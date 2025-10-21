@@ -132,6 +132,84 @@ if ($action) {
                         $url = 'http://' . $_SERVER['HTTP_HOST'] . '/' . ltrim($url, '/');
                     }
                     $diagnosis = StaticPageCache::diagnoseCacheability($url, true);
+
+                    // Check for actual cached file and its HTML comment
+                    $url_parts = parse_url($url);
+                    $path = $url_parts['path'] ?? '/';
+                    parse_str($url_parts['query'] ?? '', $params);
+                    $cache_file_path = StaticPageCache::checkCache($path, $params);
+
+                    if ($cache_file_path && $cache_file_path !== 'nostatic' && file_exists($cache_file_path)) {
+                        // Read first few lines to extract the comment
+                        $handle = fopen($cache_file_path, 'r');
+                        $first_lines = '';
+                        for ($i = 0; $i < 5; $i++) {
+                            $line = fgets($handle);
+                            if ($line === false) break;
+                            $first_lines .= $line;
+                        }
+                        fclose($handle);
+
+                        // Extract the cached URL from the comment
+                        $cached_url = null;
+                        if (preg_match('/<!-- Cached: (.+?) -->/', $first_lines, $matches)) {
+                            $cached_url = $matches[1];
+                        }
+
+                        $diagnosis['cached_file_status'] = 'found';
+                        $diagnosis['cached_file_path'] = $cache_file_path;
+                        $diagnosis['cached_file_size'] = filesize($cache_file_path);
+                        $diagnosis['cached_file_modified'] = filemtime($cache_file_path);
+                        $diagnosis['cached_url_comment'] = $cached_url;
+                    } else {
+                        $diagnosis['cached_file_status'] = 'not_found';
+                    }
+
+                    // Test live serving - make actual HTTP request to see if cache is served
+                    $ch = curl_init();
+                    curl_setopt($ch, CURLOPT_URL, $url);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_HEADER, true);
+                    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+                    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+                    // Don't send cookies - we want to test anonymous access
+                    curl_setopt($ch, CURLOPT_COOKIE, '');
+
+                    $response = curl_exec($ch);
+                    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+                    curl_close($ch);
+
+                    if ($response !== false) {
+                        $response_headers = substr($response, 0, $header_size);
+                        $response_body = substr($response, $header_size);
+                        $response_size = strlen($response_body);
+
+                        // Check for X-Cache header
+                        $cache_hit = (strpos($response_headers, 'X-Cache: HIT') !== false);
+
+                        // Extract HTML comment from response
+                        $response_comment = null;
+                        if (preg_match('/<!-- Cached: (.+?) -->/', substr($response_body, 0, 500), $matches)) {
+                            $response_comment = $matches[1];
+                        }
+
+                        // Check if sizes match (approximately - allow 1% variance)
+                        $cached_file_size = isset($diagnosis['cached_file_size']) ? $diagnosis['cached_file_size'] : 0;
+                        $size_match = ($cached_file_size > 0) ? (abs($response_size - $cached_file_size) / $cached_file_size < 0.01) : false;
+
+                        $diagnosis['live_serving_status'] = 'success';
+                        $diagnosis['live_http_code'] = $http_code;
+                        $diagnosis['live_cache_hit'] = $cache_hit;
+                        $diagnosis['live_response_size'] = $response_size;
+                        $diagnosis['live_response_comment'] = $response_comment;
+                        $diagnosis['live_size_matches'] = $size_match;
+                    } else {
+                        $diagnosis['live_serving_status'] = 'failed';
+                        $diagnosis['live_error'] = 'Could not fetch URL';
+                    }
+
                     // Store in session for display
                     $_SESSION['cache_diagnosis'] = $diagnosis;
                     $redirect_needed = isset($_GET['action']);
@@ -394,48 +472,156 @@ if (!empty($display_messages)) {
                 if (isset($_SESSION['cache_diagnosis'])) {
                     $diagnosis = $_SESSION['cache_diagnosis'];
                     unset($_SESSION['cache_diagnosis']); // Clear after display
+
+                    // Determine status badge
+                    $status_badge = '';
+                    switch($diagnosis['status']) {
+                        case 'already_cached':
+                            $status_badge = '<span class="badge bg-success">✅ Already Cached</span>';
+                            break;
+                        case 'marked_nostatic':
+                            $status_badge = '<span class="badge bg-warning text-dark">⚠️ Non-Cacheable</span>';
+                            break;
+                        case 'cacheable':
+                            $status_badge = '<span class="badge bg-success">✅ Cacheable</span>';
+                            break;
+                        case 'partial_check':
+                            $status_badge = '<span class="badge bg-info">ℹ️ Partial Check</span>';
+                            break;
+                        default:
+                            $status_badge = '<span class="badge bg-danger">❌ Not Cacheable</span>';
+                    }
+
+                    // Determine cache file status badge
+                    $file_status_badge = '';
+                    if (isset($diagnosis['cached_file_status'])) {
+                        if ($diagnosis['cached_file_status'] === 'found') {
+                            $file_status_badge = '<span class="badge bg-success">✅ Found</span>';
+                        } else {
+                            $file_status_badge = '<span class="badge bg-secondary">Not Found</span>';
+                        }
+                    }
+
                     ?>
                     <div class="mt-4">
-                        <h6>Diagnosis Results for: <code><?= htmlspecialchars($diagnosis['url']) ?></code></h6>
+                        <h6 class="mb-3">Diagnosis Results for: <code><?= htmlspecialchars($diagnosis['url']) ?></code></h6>
 
-                        <div class="alert <?= $diagnosis['is_cacheable'] ? 'alert-success' : 'alert-warning' ?>">
-                            <strong>Status:</strong>
-                            <?php
-                            switch($diagnosis['status']) {
-                                case 'already_cached':
-                                    echo '✅ Already Cached';
-                                    break;
-                                case 'marked_nostatic':
-                                    echo '⚠️ Marked as Non-Cacheable';
-                                    break;
-                                case 'cacheable':
-                                    echo '✅ Cacheable';
-                                    break;
-                                case 'partial_check':
-                                    echo 'ℹ️ Partial Check Complete';
-                                    break;
-                                default:
-                                    echo '❌ Not Cacheable';
-                            }
-                            ?>
-                        </div>
+                        <table class="table table-sm table-borderless">
+                            <tbody>
+                                <tr>
+                                    <td style="width: 40%; font-weight: 500;">Cache Status</td>
+                                    <td><?= $status_badge ?></td>
+                                </tr>
+                                <?php if (isset($diagnosis['cached_file_status'])): ?>
+                                    <tr>
+                                        <td style="font-weight: 500;">Cached File Status</td>
+                                        <td><?= $file_status_badge ?></td>
+                                    </tr>
+                                    <?php if ($diagnosis['cached_file_status'] === 'found'): ?>
+                                        <tr>
+                                            <td style="font-weight: 500;">File Size</td>
+                                            <td><?= round($diagnosis['cached_file_size'] / 1024, 2) ?> KB</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight: 500;">Last Modified</td>
+                                            <td><?= date('Y-m-d H:i:s', $diagnosis['cached_file_modified']) ?></td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight: 500;">HTML Comment</td>
+                                            <td>
+                                                <?php if ($diagnosis['cached_url_comment']): ?>
+                                                    <span class="badge bg-info text-dark">Found</span>
+                                                    <div style="font-family: monospace; font-size: 0.85rem; margin-top: 5px;">
+                                                        &lt;!-- Cached: <?= htmlspecialchars($diagnosis['cached_url_comment']) ?> --&gt;
+                                                    </div>
+                                                <?php else: ?>
+                                                    <span class="badge bg-warning text-dark">Not Found</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight: 500;">File Path</td>
+                                            <td>
+                                                <code style="word-break: break-all; font-size: 0.8rem;">
+                                                    <?= htmlspecialchars($diagnosis['cached_file_path']) ?>
+                                                </code>
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+                                <?php endif; ?>
 
-                        <div class="card">
-                            <div class="card-header">
-                                <strong>Analysis Details:</strong>
-                            </div>
-                            <ul class="list-group list-group-flush">
-                                <?php foreach ($diagnosis['reasons'] as $reason): ?>
-                                    <li class="list-group-item"><?= $reason ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        </div>
+                                <!-- Live Serving Test Results -->
+                                <?php if (isset($diagnosis['live_serving_status'])): ?>
+                                    <tr style="border-top: 2px solid #dee2e6; padding-top: 10px;">
+                                        <td colspan="2" style="font-weight: 600; padding-bottom: 8px;">Live Serving Test</td>
+                                    </tr>
+                                    <?php if ($diagnosis['live_serving_status'] === 'success'): ?>
+                                        <tr>
+                                            <td style="font-weight: 500;">Status</td>
+                                            <td>
+                                                <?php if ($diagnosis['live_cache_hit']): ?>
+                                                    <span class="badge bg-success">✅ Cache Hit (X-Cache: HIT)</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-warning text-dark">⚠️ Cache Miss</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight: 500;">HTTP Status</td>
+                                            <td><?= $diagnosis['live_http_code'] ?></td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight: 500;">Response Size</td>
+                                            <td><?= round($diagnosis['live_response_size'] / 1024, 2) ?> KB</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight: 500;">Size Match</td>
+                                            <td>
+                                                <?php if ($diagnosis['live_size_matches']): ?>
+                                                    <span class="badge bg-success">✅ Yes</span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-warning text-dark">⚠️ No</span>
+                                                <?php endif; ?>
+                                                <?php if (isset($diagnosis['cached_file_size'])): ?>
+                                                    (Cached: <?= round($diagnosis['cached_file_size'] / 1024, 2) ?> KB)
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style="font-weight: 500;">HTML Comment</td>
+                                            <td>
+                                                <?php if ($diagnosis['live_response_comment']): ?>
+                                                    <span class="badge bg-info text-dark">Found</span>
+                                                    <div style="font-family: monospace; font-size: 0.85rem; margin-top: 5px;">
+                                                        &lt;!-- Cached: <?= htmlspecialchars($diagnosis['live_response_comment']) ?> --&gt;
+                                                    </div>
+                                                <?php else: ?>
+                                                    <span class="badge bg-warning text-dark">Not Found</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                    <?php else: ?>
+                                        <tr>
+                                            <td colspan="2">
+                                                <span class="badge bg-danger">✗ Failed</span>
+                                                <span><?= htmlspecialchars($diagnosis['live_error'] ?? 'Unknown error') ?></span>
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+                                <?php endif; ?>
 
-                        <?php if (isset($diagnosis['cache_file'])): ?>
-                            <div class="mt-3">
-                                <strong>Cache File:</strong> <code><?= htmlspecialchars($diagnosis['cache_file']) ?></code>
-                            </div>
-                        <?php endif; ?>
+                                <tr style="border-top: 2px solid #dee2e6; padding-top: 10px;">
+                                    <td style="font-weight: 500;">Analysis</td>
+                                    <td>
+                                        <ul class="mb-0 ps-3">
+                                            <?php foreach ($diagnosis['reasons'] as $reason): ?>
+                                                <li style="font-size: 0.9rem;"><?= $reason ?></li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                     <?php
                 }
