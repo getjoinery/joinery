@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 3.0 - SKIPPING migration messages now hidden by default, only shown with --verbose flag
+#version 3.51 - Critical deployment and rollback fixes
 # MODIFIED: Added comprehensive PHP syntax validation during deployment
 # MODIFIED: Added plugin loading test with proper PathHelper context
 # MODIFIED: Added basic runtime bootstrap test
@@ -8,9 +8,15 @@
 # MODIFIED: Added --norollback flag to disable rollback functionality
 # MODIFIED: Improved rollback functionality to handle directory conflicts
 # MODIFIED: Added trap-based automatic rollback system
+# MODIFIED v3.51: Fixed atomic backup using cp instead of mv with glob to preserve all files including hidden
+# MODIFIED v3.51: Removed dangerous || true that masked backup failures
+# MODIFIED v3.51: Replaced PHP/PathHelper-dependent rollback with pure bash implementation for reliability
+# MODIFIED v3.51: Added backup verification step before proceeding with deployment
+# MODIFIED v3.51: Automatic cache directory migration from public_html to site root with failure handling
+# MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.5"
+DEPLOY_VERSION="3.51"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -80,49 +86,53 @@ cleanup_and_rollback() {
         echo "========================================="
         echo "Attempting automatic rollback for site: $TARGET_SITE"
 
-        # Call DeploymentHelper::performRollback()
-        rollback_result=$(php -r "
-            // DeploymentHelper may not be available if deployment failed early
-            // So we need to check for PathHelper first
-            if (file_exists('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php')) {
-                require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
-            } else if (file_exists('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php')) {
-                require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
-            } else {
-                echo 'ERROR:PathHelper not found';
-                exit(1);
-            }
+        # Pure bash rollback - no PHP dependencies
+        local site_root="/var/www/html/$TARGET_SITE"
+        local public_html_dir="$site_root/public_html"
+        local backup_dir="$site_root/public_html_last"
+        local failed_dir="$site_root/public_html_failed_$(date +%Y%m%d_%H%M%S)"
 
-            require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
-
-            \$result = DeploymentHelper::performRollback('/var/www/html/$TARGET_SITE');
-
-            if (!\$result['success']) {
-                echo 'ERROR:' . \$result['message'];
-                exit(1);
-            } else {
-                echo 'SUCCESS:' . \$result['message'];
-                if (isset(\$result['failed_dir'])) {
-                    echo ':' . \$result['failed_dir'];
-                }
-                exit(0);
-            }
-        " 2>&1)
-        rollback_exit=$?
-
-        if [ $rollback_exit -eq 0 ]; then
-            echo "✓ Automatic rollback completed successfully."
-            failed_location=$(echo "$rollback_result" | grep "^SUCCESS:" | cut -d: -f3)
-            if [ -n "$failed_location" ]; then
-                echo "Failed deployment preserved at: $failed_location"
-            else
-                echo "Failed deployment preserved for debugging."
-            fi
+        # Check if backup exists
+        if [[ ! -d "$backup_dir" ]] || [[ -z "$(ls -A "$backup_dir" 2>/dev/null)" ]]; then
+            echo "✗ Automatic rollback failed: No backup found at $backup_dir"
+            echo "  This may be an initial deployment with no previous version."
+            echo "  Manual intervention required."
+            echo "  Current deployment preserved at: $public_html_dir"
         else
-            echo "✗ Automatic rollback failed. Manual intervention required."
-            echo "$rollback_result" | grep "^ERROR:" | while IFS=: read -r prefix message; do
-                echo "  $message"
-            done
+            # Preserve failed deployment for debugging
+            echo "Preserving failed deployment at: $failed_dir"
+            if [[ -d "$public_html_dir" ]] && [[ -n "$(ls -A "$public_html_dir" 2>/dev/null)" ]]; then
+                if mv "$public_html_dir" "$failed_dir" 2>/dev/null; then
+                    verbose_echo "Failed deployment moved to $failed_dir"
+                else
+                    echo "Warning: Could not move failed deployment (will remove instead)"
+                    rm -rf "$public_html_dir"
+                fi
+            fi
+
+            # Recreate public_html directory
+            mkdir -p "$public_html_dir"
+
+            # Restore from backup
+            echo "Restoring from backup: $backup_dir"
+            if cp -a "$backup_dir/." "$public_html_dir/"; then
+                # Fix permissions after rollback
+                echo "Fixing permissions after rollback..."
+                chown -R www-data:user1 "$public_html_dir" 2>/dev/null || echo "  Warning: Could not change ownership (try with sudo)"
+                chmod -R 775 "$public_html_dir" 2>/dev/null || echo "  Warning: Could not change permissions (try with sudo)"
+
+                echo "✓ Automatic rollback completed successfully."
+                if [[ -d "$failed_dir" ]]; then
+                    echo "  Failed deployment preserved at: $failed_dir"
+                fi
+                echo "  Site restored to previous working version."
+            else
+                echo "✗ Automatic rollback failed: Could not restore from backup"
+                echo "  Manual intervention required."
+                if [[ -d "$failed_dir" ]]; then
+                    echo "  Failed deployment at: $failed_dir"
+                fi
+            fi
         fi
     fi
     
@@ -710,19 +720,6 @@ if [ "$IS_MANUAL_ROLLBACK" = true ]; then
             echo "ERROR: Could not move current deployment"
             exit 1
         }
-        
-        # Create .htaccess to block web access to failed deployment directory
-        echo "Creating .htaccess to block web access to failed deployment directory..."
-        cat > "$failed_dir/.htaccess" << 'EOF'
-# Block all web access to failed deployment directory
-Order Deny,Allow
-Deny from all
-
-# Alternative syntax for Apache 2.4+
-<RequireAll>
-    Require all denied
-</RequireAll>
-EOF
     fi
     
     # Recreate public_html directory
@@ -886,25 +883,83 @@ fi
 rm -rf .git
 echo "✓ Repository cloned and updated to latest version"
 
-# CLEAR THE LAST FOLDER AND SAVE CURRENT TO LAST
-rm -rf /var/www/html/$TARGET_SITE/public_html_last
-mkdir /var/www/html/$TARGET_SITE/public_html_last
-if [[ -d /var/www/html/$TARGET_SITE/public_html ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html)" ]]; then
-    mv /var/www/html/$TARGET_SITE/public_html/* /var/www/html/$TARGET_SITE/public_html_last/ 2>/dev/null || true
+# MIGRATE CACHE DIRECTORY OUT OF PUBLIC_HTML (if it exists)
+if [[ -d "/var/www/html/$TARGET_SITE/public_html/cache" ]]; then
+    verbose_echo "Migrating cache directory out of public_html..."
+
+    # Check if cache already exists at site root level
+    if [[ -d "/var/www/html/$TARGET_SITE/cache" ]]; then
+        verbose_echo "Cache directory already exists at site root - merging with public_html cache..."
+        # Merge the two cache directories (public_html cache takes precedence)
+        if ! cp -a /var/www/html/$TARGET_SITE/public_html/cache/. /var/www/html/$TARGET_SITE/cache/; then
+            echo "ERROR: Failed to merge cache directories. This is likely a permissions issue."
+            echo "Try running: sudo chown -R www-data:user1 /var/www/html/$TARGET_SITE/public_html/cache"
+            echo "Then run deployment again."
+            exit 1
+        fi
+        # Remove the old cache from public_html
+        if ! rm -rf /var/www/html/$TARGET_SITE/public_html/cache; then
+            echo "ERROR: Failed to remove cache directory from public_html after merge."
+            echo "Permissions issue - deployment aborted."
+            exit 1
+        fi
+        verbose_echo "✓ Cache merged and public_html cache removed"
+    else
+        # Move cache directory to site root
+        verbose_echo "Moving cache from public_html to site root..."
+        if ! mv /var/www/html/$TARGET_SITE/public_html/cache /var/www/html/$TARGET_SITE/cache; then
+            echo "ERROR: Failed to move cache directory from public_html to site root."
+            echo "This is likely a permissions issue."
+            echo "Try running: sudo chown -R www-data:user1 /var/www/html/$TARGET_SITE/public_html/cache"
+            echo "Then run deployment again."
+            exit 1
+        fi
+        verbose_echo "✓ Cache directory migrated successfully"
+    fi
+else
+    verbose_echo "No cache directory in public_html to migrate"
 fi
 
-# Create .htaccess to block web access to backup directory
-verbose_echo "Creating .htaccess to block web access to backup directory..."
-cat > /var/www/html/$TARGET_SITE/public_html_last/.htaccess << 'EOF'
-# Block all web access to backup directory
-Order Deny,Allow
-Deny from all
+# BACKUP CURRENT DEPLOYMENT TO LAST (ATOMIC OPERATION)
+verbose_echo "Creating atomic backup of current deployment..."
+rm -rf /var/www/html/$TARGET_SITE/public_html_last
+mkdir -p /var/www/html/$TARGET_SITE/public_html_last
 
-# Alternative syntax for Apache 2.4+
-<RequireAll>
-    Require all denied
-</RequireAll>
-EOF
+if [[ -d /var/www/html/$TARGET_SITE/public_html ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html 2>/dev/null)" ]]; then
+    # Use cp -a to preserve all attributes and copy hidden files
+    verbose_echo "Backing up existing public_html to public_html_last..."
+    if ! cp -a /var/www/html/$TARGET_SITE/public_html/. /var/www/html/$TARGET_SITE/public_html_last/; then
+        echo "ERROR: Failed to create backup of current deployment. Aborting."
+        echo "Cannot proceed with deployment if backup fails."
+        exit 1
+    fi
+
+    # Verify backup was created successfully
+    if [[ ! -d /var/www/html/$TARGET_SITE/public_html_last ]] || [[ -z "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        echo "ERROR: Backup verification failed - backup directory is empty. Aborting."
+        exit 1
+    fi
+
+    verbose_echo "✓ Backup created successfully"
+
+    # Now safe to clear public_html for new deployment
+    verbose_echo "Clearing public_html for new deployment..."
+    if ! rm -rf /var/www/html/$TARGET_SITE/public_html/*; then
+        echo "ERROR: Failed to clear public_html. Aborting."
+        echo "Backup preserved at public_html_last"
+        exit 1
+    fi
+
+    # Also remove hidden files
+    if ! rm -rf /var/www/html/$TARGET_SITE/public_html/.[!.]* 2>/dev/null; then
+        # This may fail if no hidden files exist - that's ok
+        verbose_echo "No hidden files to remove (or permission denied)"
+    fi
+
+    verbose_echo "✓ public_html cleared for new deployment"
+else
+    verbose_echo "No existing deployment to backup (fresh install)"
+fi
 
 # DOWNLOAD THEMES AND PLUGINS FROM JOINERY REPOSITORY
 if ! deploy_theme_plugin "$TARGET_SITE"; then
