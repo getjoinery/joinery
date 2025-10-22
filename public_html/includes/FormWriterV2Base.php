@@ -354,27 +354,6 @@ abstract class FormWriterV2Base {
                     }
                     break;
 
-                case 'constraints':
-                    // Use FieldConstraints functions
-                    if (is_array($param)) {
-                        require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
-                        foreach ($param as $constraint => $args) {
-                            try {
-                                if (is_numeric($constraint)) {
-                                    // Simple constraint like 'NoWebsite'
-                                    call_user_func($args, $field_name, $value);
-                                } else {
-                                    // Constraint with params like 'WordLength' => [2, 64]
-                                    array_unshift($args, $field_name, $value);
-                                    call_user_func_array($constraint, $args);
-                                }
-                            } catch (FieldConstraintError $e) {
-                                $errors[] = $e->getMessage();
-                            }
-                        }
-                    }
-                    break;
-
                 case 'custom':
                     // Custom validator function
                     if (is_callable($param)) {
