@@ -1,9 +1,9 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.0.0
+ * @version 1.0.4
  */
-console.log('%c=== JOINERY VALIDATION v1.0.0 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.0.4 ===', 'color: blue; font-weight: bold');
 console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
 (function() {
@@ -43,6 +43,9 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             this.submitHandler = options.submitHandler;
             this.invalidHandler = options.invalidHandler;
 
+            // Track which fields have been touched by user
+            this.touchedFields = new Set();
+
             this.init();
         }
 
@@ -71,7 +74,13 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                         this.submitHandler(this.form);
                     } else {
                         if (this.debug) console.log('Submitting form normally');
-                        this.form.submit();
+                        // Use requestSubmit() instead of submit() to avoid conflicts with submit button name="submit"
+                        if (this.form.requestSubmit) {
+                            this.form.requestSubmit();
+                        } else {
+                            // Fallback for older browsers
+                            this.form.submit();
+                        }
                     }
                 } else {
                     if (this.invalidHandler) {
@@ -117,15 +126,18 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                     if (field.type === 'radio' || field.type === 'checkbox') {
                         field.addEventListener('change', async () => {
                             if (this.debug) console.log(`Change event: ${field.name}`);
+                            this.touchedFields.add(fieldName);
                             await this.validateField(fieldName);
                         });
                     } else {
-                        field.addEventListener('blur', async () => {
-                            if (this.debug) console.log(`Blur event: ${field.name}`);
+                        field.addEventListener('blur', async (e) => {
+                            console.log(`%c[BLUR EVENT] Field: ${field.name}`, 'color: orange; font-weight: bold');
+                            this.touchedFields.add(fieldName);
                             await this.validateField(fieldName);
                         });
                         field.addEventListener('change', async () => {
-                            if (this.debug) console.log(`Change event: ${field.name}`);
+                            console.log(`%c[CHANGE EVENT] Field: ${field.name}`, 'color: orange; font-weight: bold');
+                            this.touchedFields.add(fieldName);
                             await this.validateField(fieldName);
                         });
                     }
@@ -153,6 +165,11 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
             if (this.debug) {
                 console.log('=== Validating entire form ===');
+            }
+
+            // Mark all fields as touched when validating the entire form (on submit)
+            for (const fieldName of Object.keys(this.rules)) {
+                this.touchedFields.add(fieldName);
             }
 
             for (const fieldName of Object.keys(this.rules)) {
@@ -353,7 +370,17 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
             // Remove error class from field
             field.classList.remove(this.errorClass);
-            field.classList.add(this.validClass);
+
+            // Only add valid class if field has been touched AND has actual content
+            // Empty optional fields should show neutral, not green
+            const fieldValue = this.getFieldValue([field]);
+            const hasContent = fieldValue && (typeof fieldValue === 'string' ? fieldValue.trim() !== '' : true);
+
+            if (this.touchedFields.has(field.name) && hasContent) {
+                field.classList.add(this.validClass);
+            } else {
+                field.classList.remove(this.validClass);
+            }
 
             // For radio/checkbox groups, clear error from all fields in group
             if (field.type === 'radio' || (field.type === 'checkbox' && field.name.endsWith('[]'))) {
@@ -362,7 +389,11 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                 const allFields = form.querySelectorAll(`[name="${escapedName}"]`);
                 allFields.forEach(f => {
                     f.classList.remove(this.errorClass);
-                    f.classList.add(this.validClass);
+                    if (this.touchedFields.has(field.name) && hasContent) {
+                        f.classList.add(this.validClass);
+                    } else {
+                        f.classList.remove(this.validClass);
+                    }
                 });
             }
 
@@ -601,11 +632,19 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
         return value.length > 9 && /^(1-?)?(\([2-9]\d{2}\)|[2-9]\d{2})-?[2-9]\d{2}-?\d{4}$/.test(value);
     }, "Please specify a valid phone number");
 
-    // General phone validator (not US-specific)
+    // General phone validator (maximally permissive - international compatible)
     JoineryValidator.addValidator("phone", function(value, element) {
         if (!value) return true;
-        // Accept formats: (123) 456-7890, 123-456-7890, 123.456.7890, 1234567890
-        return /^\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})$/.test(value);
+        // First: reject if ANY invalid characters present (not digits, +, space, hyphen, dot, or parentheses)
+        // This catches cases like "555-123-4567s"
+        if (!/^[0-9+\s\-().]*$/.test(value)) {
+            return false;
+        }
+        // Then: remove only valid formatting characters
+        // Allows: +1 (555) 123-4567, +44 20 7946 0958, +33142685300, etc.
+        var cleaned = value.replace(/[\s\-().]/g, '');
+        // Require: optional + prefix, then at least 7 digits (minimum for international)
+        return /^(\+)?[0-9]{7,}$/.test(cleaned);
     }, "Please enter a valid phone number");
 
     // ZIP code validator
@@ -767,4 +806,4 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
 })();
 
-console.log('%c=== JOINERY VALIDATION LOADED ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.0.4 LOADED ===', 'color: blue; font-weight: bold');

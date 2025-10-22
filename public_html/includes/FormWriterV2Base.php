@@ -64,7 +64,8 @@ abstract class FormWriterV2Base {
             'csrf_error' => 'Security validation failed. Please refresh and try again.',
             'validation' => true,  // Validation enabled by default
             'class' => '',
-            'enctype' => null
+            'enctype' => null,
+            'debug' => false  // Debug mode - outputs validation details to console
         ];
     }
 
@@ -822,6 +823,15 @@ abstract class FormWriterV2Base {
      * Output the opening form tag and CSRF token
      */
     public function begin_form() {
+        // Output CSS to ensure placeholders are visually distinct from actual input text
+        echo '<style>';
+        echo '#' . htmlspecialchars($this->form_id) . ' input::placeholder,';
+        echo '#' . htmlspecialchars($this->form_id) . ' textarea::placeholder {';
+        echo '  color: #999 !important;';
+        echo '  opacity: 0.8 !important;';
+        echo '}';
+        echo '</style>';
+
         // Output form tag with all attributes from options
         echo '<form';
         echo ' id="' . htmlspecialchars($this->form_id) . '"';
@@ -849,15 +859,16 @@ abstract class FormWriterV2Base {
         if ($this->csrf_token) {
             echo '<input type="hidden" name="' . htmlspecialchars($this->options['csrf_field']) . '" value="' . htmlspecialchars($this->csrf_token) . '">';
         }
-
-        // Output JoineryValidator initialization if we have validation rules
-        $this->outputJavascriptValidation();
     }
 
     /**
      * Output the closing form tag
      */
     public function end_form() {
+        // Output JoineryValidator initialization if we have validation rules
+        // This is called AFTER all fields have been registered, so we have complete validation rules
+        $this->outputJavascriptValidation();
+
         echo '</form>';
     }
 
@@ -1001,9 +1012,14 @@ abstract class FormWriterV2Base {
         }
 
         // Output JoineryValidator initialization
+        if ($this->options['debug']) {
+            echo '        console.log("Initializing JoineryValidator for form: ' . htmlspecialchars($this->form_id) . '");';
+            echo '        console.log("Validation rules:", ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ');';
+        }
         echo '        var validator = new JoineryValidator(form, {';
         echo '            rules: ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ',';
-        echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES);
+        echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ',';
+        echo '            debug: ' . ($this->options['debug'] ? 'true' : 'false');
         echo '        });';
 
         // Add AJAX submission handler if needed
