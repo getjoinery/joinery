@@ -1,7 +1,6 @@
 <?php
 // PathHelper is already loaded by the time this file is included
 
-require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
