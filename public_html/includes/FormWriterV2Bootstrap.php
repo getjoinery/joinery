@@ -44,7 +44,8 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo ' class="' . htmlspecialchars($class) . '"';
         echo ' value="' . htmlspecialchars($value) . '"';
 
-        if ($placeholder) {
+        // Only show placeholder if field is empty (Bootstrap native behavior)
+        if ($placeholder && !$value) {
             echo ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
