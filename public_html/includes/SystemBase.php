@@ -1,7 +1,6 @@
 <?php
 require_once('PathHelper.php');
 require_once('SqlBuilder.php');
-require_once('FieldConstraints.php');
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 
@@ -997,24 +996,94 @@ abstract class SystemBase {
 				}
 			}
 		}
-		
-		//CHECK FIELD CONSTRAINTS
-		foreach (static::$field_constraints as $field => $constraints) {
-			foreach($constraints as $constraint) {
-				if (gettype($constraint) == 'array') {
-					$params = array();
-					$params[] = $field;
-					$params[] = $this->get($field);
-					for($i=1;$i<count($constraint);$i++) {
-						$params[] = $constraint[$i];
+
+		// CHECK VALIDATION RULES FROM field_specifications['validation']
+		foreach (static::$field_specifications as $field_name => $spec) {
+			if (isset($spec['validation']) && is_array($spec['validation'])) {
+				$field_value = $this->get($field_name);
+				$validation_rules = $spec['validation'];
+				$custom_messages = $validation_rules['messages'] ?? array();
+
+				foreach ($validation_rules as $rule_name => $rule_param) {
+					// Skip 'messages' key
+					if ($rule_name === 'messages') {
+						continue;
 					}
-					call_user_func_array($constraint[0], $params);
-				} 
-				else {
-					call_user_func($constraint, $field, $this->get($field));
+
+					$is_valid = true;
+					$error_message = null;
+
+					switch ($rule_name) {
+						case 'required':
+							if ($rule_param === true) {
+								if (is_null($field_value) || $field_value === '') {
+									$is_valid = false;
+									$error_message = $custom_messages['required'] ?? "Field '$field_name' is required.";
+								}
+							}
+							break;
+
+						case 'email':
+							if ($rule_param === true && !is_null($field_value) && $field_value !== '') {
+								if (!filter_var($field_value, FILTER_VALIDATE_EMAIL)) {
+									$is_valid = false;
+									$error_message = $custom_messages['email'] ?? "Field '$field_name' must be a valid email address.";
+								}
+							}
+							break;
+
+						case 'url':
+							if ($rule_param === true && !is_null($field_value) && $field_value !== '') {
+								if (!filter_var($field_value, FILTER_VALIDATE_URL)) {
+									$is_valid = false;
+									$error_message = $custom_messages['url'] ?? "Field '$field_name' must be a valid URL.";
+								}
+							}
+							break;
+
+						case 'minlength':
+							if (is_numeric($rule_param) && !is_null($field_value) && $field_value !== '') {
+								if (strlen($field_value) < $rule_param) {
+									$is_valid = false;
+									$error_message = $custom_messages['minlength'] ?? "Field '$field_name' must be at least $rule_param characters.";
+								}
+							}
+							break;
+
+						case 'maxlength':
+							if (is_numeric($rule_param) && !is_null($field_value) && $field_value !== '') {
+								if (strlen($field_value) > $rule_param) {
+									$is_valid = false;
+									$error_message = $custom_messages['maxlength'] ?? "Field '$field_name' must be no more than $rule_param characters.";
+								}
+							}
+							break;
+
+						case 'pattern':
+							if (is_string($rule_param) && !is_null($field_value) && $field_value !== '') {
+								if (!preg_match($rule_param, $field_value)) {
+									$is_valid = false;
+									$error_message = $custom_messages['pattern'] ?? "Field '$field_name' does not match the required format.";
+								}
+							}
+							break;
+
+						case 'numeric':
+							if ($rule_param === true && !is_null($field_value) && $field_value !== '') {
+								if (!is_numeric($field_value)) {
+									$is_valid = false;
+									$error_message = $custom_messages['numeric'] ?? "Field '$field_name' must be numeric.";
+								}
+							}
+							break;
+					}
+
+					if (!$is_valid && $error_message) {
+						throw new DisplayableUserException($error_message);
+					}
 				}
 			}
-		}	
+		}
 
 		//CHECK UNIQUE CONSTRAINTS (safety net)
 		$duplicate = $this->check_unique_constraints();

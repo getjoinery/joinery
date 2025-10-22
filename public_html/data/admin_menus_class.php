@@ -4,7 +4,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 $settings = Globalvars::get_instance();
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-require_once(PathHelper::getIncludePath('includes/FieldConstraints.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));

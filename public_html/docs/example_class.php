@@ -200,38 +200,13 @@ class Example extends SystemBase
         )
     );
     
-    // OPTIONAL: Field validation constraints (checked during save() before database operations)
-    // These are RUNTIME validation functions that throw FieldConstraintError exceptions
-    // Available constraint functions from FieldConstraints.php:
-    public static $field_constraints = array(
-        // VALIDATION CONSTRAINT EXAMPLES:
-        
-        // Single constraint function (no parameters)
-        'exm_name' => array(
-            'NoSymbols',        // Validates allowed characters, prevents repeated symbols
-            'NoCaps'            // Validates reasonable capitalization (not ALL CAPS)
-        ),
-        
-        // Constraint function with parameters (passed as array with function name first)
-        'exm_description' => array(
-            array('WordLength', 10, 500),  // Min 10, max 500 characters
-            'NoWebsite',                   // Prevents website URLs 
-            'NoEmailAddress',              // Prevents email addresses
-            'NoPhoneNumber'                // Prevents phone numbers
-        ),
-        
-        // Available built-in constraint functions:
-        // - 'NoSymbols'                     - Only letters, numbers, and specific symbols
-        // - 'NoCaps'                        - Prevents excessive capitalization  
-        // - 'NoWebsite'                     - Prevents website URLs
-        // - 'NoEmailAddress'                - Prevents email addresses
-        // - 'NoPhoneNumber'                 - Prevents phone numbers
-        // - array('WordLength', min, max)   - String length validation
-        //
-        // Custom constraint functions can be defined in your class and referenced by name
-    );
-    
-    
+    // VALIDATION: Validation rules are now defined in field_specifications using the 'validation' property
+    // These are checked during save() before database operations
+    // Rules are also used by FormWriter v2 for client-side validation
+    // See field_specifications above for 'validation' examples:
+    // 'exm_name' => array('type'=>'varchar(64)', 'validation'=>array('required'=>true, 'minlength'=>2, 'maxlength'=>64))
+
+
     // REQUIRED: Actions to take when permanently deleting records
     // This array MUST be defined (even if empty) for all model classes
     // Defines cleanup operations when permanent_delete() is called
