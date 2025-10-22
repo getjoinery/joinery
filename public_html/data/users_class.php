@@ -48,7 +48,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_user_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'usr_first_name' => array('type'=>'varchar(32)', 'required'=>true),
 	    'usr_last_name' => array('type'=>'varchar(32)'),
-	    'usr_email' => array('type'=>'varchar(64)', 'required'=>true),
+	    'usr_email' => array('type'=>'varchar(64)', 'required'=>true, 'validation' => array('email' => true)),
 	    'usr_signup_date' => array('type'=>'date', 'default'=>'now()'),
 	    'usr_password' => array('type'=>'varchar(255)'),
 	    'usr_permission' => array('type'=>'int4', 'zero_on_create'=>true),

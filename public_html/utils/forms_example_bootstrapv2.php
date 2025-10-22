@@ -30,6 +30,9 @@ $hoptions = array(
 );
 $page->public_header($hoptions, NULL);
 
+// Include JoineryValidator for client-side validation
+echo '<script src="/assets/js/joinery-validate.js"></script>';
+
 echo PublicPage::BeginPage('FormWriter v2 Test - Complete Feature Demonstration');
 
 // Load FormWriter v2
@@ -40,7 +43,7 @@ require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
 // ============================================================================
 
 echo '<h2>1. Values Auto-Filling Demo</h2>';
-echo '<p>Values array is passed once to the form, fields automatically populate:</p>';
+echo '<p><strong>Notice:</strong> The fields below are pre-filled with sample data. This data was passed once when the form was created, and each field automatically populated.</p>';
 
 // Prepare mock values (would normally come from model export)
 $mock_values = [
@@ -62,16 +65,33 @@ $formwriter1->begin_form();
 echo '<div class="row">';
 echo '<div class="col-md-6">';
 // All these fields auto-fill from values array
-$formwriter1->textinput('usr_email', 'Email');
-$formwriter1->textinput('usr_first_name', 'First Name');
-$formwriter1->textinput('usr_last_name', 'Last Name');
-$formwriter1->textinput('usr_phone', 'Phone');
+$formwriter1->textinput('usr_email', 'Email', [
+    'validation' => ['required' => true],
+    'placeholder' => 'user@example.com'
+]);
+$formwriter1->textinput('usr_first_name', 'First Name', [
+    'validation' => ['required' => true],
+    'placeholder' => 'John'
+]);
+$formwriter1->textinput('usr_last_name', 'Last Name', [
+    'validation' => ['required' => true],
+    'placeholder' => 'Doe'
+]);
+$formwriter1->textinput('usr_phone', 'Phone', [
+    'validation' => ['required' => true],
+    'placeholder' => '555-123-4567'
+]);
+$formwriter1->textinput('address', 'Address (Empty - Placeholder Only)', [
+    'validation' => ['required' => true],
+    'placeholder' => '123 Main Street, City, State 12345'
+]);
 $formwriter1->radioinput('preference', 'Preference', [
     'options' => [
         'option1' => 'Option 1',
         'option2' => 'Option 2',
         'option3' => 'Option 3'
-    ]
+    ],
+    'validation' => ['required' => true]
 ]);
 echo '</div>';
 
@@ -105,7 +125,8 @@ echo '<p>Fields with model prefixes (usr_, pro_, evt_, etc.) automatically get v
 
 $formwriter2 = new FormWriterV2Bootstrap('auto_validation_form', [
     'action' => '/test/validate',
-    'method' => 'POST'
+    'method' => 'POST',
+    'debug' => true  // Enable console debug output for this form
 ]);
 
 $formwriter2->begin_form();
@@ -209,7 +230,7 @@ $formwriter3->passwordinput('password_confirm', 'Confirm Password', [
 $formwriter3->textarea('comments', 'Comments', [
     'rows' => 4,
     'placeholder' => 'Enter your comments',
-    'validation' => ['minlength' => 10, 'maxlength' => 500]
+    'validation' => ['required' => true, 'minlength' => 10, 'maxlength' => 500]
 ]);
 
 // Dropdown
@@ -248,7 +269,7 @@ $formwriter3->radioinput('subscription', 'Subscription Plan', [
 $formwriter3->dateinput('start_date', 'Start Date', [
     'min' => '2025-01-01',
     'max' => '2025-12-31',
-    'validation' => 'date'
+    'validation' => ['required' => true, 'date' => true]
 ]);
 
 // File Input
@@ -274,7 +295,8 @@ echo '<p>Use predefined validation types instead of writing rules repeatedly:</p
 
 $formwriter4 = new FormWriterV2Bootstrap('validation_types_form', [
     'action' => '/test/types',
-    'method' => 'POST'
+    'method' => 'POST',
+    'debug' => true
 ]);
 
 $formwriter4->begin_form();
@@ -284,31 +306,31 @@ echo '<div class="col-md-6">';
 
 // Email shorthand
 $formwriter4->textinput('email', 'Email', [
-    'validation' => 'email',  // Shorthand for email validation
+    'validation' => ['required' => true, 'email' => true],  // Shorthand for email validation
     'placeholder' => 'user@example.com'
 ]);
 
 // Phone shorthand
 $formwriter4->textinput('phone', 'Phone', [
-    'validation' => 'phone',  // Shorthand for phone validation
+    'validation' => ['required' => true, 'phone' => true],  // Shorthand for phone validation
     'placeholder' => '(555) 123-4567'
 ]);
 
 // ZIP shorthand
 $formwriter4->textinput('zip', 'ZIP Code', [
-    'validation' => 'zip',  // Shorthand for ZIP validation
+    'validation' => ['required' => true, 'zip' => true],  // Shorthand for ZIP validation
     'placeholder' => '12345'
 ]);
 
 // URL shorthand
 $formwriter4->textinput('website', 'Website', [
-    'validation' => 'url',  // Shorthand for URL validation
+    'validation' => ['required' => true, 'url' => true],  // Shorthand for URL validation
     'placeholder' => 'https://example.com'
 ]);
 
 // Number shorthand
 $formwriter4->textinput('age', 'Age', [
-    'validation' => 'number',  // Shorthand for number validation
+    'validation' => ['required' => true, 'number' => true],  // Shorthand for number validation
     'placeholder' => '25'
 ]);
 
@@ -353,7 +375,7 @@ echo '<strong>Note:</strong> Check the form source - you\'ll see a hidden _csrf_
 echo '</div>';
 
 $formwriter5->begin_form();
-$formwriter5->textinput('test_field', 'Test Field');
+$formwriter5->textinput('test_field', 'Test Field', ['validation' => ['required' => true]]);
 $formwriter5->submitbutton('submit', 'Submit with CSRF');
 $formwriter5->end_form();
 
