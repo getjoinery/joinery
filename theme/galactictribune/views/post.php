@@ -24,7 +24,7 @@ $page_vars = $page_vars->data;
 ?>
 
 <!-- Blog Post Content -->
-<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:max-w-6xl lg:px-8 py-8">
+<div class="max-w-3xl mx-auto px-4 sm:px-6 lg:max-w-4xl lg:px-8 py-8">
 
 	<!-- Breadcrumbs -->
 	<nav class="mb-6 text-sm" aria-label="Breadcrumb">
@@ -93,14 +93,14 @@ $page_vars = $page_vars->data;
 		<?php endif; ?>
 
 		<!-- Post Body -->
-		<div class="prose prose-lg max-w-none">
+		<div class="text-lg text-gray-800 leading-relaxed max-w-3xl mx-auto">
 			<?php echo $post->get('pst_body'); ?>
 		</div>
 
 		<!-- Blog Footer Text -->
 		<?php if($page_vars['settings']->get_setting('blog_footer_text')): ?>
-		<div class="mt-8 pt-8 border-t border-gray-200">
-			<div class="prose prose-sm max-w-none text-gray-600">
+		<div class="mt-8 pt-8 border-t border-gray-200 max-w-3xl mx-auto">
+			<div class="text-sm text-gray-600 leading-relaxed">
 				<?php echo $page_vars['settings']->get_setting('blog_footer_text'); ?>
 			</div>
 		</div>
@@ -112,58 +112,9 @@ $page_vars = $page_vars->data;
 	<?php if($page_vars['settings']->get_setting('comments_active')): ?>
 	<div class="rounded-lg bg-white overflow-hidden shadow-lg p-8 mb-8">
 
-		<!-- Add Comment Form -->
-		<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
-		<div class="mb-8 pb-8 border-b border-gray-200">
-			<h2 class="text-2xl font-bold text-gray-900 mb-6">Leave a Comment</h2>
-			<?php
-			$settings = Globalvars::get_instance();
-			$formwriter = $page->getFormWriter('form1');
-			$validation_rules = array();
-			$validation_rules['cmt']['required']['value'] = 'true';
-			$validation_rules['cmt']['minlength']['value'] = 20;
-			$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-			$validation_rules['name']['required']['value'] = 'true';
-			$validation_rules['name']['minlength']['value'] = 2;
-			$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-			echo $formwriter->set_validate($validation_rules);
-
-			echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
-			?>
-
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-				<div>
-					<label for="name" class="block text-sm font-medium text-gray-700 mb-2">Name <span class="text-red-500">*</span></label>
-					<?php echo $formwriter->textinput("", "name", 'w-full px-4 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500', 20, NULL , "",255, ""); ?>
-				</div>
-			</div>
-			<div class="mb-4">
-				<label for="cmt" class="block text-sm font-medium text-gray-700 mb-2">Comment <span class="text-red-500">*</span></label>
-				<?php echo $formwriter->textbox('', 'cmt', 'w-full px-4 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500', 6, 80, NULL, '', ''); ?>
-			</div>
-
-			<?php if(!$page_vars['session']->get_user_id()): ?>
-			<div class="mb-4">
-				<?php
-				echo $formwriter->antispam_question_input('blog');
-				echo $formwriter->honeypot_hidden_input();
-				echo $formwriter->honeypot_hidden_input('Comment', 'comment');
-				echo $formwriter->captcha_hidden_input('blog');
-				?>
-			</div>
-			<?php endif; ?>
-
-			<div class="flex justify-end">
-				<button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-colors duration-200">Post Comment</button>
-			</div>
-
-			<?php echo $formwriter->end_form(true); ?>
-		</div>
-		<?php endif; ?>
-
 		<!-- Comments Display -->
 		<?php if($page_vars['settings']->get_setting('show_comments') && $page_vars['numcomments']): ?>
-		<div>
+		<div class="mb-8 pb-8 border-b border-gray-200">
 			<h2 class="text-2xl font-bold text-gray-900 mb-6">Comments (<?php echo $page_vars['numcomments']; ?>)</h2>
 
 			<script>
@@ -214,13 +165,13 @@ $page_vars = $page_vars->data;
 						echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
 						?>
 
-						<div class="mb-3">
+						<div class="mb-3 w-full">
 							<label class="block text-sm font-medium text-gray-700 mb-2">Your name</label>
-							<?php echo $formwriter->textinput("", "name", 'w-full px-3 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm', 20, NULL , "",255, ""); ?>
+							<input type="text" name="name" id="name" class="w-full px-3 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm box-border" maxlength="255" />
 						</div>
-						<div class="mb-4">
+						<div class="mb-4 w-full">
 							<label class="block text-sm font-medium text-gray-700 mb-2">Your reply</label>
-							<?php echo $formwriter->textbox('', 'cmt', 'w-full px-3 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm', 3, 80, NULL, '', ''); ?>
+							<textarea name="cmt" id="cmt" rows="3" class="w-full px-3 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm box-border"></textarea>
 						</div>
 
 						<?php if(!$page_vars['session']->get_user_id()): ?>
@@ -272,6 +223,53 @@ $page_vars = $page_vars->data;
 				</div>
 				<?php endforeach; ?>
 			</div>
+		</div>
+		<?php endif; ?>
+
+		<!-- Add Comment Form -->
+		<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
+		<div>
+			<h2 class="text-2xl font-bold text-gray-900 mb-6">Leave a Comment</h2>
+			<?php
+			$settings = Globalvars::get_instance();
+			$formwriter = $page->getFormWriter('form1');
+			$validation_rules = array();
+			$validation_rules['cmt']['required']['value'] = 'true';
+			$validation_rules['cmt']['minlength']['value'] = 20;
+			$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
+			$validation_rules['name']['required']['value'] = 'true';
+			$validation_rules['name']['minlength']['value'] = 2;
+			$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+			echo $formwriter->set_validate($validation_rules);
+
+			echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
+			?>
+
+			<div class="mb-4 w-full">
+				<label for="name" class="block text-sm font-medium text-gray-700 mb-2">Name <span class="text-red-500">*</span></label>
+				<input type="text" name="name" id="name" class="w-full px-4 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 box-border" maxlength="255" />
+			</div>
+			<div class="mb-4 w-full">
+				<label for="cmt" class="block text-sm font-medium text-gray-700 mb-2">Comment <span class="text-red-500">*</span></label>
+				<textarea name="cmt" id="cmt" rows="6" class="w-full px-4 py-2 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 box-border"></textarea>
+			</div>
+
+			<?php if(!$page_vars['session']->get_user_id()): ?>
+			<div class="mb-4">
+				<?php
+				echo $formwriter->antispam_question_input('blog');
+				echo $formwriter->honeypot_hidden_input();
+				echo $formwriter->honeypot_hidden_input('Comment', 'comment');
+				echo $formwriter->captcha_hidden_input('blog');
+				?>
+			</div>
+			<?php endif; ?>
+
+			<div class="flex justify-end">
+				<button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-colors duration-200">Post Comment</button>
+			</div>
+
+			<?php echo $formwriter->end_form(true); ?>
 		</div>
 		<?php endif; ?>
 
