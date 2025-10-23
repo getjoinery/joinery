@@ -394,9 +394,6 @@ class FormWriterBootstrap extends FormWriterBase {
 						\$.getScript(scripts[index])
 							.done(function() {
 								loadNextScript(index + 1);
-							})
-							.fail(function() {
-								console.error('[Trumbo] Failed to load script:', scripts[index]);
 							});
 					}
 
