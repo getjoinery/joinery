@@ -87,20 +87,7 @@ class EventSession extends SystemBase {
 	    'evs_delete_time' => array('type'=>'timestamp(6)'),
 	); 
 
-	public static $field_constraints = array(
-	/*
-		'evs_name' => array(
-			array('WordLength', 0, 255),
-			'NoCaps',
-			),
-		'evs_description' => array(
-			array('WordLength', 50, 100000),
-			'NoCaps',
-			),
-					*/
-		);
-
-	public static function GetBySessionNumber($event_id, $session_number){
+public static function GetBySessionNumber($event_id, $session_number){
 		$results = new MultiEventSessions(array('event_id' => $event_id, 'session_number' => $session_number));
 		$results->load();
 

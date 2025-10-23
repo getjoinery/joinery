@@ -45,9 +45,7 @@ class StripeInvoice extends SystemBase {	public static $prefix = 'siv';
 	    'siv_stripe_payment_intent_id' => array('type'=>'varchar(32)'),
 	);
 
-	public static $field_constraints = array();	
-
-	public static function GetByStripeSession($session_id) {
+public static function GetByStripeSession($session_id) {
 		$data = SingleRowFetch('siv_stripe_invoices', 'siv_stripe_session_id',
 			$session_id, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
 

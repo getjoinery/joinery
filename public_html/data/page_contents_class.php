@@ -49,9 +49,7 @@ class PageContent extends SystemBase {	public static $prefix = 'pac';
 	    'pac_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function get_content(){
+function get_content(){
 		if($this->get('pac_published_time') && !$this->get('pac_delete_time')){
 			return $this->get('pac_body');
 		}

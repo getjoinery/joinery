@@ -126,10 +126,7 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 	    'usa_cco_country_code_id' => array('type'=>'int2'),
 	);
 
-	public static $field_constraints = array();
-
-
-	private static function UcAddress($string) {
+private static function UcAddress($string) {
 		$test_string = preg_replace('/[^A-Za-z]/', '', $string);
 		if(ctype_lower($test_string) || ctype_upper($test_string) ){
 		    $string = ucwords(strtolower($string));

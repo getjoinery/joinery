@@ -74,18 +74,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	);
 
-	public static $field_constraints = array(
-	/*
-		'usr_first_name' => array(
-			array('WordLength', 2, 64)
-			),
-		'usr_last_name' => array(
-			array('WordLength', 2, 64)
-			),
-			*/
-	);
-
-	private static function UcName($string) {
+private static function UcName($string) {
 		$test_string = preg_replace('/[^A-Za-z]/', '', $string);
 		$string = preg_replace('/[^A-Za-z\'-]/', '', $string);
 		if(ctype_lower($test_string) || ctype_upper($test_string) ){

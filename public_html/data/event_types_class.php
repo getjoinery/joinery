@@ -34,8 +34,6 @@ class EventType extends SystemBase {	public static $prefix = 'ety';
 	    'ety_name' => array('type'=>'varchar(100)'),
 	);
 
-	public static $field_constraints = array();
-
 }
 
 class MultiEventType extends SystemMultiBase {

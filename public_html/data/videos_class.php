@@ -51,9 +51,7 @@ class Video extends SystemBase {	public static $prefix = 'vid';
 	    'vid_evt_event_id' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array();
-
-	function get_embed($vidwidth = 560, $vidheight = 315) {
+function get_embed($vidwidth = 560, $vidheight = 315) {
 		if($this->get('vid_delete_time')){
 			return FALSE;
 		}

@@ -38,8 +38,6 @@ class PluginVersion extends SystemBase {    public static $prefix = 'plv';
         'plv_metadata' => array('type'=>'text'),
     );
 
-    public static $field_constraints = array();
-
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {
             throw new SystemAuthenticationError(

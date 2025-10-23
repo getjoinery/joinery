@@ -41,8 +41,6 @@ class ProductDetail extends SystemBase {	public static $prefix = 'prd';
 	    'prd_notes' => array('type'=>'text'),
 	);	
 
-	public static $field_constraints = array();	
-
 }
 
 class MultiProductDetail extends SystemMultiBase {

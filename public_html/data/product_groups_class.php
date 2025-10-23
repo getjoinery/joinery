@@ -38,8 +38,6 @@ class ProductGroup extends SystemBase {	public static $prefix = 'prg';
 	    'prg_type' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array();	
-
 }
 
 class MultiProductGroup extends SystemMultiBase {

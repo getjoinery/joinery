@@ -40,9 +40,7 @@ class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	    'upg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	public static $field_constraints = array();	
-
-	function authenticate_write($data) {
+function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
 			// sure they have admin access, otherwise denied.

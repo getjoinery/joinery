@@ -41,20 +41,7 @@ class ProductRequirementInstance extends SystemBase {	public static $prefix = 'p
 	    'pri_delete_time' => array('type'=>'timestamp(6)'),
 	); 
 
-	public static $field_constraints = array(
-	/*
-		'prq_name' => array(
-			array('WordLength', 0, 255),
-			'NoCaps',
-			),
-		'prq_description' => array(
-			array('WordLength', 50, 100000),
-			'NoCaps',
-			),
-					*/
-		);
-
-	function authenticate_write($data) {
+function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in '. static::$tablename);

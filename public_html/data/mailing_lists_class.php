@@ -68,14 +68,7 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	    'mlt_ctt_contact_type_id' => array('type'=>'int4'),
 	); 
 
-	public static $field_constraints = array(
-		'mlt_name' => array(
-			array('WordLength', 0, 255),
-			'NoCaps',
-			),
-		);
-
-	function get_subscribed_users($return='object'){
+function get_subscribed_users($return='object'){
 		$searches = array();
 		$searches['deleted'] = false;
 		$searches['mailing_list_id'] = $this->key;

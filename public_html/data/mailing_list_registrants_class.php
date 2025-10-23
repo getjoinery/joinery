@@ -43,9 +43,7 @@ class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 	    'mlr_delete_time' => array('type'=>'timestamp(6)'),
 	);	
 
-	public static $field_constraints = array();	
-
-	public static function CheckIfExists($user_id, $mailing_list_id) {
+public static function CheckIfExists($user_id, $mailing_list_id) {
 		
 		$count = new MultiMailingListRegistrant(array(
 			'user_id' => $user_id,

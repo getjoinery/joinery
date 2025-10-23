@@ -47,14 +47,7 @@ class CouponCode extends SystemBase {	public static $prefix = 'ccd';
 	    'ccd_applies_to' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array(
-		'ccd_code' => array(
-			array('WordLength', 0, 64),
-			'NoCaps',
-			),
-	);	
-
-	function get_discount($full_price){
+function get_discount($full_price){
 		$discount = 0;
 		if($this->get('ccd_amount_discount')){
 			$discount = $this->get('ccd_amount_discount');

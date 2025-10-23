@@ -45,9 +45,7 @@ class EmailRecipient extends SystemBase {	public static $prefix = 'erc';
 	    'erc_status' => array('type'=>'int2'),
 	);
 
-	public static $field_constraints = array();	
-
-	function authenticate_write($data) {
+function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
 			// sure they have admin access, otherwise denied.

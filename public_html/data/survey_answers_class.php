@@ -47,9 +47,7 @@ class SurveyAnswer extends SystemBase {	public static $prefix = 'sva';
 	    'sva_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	public static $field_constraints = array();	
-
-	function check_for_duplicates() {
+function check_for_duplicates() {
 		
 		$count = new MultiSurveyAnswer(array(
 			'survey_id' => $this->get('sva_svy_survey_id'),

@@ -200,11 +200,12 @@ class Example extends SystemBase
         )
     );
     
-    // VALIDATION: Validation rules are now defined in field_specifications using the 'validation' property
+    // VALIDATION: Validation rules are handled through field_specifications properties:
+    // - 'required' => true     - Field must have a value
+    // - 'unique' => true       - Field must be unique across table
+    // - 'unique_with' => []    - Multi-field unique constraint
     // These are checked during save() before database operations
-    // Rules are also used by FormWriter v2 for client-side validation
-    // See field_specifications above for 'validation' examples:
-    // 'exm_name' => array('type'=>'varchar(64)', 'validation'=>array('required'=>true, 'minlength'=>2, 'maxlength'=>64))
+    // For form validation, use FormWriter's set_validate() method with rules defined separately
 
 
     // REQUIRED: Actions to take when permanently deleting records

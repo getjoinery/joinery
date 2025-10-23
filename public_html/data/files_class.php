@@ -51,9 +51,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_evt_event_id' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array();
-
-	public static function get_by_name($name) {
+public static function get_by_name($name) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 

@@ -63,9 +63,7 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 	    'ord_stripe_subscription_id_temp' => array('type'=>'varchar(255)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function is_stripe_order(){
+function is_stripe_order(){
 		if($this->get('ord_stripe_session_id') || $this->get('ord_stripe_payment_intent_id') || $this->get('ord_stripe_charge_id') || $this->get('ord_stripe_invoice_id')){
 			return true;
 		}

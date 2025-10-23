@@ -41,9 +41,7 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	    'msg_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function display_title(){
+function display_title(){
 		if($this->get('msg_body')){
 			return substr(strip_tags($this->get('msg_body')), 0, 100);
 		}

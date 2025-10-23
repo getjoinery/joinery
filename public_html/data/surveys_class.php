@@ -39,9 +39,7 @@ class Survey extends SystemBase {	public static $prefix = 'svy';
 	    'svy_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function get_users_who_answered() {
+function get_users_who_answered() {
 
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();	
