@@ -40,10 +40,10 @@ class PublicPage extends PublicPageFalcon {
     <link rel="stylesheet" href="/theme/canvas/assets/css/custom.css">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <!-- jQuery - Load in header for inline scripts -->
+    <!-- jQuery - Load clean instance last to override any bundled versions -->
+    <script src="/theme/canvas/assets/js/plugins.min.js"></script>
     <script src="/theme/canvas/assets/js/jquery.js"></script>
     <script src="/theme/canvas/assets/js/jquery.validate-1.9.1.js"></script>
-    <script src="/theme/canvas/assets/js/plugins.min.js"></script>
 
     <title><?php echo htmlspecialchars($title); ?></title>
 </head>
