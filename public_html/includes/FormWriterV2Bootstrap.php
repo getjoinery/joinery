@@ -473,23 +473,50 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $input_class .= ' is-invalid';
         }
 
-        // Parse value if it exists (expects HH:MM format)
+        // Parse value - handles both "HH:MM" (24-hour) and "g:i a" (12-hour) formats
         $hour = '';
         $minute = '';
         $ampm = 'AM';
 
         if ($value) {
-            list($h, $m) = explode(':', $value);
-            $h = intval($h);
-            if ($h >= 12) {
-                $ampm = 'PM';
-                if ($h > 12) $h -= 12;
-            } else {
-                $ampm = 'AM';
-                if ($h == 0) $h = 12;
+            // Check if value contains AM/PM (e.g., "3:15 PM" from datetimeinput)
+            if (stripos($value, 'am') !== false || stripos($value, 'pm') !== false) {
+                // Extract AM/PM first
+                if (stripos($value, 'pm') !== false) {
+                    $ampm = 'PM';
+                    $value = str_ireplace('pm', '', $value);
+                } else {
+                    $ampm = 'AM';
+                    $value = str_ireplace('am', '', $value);
+                }
+                $value = trim($value);
             }
-            $hour = str_pad($h, 2, '0', STR_PAD_LEFT);
-            $minute = str_pad($m, 2, '0', STR_PAD_LEFT);
+
+            // Now parse hour and minute
+            if (strpos($value, ':') !== false) {
+                list($h, $m) = explode(':', $value);
+                $h = intval(trim($h));
+                $m = intval(trim($m));
+
+                // If we extracted AM/PM, the hour is already in 12-hour format
+                if ($ampm === 'PM' && $h !== 12) {
+                    // Will display as-is, conversion happens on submit
+                } elseif ($ampm === 'AM' && $h === 12) {
+                    // Keep as 12
+                } elseif ($h >= 12 && (stripos($value, 'am') === false && stripos($value, 'pm') === false)) {
+                    // If no AM/PM was in original value, convert from 24-hour
+                    if ($h >= 12) {
+                        $ampm = 'PM';
+                        if ($h > 12) $h -= 12;
+                    } else {
+                        $ampm = 'AM';
+                        if ($h == 0) $h = 12;
+                    }
+                }
+
+                $hour = str_pad($h, 2, '0', STR_PAD_LEFT);
+                $minute = str_pad($m, 2, '0', STR_PAD_LEFT);
+            }
         }
 
         echo '<div class="form-group">';

@@ -641,31 +641,145 @@ class FormWriterHTML5 extends FormWriterBase {
 			layout ('default', 'horizontal')
 	********************************/	
 	function timeinput($label, $id, $class, $value, $hint, $layout='default') {
-		$class = $class . ' timepicker';
 		$output = '';
-		$output .= '
-		<link rel="stylesheet" href="/assets/vendor/jquery-timepicker-1.3.5/jquery.timepicker.min.css"/>
-		<script type="text/javascript" src="/assets/vendor/jquery-timepicker-1.3.5/jquery.timepicker.min.js"></script>
-		<script type="text/javascript">
-		$(document).ready(function(){
-			$("input.timepicker").timepicker({
-				timeFormat: "h:mm p",
-				interval: 15,
-				//minTime: "10",
-				//maxTime: "6:00pm",
-				//defaultTime: "11",
-				//startTime: "00:00",
-				//dynamic: false,
-				//dropdown: true,
-				//scrollbar: true
-			});
-		});
-		</script>';
-		
-		$output .= $this->textinput($label, $id, $class, $size, $value, $hint, 10, $readonly, TRUE, FALSE, 'text', $layout);
-		return $output;
+		$hour_id = $id . '_hour';
+		$minute_id = $id . '_minute';
+		$ampm_id = $id . '_ampm';
 
-	
+		// Parse value - handles both "HH:MM" (24-hour) and "g:i a" (12-hour) formats
+		$hour = '';
+		$minute = '';
+		$ampm = 'AM';
+
+		if ($value) {
+			// Check if value contains AM/PM (e.g., "3:15 PM" from datetimeinput)
+			if (stripos($value, 'am') !== false || stripos($value, 'pm') !== false) {
+				// Extract AM/PM first
+				if (stripos($value, 'pm') !== false) {
+					$ampm = 'PM';
+					$value = str_ireplace('pm', '', $value);
+				} else {
+					$ampm = 'AM';
+					$value = str_ireplace('am', '', $value);
+				}
+				$value = trim($value);
+			}
+
+			// Now parse hour and minute
+			if (strpos($value, ':') !== false) {
+				list($h, $m) = explode(':', $value);
+				$h = intval(trim($h));
+				$m = intval(trim($m));
+
+				// If we extracted AM/PM, the hour is already in 12-hour format
+				if ($ampm === 'PM' && $h !== 12) {
+					// Will display as-is, conversion happens on submit
+				} elseif ($ampm === 'AM' && $h === 12) {
+					// Keep as 12
+				} elseif ($h >= 12 && (stripos($value, 'am') === false && stripos($value, 'pm') === false)) {
+					// If no AM/PM was in original value, convert from 24-hour
+					if ($h >= 12) {
+						$ampm = 'PM';
+						if ($h > 12) $h -= 12;
+					} else {
+						$ampm = 'AM';
+						if ($h == 0) $h = 12;
+					}
+				}
+
+				$hour = str_pad($h, 2, '0', STR_PAD_LEFT);
+				$minute = str_pad($m, 2, '0', STR_PAD_LEFT);
+			}
+		}
+
+		$output .= '
+		<div id="'.$id.'_container" class="mb-3 errorplacement">
+			<label class="form-label">'.$label.'</label>
+			<div class="row g-2">
+				<div class="col-auto">
+					<input type="number"
+						id="'.$hour_id.'"
+						name="'.$hour_id.'"
+						class="form-control"
+						style="width: 80px;"
+						min="1" max="12"
+						placeholder="HH"
+						value="'.$hour.'">
+				</div>
+				<div class="col-auto" style="display: flex; align-items: center;">
+					<strong>:</strong>
+				</div>
+				<div class="col-auto">
+					<input type="number"
+						id="'.$minute_id.'"
+						name="'.$minute_id.'"
+						class="form-control"
+						style="width: 80px;"
+						min="0" max="59"
+						placeholder="MM"
+						value="'.$minute.'">
+				</div>
+				<div class="col-auto">
+					<select id="'.$ampm_id.'" name="'.$ampm_id.'" class="form-select">
+						<option value="AM"'.($ampm === 'AM' ? ' selected' : '').'>AM</option>
+						<option value="PM"'.($ampm === 'PM' ? ' selected' : '').'>PM</option>
+					</select>
+				</div>
+			</div>
+			<input type="hidden" name="'.$id.'" id="'.$id.'" value="'.$value.'">
+		</div>';
+
+		// JavaScript to sync hidden field with user input
+		static $time_input_js_loaded = false;
+		if (!$time_input_js_loaded) {
+			$output .= '
+			<script type="text/javascript">
+			function updateTimeInput(hourId, minuteId, ampmId, hiddenId) {
+				var hour = document.getElementById(hourId).value;
+				var minute = document.getElementById(minuteId).value;
+				var ampm = document.getElementById(ampmId).value;
+
+				if (hour && minute) {
+					var h = parseInt(hour);
+					if (ampm === "PM" && h !== 12) h += 12;
+					if (ampm === "AM" && h === 12) h = 0;
+
+					var timeValue = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
+					document.getElementById(hiddenId).value = timeValue;
+				}
+			}
+
+			document.addEventListener("DOMContentLoaded", function() {
+				var timeInputs = document.querySelectorAll("[data-time-hour]");
+				timeInputs.forEach(function(el) {
+					var hourId = el.getAttribute("data-time-hour");
+					var minuteId = el.getAttribute("data-time-minute");
+					var ampmId = el.getAttribute("data-time-ampm");
+					var hiddenId = el.getAttribute("data-time-hidden");
+
+					document.getElementById(hourId).addEventListener("change", function() {
+						updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+					});
+					document.getElementById(minuteId).addEventListener("change", function() {
+						updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+					});
+					document.getElementById(ampmId).addEventListener("change", function() {
+						updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+					});
+				});
+			});
+			</script>';
+			$time_input_js_loaded = true;
+		}
+
+		// Add data attributes to trigger sync
+		$output .= '<div data-time-hour="'.$hour_id.'" data-time-minute="'.$minute_id.'" data-time-ampm="'.$ampm_id.'" data-time-hidden="'.$id.'" style="display:none;"></div>';
+
+		if($hint) {
+			$output .= '<div id="'.$id.'_hint"><small>'.$hint.'</small></div>';
+		}
+
+		return $output;
 	}
 
 
@@ -685,45 +799,159 @@ class FormWriterHTML5 extends FormWriterBase {
 			*DOES NOT CONVERT FOR TIMEZONES
 	********************************/
 	function datetimeinput($label, $id, $class, $inputdatetime, $hint, $timehint, $datehint, $layout='default') {
-		
-			//REMOVE TIME OR DATE FROM LABEL
-			$label = preg_replace('/\s*(time|date)$/i', '', trim($label));
-			if(!is_null($inputdatetime) && $inputdatetime != ''){
-				$session = SessionControl::get_instance();
-				$inputdate = LibraryFunctions::convert_time($inputdatetime, 'UTC', 'UTC', 'Y-m-d');
-				$inputtime = LibraryFunctions::convert_time($inputdatetime, 'UTC', 'UTC', 'g:i a');
-			}
-			else{
-				$inputdate = '';
-				$inputtime = '';
-			}
-			
-			$output = '';
-			if($layout == 'default'){
-				$output .= $this->dateinput($label.' date', $id.'_date', NULL, NULL, $inputdate, $hint, NULL, NULL, NULL, NULL, 'default');
-				$output .= $this->timeinput($label.' time', $id.'_time', NULL, $inputtime, NULL, 'default'); 
-			}
-			else if($layout == 'horizontal'){
-				$output .= '<div class="row gy-2 gx-3">
-					<div class="col-auto">';
-				
-				$output .= $this->dateinput($label.' date', $id.'_date', NULL, NULL, $inputdate, $hint, NULL, NULL, NULL, NULL, 'default');
-			
-		
-				$output .= '  </div>
-					<div class="col-auto">';
-			
-				$output .= $this->timeinput($label.' time', $id.'_time', NULL, $inputtime, NULL, 'default'); 
-			
-				$output .= '</div></div>';
-			}
-			else if($layout = 'row'){
-				$output .= $this->dateinput($label.' date', $id.'_date', NULL, NULL, $inputdate, $hint, NULL, NULL, NULL, NULL, 'horizontal');
+		// Parse input datetime
+		$inputdate = '';
+		$inputtime = '';
+		if(!is_null($inputdatetime) && $inputdatetime != ''){
+			$inputdate = LibraryFunctions::convert_time($inputdatetime, 'UTC', 'UTC', 'Y-m-d');
+			$inputtime = LibraryFunctions::convert_time($inputdatetime, 'UTC', 'UTC', 'g:i a');
+		}
 
-				$output .= $this->timeinput($label.' time', $id.'_time', NULL, $inputtime, NULL, 'horizontal'); 				
-			}
-			return $output;
+		// Parse time value for hour, minute, AM/PM
+		$hour = '';
+		$minute = '';
+		$ampm = 'AM';
+		$date_id = $id . '_date';
+		$time_id = $id . '_time';
+		$hour_id = $time_id . '_hour';
+		$minute_id = $time_id . '_minute';
+		$ampm_id = $time_id . '_ampm';
 
+		if ($inputtime) {
+			// Handle both "HH:MM" and "g:i a" formats
+			if (stripos($inputtime, 'am') !== false || stripos($inputtime, 'pm') !== false) {
+				if (stripos($inputtime, 'pm') !== false) {
+					$ampm = 'PM';
+					$inputtime = str_ireplace('pm', '', $inputtime);
+				} else {
+					$ampm = 'AM';
+					$inputtime = str_ireplace('am', '', $inputtime);
+				}
+				$inputtime = trim($inputtime);
+			}
+			if (strpos($inputtime, ':') !== false) {
+				list($h, $m) = explode(':', $inputtime);
+				$h = intval(trim($h));
+				$m = intval(trim($m));
+				if ($h >= 12 && $ampm === 'AM') {
+					$ampm = 'PM';
+					if ($h > 12) $h -= 12;
+				} elseif ($h == 0 && $ampm === 'AM') {
+					$h = 12;
+				}
+				$hour = str_pad($h, 2, '0', STR_PAD_LEFT);
+				$minute = str_pad($m, 2, '0', STR_PAD_LEFT);
+			}
+		}
+
+		$output = '';
+		$output .= '<div id="'.$id.'_container" class="form-group errorplacement">';
+
+		if($label){
+			$output .= '<label class="form-label">'.$label.'</label>';
+		}
+
+		$output .= '<div class="row g-2">';
+
+		// Date column
+		$output .= '<div class="col-md-6">';
+		$output .= '<input type="date"';
+		$output .= ' name="'.$date_id.'"';
+		$output .= ' id="'.$date_id.'"';
+		$output .= ' class="form-control"';
+		$output .= ' value="'.htmlspecialchars($inputdate).'"';
+		$output .= '>';
+		$output .= '</div>';
+
+		// Time column with hour/minute/AM-PM
+		$output .= '<div class="col-md-6">';
+		$output .= '<div class="row g-2">';
+
+		// Hour input
+		$output .= '<div class="col-auto">';
+		$output .= '<input type="number"';
+		$output .= ' id="'.$hour_id.'"';
+		$output .= ' name="'.$hour_id.'"';
+		$output .= ' class="form-control"';
+		$output .= ' style="width: 80px;"';
+		$output .= ' min="1" max="12"';
+		$output .= ' placeholder="HH"';
+		$output .= ' value="'.htmlspecialchars($hour).'">';
+		$output .= '</div>';
+
+		// Colon separator
+		$output .= '<div class="col-auto" style="display: flex; align-items: center;">';
+		$output .= '<strong>:</strong>';
+		$output .= '</div>';
+
+		// Minute input
+		$output .= '<div class="col-auto">';
+		$output .= '<input type="number"';
+		$output .= ' id="'.$minute_id.'"';
+		$output .= ' name="'.$minute_id.'"';
+		$output .= ' class="form-control"';
+		$output .= ' style="width: 80px;"';
+		$output .= ' min="0" max="59"';
+		$output .= ' placeholder="MM"';
+		$output .= ' value="'.htmlspecialchars($minute).'">';
+		$output .= '</div>';
+
+		// AM/PM select
+		$output .= '<div class="col-auto">';
+		$output .= '<select id="'.$ampm_id.'" name="'.$ampm_id.'" class="form-select">';
+		$output .= '<option value="AM"'.($ampm === 'AM' ? ' selected' : '').'>AM</option>';
+		$output .= '<option value="PM"'.($ampm === 'PM' ? ' selected' : '').'>PM</option>';
+		$output .= '</select>';
+		$output .= '</div>';
+
+		$output .= '</div>'; // Close nested row for time parts
+		$output .= '</div>'; // Close col-md-6 for time
+		$output .= '</div>'; // Close main row
+
+		// Hidden field to hold the actual time value
+		$output .= '<input type="hidden" name="'.$time_id.'" id="'.$time_id.'" value="'.htmlspecialchars($inputtime).'">';
+
+		// JavaScript to sync hidden field with user input
+		static $datetime_input_js_loaded = false;
+		if (!$datetime_input_js_loaded) {
+			$output .= '
+			<script type="text/javascript">
+			function updateTimeInput(hourId, minuteId, ampmId, hiddenId) {
+				var hour = document.getElementById(hourId).value;
+				var minute = document.getElementById(minuteId).value;
+				var ampm = document.getElementById(ampmId).value;
+				if (hour && minute) {
+					var h = parseInt(hour);
+					if (ampm === "PM" && h !== 12) h += 12;
+					if (ampm === "AM" && h === 12) h = 0;
+					var timeValue = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
+					document.getElementById(hiddenId).value = timeValue;
+				}
+			}
+			document.addEventListener("DOMContentLoaded", function() {
+				var timeInputs = document.querySelectorAll("[data-datetime-hour]");
+				timeInputs.forEach(function(el) {
+					var hourId = el.getAttribute("data-datetime-hour");
+					var minuteId = el.getAttribute("data-datetime-minute");
+					var ampmId = el.getAttribute("data-datetime-ampm");
+					var hiddenId = el.getAttribute("data-datetime-hidden");
+					document.getElementById(hourId).addEventListener("change", function() {
+						updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+					});
+					document.getElementById(minuteId).addEventListener("change", function() {
+						updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+					});
+					document.getElementById(ampmId).addEventListener("change", function() {
+						updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+					});
+				});
+			});
+			</script>';
+			$datetime_input_js_loaded = true;
+		}
+
+		$output .= '</div>'; // Close form-group
+		return $output;
 	}
 
 
