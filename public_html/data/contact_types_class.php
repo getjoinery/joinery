@@ -38,9 +38,7 @@ class ContactType extends SystemBase {	public static $prefix = 'ctt';
 	    'ctt_mailchimp_list_id' => array('type'=>'varchar(255)'),
 	);
 
-	public static $field_constraints = array();	
-
-	public static function ToReadable($ctt_contact_type_id){
+public static function ToReadable($ctt_contact_type_id){
 		$contact_type = ContactType::GetByColumn('ctt_contact_type_id', (int)$ctt_contact_type_id);
 		return $contact_type->get('ctt_name');
 	}

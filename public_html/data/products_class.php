@@ -648,9 +648,7 @@ class Product extends SystemBase {
 	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array();	
-
-	public function get_requirement_info($output='text') {
+public function get_requirement_info($output='text') {
 		$requirements_out = array();
 		foreach ($this->get_product_requirements() as $productr){
 			if($output == 'text'){

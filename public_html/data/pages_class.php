@@ -44,9 +44,7 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	    'pag_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function get_filled_content(){
+function get_filled_content(){
 
 		//LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
 		if($this->get('pag_script_filename')){

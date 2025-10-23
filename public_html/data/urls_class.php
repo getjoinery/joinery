@@ -41,9 +41,7 @@ class Url extends SystemBase {
 	    'url_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function get_type_text() {
+function get_type_text() {
 		if($this->get('url_type') == 301){
 			return 'HTTP/1.1 301 Moved Permanently';
 		}

@@ -48,9 +48,7 @@ class Group extends SystemBase {	public static $prefix = 'grp';
 	    'grp_category' => array('type'=>'varchar(24)'),
 	);	
 
-	public static $field_constraints = array();	
-
-	//RETURNS A GROUP OBJECT WITH A SPECIFIED NAME
+//RETURNS A GROUP OBJECT WITH A SPECIFIED NAME
 	public static function get_by_name($name, $category, $return_deleted=false) {
 		if(!$name){
 			throw new GroupException('A name is required to get groups by name.');

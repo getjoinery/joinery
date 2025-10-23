@@ -43,14 +43,7 @@ class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 	    'ccu_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array(
-		/*'ccu_code' => array(
-			array('WordLength', 0, 64),
-			'NoCaps',
-			),*/
-	);	
-
-	/*
+/*
 	function prepare() {
 
 	}	

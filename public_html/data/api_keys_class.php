@@ -45,14 +45,7 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	    'apk_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array(
-		/*'apk_code' => array(
-			array('WordLength', 0, 64),
-			'NoCaps',
-			),*/
-	);	
-
-	public static function GenerateKey($key) {
+public static function GenerateKey($key) {
 		require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 		$hasher = new PasswordHash(8, TRUE);
 		return $hasher->HashPassword($key);

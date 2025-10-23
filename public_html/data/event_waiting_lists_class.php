@@ -41,9 +41,7 @@ class WaitingList extends SystemBase {	public static $prefix = 'ewl';
 	    'ewl_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);	
 
-	public static $field_constraints = array();	
-
-	public static function CheckIfExists($user_id, $event_id) {
+public static function CheckIfExists($user_id, $event_id) {
 		
 		$count = new MultiWaitingList(array(
 			'user_id' => $user_id,

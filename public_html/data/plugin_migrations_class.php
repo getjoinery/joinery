@@ -42,14 +42,6 @@ class PluginMigration extends SystemBase {    public static $prefix = 'plm';
         'plm_error_message' => array('type'=>'text'),
     );
 
-    public static $field_constraints = array(
-        // Note: Unique constraints should be defined in field_specifications, not field_constraints
-        // 'plm_plugin_name_migration_id_unique' => array(
-        //     'type' => 'unique',
-        //     'fields' => array('plm_plugin_name', 'plm_migration_id')
-        // )
-    );
-
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {
             throw new SystemAuthenticationError(

@@ -42,8 +42,6 @@ class ActivationCode extends SystemBase {	public static $prefix = 'act';
 	    'act_deleted' => array('type'=>'bool', 'default'=>false),
 	);
 
-	public static $field_constraints = array();
-
 }
 
 class MultiActivationCode extends SystemMultiBase {

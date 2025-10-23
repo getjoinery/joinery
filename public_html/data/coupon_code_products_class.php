@@ -42,9 +42,7 @@ class CouponCodeProduct extends SystemBase {	public static $prefix = 'ccp';
 	    'ccp_pro_product_id' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array();	
-
-	function prepare() {
+function prepare() {
 
 	}	
 

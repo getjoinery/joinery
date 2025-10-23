@@ -39,8 +39,6 @@ class SessionAnalytic extends SystemBase {	public static $prefix = 'sev';
 	    'sev_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	public static $field_constraints = array();
-
 }
 
 class MultiSessionAnalytic extends SystemMultiBase {

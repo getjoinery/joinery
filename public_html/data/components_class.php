@@ -40,8 +40,6 @@ class Component extends SystemBase {	public static $prefix = 'com';
 	    'com_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
 }
 
 class MultiComponent extends SystemMultiBase {

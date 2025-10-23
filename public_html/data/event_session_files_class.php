@@ -39,8 +39,6 @@ class EventSessionFile extends SystemBase {	public static $prefix = 'esf';
 	    'esf_fil_file_id' => array('type'=>'int4', 'required'=>true),
 	);
 
-	public static $field_constraints = array();
-
 }
 
 class MultiEventSessionFile extends SystemMultiBase {

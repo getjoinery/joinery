@@ -40,11 +40,7 @@ class Comment extends SystemBase {	public static $prefix = 'cmt';
 	    'cmt_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array(
-
-	);
-
-	function display_title(){
+function display_title(){
 		if($this->get('cmt_body')){
 			return substr(strip_tags($this->get('cmt_body')), 0, 100);
 		}

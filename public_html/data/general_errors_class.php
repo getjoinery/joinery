@@ -48,9 +48,7 @@ class GeneralError extends SystemBase {	public static $prefix = 'err';
 	    'err_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	public static $field_constraints = array();
-
-	function display_time($session) {
+function display_time($session) {
 		return LibraryFunctions::convert_time(
 			$this->get('err_log_time'), 'UTC', $session->get_timezone(), '%a, %d %b %Y %R:%S');
 	}	

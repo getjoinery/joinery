@@ -135,7 +135,6 @@ class TableName extends SystemBase {
     public static $field_specifications = array();
     public static $timestamp_fields = array();
     public static $required_fields = array();
-    public static $field_constraints = array();
     public static $initial_default_values = array();
     public static $zero_variables = array();
     public static $permanent_delete_actions = array();

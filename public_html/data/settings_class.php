@@ -45,9 +45,7 @@ class Setting extends SystemBase {	public static $prefix = 'stg';
 	    'stg_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);	
 
-	public static $field_constraints = array();	
-
-	private function _check_for_duplicate_setting() {
+private function _check_for_duplicate_setting() {
 		
 		$settings = Globalvars::get_instance();
 		if($settings->get_setting($this->get('stg_name'))){

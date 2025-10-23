@@ -44,20 +44,7 @@ class ProductRequirement extends SystemBase {	public static $prefix = 'prq';
 	    'prq_delete_time' => array('type'=>'timestamp(6)'),
 	); 
 
-	public static $field_constraints = array(
-	/*
-		'prq_name' => array(
-			array('WordLength', 0, 255),
-			'NoCaps',
-			),
-		'prq_description' => array(
-			array('WordLength', 50, 100000),
-			'NoCaps',
-			),
-					*/
-		);
-		
-	function get_link_to_append(){
+function get_link_to_append(){
 		$settings = Globalvars::get_instance();
 		if($this->get('prq_link')){
 			return $this->get('prq_link');
