@@ -696,6 +696,48 @@ abstract class FormWriterV2Base {
     }
 
     /**
+     * Create a time input field
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    public function timeinput($name, $label = '', $options = []) {
+        $this->registerField($name, 'time', $label, $options);
+        $this->outputTimeInput($name, $label, $options);
+    }
+
+    /**
+     * Create separate date and time input fields
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options (includes date_name, time_name for separate fields)
+     */
+    public function datetimeinput($name, $label = '', $options = []) {
+        // Default to name_date and name_time if not specified
+        $date_name = $options['date_name'] ?? $name . '_date';
+        $time_name = $options['time_name'] ?? $name . '_time';
+
+        $this->registerField($date_name, 'date', $label ? $label . ' (Date)' : '', $options);
+        $this->registerField($time_name, 'time', $label ? $label . ' (Time)' : '', $options);
+
+        $this->outputDateTimeInput($name, $label, $options, $date_name, $time_name);
+    }
+
+    /**
+     * Create a combined datetime input field
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    public function datetimeinput2($name, $label = '', $options = []) {
+        $this->registerField($name, 'datetime-local', $label, $options);
+        $this->outputDateTimeInput2($name, $label, $options);
+    }
+
+    /**
      * Create a file input field
      *
      * @param string $name Field name
@@ -1068,6 +1110,9 @@ abstract class FormWriterV2Base {
     abstract protected function outputCheckboxInput($name, $label, $options);
     abstract protected function outputRadioInput($name, $label, $options);
     abstract protected function outputDateInput($name, $label, $options);
+    abstract protected function outputTimeInput($name, $label, $options);
+    abstract protected function outputDateTimeInput($name, $label, $options, $date_name, $time_name);
+    abstract protected function outputDateTimeInput2($name, $label, $options);
     abstract protected function outputFileInput($name, $label, $options);
     abstract protected function outputHiddenInput($name, $options);
     abstract protected function outputSubmitButton($name, $label, $options);
