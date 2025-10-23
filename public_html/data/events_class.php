@@ -119,18 +119,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_loc_location_id' => array('type'=>'int4'),
 	); 
 
-	public static $field_constraints = array(
-		'evt_name' => array(
-			array('WordLength', 0, 255),
-			'NoCaps',
-			),
-		//'evt_description' => array(
-		//	array('WordLength', 50, 100000),
-		//	'NoCaps',
-		//	),
-		);
-
-	function get_leader() {
+function get_leader() {
 		if($this->get('evt_usr_user_id_leader')){
 			$leader = new User($this->get('evt_usr_user_id_leader'), TRUE);
 			return $leader->display_name();

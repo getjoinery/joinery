@@ -42,21 +42,7 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	    'phn_cco_country_code_id' => array('type'=>'int4', 'default'=>1),
 	);
 
-	public static $field_constraints = array(
-	/*
-		'phn_field' => array(
-			array('WordLength', 0, 255),
-			'NoSymbols',
-			'NoCaps',
-			),
-		'phn_field' => array(
-			array('WordLength', 50, 100000),
-			'NoEmailAddress',
-			'NoCaps',
-			),*/
-		);
-
-	public static $phone_carriers = array(
+public static $phone_carriers = array(
 		'Alltel'=>'message.alltel.com',
 		'AT&T'=>'txt.att.net',
 		'Boost'=>'myboostmobile.com',

@@ -523,11 +523,6 @@ abstract class FormWriterV2Base {
             ];
         }
 
-        // Add field constraints if they exist
-        if (isset($model_class::$field_constraints[$field_name])) {
-            $validation['constraints'] = $model_class::$field_constraints[$field_name];
-        }
-
         return $validation;
     }
 

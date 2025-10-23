@@ -53,9 +53,7 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 	    'pst_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function prepare() {	
+function prepare() {	
 		//CHECK FOR DUPLICATES
 		if($this->check_for_duplicate(array('pst_link'))){
 			throw new SystemAuthenticationError(

@@ -1052,16 +1052,7 @@ class DatabaseUpdater {
                 }
             }
         }
-        
-        // Also check field_constraints for backward compatibility
-        if (isset($class::$field_constraints)) {
-            foreach ($class::$field_constraints as $constraint_name => $constraint_info) {
-                if ($constraint_info['type'] === 'unique' && !in_array($constraint_name, $constraints)) {
-                    $constraints[] = $constraint_name;
-                }
-            }
-        }
-        
+
         return $constraints;
     }
     

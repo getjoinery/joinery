@@ -55,9 +55,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	    'qst_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function output_js_validation($validation_rules){
+function output_js_validation($validation_rules){
 		$validation_options = unserialize($this->get('qst_validate')); 
 		
 		if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){

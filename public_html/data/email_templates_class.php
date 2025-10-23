@@ -44,9 +44,7 @@ class EmailTemplateStore extends SystemBase {	public static $prefix = 'emt';
 	    'emt_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	private function _check_for_duplicate_email_template() {
+private function _check_for_duplicate_email_template() {
 		$count = new MultiEmailTemplateStore(array(
 			'email_template_name' => $this->get('emt_name'),
 		));

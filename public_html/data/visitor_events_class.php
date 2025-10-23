@@ -49,9 +49,7 @@ class VisitorEvent extends SystemBase {	public static $prefix = 'vse';
 	    'vse_is_404' => array('type'=>'bool'),
 	);
 
-	public static $field_constraints = array();
-
-	/**
+/**
 	 * Record a page visit for tracking purposes
 	 * This method creates a visitor event record for JavaScript-based tracking
 	 * @param string $page The page URL being visited

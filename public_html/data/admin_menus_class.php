@@ -47,9 +47,7 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	    'amu_setting_activate' => array('type'=>'varchar(64)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function authenticate_write($data) {
+function authenticate_write($data) {
 		// If the user's ID doesn't match, we have to make
 		// sure they have admin access, otherwise denied.
 		if ($data['current_user_permission'] < 10) {

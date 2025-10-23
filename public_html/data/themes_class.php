@@ -63,11 +63,8 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         'thm_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
     
         'thm_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-    
-    );
-    
 
-    public static $field_constraints = array();
+    );
 
     /**
      * Get theme by name

@@ -42,9 +42,7 @@ class FormError extends SystemBase {	public static $prefix = 'lfe';
 	    'lfe_context' => array('type'=>'varchar(255)'),
 	);
 
-	public static $field_constraints = array();
-
-	function display_time($session) {
+function display_time($session) {
 		return LibraryFunctions::convert_time(
 			$this->get('lfe_log_time'), 'UTC', $session->get_timezone(), '%a, %d %b %Y %R:%S');
 	}	

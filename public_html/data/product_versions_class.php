@@ -45,9 +45,7 @@ class ProductVersion extends SystemBase {	public static $prefix = 'esf';
 	    'prv_stripe_price_id_test' => array('type'=>'varchar(64)'),
 	);
 
-	public static $field_constraints = array();
-
-	public function is_subscription(){
+public function is_subscription(){
 		if($this->get('prv_price_type') == 'day' || $this->get('prv_price_type') == 'week' || $this->get('prv_price_type') == 'month' || $this->get('prv_price_type') == 'year'){
 			return $this->get('prv_price_type');
 		}

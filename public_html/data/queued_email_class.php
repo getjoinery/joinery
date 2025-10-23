@@ -64,9 +64,7 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	    'equ_ers_recurring_email_log_id' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array();	
-
-	function get_status() {
+function get_status() {
 		return self::$status_to_text[$this->get('equ_status')];
 	}
 

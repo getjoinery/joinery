@@ -52,9 +52,7 @@ class ContentVersion extends SystemBase {	public static $prefix = 'cnv';
 	    'cnv_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function get_previous_version(){
+function get_previous_version(){
 		if($this->get('cnv_previous_version_id')){
 			return new ContentVersion($this->get('cnv_previous_version_id'), TRUE);
 		}

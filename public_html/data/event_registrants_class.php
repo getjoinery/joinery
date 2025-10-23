@@ -75,12 +75,7 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	    'evr_grp_group_id' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array(
-
-		);
-
-
-	static function check_if_registrant_exists($userid, $eventid){
+static function check_if_registrant_exists($userid, $eventid){
 		$sql = 'SELECT * FROM evr_event_registrants WHERE evr_usr_user_id = ? AND evr_evt_event_id = ?';
 
 		$dbhelper = DbConnector::get_instance();

@@ -41,9 +41,7 @@ abstract class SystemBase {
 
 	static $constants = array();
 	static $required = array();
-	static $required_user = array();	
-	static $field_constraints = array();
-	static $field_constraints_user = array();
+	static $required_user = array();
 	static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load=FALSE) {

@@ -69,9 +69,7 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	    'odi_subscription_period_end' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function get_order() {
+function get_order() {
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
 		return $order;
 	}

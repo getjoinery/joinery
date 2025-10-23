@@ -38,9 +38,7 @@ class EmailRecipientGroup extends SystemBase {	public static $prefix = 'erg';
 	    'erg_operation' => array('type'=>'varchar(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function authenticate_write($data) {
+function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in '. static::$tablename);

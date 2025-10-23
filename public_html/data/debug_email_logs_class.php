@@ -38,8 +38,6 @@ class DebugEmailLog extends SystemBase {	public static $prefix = 'del';
 	    'del_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	public static $field_constraints = array();
-
 }
 
 class MultiDebugEmailLog extends SystemMultiBase {

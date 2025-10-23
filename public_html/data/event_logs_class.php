@@ -39,8 +39,6 @@ class EventLog extends SystemBase {	public static $prefix = 'evl';
 	    'evl_note' => array('type'=>'varchar(255)'),
 	);
 
-	public static $field_constraints = array();
-
 }
 
 class MultiEventLog extends SystemMultiBase {

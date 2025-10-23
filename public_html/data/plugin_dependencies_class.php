@@ -40,14 +40,6 @@ class PluginDependency extends SystemBase {    public static $prefix = 'pld';
         'pld_dependency_type' => array('type'=>'varchar(20)'),
     );
 
-    public static $field_constraints = array(
-        // Note: Unique constraints should be defined in field_specifications, not field_constraints
-        // 'pld_plugin_name_depends_on_unique' => array(
-        //     'type' => 'unique',
-        //     'fields' => array('pld_plugin_name', 'pld_depends_on')
-        // )
-    );
-
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {
             throw new SystemAuthenticationError(

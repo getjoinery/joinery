@@ -39,9 +39,7 @@ class SurveyQuestion extends SystemBase {	public static $prefix = 'srq';
 	    'srq_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	private function _check_for_duplicates() {
+private function _check_for_duplicates() {
 		
 		$count = new MultiSurveyQuestion(array(
 			'survey_id' => $this->get('srq_svy_survey_id'),

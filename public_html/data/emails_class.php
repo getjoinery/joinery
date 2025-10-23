@@ -73,9 +73,7 @@ class Email extends SystemBase {	public static $prefix = 'eml';
 	    'eml_mlt_mailing_list_id' => array('type'=>'int4'),
 	);
 
-	public static $field_constraints = array();
-
-	public function __construct($key, $load=FALSE) { 
+public function __construct($key, $load=FALSE) { 
 		parent::__construct($key, $load);
 
 		// Store a few things here for easy passthrough into the 

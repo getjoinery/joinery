@@ -40,9 +40,7 @@ class GroupMember extends SystemBase {	public static $prefix = 'grm';
 	    'grm_foreign_key_id' => array('type'=>'int8'),
 	);	
 
-	public static $field_constraints = array();	
-
-	function remove(){
+function remove(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		

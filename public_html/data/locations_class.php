@@ -44,9 +44,7 @@ class Location extends SystemBase {	public static $prefix = 'loc';
 	    'loc_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $field_constraints = array();	
-
-	function authenticate_write($data) {
+function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in '. static::$tablename);
