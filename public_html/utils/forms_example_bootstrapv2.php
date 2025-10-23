@@ -325,8 +325,8 @@ $formwriter3->dateinput('start_date', 'Start Date', [
 
 // Time Input
 $formwriter3->timeinput('meeting_time', 'Meeting Time', [
-    'validation' => ['required' => true, 'time' => true],
-    'helptext' => 'Format: HH:MM (24-hour time)'
+    'validation' => ['required' => true],
+    'helptext' => 'Enter hour (1-12), minute, and AM/PM'
 ]);
 
 // Date and Time Input (Separate Fields)

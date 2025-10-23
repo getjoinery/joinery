@@ -463,37 +463,105 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $value = $options['value'] ?? '';
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
+        $hour_id = $id . '_hour';
+        $minute_id = $id . '_minute';
+        $ampm_id = $id . '_ampm';
 
         $has_errors = isset($this->errors[$name]);
+        $input_class = $class;
         if ($has_errors) {
-            $class .= ' is-invalid';
+            $input_class .= ' is-invalid';
+        }
+
+        // Parse value if it exists (expects HH:MM format)
+        $hour = '';
+        $minute = '';
+        $ampm = 'AM';
+
+        if ($value) {
+            list($h, $m) = explode(':', $value);
+            $h = intval($h);
+            if ($h >= 12) {
+                $ampm = 'PM';
+                if ($h > 12) $h -= 12;
+            } else {
+                $ampm = 'AM';
+                if ($h == 0) $h = 12;
+            }
+            $hour = str_pad($h, 2, '0', STR_PAD_LEFT);
+            $minute = str_pad($m, 2, '0', STR_PAD_LEFT);
         }
 
         echo '<div class="form-group">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+            echo '<label>' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<input type="time"';
+        echo '<div class="row g-2">';
+
+        // Hour input
+        echo '<div class="col-auto">';
+        echo '<input type="number"';
+        echo ' id="' . htmlspecialchars($hour_id) . '"';
+        echo ' name="' . htmlspecialchars($id . '_hour') . '"';
+        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 80px;"';
+        echo ' min="1" max="12"';
+        echo ' placeholder="HH"';
+        echo ' value="' . htmlspecialchars($hour) . '"';
+        if (!empty($options['readonly'])) echo ' readonly';
+        if (!empty($options['disabled'])) echo ' disabled';
+        echo '>';
+        echo '</div>';
+
+        // Colon separator
+        echo '<div class="col-auto" style="display: flex; align-items: center;">';
+        echo '<strong>:</strong>';
+        echo '</div>';
+
+        // Minute input
+        echo '<div class="col-auto">';
+        echo '<input type="number"';
+        echo ' id="' . htmlspecialchars($minute_id) . '"';
+        echo ' name="' . htmlspecialchars($id . '_minute') . '"';
+        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 80px;"';
+        echo ' min="0" max="59"';
+        echo ' placeholder="MM"';
+        echo ' value="' . htmlspecialchars($minute) . '"';
+        if (!empty($options['readonly'])) echo ' readonly';
+        if (!empty($options['disabled'])) echo ' disabled';
+        echo '>';
+        echo '</div>';
+
+        // AM/PM selector
+        echo '<div class="col-auto">';
+        echo '<select';
+        echo ' id="' . htmlspecialchars($ampm_id) . '"';
+        echo ' name="' . htmlspecialchars($id . '_ampm') . '"';
+        echo ' class="form-select"';
+        if (!empty($options['readonly'])) echo ' disabled';
+        if (!empty($options['disabled'])) echo ' disabled';
+        echo '>';
+        echo '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
+        echo '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
+        echo '</select>';
+        echo '</div>';
+
+        // Hidden field to store the actual time value
+        echo '<input type="hidden"';
         echo ' name="' . htmlspecialchars($name) . '"';
         echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
         echo ' value="' . htmlspecialchars($value) . '"';
-
-        if (!empty($options['readonly'])) {
-            echo ' readonly';
-        }
-        if (!empty($options['disabled'])) {
-            echo ' disabled';
-        }
-
         echo '>';
 
+        echo '</div>';
+
         if ($has_errors) {
+            echo '<div class="invalid-feedback d-block">';
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                echo htmlspecialchars($error) . '<br>';
             }
+            echo '</div>';
         }
 
         if (!empty($options['helptext'])) {
@@ -501,6 +569,55 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         echo '</div>';
+
+        // JavaScript to sync the hidden field with user input
+        static $time_input_js_loaded = false;
+        if (!$time_input_js_loaded) {
+            echo '<script type="text/javascript">
+            function updateTimeInput(hourId, minuteId, ampmId, hiddenId) {
+                var hour = document.getElementById(hourId).value;
+                var minute = document.getElementById(minuteId).value;
+                var ampm = document.getElementById(ampmId).value;
+
+                if (hour && minute) {
+                    var h = parseInt(hour);
+                    if (ampm === "PM" && h !== 12) h += 12;
+                    if (ampm === "AM" && h === 12) h = 0;
+
+                    var timeValue = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
+                    document.getElementById(hiddenId).value = timeValue;
+                }
+            }
+
+            document.addEventListener("DOMContentLoaded", function() {
+                var timeInputs = document.querySelectorAll("[data-time-hour]");
+                timeInputs.forEach(function(el) {
+                    var hourId = el.getAttribute("data-time-hour");
+                    var minuteId = el.getAttribute("data-time-minute");
+                    var ampmId = el.getAttribute("data-time-ampm");
+                    var hiddenId = el.getAttribute("data-time-hidden");
+
+                    document.getElementById(hourId).addEventListener("change", function() {
+                        updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+                    });
+                    document.getElementById(minuteId).addEventListener("change", function() {
+                        updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+                    });
+                    document.getElementById(ampmId).addEventListener("change", function() {
+                        updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+                    });
+                });
+            });
+            </script>';
+            $time_input_js_loaded = true;
+        }
+
+        // Add data attributes to trigger the sync
+        echo '<div data-time-hour="' . htmlspecialchars($hour_id) . '"';
+        echo ' data-time-minute="' . htmlspecialchars($minute_id) . '"';
+        echo ' data-time-ampm="' . htmlspecialchars($ampm_id) . '"';
+        echo ' data-time-hidden="' . htmlspecialchars($id) . '"';
+        echo ' style="display:none;"></div>';
     }
 
     /**
@@ -558,26 +675,80 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo '</div>';
         echo '<div class="col-md-6">';
 
-        // Time input
+        // Time input - use same AM/PM format as outputTimeInput
         $time_class = $class;
         if (isset($this->errors[$time_name])) {
             $time_class .= ' is-invalid';
         }
 
-        echo '<input type="time"';
-        echo ' name="' . htmlspecialchars($time_name) . '"';
-        echo ' id="' . htmlspecialchars($time_id) . '"';
-        echo ' class="' . htmlspecialchars($time_class) . '"';
-        echo ' value="' . htmlspecialchars($time_value) . '"';
-        if (!empty($options['readonly'])) {
-            echo ' readonly';
+        $hour = '';
+        $minute = '';
+        $ampm = 'AM';
+
+        if ($time_value) {
+            list($h, $m) = explode(':', $time_value);
+            $h = intval($h);
+            if ($h >= 12) {
+                $ampm = 'PM';
+                if ($h > 12) $h -= 12;
+            } else {
+                $ampm = 'AM';
+                if ($h == 0) $h = 12;
+            }
+            $hour = str_pad($h, 2, '0', STR_PAD_LEFT);
+            $minute = str_pad($m, 2, '0', STR_PAD_LEFT);
         }
+
+        $time_hour_id = $time_id . '_hour';
+        $time_minute_id = $time_id . '_minute';
+        $time_ampm_id = $time_id . '_ampm';
+
+        echo '<div class="row g-2">';
+        echo '<div class="col-auto">';
+        echo '<input type="number"';
+        echo ' id="' . htmlspecialchars($time_hour_id) . '"';
+        echo ' name="' . htmlspecialchars($time_name . '_hour') . '"';
+        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 80px;"';
+        echo ' min="1" max="12" placeholder="HH"';
+        echo ' value="' . htmlspecialchars($hour) . '"';
+        if (!empty($options['readonly'])) echo ' readonly';
+        echo '>';
+        echo '</div>';
+        echo '<div class="col-auto" style="display: flex; align-items: center;"><strong>:</strong></div>';
+        echo '<div class="col-auto">';
+        echo '<input type="number"';
+        echo ' id="' . htmlspecialchars($time_minute_id) . '"';
+        echo ' name="' . htmlspecialchars($time_name . '_minute') . '"';
+        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 80px;"';
+        echo ' min="0" max="59" placeholder="MM"';
+        echo ' value="' . htmlspecialchars($minute) . '"';
+        if (!empty($options['readonly'])) echo ' readonly';
+        echo '>';
+        echo '</div>';
+        echo '<div class="col-auto">';
+        echo '<select';
+        echo ' id="' . htmlspecialchars($time_ampm_id) . '"';
+        echo ' name="' . htmlspecialchars($time_name . '_ampm') . '"';
+        echo ' class="form-select"';
+        if (!empty($options['readonly'])) echo ' disabled';
+        echo '>';
+        echo '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
+        echo '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
+        echo '</select>';
+        echo '</div>';
+        echo '</div>';
+
+        echo '<input type="hidden"';
+        echo ' id="' . htmlspecialchars($time_id) . '"';
+        echo ' value="' . htmlspecialchars($time_value) . '"';
         echo '>';
 
         if (isset($this->errors[$time_name])) {
+            echo '<div class="invalid-feedback d-block">';
             foreach ($this->errors[$time_name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                echo htmlspecialchars($error) . '<br>';
             }
+            echo '</div>';
         }
 
         echo '</div>';
