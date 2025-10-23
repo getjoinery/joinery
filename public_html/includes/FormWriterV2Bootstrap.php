@@ -562,61 +562,100 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $htmlmode = $options['htmlmode'] ?? 'no';
 
         if ($htmlmode === 'yes') {
-            // Load Trumbowyg scripts and styles
-            echo '
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js"></script>
-			<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
-			<script type="text/javascript">';
-            echo "
-				$(document).ready(function() {
-						$('.html_editable').trumbowyg({
-							autogrow: false,
-							autogrowOnEnter: false,
-							btns: [
-								['viewHTML'],
-								['undo', 'redo'],
-								['formatting'],
-								['strong', 'em', 'del'],
-								['superscript', 'subscript'],
-								['link'],
-								['insertImage'],
-								['preformatted'],
-								['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
-								['unorderedList', 'orderedList'],
-								['horizontalRule'],
-								['removeformat'],
-								['fullscreen']
-							],
-							semantic:{
-							  'div': 'div'
-							},
-							plugins: {
-								allowTagsFromPaste: {
-									allowedTags: ['p', 'br','blockquote', 'b', 'i', 'strong', 'em', 'ul', 'li', 'ol', 'a','code','pre','h1','h2','h3','h4','h5','embed','table','tr','td','th','img','video']
-								}
-							}
-						});
-						$('.trumbowyg-editor').attr('name', 'trumbobox');
+            // Load Trumbowyg CSS and dynamically load scripts after jQuery is ready
+            echo '<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">';
+            echo '<script type="text/javascript">
+            // Use jQuery.getScript to load Trumbowyg scripts properly
+            $(function() {
+                console.log("[Trumbo] jQuery ready, about to load scripts");
+                // Ensure jQuery is available in window scope for UMD modules
+                window.jQuery = $;
+                // Temporarily disable module detection to force browser global approach
+                var originalDefine = window.define;
+                var originalExports = window.exports;
+                delete window.define;
+                delete window.exports;
+                console.log("[Trumbo] Disabled module detection, set window.jQuery = $");
+                var scripts = [
+                    "/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js",
+                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js",
+                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js",
+                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"
+                ];
 
-				});
-			</script>
+                // Load scripts sequentially using jQuery.getScript
+                function loadNextScript(index) {
+                    console.log("[Trumbo] loadNextScript called with index:", index);
+                    if (index >= scripts.length) {
+                        // All scripts loaded, restore module detection
+                        if (originalDefine) window.define = originalDefine;
+                        if (originalExports) window.exports = originalExports;
+                        console.log("[Trumbo] All scripts loaded. $.fn.trumbowyg type:", typeof $.fn.trumbowyg);
+                        if (typeof $.fn.trumbowyg === "function") {
+                            console.log("[Trumbo] Initializing Trumbowyg...");
+                            $(".html_editable").trumbowyg({
+                                svgPath: "/assets/vendor/Trumbowyg-2-26/dist/ui/icons.svg",
+                                autogrow: false,
+                                autogrowOnEnter: false,
+                                btns: [
+                                    ["viewHTML"],
+                                    ["undo", "redo"],
+                                    ["formatting"],
+                                    ["strong", "em", "del"],
+                                    ["superscript", "subscript"],
+                                    ["link"],
+                                    ["insertImage"],
+                                    ["preformatted"],
+                                    ["justifyLeft", "justifyCenter", "justifyRight", "justifyFull"],
+                                    ["unorderedList", "orderedList"],
+                                    ["horizontalRule"],
+                                    ["removeformat"],
+                                    ["fullscreen"]
+                                ],
+                                semantic: {
+                                    "div": "div"
+                                },
+                                plugins: {
+                                    allowTagsFromPaste: {
+                                        allowedTags: ["p", "br", "blockquote", "b", "i", "strong", "em", "ul", "li", "ol", "a", "code", "pre", "h1", "h2", "h3", "h4", "h5", "embed", "table", "tr", "td", "th", "img", "video"]
+                                    }
+                                }
+                            });
+                            $(".trumbowyg-editor").attr("name", "trumbobox");
+                            console.log("[Trumbo] SUCCESS - Trumbowyg initialized!");
+                        } else {
+                            console.error("[Trumbo] ERROR - $.fn.trumbowyg is not available");
+                        }
+                        return;
+                    }
 
-			<style>
-			.trumbowyg-box,
-			.trumbowyg-editor,
-			.trumbowyg-textarea {
-				height: 500px;
-			}
+                    console.log("[Trumbo] Loading script:", scripts[index]);
+                    $.getScript(scripts[index])
+                        .done(function() {
+                            console.log("[Trumbo] Script loaded successfully:", scripts[index]);
+                            loadNextScript(index + 1);
+                        })
+                        .fail(function() {
+                            console.error("[Trumbo] Failed to load script:", scripts[index]);
+                        });
+                }
 
-			.trumbowyg-box.trumbowyg-fullscreen,
-			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor,
-			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea {
-				height: 100%;
-			}
-			</style>";
+                // Start loading scripts
+                loadNextScript(0);
+            });
+            </script>';
+            echo '<style>
+            .trumbowyg-box,
+            .trumbowyg-editor,
+            .trumbowyg-textarea {
+                height: 500px;
+            }
+            .trumbowyg-box.trumbowyg-fullscreen,
+            .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor,
+            .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea {
+                height: 100%;
+            }
+            </style>';
         }
 
         // Output textarea
