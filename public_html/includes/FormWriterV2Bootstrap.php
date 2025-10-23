@@ -546,4 +546,83 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo htmlspecialchars($label);
         echo '</button>';
     }
+
+    /**
+     * Output a textarea field with optional rich text editor (Trumbowyg)
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options (rows, value, placeholder, htmlmode, etc)
+     */
+    public function textbox($name, $label, $options = []) {
+        $rows = $options['rows'] ?? 5;
+        $cols = $options['cols'] ?? 80;
+        $value = $options['value'] ?? '';
+        $placeholder = $options['placeholder'] ?? '';
+        $htmlmode = $options['htmlmode'] ?? 'no';
+
+        if ($htmlmode === 'yes') {
+            // Load Trumbowyg scripts and styles
+            echo '
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js"></script>
+			<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>
+			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
+			<script type="text/javascript">';
+            echo "
+				$(document).ready(function() {
+						$('.html_editable').trumbowyg({
+							autogrow: false,
+							autogrowOnEnter: false,
+							btns: [
+								['viewHTML'],
+								['undo', 'redo'],
+								['formatting'],
+								['strong', 'em', 'del'],
+								['superscript', 'subscript'],
+								['link'],
+								['insertImage'],
+								['preformatted'],
+								['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
+								['unorderedList', 'orderedList'],
+								['horizontalRule'],
+								['removeformat'],
+								['fullscreen']
+							],
+							semantic:{
+							  'div': 'div'
+							},
+							plugins: {
+								allowTagsFromPaste: {
+									allowedTags: ['p', 'br','blockquote', 'b', 'i', 'strong', 'em', 'ul', 'li', 'ol', 'a','code','pre','h1','h2','h3','h4','h5','embed','table','tr','td','th','img','video']
+								}
+							}
+						});
+						$('.trumbowyg-editor').attr('name', 'trumbobox');
+
+				});
+			</script>
+
+			<style>
+			.trumbowyg-box,
+			.trumbowyg-editor,
+			.trumbowyg-textarea {
+				height: 500px;
+			}
+
+			.trumbowyg-box.trumbowyg-fullscreen,
+			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor,
+			.trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea {
+				height: 100%;
+			}
+			</style>";
+        }
+
+        // Output textarea
+        echo '<div id="' . htmlspecialchars($name) . '_container" class="mb-3 errorplacement">';
+        echo '<label class="form-label" for="' . htmlspecialchars($name) . '">' . htmlspecialchars($label) . '</label>';
+        echo '<textarea name="' . htmlspecialchars($name) . '" id="' . htmlspecialchars($name) . '" class="form-control' . ($htmlmode === 'yes' ? ' html_editable' : '') . '" rows="' . (int)$rows . '" cols="' . (int)$cols . '" placeholder="' . htmlspecialchars($placeholder) . '">' . htmlspecialchars($value) . '</textarea>';
+        echo '</div>';
+    }
 }
