@@ -333,44 +333,74 @@ class FormWriterBootstrap extends FormWriterBase {
 		$output = '';
 		if($htmlmode == 'yes'){
 			$output .= '
-			
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js"></script>
 			<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js"></script>
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js"></script>
-			<script src="/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"></script>
 			<script type="text/javascript">';
 			$output .= "
-				$(document).ready(function() {
-						$('.html_editable').trumbowyg({
-							autogrow: false,
-							autogrowOnEnter: false,
-							btns: [
-								['viewHTML'],
-								['undo', 'redo'], // Only supported in Blink browsers
-								['formatting'],
-								['strong', 'em', 'del'],
-								['superscript', 'subscript'],
-								['link'],
-								['insertImage'],
-								['preformatted'],
-								['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
-								['unorderedList', 'orderedList'],
-								['horizontalRule'],
-								['removeformat'], 
-								['fullscreen']
-							],
-							 semantic:{
-							  'div': 'div'
-							},
-							plugins: {
-								allowTagsFromPaste: {
-									allowedTags: ['p', 'br','blockquote', 'b', 'i', 'strong', 'em', 'ul', 'li', 'ol', 'a','code','pre','h1','h2','h3','h4','h5','embed','table','tr','td','th','img','video']
-								}
-							}
-						});
-						$('.trumbowyg-editor').attr('name', 'trumbobox');
+				$(function() {
+					// Ensure jQuery is available in window scope for UMD modules
+					window.jQuery = \$;
+					// Temporarily disable module detection to force browser global approach
+					var originalDefine = window.define;
+					var originalExports = window.exports;
+					delete window.define;
+					delete window.exports;
 
+					var scripts = [
+						'/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js',
+						'/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js',
+						'/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js',
+						'/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js'
+					];
+
+					function loadNextScript(index) {
+						if (index >= scripts.length) {
+							if (originalDefine) window.define = originalDefine;
+							if (originalExports) window.exports = originalExports;
+
+							if (typeof \$.fn.trumbowyg === 'function') {
+								\$('.html_editable').trumbowyg({
+									svgPath: '/assets/vendor/Trumbowyg-2-26/dist/ui/icons.svg',
+									autogrow: false,
+									autogrowOnEnter: false,
+									btns: [
+										['viewHTML'],
+										['undo', 'redo'],
+										['formatting'],
+										['strong', 'em', 'del'],
+										['superscript', 'subscript'],
+										['link'],
+										['insertImage'],
+										['preformatted'],
+										['justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull'],
+										['unorderedList', 'orderedList'],
+										['horizontalRule'],
+										['removeformat'],
+										['fullscreen']
+									],
+									semantic: {
+										'div': 'div'
+									},
+									plugins: {
+										allowTagsFromPaste: {
+											allowedTags: ['p', 'br', 'blockquote', 'b', 'i', 'strong', 'em', 'ul', 'li', 'ol', 'a', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'embed', 'table', 'tr', 'td', 'th', 'img', 'video']
+										}
+									}
+								});
+								\$('.trumbowyg-editor').attr('name', 'trumbobox');
+							}
+							return;
+						}
+
+						\$.getScript(scripts[index])
+							.done(function() {
+								loadNextScript(index + 1);
+							})
+							.fail(function() {
+								console.error('[Trumbo] Failed to load script:', scripts[index]);
+							});
+					}
+
+					loadNextScript(0);
 				});
 			</script>
 			
