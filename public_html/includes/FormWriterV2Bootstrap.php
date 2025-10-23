@@ -453,6 +453,195 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
     }
 
     /**
+     * Output a time input field with Bootstrap styling
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    protected function outputTimeInput($name, $label, $options) {
+        $value = $options['value'] ?? '';
+        $class = $options['class'] ?? 'form-control';
+        $id = $options['id'] ?? $name;
+
+        $has_errors = isset($this->errors[$name]);
+        if ($has_errors) {
+            $class .= ' is-invalid';
+        }
+
+        echo '<div class="form-group">';
+
+        if ($label) {
+            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        }
+
+        echo '<input type="time"';
+        echo ' name="' . htmlspecialchars($name) . '"';
+        echo ' id="' . htmlspecialchars($id) . '"';
+        echo ' class="' . htmlspecialchars($class) . '"';
+        echo ' value="' . htmlspecialchars($value) . '"';
+
+        if (!empty($options['readonly'])) {
+            echo ' readonly';
+        }
+        if (!empty($options['disabled'])) {
+            echo ' disabled';
+        }
+
+        echo '>';
+
+        if ($has_errors) {
+            foreach ($this->errors[$name] as $error) {
+                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        if (!empty($options['helptext'])) {
+            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        }
+
+        echo '</div>';
+    }
+
+    /**
+     * Output separate date and time input fields with Bootstrap styling
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     * @param string $date_name Date field name
+     * @param string $time_name Time field name
+     */
+    protected function outputDateTimeInput($name, $label, $options, $date_name, $time_name) {
+        $date_value = $options['value'] ?? $options['date_value'] ?? '';
+        $time_value = $options['time_value'] ?? '';
+        $class = $options['class'] ?? 'form-control';
+        $date_id = $options['date_id'] ?? $date_name;
+        $time_id = $options['time_id'] ?? $time_name;
+
+        // Extract date from datetime value if provided
+        if ($date_value && strpos($date_value, ' ') !== false) {
+            list($date_value, $time_value) = explode(' ', $date_value, 2);
+        }
+
+        echo '<div class="form-group">';
+
+        if ($label) {
+            echo '<label>' . htmlspecialchars($label) . '</label>';
+        }
+
+        echo '<div class="row">';
+        echo '<div class="col-md-6">';
+
+        // Date input
+        $date_class = $class;
+        if (isset($this->errors[$date_name])) {
+            $date_class .= ' is-invalid';
+        }
+
+        echo '<input type="date"';
+        echo ' name="' . htmlspecialchars($date_name) . '"';
+        echo ' id="' . htmlspecialchars($date_id) . '"';
+        echo ' class="' . htmlspecialchars($date_class) . '"';
+        echo ' value="' . htmlspecialchars($date_value) . '"';
+        if (!empty($options['readonly'])) {
+            echo ' readonly';
+        }
+        echo '>';
+
+        if (isset($this->errors[$date_name])) {
+            foreach ($this->errors[$date_name] as $error) {
+                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        echo '</div>';
+        echo '<div class="col-md-6">';
+
+        // Time input
+        $time_class = $class;
+        if (isset($this->errors[$time_name])) {
+            $time_class .= ' is-invalid';
+        }
+
+        echo '<input type="time"';
+        echo ' name="' . htmlspecialchars($time_name) . '"';
+        echo ' id="' . htmlspecialchars($time_id) . '"';
+        echo ' class="' . htmlspecialchars($time_class) . '"';
+        echo ' value="' . htmlspecialchars($time_value) . '"';
+        if (!empty($options['readonly'])) {
+            echo ' readonly';
+        }
+        echo '>';
+
+        if (isset($this->errors[$time_name])) {
+            foreach ($this->errors[$time_name] as $error) {
+                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        echo '</div>';
+        echo '</div>';
+
+        if (!empty($options['helptext'])) {
+            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        }
+
+        echo '</div>';
+    }
+
+    /**
+     * Output a combined datetime input field with Bootstrap styling
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    protected function outputDateTimeInput2($name, $label, $options) {
+        $value = $options['value'] ?? '';
+        $class = $options['class'] ?? 'form-control';
+        $id = $options['id'] ?? $name;
+
+        $has_errors = isset($this->errors[$name]);
+        if ($has_errors) {
+            $class .= ' is-invalid';
+        }
+
+        echo '<div class="form-group">';
+
+        if ($label) {
+            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        }
+
+        echo '<input type="datetime-local"';
+        echo ' name="' . htmlspecialchars($name) . '"';
+        echo ' id="' . htmlspecialchars($id) . '"';
+        echo ' class="' . htmlspecialchars($class) . '"';
+        echo ' value="' . htmlspecialchars($value) . '"';
+
+        if (!empty($options['readonly'])) {
+            echo ' readonly';
+        }
+        if (!empty($options['disabled'])) {
+            echo ' disabled';
+        }
+
+        echo '>';
+
+        if ($has_errors) {
+            foreach ($this->errors[$name] as $error) {
+                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        if (!empty($options['helptext'])) {
+            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        }
+
+        echo '</div>';
+    }
+
+    /**
      * Output a file input field with Bootstrap styling
      *
      * @param string $name Field name
@@ -565,9 +754,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             // Load Trumbowyg CSS and dynamically load scripts after jQuery is ready
             echo '<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">';
             echo '<script type="text/javascript">
-            // Use jQuery.getScript to load Trumbowyg scripts properly
             $(function() {
-                console.log("[Trumbo] jQuery ready, about to load scripts");
                 // Ensure jQuery is available in window scope for UMD modules
                 window.jQuery = $;
                 // Temporarily disable module detection to force browser global approach
@@ -575,7 +762,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
                 var originalExports = window.exports;
                 delete window.define;
                 delete window.exports;
-                console.log("[Trumbo] Disabled module detection, set window.jQuery = $");
+
                 var scripts = [
                     "/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js",
                     "/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js",
@@ -585,14 +772,12 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
                 // Load scripts sequentially using jQuery.getScript
                 function loadNextScript(index) {
-                    console.log("[Trumbo] loadNextScript called with index:", index);
                     if (index >= scripts.length) {
                         // All scripts loaded, restore module detection
                         if (originalDefine) window.define = originalDefine;
                         if (originalExports) window.exports = originalExports;
-                        console.log("[Trumbo] All scripts loaded. $.fn.trumbowyg type:", typeof $.fn.trumbowyg);
+
                         if (typeof $.fn.trumbowyg === "function") {
-                            console.log("[Trumbo] Initializing Trumbowyg...");
                             $(".html_editable").trumbowyg({
                                 svgPath: "/assets/vendor/Trumbowyg-2-26/dist/ui/icons.svg",
                                 autogrow: false,
@@ -622,25 +807,16 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
                                 }
                             });
                             $(".trumbowyg-editor").attr("name", "trumbobox");
-                            console.log("[Trumbo] SUCCESS - Trumbowyg initialized!");
-                        } else {
-                            console.error("[Trumbo] ERROR - $.fn.trumbowyg is not available");
                         }
                         return;
                     }
 
-                    console.log("[Trumbo] Loading script:", scripts[index]);
                     $.getScript(scripts[index])
                         .done(function() {
-                            console.log("[Trumbo] Script loaded successfully:", scripts[index]);
                             loadNextScript(index + 1);
-                        })
-                        .fail(function() {
-                            console.error("[Trumbo] Failed to load script:", scripts[index]);
                         });
                 }
 
-                // Start loading scripts
                 loadNextScript(0);
             });
             </script>';

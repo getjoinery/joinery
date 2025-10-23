@@ -323,6 +323,24 @@ $formwriter3->dateinput('start_date', 'Start Date', [
     'validation' => ['required' => true, 'date' => true]
 ]);
 
+// Time Input
+$formwriter3->timeinput('meeting_time', 'Meeting Time', [
+    'validation' => ['required' => true, 'time' => true],
+    'helptext' => 'Format: HH:MM (24-hour time)'
+]);
+
+// Date and Time Input (Separate Fields)
+$formwriter3->datetimeinput('event_datetime', 'Event Date & Time', [
+    'validation' => ['required' => true],
+    'helptext' => 'Select both date and time for the event'
+]);
+
+// Combined DateTime Input
+$formwriter3->datetimeinput2('deadline', 'Project Deadline', [
+    'validation' => ['required' => true],
+    'helptext' => 'Pick a date and time for project completion'
+]);
+
 // Rich Text Editor
 $formwriter3->textbox('rich_text_editor', 'Rich Text Editor', [
     'rows' => 5,
