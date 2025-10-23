@@ -85,6 +85,11 @@ class MethodExistenceTest {
             // Field specification anti-patterns
             "'type'=>'serial'" => "Use 'type'=>'int8' with 'serial'=>true instead of 'type'=>'serial' (PostgreSQL serial is a pseudo-type)",
             "'type' => 'serial'" => "Use 'type'=>'int8' with 'serial'=>true instead of 'type'=>'serial' (PostgreSQL serial is a pseudo-type)",
+
+            // Removed/deprecated patterns
+            'public static $field_constraints' => 'field_constraints was removed - validation is now handled via field_specifications (required, unique, unique_with)',
+            "static \$field_constraints" => 'field_constraints was removed - validation is now handled via field_specifications (required, unique, unique_with)',
+            "::field_constraints[" => 'field_constraints was removed - validation is now handled via field_specifications (required, unique, unique_with)',
         ],
     ];
 
