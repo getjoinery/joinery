@@ -203,10 +203,10 @@ echo $formwriter->fileinput("Upload Document", "upload", "", 30, 'PDF, DOC, DOCX
 echo $formwriter->dateinput("Date", "date_field", NULL, 30, date('Y-m-d'), "", 10);
 
 // 14. Time Input
-echo $formwriter->timeinput("Time", "time_field", NULL, 30, date('H:i'), "", 8);
+echo $formwriter->timeinput("Time", "time_field", NULL, date('H:i'), "");
 
 // 15. DateTime Combined
-echo $formwriter->datetimeinput("Date & Time", "datetime_field", NULL, date('Y-m-d'), date('H:i'), "", 10, 8);
+echo $formwriter->datetimeinput("Date & Time", "datetime_field", NULL, date('Y-m-d H:i'), "", "", "");
 
 echo '<hr><h3>Special Input Types</h3>';
 
