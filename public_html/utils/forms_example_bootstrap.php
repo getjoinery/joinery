@@ -178,6 +178,10 @@ $countries = array(
 );
 echo $formwriter->dropinput("Country", "country", "", $countries, NULL, 'Select your country', TRUE);
 
+// 8b. AJAX Dropdown Test
+$user_options = array();
+echo $formwriter->dropinput("User Lookup (AJAX Test)", "user_search", "", $user_options, NULL, 'Start typing to search users', FALSE, FALSE, '/ajax/user_search_ajax');
+
 // 9. Radio Buttons
 $intervals = array("Daily" => "1", "Weekly" => "7", "Monthly" => "30");
 echo $formwriter->radioinput("Frequency", "interval", NULL, $intervals, '', array(), array(), 'Choose one');
