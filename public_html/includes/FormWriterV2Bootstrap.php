@@ -219,6 +219,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
         $select_options = $options['options'] ?? [];
+        $ajaxendpoint = $options['ajaxendpoint'] ?? '';
 
         $has_errors = isset($this->errors[$name]);
         if ($has_errors) {
@@ -263,6 +264,92 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         echo '</select>';
+
+        // AJAX dropdown support - output inline script
+        if (!empty($ajaxendpoint)) {
+            echo '<script>
+(function() {
+  class AjaxSearchSelect {
+    constructor(selectEl, ajaxUrl) {
+      this.select = selectEl;
+      this.ajaxUrl = ajaxUrl;
+      this.cache = {};
+      this.debounceTimer = null;
+
+      const input = document.createElement(\'input\');
+      input.type = \'text\';
+      input.className = selectEl.className;
+      input.placeholder = \'Type to search...\';
+
+      const list = document.createElement(\'datalist\');
+      list.id = selectEl.id + \'_list\';
+      input.setAttribute(\'list\', list.id);
+
+      selectEl.style.display = \'none\';
+      selectEl.parentNode.insertBefore(input, selectEl);
+      selectEl.parentNode.insertBefore(list, selectEl);
+
+      this.input = input;
+      this.list = list;
+      this.data = [];
+
+      if (selectEl.value) {
+        input.value = selectEl.options[selectEl.selectedIndex].text;
+      }
+
+      input.addEventListener(\'input\', (e) => this.search(e.target.value));
+      input.addEventListener(\'change\', (e) => {
+        if (!e.target.value) {
+          selectEl.value = \'\';
+          selectEl.dispatchEvent(new Event(\'change\', { bubbles: true }));
+        }
+      });
+    }
+
+    search(query) {
+      clearTimeout(this.debounceTimer);
+      if (query.length < 3) {
+        this.list.innerHTML = \'\';
+        this.data = [];
+        return;
+      }
+
+      if (this.cache[query]) {
+        this.updateList(this.cache[query]);
+        return;
+      }
+
+      this.debounceTimer = setTimeout(() => {
+        fetch(this.ajaxUrl + \'?q=\' + encodeURIComponent(query))
+          .then(r => r.json())
+          .then(data => {
+            this.cache[query] = data;
+            this.updateList(data);
+          });
+      }, 250);
+    }
+
+    updateList(data) {
+      this.data = data;
+      this.list.innerHTML = \'\';
+      data.forEach(item => {
+        const opt = document.createElement(\'option\');
+        opt.value = item.text;
+        opt.dataset.id = item.id;
+        this.list.appendChild(opt);
+      });
+    }
+  }
+
+  document.addEventListener(\'DOMContentLoaded\', () => {
+    const select = document.getElementById(\'' . htmlspecialchars($id) . '\');
+    if (select) {
+      new AjaxSearchSelect(select, \'' . htmlspecialchars($ajaxendpoint) . '\');
+    }
+  });
+})();
+</script>';
+        }
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
