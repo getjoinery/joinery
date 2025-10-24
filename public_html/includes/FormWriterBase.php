@@ -14,24 +14,6 @@ abstract class FormWriterBase {
 	protected $captcha_public;
 	protected $captcha_private;
 	protected $use_tabindex;
-	
-	/**
-	 * Default validation styling information
-	 * Can be overridden by child classes for framework-specific styling
-	 */
-	public $validate_style_info = 'errorElement: "span",
-		errorClass: "text-danger",
-		highlight: function(element, errorClass) {
-			var name = element.name.replace(/[\[\]]/gi, "");
-			$("#"+name).addClass("error");
-		},
-		unhighlight: function(element, errorClass) {
-			var name = element.name.replace(/[\[\]]/gi, "");
-			$("#"+name).removeClass("error");
-		},
-		errorPlacement: function(error, element) {
-			error.appendTo(element.parents(".errorplacement").eq(0));
-		}';
 
 	/**
 	 * FormWriter constructor

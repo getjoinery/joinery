@@ -284,8 +284,8 @@ $formwriter3->textarea('user_comments', 'Comments', [
     'validation' => ['required' => true, 'minlength' => 10, 'maxlength' => 500]
 ]);
 
-// Dropdown
-$formwriter3->dropinput('country', 'Country', [
+// Dropdown (Static)
+$formwriter3->dropinput('country', 'Country (Static)', [
     'options' => [
         '' => '-- Select Country --',
         'us' => 'United States',
@@ -294,6 +294,14 @@ $formwriter3->dropinput('country', 'Country', [
     ],
     'validation' => ['required' => true],
     'empty_option' => '-- Select Country --'
+]);
+
+// Dropdown with AJAX (requires admin login)
+$formwriter3->dropinput('user_lookup', 'User Lookup (AJAX Test - Requires Admin Login)', [
+    'options' => [],
+    'validation' => ['required' => false],
+    'ajaxendpoint' => '/ajax/user_search_ajax',
+    'empty_option' => '-- Type 3+ characters to search users --'
 ]);
 
 // Checkbox
