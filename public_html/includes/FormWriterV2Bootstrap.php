@@ -255,7 +255,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         // Output options
-        foreach ($select_options as $opt_value => $opt_label) {
+        foreach ($select_options as $opt_label => $opt_value) {
             echo '<option value="' . htmlspecialchars($opt_value) . '"';
             if ((string)$value === (string)$opt_value) {
                 echo ' selected';

@@ -257,32 +257,26 @@ echo '<hr><h3>FormWriter Visibility Rules & Custom Scripts Tests</h3>';
 echo '<p>The following test fields demonstrate the new visibility and custom script features:</p>';
 
 // Test 1: Simple toggle between two fields using visibility rules
-$test_options_1 = array();
+$test_options_1 = array('Option A' => 'option_a', 'Option B' => 'option_b');
 echo $formwriter->dropinput('Test Type (Simple Toggle)', 'test_type_1', array(
     'visibility_rules' => array(
-        'option_a' => array('show' => array('test-field-1a'), 'hide' => array('test-field-1b')),
-        'option_b' => array('show' => array('test-field-1b'), 'hide' => array('test-field-1a'))
-    )
-), $test_options_1, '', 'Select an option', true, false);
-$test_options_1 = array('option_a' => 'Option A', 'option_b' => 'Option B');
-echo $formwriter->dropinput('Test Type (Simple Toggle)', 'test-type-1', array(
-    'visibility_rules' => array(
-        'option_a' => array('show' => array('test-field-1a'), 'hide' => array('test-field-1b')),
-        'option_b' => array('show' => array('test-field-1b'), 'hide' => array('test-field-1a'))
+        '' => array('show' => array(), 'hide' => array('test_field_1a_container', 'test_field_1b_container')),
+        'option_a' => array('show' => array('test_field_1a_container'), 'hide' => array('test_field_1b_container')),
+        'option_b' => array('show' => array('test_field_1b_container'), 'hide' => array('test_field_1a_container'))
     )
 ), $test_options_1, 'option_a', 'Select an option', true, false);
 
 // Create the target fields
-echo $formwriter->textinput('Field A (shown for Option A)', 'test-field-1a', '', 30, '', 'This field is visible when Option A is selected');
-echo $formwriter->textinput('Field B (shown for Option B)', 'test-field-1b', '', 30, '', 'This field is visible when Option B is selected');
+echo $formwriter->textinput('Field A (shown for Option A)', 'test_field_1a', '', 30, '', 'This field is visible when Option A is selected');
+echo $formwriter->textinput('Field B (shown for Option B)', 'test_field_1b', '', 30, '', 'This field is visible when Option B is selected');
 
 // Test 2: Custom script with conditional logic
-$test_options_2 = array('small' => 'Small', 'medium' => 'Medium', 'large' => 'Large');
-echo $formwriter->dropinput('Test Type (Custom Script)', 'test-type-2', array(
+$test_options_2 = array('Small' => 'small', 'Medium' => 'medium', 'Large' => 'large');
+echo $formwriter->dropinput('Test Type (Custom Script)', 'test_type_2', array(
     'custom_script' => '
         const size = this.value;
-        const price = document.getElementById("test-price");
-        const warning = document.getElementById("test-bulk-warning");
+        const price = document.getElementById("test_price");
+        const warning = document.getElementById("test_bulk_warning");
 
         if (size === "small") {
             if (price) price.value = "9.99";
@@ -297,16 +291,19 @@ echo $formwriter->dropinput('Test Type (Custom Script)', 'test-type-2', array(
     '
 ), $test_options_2, 'small', 'Select a size', true, false);
 
-echo $formwriter->textinput('Price', 'test-price', '', 10, '9.99', 'Price updates based on size');
-echo $formwriter->textinput('Bulk Warning', 'test-bulk-warning', '', 50, 'Bulk orders require approval', 'Shown only for Large size', 255, '', true);
+// Display readonly field for price
+echo '<div id="test_price_container" class="errorplacement mb-3"><label for="test_price" class="form-label">Calculated Price</label><input name="test_price" id="test_price" value="9.99" type="text" class="form-control" readonly /></div>';
+
+// Display readonly field for warning
+echo '<div id="test_bulk_warning_container" class="errorplacement mb-3"><label for="test_bulk_warning" class="form-label">Bulk Order Warning</label><input name="test_bulk_warning" id="test_bulk_warning" value="Bulk orders require manager approval" type="text" class="form-control" readonly style="display:none;" /></div>';
 
 // Test 3: Form-level script for cross-field logic
 $formwriter->addReadyScript('
-    document.getElementById("test-country").addEventListener("change", function() {
+    document.getElementById("test_country").addEventListener("change", function() {
         const country = this.value;
-        const stateEl = document.getElementById("test-state");
-        const zipEl = document.getElementById("test-zip");
-        const customEl = document.getElementById("test-custom-location");
+        const stateEl = document.getElementById("test_state");
+        const zipEl = document.getElementById("test_zip");
+        const customEl = document.getElementById("test_custom");
 
         if (!stateEl || !zipEl || !customEl) return;
 
@@ -330,18 +327,18 @@ $formwriter->addReadyScript('
     });
 
     // Initialize on load
-    const countryEl = document.getElementById("test-country");
+    const countryEl = document.getElementById("test_country");
     if (countryEl) {
         const event = new Event("change");
         countryEl.dispatchEvent(event);
     }
 ');
 
-$country_options = array('us' => 'United States', 'ca' => 'Canada', 'other' => 'Other');
-echo $formwriter->dropinput('Country', 'test-country', '', $country_options, 'us', 'Select your country', true, false);
-echo $formwriter->textinput('State/Province', 'test-state', '', 30, '', 'Enter your state or province');
-echo $formwriter->textinput('ZIP/Postal Code', 'test-zip', '', 15, '', 'Enter your ZIP or postal code');
-echo $formwriter->textinput('Custom Location (for Other)', 'test-custom-location', '', 50, '', 'Enter your location');
+$country_options = array('United States' => 'us', 'Canada' => 'ca', 'Other' => 'other');
+echo $formwriter->dropinput('Country', 'test_country', '', $country_options, 'us', 'Select your country', true, false);
+echo $formwriter->textinput('State/Province', 'test_state', '', 30, '', 'Enter your state or province');
+echo $formwriter->textinput('ZIP/Postal Code', 'test_zip', '', 15, '', 'Enter your ZIP or postal code');
+echo $formwriter->textinput('Custom Location (for Other)', 'test_custom', '', 50, '', 'Enter your location');
 
 echo '<div class="alert alert-info mt-3">';
 echo '<strong>Test Summary:</strong><ul>';
