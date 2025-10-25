@@ -1221,7 +1221,26 @@ abstract class FormWriterV2Base {
         // Convert PHP array to JavaScript object
         $jsRules = json_encode($rules);
 
-        $output = '<script>' . "\n";
+        // Add CSS for fade transitions (only once per page)
+        static $cssAdded = false;
+        $cssOutput = '';
+        if (!$cssAdded) {
+            $cssOutput = '<style>' . "\n";
+            $cssOutput .= '/* FormWriter visibility transitions */' . "\n";
+            $cssOutput .= '.fw-field-hidden {' . "\n";
+            $cssOutput .= '  opacity: 0 !important;' . "\n";
+            $cssOutput .= '  transition: opacity 0.3s ease-out;' . "\n";
+            $cssOutput .= '  pointer-events: none;' . "\n";
+            $cssOutput .= '}' . "\n";
+            $cssOutput .= '.fw-field-visible {' . "\n";
+            $cssOutput .= '  opacity: 1;' . "\n";
+            $cssOutput .= '  transition: opacity 0.3s ease-in;' . "\n";
+            $cssOutput .= '}' . "\n";
+            $cssOutput .= '</style>' . "\n";
+            $cssAdded = true;
+        }
+
+        $output = $cssOutput . '<script>' . "\n";
         $output .= '(function() {' . "\n";
         $output .= '  const visibilityRules' . $varName . ' = ' . $jsRules . ';' . "\n";
         $output .= '  ' . "\n";
@@ -1234,20 +1253,23 @@ abstract class FormWriterV2Base {
         $output .= '      if (el) {' . "\n";
         $output .= '        // Find parent that contains both label and field' . "\n";
         $output .= '        let parent = el.parentElement;' . "\n";
-        $output .= '        let found = false;' . "\n";
-        $output .= '        while (parent && parent !== document.body && !found) {' . "\n";
+        $output .= '        let container = null;' . "\n";
+        $output .= '        while (parent && parent !== document.body && !container) {' . "\n";
         $output .= '          if (parent.classList && (parent.classList.contains("form-group") || ' . "\n";
         $output .= '              parent.classList.contains("mb-4") || ' . "\n";
         $output .= '              parent.classList.contains("field-container"))) {' . "\n";
-        $output .= '            parent.style.display = "";' . "\n";
-        $output .= '            found = true;' . "\n";
+        $output .= '            container = parent;' . "\n";
         $output .= '          }' . "\n";
         $output .= '          parent = parent.parentElement;' . "\n";
         $output .= '        }' . "\n";
-        $output .= '        // Fallback: just show the element if no container found' . "\n";
-        $output .= '        if (!found) {' . "\n";
-        $output .= '          el.style.display = "";' . "\n";
-        $output .= '        }' . "\n";
+        $output .= '        // Use container if found, otherwise use element itself' . "\n";
+        $output .= '        const target = container || el;' . "\n";
+        $output .= '        // Show with fade in effect' . "\n";
+        $output .= '        target.style.display = "";' . "\n";
+        $output .= '        target.classList.remove("fw-field-hidden");' . "\n";
+        $output .= '        setTimeout(function() {' . "\n";
+        $output .= '          target.classList.add("fw-field-visible");' . "\n";
+        $output .= '        }, 10);' . "\n";
         $output .= '      }' . "\n";
         $output .= '    });' . "\n";
         $output .= '    ' . "\n";
@@ -1256,20 +1278,23 @@ abstract class FormWriterV2Base {
         $output .= '      if (el) {' . "\n";
         $output .= '        // Find parent that contains both label and field' . "\n";
         $output .= '        let parent = el.parentElement;' . "\n";
-        $output .= '        let found = false;' . "\n";
-        $output .= '        while (parent && parent !== document.body && !found) {' . "\n";
+        $output .= '        let container = null;' . "\n";
+        $output .= '        while (parent && parent !== document.body && !container) {' . "\n";
         $output .= '          if (parent.classList && (parent.classList.contains("form-group") || ' . "\n";
         $output .= '              parent.classList.contains("mb-4") || ' . "\n";
         $output .= '              parent.classList.contains("field-container"))) {' . "\n";
-        $output .= '            parent.style.display = "none";' . "\n";
-        $output .= '            found = true;' . "\n";
+        $output .= '            container = parent;' . "\n";
         $output .= '          }' . "\n";
         $output .= '          parent = parent.parentElement;' . "\n";
         $output .= '        }' . "\n";
-        $output .= '        // Fallback: just hide the element if no container found' . "\n";
-        $output .= '        if (!found) {' . "\n";
-        $output .= '          el.style.display = "none";' . "\n";
-        $output .= '        }' . "\n";
+        $output .= '        // Use container if found, otherwise use element itself' . "\n";
+        $output .= '        const target = container || el;' . "\n";
+        $output .= '        // Hide with fade out effect' . "\n";
+        $output .= '        target.classList.remove("fw-field-visible");' . "\n";
+        $output .= '        target.classList.add("fw-field-hidden");' . "\n";
+        $output .= '        setTimeout(function() {' . "\n";
+        $output .= '          target.style.display = "none";' . "\n";
+        $output .= '        }, 300);' . "\n";
         $output .= '      }' . "\n";
         $output .= '    });' . "\n";
         $output .= '  }' . "\n";
