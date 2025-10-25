@@ -290,7 +290,7 @@ $formwriter->dropinput('question_type', 'Question Type', [
     ]
 ]);
 
-// Create the target fields
+// Create the target fields (using their field IDs only)
 $formwriter->textinput('text_options', 'Text Options');
 $formwriter->textinput('char_limit', 'Character Limit');
 $formwriter->textarea('choices_list', 'Multiple Choice Options');
@@ -301,9 +301,18 @@ $formwriter->dropinput('rating_scale', 'Rating Scale', [
 
 **Features:**
 - Fields and their labels fade in/out smoothly (300ms CSS transition)
-- Automatic parent container detection (hides entire form-group)
+- **Automatic container detection** - Just use field IDs in rules, the system automatically targets `field_id_container` if it exists, otherwise falls back to the field ID
 - Works on page load and when select value changes
 - No additional JavaScript needed
+- No need to specify `_container` suffix - it's automatic!
+
+**How Container Detection Works:**
+The visibility system automatically checks for `field_id_container` elements first. This is the standard FormWriter pattern where fields are wrapped in container divs. If a container exists, it's targeted (hiding both label and field). If not, the field itself is targeted. You just pass the field ID and let the system handle it:
+
+```javascript
+// Automatic logic (you don't write this - it happens behind the scenes)
+const el = document.getElementById(id + "_container") || document.getElementById(id);
+```
 
 ### 4.2 Level 2: Field-Level Custom Scripts
 
@@ -354,26 +363,31 @@ $formwriter->addReadyScript('
     if (countryField) {
         countryField.addEventListener("change", function() {
             const country = this.value;
+            // Use field IDs only - container detection is automatic!
+            const stateContainer = document.getElementById("state_container");
+            const zipContainer = document.getElementById("zip_container");
+            const customContainer = document.getElementById("custom_location_container");
+
+            // Get input elements for setting placeholders
             const stateField = document.getElementById("state");
             const zipField = document.getElementById("zip");
-            const customField = document.getElementById("custom_location");
 
             if (country === "us") {
-                stateField.placeholder = "State";
-                zipField.placeholder = "ZIP Code (5 digits)";
-                stateField.style.display = "";
-                zipField.style.display = "";
-                customField.style.display = "none";
+                stateContainer.style.display = "";
+                zipContainer.style.display = "";
+                customContainer.style.display = "none";
+                if (stateField) stateField.placeholder = "State";
+                if (zipField) zipField.placeholder = "ZIP Code (5 digits)";
             } else if (country === "ca") {
-                stateField.placeholder = "Province";
-                zipField.placeholder = "Postal Code";
-                stateField.style.display = "";
-                zipField.style.display = "";
-                customField.style.display = "none";
+                stateContainer.style.display = "";
+                zipContainer.style.display = "";
+                customContainer.style.display = "none";
+                if (stateField) stateField.placeholder = "Province";
+                if (zipField) zipField.placeholder = "Postal Code";
             } else {
-                stateField.style.display = "none";
-                zipField.style.display = "none";
-                customField.style.display = "";
+                stateContainer.style.display = "none";
+                zipContainer.style.display = "none";
+                customContainer.style.display = "";
             }
         });
 
@@ -387,7 +401,10 @@ $formwriter->addReadyScript('
 - Multiple scripts can be added (they all run in order)
 - Wrapped in `DOMContentLoaded` automatically
 - Full control - no framework limitations
+- **Container auto-detection** - When hiding/showing fields, target the `field_id_container` divs (FormWriter's standard pattern) which hide both label and field together
 - Runs just before form closing tag
+
+**Pro Tip:** When hiding fields in form-level scripts, target `field_id_container` elements rather than field IDs directly. This hides the entire field wrapper (label + input) instead of just the input. FormWriter automatically wraps form fields in these containers, so they're always available to target.
 
 ### 4.4 Fade Effects
 
@@ -734,6 +751,12 @@ See **[validation.md](validation.md)**
 3. **Use consistent field naming**
    - Prefix with model: `usr_email`, `pro_name`
    - Use underscores not hyphens: `first_name` not `first-name`
+
+4. **Container handling**
+   - **In visibility_rules:** Just use field IDs (e.g., `'user_email'`) - container detection is automatic
+   - **In form-level scripts:** Target `field_id_container` elements to hide both label and field together
+   - FormWriter automatically wraps fields in containers, so `_container` elements always exist
+   - Example: `document.getElementById("user_email_container")` hides the field + label
 
 ---
 

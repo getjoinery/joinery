@@ -30,7 +30,28 @@ Removing the global jQuery dependency in two phases:
 
 ## 2. Current State Analysis
 
-### 2.1 jQuery Usage Map
+### 2.1 FormWriter Visibility Rules Feature (New - Simplifies Future Development)
+
+**IMPORTANT UPDATE (2025-10-25):** FormWriter now includes built-in field visibility rules with automatic container detection. This means:
+
+1. **For new admin pages:** Use FormWriter's `visibility_rules` parameter instead of custom jQuery/JavaScript code
+   ```php
+   $formwriter->dropinput('question_type', 'Question Type', [
+       'options' => ['text' => 'Text', 'choice' => 'Multiple Choice'],
+       'visibility_rules' => [
+           'text' => ['show' => ['text_options'], 'hide' => ['choice_options']],
+           'choice' => ['show' => ['choice_options'], 'hide' => ['text_options']]
+       ]
+   ]);
+   ```
+
+2. **Automatic container detection:** Just pass field IDs to `show`/`hide` arrays. The system automatically checks for `field_id_container` elements (which FormWriter creates by default) and falls back to the field ID if needed.
+
+3. **Smooth fade transitions:** All visibility changes include automatic 300ms fade effects with CSS classes.
+
+**See:** `/docs/formwriter.md` (Section 4) for complete documentation
+
+### 2.2 jQuery Usage Map
 
 **Global jQuery Loading Points:**
 - `/includes/PublicPageFalcon.php` - jQuery 3.7.1 CDN (all public pages)
