@@ -1,23 +1,30 @@
 # Specification: Remove jQuery Dependency
 
-**Status:** Phase 1 ✅ COMPLETE | Phase 2 Pending
+**Status:** Phase 0 ✅ COMPLETE (Select2 Replacement) | Phase 1 (Migration) In Progress | Phase 2 (Cleanup) Pending
 **Priority:** High
-**Estimated Effort:** 4-6 hours (Phase 1: 2-3 hours ✅ DONE, Phase 2: 2-3 hours)
-**Date Created:** 2025-10-23
-**Phase 1 Completed:** 2025-10-24
+**Estimated Effort:** Phase 1 (Migration) 6.5-8.5 hours | Phase 2 (Cleanup) 45 minutes | Total: 7-9 hours
+**Date Created:** 2025-10-24
+**Related Specification:** Phase 0 Complete - See `/specs/implemented/replace_select2_with_native_dropdown.md`
 
 ---
 
 ## 1. Overview
 
-Remove jQuery as a global dependency from the codebase by:
-1. **Replacing Select2** with native HTML5 `<input>` + `<datalist>` elements (~80 lines JavaScript, zero CSS)
-2. **Loading jQuery conditionally** only when Trumbowyg rich text editor is used
-3. **Removing jQuery from default page templates**
-4. **Refactoring validation logic** to eliminate jQuery Validate dependencies
-5. **Cleaning up jQuery files** from theme directories
+Removing the global jQuery dependency in two phases:
 
-The approach uses native HTML5 features - Select2 will be replaced with `<input>` + `<datalist>` which provides autocomplete functionality with zero custom CSS and minimal JavaScript.
+**Phase 1 - Migration:** Convert code from jQuery to vanilla JavaScript
+1. **Loading jQuery dynamically** when needed (already done via jquery-loader.js)
+2. **Converting admin page field visibility** from jQuery show/hide to vanilla JavaScript
+3. **Converting AJAX interactions** from jQuery $.ajax() to Fetch API
+
+**Phase 2 - Cleanup:** Remove jQuery files and CDN includes from the application
+1. **Removing jQuery from default page templates**
+2. **Cleaning up jQuery files** from theme directories
+3. **Removing bundled jQuery Validate files**
+
+**Note:** jQuery is loaded dynamically only when needed, not globally on every page.
+
+**Prerequisites:** Select2 replacement with native HTML5 `<input>` + `<datalist>` - See implemented specification for details (`/specs/implemented/replace_select2_with_native_dropdown.md`).
 
 ---
 
@@ -34,665 +41,301 @@ The approach uses native HTML5 features - Select2 will be replaced with `<input>
 - `/theme/devonandjerry/assets/js/jquery-3.4.1.min.js` - Bundled locally
 - `/theme/zoukphilly/assets/js/jquery-3.4.1.min.js` - Bundled locally
 
+**Comprehensive jQuery Usage Summary:**
+- **Total jQuery instances:** 333 usage instances across 29 files
+- **Primary usage:** Show/hide form field visibility based on input selections
+- **Secondary usage:** Form interactions and AJAX calls
+
+**Files Using jQuery (29 files):**
+
+**Admin Pages (13 files) - Heavy jQuery usage for conditional field visibility:**
+- `/adm/admin_analytics_activitybydate.php` - Show/hide chart elements
+- `/adm/admin_analytics_email_stats.php` - Show/hide analytics sections
+- `/adm/admin_analytics_users.php` - Show/hide user metrics
+- `/adm/admin_coupon_code_edit.php` - Show/hide coupon options
+- `/adm/admin_email_template_edit.php` - Show/hide template options
+- `/adm/admin_event_edit.php` - Show/hide event configuration fields
+- `/adm/admin_product_edit.php` - Show/hide product options
+- `/adm/admin_product_version_edit.php` - Show/hide version fields
+- `/adm/admin_public_menu_edit.php` - Show/hide menu options
+- `/adm/admin_question_edit.php` - **HEAVY jQuery usage** (50+ instances) for conditional validation fields based on question type
+- `/adm/admin_settings_email.php` - Show/hide email provider options
+- `/adm/admin_settings_payments.php` - Show/hide payment method configuration
+- `/adm/admin_settings.php` - Show/hide settings sections
+
+**Form & Include Files (6 files):**
+- `/includes/FormWriterBase.php` - Base form writer utilities
+- `/includes/FormWriterBootstrap.php` - Bootstrap form field rendering (Select2)
+- `/includes/FormWriterHTML5.php` - HTML5 form field rendering (Select2)
+- `/includes/FormWriterUIKit.php` - UIKit form field rendering (Select2)
+- `/includes/FormWriterV2Bootstrap.php` - FormWriter v2 Bootstrap (jQuery test code)
+- `/includes/PublicPageTailwind.php` - Public page template
+
+**View & Template Files (7 files):**
+- `/views/cart.php` - Shopping cart interactions
+- `/views/post.php` - Post display interactions
+- `/views/profile/subscriptions.php` - Subscription management (AJAX)
+- `/utils/api_example_js_create.php` - API example with jQuery AJAX
+- `/utils/api_example_js_list.php` - API example with jQuery AJAX
+- `/utils/api_example_js_single.php` - API example with jQuery AJAX
+- `/utils/forms_example_bootstrapv2.php` - FormWriter v2 test file
+
+**Data & Helper Files (3 files):**
+- `/data/products_class.php` - Product class (possible jQuery comment or string)
+- `/includes/StripeHelper.php` - Stripe integration helper
+- `/utils/products_list.php` - Products list rendering
+
 **jQuery Used For:**
-- Select2 AJAX dropdown enhancement
-- Trumbowyg rich text editor
-- Form validation (jQuery Validate plugin - being phased out)
-- Miscellaneous view file interactions (subscriptions.php)
-- controld plugin initialization
+1. **Show/Hide Field Visibility** (MOST COMMON) - Conditional field display based on form input selections
+2. **AJAX Interactions** - Dynamic loading of content and form handling
+3. **DOM Manipulation** - General element property/attribute changes
 
-### 2.2 Select2 Current Usage
+**Note on Select2:** Completely removed in Phase 1 (see `/specs/implemented/replace_select2_with_native_dropdown.md`). AJAX dropdowns now use native HTML5 with inline vanilla JavaScript.
 
-**Files Using Select2:**
-- `/includes/FormWriterBootstrap.php`
-- `/includes/FormWriterHTML5.php`
-- `/includes/FormWriterUIKit.php`
-- `/includes/FormWriterTailwind.php`
+### 2.2 Form Validation
+- ✅ JoineryValidator is pure JavaScript, independent of jQuery - no migration work needed
 
-**Features Currently Used:**
-1. **AJAX Data Loading** - Remote endpoint loads options based on search
-2. **Search/Filter** - User types 3+ characters to trigger AJAX
-3. **Result Caching** - Client-side cache to avoid redundant requests
-4. **Static Placeholder** - Always "None"
-5. **Debouncing** - 250ms delay before AJAX request
-6. **Standard Single Selection** - Not multi-select
+### 2.3 Migration Work Summary
+- **Phase 1:** 13 admin pages + 4 AJAX files require jQuery to vanilla JS conversion (see Section 3)
+- **Phase 2:** 3 template files need jQuery CDN removal + 4 theme files need jQuery deletion (see Section 4)
+- **Out of Scope:** Plugin at `/plugins/controld/assets/js/main.js` uses jQuery but not prioritized for Phase 1/2
 
-**Features NOT Used:**
-- Multi-select mode
-- Tags mode
-- Custom templates
-- Pagination
-- Customizable placeholders
-- Event callbacks
-- Formatting functions
+---
 
-**Initialization Code Pattern (identical across all FormWriter classes):**
+## 3. Phase 1 - Migration Tasks (Active Work)
+
+**Select2 Replacement (Phase 0):** ✅ COMPLETE - See `/specs/implemented/replace_select2_with_native_dropdown.md`
+
+**These tasks require active code modification to migrate from jQuery to vanilla JavaScript.**
+
+### 3.1 Convert 13 Admin Pages to Vanilla JavaScript
+
+Refactor conditional field visibility from jQuery show/hide to FormVisibility helper library.
+
+**High Priority (50+ jQuery instances):**
+- [ ] `/adm/admin_question_edit.php` - Reference implementation
+
+**Medium Priority (10-50 jQuery instances):**
+- [ ] `/adm/admin_analytics_activitybydate.php`
+- [ ] `/adm/admin_analytics_email_stats.php`
+- [ ] `/adm/admin_analytics_users.php`
+- [ ] `/adm/admin_coupon_code_edit.php`
+- [ ] `/adm/admin_email_template_edit.php`
+- [ ] `/adm/admin_event_edit.php`
+- [ ] `/adm/admin_product_edit.php`
+- [ ] `/adm/admin_product_version_edit.php`
+- [ ] `/adm/admin_settings_email.php`
+- [ ] `/adm/admin_settings_payments.php`
+
+**Low Priority (1-10 jQuery instances):**
+- [ ] `/adm/admin_public_menu_edit.php`
+- [ ] `/adm/admin_settings.php`
+
+### 3.2 Convert AJAX from jQuery to Fetch API
+
+Replace jQuery $.ajax() with Fetch API in 4 files.
+
+- [ ] `/views/profile/subscriptions.php` - Replace `$("#appointments").load()` with fetch
+- [ ] `/utils/api_example_js_create.php` - Replace `$.ajax()` with fetch
+- [ ] `/utils/api_example_js_list.php` - Replace `$.ajax()` with fetch
+- [ ] `/utils/api_example_js_single.php` - Replace `$.ajax()` with fetch
+
+---
+
+## 4. Phase 2 - Cleanup Tasks (Breaking Changes - Remove)
+
+**After Phase 1 migration completes, these files and includes must be removed to prevent jQuery from being loaded globally. Removing these breaks backward compatibility but eliminates unnecessary jQuery dependency.**
+
+### 4.1 Remove jQuery CDN from Page Templates
+
+Remove jQuery script tags that load jQuery globally on every page.
+
+- [ ] `/includes/PublicPageFalcon.php` - Remove jQuery 3.7.1 CDN script tag
+- [ ] `/includes/PublicPageTailwind.php` - Remove jQuery 3.7.1 CDN script tag
+- [ ] `/includes/AdminPage-uikit3.php` - Remove both jQuery 3.4.1 CDN script tags (appears twice)
+
+### 4.2 Delete Bundled jQuery Files from Themes
+
+Remove locally bundled jQuery files that are no longer needed.
+
+- [ ] `/theme/galactictribune/assets/js/jquery-3.4.1.min.js`
+- [ ] `/theme/default/assets/js/jquery-3.4.1.min.js`
+- [ ] `/theme/devonandjerry/assets/js/jquery-3.4.1.min.js`
+- [ ] `/theme/zoukphilly/assets/js/jquery-3.4.1.min.js`
+
+### 4.3 Delete jQuery Validate Plugin Files
+
+Remove jQuery Validate plugin files that are no longer used.
+
+- [ ] All jQuery Validate files in theme directories
+- [ ] Legacy jQuery Validate references from utility files
+
+---
+
+## 5. Implementation Support & Resources
+
+**Status:** ✅ Resources created and ready for Phase 1 implementation
+
+### 5.1 Utilities Already Created ✅
+
+- ✅ **FormVisibility Helper** (`/assets/js/form-visibility-helper.js`) - 300+ lines, 30+ DOM manipulation methods
+
+### 5.2 Quick Reference Pattern for Admin Pages
+
+Standard pattern used across all admin pages:
 ```javascript
-$(document).ready(function() {
-  $("#[FIELD_ID]").select2({
-    placeholder: "None",
-    ajax: {
-      url: "[AJAX_ENDPOINT_URL]",
-      dataType: "json",
-      delay: 250,
-      processResults: function (data) {
-        return { results: data };
-      },
-      minimumInputLength: 3,
-      cache: true
-    }
-  });
+// 1. Include helper
+<script src="/assets/js/form-visibility-helper.js"></script>
+
+// 2. Define visibility rules
+const visibilityRules = {
+  '1': { show: ['field1'], hide: ['field2'] },
+  '2': { show: ['field2'], hide: ['field1'] }
+};
+
+// 3. Listen to changes
+document.getElementById('select-id').addEventListener('change', function() {
+  const rules = visibilityRules[this.value];
+  FormVisibility.setVisibility(rules.show, rules.hide);
 });
 ```
 
-**Expected AJAX Response Format:**
-```json
-[
-  { "id": "value1", "text": "Display Text 1" },
-  { "id": "value2", "text": "Display Text 2" }
-]
-```
+---
 
-### 2.3 Trumbowyg Rich Text Editor
+## 6. Related References
 
-- **File:** `/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js`
-- **jQuery Dependency:** REQUIRED - Trumbowyg is a jQuery plugin
-- **Current Approach:** jQuery loaded globally for all pages
-- **Proposed Approach:** Load jQuery conditionally when Trumbowyg is initialized
+### 6.1 Phase 0 Related Files (Completed - See implemented spec)
+- ✅ **Specification:** `/specs/implemented/replace_select2_with_native_dropdown.md` - Modified 6 FormWriter classes, deleted scratch.php and select2 vendor directory
 
-### 2.4 Form Validation
+### 6.2 Related Specifications
+- Phase 0 Spec: `/specs/implemented/replace_select2_with_native_dropdown.md` (Select2 Replacement)
+- Project Guide: `/CLAUDE.md`
+- Admin Page Documentation: `/docs/admin_pages.md`
 
-**Current State:**
-- Pure JavaScript `JoineryValidator` is the primary validation system
-- Already independent of jQuery
-- Form validation works through `set_validate()` which calls `JoineryValidation.init()`
+### 6.3 Themes & Plugins Using jQuery
 
-**Status:**
-- ✅ No jQuery dependency in validation layer
-- ✅ JoineryValidator uses vanilla JS for error handling (classList, createElement, appendChild)
-- ✅ Legacy `validate_style_info` properties in FormWriter classes removed (dead code)
-
-### 2.5 Other jQuery Usage
-
-**View Files:**
-- `/views/profile/subscriptions.php` - Uses `$(document).ready()` and `$("#appointments").load()`
-
-**Admin Pages:**
-- `/adm/admin_settings_payments.php` - jQuery Validator custom methods for Stripe validation
+**Note:** After Phase 2 cleanup, themes and plugins that require jQuery must include it themselves.
 
 **Plugins:**
-- `/plugins/controld/assets/js/main.js` - Uses jQuery for plugin initialization
+- **ControlD Plugin:**
+  - `assets/js/controld-plugin.js` - Event binding, device management ($(document).ready, $(document).on, .click, .change)
+  - `assets/js/main.js` - Extensive DOM manipulation, sliders, mobile menu, animations, form validation ($.ajax, custom jQuery methods)
+  - `views/login.php` - Input focus management ($().focus)
+  - `views/cart.php` - Form field visibility (hide/show, commented out)
+  - `includes/FormWriter.php` - Validation error styling (addClass/removeClass)
+  - `assets/js/swiper-bundle.min.js` - Third-party carousel library
+
+**Themes:**
+- **Canvas Theme:**
+  - `views/cart.php` - Prevent duplicate form submissions, disable buttons during submission
+  - `views/post.php` - Comment toggle with animation (.toggle)
+
+- **Tailwind Theme:**
+  - `views/events.php` - Category selector navigation with redirect ($(location).attr)
+  - `views/cart.php` - Prevent duplicate form submissions
+
+- **Default Theme:**
+  - `includes/FormWriter.php` - Form validation error styling (addClass/removeClass for error containers)
+
+- **Devon & Jerry Theme:**
+  - `includes/FormWriter.php` - Form validation error styling
+
+- **Zouk Philly Theme:**
+  - `includes/FormWriter.php` - Form validation error styling
+
+- **Other Themes (Galactic Tribune, Falcon, Plugin, Zouk Room):** No custom jQuery usage
 
 ---
 
-## 3. Implementation Phases
-
-## PHASE 1: Replace Select2 with Custom Dropdown Component
-
-### 3.1 Custom Vanilla JS Dropdown Component (PHASE 1)
-
-**Create a custom dropdown component that replaces Select2 with equivalent functionality.**
-
-**Requirements:**
-- Works with existing `<select>` elements
-- Support AJAX data loading with search
-- Minimum 3 characters to trigger search
-- Maintain client-side result caching
-- 250ms debounce on search
-- Zero custom CSS required
-- No jQuery dependency
-
-**Key Characteristics:**
-- Inline JavaScript (~80 lines, only loaded when AJAX dropdown exists)
-- Zero CSS needed - uses native HTML5 elements
-- No separate files to load
-- Works with existing select elements
-
-**File Locations:**
-- No new files needed! JavaScript is embedded inline in FormWriter output
-
-### 3.2 Refactor FormWriter Classes for Custom Dropdown (PHASE 1)
-
-**Update all FormWriter implementations to use custom dropdown instead of Select2.**
-
-**Files to Modify:**
-- `/includes/FormWriterHTML5.php` - Replace Select2 with custom dropdown
-- `/includes/FormWriterBootstrap.php` - Replace Select2 with custom dropdown
-- `/includes/FormWriterTailwind.php` - Replace Select2 with custom dropdown
-- `/includes/FormWriterUIKit.php` - Replace Select2 with custom dropdown
-
-**Changes in dropinput() method:**
-- Replace Select2 CSS/JS includes with custom dropdown CSS/JS
-- Replace Select2 initialization script with custom dropdown initialization
-- Update script to call dropdown component instead of Select2
-
-### 3.3 Test Custom Dropdown (PHASE 1)
-
-**Verify custom dropdown works across all themes and AJAX endpoints.**
-
----
-
-## PHASE 2: Remove Global jQuery Dependency
-
-### 3.4 Conditional jQuery Loading for Trumbowyg (PHASE 2)
-
-**Create a utility that loads jQuery only when Trumbowyg is initialized.**
-
-**Implementation:**
-- Add a function `ensureJQueryLoaded()` that:
-  1. Checks if jQuery is already loaded (window.$)
-  2. If not, dynamically loads jQuery 3.7.1 from CDN
-  3. Waits for jQuery to fully load before proceeding
-  4. Calls callback once jQuery is ready
-- Modify FormWriter Trumbowyg initialization to call this function first
-- Cache the jQuery loading promise to avoid loading multiple times
-
-**File Locations:**
-- Utility: `/assets/js/jquery-loader.js` (new)
-
-### 3.5 Remove jQuery from Default Templates (PHASE 2)
-
-**Remove jQuery CDN/script tags from all page template files.**
-
-**Files to Modify:**
-- `/includes/PublicPageFalcon.php` - Remove jQuery script tag
-- `/includes/PublicPageTailwind.php` - Remove jQuery script tag
-- `/includes/AdminPage-uikit3.php` - Remove both jQuery script tags
-- Delete local jQuery files from theme directories
-
-### 3.6 Clean Up jQuery Files (PHASE 2)
-
-**Remove jQuery from themes and utilities.**
-
-**Delete:**
-- `/theme/galactictribune/assets/js/jquery-3.4.1.min.js`
-- `/theme/default/assets/js/jquery-3.4.1.min.js`
-- `/theme/devonandjerry/assets/js/jquery-3.4.1.min.js`
-- `/theme/zoukphilly/assets/js/jquery-3.4.1.min.js`
-- All theme jQuery Validate files
-- Legacy jQuery references from utility files
-
-### 3.7 Fix View Layer jQuery (PHASE 2)
-
-**Remove jQuery usage from view templates.**
-
-**Files to Modify:**
-- `/views/profile/subscriptions.php` - Replace `$(document).ready()` and jQuery AJAX with fetch API
-
-### 3.8 Update Admin and Utility Pages (PHASE 2)
-
-**Refactor remaining jQuery dependencies.**
-
-**Files to Modify:**
-- `/adm/admin_settings_payments.php` - Replace jQuery Validator methods with JoineryValidator equivalents
-- `/utils/scratch.php` - Remove jQuery examples or update to vanilla JS
-- `/plugins/controld/assets/js/main.js` - Remove jQuery dependency or load jQuery conditionally
-
----
-
-## 4. Implementation Tasks
-
-### PHASE 1: Custom Dropdown Implementation
-
-#### 4.1 Update FormWriter Classes for Inline AJAX Dropdown
-- Modify FormWriter classes to output inline JavaScript for AJAX dropdowns:
-  - Update `/includes/FormWriterHTML5.php`:
-    - Remove Select2 CSS/JS includes
-    - Modify dropinput() method to output inline JavaScript when `ajaxendpoint` is present
-  - Update `/includes/FormWriterBootstrap.php` with same changes
-  - Update `/includes/FormWriterTailwind.php` with same changes
-  - Update `/includes/FormWriterUIKit.php` with same changes
-
-Implementation details:
-  - Replace Select2 CSS/JS includes with inline dropdown code
-  - JavaScript only outputs when `ajaxendpoint` parameter is used
-  - Uses native HTML5 `<input>` + `<datalist>` elements
-  - AJAX data loading with search (3+ character minimum)
-  - Client-side result caching
-  - 250ms debounce on search
-  - No CSS file needed
-
-#### 4.2 Test AJAX Dropdown (PHASE 1)
-- Test all dropdown AJAX endpoints with custom dropdown
-- Comprehensive browser testing (Chrome, Firefox, Safari)
-- Mobile device testing
-- Test keyboard navigation and accessibility
-- Verify dropdown functionality across all themes
-
----
-
-### PHASE 2: Remove Global jQuery
-
-#### 4.4 jQuery Conditional Loading
-- Create jQuery loader utility (`/assets/js/jquery-loader.js`) that:
-  - Checks if jQuery is already loaded
-  - Dynamically loads jQuery 3.7.1 from CDN if needed
-  - Returns promise for async handling
-  - Caches to avoid loading multiple times
-- Modify FormWriter to load jQuery before Trumbowyg initialization
-
-#### 4.5 Remove jQuery from Templates
-- Remove jQuery CDN script tag from `/includes/PublicPageFalcon.php`
-- Remove jQuery CDN script tag from `/includes/PublicPageTailwind.php`
-- Remove jQuery CDN script tags (appears twice) from `/includes/AdminPage-uikit3.php`
-- Delete bundled jQuery files from theme directories:
-  - `/theme/galactictribune/assets/js/jquery-3.4.1.min.js`
-  - `/theme/default/assets/js/jquery-3.4.1.min.js`
-  - `/theme/devonandjerry/assets/js/jquery-3.4.1.min.js`
-  - `/theme/zoukphilly/assets/js/jquery-3.4.1.min.js`
-
-#### 4.6 Fix View Layer jQuery
-- Refactor `/views/profile/subscriptions.php`:
-  - Replace `$(document).ready()` with vanilla JS
-  - Replace `$("#appointments").load()` with fetch API
-  - Update DOM manipulation to vanilla JS methods
-
-#### 4.7 Clean Up jQuery References
-- Update `/utils/api_example_js_create.php` to use fetch instead of jQuery AJAX
-- Update `/utils/api_example_js_list.php` to use fetch instead of jQuery AJAX
-- Update `/utils/api_example_js_single.php` to use fetch instead of jQuery AJAX
-- Remove jQuery examples from `/utils/scratch.php`
-- Update `/plugins/controld/assets/js/main.js` to remove jQuery dependency or load conditionally
-
-#### 4.8 Testing (PHASE 2)
-- Test Trumbowyg rich text editor with conditional jQuery loading
-- Confirm jQuery is not loaded on pages without Trumbowyg
-- Verify all previously jQuery-dependent features work
-
-#### 4.9 Documentation
-- Create API documentation for custom dropdown component in `/docs/`
-- Update `/CLAUDE.md` with notes on conditional jQuery loading
-
----
-
-## 4.10 Custom Dropdown Component - Inline JavaScript Implementation
-
-### Inline JavaScript (loaded only for AJAX dropdowns)
-
-The JavaScript is loaded **inline in the HTML** only when an AJAX dropdown is present (no separate file needed).
-
-```javascript
-// Inline script - only loaded when AJAX dropdown exists
-(function() {
-  class AjaxSearchSelect {
-    constructor(selectEl, ajaxUrl) {
-      this.select = selectEl;
-      this.ajaxUrl = ajaxUrl;
-      this.cache = {};
-      this.debounceTimer = null;
-
-      // Create and insert search input
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = selectEl.className;
-      input.placeholder = 'Type to search...';
-
-      // Create datalist
-      const list = document.createElement('datalist');
-      list.id = selectEl.id + '_list';
-      input.setAttribute('list', list.id);
-
-      // Hide select, insert input and datalist
-      selectEl.style.display = 'none';
-      selectEl.parentNode.insertBefore(input, selectEl);
-      selectEl.parentNode.insertBefore(list, selectEl);
-
-      this.input = input;
-      this.list = list;
-      this.data = [];
-
-      // Set initial value
-      if (selectEl.value) {
-        input.value = selectEl.options[selectEl.selectedIndex].text;
-      }
-
-      // Event listeners
-      input.addEventListener('input', (e) => this.search(e.target.value));
-      input.addEventListener('change', (e) => {
-        if (!e.target.value) {
-          selectEl.value = '';
-          selectEl.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      });
-    }
-
-    search(query) {
-      clearTimeout(this.debounceTimer);
-
-      if (query.length < 3) {
-        this.list.innerHTML = '';
-        this.data = [];
-        return;
-      }
-
-      if (this.cache[query]) {
-        this.updateList(this.cache[query]);
-        return;
-      }
-
-      this.debounceTimer = setTimeout(() => {
-        fetch(`${this.ajaxUrl}?q=${encodeURIComponent(query)}`)
-          .then(r => r.json())
-          .then(data => {
-            this.cache[query] = data;
-            this.updateList(data);
-          });
-      }, 250);
-    }
-
-    updateList(data) {
-      this.data = data;
-      this.list.innerHTML = '';
-      data.forEach(item => {
-        const opt = document.createElement('option');
-        opt.value = item.text;
-        opt.dataset.id = item.id;
-        this.list.appendChild(opt);
-      });
-    }
-  }
-
-  // Initialize when DOM is ready
-  document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('select[data-ajax-endpoint]').forEach(select => {
-      new AjaxSearchSelect(select, select.dataset.ajaxEndpoint);
-    });
-  });
-})();
-```
-
-### No CSS or separate files needed!
-
-The implementation:
-- Uses native HTML5 `<input>` + `<datalist>` elements
-- Browser provides built-in dropdown UI and styling
-- Zero CSS required
-- JavaScript loaded inline only for AJAX dropdowns
-- No separate JavaScript file to load
-
-### Usage in FormWriter Classes
-
-**Example: Update FormWriterBootstrap::dropinput() method**
-
-```php
-public function dropinput($field_id, $field_label, $field_value, $field_options,
-                         $readonly = false, $required = false, $ajaxendpoint = '', $placeholder = '')
-{
-    // Only add data-ajax-endpoint if AJAX is needed
-    $ajax_attr = $ajaxendpoint ? 'data-ajax-endpoint="' . htmlspecialchars($ajaxendpoint) . '"' : '';
-
-    // Create standard select element
-    $html = '<select id="' . $field_id . '" name="' . $field_id . '"
-                    class="form-control" ' . $ajax_attr . '>';
-
-    // Add options
-    $html .= '<option value="">None</option>';
-    if (is_array($field_options)) {
-        foreach ($field_options as $value => $label) {
-            $selected = ($value == $field_value) ? 'selected' : '';
-            $html .= '<option value="' . htmlspecialchars($value) . '" ' . $selected . '>' .
-                    htmlspecialchars($label) . '</option>';
-        }
-    }
-    $html .= '</select>';
-
-    // Include inline JavaScript only for AJAX dropdowns (no separate file!)
-    if ($ajaxendpoint) {
-        static $ajax_script_loaded = false;
-        if (!$ajax_script_loaded) {
-            $html .= <<<'JS'
-<script>
-(function() {
-  class AjaxSearchSelect {
-    constructor(selectEl, ajaxUrl) {
-      this.select = selectEl;
-      this.ajaxUrl = ajaxUrl;
-      this.cache = {};
-      this.debounceTimer = null;
-
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = selectEl.className;
-      input.placeholder = 'Type to search...';
-
-      const list = document.createElement('datalist');
-      list.id = selectEl.id + '_list';
-      input.setAttribute('list', list.id);
-
-      selectEl.style.display = 'none';
-      selectEl.parentNode.insertBefore(input, selectEl);
-      selectEl.parentNode.insertBefore(list, selectEl);
-
-      this.input = input;
-      this.list = list;
-      this.data = [];
-
-      if (selectEl.value) {
-        input.value = selectEl.options[selectEl.selectedIndex].text;
-      }
-
-      input.addEventListener('input', (e) => this.search(e.target.value));
-      input.addEventListener('change', (e) => {
-        if (!e.target.value) {
-          selectEl.value = '';
-          selectEl.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      });
-    }
-
-    search(query) {
-      clearTimeout(this.debounceTimer);
-      if (query.length < 3) {
-        this.list.innerHTML = '';
-        this.data = [];
-        return;
-      }
-
-      if (this.cache[query]) {
-        this.updateList(this.cache[query]);
-        return;
-      }
-
-      this.debounceTimer = setTimeout(() => {
-        fetch(this.ajaxUrl + '?q=' + encodeURIComponent(query))
-          .then(r => r.json())
-          .then(data => {
-            this.cache[query] = data;
-            this.updateList(data);
-          });
-      }, 250);
-    }
-
-    updateList(data) {
-      this.data = data;
-      this.list.innerHTML = '';
-      data.forEach(item => {
-        const opt = document.createElement('option');
-        opt.value = item.text;
-        opt.dataset.id = item.id;
-        this.list.appendChild(opt);
-      });
-    }
-  }
-
-  document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('select[data-ajax-endpoint]').forEach(select => {
-      new AjaxSearchSelect(select, select.dataset.ajaxEndpoint);
-    });
-  });
-})();
-</script>
-JS;
-            $ajax_script_loaded = true;
-        }
-    }
-
-    return $this->wrap_input($html, $field_id, $field_label, $required);
-}
-```
-
----
-
-## 5. Success Criteria
-
-### 5.1 Functional Requirements
-- [ ] All form dropdown fields work identically to Select2 (AJAX, search, caching, keyboard nav)
-- [ ] Trumbowyg rich text editor initializes and functions correctly
-- [ ] jQuery is NOT loaded on pages without Trumbowyg
-- [ ] jQuery loads automatically and transparently when Trumbowyg is needed
-- [ ] All existing AJAX endpoints work with custom dropdown
-
-### 5.2 Code Quality Requirements
-- [ ] Zero jQuery usage in codebase except conditional loading for Trumbowyg
-- [ ] Custom dropdown component has no external dependencies
-- [ ] Custom dropdown uses semantic HTML (`<select>` element preserved)
-- [ ] All FormWriter classes updated consistently
-- [ ] No console errors in any browser
-
-### 5.3 Performance Requirements
-- [ ] Custom dropdown performs as well as or better than Select2
-- [ ] Page load time improved due to no global jQuery
-- [ ] AJAX requests use same debounce delay (250ms)
-- [ ] Caching works efficiently
-
-### 5.4 Compatibility Requirements
-- [ ] Works with Bootstrap theme (PublicPageFalcon)
-- [ ] Works with Tailwind theme (PublicPageTailwind)
-- [ ] Works with UIKit admin interface (AdminPage-uikit3)
-- [ ] Works with other installed themes
-- [ ] Keyboard accessible (WCAG 2.1 Level AA)
-
-### 5.5 Testing Requirements
-- [ ] All forms pass manual testing
-- [ ] All dropdown AJAX endpoints tested
-- [ ] All themes tested with forms and dropdowns
-- [ ] Rich text editor works on all pages with forms
-- [ ] No memory leaks (jQuery loaded/unloaded correctly)
-- [ ] Mobile/touch navigation works
-
----
-
-## 6. Related Files
-
-### 6.1 Files to Modify
-- `/includes/PublicPageFalcon.php` - Remove jQuery CDN
-- `/includes/PublicPageTailwind.php` - Remove jQuery CDN
-- `/includes/AdminPage-uikit3.php` - Remove jQuery CDN
-- `/includes/FormWriterHTML5.php` - Replace Select2 with custom dropdown
-- `/includes/FormWriterBootstrap.php` - Replace Select2 with custom dropdown
-- `/includes/FormWriterTailwind.php` - Replace Select2 with custom dropdown
-- `/includes/FormWriterUIKit.php` - Replace Select2 with custom dropdown
-- `/views/profile/subscriptions.php` - Replace jQuery with fetch API
-- `/plugins/controld/assets/js/main.js` - Remove jQuery dependency
-- `/utils/api_example_js_create.php` - Replace jQuery AJAX with fetch
-- `/utils/api_example_js_list.php` - Replace jQuery AJAX with fetch
-- `/utils/api_example_js_single.php` - Replace jQuery AJAX with fetch
-- `/utils/scratch.php` - Remove jQuery examples
-
-### 6.2 Files Already Modified
-- `/includes/FormWriterBase.php` - ✅ Removed validate_style_info (dead code)
-- `/includes/FormWriterHTML5.php` - ✅ Removed validate_style_info (dead code)
-- `/includes/FormWriterBootstrap.php` - ✅ Removed validate_style_info (dead code)
-- `/includes/FormWriterUIKit.php` - ✅ Removed validate_style_info (dead code)
-
-### 6.3 Files to Create
-- `/assets/js/jquery-loader.js` - Conditional jQuery loader (for Phase 2)
-- No other files needed! AJAX dropdown uses inline JavaScript
-
-### 6.4 Files to Delete
-- `/theme/galactictribune/assets/js/jquery-3.4.1.min.js`
-- `/theme/default/assets/js/jquery-3.4.1.min.js`
-- `/theme/devonandjerry/assets/js/jquery-3.4.1.min.js`
-- `/theme/zoukphilly/assets/js/jquery-3.4.1.min.js`
-- Multiple jQuery Validate plugin references in theme directories
-
-### 6.5 Related Documentation
-- `/CLAUDE.md` - Project instructions
-- `/docs/plugin_developer_guide.md` - Plugin architecture (for controld plugin)
-- `/docs/admin_pages.md` - Admin page documentation
-
----
-
-## 7. Implementation Notes
-
-### 7.1 Custom Dropdown Design Considerations
-
-The custom dropdown component should:
-1. **Preserve native `<select>` element** - All form values should come from the hidden select, not from JavaScript state
-2. **Apply theme-specific CSS** - Bootstrap, UIKit, and Tailwind all have different class conventions
-3. **Support data attributes for configuration** - Allow markup-based initialization without JavaScript
-4. **Cache results efficiently** - Store results in a Map to avoid AJAX duplication
-5. **Handle edge cases**:
-   - Rapid typing (debounce prevents requests)
-   - Network errors (graceful fallback)
-   - Empty results (show "no results" message)
-   - Mobile keyboards (work with touch events)
-
-### 7.2 jQuery Conditional Loading
-
-The jQuery loader should:
-1. **Check if jQuery is available** - `window.$ && window.jQuery`
-2. **Load from same CDN as before** - jQuery 3.7.1 from CDN.jsdelivr.net
-3. **Handle timing** - Return a Promise to ensure jQuery is ready before use
-4. **Cache the promise** - Only load once even if multiple components request it
-5. **Fail gracefully** - Log error if jQuery fails to load
-
-### 7.3 Validation Migration
-
-JoineryValidator already exists, so:
-1. **Verify it covers all needs** - Check if custom Stripe validation exists
-2. **Maintain configuration compatibility** - If jQuery Validate config exists, document how it maps to JoineryValidator
-3. **Support both temporarily** - During transition, both can coexist without conflict
+## 7. Phase 1 Implementation Notes
+
+### 7.1 Show/Hide Field Visibility Pattern
+
+Most admin pages follow this pattern:
+1. Select/dropdown change triggers update function
+2. Function shows/hides form field containers
+3. Function enables/disables form controls
+4. Initial call on page load sets initial state
+
+**Solution:** Use FormVisibility helper library + vanilla JS event listeners (see Section 11 for detailed examples)
+
+### 7.2 FormVisibility Helper Integration
+
+When converting admin pages:
+1. **Include helper:** `<script src="/assets/js/form-visibility-helper.js"></script>`
+2. **Replace jQuery patterns:**
+   - `$("#id").show()` → `FormVisibility.show('id')`
+   - `$("#id").hide()` → `FormVisibility.hide('id')`
+   - `$("#id").prop('disabled', true)` → `FormVisibility.setEnabled('id', false)`
+3. **Convert event listeners:** `$("#id").change(fn)` → `document.getElementById('id').addEventListener('change', fn)`
+4. **Use data structures** instead of if-else chains for better maintainability
+
+### 7.3 AJAX to Fetch API Conversion
+
+When converting jQuery AJAX:
+1. **Basic pattern:** Replace `$.ajax()` with `fetch()`
+2. **Response handling:** Use `.then()` instead of success/error callbacks
+3. **Headers:** Pass as options object, not as separate parameter
+4. **Data:** Use URLSearchParams for GET, FormData for files, JSON.stringify for JSON
+5. **Error handling:** Check `response.ok` AND implement `.catch()`
+
+See section 11.3 of this specification for detailed AJAX conversion patterns and examples
 
 ### 7.4 Testing Strategy
 
 Test in this order:
-1. **Unit tests** - Custom dropdown in isolation
-2. **Integration tests** - Dropdown in FormWriter context
-3. **End-to-end tests** - Full forms across all themes
-4. **Performance tests** - Verify no degradation
-5. **Accessibility tests** - Keyboard navigation, screen readers
+1. **Syntax validation** - `php -l filename.php` passes
+2. **Individual pages** - Each admin page forms work correctly
+3. **Cross-browser** - Test on at least Chrome and Firefox
+4. **Mobile** - Test touch interactions on actual device
+5. **AJAX** - Verify Fetch calls work and data loads correctly
 
-### 7.5 Backward Compatibility
+### 7.5 Using the Conversion Checklist
 
-This is a breaking change because:
-1. Select2 API disappears - Any custom JavaScript that called Select2 will break
-2. jQuery no longer globally available - Custom scripts relying on `$` won't work
-3. Validation configuration changes - jQuery Validate won't initialize
+For consistent, organized conversions:
+1. Use the conversion patterns provided in Section 11
+2. Use the general conversion template provided
+3. Test using pre/post conversion checklists
+4. Verify with provided verification commands
 
-**Mitigation:**
-- Search entire codebase for custom Select2 usage before implementation
-- Document breaking changes in CLAUDE.md
-- Provide migration guide for plugins/themes using jQuery
+### 7.6 Rollback Plan
+
+All admin pages have `.bak` backups created during Phase 2:
+- Use `git checkout` to revert to original if needed
+- Or restore from `.bak` files
+- FormVisibility and jquery-loader are additive (won't break existing code)
+- Phase 1 (Select2) can be rolled back independently from Phase 2
 
 ---
 
-## 8. Risk Assessment
+## 8. Risk Assessment (Phase 1 & 2)
 
-### 8.1 High Risk
-- **Custom dropdown not feature-complete** - Could break existing functionality
-  - *Mitigation*: Comprehensive testing, direct comparison with Select2
-- **Validation not working correctly** - Forms might accept invalid data
-  - *Mitigation*: Verify JoineryValidator capabilities before refactoring
+### 8.1 High Risk (Phase 1)
+- **Show/hide logic breaks** - Could make form fields inaccessible
+  - *Mitigation*: Comprehensive testing of each admin page; Use FormVisibility helper for consistency
+- **AJAX conversions fail** - Endpoints might return different data formats
+  - *Mitigation*: Test each converted file; Verify endpoint responses match expectations
 
 ### 8.2 Medium Risk
-- **Theme incompatibility** - Custom dropdown styling breaks in unexpected themes
-  - *Mitigation*: Test all installed themes
-- **AJAX endpoint changes** - Response format might differ between endpoints
-  - *Mitigation*: Audit all AJAX endpoints before implementation
+- **FormVisibility helper insufficient** - Edge cases not covered
+  - *Mitigation*: Review implementation guide; Extend helper if needed
+- **jQuery loader fails** - jQuery plugins won't initialize
+  - *Mitigation*: Test conditional loading; Implement error logging
+- **Cross-browser compatibility** - Fetch API not supported in older IE
+  - *Mitigation*: Add Fetch polyfill if needed; Test on required browsers
 
 ### 8.3 Low Risk
-- **jQuery conflicts** - Multiple jQuery loads could cause issues
-  - *Mitigation*: Load script checks version and waits for ready state
-- **Mobile compatibility** - Touch events might not work correctly
-  - *Mitigation*: Test on actual mobile devices
+- **Performance degradation** - Vanilla JS slower than jQuery
+  - *Mitigation*: Benchmarking; jQuery wasn't optimized anyway
+- **Mobile touch events** - Event listeners don't work on mobile
+  - *Mitigation*: Test on actual mobile devices; Event listeners work fine on touch
 
 ---
 
-## 9. Success Metrics
+## 9. Success Metrics (Phase 1 & 2)
 
-After implementation is complete, verify:
-1. **Zero jQuery references** in main codebase (except jquery-loader.js)
+After Phase 1 and Phase 2 implementation is complete, verify:
+1. **Zero jQuery in main codebase** - Except for jquery-loader.js (conditional loader only)
 2. **Page load time improvement** - Measure with and without change
 3. **Form functionality parity** - All existing forms work identically
 4. **Test coverage** - 100% of dropdown functionality tested
@@ -702,11 +345,367 @@ After implementation is complete, verify:
 
 ---
 
-## 10. Future Considerations
+## 10. Phase 1 Preparation Summary ✅
+
+**Status:** Comprehensive planning and resource creation complete - Phase 1 ready for implementation
+
+**Created Utilities & Resources:**
+
+### 🛠️ Utility Libraries Created
+- ✅ **FormVisibility Helper** (`/assets/js/form-visibility-helper.js`) - 300+ line library with 30+ DOM manipulation methods, null-safe, full documentation
+
+### 📋 Detailed Analysis Completed
+- ✅ Analyzed 13 admin pages, identified 4 AJAX files, mapped patterns, created reference implementation, organized by priority
+
+**Implementation Approach:**
+1. Use FormVisibility helper library for consistent DOM manipulation
+2. Start with Priority 1 admin pages (admin_question_edit.php as reference)
+3. Test each conversion thoroughly
+4. Use patterns provided in Section 11
+5. Final validation and cleanup
+
+**Estimated Effort for Implementation:**
+- Phase 1 (Migration):
+  - Admin page refactoring: 4-5 hours (13 files)
+  - AJAX conversion: 1-1.5 hours (4 files)
+  - Testing: 1-2 hours
+  - **Phase 1 Total: 6.5-8.5 hours**
+- Phase 2 (Cleanup):
+  - Template cleanup: 30 minutes
+  - Delete jQuery files: 15 minutes
+  - **Phase 2 Total: 45 minutes**
+- **Combined Total: 7-9 hours**
+
+---
+
+## 11. Phase 1 Detailed Implementation Guide
+
+### 11.1 Vanilla JavaScript Patterns
+
+**Pattern 1: Show/Hide Elements**
+```javascript
+// jQuery
+$("#element-id").show();
+$("#element-id").hide();
+
+// Vanilla JavaScript
+document.getElementById("element-id").style.display = '';
+document.getElementById("element-id").style.display = 'none';
+
+// Using FormVisibility Helper (Recommended)
+FormVisibility.show('element-id');
+FormVisibility.hide('element-id');
+```
+
+**Pattern 2: Enable/Disable Form Fields**
+```javascript
+// jQuery
+$("#checkbox-id").prop('disabled', true);
+
+// Vanilla JavaScript
+document.getElementById("checkbox-id").disabled = true;
+
+// Using FormVisibility Helper
+FormVisibility.setEnabled('checkbox-id', false);
+```
+
+**Pattern 3: Set Checked State**
+```javascript
+// jQuery
+$("#checkbox-id").attr('checked', false);
+
+// Vanilla JavaScript
+document.getElementById("checkbox-id").checked = false;
+
+// Using FormVisibility Helper
+FormVisibility.setChecked('checkbox-id', false);
+```
+
+**Pattern 4: Get Element Value**
+```javascript
+// jQuery
+var value = $("#element-id").val();
+
+// Vanilla JavaScript
+var value = document.getElementById("element-id").value;
+
+// Using FormVisibility Helper
+var value = FormVisibility.getValue('element-id');
+```
+
+**Pattern 5: Change Event Listener**
+```javascript
+// jQuery
+$("#element-id").change(function() {
+    // Handle change
+});
+
+// Vanilla JavaScript
+document.getElementById("element-id").addEventListener('change', function(event) {
+    // Handle change
+});
+
+// Using FormVisibility Helper
+FormVisibility.onChange('element-id', function(event) {
+    // Handle change
+});
+```
+
+**Pattern 6: DOM Ready**
+```javascript
+// jQuery
+$(document).ready(function() {
+    // Code here
+});
+
+// Vanilla JavaScript
+document.addEventListener('DOMContentLoaded', function() {
+    // Code here
+});
+```
+
+### 11.2 Admin Page Conversion Pattern
+
+Most admin pages follow the same pattern:
+
+**Step 1: Identify the Pattern**
+- Find the select/dropdown that triggers changes
+- Find the show/hide/enable/disable operations
+- Identify initial state setup
+
+**Step 2: Create Conversion**
+```php
+<?php
+// Include helper at top of page
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+// ... other includes
+
+// Later in the page, replace jQuery with:
+?>
+
+<!-- Include FormVisibility Helper -->
+<script src="/assets/js/form-visibility-helper.js"></script>
+
+<script type="text/javascript">
+/**
+ * Update form field visibility/state based on selection
+ */
+(function() {
+    'use strict';
+
+    // Define visibility rules by selection value
+    const visibilityRules = {
+        '1': {
+            show: ['field1', 'field2'],
+            hide: ['field3', 'field4'],
+            enable: ['option1'],
+            disable: ['option2', 'option3']
+        },
+        '2': {
+            show: ['field3', 'field4'],
+            hide: ['field1', 'field2'],
+            enable: ['option2'],
+            disable: ['option1', 'option3']
+        }
+        // ... more rules
+    };
+
+    function updateFormState() {
+        const selectedValue = FormVisibility.getValue('select-id');
+        const rules = visibilityRules[selectedValue] || visibilityRules['1'];
+
+        // Apply all rules
+        FormVisibility.setVisibility(rules.show, rules.hide);
+        FormVisibility.setMultipleEnabled(rules.enable, true);
+        FormVisibility.setMultipleEnabled(rules.disable, false);
+    }
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        const selectElement = document.getElementById('select-id');
+        if (!selectElement) return;
+
+        // Set initial state
+        updateFormState();
+
+        // Add change listener
+        selectElement.addEventListener('change', updateFormState);
+    });
+})();
+</script>
+```
+
+### 11.3 AJAX to Fetch API Conversion
+
+**Basic Conversion Pattern:**
+
+```javascript
+// jQuery AJAX
+$.ajax({
+    type: "GET",
+    url: '/api/endpoint',
+    data: { key: value },
+    success: function(data) {
+        console.log('Success:', data);
+    },
+    error: function() {
+        console.error('Error');
+    }
+});
+
+// Fetch API
+fetch('/api/endpoint?key=' + encodeURIComponent(value))
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Success:', data);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+    });
+```
+
+**POST Request Pattern:**
+
+```javascript
+// jQuery
+$.ajax({
+    type: 'POST',
+    url: '/api/create',
+    contentType: 'application/json',
+    data: JSON.stringify({ name: 'value' }),
+    success: function(data) { /* ... */ }
+});
+
+// Fetch
+fetch('/api/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'value' })
+})
+    .then(response => response.json())
+    .then(data => { /* ... */ });
+```
+
+**Form Data Pattern:**
+
+```javascript
+// jQuery
+$.ajax({
+    type: 'POST',
+    url: '/upload',
+    data: new FormData(document.getElementById('myForm')),
+    processData: false,
+    contentType: false,
+    success: function(data) { /* ... */ }
+});
+
+// Fetch
+const formData = new FormData(document.getElementById('myForm'));
+fetch('/upload', {
+    method: 'POST',
+    body: formData
+    // Don't set Content-Type - browser sets it with boundary
+})
+    .then(response => response.json())
+    .then(data => { /* ... */ });
+```
+
+**Load HTML Pattern:**
+
+```javascript
+// jQuery
+$("#appointments").load('endpoint');
+
+// Fetch
+fetch('endpoint')
+    .then(response => response.text())
+    .then(html => {
+        document.getElementById('appointments').innerHTML = html;
+    });
+```
+
+### 11.4 Admin Pages to Convert Checklist
+
+#### High Priority (50+ jQuery instances)
+- [ ] `/adm/admin_question_edit.php` - Reference implementation
+
+#### Medium Priority (10-50 jQuery instances)
+- [ ] `/adm/admin_analytics_activitybydate.php`
+- [ ] `/adm/admin_analytics_email_stats.php`
+- [ ] `/adm/admin_analytics_users.php`
+- [ ] `/adm/admin_coupon_code_edit.php`
+- [ ] `/adm/admin_email_template_edit.php`
+- [ ] `/adm/admin_event_edit.php`
+- [ ] `/adm/admin_product_edit.php`
+- [ ] `/adm/admin_product_version_edit.php`
+- [ ] `/adm/admin_settings_email.php`
+- [ ] `/adm/admin_settings_payments.php`
+
+#### Low Priority (1-10 jQuery instances)
+- [ ] `/adm/admin_public_menu_edit.php`
+- [ ] `/adm/admin_settings.php`
+
+### 11.5 AJAX Files to Convert Checklist
+
+- [ ] `/views/profile/subscriptions.php` - Convert `$("#appointments").load()` to fetch
+- [ ] `/utils/api_example_js_list.php` - Convert `$.ajax()` to fetch
+- [ ] `/utils/api_example_js_create.php` - Convert `$.ajax()` to fetch
+- [ ] `/utils/api_example_js_single.php` - Convert `$.ajax()` to fetch
+
+### 11.6 Conversion Workflow
+
+**For Each File:**
+
+1. **Create Backup**
+   ```bash
+   cp /path/to/file.php /path/to/file.php.bak
+   ```
+
+2. **Include FormVisibility Helper (if needed)**
+   ```html
+   <script src="/assets/js/form-visibility-helper.js"></script>
+   ```
+
+3. **Find jQuery Patterns**
+   - `$(document).ready(...)` → `document.addEventListener('DOMContentLoaded', ...)`
+   - `$("#id").show()` → `FormVisibility.show('id')`
+   - `$("#id").hide()` → `FormVisibility.hide('id')`
+   - `$("#id").prop('disabled', ...)` → `FormVisibility.setEnabled('id', ...)`
+   - `$("#id").change(fn)` → `document.getElementById('id').addEventListener('change', fn)`
+
+4. **Test**
+   ```bash
+   php -l /path/to/file.php
+   ```
+
+5. **Browser Testing**
+   - Check form interactions
+   - Verify all show/hide operations work
+   - Check browser console for errors
+
+### 11.7 Quick Reference - jQuery to Vanilla JS
+
+| jQuery | Vanilla JS | FormVisibility |
+|--------|-----------|-----------------|
+| `$("#id").val()` | `document.getElementById('id').value` | `FormVisibility.getValue('id')` |
+| `$("#id").show()` | `document.getElementById('id').style.display = ''` | `FormVisibility.show('id')` |
+| `$("#id").hide()` | `document.getElementById('id').style.display = 'none'` | `FormVisibility.hide('id')` |
+| `$("#id").prop('disabled', true)` | `document.getElementById('id').disabled = true` | `FormVisibility.setEnabled('id', false)` |
+| `$("#id").attr('checked', false)` | `document.getElementById('id').checked = false` | `FormVisibility.setChecked('id', false)` |
+| `$("#id").change(fn)` | `document.getElementById('id').addEventListener('change', fn)` | `FormVisibility.onChange('id', fn)` |
+| `$(document).ready(fn)` | `document.addEventListener('DOMContentLoaded', fn)` | N/A |
+| `$.ajax({...})` | `fetch(...).then(...).catch(...)` | N/A |
+
+---
+
+## 12. Future Considerations
 
 After jQuery removal:
 1. **Evaluate other jQuery plugins** - Check if any other plugins require jQuery
-2. **Monitor Trumbowyg updates** - Watch for jQuery-free version
-3. **Consider replacing rich text editor** - TinyMCE (Canvas theme) doesn't need jQuery
-4. **Modernize remaining JavaScript** - Consider ES6 modules and bundling
-5. **Performance monitoring** - Track metrics to ensure improvements are maintained
+2. **Modernize remaining JavaScript** - Consider ES6 modules and bundling
+3. **Performance monitoring** - Track metrics to ensure improvements are maintained
