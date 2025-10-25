@@ -885,6 +885,9 @@ abstract class FormWriterV2Base {
         // This is called AFTER all fields have been registered, so we have complete validation rules
         $this->outputJavascriptValidation();
 
+        // Output any ready scripts added via addReadyScript()
+        echo $this->outputReadyScripts();
+
         echo '</form>';
     }
 
@@ -1116,4 +1119,191 @@ abstract class FormWriterV2Base {
     abstract protected function outputFileInput($name, $label, $options);
     abstract protected function outputHiddenInput($name, $options);
     abstract protected function outputSubmitButton($name, $label, $options);
+
+    // ===== NEW FIELD VISIBILITY & CUSTOM SCRIPT METHODS =====
+
+    /**
+     * Array to store ready scripts for output at form end
+     */
+    protected $ready_scripts = array();
+
+    /**
+     * Add JavaScript to run when form loads
+     * @param string $script - Raw JavaScript (will be wrapped in DOMContentLoaded)
+     */
+    public function addReadyScript($script) {
+        if (!isset($this->ready_scripts)) {
+            $this->ready_scripts = array();
+        }
+        $this->ready_scripts[] = $script;
+    }
+
+    /**
+     * Output all accumulated ready scripts
+     * @return string - JavaScript HTML to be included before form close
+     */
+    protected function outputReadyScripts() {
+        if (empty($this->ready_scripts)) return '';
+
+        $output = '<script>';
+        $output .= 'document.addEventListener("DOMContentLoaded", function() {';
+        foreach ($this->ready_scripts as $script) {
+            $output .= $script;
+        }
+        $output .= '});';
+        $output .= '</script>';
+        return $output;
+    }
+
+    /**
+     * Sanitize field name for use as JavaScript variable name
+     * @param string $fieldName - Field name that may contain special characters
+     * @return string - Valid JavaScript variable name
+     */
+    protected function sanitizeForJsVariable($fieldName) {
+        // Replace non-alphanumeric characters with underscores
+        // Ensure it starts with a letter or underscore
+        $sanitized = preg_replace('/[^a-zA-Z0-9_]/', '_', $fieldName);
+        if (preg_match('/^[0-9]/', $sanitized)) {
+            $sanitized = '_' . $sanitized;
+        }
+        return $sanitized;
+    }
+
+    /**
+     * Validate visibility rules for conflicts and errors
+     * @param string $fieldId - Field ID being configured
+     * @param array $rules - Visibility rules to validate
+     */
+    protected function validateVisibilityRules($fieldId, $rules) {
+        foreach ($rules as $selectValue => $rule) {
+            $show = isset($rule['show']) ? $rule['show'] : array();
+            $hide = isset($rule['hide']) ? $rule['hide'] : array();
+
+            // Check for conflicting fields
+            $conflicts = array_intersect($show, $hide);
+            if (!empty($conflicts)) {
+                $conflictList = implode(', ', $conflicts);
+                trigger_error(
+                    "Visibility conflict in field '{$fieldId}' for value '{$selectValue}': " .
+                    "Fields cannot be both shown and hidden: {$conflictList}",
+                    E_USER_ERROR
+                );
+            }
+
+            // Check for non-string values
+            foreach (array_merge($show, $hide) as $fieldRef) {
+                if (!is_string($fieldRef)) {
+                    trigger_error(
+                        "Invalid field reference in '{$fieldId}': field IDs must be strings, " .
+                        "got " . gettype($fieldRef),
+                        E_USER_ERROR
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Generate visibility rules JavaScript
+     * @param string $fieldName - Field identifier (used for variable naming)
+     * @param string $fieldId - HTML id of the select element
+     * @param array $rules - Visibility rules
+     * @return string - JavaScript code
+     */
+    protected function generateVisibilityScript($fieldName, $fieldId, $rules) {
+        // Validate rules first
+        $this->validateVisibilityRules($fieldId, $rules);
+
+        // Sanitize field name for JavaScript variable
+        $varName = $this->sanitizeForJsVariable($fieldName);
+
+        // Convert PHP array to JavaScript object
+        $jsRules = json_encode($rules);
+
+        $output = '<script>' . "\n";
+        $output .= '(function() {' . "\n";
+        $output .= '  const visibilityRules' . $varName . ' = ' . $jsRules . ';' . "\n";
+        $output .= '  ' . "\n";
+        $output .= '  function update' . $varName . 'Visibility() {' . "\n";
+        $output .= '    const selected = document.getElementById("' . $fieldId . '").value;' . "\n";
+        $output .= '    const rules = visibilityRules' . $varName . '[selected] || {};' . "\n";
+        $output .= '    ' . "\n";
+        $output .= '    (rules.show || []).forEach(function(id) {' . "\n";
+        $output .= '      const el = document.getElementById(id);' . "\n";
+        $output .= '      if (el) {' . "\n";
+        $output .= '        // Find parent that contains both label and field' . "\n";
+        $output .= '        let parent = el.parentElement;' . "\n";
+        $output .= '        let found = false;' . "\n";
+        $output .= '        while (parent && parent !== document.body && !found) {' . "\n";
+        $output .= '          if (parent.classList && (parent.classList.contains("form-group") || ' . "\n";
+        $output .= '              parent.classList.contains("mb-4") || ' . "\n";
+        $output .= '              parent.classList.contains("field-container"))) {' . "\n";
+        $output .= '            parent.style.display = "";' . "\n";
+        $output .= '            found = true;' . "\n";
+        $output .= '          }' . "\n";
+        $output .= '          parent = parent.parentElement;' . "\n";
+        $output .= '        }' . "\n";
+        $output .= '        // Fallback: just show the element if no container found' . "\n";
+        $output .= '        if (!found) {' . "\n";
+        $output .= '          el.style.display = "";' . "\n";
+        $output .= '        }' . "\n";
+        $output .= '      }' . "\n";
+        $output .= '    });' . "\n";
+        $output .= '    ' . "\n";
+        $output .= '    (rules.hide || []).forEach(function(id) {' . "\n";
+        $output .= '      const el = document.getElementById(id);' . "\n";
+        $output .= '      if (el) {' . "\n";
+        $output .= '        // Find parent that contains both label and field' . "\n";
+        $output .= '        let parent = el.parentElement;' . "\n";
+        $output .= '        let found = false;' . "\n";
+        $output .= '        while (parent && parent !== document.body && !found) {' . "\n";
+        $output .= '          if (parent.classList && (parent.classList.contains("form-group") || ' . "\n";
+        $output .= '              parent.classList.contains("mb-4") || ' . "\n";
+        $output .= '              parent.classList.contains("field-container"))) {' . "\n";
+        $output .= '            parent.style.display = "none";' . "\n";
+        $output .= '            found = true;' . "\n";
+        $output .= '          }' . "\n";
+        $output .= '          parent = parent.parentElement;' . "\n";
+        $output .= '        }' . "\n";
+        $output .= '        // Fallback: just hide the element if no container found' . "\n";
+        $output .= '        if (!found) {' . "\n";
+        $output .= '          el.style.display = "none";' . "\n";
+        $output .= '        }' . "\n";
+        $output .= '      }' . "\n";
+        $output .= '    });' . "\n";
+        $output .= '  }' . "\n";
+        $output .= '  ' . "\n";
+        $output .= '  document.addEventListener("DOMContentLoaded", function() {' . "\n";
+        $output .= '    const selectEl = document.getElementById("' . $fieldId . '");' . "\n";
+        $output .= '    if (!selectEl) return;' . "\n";
+        $output .= '    update' . $varName . 'Visibility();' . "\n";
+        $output .= '    selectEl.addEventListener("change", update' . $varName . 'Visibility);' . "\n";
+        $output .= '  });' . "\n";
+        $output .= '})();' . "\n";
+        $output .= '</script>';
+
+        return $output;
+    }
+
+    /**
+     * Generate field-level event handler wrapper
+     * @param string $fieldId - HTML id of the element
+     * @param string $scriptBody - JavaScript to execute in handler
+     * @return string - JavaScript code with addEventListener wrapper
+     */
+    protected function generateFieldScript($fieldId, $scriptBody) {
+        $output = '<script>' . "\n";
+        $output .= 'document.addEventListener("DOMContentLoaded", function() {' . "\n";
+        $output .= '  const selectEl = document.getElementById("' . $fieldId . '");' . "\n";
+        $output .= '  if (!selectEl) return;' . "\n";
+        $output .= '  ' . "\n";
+        $output .= '  selectEl.addEventListener("change", function() {' . "\n";
+        $output .= $scriptBody;
+        $output .= '  });' . "\n";
+        $output .= '});' . "\n";
+        $output .= '</script>';
+
+        return $output;
+    }
 }

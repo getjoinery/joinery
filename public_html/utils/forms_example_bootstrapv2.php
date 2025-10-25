@@ -366,6 +366,124 @@ $formwriter3->fileinput('document', 'Upload Document', [
 // Hidden Input
 $formwriter3->hiddeninput('form_id', '', ['value' => 'test123']);
 
+// ==============================================
+// VISIBILITY & CUSTOM SCRIPT TESTS
+// ==============================================
+echo '<hr><h3>FormWriter V2 Visibility Rules & Custom Scripts Tests</h3>';
+echo '<p>Testing the new visibility and custom script features with FormWriter V2:</p>';
+
+// Test 1: Simple toggle using visibility rules
+$formwriter3->dropinput('test_type_v2_1', 'Test Type (Simple Toggle)', [
+    'options' => ['option_a' => 'Option A', 'option_b' => 'Option B'],
+    'value' => 'option_a',
+    'visibility_rules' => [
+        'option_a' => ['show' => ['test_field_v2_1a'], 'hide' => ['test_field_v2_1b']],
+        'option_b' => ['show' => ['test_field_v2_1b'], 'hide' => ['test_field_v2_1a']]
+    ]
+]);
+
+$formwriter3->textinput('test_field_v2_1a', 'Field A (for Option A)', [
+    'placeholder' => 'Visible when Option A selected'
+]);
+
+$formwriter3->textinput('test_field_v2_1b', 'Field B (for Option B)', [
+    'placeholder' => 'Visible when Option B selected'
+]);
+
+// Test 2: Custom script with conditional logic
+$formwriter3->dropinput('test_type_v2_2', 'Size Selector (Custom Script)', [
+    'options' => ['small' => 'Small', 'medium' => 'Medium', 'large' => 'Large'],
+    'value' => 'small',
+    'custom_script' => '
+        const size = this.value;
+        const price = document.getElementById("test_price_v2");
+        const warning = document.getElementById("test_bulk_warning_v2");
+
+        if (size === "small") {
+            if (price) price.value = "9.99";
+            if (warning) warning.style.display = "none";
+        } else if (size === "medium") {
+            if (price) price.value = "19.99";
+            if (warning) warning.style.display = "none";
+        } else if (size === "large") {
+            if (price) price.value = "29.99";
+            if (warning) warning.style.display = "";
+        }
+    '
+]);
+
+$formwriter3->textinput('test_price_v2', 'Calculated Price', [
+    'value' => '9.99',
+    'readonly' => true
+]);
+
+$formwriter3->textinput('test_bulk_warning_v2', 'Bulk Order Warning', [
+    'value' => 'Bulk orders require manager approval',
+    'readonly' => true,
+    'helptext' => 'Shown only for large size'
+]);
+
+// Test 3: Form-level script for cross-field logic
+$formwriter3->addReadyScript('
+    const countryV2 = document.getElementById("test_country_v2");
+    if (countryV2) {
+        countryV2.addEventListener("change", function() {
+            const country = this.value;
+            const stateEl = document.getElementById("test_state_v2");
+            const zipEl = document.getElementById("test_zip_v2");
+            const customEl = document.getElementById("test_custom_v2");
+
+            if (!stateEl || !zipEl || !customEl) return;
+
+            if (country === "us") {
+                stateEl.style.display = "";
+                stateEl.placeholder = "State";
+                zipEl.style.display = "";
+                zipEl.placeholder = "ZIP Code (5 digits)";
+                customEl.style.display = "none";
+            } else if (country === "ca") {
+                stateEl.style.display = "";
+                stateEl.placeholder = "Province";
+                zipEl.style.display = "";
+                zipEl.placeholder = "Postal Code";
+                customEl.style.display = "none";
+            } else {
+                stateEl.style.display = "none";
+                zipEl.style.display = "none";
+                customEl.style.display = "";
+            }
+        });
+
+        // Trigger on load
+        const event = new Event("change");
+        countryV2.dispatchEvent(event);
+    }
+');
+
+$formwriter3->dropinput('test_country_v2', 'Country', [
+    'options' => ['us' => 'United States', 'ca' => 'Canada', 'other' => 'Other'],
+    'value' => 'us'
+]);
+
+$formwriter3->textinput('test_state_v2', 'State/Province', [
+    'placeholder' => 'State'
+]);
+
+$formwriter3->textinput('test_zip_v2', 'ZIP/Postal Code', [
+    'placeholder' => 'ZIP Code (5 digits)'
+]);
+
+$formwriter3->textinput('test_custom_v2', 'Custom Location', [
+    'placeholder' => 'Enter your location'
+]);
+
+echo '<div class="alert alert-info mt-3">';
+echo '<strong>V2 Test Summary:</strong><ul>';
+echo '<li><strong>Test 1:</strong> Toggle fields with Option A/B selector</li>';
+echo '<li><strong>Test 2:</strong> Size selector updates price automatically</li>';
+echo '<li><strong>Test 3:</strong> Country selector changes field labels and visibility</li>';
+echo '</ul></div>';
+
 // Submit Button
 $formwriter3->submitbutton('submit', 'Submit Form', ['class' => 'btn btn-primary btn-lg']);
 
