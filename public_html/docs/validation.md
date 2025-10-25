@@ -374,197 +374,45 @@ class Product extends SystemBase {
 
 ---
 
-## 3. FormWriter v1 Integration (Legacy)
+## 3. FormWriter Integration
 
-The original FormWriter class combines validation rule generation with HTML form generation.
+FormWriter provides a convenient interface for generating validation rules alongside form HTML. Both FormWriter V1 and V2 support the `set_validate()` method to automatically generate JoineryValidation JavaScript.
 
-### FormWriter v1: set_validate() Method
+### Quick Example
 
 ```php
-<?php
-// In a view or public page
-require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-
 $formwriter = new FormWriterBootstrap('contact_form');
 
 // Define validation rules
 $validation_rules = array();
-$validation_rules['name']['required']['value'] = 'true';
 $validation_rules['email']['required']['value'] = 'true';
 $validation_rules['email']['email']['value'] = 'true';
-$validation_rules['message']['required']['value'] = 'true';
-$validation_rules['message']['minlength']['value'] = '10';
-$validation_rules['message']['minlength']['message'] = '"Message must be at least 10 characters"';
+$validation_rules['password']['minlength']['value'] = '8';
 
-// Output validation script (generates JavaScript)
+// Output validation script (generates JavaScript automatically)
 echo $formwriter->set_validate($validation_rules);
 
-// Build the form
-echo $formwriter->begin_form('contact_form', 'POST', '/submit');
-
-echo $formwriter->textinput('Name', 'name', 'form-control', 50, '', '', 255);
-echo $formwriter->textinput('Email', 'email', 'form-control', 50, '', '', 255);
-echo $formwriter->textbox('Message', 'message', 'form-control', 5, 40, '', '');
-
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Send', 'btn btn-primary');
-echo $formwriter->end_buttons();
-
-echo $formwriter->end_form();
-?>
+// Build the form with validated fields
+$formwriter->begin_form();
+$formwriter->textinput('email', 'Email', ['required' => true, 'validation' => 'email']);
+$formwriter->passwordinput('password', 'Password', ['validation' => ['minlength' => 8]]);
+$formwriter->end_form();
 ```
 
-### FormWriter v1 Output Structure
+**FormWriter V2** adds model-aware validation - it can automatically extract validation rules from model `field_specifications` for seamless integration.
 
-The `set_validate()` method generates:
+**For complete FormWriter validation documentation**, including:
+- V1 and V2 usage patterns
+- Model-aware validation
+- Common validation patterns
+- Custom error messages
+- Integration examples
 
-```html
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const validationOptions = {
-        debug: false,
-        rules: {
-            email: { required: true, email: true },
-            password: { required: true, minlength: 8 }
-        },
-        messages: {
-            email: { required: "Email is required", email: "Invalid email" },
-            password: { minlength: "Minimum 8 characters" }
-        }
-    };
-
-    JoineryValidation.init('formId', validationOptions);
-});
-</script>
-```
-
-### FormWriter v1 Available Methods
-
-- `set_validate($rules, $custom_js, $debug)` - Generate validation script
-- `begin_form()` - Start form tag
-- `textinput()` - Text input field
-- `passwordinput()` - Password field
-- `textbox()` - Textarea field
-- `dropdownlist()` - Select dropdown
-- `checkboxinput()` - Checkbox
-- `radioinput()` - Radio button
-- `hiddeninput()` - Hidden field
-- `start_buttons()` - Button container start
-- `new_form_button()` - Submit/button
-- `end_buttons()` - Button container end
-- `end_form()` - Close form tag
+See **[formwriter.md - Section 5: Validation Integration](formwriter.md#5-validation-integration)**
 
 ---
 
-## 4. FormWriter v2 Integration (Current)
-
-FormWriter v2 (FormWriterV2Base and implementations) provides advanced validation integration with model-aware validation.
-
-### FormWriter v2: set_validate() Method
-
-```php
-<?php
-// In an admin page view
-$page = new AdminPage();
-$formwriter = $page->getFormWriter('user_form');
-
-// Method 1: Simple validation rules
-$validation_rules = array();
-$validation_rules['usr_email']['required']['value'] = 'true';
-$validation_rules['usr_email']['email']['value'] = 'true';
-
-echo $formwriter->set_validate($validation_rules);
-
-// Method 2: Model-aware validation (FormWriter v2 feature)
-// FormWriter can automatically extract validation from model field_specifications
-?>
-```
-
-### FormWriter v2 Model Integration
-
-FormWriter v2 can automatically generate validation from model field_specifications:
-
-```php
-<?php
-// In admin form
-require_once(PathHelper::getIncludePath('data/user_class.php'));
-
-$user = new User($user_id ?? NULL, !empty($user_id));
-$formwriter = $page->getFormWriter('user_form');
-
-// Generate validation from model field_specifications
-$validation_rules = array();
-foreach (User::$field_specifications as $field_name => $spec) {
-    if (isset($spec['required']) || isset($spec['validation'])) {
-        $validation_rules[$field_name] = array();
-
-        // Add required rule
-        if (isset($spec['required']) && $spec['required']) {
-            $validation_rules[$field_name]['required']['value'] = 'true';
-        }
-
-        // Add other validation rules
-        if (isset($spec['validation'])) {
-            foreach ($spec['validation'] as $rule => $value) {
-                if ($rule !== 'messages') {
-                    if (is_bool($value)) {
-                        $validation_rules[$field_name][$rule]['value'] = $value ? 'true' : 'false';
-                    } else {
-                        $validation_rules[$field_name][$rule]['value'] = (string)$value;
-                    }
-                }
-            }
-        }
-    }
-}
-
-echo $formwriter->set_validate($validation_rules);
-?>
-```
-
-### FormWriter v2 Features
-
-- **Model-aware validation** - Reads from field_specifications
-- **Bootstrap 5 integration** - Automatic `is-invalid` / `is-valid` classes
-- **Custom error messages** - Per field, per rule
-- **Unique constraint detection** - Auto-generates unique validation
-- **AJAX validation support** - Remote validation endpoints
-
-### FormWriter v2 Bootstrap Integration
-
-```php
-<?php
-// In bootstrap theme
-require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-
-$formwriter = new FormWriterV2Bootstrap('contact_form');
-
-// Set validation
-$validation_rules = array(
-    'email' => array(
-        'required' => array('value' => 'true', 'message' => '"Email is required"'),
-        'email' => array('value' => 'true', 'message' => '"Invalid email format"')
-    ),
-    'name' => array(
-        'required' => array('value' => 'true'),
-        'minlength' => array('value' => '2')
-    )
-);
-
-echo $formwriter->set_validate($validation_rules);
-
-// FormWriter v2 generates Bootstrap 5 compatible validation
-echo $formwriter->textinput('Email', 'email', 'form-control', 50, '', '', 255);
-// Output includes:
-// - form-control class for Bootstrap
-// - Validation error feedback div with invalid-feedback class
-// - is-invalid/is-valid classes applied by JoineryValidation.js
-?>
-```
-
----
-
-## 5. Complete Validation Example
+## 4. Complete Validation Example
 
 Here's a complete end-to-end validation example with all layers:
 
@@ -762,7 +610,7 @@ $page->admin_footer();
 
 ---
 
-## 6. Validation Rule Reference
+## 5. Validation Rule Reference
 
 ### Required Fields
 
@@ -885,7 +733,7 @@ $rules['field_name']['required']['value'] = 'true';
 
 ---
 
-## 7. Common Validation Patterns
+## 6. Common Validation Patterns
 
 ### Email Signup Form
 
@@ -933,7 +781,7 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';  // Digits, dash, 
 
 ---
 
-## 8. Troubleshooting
+## 7. Troubleshooting
 
 ### Validation not triggering
 
@@ -978,7 +826,7 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';  // Digits, dash, 
 
 ---
 
-## 9. Performance Considerations
+## 8. Performance Considerations
 
 ### Minimize Validation Rules
 - Only validate what needs validation
@@ -997,7 +845,7 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';  // Digits, dash, 
 
 ---
 
-## 10. Security Notes
+## 9. Security Notes
 
 ⚠️ **IMPORTANT:** Never trust client-side validation alone!
 
