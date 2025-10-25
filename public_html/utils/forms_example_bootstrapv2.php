@@ -374,7 +374,7 @@ echo '<p>Testing the new visibility and custom script features with FormWriter V
 
 // Test 1: Simple toggle using visibility rules
 $formwriter3->dropinput('test_type_v2_1', 'Test Type (Simple Toggle)', [
-    'options' => ['option_a' => 'Option A', 'option_b' => 'Option B'],
+    'options' => ['Option A' => 'option_a', 'Option B' => 'option_b'],
     'value' => 'option_a',
     'visibility_rules' => [
         'option_a' => ['show' => ['test_field_v2_1a'], 'hide' => ['test_field_v2_1b']],
@@ -392,7 +392,7 @@ $formwriter3->textinput('test_field_v2_1b', 'Field B (for Option B)', [
 
 // Test 2: Custom script with conditional logic
 $formwriter3->dropinput('test_type_v2_2', 'Size Selector (Custom Script)', [
-    'options' => ['small' => 'Small', 'medium' => 'Medium', 'large' => 'Large'],
+    'options' => ['Small' => 'small', 'Medium' => 'medium', 'Large' => 'large'],
     'value' => 'small',
     'custom_script' => '
         const size = this.value;
@@ -461,7 +461,7 @@ $formwriter3->addReadyScript('
 ');
 
 $formwriter3->dropinput('test_country_v2', 'Country', [
-    'options' => ['us' => 'United States', 'ca' => 'Canada', 'other' => 'Other'],
+    'options' => ['United States' => 'us', 'Canada' => 'ca', 'Other' => 'other'],
     'value' => 'us'
 ]);
 

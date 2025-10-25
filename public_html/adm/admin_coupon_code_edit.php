@@ -38,31 +38,6 @@
 
 	echo $formwriter->set_validate($validation_rules);
 
-	?>
-	<script type="text/javascript">
-
-		function set_applies_choices(){
-			var value = $("#ccd_applies_to").val();
-			if(value == 3){  //ONE PRICE
-				$("#products_list_container").show();
-			}
-			else {
-				$("#products_list_container").hide();
-			}
-		}
-
-		$(document).ready(function() {
-
-			set_applies_choices();
-			$("#ccd_applies_to").change(function() {
-				set_applies_choices();
-			});
-
-		});
-
-	</script>
-	<?php
-
 	echo $formwriter->begin_form('form', 'POST', '/admin/admin_coupon_code_edit');
 
 	if($coupon_code->key){
@@ -87,7 +62,30 @@
 	echo $formwriter->dropinput("Is this coupon stackable?", "ccd_is_stackable", "ctrlHolder", $optionvals, $coupon_code->get('ccd_is_stackable'), '', FALSE);
 
 	$optionvals = array("All products"=>0, "Subscriptions only"=>1, "One time purchases only"=>2, "Custom (below)"=>3);
-	echo $formwriter->dropinput("Applies to", "ccd_applies_to", "ctrlHolder", $optionvals, $coupon_code->get('ccd_applies_to'), '', FALSE);
+	echo $formwriter->dropinput("Applies to", "ccd_applies_to", array(
+		'visibility_rules' => array(
+			'' => array(
+				'show' => array(),
+				'hide' => array('products_list_container')
+			),
+			3 => array(
+				'show' => array('products_list_container'),
+				'hide' => array()
+			),
+			0 => array(
+				'show' => array(),
+				'hide' => array('products_list_container')
+			),
+			1 => array(
+				'show' => array(),
+				'hide' => array('products_list_container')
+			),
+			2 => array(
+				'show' => array(),
+				'hide' => array('products_list_container')
+			)
+		)
+	), $optionvals, $coupon_code->get('ccd_applies_to'), '', TRUE);
 
 	//GET ALL PRODUCTS
 	$searches = array();

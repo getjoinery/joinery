@@ -151,25 +151,27 @@ $formwriter->passwordinput('password_confirm', 'Confirm Password', [
 ```php
 // V1 Style
 $formwriter->dropinput('country', 'Country', [
-    'us' => 'United States',
-    'ca' => 'Canada',
-    'uk' => 'United Kingdom'
+    'United States' => 'us',
+    'Canada' => 'ca',
+    'United Kingdom' => 'uk'
 ], [
     'value' => 'us',  // Default selected
     'required' => true
 ]);
 
-// V2 Style
+// V2 Style - Same array format as V1!
 $formwriter->dropinput('country', 'Country', [
     'options' => [
-        'us' => 'United States',
-        'ca' => 'Canada',
-        'uk' => 'United Kingdom'
+        'United States' => 'us',
+        'Canada' => 'ca',
+        'United Kingdom' => 'uk'
     ],
     'value' => 'us',
     'empty_option' => '-- Select Country --'
 ]);
 ```
+
+**Note:** Both V1 and V2 use the same dropdown array format: `'Display Text' => 'actual_value'`
 
 ### Textarea
 
