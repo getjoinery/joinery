@@ -250,6 +250,108 @@ echo $formwriter->datetimeinput2('Combined DateTime Horizontal', 'combined_datet
 // Textbox with TinyMCE
 echo $formwriter->textbox('Rich Text Editor', 'rich_text', '', 5, 80, NULL, '', 'yes');
 
+// ==============================================
+// VISIBILITY & CUSTOM SCRIPT TESTS
+// ==============================================
+echo '<hr><h3>FormWriter Visibility Rules & Custom Scripts Tests</h3>';
+echo '<p>The following test fields demonstrate the new visibility and custom script features:</p>';
+
+// Test 1: Simple toggle between two fields using visibility rules
+$test_options_1 = array();
+echo $formwriter->dropinput('Test Type (Simple Toggle)', 'test_type_1', array(
+    'visibility_rules' => array(
+        'option_a' => array('show' => array('test-field-1a'), 'hide' => array('test-field-1b')),
+        'option_b' => array('show' => array('test-field-1b'), 'hide' => array('test-field-1a'))
+    )
+), $test_options_1, '', 'Select an option', true, false);
+$test_options_1 = array('option_a' => 'Option A', 'option_b' => 'Option B');
+echo $formwriter->dropinput('Test Type (Simple Toggle)', 'test-type-1', array(
+    'visibility_rules' => array(
+        'option_a' => array('show' => array('test-field-1a'), 'hide' => array('test-field-1b')),
+        'option_b' => array('show' => array('test-field-1b'), 'hide' => array('test-field-1a'))
+    )
+), $test_options_1, 'option_a', 'Select an option', true, false);
+
+// Create the target fields
+echo $formwriter->textinput('Field A (shown for Option A)', 'test-field-1a', '', 30, '', 'This field is visible when Option A is selected');
+echo $formwriter->textinput('Field B (shown for Option B)', 'test-field-1b', '', 30, '', 'This field is visible when Option B is selected');
+
+// Test 2: Custom script with conditional logic
+$test_options_2 = array('small' => 'Small', 'medium' => 'Medium', 'large' => 'Large');
+echo $formwriter->dropinput('Test Type (Custom Script)', 'test-type-2', array(
+    'custom_script' => '
+        const size = this.value;
+        const price = document.getElementById("test-price");
+        const warning = document.getElementById("test-bulk-warning");
+
+        if (size === "small") {
+            if (price) price.value = "9.99";
+            if (warning) warning.style.display = "none";
+        } else if (size === "medium") {
+            if (price) price.value = "19.99";
+            if (warning) warning.style.display = "none";
+        } else if (size === "large") {
+            if (price) price.value = "29.99";
+            if (warning) warning.style.display = "";
+        }
+    '
+), $test_options_2, 'small', 'Select a size', true, false);
+
+echo $formwriter->textinput('Price', 'test-price', '', 10, '9.99', 'Price updates based on size');
+echo $formwriter->textinput('Bulk Warning', 'test-bulk-warning', '', 50, 'Bulk orders require approval', 'Shown only for Large size', 255, '', true);
+
+// Test 3: Form-level script for cross-field logic
+$formwriter->addReadyScript('
+    document.getElementById("test-country").addEventListener("change", function() {
+        const country = this.value;
+        const stateEl = document.getElementById("test-state");
+        const zipEl = document.getElementById("test-zip");
+        const customEl = document.getElementById("test-custom-location");
+
+        if (!stateEl || !zipEl || !customEl) return;
+
+        if (country === "us") {
+            stateEl.style.display = "";
+            stateEl.placeholder = "State";
+            zipEl.style.display = "";
+            zipEl.placeholder = "ZIP Code (5 digits)";
+            customEl.style.display = "none";
+        } else if (country === "ca") {
+            stateEl.style.display = "";
+            stateEl.placeholder = "Province";
+            zipEl.style.display = "";
+            zipEl.placeholder = "Postal Code";
+            customEl.style.display = "none";
+        } else {
+            stateEl.style.display = "none";
+            zipEl.style.display = "none";
+            customEl.style.display = "";
+        }
+    });
+
+    // Initialize on load
+    const countryEl = document.getElementById("test-country");
+    if (countryEl) {
+        const event = new Event("change");
+        countryEl.dispatchEvent(event);
+    }
+');
+
+$country_options = array('us' => 'United States', 'ca' => 'Canada', 'other' => 'Other');
+echo $formwriter->dropinput('Country', 'test-country', '', $country_options, 'us', 'Select your country', true, false);
+echo $formwriter->textinput('State/Province', 'test-state', '', 30, '', 'Enter your state or province');
+echo $formwriter->textinput('ZIP/Postal Code', 'test-zip', '', 15, '', 'Enter your ZIP or postal code');
+echo $formwriter->textinput('Custom Location (for Other)', 'test-custom-location', '', 50, '', 'Enter your location');
+
+echo '<div class="alert alert-info mt-3">';
+echo '<strong>Test Summary:</strong><ul>';
+echo '<li><strong>Test 1 (Simple Toggle):</strong> Select between Option A and B to see fields toggle</li>';
+echo '<li><strong>Test 2 (Custom Script):</strong> Size selection updates price field automatically</li>';
+echo '<li><strong>Test 3 (Form-Level):</strong> Country selection changes field labels and visibility</li>';
+echo '</ul>';
+echo '<p>Check browser console (F12) for any warnings or errors.</p>';
+echo '</div>';
+
 // 21. Buttons
 echo $formwriter->start_buttons();
 echo $formwriter->new_form_button('Cancel', 'secondary');

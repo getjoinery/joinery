@@ -360,6 +360,13 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
+        // Check for visibility rules or custom scripts in options
+        if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
+            echo $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
+        } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
+            echo $this->generateFieldScript($id, $options['custom_script']);
+        }
+
         echo '</div>';
     }
 
@@ -414,6 +421,13 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         }
 
         echo '</div>';
+
+        // Check for visibility rules or custom scripts in options
+        if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
+            echo $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
+        } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
+            echo $this->generateFieldScript($id, $options['custom_script']);
+        }
     }
 
     /**

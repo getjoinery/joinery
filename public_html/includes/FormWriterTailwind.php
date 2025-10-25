@@ -41,7 +41,9 @@ class FormWriterTailwind extends FormWriterBase {
 	}
 
 	function end_form() {
-		return '</form>';
+		$output = $this->outputReadyScripts();
+		$output .= '</form>';
+		return $output;
 	}
 
 	function textinput($label, $id, $class, $size, $value, $hint, $maxlength=255,
@@ -863,6 +865,20 @@ class FormWriterTailwind extends FormWriterBase {
 		}
 
 		$output .= '</div>';
+
+		// Check for visibility rules or custom scripts in the class parameter
+		if (is_array($class)) {
+			$visibility_rules = isset($class['visibility_rules']) ? $class['visibility_rules'] : null;
+			$custom_script = isset($class['custom_script']) ? $class['custom_script'] : null;
+
+			// Generate JavaScript if provided
+			if (!empty($visibility_rules)) {
+				$output .= $this->generateVisibilityScript($id, $id, $visibility_rules);
+			} elseif (!empty($custom_script)) {
+				$output .= $this->generateFieldScript($id, $custom_script);
+			}
+		}
+
 		return $output;
 	}
 
