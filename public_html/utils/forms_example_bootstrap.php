@@ -301,28 +301,33 @@ echo '<div id="test_bulk_warning_container" class="errorplacement mb-3"><label f
 $formwriter->addReadyScript('
     document.getElementById("test_country").addEventListener("change", function() {
         const country = this.value;
+        // Target container elements to hide/show both label and input
+        const stateContainer = document.getElementById("test_state_container");
+        const zipContainer = document.getElementById("test_zip_container");
+        const customContainer = document.getElementById("test_custom_container");
+
+        // Also get the input elements for placeholder changes
         const stateEl = document.getElementById("test_state");
         const zipEl = document.getElementById("test_zip");
-        const customEl = document.getElementById("test_custom");
 
-        if (!stateEl || !zipEl || !customEl) return;
+        if (!stateContainer || !zipContainer || !customContainer || !stateEl || !zipEl) return;
 
         if (country === "us") {
-            stateEl.style.display = "";
+            stateContainer.style.display = "";
+            zipContainer.style.display = "";
+            customContainer.style.display = "none";
             stateEl.placeholder = "State";
-            zipEl.style.display = "";
             zipEl.placeholder = "ZIP Code (5 digits)";
-            customEl.style.display = "none";
         } else if (country === "ca") {
-            stateEl.style.display = "";
+            stateContainer.style.display = "";
+            zipContainer.style.display = "";
+            customContainer.style.display = "none";
             stateEl.placeholder = "Province";
-            zipEl.style.display = "";
             zipEl.placeholder = "Postal Code";
-            customEl.style.display = "none";
         } else {
-            stateEl.style.display = "none";
-            zipEl.style.display = "none";
-            customEl.style.display = "";
+            stateContainer.style.display = "none";
+            zipContainer.style.display = "none";
+            customContainer.style.display = "";
         }
     });
 
