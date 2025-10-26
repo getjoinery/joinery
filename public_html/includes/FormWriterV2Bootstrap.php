@@ -23,6 +23,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $placeholder = $options['placeholder'] ?? '';
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
+        $prepend = $options['prepend'] ?? '';  // Bootstrap input-group prepend text
 
         // Determine if field has errors
         $has_errors = isset($this->errors[$name]);
@@ -35,6 +36,12 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         // Output label
         if ($label) {
             echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        }
+
+        // Open input-group if prepend text is provided
+        if ($prepend) {
+            echo '<div class="input-group">';
+            echo '<div class="input-group-text">' . htmlspecialchars($prepend) . '</div>';
         }
 
         // Output input
@@ -65,6 +72,11 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         echo '>';
+
+        // Close input-group if prepend text was provided
+        if ($prepend) {
+            echo '</div>';  // Close input-group
+        }
 
         // Display any errors for this field
         if ($has_errors) {

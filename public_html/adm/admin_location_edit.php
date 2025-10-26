@@ -105,7 +105,9 @@
 	$formwriter->textinput('loc_website', 'Location website');
 
 	if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
-		$formwriter->textinput('loc_link', 'Link (optional): '.$settings->get_setting('webDir').'/location/');
+		$formwriter->textinput('loc_link', 'Link (optional)', [
+			'prepend' => $settings->get_setting('webDir').'/location/'
+		]);
 	}
 
 	$formwriter->dropinput('loc_is_published', 'Published', [
