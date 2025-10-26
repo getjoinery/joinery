@@ -123,32 +123,40 @@
 </div>	';
 
 ?>
+<script src="/assets/js/form-visibility-helper.js"></script>
+
 <script>
-$(document).ready(function() {
-    // Add character counter for subject field
-    var subjectField = $('#emt_subject');
-    if (subjectField.length) {
+(function() {
+    'use strict';
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var subjectField = document.getElementById('emt_subject');
+        if (!subjectField) return;
+
         // Add counter display after the subject field
-        subjectField.after('<div class="field-help"><span id="subject-char-count">0/255</span> characters</div>');
-        
+        var counterHtml = '<div class="field-help"><span id="subject-char-count">0/255</span> characters</div>';
+        subjectField.insertAdjacentHTML('afterend', counterHtml);
+
+        var counterElement = document.getElementById('subject-char-count');
+
         // Update counter on input
-        subjectField.on('input', function() {
-            var length = $(this).val().length;
-            $('#subject-char-count').text(length + '/255');
-            
+        subjectField.addEventListener('input', function() {
+            var length = this.value.length;
+            counterElement.textContent = length + '/255';
+
             if (length > 255) {
-                $(this).addClass('error');
-                $('#subject-char-count').addClass('error');
+                this.classList.add('error');
+                counterElement.classList.add('error');
             } else {
-                $(this).removeClass('error');
-                $('#subject-char-count').removeClass('error');
+                this.classList.remove('error');
+                counterElement.classList.remove('error');
             }
         });
-        
+
         // Initialize counter
-        subjectField.trigger('input');
-    }
-});
+        subjectField.dispatchEvent(new Event('input'));
+    });
+})();
 </script>
 <?php
 

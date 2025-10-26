@@ -21,25 +21,33 @@ array(
 );
 ?>
 
+<script src="/assets/js/form-visibility-helper.js"></script>
+
 <script type="text/javascript">
+(function() {
+	'use strict';
 
-	$(document).ready(function()
-	{
-		$("#sqlbtn").toggle
-		(
-			function ()
-			{
-				$("#sql").show();
-			},
-			function ()
-			{
-				$("#sql").hide();
+	document.addEventListener('DOMContentLoaded', function() {
+		var sqlElement = document.getElementById('sql');
+		var sqlBtn = document.getElementById('sqlbtn');
+
+		if (!sqlBtn || !sqlElement) return;
+
+		// Initially hide SQL element
+		FormVisibility.hide('sql');
+
+		// Toggle visibility on button click
+		sqlBtn.addEventListener('click', function(e) {
+			e.preventDefault();
+
+			if (sqlElement.style.display === 'none') {
+				FormVisibility.show('sql');
+			} else {
+				FormVisibility.hide('sql');
 			}
-		);
-
-		$("#sql").hide();
+		});
 	});
-
+})();
 </script>
 
 <?php
