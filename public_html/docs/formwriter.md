@@ -230,10 +230,112 @@ $formwriter->timeinput('meeting_time', 'Meeting Time', [
     'helptext' => 'Select preferred meeting time'
 ]);
 
-// DateTime input
+// DateTime input (V2 - combines date picker with time dropdowns)
 $formwriter->datetimeinput('deadline', 'Deadline', [
     'required' => true
 ]);
+```
+
+#### DateTime Input Format
+
+The `datetimeinput()` method accepts DateTime values in multiple formats for maximum compatibility:
+
+**Accepted input formats:**
+- **DateTime object** - Direct from database (preferred)
+- **String** - Any format parseable by PHP's DateTime constructor
+  - `'2024-09-09 18:02:00'` - MySQL DATETIME
+  - `'2024-09-09T18:02:00+00:00'` - ISO 8601
+  - `'September 9, 2024 6:02pm'` - Human readable
+
+**Example with automatic form filling:**
+
+```php
+// Load model with datetime fields
+$coupon = new CouponCode($coupon_id, TRUE);
+
+// Pass to FormWriter - handles DateTime objects automatically
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'values' => $coupon->export_as_array()  // Returns DateTime objects for timestamp fields
+]);
+
+$formwriter->begin_form();
+
+// Automatically converts DateTime to user's timezone and populates fields
+$formwriter->datetimeinput('ccd_start_time', 'Start time');
+$formwriter->datetimeinput('ccd_end_time', 'End time');
+
+$formwriter->end_form();
+```
+
+**How it works:**
+1. Receives value from `values` array (DateTime object or string)
+2. Uses PHP's DateTime class to parse the value
+3. Formats date as `Y-m-d` for the date picker
+4. Formats time as `H:i` (24-hour) for conversion to 12-hour dropdowns
+5. User sees properly formatted date and time in their timezone
+
+**Processing submitted datetime values:**
+
+Use the static helper method to process datetime submissions:
+
+```php
+// In logic file
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
+
+// Process datetime - automatically converts from user's timezone to UTC
+$start_time = FormWriterV2Base::process_datetimeinput($_POST, 'ccd_start_time', true);
+if($start_time !== NULL){
+    $model->set('ccd_start_time', $start_time);
+}
+
+// Or get local time without UTC conversion
+$local_time = FormWriterV2Base::process_datetimeinput($_POST, 'meeting_time', false);
+```
+
+**FormWriterV2Base::process_datetimeinput() Parameters:**
+- `$post_vars` - The `$_POST` array
+- `$field_name` - Base field name (e.g., `'ccd_start_time'`)
+- `$to_utc` - Convert to UTC timezone (default: `true`)
+
+**Returns:**
+- ISO 8601 datetime string if `$to_utc` is true (e.g., `'2024-09-09T18:02:00+00:00'`)
+- Local datetime string if `$to_utc` is false (e.g., `'2024-09-09 18:02:00'`)
+- `NULL` if required fields not present in POST data
+
+**Complete example:**
+
+```php
+// admin_event_edit.php (view)
+$event = new Event($event_id, TRUE);
+$form_values = $event->export_as_array();
+
+// Convert UTC times to user's local timezone for display
+if($event->key){
+    if($form_values['evt_start_time']){
+        $form_values['evt_start_time'] = LibraryFunctions::convert_time(
+            $form_values['evt_start_time'],
+            'UTC',
+            $session->get_timezone(),
+            'Y-m-d H:i:s'
+        );
+    }
+}
+
+$formwriter = $page->getFormWriter('form1', 'v2', ['values' => $form_values]);
+$formwriter->begin_form();
+$formwriter->datetimeinput('evt_start_time', 'Event Start Time');
+$formwriter->end_form();
+
+// admin_event_edit_logic.php (processing)
+if($_POST){
+    // Process datetime from user's timezone to UTC for storage
+    $start_time = FormWriterV2Base::process_datetimeinput($_POST, 'evt_start_time', true);
+    if($start_time !== NULL){
+        $event->set('evt_start_time', $start_time);
+    }
+
+    $event->save();
+}
 ```
 
 ### File Upload
