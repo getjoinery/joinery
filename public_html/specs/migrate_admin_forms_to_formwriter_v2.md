@@ -372,6 +372,8 @@ if($_POST){
 - The helper handles all the field name parsing (`_date`, `_time_hour`, `_time_minute`, `_time_ampm`)
 - Set `$to_utc` parameter to `false` if you don't want timezone conversion
 
+**IMPORTANT:** `datetimeinput2()` has been removed from FormWriter V2. Always use `datetimeinput()` instead. The `datetimeinput2()` method used HTML5's `datetime-local` input type which has poor browser support and no timezone handling. The standard `datetimeinput()` uses separate date picker and time dropdowns for better UX and proper timezone conversion.
+
 ##### HiddenInput Conversion
 ```php
 // V1

@@ -922,57 +922,6 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
     }
 
     /**
-     * Output a combined datetime input field with Bootstrap styling
-     *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputDateTimeInput2($name, $label, $options) {
-        $value = $options['value'] ?? '';
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
-            $class .= ' is-invalid';
-        }
-
-        echo '<div class="form-group">';
-
-        if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
-        }
-
-        echo '<input type="datetime-local"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
-
-        if (!empty($options['readonly'])) {
-            echo ' readonly';
-        }
-        if (!empty($options['disabled'])) {
-            echo ' disabled';
-        }
-
-        echo '>';
-
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
-            }
-        }
-
-        if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
-        }
-
-        echo '</div>';
-    }
-
-    /**
      * Output a file input field with Bootstrap styling
      *
      * @param string $name Field name
