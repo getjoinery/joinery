@@ -18,7 +18,6 @@
  * ✓ dateinput() - Date picker
  * ✓ timeinput() - Time picker
  * ✓ datetimeinput() - Separate date & time fields
- * ✓ datetimeinput2() - Combined datetime field
  * ✓ fileinput() - File upload (single and multiple)
  * ✓ All layout variations: default, horizontal, row
  */
@@ -240,8 +239,6 @@ echo $formwriter->dropinput("Horizontal Select", "horizontal_select", "", $count
 echo $formwriter->datetimeinput('Row Layout DateTime', 'row_datetime', '', date('Y-m-d'), date('H:i'), '', '','row');
 
 // Alternative datetime format (needs proper format for datetime-local input)
-echo $formwriter->datetimeinput2('Combined DateTime', 'combined_datetime', '', date('Y-m-d\TH:i'), '', '', '', 'default');
-echo $formwriter->datetimeinput2('Combined DateTime Horizontal', 'combined_datetime_h', '', date('Y-m-d\TH:i'), '', '', '', 'horizontal');
 
 // Textbox with TinyMCE
 echo $formwriter->textbox('Rich Text Editor', 'rich_text', '', 5, 80, NULL, '', 'yes');

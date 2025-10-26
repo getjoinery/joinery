@@ -530,12 +530,6 @@ abstract class FormWriterBase {
 				   'timehint', 'datehint', 'layout'));
 	}
 
-	function datetimeinput2($label, $id, $class, $value, $hint, $readonly=false,
-						   $formhint=FALSE, $layout='default') {
-		return $this->_not_implemented('datetimeinput2',
-			compact('label', 'id', 'class', 'value', 'hint', 'readonly',
-				   'formhint', 'layout'));
-	}
 
 	function imageinput($label, $id, $class, &$optionvals, $input, $hint,
 					   $showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE) {

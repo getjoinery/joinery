@@ -598,16 +598,6 @@ class FormWriterHTML5 extends FormWriterBase {
 			hint (string)
 			layout ('default', 'horizontal')
 	********************************/	
-	function datetimeinput2($label, $id, $class, $value, $hint, $readonly=false, $formhint=FALSE, $layout='default'){
-	
-		$value = trim($value);
-		$value = str_replace(' ', 'T', $value);
-			
-		//$formhint = 'MM/DD/YYYY HH:MM AM/PM';
-
-		return $this->textinput($label, $id, $class, NULL, $value, $hint, 255, $readonly, false, $formhint, 'datetime-local', $layout);
-		
-	}	
 
 	/*******************************
 	GENERATES A DATEPICKER

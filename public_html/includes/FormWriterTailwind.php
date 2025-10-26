@@ -883,37 +883,6 @@ class FormWriterTailwind extends FormWriterBase {
 	}
 
 	/**
-	 * datetimeinput2 - Bootstrap-compatible datetime input
-	 */
-	function datetimeinput2($label, $id, $class, $value, $hint, $readonly=false, $formhint=FALSE, $layout='default'){
-		$readonly_attr = $readonly ? 'readonly="readonly"' : '';
-
-		$output = '<div id="'.$id.'_container" class="mb-4 errorplacement">';
-		if($label){
-			$output .= '<label for="'.$id.'" class="block text-sm font-medium text-gray-700 mb-1">'.$label.'</label>';
-		}
-
-		if($formhint){
-			$output .= '<div class="flex">';
-			$output .= '<span class="inline-flex items-center px-3 text-sm text-gray-900 bg-gray-200 border border-r-0 border-gray-300 rounded-l-md">'.$formhint.'</span>';
-		}
-
-		$output .= '<input type="datetime-local" name="'.$id.'" id="'.$id.'" value="'.$value.'" ';
-		$output .= 'class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5" ';
-		if($hint){
-			$output .= 'placeholder="'.$hint.'" ';
-		}
-		$output .= $readonly_attr.' />';
-
-		if($formhint){
-			$output .= '</div>';
-		}
-
-		$output .= '</div>';
-		return $output;
-	}
-
-	/**
 	 * imageinput - Bootstrap-compatible image selector
 	 */
 	function imageinput($label, $id, $class, &$optionvals, $input, $hint, $showdefault=TRUE, $forcestrict=TRUE, $ajaxendpoint=FALSE) {
