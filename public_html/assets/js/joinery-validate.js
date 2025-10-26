@@ -4,7 +4,6 @@
  * @version 1.0.8
  */
 console.log('%c=== JOINERY VALIDATION v1.0.8 ===', 'color: blue; font-weight: bold');
-console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
 (function() {
     'use strict';
@@ -24,13 +23,6 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
             // Debug mode
             this.debug = options.debug || window.JOINERY_VALIDATE_DEBUG || false;
-
-            if (this.debug) {
-                console.log('%c=== JoineryValidator INITIALIZED ===', 'color: green; font-weight: bold');
-                console.log('Form:', this.form);
-                console.log('Rules:', this.rules);
-                console.log('Options:', this.options);
-            }
 
             // CRITICAL: Detect incompatibilities before proceeding
             // This will throw errors for payment forms and warn for other issues
@@ -82,33 +74,25 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                 const isValid = await this.validateForm();
                 this.isValidating = false;
 
-                if (this.debug) {
-                    console.log(`Form validation result: ${isValid ? 'VALID' : 'INVALID'}`);
-                }
-
                 if (isValid) {
                     if (this.submitHandler) {
-                        if (this.debug) console.log('Calling custom submitHandler');
+                        if (this.debug) console.log('→ Calling custom submitHandler');
                         this.submitHandler(this.form);
                     } else {
-                        if (this.debug) console.log('Submitting form via form.submit()');
-
                         try {
                             // Direct form submission - bypasses submit events but is simple and reliable
                             // Incompatibility detection has already warned about payment forms and analytics
                             this.form.submit();
                         } catch (error) {
                             // Fallback for name="submit" shadowing issue
-                            if (this.debug) console.warn('form.submit() failed, using prototype fallback:', error);
+                            if (this.debug) console.warn('⚠️ form.submit() failed, using prototype fallback:', error);
                             HTMLFormElement.prototype.submit.call(this.form);
                         }
                     }
                 } else {
                     if (this.invalidHandler) {
-                        if (this.debug) console.log('Calling invalidHandler');
+                        if (this.debug) console.log('→ Calling invalidHandler');
                         this.invalidHandler(e, this);
-                    } else {
-                        if (this.debug) console.log('Form invalid, submission blocked');
                     }
                 }
             });
@@ -265,40 +249,29 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                 // Clean quotes from field name for searching
                 const cleanName = fieldName.replace(/['"]/g, '');
 
-                if (this.debug) {
-                    console.log(`Setting up validation for: ${fieldName} (clean: ${cleanName})`);
-                }
-
                 // Find fields - try exact name first, then with [] appended
                 let fields = this.findFields(cleanName);
 
                 if (fields.length === 0) {
                     if (this.debug) {
-                        console.warn(`Field not found: ${cleanName}`);
+                        console.warn(`⚠️ Field not found: ${cleanName}`);
                     }
                     return;
-                }
-
-                if (this.debug) {
-                    console.log(`Found ${fields.length} field(s) for ${cleanName}`);
                 }
 
                 // Add event listeners
                 fields.forEach(field => {
                     if (field.type === 'radio' || field.type === 'checkbox') {
                         field.addEventListener('change', async () => {
-                            if (this.debug) console.log(`Change event: ${field.name}`);
                             this.touchedFields.add(fieldName);
                             await this.validateField(fieldName);
                         });
                     } else {
                         field.addEventListener('blur', async (e) => {
-                            console.log(`%c[BLUR EVENT] Field: ${field.name}`, 'color: orange; font-weight: bold');
                             this.touchedFields.add(fieldName);
                             await this.validateField(fieldName);
                         });
                         field.addEventListener('change', async () => {
-                            console.log(`%c[CHANGE EVENT] Field: ${field.name}`, 'color: orange; font-weight: bold');
                             this.touchedFields.add(fieldName);
                             await this.validateField(fieldName);
                         });
@@ -325,10 +298,6 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
         async validateForm() {
             let isValid = true;
 
-            if (this.debug) {
-                console.log('=== Validating entire form ===');
-            }
-
             // Mark all fields as touched when validating the entire form (on submit)
             for (const fieldName of Object.keys(this.rules)) {
                 this.touchedFields.add(fieldName);
@@ -342,7 +311,7 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             }
 
             if (this.debug) {
-                console.log(`Form is ${isValid ? 'VALID' : 'INVALID'}`);
+                console.log(`Form is ${isValid ? 'VALID ✓' : 'INVALID ✗'}`);
             }
 
             return isValid;
@@ -352,27 +321,15 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             const cleanName = fieldName.replace(/['"]/g, '');
             const rules = this.rules[fieldName];
 
-            if (this.debug) {
-                console.log(`Validating field: ${fieldName}`);
-            }
-
             // Get field(s) using findFields method
             const fields = this.findFields(cleanName);
             if (fields.length === 0) {
-                if (this.debug) console.warn(`Field not found for validation: ${cleanName}`);
+                if (this.debug) console.warn(`⚠️ Field not found for validation: ${cleanName}`);
                 return true;
             }
 
             // Get field value
             const value = this.getFieldValue(fields);
-
-            if (this.debug) {
-                console.log(`Field value for ${fieldName}:`, value);
-                console.log(`  Type: ${typeof value}, IsArray: ${Array.isArray(value)}`);
-                if (fields[0]) {
-                    console.log(`  Element type: ${fields[0].type}, name: ${fields[0].name}`);
-                }
-            }
 
             // Check each rule
             let isValid = true;
@@ -381,7 +338,7 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             for (const [ruleName, ruleParam] of Object.entries(rules)) {
                 const validator = JoineryValidator.validators[ruleName];
                 if (!validator) {
-                    console.warn(`Unknown validator: ${ruleName}`);
+                    console.warn(`⚠️ Unknown validator: ${ruleName}`);
                     continue;
                 }
 
@@ -392,10 +349,6 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
                 // Call validator with validator instance as context
                 const result = await validator.call(this, value, fields[0], param);
-
-                if (this.debug) {
-                    console.log(`Rule ${ruleName}: param=${param}, result=${result}`);
-                }
 
                 if (!result) {
                     isValid = false;
@@ -454,21 +407,13 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
         showError(field, message) {
             if (this.debug) {
-                console.log(`%c[showError] ${field.name}: ${message}`, 'color: orange; font-weight: bold');
+                console.log(`✗ ${field.name}: ${message}`);
             }
 
             const form = field.closest('form');
 
             // First, ensure no existing error for this field
-            if (this.debug) {
-                const existingBefore = this.countErrorLabels(form, field.name);
-                console.log(`  Existing errors before clear: ${existingBefore}`);
-            }
             this.clearError(field);
-            if (this.debug) {
-                const existingAfter = this.countErrorLabels(form, field.name);
-                console.log(`  Existing errors after clear: ${existingAfter}`);
-            }
 
             // For radio/checkbox groups, apply error class to ALL fields in the group
             if (field.type === 'radio' || field.name.endsWith('[]')) {
@@ -489,10 +434,6 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             error.className = this.errorLabelClass + ' joinery-error-label';
             error.setAttribute('data-field', field.name);
             error.textContent = message;
-
-            if (this.debug) {
-                console.log(`Inserting error label for ${field.name}`);
-            }
 
             // For radio/checkbox groups, put error after the container
             if (field.type === 'radio' || field.type === 'checkbox') {

@@ -19,6 +19,7 @@ abstract class FormWriterV2Base {
     protected $validator;
     protected $values = [];
     protected $errors = [];
+    protected $model_validated_fields = [];  // Track fields using automatic model validation
 
     // Static property for custom validators
     protected static $custom_validators = [];
@@ -854,6 +855,14 @@ abstract class FormWriterV2Base {
             $base_validation = [];
             if ($model_class) {
                 $base_validation = $this->getModelValidation($model_class, $name);
+
+                // Track when model validation is applied
+                if (!empty($base_validation)) {
+                    $this->model_validated_fields[$name] = [
+                        'model' => $model_class,
+                        'rules' => $base_validation
+                    ];
+                }
             }
 
             // Merge with any provided validation (provided takes precedence)
@@ -870,7 +879,8 @@ abstract class FormWriterV2Base {
             'input_type' => $input_type,
             'label' => $label,
             'options' => $options,
-            'validation' => $options['validation'] ?? []
+            'validation' => $options['validation'] ?? [],
+            'model_class' => $model_class  // Store for console output
         ];
 
         // Debug output
@@ -950,22 +960,25 @@ abstract class FormWriterV2Base {
 
         echo '<script type="text/javascript">';
         echo 'console.log("=== FormWriterV2 DEBUG ===");';
-        echo 'console.log("Debug mode:", ' . ($this->options['debug'] ? 'true' : 'false') . ');';
         echo 'console.log("Form ID:", "' . htmlspecialchars($this->form_id) . '");';
-        echo 'console.log("Total fields registered:", ' . count($this->fields) . ');';
-        echo 'console.log("Fields:", ' . json_encode(array_keys($this->fields)) . ');';
-        echo 'console.log("Validation rules detected:", ' . json_encode($validation_rules) . ');';
+
+        // Output model validation information
+        if (!empty($this->model_validated_fields)) {
+            echo 'console.log("🔍 Automatic Model Validation Detected:");';
+            foreach ($this->model_validated_fields as $field_name => $info) {
+                echo 'console.log("  ✓ ' . htmlspecialchars($field_name) . ' → Model: ' . htmlspecialchars($info['model']) . '", ' . json_encode($info['rules']) . ');';
+            }
+        }
+
         echo 'document.addEventListener("DOMContentLoaded", function() {';
         echo '    var form = document.getElementById("' . htmlspecialchars($this->form_id) . '");';
         echo '    if (form) {';
-        echo '        console.log("Form found:", form);';
 
         // Build rules and messages in JoineryValidator format
         $js_rules = [];
         $js_messages = [];
 
         foreach ($validation_rules as $fieldName => $fieldRules) {
-            echo '        console.log("Processing field: ' . htmlspecialchars($fieldName) . '", ' . json_encode($fieldRules) . ');';
             $field_js_rules = [];
             $field_js_messages = [];
 
@@ -1086,9 +1099,9 @@ abstract class FormWriterV2Base {
         }
 
         // Output JoineryValidator initialization
-        echo '        console.log("✓ Initializing JoineryValidator for form: ' . htmlspecialchars($this->form_id) . '");';
-        echo '        console.log("✓ Final JS validation rules:", ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ');';
-        echo '        console.log("✓ Final JS validation messages:", ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ');';
+        if (!empty($js_rules)) {
+            echo '        console.log("✓ Validation rules:", ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ');';
+        }
         echo '        var validator = new JoineryValidator(form, {';
         echo '            rules: ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ',';
         echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ',';

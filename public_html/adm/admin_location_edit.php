@@ -76,8 +76,17 @@
     <div class="col-md-8">
       <div class="p-3">';
 
-	// Editing an existing location
-	$formwriter = $page->getFormWriter('form1', 'v2', ['debug' => true]);
+	// Prepare form values - use automatic form filling from Location model
+	$form_values = $location->export_as_array();
+	// Override with content version values if loaded
+	$form_values['loc_name'] = $title;
+	$form_values['loc_description'] = $content;
+
+	// Editing an existing location - use automatic form filling
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'debug' => true,
+		'values' => $form_values
+	]);
 
 	// Note: FormWriterV2 uses model-based validation auto-detection
 	// No need for set_validate() - validation rules come from Location model
@@ -89,28 +98,18 @@
 		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
 
-	$formwriter->textinput('loc_name', 'Location name', [
-		'value' => $title
-	]);
+	$formwriter->textinput('loc_name', 'Location name');
 
-	$formwriter->textinput('loc_address', 'Location street address', [
-		'value' => $location->get('loc_address')
-	]);
+	$formwriter->textinput('loc_address', 'Location street address');
 
-	$formwriter->textinput('loc_website', 'Location website', [
-		'value' => $location->get('loc_website')
-	]);
+	$formwriter->textinput('loc_website', 'Location website');
 
 	if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
-		$formwriter->textinput('loc_link', 'Link (optional): '.$settings->get_setting('webDir').'/location/', [
-			'value' => $location->get('loc_link'),
-			'validation' => false  // Backend auto-generates link if empty, so don't validate
-		]);
+		$formwriter->textinput('loc_link', 'Link (optional): '.$settings->get_setting('webDir').'/location/');
 	}
 
 	$formwriter->dropinput('loc_is_published', 'Published', [
-		'options' => ['No' => 0, 'Yes' => 1],
-		'value' => $location->get('loc_is_published')
+		'options' => ['No' => 0, 'Yes' => 1]
 	]);
 
 	// Temporarily commented out for debugging
@@ -123,17 +122,13 @@
 	$files->load();
 	$optionvals = $files->get_image_dropdown_array();
 	$formwriter->imageinput('loc_fil_file_id', 'Image', [
-		'options' => $optionvals,
-		'value' => $location->get('loc_fil_file_id')
+		'options' => $optionvals
 	]);
 	*/
 
-	$formwriter->textinput('loc_short_description', 'Short description', [
-		'value' => $location->get('loc_short_description')
-	]);
+	$formwriter->textinput('loc_short_description', 'Short description');
 
 	$formwriter->textbox('loc_description', 'Description', [
-		'value' => $content,
 		'htmlmode' => 'yes'
 	]);
 
