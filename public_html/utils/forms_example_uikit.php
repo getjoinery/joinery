@@ -52,7 +52,6 @@
 	echo $formwriter->datetimeinput('Start time', 'ccd_start_time2', '', LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '','horizontal');
 
 	 
-	echo $formwriter->datetimeinput2('End time', 'ccd_end_time', '', LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '', 'default');
 	
 
 	echo $formwriter->text('Text only field', 'To:', 'something something here is some text to test out columns', NULL, 'horizontal');
@@ -63,8 +62,6 @@
 
 	echo $formwriter->datetimeinput('Start time', 'ccd_start_time3', '', LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '','row');
 
-
-	echo $formwriter->datetimeinput2('End time', 'ccd_end_time2', '', LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '', 'horizontal');	
 
 	echo $formwriter->start_buttons();
 	echo $formwriter->new_form_button('Cancel', 'secondary');
