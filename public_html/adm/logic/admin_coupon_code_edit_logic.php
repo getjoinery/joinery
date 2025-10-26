@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 function admin_coupon_code_edit_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 	require_once(PathHelper::getIncludePath('data/coupon_codes_class.php'));
 	require_once(PathHelper::getIncludePath('data/coupon_code_products_class.php'));
 
