@@ -759,6 +759,32 @@ abstract class FormWriterV2Base {
         $date_name = $options['date_name'] ?? $name . '_date';
         $time_name = $options['time_name'] ?? $name . '_time';
 
+        // Auto-parse datetime value from database if it exists as a single field
+        // Use PHP DateTime for maximum compatibility with various database datetime formats
+        if (isset($this->values[$name]) && !isset($options['value']) && !isset($options['date_value'])) {
+            $datetime_value = $this->values[$name];
+            if ($datetime_value) {
+                try {
+                    // If it's already a DateTime object, use it directly
+                    if ($datetime_value instanceof DateTime) {
+                        $dt = $datetime_value;
+                    } else {
+                        // Otherwise create a DateTime object from the string
+                        $dt = new DateTime($datetime_value);
+                    }
+                    $options['date_value'] = $dt->format('Y-m-d');
+                    $options['time_value'] = $dt->format('H:i');  // 24-hour format for parsing
+                } catch (Exception $e) {
+                    // If DateTime parsing fails, fall back to existing behavior
+                    if (is_string($datetime_value) && strpos($datetime_value, ' ') !== false) {
+                        list($date_part, $time_part) = explode(' ', $datetime_value, 2);
+                        $options['date_value'] = $date_part;
+                        $options['time_value'] = $time_part;
+                    }
+                }
+            }
+        }
+
         $this->registerField($date_name, 'date', $label ? $label . ' (Date)' : '', $options);
         $this->registerField($time_name, 'time', $label ? $label . ' (Time)' : '', $options);
 

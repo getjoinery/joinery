@@ -858,16 +858,26 @@ class LibraryFunctions {
 	}
 
 	//CONVERT TIME FROM ONE TIMEZONE TO ANOTHER
-	static function convert_time($starttime, $fromtz, $totz, $format='M j, Y g:i a T'){ 
+	static function convert_time($starttime, $fromtz, $totz, $format='M j, Y g:i a T'){
 		if(is_null($starttime)){
 			return FALSE;
 		}
-		
-		$dt = new DateTime($starttime, new DateTimeZone($fromtz)); //first argument "must" be a string
-		
+
+		// Auto-detect if we received a DateTime object or a string
+		if ($starttime instanceof DateTime) {
+			$dt = clone $starttime; // Clone to avoid modifying the original
+			// If the DateTime object has a timezone, only update if it's different
+			if ($dt->getTimezone()->getName() !== $fromtz) {
+				$dt->setTimezone(new DateTimeZone($fromtz));
+			}
+		} else {
+			// String input - create new DateTime object
+			$dt = new DateTime($starttime, new DateTimeZone($fromtz));
+		}
+
 		$dt->setTimezone(new DateTimeZone($totz));
-		
-		return $dt->format($format) ;		
+
+		return $dt->format($format) ;
 	}
 	
 	//RETURN NEW TIME X DAYS FROM INPUT TIME
