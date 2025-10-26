@@ -1207,7 +1207,6 @@ abstract class FormWriterV2Base {
     abstract protected function outputDateInput($name, $label, $options);
     abstract protected function outputTimeInput($name, $label, $options);
     abstract protected function outputDateTimeInput($name, $label, $options, $date_name, $time_name);
-    abstract protected function outputDateTimeInput2($name, $label, $options);
     abstract protected function outputFileInput($name, $label, $options);
     abstract protected function outputHiddenInput($name, $options);
     abstract protected function outputSubmitButton($name, $label, $options);
