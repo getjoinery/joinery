@@ -24,28 +24,16 @@ function admin_coupon_code_edit_logic($get_vars, $post_vars) {
 	}
 
 	if($post_vars){
-		// Handle start time
-		if($post_vars['ccd_start_time_date'] && isset($post_vars['ccd_start_time_time_hour'])){
-			// Combine hour, minute, ampm into time string
-			$hour = intval($post_vars['ccd_start_time_time_hour']);
-			$minute = str_pad($post_vars['ccd_start_time_time_minute'], 2, '0', STR_PAD_LEFT);
-			$ampm = $post_vars['ccd_start_time_time_ampm'];
-			$time_string = $hour . ':' . $minute . $ampm;
-			$time_combined = $post_vars['ccd_start_time_date'] . ' ' . LibraryFunctions::toDBTime($time_string);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-			$coupon_code->set('ccd_start_time', $utc_time);
+		// Handle start time using FormWriterV2Base helper
+		$start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'ccd_start_time', true);
+		if($start_time !== NULL){
+			$coupon_code->set('ccd_start_time', $start_time);
 		}
 
-		// Handle end time
-		if($post_vars['ccd_end_time_date'] && isset($post_vars['ccd_end_time_time_hour'])){
-			// Combine hour, minute, ampm into time string
-			$hour = intval($post_vars['ccd_end_time_time_hour']);
-			$minute = str_pad($post_vars['ccd_end_time_time_minute'], 2, '0', STR_PAD_LEFT);
-			$ampm = $post_vars['ccd_end_time_time_ampm'];
-			$time_string = $hour . ':' . $minute . $ampm;
-			$time_combined = $post_vars['ccd_end_time_date'] . ' ' . LibraryFunctions::toDBTime($time_string);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-			$coupon_code->set('ccd_end_time', $utc_time);
+		// Handle end time using FormWriterV2Base helper
+		$end_time = FormWriterV2Base::process_datetimeinput($post_vars, 'ccd_end_time', true);
+		if($end_time !== NULL){
+			$coupon_code->set('ccd_end_time', $end_time);
 		}
 
 		if(empty($post_vars['ccd_amount_discount'])){
