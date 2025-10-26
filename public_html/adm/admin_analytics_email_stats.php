@@ -18,32 +18,6 @@ $dblink = $dbhelper->get_db_link();
 		'session' => $session,
 	)
 	);
-	/*
-?>
-<script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
-<script type="text/javascript">
-
-		$(document).ready(function()
-		{
-			$("#sqlbtn").toggle
-			(
-				function ()
-				{
-					$("#sql").show();
-				},
-				function ()
-				{
-					$("#sql").hide();
-				}
-			);
-
-			$("#sql").hide();
-		});
-
-</script>
-
-<?php
-*/
 
 $today = date("m-d-Y");
 $startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');
