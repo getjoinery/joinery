@@ -24,18 +24,28 @@ function admin_coupon_code_edit_logic($get_vars, $post_vars) {
 	}
 
 	if($post_vars){
-		if($post_vars['ccd_start_time_date'] && $post_vars['ccd_start_time_time']){
-			$time_combined = $post_vars['ccd_start_time_date'] . ' ' . LibraryFunctions::toDBTime($post_vars['ccd_start_time_time']);
+		// Handle start time
+		if($post_vars['ccd_start_time_date'] && isset($post_vars['ccd_start_time_time_hour'])){
+			// Combine hour, minute, ampm into time string
+			$hour = intval($post_vars['ccd_start_time_time_hour']);
+			$minute = str_pad($post_vars['ccd_start_time_time_minute'], 2, '0', STR_PAD_LEFT);
+			$ampm = $post_vars['ccd_start_time_time_ampm'];
+			$time_string = $hour . ':' . $minute . $ampm;
+			$time_combined = $post_vars['ccd_start_time_date'] . ' ' . LibraryFunctions::toDBTime($time_string);
 			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
 			$coupon_code->set('ccd_start_time', $utc_time);
-			$coupon_code->set('ccd_start_time_local', $time_combined);
 		}
 
-		if($post_vars['ccd_end_time_date'] && $post_vars['ccd_end_time_time']){
-			$time_combined = $post_vars['ccd_end_time_date'] . ' ' . LibraryFunctions::toDBTime($post_vars['ccd_end_time_time']);
+		// Handle end time
+		if($post_vars['ccd_end_time_date'] && isset($post_vars['ccd_end_time_time_hour'])){
+			// Combine hour, minute, ampm into time string
+			$hour = intval($post_vars['ccd_end_time_time_hour']);
+			$minute = str_pad($post_vars['ccd_end_time_time_minute'], 2, '0', STR_PAD_LEFT);
+			$ampm = $post_vars['ccd_end_time_time_ampm'];
+			$time_string = $hour . ':' . $minute . $ampm;
+			$time_combined = $post_vars['ccd_end_time_date'] . ' ' . LibraryFunctions::toDBTime($time_string);
 			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
 			$coupon_code->set('ccd_end_time', $utc_time);
-			$coupon_code->set('ccd_end_time_local', $time_combined);
 		}
 
 		if(empty($post_vars['ccd_amount_discount'])){

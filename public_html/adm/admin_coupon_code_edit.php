@@ -30,6 +30,16 @@
 		$form_values['ccd_is_active'] = 1;
 	}
 
+	// Convert UTC times to user's local timezone for display
+	if($coupon_code->key){
+		if($form_values['ccd_start_time']){
+			$form_values['ccd_start_time'] = LibraryFunctions::convert_time($form_values['ccd_start_time'], 'UTC', $session->get_timezone(), 'Y-m-d H:i:s');
+		}
+		if($form_values['ccd_end_time']){
+			$form_values['ccd_end_time'] = LibraryFunctions::convert_time($form_values['ccd_end_time'], 'UTC', $session->get_timezone(), 'Y-m-d H:i:s');
+		}
+	}
+
 	// Editing an existing coupon code - use V2 with automatic form filling
 	$formwriter = $page->getFormWriter('form1', 'v2', [
 		'debug' => true,
@@ -132,13 +142,9 @@
 		'checked' => $checkedvals
 	]);
 
-	$formwriter->datetimeinput('ccd_start_time', 'Start time', [
-		'value' => LibraryFunctions::convert_time($coupon_code->get('ccd_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia')
-	]);
+	$formwriter->datetimeinput('ccd_start_time', 'Start time');
 
-	$formwriter->datetimeinput('ccd_end_time', 'End time', [
-		'value' => LibraryFunctions::convert_time($coupon_code->get('ccd_end_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia')
-	]);
+	$formwriter->datetimeinput('ccd_end_time', 'End time');
 
 	$formwriter->textinput('ccd_max_num_uses', 'Maximum number of uses');
 
