@@ -1087,6 +1087,16 @@ abstract class FormWriterV2Base {
                             }
                         }
                         break;
+
+                    case 'require_one_group':
+                        // require_one_group validation - pass the entire rule to JoineryValidator
+                        if (is_array($param)) {
+                            $field_js_rules['require_one_group'] = $param;
+                            if (isset($param['message'])) {
+                                $field_js_messages['require_one_group'] = $param['message'];
+                            }
+                        }
+                        break;
                 }
             }
 

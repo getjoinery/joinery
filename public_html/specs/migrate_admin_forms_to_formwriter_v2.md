@@ -1,9 +1,9 @@
 # Specification: Migrate Admin Forms to FormWriter V2
 
-**Status:** Planning Phase - Ready for Implementation
+**Status:** In Progress
 **Priority:** High
-**Estimated Effort:** 15-20 hours total (includes AdminPage enhancement + 13 admin pages)
 **Date Created:** 2025-10-26
+**Last Updated:** 2025-10-26
 **Related Specifications:**
 - `/docs/formwriter.md` - FormWriter V2 documentation
 - `/specs/remove_jquery_dependency.md` - jQuery removal (related but separate)
@@ -106,31 +106,98 @@ public function getFormWriter($form_id = 'form1', $version = 'v1') {
 
 ### 3.1 Admin Pages to Migrate
 
-**Total: 13 admin pages** (same pages identified in jQuery removal spec)
+**Total: 69 admin pages with forms**
 
-**By priority:**
+**Progress: 1/69 completed (1.4%)**
 
-#### High Priority (Most Complex - 50+ jQuery instances)
-1. `/adm/admin_question_edit.php` - REFERENCE IMPLEMENTATION
-   - Heavy visibility logic (50+ instances)
-   - Multiple conditional field groups
-   - Estimated effort: 2.5-3 hours
+#### Completed ✅
+- [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
 
-#### Medium Priority (10-50 jQuery instances)
-2. `/adm/admin_analytics_activitybydate.php` - 2 hours
-3. `/adm/admin_analytics_email_stats.php` - 1.5 hours
-4. `/adm/admin_analytics_users.php` - 1.5 hours
-5. `/adm/admin_coupon_code_edit.php` - 1 hour ⭐ (STARTED)
-6. `/adm/admin_email_template_edit.php` - 1.5 hours
-7. `/adm/admin_event_edit.php` - 2 hours
-8. `/adm/admin_product_edit.php` - 2 hours
-9. `/adm/admin_product_version_edit.php` - 1.5 hours
-10. `/adm/admin_settings_email.php` - 1 hour
-11. `/adm/admin_settings_payments.php` - 1 hour
+#### Pending Conversion (68 pages)
 
-#### Low Priority (1-10 jQuery instances)
-12. `/adm/admin_public_menu_edit.php` - 0.5 hours
-13. `/adm/admin_settings.php` - 0.5 hours
+**A-C:**
+- [ ] `/adm/admin_address_edit.php`
+- [ ] `/adm/admin_admin_menu_edit.php`
+- [ ] `/adm/admin_analytics_activitybydate.php`
+- [ ] `/adm/admin_analytics_email_stats.php`
+- [ ] `/adm/admin_analytics_funnels.php`
+- [ ] `/adm/admin_analytics_stats.php`
+- [ ] `/adm/admin_analytics_users.php`
+- [ ] `/adm/admin_api_key_edit.php`
+- [ ] `/adm/admin_comment_edit.php`
+- [ ] `/adm/admin_comments.php`
+- [ ] `/adm/admin_contact_type_edit.php`
+- [ ] `/adm/admin_coupon_code_edit.php`
+
+**E:**
+- [ ] `/adm/admin_email_edit.php`
+- [ ] `/adm/admin_email_recipients_modify.php`
+- [ ] `/adm/admin_email_template_edit.php`
+- [ ] `/adm/admin_email_template_permanent_delete.php`
+- [ ] `/adm/admin_event.php`
+- [ ] `/adm/admin_event_bundle_edit.php`
+- [ ] `/adm/admin_event_edit.php`
+- [ ] `/adm/admin_event_session_edit.php`
+- [ ] `/adm/admin_event_type_edit.php`
+
+**F-G:**
+- [ ] `/adm/admin_file_delete.php`
+- [ ] `/adm/admin_file_edit.php`
+- [ ] `/adm/admin_file_upload.php`
+- [ ] `/adm/admin_group_edit.php`
+- [ ] `/adm/admin_group_permanent_delete.php`
+
+**L-M:**
+- [ ] `/adm/admin_log_event.php`
+- [ ] `/adm/admin_mailing_list_edit.php`
+- [ ] `/adm/admin_message.php`
+
+**O:**
+- [ ] `/adm/admin_order_delete.php`
+- [ ] `/adm/admin_order_edit.php`
+- [ ] `/adm/admin_order_item_edit.php`
+- [ ] `/adm/admin_order_refund.php`
+- [ ] `/adm/admin_orders.php`
+
+**P:**
+- [ ] `/adm/admin_page_content_edit.php`
+- [ ] `/adm/admin_page_content_permanent_delete.php`
+- [ ] `/adm/admin_page_edit.php`
+- [ ] `/adm/admin_phone_edit.php`
+- [ ] `/adm/admin_phone_verify.php`
+- [ ] `/adm/admin_post_edit.php`
+- [ ] `/adm/admin_post_permanent_delete.php`
+- [ ] `/adm/admin_product_edit.php`
+- [ ] `/adm/admin_product_group_edit.php`
+- [ ] `/adm/admin_product_requirement_edit.php`
+- [ ] `/adm/admin_product_version_edit.php`
+- [ ] `/adm/admin_public_menu_edit.php`
+
+**Q-S:**
+- [ ] `/adm/admin_question.php`
+- [ ] `/adm/admin_question_edit.php`
+- [ ] `/adm/admin_settings.php`
+- [ ] `/adm/admin_settings_email.php`
+- [ ] `/adm/admin_settings_payments.php`
+- [ ] `/adm/admin_shadow_session_edit.php`
+- [ ] `/adm/admin_softdelete.php`
+- [ ] `/adm/admin_static_cache.php`
+- [ ] `/adm/admin_stripe_orders.php`
+- [ ] `/adm/admin_subscription_tier_edit.php`
+- [ ] `/adm/admin_survey.php`
+- [ ] `/adm/admin_survey_edit.php`
+
+**U-Y:**
+- [ ] `/adm/admin_url_edit.php`
+- [ ] `/adm/admin_user.php`
+- [ ] `/adm/admin_user_add.php`
+- [ ] `/adm/admin_users_edit.php`
+- [ ] `/adm/admin_users_message.php`
+- [ ] `/adm/admin_users_password_edit.php`
+- [ ] `/adm/admin_users_permanent_delete.php`
+- [ ] `/adm/admin_users_undelete.php`
+- [ ] `/adm/admin_video_edit.php`
+- [ ] `/adm/admin_yearly_report_donations.php`
 
 ---
 
@@ -674,38 +741,37 @@ php -l /path/to/admin_page.php
 
 ## 6. Migration Rollout Plan
 
-### Phase 1: Foundation (1-2 hours)
-- [ ] Enhance AdminPage.getFormWriter() with version parameter
-- [ ] Test both V1 and V2 instantiation
-- [ ] Ensure backward compatibility
+### Phase 1: Foundation ✅ COMPLETED
+- [x] Enhance AdminPage.getFormWriter() with version parameter
+- [x] Test both V1 and V2 instantiation
+- [x] Ensure backward compatibility
 
-### Phase 2: Reference Implementation (2-3 hours)
-- [ ] Start with admin_coupon_code_edit.php (simplest with visibility rules)
-- [ ] Use as template for other page migrations
-- [ ] Document patterns and gotchas
-- [ ] Thoroughly test
+### Phase 2: Initial Implementation ✅ COMPLETED (1/69)
+- [x] admin_location_edit.php - First complete V2 migration
+- [x] Demonstrates all V2 features (automatic form filling, prepend, model validation, debug mode)
+- [x] Use as template for other page migrations
+- [x] Document patterns and gotchas
 
-### Phase 3: Low Priority Pages (1-2 hours)
-- [ ] Migrate admin_public_menu_edit.php
-- [ ] Migrate admin_settings.php
-- [ ] Quick, low-risk wins to build confidence
+### Phase 3: Ongoing Migration (68/69 remaining)
 
-### Phase 4: Medium Priority Pages (6-8 hours)
-- [ ] Migrate remaining 8 medium-priority pages
-- [ ] Test each page before moving to next
-- [ ] Adjust patterns based on learnings
+**Recommended approach:**
+- Migrate pages incrementally as they're edited for other reasons
+- Prioritize pages that are frequently accessed or modified
+- Use admin_location_edit.php as reference implementation
+- Test thoroughly after each migration
+- Update progress counter in section 3.1 after each completion
 
-### Phase 5: High Priority Pages (3-4 hours)
-- [ ] Migrate admin_question_edit.php (most complex)
-- [ ] Test thoroughly
-- [ ] May need additional pattern documentation
+**Complexity levels:**
+- Simple forms: Few fields, no visibility rules
+- Medium complexity: Multiple fields, dropdowns
+- Complex forms: Visibility rules, AJAX, custom logic
 
-### Phase 6: Final Validation (1-2 hours)
+### Phase 4: Final Validation (After all pages migrated)
 - [ ] Spot-check all migrated pages
 - [ ] Run through integration tests
-- [ ] Document any issues or patterns discovered
-
-**Total estimated time: 15-20 hours**
+- [ ] Remove V1 FormWriter classes if no longer needed
+- [ ] Update documentation
+- [ ] Celebrate! 🎉
 
 ---
 
@@ -962,17 +1028,17 @@ If a field is missing from this list but should have validation, check for `'val
 
 Migration is successful when:
 
-1. ✅ AdminPage.getFormWriter() works with both 'v1' and 'v2' parameters
-2. ✅ All 13 admin pages migrated to V2
-3. ✅ Each migrated page loads correctly in browser
-4. ✅ All form fields render properly
-5. ✅ All visibility rules function correctly
-6. ✅ All form submissions work and save data
-7. ✅ No JavaScript errors in browser console
-8. ✅ No PHP errors in server logs
-9. ✅ Database entries from forms are correct
-10. ✅ Backward compatibility maintained (V1 pages still work)
-11. ✅ Code is cleaner and more maintainable
+1. ✅ **COMPLETED** - AdminPage.getFormWriter() works with both 'v1' and 'v2' parameters
+2. ⏳ **IN PROGRESS** - All 69 admin pages migrated to V2 (1/69 complete)
+3. ✅ **ONGOING** - Each migrated page loads correctly in browser
+4. ✅ **ONGOING** - All form fields render properly
+5. ✅ **ONGOING** - All visibility rules function correctly
+6. ✅ **ONGOING** - All form submissions work and save data
+7. ✅ **ONGOING** - No JavaScript errors in browser console
+8. ✅ **ONGOING** - No PHP errors in server logs
+9. ✅ **ONGOING** - Database entries from forms are correct
+10. ✅ **MAINTAINED** - Backward compatibility maintained (V1 pages still work)
+11. ✅ **ACHIEVED** - Code is cleaner and more maintainable
 
 ---
 
@@ -1051,6 +1117,13 @@ After Phase 1 completion:
 
 ---
 
-**Status: READY FOR IMPLEMENTATION**
+**Status: IN PROGRESS (1/69 pages migrated - 1.4% complete)**
 
-Proceed with Step 1: Enhance AdminPage.getFormWriter() when ready.
+**Completed:**
+- ✅ Phase 1: AdminPage.getFormWriter() enhancement
+- ✅ Phase 2: First reference implementation (admin_location_edit.php)
+
+**Next Steps:**
+- Continue migrating remaining 68 admin pages incrementally
+- Use admin_location_edit.php as reference template
+- Update progress counter in section 3.1 after each completion
