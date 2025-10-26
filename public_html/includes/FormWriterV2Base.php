@@ -1089,9 +1089,10 @@ abstract class FormWriterV2Base {
                         break;
 
                     case 'require_one_group':
-                        // require_one_group validation - pass the entire rule to JoineryValidator
-                        if (is_array($param)) {
-                            $field_js_rules['require_one_group'] = $param;
+                        // require_one_group validation - pass to JoineryValidator for client-side validation
+                        // JoineryValidator expects the group name as the rule value, not an object
+                        if (is_array($param) && isset($param['value'])) {
+                            $field_js_rules['require_one_group'] = $param['value'];  // Just the group name string
                             if (isset($param['message'])) {
                                 $field_js_messages['require_one_group'] = $param['message'];
                             }
