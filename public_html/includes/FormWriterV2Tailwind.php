@@ -646,4 +646,86 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         echo htmlspecialchars($label);
         echo '</button>';
     }
+
+    /**
+     * Create a checkbox list (or radio group) field
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options (options, checked, disabled, readonly, type)
+     */
+    public function checkboxlist($name, $label = '', $options = []) {
+        $this->registerField($name, 'checkboxlist', $label, $options);
+        $this->outputCheckboxList($name, $label, $options);
+    }
+
+    /**
+     * Output a checkbox list (or radio group) field with Tailwind styling
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    protected function outputCheckboxList($name, $label, $options) {
+        $optionvals = $options['options'] ?? [];
+        $checked = $options['checked'] ?? [];
+        $disabled = $options['disabled'] ?? [];
+        $readonly = $options['readonly'] ?? [];
+        $type = $options['type'] ?? 'checkbox';
+        $id = $options['id'] ?? $name;
+
+        // Ensure checked is an array
+        if (!is_array($checked)) {
+            $checked = [];
+        }
+
+        // Validate input
+        if (empty($optionvals)) {
+            echo '<div class="rounded-md bg-yellow-50 p-4"><div class="text-sm text-yellow-800">No options available for ' . htmlspecialchars($name) . '</div></div>';
+            return;
+        }
+
+        if ($type === 'radio') {
+            if (is_array($checked) && count($checked) > 1) {
+                throw new DisplayableUserException('A radio field cannot have more than one checked value.');
+            }
+            if ($readonly) {
+                throw new DisplayableUserException('A radio field cannot have read only values.');
+            }
+        } elseif ($type !== 'checkbox') {
+            throw new DisplayableUserException('Invalid checkbox list type.');
+        }
+
+        echo '<div id="' . htmlspecialchars($id) . '_container" class="mb-4">';
+        if ($label) {
+            echo '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($label) . '</label>';
+        }
+
+        echo '<div class="mt-2 space-y-2">';
+
+        foreach ($optionvals as $key => $value) {
+            $uniqid = $id . '_' . htmlspecialchars($value);
+            $is_checked = in_array($value, $checked) ? 'checked="checked"' : '';
+            $is_disabled = in_array($value, $disabled) ? 'disabled="disabled"' : '';
+
+            // Readonly means it cannot be changed but is submitted
+            if (in_array($value, $readonly)) {
+                if (in_array($value, $checked)) {
+                    echo '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" />';
+                }
+                echo '<div class="relative flex items-center">';
+                echo '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' disabled="disabled" />';
+                echo '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
+                echo '</div>';
+            } else {
+                echo '<div class="relative flex items-center">';
+                echo '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
+                echo '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
+                echo '</div>';
+            }
+        }
+
+        echo '</div>';
+        echo '</div>';
+    }
 }

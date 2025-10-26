@@ -23,69 +23,85 @@
 	$pageoptions['title'] = "Edit Coupon Code";
 	$page->begin_box($pageoptions);
 
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
+	// Prepare form values - use automatic form filling from CouponCode model
+	$form_values = $coupon_code->export_as_array();
+	// Set default is_active for new coupons
+	if(!$coupon_code->key){
+		$form_values['ccd_is_active'] = 1;
+	}
 
-	$validation_rules = array();
-	$validation_rules['ccd_code']['required']['value'] = 'true';
+	// Editing an existing coupon code - use V2 with automatic form filling
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'debug' => true,
+		'values' => $form_values,
+		'form_debug' => true  // Enable verbose form-level debugging
+	]);
 
-	// Require either amount or percent discount (at least one must be filled)
-	$validation_rules['ccd_amount_discount']['require_one_group']['value'] = 'discount_fields';
-	$validation_rules['ccd_amount_discount']['require_one_group']['message'] = 'Please enter either an amount or percent discount';
-
-	$validation_rules['ccd_percent_discount']['require_one_group']['value'] = 'discount_fields';
-	$validation_rules['ccd_percent_discount']['require_one_group']['message'] = 'Please enter either an amount or percent discount';
-
-	echo $formwriter->set_validate($validation_rules);
-
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_coupon_code_edit');
+	echo $formwriter->begin_form();
 
 	if($coupon_code->key){
-		echo $formwriter->hiddeninput('ccd_coupon_code_id', $coupon_code->key);
-		echo $formwriter->hiddeninput('action', 'edit');
-		$is_active = $coupon_code->get('ccd_is_active');
-	}
-	else{
-		$is_active = 1;
+		$formwriter->hiddeninput('ccd_coupon_code_id', ['value' => $coupon_code->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
 
-	echo $formwriter->textinput('Coupon code', 'ccd_code', NULL, 100, $coupon_code->get('ccd_code'), '', 255, '');
+	$formwriter->textinput('ccd_code', 'Coupon code');
 
-	$optionvals = array("Inactive"=>0, "Active"=>1);
-	echo $formwriter->dropinput("Active?", "ccd_is_active", "ctrlHolder", $optionvals, $is_active, '', FALSE);
+	$formwriter->dropinput('ccd_is_active', 'Active?', [
+		'options' => ['Inactive' => 0, 'Active' => 1]
+	]);
 
-	echo $formwriter->textinput('Amount of discount ('.$currency_symbol.')', 'ccd_amount_discount', NULL, 100, $coupon_code->get('ccd_amount_discount'), '', 255, '');
+	$formwriter->textinput('ccd_amount_discount', 'Amount of discount ('.$currency_symbol.')', [
+		'validation' => [
+			'require_one_group' => [
+				'value' => 'discount_fields',
+				'message' => 'Please enter either an amount or percent discount'
+			]
+		]
+	]);
 
-	echo $formwriter->textinput('or percent of discount', 'ccd_percent_discount', NULL, 100, $coupon_code->get('ccd_percent_discount'), '', 255, '');
+	$formwriter->textinput('ccd_percent_discount', 'or percent of discount', [
+		'validation' => [
+			'require_one_group' => [
+				'value' => 'discount_fields',
+				'message' => 'Please enter either an amount or percent discount'
+			]
+		]
+	]);
 
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Is this coupon stackable?", "ccd_is_stackable", "ctrlHolder", $optionvals, $coupon_code->get('ccd_is_stackable'), '', FALSE);
+	$formwriter->dropinput('ccd_is_stackable', 'Is this coupon stackable?', [
+		'options' => ['No' => 0, 'Yes' => 1]
+	]);
 
-	$optionvals = array("All products"=>0, "Subscriptions only"=>1, "One time purchases only"=>2, "Custom (below)"=>3);
-	echo $formwriter->dropinput("Applies to", "ccd_applies_to", array(
-		'visibility_rules' => array(
-			'' => array(
-				'show' => array(),
-				'hide' => array('products_list_container')
-			),
-			3 => array(
-				'show' => array('products_list_container'),
-				'hide' => array()
-			),
-			0 => array(
-				'show' => array(),
-				'hide' => array('products_list_container')
-			),
-			1 => array(
-				'show' => array(),
-				'hide' => array('products_list_container')
-			),
-			2 => array(
-				'show' => array(),
-				'hide' => array('products_list_container')
-			)
-		)
-	), $optionvals, $coupon_code->get('ccd_applies_to'), '', TRUE);
+	$formwriter->dropinput('ccd_applies_to', 'Applies to', [
+		'options' => [
+			'All products' => 0,
+			'Subscriptions only' => 1,
+			'One time purchases only' => 2,
+			'Custom (below)' => 3
+		],
+		'visibility_rules' => [
+			'' => [
+				'show' => [],
+				'hide' => ['products_list']
+			],
+			3 => [
+				'show' => ['products_list'],
+				'hide' => []
+			],
+			0 => [
+				'show' => [],
+				'hide' => ['products_list']
+			],
+			1 => [
+				'show' => [],
+				'hide' => ['products_list']
+			],
+			2 => [
+				'show' => [],
+				'hide' => ['products_list']
+			]
+		]
+	]);
 
 	//GET ALL PRODUCTS
 	$searches = array();
@@ -111,28 +127,36 @@
 	else{
 		$checkedvals = array();
 	}
-	$disabledvals = array();
-	$readonlyvals = array();
-	echo $formwriter->checkboxList("Valid products for this code", 'products_list', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	$formwriter->checkboxList('products_list', 'Valid products for this code', [
+		'options' => $optionvals,
+		'checked' => $checkedvals
+	]);
 
-	echo $formwriter->datetimeinput('Start time', 'ccd_start_time', 'ctrlHolder', LibraryFunctions::convert_time($coupon_code->get('ccd_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+	$formwriter->datetimeinput('ccd_start_time', 'Start time', [
+		'value' => LibraryFunctions::convert_time($coupon_code->get('ccd_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia')
+	]);
 
-	echo $formwriter->datetimeinput('End time', 'ccd_end_time', 'ctrlHolder', LibraryFunctions::convert_time($coupon_code->get('ccd_end_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+	$formwriter->datetimeinput('ccd_end_time', 'End time', [
+		'value' => LibraryFunctions::convert_time($coupon_code->get('ccd_end_time_local'), $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia')
+	]);
 
-	$max_display = '';
-	if($coupon_code->get('ccd_max_num_uses')){
-		$max_display = $coupon_code->get('ccd_max_num_uses');
+	$formwriter->textinput('ccd_max_num_uses', 'Maximum number of uses');
+
+	// Pre-load only the currently selected affiliate user (if editing)
+	$affiliate_options = [];
+	if ($coupon_code->get('ccd_usr_user_id_affiliate')) {
+		$affiliate_user = new User($coupon_code->get('ccd_usr_user_id_affiliate'), TRUE);
+		$affiliate_options = [$affiliate_user->key => $affiliate_user->get('usr_name')];
 	}
-	echo $formwriter->textinput('Maximum number of uses', 'ccd_max_num_uses', NULL, 10, $max_display, '', 255, '');
 
-	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => 'ASC'));
-	$users->load();
-	$optionvals = $users->get_dropdown_array();
-	echo $formwriter->dropinput("Affiliate User for this coupon", "ccd_usr_user_id_affiliate", "ctrlHolder", $optionvals, $coupon_code->get('ccd_usr_user_id_affiliate'), '', TRUE, FALSE, '/ajax/user_search_ajax?includenone=1');
+	$formwriter->dropinput('ccd_usr_user_id_affiliate', 'Affiliate User for this coupon', [
+		'options' => $affiliate_options,
+		'validation' => ['required' => false],
+		'ajaxendpoint' => '/ajax/user_search_ajax?includenone=1',
+		'empty_option' => '-- Type 3+ characters to search users --'
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	$formwriter->submitbutton('btn_submit', 'Submit');
 	echo $formwriter->end_form();
 
 $page->end_box();

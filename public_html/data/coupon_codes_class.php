@@ -33,7 +33,7 @@ class CouponCode extends SystemBase {	public static $prefix = 'ccd';
 	 */
 	public static $field_specifications = array(
 	    'ccd_coupon_code_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'ccd_code' => array('type'=>'varchar(64)'),
+	    'ccd_code' => array('type'=>'varchar(64)', 'required'=>true),
 	    'ccd_amount_discount' => array('type'=>'numeric(10,2)'),
 	    'ccd_percent_discount' => array('type'=>'int4'),
 	    'ccd_start_time' => array('type'=>'timestamp(6)'),
