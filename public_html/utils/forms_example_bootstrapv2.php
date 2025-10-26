@@ -344,7 +344,7 @@ $formwriter3->datetimeinput('event_datetime', 'Event Date & Time', [
 ]);
 
 // Combined DateTime Input
-$formwriter3->datetimeinput2('deadline', 'Project Deadline', [
+$formwriter3->datetimeinput('deadline', 'Project Deadline', [
     'validation' => ['required' => true],
     'helptext' => 'Pick a date and time for project completion'
 ]);

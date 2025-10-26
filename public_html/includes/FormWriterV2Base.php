@@ -792,18 +792,6 @@ abstract class FormWriterV2Base {
     }
 
     /**
-     * Create a combined datetime input field
-     *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    public function datetimeinput2($name, $label = '', $options = []) {
-        $this->registerField($name, 'datetime-local', $label, $options);
-        $this->outputDateTimeInput2($name, $label, $options);
-    }
-
-    /**
      * Create a file input field
      *
      * @param string $name Field name
