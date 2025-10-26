@@ -771,26 +771,182 @@ See **[validation.md](validation.md)**
 ### When to Use V2
 
 - New development
-- Model-aware validation needed
+- **Automatic model validation** from field specifications
+- **Automatic form filling** from model data
 - Modern Bootstrap or Tailwind styling
 - Time picker widgets
 - Password strength meters
+- Input group prepend/append text
 
-### Migration
+### 7.1 V2 Automatic Features
 
-V1 and V2 can coexist in the same codebase. No rush to migrate existing forms. Use V2 for new development when appropriate.
+FormWriter V2 includes powerful automatic features that reduce boilerplate code:
+
+#### 7.1.1 Automatic Model Validation
+
+V2 automatically detects validation rules from model `field_specifications` based on field naming conventions:
+
+```php
+// In /data/locations_class.php
+public static $field_specifications = array(
+    'loc_name' => array('type'=>'varchar(255)', 'required'=>true),
+    'loc_link' => array('type'=>'varchar(255)', 'required'=>true),
+    'loc_address' => array('type'=>'varchar(255)'),
+);
+
+// In admin form - NO manual validation setup needed!
+$formwriter = $page->getFormWriter('form1', 'v2', ['debug' => true]);
+$formwriter->begin_form();
+
+// V2 auto-detects Location model from 'loc_' prefix and applies validation
+$formwriter->textinput('loc_name', 'Location name');  // ← Automatically required!
+$formwriter->textinput('loc_link', 'Link');           // ← Automatically required!
+$formwriter->textinput('loc_address', 'Address');     // ← Not required (no rule in model)
+
+$formwriter->end_form();
+```
+
+**How it works:**
+1. V2 extracts field prefix (`loc_` from `loc_name`)
+2. Maps prefix to model class (`loc` → `Location`)
+3. Loads `Location::$field_specifications`
+4. Applies validation rules automatically
+5. Outputs console debug info (when `debug => true`)
+
+**Console output:**
+```javascript
+=== FormWriterV2 DEBUG ===
+Form ID: form1
+🔍 Automatic Model Validation Detected:
+  ✓ loc_name → Model: Location {required: true}
+  ✓ loc_link → Model: Location {required: true}
+✓ Validation rules: {loc_name: {required: true}, loc_link: {required: true}}
+```
+
+**IMPORTANT:** Don't override model validation unless necessary:
+
+```php
+// ❌ BAD - Disables ALL validation including model-based
+$formwriter->textinput('loc_link', 'Link', [
+    'validation' => false  // Overrides model validation!
+]);
+
+// ✅ GOOD - Uses automatic model validation
+$formwriter->textinput('loc_link', 'Link');
+
+// ✅ GOOD - Adds to model validation (doesn't replace it)
+$formwriter->textinput('loc_link', 'Link', [
+    'validation' => ['maxlength' => 100]  // Adds maxlength, keeps required from model
+]);
+```
+
+#### 7.1.2 Automatic Form Filling
+
+V2 can auto-populate all fields from model data using the `values` option:
+
+```php
+// Load location model
+$location = new Location($location_id, TRUE);
+
+// Prepare form values
+$form_values = $location->export_as_array();
+// Override specific values if needed (e.g., from content version)
+$form_values['loc_name'] = $custom_title;
+$form_values['loc_description'] = $custom_content;
+
+// Pass values to FormWriter - auto-fills all fields!
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'values' => $form_values
+]);
+
+$formwriter->begin_form();
+
+// No need to specify 'value' for each field - auto-filled!
+$formwriter->textinput('loc_name', 'Location name');
+$formwriter->textinput('loc_address', 'Address');
+$formwriter->textinput('loc_website', 'Website');
+$formwriter->textinput('loc_link', 'Link');
+
+$formwriter->end_form();
+```
+
+**Benefits:**
+- ✅ Less repetitive code
+- ✅ Automatic value population from model
+- ✅ Still allows field-specific overrides when needed
+- ✅ Works with all field types
+
+**Old way (manual):**
+```php
+$formwriter = $page->getFormWriter('form1', 'v2');
+$formwriter->textinput('loc_name', 'Location name', [
+    'value' => $location->get('loc_name')  // Repeat for every field!
+]);
+$formwriter->textinput('loc_address', 'Address', [
+    'value' => $location->get('loc_address')
+]);
+// ... etc
+```
+
+**New way (automatic):**
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'values' => $location->export_as_array()  // One line!
+]);
+$formwriter->textinput('loc_name', 'Location name');
+$formwriter->textinput('loc_address', 'Address');
+// ... etc - all auto-filled!
+```
+
+#### 7.1.3 Input Group Prepend Text (Bootstrap)
+
+V2 Bootstrap supports prepending text to input fields using Bootstrap's input-group:
+
+```php
+// Show URL prefix before the input field
+$formwriter->textinput('loc_link', 'Link', [
+    'prepend' => $settings->get_setting('webDir').'/location/'
+]);
+
+// Shows as: [/location/][user types here]
+
+// Currency prefix
+$formwriter->textinput('price', 'Price', [
+    'prepend' => '$'
+]);
+
+// Shows as: [$][user types here]
+
+// Protocol prefix
+$formwriter->textinput('website', 'Website', [
+    'prepend' => 'https://'
+]);
+
+// Shows as: [https://][user types here]
+```
+
+**Benefits:**
+- ✅ Cleaner than putting prefix in label
+- ✅ Visual indication of final format
+- ✅ User only types the variable part
+- ✅ Uses Bootstrap's native input-group styling
 
 **Key Differences:**
 
 | Feature | V1 | V2 |
 |---------|----|----|
 | Field options | Mixed parameters | Standardized `options` array |
-| Validation | Manual setup | Auto from model |
+| Validation | Manual `set_validate()` | **Auto from model specs** |
+| Form filling | Manual per-field | **Auto from `values` option** |
 | Time picker | Basic input | Hour/minute dropdowns |
 | Password | Simple input | With strength meter |
+| Input groups | Manual HTML | **`prepend` option** |
+| Debug mode | Limited | **Console model detection** |
 | Themes | 4 (Bootstrap, HTML5, UIKit, Tailwind) | 2 (Bootstrap, Tailwind) |
 | Visibility rules | ✅ Supported | ✅ Supported |
 | Custom scripts | ✅ Supported | ✅ Supported |
+
+**For migration guidance**, see **[/specs/migrate_admin_forms_to_formwriter_v2.md](/specs/migrate_admin_forms_to_formwriter_v2.md)**
 
 ---
 

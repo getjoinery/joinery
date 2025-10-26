@@ -114,8 +114,6 @@
 		'options' => ['No' => 0, 'Yes' => 1]
 	]);
 
-	// Temporarily commented out for debugging
-	/*
 	$files = new MultiFile(
 		array('deleted'=>false, 'picture'=>true),
 		array('file_id' => 'DESC'),
@@ -126,7 +124,6 @@
 	$formwriter->imageinput('loc_fil_file_id', 'Image', [
 		'options' => $optionvals
 	]);
-	*/
 
 	$formwriter->textinput('loc_short_description', 'Short description');
 
