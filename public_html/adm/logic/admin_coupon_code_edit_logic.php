@@ -13,8 +13,11 @@ function admin_coupon_code_edit_logic($get_vars, $post_vars) {
 	$settings = Globalvars::get_instance();
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
-	if (isset($get_vars['ccd_coupon_code_id'])) {
-		$coupon_code = new CouponCode($get_vars['ccd_coupon_code_id'], TRUE);
+	// Check both GET and POST for coupon_code_id (POST from form submission, GET from URL)
+	$coupon_code_id = $get_vars['ccd_coupon_code_id'] ?? $post_vars['ccd_coupon_code_id'] ?? NULL;
+
+	if ($coupon_code_id) {
+		$coupon_code = new CouponCode($coupon_code_id, TRUE);
 	}
 	else{
 		$coupon_code = new CouponCode(NULL);

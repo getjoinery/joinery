@@ -278,6 +278,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
       const input = document.createElement(\'input\');
       input.type = \'text\';
       input.className = selectEl.className;
+      // Don\'t transfer name - keep it on the select element so it submits the ID
       input.placeholder = \'Type to search...\';
 
       const list = document.createElement(\'datalist\');
@@ -285,6 +286,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
       input.setAttribute(\'list\', list.id);
 
       selectEl.style.display = \'none\';
+      // Keep name on select so it submits the ID, not the input value
       selectEl.parentNode.insertBefore(input, selectEl);
       selectEl.parentNode.insertBefore(list, selectEl);
 
@@ -298,10 +300,26 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
       input.addEventListener(\'input\', (e) => this.search(e.target.value));
       input.addEventListener(\'change\', (e) => {
-        if (!e.target.value) {
+        const inputVal = e.target.value.trim();
+        if (!inputVal) {
           selectEl.value = \'\';
-          selectEl.dispatchEvent(new Event(\'change\', { bubbles: true }));
+        } else {
+          // When user selects from datalist, find the matching item and update hidden select
+          const matching = this.data.find(item => item.text === inputVal);
+          if (matching) {
+            // Add the option to the select if it doesn\'t exist
+            let option = selectEl.querySelector(\'option[value="\' + matching.id + \'"]\');
+            if (!option) {
+              option = document.createElement(\'option\');
+              option.value = matching.id;
+              option.textContent = matching.text;
+              selectEl.innerHTML = \'\';  // Clear previous options
+              selectEl.appendChild(option);
+            }
+            selectEl.value = matching.id;
+          }
         }
+        selectEl.dispatchEvent(new Event(\'change\', { bubbles: true }));
       });
     }
 
@@ -319,7 +337,9 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
       }
 
       this.debounceTimer = setTimeout(() => {
-        fetch(this.ajaxUrl + \'?q=\' + encodeURIComponent(query))
+        // Build URL - use & if URL already has ?, otherwise use ?
+        const separator = this.ajaxUrl.includes(\'?\') ? \'&\' : \'?\';
+        fetch(this.ajaxUrl + separator + \'q=\' + encodeURIComponent(query))
           .then(r => r.json())
           .then(data => {
             this.cache[query] = data;
@@ -333,8 +353,8 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
       this.list.innerHTML = \'\';
       data.forEach(item => {
         const opt = document.createElement(\'option\');
-        opt.value = item.text;
-        opt.dataset.id = item.id;
+        opt.value = item.text;  // Display the full text (name - email)
+        opt.dataset.id = item.id;  // Store the ID for later retrieval
         this.list.appendChild(opt);
       });
     }
