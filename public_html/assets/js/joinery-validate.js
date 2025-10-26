@@ -1,9 +1,9 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.0.4
+ * @version 1.0.8
  */
-console.log('%c=== JOINERY VALIDATION v1.0.4 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.0.8 ===', 'color: blue; font-weight: bold');
 console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
 
 (function() {
@@ -32,6 +32,10 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                 console.log('Options:', this.options);
             }
 
+            // CRITICAL: Detect incompatibilities before proceeding
+            // This will throw errors for payment forms and warn for other issues
+            this.detectIncompatibilities();
+
             // Validation options - use Bootstrap's standard classes
             this.errorElement = options.errorElement || 'div';
             this.errorClass = options.errorClass || 'is-invalid';
@@ -46,6 +50,9 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             // Track which fields have been touched by user
             this.touchedFields = new Set();
 
+            // Flag to prevent double-submission during validation
+            this.isValidating = false;
+
             this.init();
         }
 
@@ -53,16 +60,27 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
             // Prevent browser's default validation UI
             this.form.setAttribute('novalidate', 'novalidate');
 
-            // Submit handler
+            // Submit handler - simple and deterministic
             this.form.addEventListener('submit', async (e) => {
                 if (this.debug) {
                     console.log('%c=== FORM SUBMIT ATTEMPT ===', 'color: red; font-weight: bold');
                 }
 
+                // Prevent double-validation during async validation
+                if (this.isValidating) {
+                    if (this.debug) console.log('Validation already in progress, ignoring');
+                    e.preventDefault();
+                    return false;
+                }
+
+                // Always prevent the initial submission to validate first
                 e.preventDefault();
                 e.stopPropagation();
 
+                // Mark as validating
+                this.isValidating = true;
                 const isValid = await this.validateForm();
+                this.isValidating = false;
 
                 if (this.debug) {
                     console.log(`Form validation result: ${isValid ? 'VALID' : 'INVALID'}`);
@@ -73,18 +91,16 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                         if (this.debug) console.log('Calling custom submitHandler');
                         this.submitHandler(this.form);
                     } else {
-                        if (this.debug) console.log('Submitting form normally');
+                        if (this.debug) console.log('Submitting form via form.submit()');
 
-                        // Directly submit the form without triggering another submit event
-                        // This avoids the double-prevention issue with requestSubmit()
                         try {
-                            if (this.debug) console.log('Calling form.submit()');
-                            if (this.debug) console.log('Form before submit:', this.form);
+                            // Direct form submission - bypasses submit events but is simple and reliable
+                            // Incompatibility detection has already warned about payment forms and analytics
                             this.form.submit();
-                            if (this.debug) console.log('✓ form.submit() completed');
-                        } catch (e) {
-                            if (this.debug) console.error('ERROR during form submission:', e);
-                            throw e;  // Re-throw so we can see the error
+                        } catch (error) {
+                            // Fallback for name="submit" shadowing issue
+                            if (this.debug) console.warn('form.submit() failed, using prototype fallback:', error);
+                            HTMLFormElement.prototype.submit.call(this.form);
                         }
                     }
                 } else {
@@ -94,13 +110,154 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                     } else {
                         if (this.debug) console.log('Form invalid, submission blocked');
                     }
-                    // Ensure we don't submit
-                    return false;
                 }
             });
 
             // Set up field validation on blur/change
             this.setupFieldValidation();
+        }
+
+        detectIncompatibilities() {
+            // Allow developers to skip compatibility checking entirely
+            if (this.options.skipCompatibilityCheck) {
+                if (this.debug) {
+                    console.warn('%c[JoineryValidator] Compatibility checking disabled via skipCompatibilityCheck option',
+                                'color: orange; font-weight: bold');
+                }
+                return [];
+            }
+
+            const issues = [];
+
+            // 1. Payment forms (CRITICAL - will break payment processing)
+            if (this.isPaymentForm()) {
+                issues.push({
+                    severity: 'error',
+                    type: 'payment_form',
+                    message: 'Payment form detected. JoineryValidator uses form.submit() which bypasses Stripe/PayPal tokenization handlers. This will expose raw card data and break payment processing.',
+                    solution: 'Either:\n' +
+                             '  (1) Don\'t use JoineryValidator on payment forms (payment processors have their own validation)\n' +
+                             '  (2) Provide a custom submitHandler option\n' +
+                             '  (3) Set options.ignoreIncompatibilityErrors = true (NOT RECOMMENDED - security risk)'
+                });
+            }
+
+            // 2. Analytics tracking (WARNING - will lose tracking data)
+            const analytics = this.detectAnalytics();
+            if (analytics.length > 0) {
+                issues.push({
+                    severity: 'warning',
+                    type: 'analytics',
+                    message: `Analytics detected (${analytics.join(', ')}). Form submissions will not be tracked because form.submit() bypasses submit event handlers.`,
+                    solution: 'Provide a custom submitHandler that fires tracking events before calling form.submit():\n' +
+                             '  submitHandler: function(form) {\n' +
+                             '    gtag(\'event\', \'form_submit\', { form_id: form.id });\n' +
+                             '    form.submit();\n' +
+                             '  }'
+                });
+            }
+
+            // 3. Forms with name="submit" (WARNING - might fail)
+            if (this.form.elements['submit']) {
+                issues.push({
+                    severity: 'warning',
+                    type: 'name_submit',
+                    message: 'Form has an element with name="submit". This shadows the form.submit() method and may cause submission to fail.',
+                    solution: 'Rename the element to something other than "submit" (e.g., "submit_button", "save").'
+                });
+            }
+
+            // 4. Inline onsubmit handler (WARNING - will be bypassed)
+            if (this.form.onsubmit || this.form.getAttribute('onsubmit')) {
+                issues.push({
+                    severity: 'warning',
+                    type: 'inline_handler',
+                    message: 'Form has an inline onsubmit handler. This will be bypassed when using form.submit().',
+                    solution: 'Remove the inline onsubmit and provide a custom submitHandler instead.'
+                });
+            }
+
+            // 5. Multiple validators on same form (WARNING - may conflict)
+            if (this.form.hasAttribute('data-joinery-validator')) {
+                issues.push({
+                    severity: 'warning',
+                    type: 'duplicate_validator',
+                    message: 'Multiple JoineryValidator instances detected on the same form. This may cause conflicts.',
+                    solution: 'Only create one JoineryValidator instance per form.'
+                });
+            }
+            this.form.setAttribute('data-joinery-validator', 'true');
+
+            // Handle issues
+            for (const issue of issues) {
+                const msg = `╔════════════════════════════════════════════════════════════════\n` +
+                           `║ JoineryValidator ${issue.severity.toUpperCase()}: ${issue.type}\n` +
+                           `╠════════════════════════════════════════════════════════════════\n` +
+                           `║ ${issue.message}\n` +
+                           `║\n` +
+                           `║ Solution:\n` +
+                           `║ ${issue.solution.replace(/\n/g, '\n║ ')}\n` +
+                           `╚════════════════════════════════════════════════════════════════`;
+
+                if (issue.severity === 'error') {
+                    console.error(msg);
+                    // Always throw errors - use skipCompatibilityCheck to disable
+                    throw new Error(`JoineryValidator: ${issue.type} - ${issue.message}`);
+                } else if (issue.severity === 'warning') {
+                    console.warn(msg);
+                }
+            }
+
+            return issues;
+        }
+
+        isPaymentForm() {
+            return !!(
+                // Stripe detection
+                this.form.querySelector('[name="stripeToken"]') ||
+                this.form.querySelector('#card-element') ||
+                this.form.querySelector('[data-stripe]') ||
+                this.form.querySelector('.StripeElement') ||
+                (typeof window.Stripe !== 'undefined' && this.form.querySelector('[data-stripe-key]')) ||
+
+                // PayPal detection
+                this.form.querySelector('[data-paypal]') ||
+                this.form.querySelector('#paypal-button-container') ||
+                this.form.querySelector('.paypal-button') ||
+                (typeof window.paypal !== 'undefined' && this.form.querySelector('[data-paypal-button]')) ||
+
+                // Square detection
+                this.form.querySelector('#sq-card-number') ||
+                this.form.querySelector('[data-square]') ||
+
+                // Generic payment form detection
+                this.form.id === 'payment-form' ||
+                this.form.id === 'checkout-form' ||
+                this.form.id === 'billing-form' ||
+                this.form.classList.contains('payment-form') ||
+                this.form.classList.contains('checkout-form') ||
+                this.form.classList.contains('billing-form') ||
+
+                // Manual override
+                this.options.isPaymentForm === true
+            );
+        }
+
+        detectAnalytics() {
+            const detected = [];
+
+            if (typeof window.ga !== 'undefined') detected.push('Google Analytics (UA)');
+            if (typeof window.gtag !== 'undefined') detected.push('Google Analytics 4');
+            if (typeof window.dataLayer !== 'undefined') detected.push('Google Tag Manager');
+            if (typeof window.fbq !== 'undefined') detected.push('Facebook Pixel');
+            if (typeof window._paq !== 'undefined') detected.push('Matomo');
+            if (typeof window.mixpanel !== 'undefined') detected.push('Mixpanel');
+            if (typeof window.heap !== 'undefined') detected.push('Heap Analytics');
+            if (typeof window.analytics !== 'undefined' && typeof window.analytics.track === 'function') {
+                detected.push('Segment');
+            }
+
+            return detected;
         }
 
         setupFieldValidation() {
@@ -810,5 +967,3 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
     };
 
 })();
-
-console.log('%c=== JOINERY VALIDATION v1.0.4 LOADED ===', 'color: blue; font-weight: bold');
