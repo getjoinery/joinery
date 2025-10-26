@@ -431,7 +431,7 @@ class MultiFile extends SystemMultiBase {
 	function get_image_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $file) {
-			$items['<span class="dropimagewidth"><img src="'.$file->get_url('thumbnail').'"></span>('.$file->key.') '.$file->get('fil_title')] = $file->key;
+			$items['<span class="dropimagewidth"><img loading="lazy" src="'.$file->get_url('thumbnail').'"></span>('.$file->key.') '.$file->get('fil_title')] = $file->key;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
