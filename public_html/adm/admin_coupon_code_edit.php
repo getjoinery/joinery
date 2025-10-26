@@ -146,7 +146,10 @@
 	$affiliate_options = [];
 	if ($coupon_code->get('ccd_usr_user_id_affiliate')) {
 		$affiliate_user = new User($coupon_code->get('ccd_usr_user_id_affiliate'), TRUE);
-		$affiliate_options = [$affiliate_user->key => $affiliate_user->get('usr_name')];
+		// Format must match AJAX response: "Name - Email"
+		$display_text = $affiliate_user->display_name() . ' - ' . $affiliate_user->get('usr_email');
+		// Options array format: [label => value]
+		$affiliate_options = [$display_text => $affiliate_user->key];
 	}
 
 	$formwriter->dropinput('ccd_usr_user_id_affiliate', 'Affiliate User for this coupon', [
