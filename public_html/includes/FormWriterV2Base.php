@@ -429,6 +429,9 @@ abstract class FormWriterV2Base {
     protected function detectModelFromFieldName($field_name) {
         // Extract prefix (e.g., 'usr_' from 'usr_email')
         if (!preg_match('/^([a-z]+)_/', $field_name, $matches)) {
+            if (!empty($this->options['debug'])) {
+                error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): No prefix found");
+            }
             return null;  // No prefix found
         }
 
@@ -437,12 +440,27 @@ abstract class FormWriterV2Base {
         // Get prefix map (cached for performance)
         $prefix_map = $this->getModelPrefixMap();
 
+        if (!empty($this->options['debug'])) {
+            error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): Prefix=$prefix | Prefix map: " . json_encode($prefix_map));
+        }
+
         $model_name = $prefix_map[$prefix] ?? null;
+
+        if (!empty($this->options['debug'])) {
+            error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): Model name=$model_name | Class exists: " . (class_exists($model_name) ? 'YES' : 'NO'));
+        }
 
         if ($model_name && class_exists($model_name)) {
             // Verify the field actually exists in this model
             if (isset($model_name::$field_specifications[$field_name])) {
+                if (!empty($this->options['debug'])) {
+                    error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): ✓ Field found in model $model_name");
+                }
                 return $model_name;
+            } else {
+                if (!empty($this->options['debug'])) {
+                    error_log("[FormWriterV2 DEBUG] detectModelFromFieldName($field_name): ✗ Field NOT found in model $model_name. Available fields: " . json_encode(array_keys($model_name::$field_specifications)));
+                }
             }
         }
 
@@ -465,7 +483,8 @@ abstract class FormWriterV2Base {
                 // Extract class name from filename
                 $basename = basename($file, '_class.php');
 
-                // Convert to class name (e.g., 'users' -> 'User', 'event_registrants' -> 'EventRegistrant')
+                // Convert to class name, handling plural filenames -> singular class names
+                // e.g., 'users' -> 'User', 'locations' -> 'Location', 'event_registrants' -> 'EventRegistrant'
                 $class_name = str_replace(' ', '', ucwords(str_replace('_', ' ', $basename)));
 
                 // Try to load the class
@@ -473,22 +492,22 @@ abstract class FormWriterV2Base {
                     require_once($file);
                 }
 
-                // Add to map if class exists and has prefix
-                if (class_exists($class_name) && isset($class_name::$prefix)) {
+                // If plural class name doesn't exist, try singular version (remove trailing 's')
+                $singular_class = $class_name;
+                if (!class_exists($class_name) && substr($class_name, -1) === 's') {
+                    $singular_class = substr($class_name, 0, -1);
+                    if (!class_exists($singular_class)) {
+                        require_once($file);
+                    }
+                }
+
+                // Add to map if class exists and has prefix (prefer singular version)
+                if (class_exists($singular_class) && isset($singular_class::$prefix)) {
+                    self::$model_prefix_map[$singular_class::$prefix] = $singular_class;
+                } elseif (class_exists($class_name) && isset($class_name::$prefix)) {
                     self::$model_prefix_map[$class_name::$prefix] = $class_name;
                 }
             }
-
-            // Hardcoded fallback for core models (in case auto-discovery fails)
-            $fallback = [
-                'usr' => 'User',
-                'pro' => 'Product',
-                'evt' => 'Event',
-                'grp' => 'Group',
-            ];
-
-            // Merge with fallback (auto-discovered takes precedence)
-            self::$model_prefix_map = array_merge($fallback, self::$model_prefix_map);
         }
 
         return self::$model_prefix_map;
@@ -503,10 +522,17 @@ abstract class FormWriterV2Base {
      */
     protected function getModelValidation($model_class, $field_name) {
         if (!class_exists($model_class)) {
+            if (!empty($this->options['debug'])) {
+                error_log("[FormWriterV2 DEBUG] getModelValidation($model_class, $field_name): Class doesn't exist");
+            }
             return [];
         }
 
         $field_specs = $model_class::$field_specifications[$field_name] ?? [];
+
+        if (!empty($this->options['debug'])) {
+            error_log("[FormWriterV2 DEBUG] getModelValidation($model_class, $field_name): Field specs: " . json_encode($field_specs));
+        }
 
         // Build validation array from field_specifications
         $validation = $field_specs['validation'] ?? [];
@@ -521,6 +547,10 @@ abstract class FormWriterV2Base {
                 'table' => $model_class::$tablename,
                 'column' => $field_name
             ];
+        }
+
+        if (!empty($this->options['debug'])) {
+            error_log("[FormWriterV2 DEBUG] getModelValidation($model_class, $field_name): Final validation: " . json_encode($validation));
         }
 
         return $validation;
@@ -538,6 +568,15 @@ abstract class FormWriterV2Base {
                 $rules[$field['name']] = $field['validation'];
             }
         }
+
+        // Debug output
+        if (!empty($this->options['debug'])) {
+            error_log("[FormWriterV2 DEBUG] getAllValidationRules() collected rules for " . count($rules) . " fields: " . json_encode(array_keys($rules)));
+            foreach ($rules as $fieldName => $fieldRules) {
+                error_log("[FormWriterV2 DEBUG]   - $fieldName: " . json_encode($fieldRules));
+            }
+        }
+
         return $rules;
     }
 
@@ -833,6 +872,11 @@ abstract class FormWriterV2Base {
             'options' => $options,
             'validation' => $options['validation'] ?? []
         ];
+
+        // Debug output
+        if (!empty($this->options['debug'])) {
+            error_log("[FormWriterV2 DEBUG] Registered field: $name | Type: $input_type | Model: " . ($model_class ? $model_class : 'NONE') . " | Validation: " . json_encode($this->fields[$name]['validation']));
+        }
     }
 
     /**
@@ -898,19 +942,30 @@ abstract class FormWriterV2Base {
         $validation_rules = $this->getAllValidationRules();
 
         if (empty($validation_rules)) {
+            echo '<script type="text/javascript">';
+            echo 'console.log("No validation rules found for form");';
+            echo '</script>';
             return;  // No validation needed
         }
 
         echo '<script type="text/javascript">';
+        echo 'console.log("=== FormWriterV2 DEBUG ===");';
+        echo 'console.log("Debug mode:", ' . ($this->options['debug'] ? 'true' : 'false') . ');';
+        echo 'console.log("Form ID:", "' . htmlspecialchars($this->form_id) . '");';
+        echo 'console.log("Total fields registered:", ' . count($this->fields) . ');';
+        echo 'console.log("Fields:", ' . json_encode(array_keys($this->fields)) . ');';
+        echo 'console.log("Validation rules detected:", ' . json_encode($validation_rules) . ');';
         echo 'document.addEventListener("DOMContentLoaded", function() {';
         echo '    var form = document.getElementById("' . htmlspecialchars($this->form_id) . '");';
         echo '    if (form) {';
+        echo '        console.log("Form found:", form);';
 
         // Build rules and messages in JoineryValidator format
         $js_rules = [];
         $js_messages = [];
 
         foreach ($validation_rules as $fieldName => $fieldRules) {
+            echo '        console.log("Processing field: ' . htmlspecialchars($fieldName) . '", ' . json_encode($fieldRules) . ');';
             $field_js_rules = [];
             $field_js_messages = [];
 
@@ -1031,14 +1086,13 @@ abstract class FormWriterV2Base {
         }
 
         // Output JoineryValidator initialization
-        if ($this->options['debug']) {
-            echo '        console.log("Initializing JoineryValidator for form: ' . htmlspecialchars($this->form_id) . '");';
-            echo '        console.log("Validation rules:", ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ');';
-        }
+        echo '        console.log("✓ Initializing JoineryValidator for form: ' . htmlspecialchars($this->form_id) . '");';
+        echo '        console.log("✓ Final JS validation rules:", ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ');';
+        echo '        console.log("✓ Final JS validation messages:", ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ');';
         echo '        var validator = new JoineryValidator(form, {';
         echo '            rules: ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ',';
         echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ',';
-        echo '            debug: ' . ($this->options['debug'] ? 'true' : 'false');
+        echo '            debug: true';  // Always enable debug
         echo '        });';
 
         // Add AJAX submission handler if needed

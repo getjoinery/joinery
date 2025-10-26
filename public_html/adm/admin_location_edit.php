@@ -35,7 +35,7 @@
 				$location->set('loc_link', $location->create_url($_POST['loc_link']));
 			}
 			else{
-				$location->set('loc_link', $location->create_url($event->get('loc_name')));
+				$location->set('loc_link', $location->create_url($location->get('loc_name')));
 			}
 		}					
 
@@ -76,49 +76,68 @@
     <div class="col-md-8">
       <div class="p-3">';
 
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['loc_name']['required']['value'] = 'true';
-	$validation_rules['loc_link']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);	
+	// Editing an existing location
+	$formwriter = $page->getFormWriter('form1', 'v2', ['debug' => true]);
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_location_edit');
+	// Note: FormWriterV2 uses model-based validation auto-detection
+	// No need for set_validate() - validation rules come from Location model
+
+	echo $formwriter->begin_form();
 
 	if($location->key){
-		echo $formwriter->hiddeninput('loc_location_id', $location->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('loc_location_id', ['value' => $location->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
-	
-	echo $formwriter->textinput('Location name', 'loc_name', NULL, 100, $title, '', 255, '');		
-	
-	echo $formwriter->textinput('Location street address', 'loc_address', NULL, 100, $location->get('loc_address'), '', 255, '');
-	echo $formwriter->textinput('Location website', 'loc_website', NULL, 100, $location->get('loc_website'), '', 255, '');
+
+	$formwriter->textinput('loc_name', 'Location name', [
+		'value' => $title
+	]);
+
+	$formwriter->textinput('loc_address', 'Location street address', [
+		'value' => $location->get('loc_address')
+	]);
+
+	$formwriter->textinput('loc_website', 'Location website', [
+		'value' => $location->get('loc_website')
+	]);
 
 	if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/location/', 'loc_link', NULL, 100, $location->get('loc_link'), '', 255, '');	
+		$formwriter->textinput('loc_link', 'Link (optional): '.$settings->get_setting('webDir').'/location/', [
+			'value' => $location->get('loc_link'),
+			'validation' => false  // Backend auto-generates link if empty, so don't validate
+		]);
 	}
 
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Published", "loc_is_published", "", $optionvals, $location->get('loc_is_published'), '', FALSE);
-	
+	$formwriter->dropinput('loc_is_published', 'Published', [
+		'options' => ['No' => 0, 'Yes' => 1],
+		'value' => $location->get('loc_is_published')
+	]);
+
+	// Temporarily commented out for debugging
+	/*
 	$files = new MultiFile(
 		array('deleted'=>false, 'picture'=>true),
-		array('file_id' => 'DESC'),		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
+		array('file_id' => 'DESC'),
+		NULL,
+		NULL);
 	$files->load();
 	$optionvals = $files->get_image_dropdown_array();
-	echo $formwriter->imageinput("Image", "loc_fil_file_id", "", $optionvals, $location->get('loc_fil_file_id'), '', TRUE, TRUE, FALSE, TRUE);	
-	
-	echo $formwriter->textinput('Short description:', 'loc_short_description', NULL, 100, $location->get('loc_short_description'), '', 255, '');
+	$formwriter->imageinput('loc_fil_file_id', 'Image', [
+		'options' => $optionvals,
+		'value' => $location->get('loc_fil_file_id')
+	]);
+	*/
 
-	echo $formwriter->textbox('Description', 'loc_description', '', 5, 80, $content, '', 'yes');	
+	$formwriter->textinput('loc_short_description', 'Short description', [
+		'value' => $location->get('loc_short_description')
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	$formwriter->textbox('loc_description', 'Description', [
+		'value' => $content,
+		'htmlmode' => 'yes'
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');  // Changed from 'submit' to avoid shadowing form.submit()
 	echo $formwriter->end_form();
 
 	echo '    </div>
@@ -137,12 +156,14 @@
 	
 	if(count($optionvals)){
 
-		$formwriter = $page->getFormWriter('form_load_version');
-		
-		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_location_edit');
-		echo $formwriter->hiddeninput('loc_location_id', $location->key);
-		echo $formwriter->dropinput("Load another version", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-		echo $formwriter->new_form_button('Load');	
+		$formwriter = $page->getFormWriter('form_load_version', 'v2');
+
+		echo $formwriter->begin_form();
+		$formwriter->hiddeninput('loc_location_id', ['value' => $location->key]);
+		$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
+			'options' => $optionvals
+		]);
+		$formwriter->submitbutton('load', 'Load');
 		echo $formwriter->end_form();
 	}
 	else{

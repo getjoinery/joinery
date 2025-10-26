@@ -74,12 +74,17 @@ console.log('Debug mode enabled:', window.JOINERY_VALIDATE_DEBUG || false);
                         this.submitHandler(this.form);
                     } else {
                         if (this.debug) console.log('Submitting form normally');
-                        // Use requestSubmit() instead of submit() to avoid conflicts with submit button name="submit"
-                        if (this.form.requestSubmit) {
-                            this.form.requestSubmit();
-                        } else {
-                            // Fallback for older browsers
+
+                        // Directly submit the form without triggering another submit event
+                        // This avoids the double-prevention issue with requestSubmit()
+                        try {
+                            if (this.debug) console.log('Calling form.submit()');
+                            if (this.debug) console.log('Form before submit:', this.form);
                             this.form.submit();
+                            if (this.debug) console.log('✓ form.submit() completed');
+                        } catch (e) {
+                            if (this.debug) console.error('ERROR during form submission:', e);
+                            throw e;  // Re-throw so we can see the error
                         }
                     }
                 } else {

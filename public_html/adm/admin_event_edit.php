@@ -49,31 +49,23 @@ echo $formwriter->imageinput("Main image", "evt_fil_file_id", "ctrlHolder", $opt
 //echo $formwriter->textinput('Picture link', 'evt_picture_link', NULL, 100, $event->get('evt_picture_link'), '', 255, '');
 
 if($numlocations){
-	?>
-	<script type="text/javascript">
+	$optionvals = $locations->get_dropdown_array();
+	$location_id = $event->get('evt_loc_location_id');
 
-	function set_choices(){
-		var value = $("#evt_loc_location_id").val();
-		if(value == ''){  //ONE PRICE
-			$("#evt_location_container").show();
-		}
-		else{  //MULTIPLE PRICES
-			$("#evt_location_container").hide();
-			$("#evt_location").val('');
-		}
+	// Build visibility rules for location dropdown
+	$visibility_rules = array(
+		'' => array('show' => array('evt_location_container'), 'hide' => array()),
+	);
+
+	// Add rules for each predefined location (hide custom location field)
+	foreach ($optionvals as $label => $value) {
+		$visibility_rules[$value] = array('show' => array(), 'hide' => array('evt_location_container'));
 	}
 
-	$(document).ready(function() {
-		set_choices();
-		$("#evt_loc_location_id").change(function() {
-			set_choices();
-		});
-	});
+	echo $formwriter->dropinput('Location', 'evt_loc_location_id', array(
+		'visibility_rules' => $visibility_rules
+	), $optionvals, $location_id, '', 'Custom location');
 
-	</script>
-	<?php
-	$optionvals = $locations->get_dropdown_array();
-	echo $formwriter->dropinput('Location', 'evt_loc_location_id', '', $optionvals, $event->get('evt_loc_location_id'), '', 'Custom location');
 	echo $formwriter->textinput('Custom location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
 }
 else{
