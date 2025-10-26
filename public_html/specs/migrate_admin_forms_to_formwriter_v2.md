@@ -152,7 +152,28 @@ public function getFormWriter($form_id = 'form1', $version = 'v1') {
 
 ### 3.2 Migration Process for Each Page
 
-#### Step 1: Analyze Current V1 Form
+#### Step 1: Admin Pages Disable CSRF by Default
+
+**Important:** All admin form pages have CSRF protection **DISABLED** by default.
+
+This is set in `AdminPage.getFormWriter()` for all V2 forms:
+```php
+'csrf' => false  // Admin pages do NOT use CSRF protection
+```
+
+This means:
+- ✅ V2 forms in admin pages will NOT generate CSRF tokens
+- ✅ No CSRF validation needed on form submission
+- ✅ Backward compatible with existing admin page logic
+
+If you need CSRF protection for a specific form, override it:
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', ['csrf' => true]);
+```
+
+---
+
+#### Step 2: Analyze Current V1 Form
 
 Read the current admin page and identify:
 - [ ] All FormWriter method calls
@@ -161,7 +182,7 @@ Read the current admin page and identify:
 - [ ] Custom scripts or event handlers
 - [ ] Validation rules
 
-#### Step 2: Update getFormWriter() Call
+#### Step 3: Update getFormWriter() Call
 
 ```php
 // BEFORE (V1)
@@ -173,7 +194,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **That's the ONLY change to this line.**
 
-#### Step 3: Convert FormWriter Method Calls
+#### Step 4: Convert FormWriter Method Calls
 
 **Pattern: V1 → V2 conversion for each field type**
 
@@ -300,7 +321,7 @@ $formwriter->fileinput('document', 'Upload Document', [
 ]);
 ```
 
-#### Step 4: Update Form Begin/End Calls
+#### Step 5: Update Form Begin/End Calls
 
 ```php
 // V1
@@ -310,14 +331,44 @@ echo $formwriter->begin_form('form', 'POST', '/admin/admin_page');
 echo $formwriter->begin_form();
 ```
 
-#### Step 5: No Changes Needed For
+#### Step 6: Validation Handling (V1 vs V2)
 
-- ✅ `set_validate()` calls - works with both V1 and V2
-- ✅ Validation rule definitions - compatible with both versions
+**V1 Validation:**
+- Uses `set_validate()` method with validation rules array
+- Applies validation rules defined in PHP
+
+**V2 Validation:**
+- ❌ Do NOT use `set_validate()` - method doesn't exist in V2
+- ✅ Uses model-based validation auto-detection instead
+- ✅ Extracts validation rules from model's `$field_specifications`
+- ✅ Validation happens automatically based on Location model (or whatever model)
+
+**Action:** Remove all `set_validate()` calls when converting to V2
+
+#### Step 7: Button Methods (V1 vs V2)
+
+**V1 Button Methods:**
+```php
+echo $formwriter->start_buttons();
+echo $formwriter->new_form_button('Submit');
+echo $formwriter->end_buttons();
+```
+
+**V2 Button Method:**
+```php
+$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn-primary']);
+```
+
+**Key differences:**
+- ❌ V1's `start_buttons()`, `end_buttons()`, `new_form_button()` do NOT exist in V2
+- ✅ Use V2's `submitbutton($name, $label, $options)` instead
+- ✅ V2 handles button styling automatically
+
+#### Step 8: No Changes Needed For
+
 - ✅ Business logic (getting values, loading data, etc.)
-- ✅ `start_buttons()` / `end_buttons()` - compatible
-- ✅ `new_form_button()` - compatible
 - ✅ `end_form()` - compatible
+- ✅ `begin_form()` - compatible (different parameters)
 
 ---
 
@@ -356,6 +407,8 @@ echo $formwriter->end_form();
 ### After (V2)
 ```php
 $formwriter = $page->getFormWriter('form1', 'v2');
+
+// Note: Validation is auto-detected from Location model - no set_validate() needed
 
 echo $formwriter->begin_form();
 

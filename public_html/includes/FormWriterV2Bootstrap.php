@@ -1139,4 +1139,93 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo '<textarea name="' . htmlspecialchars($name) . '" id="' . htmlspecialchars($name) . '" class="form-control' . ($htmlmode === 'yes' ? ' html_editable' : '') . '" rows="' . (int)$rows . '" cols="' . (int)$cols . '" placeholder="' . htmlspecialchars($placeholder) . '">' . htmlspecialchars($value) . '</textarea>';
         echo '</div>';
     }
+
+    /**
+     * Output an image input field (styled image dropdown with radio buttons)
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options (options array of images, value, showdefault, forcestrict)
+     */
+    public function imageinput($name, $label = '', $options = []) {
+        $optionvals = $options['options'] ?? [];
+        $value = $options['value'] ?? null;
+        $showdefault = $options['showdefault'] ?? true;
+        $forcestrict = $options['forcestrict'] ?? true;
+        $id = $name;
+
+        $output = '';
+
+        $output .= '
+        <style>
+        .image-dropdown {
+            /*style the "box" in its minimzed state*/
+            border:1px solid black; width:600px; height:80px; overflow:hidden;
+            /*animate the dropdown collapsing*/
+            transition: height 0.1s;
+        }
+        .image-dropdown:hover {
+            /*when expanded, the dropdown will get native means of scrolling*/
+            height:400px; overflow-y:scroll;
+            /*animate the dropdown expanding*/
+            transition: height 0.5s;
+        }
+        .image-dropdown input {
+            /*hide the nasty default radio buttons!*/
+            position:absolute;top:0;left:0;opacity:0;
+        }
+        .image-dropdown label {
+            /*style the labels to look like dropdown options*/
+            display:none; margin:2px; height:80px; opacity:0.8;  overflow:hidden;
+            /*background:url("http://www.google.com/images/srpr/logo3w.png") 50% 50%;*/
+        }
+        .image-dropdown:hover label{
+            /*this is how labels render in the "expanded" state.
+             we want to see only the selected radio button in the collapsed menu,
+             and all of them when expanded*/
+            display:block;
+        }
+        .image-dropdown input:checked + label {
+            /*tricky! labels immediately following a checked radio button
+              (with our markup they are semantically related) should be fully opaque
+              and visible even in the collapsed menu*/
+            opacity:1 !important; font-weight: bold; display:block;
+        }
+        .dropimagewidth {
+            display: inline-block;
+            width: 80px;
+            padding-right: 5px;
+        }
+        </style>
+        ';
+
+        $output .= '<div id="' . htmlspecialchars($id) . '_container" class="mb-3 errorplacement">';
+        $output .= '<h5>' . htmlspecialchars($label) . '</h5>';
+        $output .= '<div class="image-dropdown">';
+
+        if ($showdefault) {
+            if (is_null($value)) {
+                $output .= '<input type="radio" id="default_id" name="' . htmlspecialchars($id) . '" value="" checked="checked" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/assets/images/image_placeholder_thumbnail.png"></span> No Image</label>';
+            } else {
+                $output .= '<input type="radio" id="default_id" name="' . htmlspecialchars($id) . '" value="" /><label for="default_id"><span class="dropimagewidth"><img loading="lazy" src="/assets/images/image_placeholder_thumbnail.png"></span> No Image</label>';
+            }
+        }
+
+        foreach ($optionvals as $key => $val) {
+            if ($forcestrict && $value === $val) {
+                // Note: $key contains HTML (image label with <img> tag), do NOT escape it
+                $output .= '<input type="radio" id="' . htmlspecialchars($val) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($val) . '" checked="checked" /><label for="' . htmlspecialchars($val) . '_id"> ' . $key . '</label>';
+            } elseif ($value == $val) {
+                // Note: $key contains HTML (image label with <img> tag), do NOT escape it
+                $output .= '<input type="radio" id="' . htmlspecialchars($val) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($val) . '" checked="checked" /><label for="' . htmlspecialchars($val) . '_id"> ' . $key . '</label>';
+            } else {
+                // Note: $key contains HTML (image label with <img> tag), do NOT escape it
+                $output .= '<input type="radio" id="' . htmlspecialchars($val) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($val) . '" /><label for="' . htmlspecialchars($val) . '_id"> ' . $key . '</label>';
+            }
+        }
+
+        $output .= '</div></div>';
+
+        echo $output;
+    }
 }

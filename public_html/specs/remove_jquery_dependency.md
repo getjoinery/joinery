@@ -193,32 +193,62 @@ Remove jQuery Validate plugin files that are no longer used.
 
 ---
 
-## 5. Implementation Support & Resources
+## 5. Implementation Approach
 
-**Status:** ✅ Resources created and ready for Phase 1 implementation
+**Status:** ✅ Ready for Phase 1 implementation
 
-### 5.1 Utilities Already Created ✅
+### 5.1 Implementation Strategy
 
-- ✅ **FormVisibility Helper** (`/assets/js/form-visibility-helper.js`) - 300+ lines, 30+ DOM manipulation methods
+Use one of two approaches based on the page requirements:
 
-### 5.2 Quick Reference Pattern for Admin Pages
+**Option 1: FormWriter Native Visibility Rules (Preferred for new admin pages)**
+- Use FormWriter's `visibility_rules` parameter for field visibility control
+- Automatically handles show/hide with smooth 300ms fade effects
+- See `/docs/formwriter.md` Section 4 for complete documentation
+- Example:
+  ```php
+  $formwriter->dropinput('question_type', 'Question Type', [
+      'options' => ['text' => 'Text', 'choice' => 'Multiple Choice'],
+      'visibility_rules' => [
+          'text' => ['show' => ['text_options'], 'hide' => ['choice_options']],
+          'choice' => ['show' => ['choice_options'], 'hide' => ['text_options']]
+      ]
+  ]);
+  ```
 
-Standard pattern used across all admin pages:
+**Option 2: Vanilla JavaScript (For complex custom logic)**
+- Use plain vanilla JavaScript with standard DOM methods
+- No external libraries or helpers
+- Direct `document.getElementById()`, `.addEventListener()`, `.style.display`, etc.
+- See Section 11 for detailed patterns
+
+### 5.2 Quick Reference Pattern for Admin Pages (Vanilla JavaScript)
+
+Standard pattern for custom JavaScript visibility logic:
 ```javascript
-// 1. Include helper
-<script src="/assets/js/form-visibility-helper.js"></script>
+(function() {
+    'use strict';
 
-// 2. Define visibility rules
-const visibilityRules = {
-  '1': { show: ['field1'], hide: ['field2'] },
-  '2': { show: ['field2'], hide: ['field1'] }
-};
+    function updateFieldVisibility() {
+        var value = document.getElementById('trigger-field').value;
 
-// 3. Listen to changes
-document.getElementById('select-id').addEventListener('change', function() {
-  const rules = visibilityRules[this.value];
-  FormVisibility.setVisibility(rules.show, rules.hide);
-});
+        if (value === 'option1') {
+            document.getElementById('field1_container').style.display = '';
+            document.getElementById('field2_container').style.display = 'none';
+        } else {
+            document.getElementById('field1_container').style.display = 'none';
+            document.getElementById('field2_container').style.display = '';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var triggerField = document.getElementById('trigger-field');
+        if (!triggerField) return;
+
+        updateFieldVisibility();
+        triggerField.addEventListener('change', updateFieldVisibility);
+    });
+})();
 ```
 
 ---
@@ -278,18 +308,21 @@ Most admin pages follow this pattern:
 3. Function enables/disables form controls
 4. Initial call on page load sets initial state
 
-**Solution:** Use FormVisibility helper library + vanilla JS event listeners (see Section 11 for detailed examples)
+**Solutions:**
+- **Preferred:** Use FormWriter's `visibility_rules` parameter (automatically handles all logic)
+- **Alternative:** Use vanilla JavaScript with direct DOM manipulation (Section 11.2 Option B)
 
-### 7.2 FormVisibility Helper Integration
+### 7.2 Vanilla JavaScript Conversion
 
-When converting admin pages:
-1. **Include helper:** `<script src="/assets/js/form-visibility-helper.js"></script>`
-2. **Replace jQuery patterns:**
-   - `$("#id").show()` → `FormVisibility.show('id')`
-   - `$("#id").hide()` → `FormVisibility.hide('id')`
-   - `$("#id").prop('disabled', true)` → `FormVisibility.setEnabled('id', false)`
-3. **Convert event listeners:** `$("#id").change(fn)` → `document.getElementById('id').addEventListener('change', fn)`
-4. **Use data structures** instead of if-else chains for better maintainability
+When converting admin pages with custom JavaScript:
+1. **Replace jQuery DOM methods with vanilla JavaScript:**
+   - `$("#id").show()` → `document.getElementById('id').style.display = ''`
+   - `$("#id").hide()` → `document.getElementById('id').style.display = 'none'`
+   - `$("#id").val()` → `document.getElementById('id').value`
+   - `$("#id").prop('disabled', true)` → `document.getElementById('id').disabled = true`
+2. **Convert event listeners:** `$("#id").change(fn)` → `document.getElementById('id').addEventListener('change', fn)`
+3. **Use data structures** instead of if-else chains for better maintainability
+4. **For FormWriter fields:** Consider using `visibility_rules` parameter instead of custom JavaScript when possible
 
 ### 7.3 AJAX to Fetch API Conversion
 
@@ -493,57 +526,61 @@ Most admin pages follow the same pattern:
 - Find the select/dropdown that triggers changes
 - Find the show/hide/enable/disable operations
 - Identify initial state setup
+- Determine if FormWriter `visibility_rules` can be used
 
-**Step 2: Create Conversion**
+**Step 2: Option A - Use FormWriter Visibility Rules (Preferred)**
 ```php
 <?php
-// Include helper at top of page
-require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-// ... other includes
+// For FormWriter dropdowns with conditional field visibility
+$formwriter->dropinput('Select Field', 'field_name', 'container', [
+    'options' => ['option1' => 'Label 1', 'option2' => 'Label 2'],
+    'value' => $current_value,
+    'visibility_rules' => [
+        'option1' => [
+            'show' => ['field1_id', 'field2_id'],
+            'hide' => ['field3_id']
+        ],
+        'option2' => [
+            'show' => ['field3_id'],
+            'hide' => ['field1_id', 'field2_id']
+        ]
+    ]
+]);
+?>
+```
 
-// Later in the page, replace jQuery with:
+**Step 2: Option B - Use Vanilla JavaScript (For Complex Custom Logic)**
+```php
+<?php
+// Later in the page, replace jQuery with vanilla JS:
 ?>
 
-<!-- Include FormVisibility Helper -->
-<script src="/assets/js/form-visibility-helper.js"></script>
-
 <script type="text/javascript">
-/**
- * Update form field visibility/state based on selection
- */
 (function() {
     'use strict';
 
-    // Define visibility rules by selection value
-    const visibilityRules = {
-        '1': {
-            show: ['field1', 'field2'],
-            hide: ['field3', 'field4'],
-            enable: ['option1'],
-            disable: ['option2', 'option3']
-        },
-        '2': {
-            show: ['field3', 'field4'],
-            hide: ['field1', 'field2'],
-            enable: ['option2'],
-            disable: ['option1', 'option3']
-        }
-        // ... more rules
-    };
-
     function updateFormState() {
-        const selectedValue = FormVisibility.getValue('select-id');
-        const rules = visibilityRules[selectedValue] || visibilityRules['1'];
+        var selectedValue = document.getElementById('select-id').value;
 
-        // Apply all rules
-        FormVisibility.setVisibility(rules.show, rules.hide);
-        FormVisibility.setMultipleEnabled(rules.enable, true);
-        FormVisibility.setMultipleEnabled(rules.disable, false);
+        // Handle visibility for each option
+        if (selectedValue === 'option1') {
+            document.getElementById('field1_container').style.display = '';
+            document.getElementById('field2_container').style.display = '';
+            document.getElementById('field3_container').style.display = 'none';
+            document.getElementById('option1').disabled = false;
+            document.getElementById('option2').disabled = true;
+        } else if (selectedValue === 'option2') {
+            document.getElementById('field1_container').style.display = 'none';
+            document.getElementById('field2_container').style.display = 'none';
+            document.getElementById('field3_container').style.display = '';
+            document.getElementById('option1').disabled = true;
+            document.getElementById('option2').disabled = false;
+        }
     }
 
     // Initialize on page load
     document.addEventListener('DOMContentLoaded', function() {
-        const selectElement = document.getElementById('select-id');
+        var selectElement = document.getElementById('select-id');
         if (!selectElement) return;
 
         // Set initial state
@@ -687,19 +724,18 @@ fetch('endpoint')
    cp /path/to/file.php /path/to/file.php.bak
    ```
 
-2. **Include FormVisibility Helper (if needed)**
-   ```html
-   <script src="/assets/js/form-visibility-helper.js"></script>
-   ```
+2. **Determine Conversion Approach**
+   - Can FormWriter `visibility_rules` be used? → Use that (Section 11.2 Option A)
+   - Complex custom logic? → Use vanilla JavaScript (Section 11.2 Option B)
 
-3. **Find jQuery Patterns**
+3. **Find jQuery Patterns** and convert using the quick reference (Section 11.7)
    - `$(document).ready(...)` → `document.addEventListener('DOMContentLoaded', ...)`
-   - `$("#id").show()` → `FormVisibility.show('id')`
-   - `$("#id").hide()` → `FormVisibility.hide('id')`
-   - `$("#id").prop('disabled', ...)` → `FormVisibility.setEnabled('id', ...)`
+   - `$("#id").show()` → `document.getElementById('id').style.display = ''`
+   - `$("#id").hide()` → `document.getElementById('id').style.display = 'none'`
+   - `$("#id").prop('disabled', ...)` → `document.getElementById('id').disabled = ...`
    - `$("#id").change(fn)` → `document.getElementById('id').addEventListener('change', fn)`
 
-4. **Test**
+4. **Syntax Test**
    ```bash
    php -l /path/to/file.php
    ```
@@ -711,16 +747,18 @@ fetch('endpoint')
 
 ### 11.7 Quick Reference - jQuery to Vanilla JS
 
-| jQuery | Vanilla JS | FormVisibility |
-|--------|-----------|-----------------|
-| `$("#id").val()` | `document.getElementById('id').value` | `FormVisibility.getValue('id')` |
-| `$("#id").show()` | `document.getElementById('id').style.display = ''` | `FormVisibility.show('id')` |
-| `$("#id").hide()` | `document.getElementById('id').style.display = 'none'` | `FormVisibility.hide('id')` |
-| `$("#id").prop('disabled', true)` | `document.getElementById('id').disabled = true` | `FormVisibility.setEnabled('id', false)` |
-| `$("#id").attr('checked', false)` | `document.getElementById('id').checked = false` | `FormVisibility.setChecked('id', false)` |
-| `$("#id").change(fn)` | `document.getElementById('id').addEventListener('change', fn)` | `FormVisibility.onChange('id', fn)` |
-| `$(document).ready(fn)` | `document.addEventListener('DOMContentLoaded', fn)` | N/A |
-| `$.ajax({...})` | `fetch(...).then(...).catch(...)` | N/A |
+| jQuery | Vanilla JS |
+|--------|-----------|
+| `$("#id").val()` | `document.getElementById('id').value` |
+| `$("#id").show()` | `document.getElementById('id').style.display = ''` |
+| `$("#id").hide()` | `document.getElementById('id').style.display = 'none'` |
+| `$("#id").prop('disabled', true)` | `document.getElementById('id').disabled = true` |
+| `$("#id").attr('checked', false)` | `document.getElementById('id').checked = false` |
+| `$("#id").change(fn)` | `document.getElementById('id').addEventListener('change', fn)` |
+| `$(document).ready(fn)` | `document.addEventListener('DOMContentLoaded', fn)` |
+| `$.ajax({...})` | `fetch(...).then(...).catch(...)` |
+| `$("#id").addClass('class')` | `document.getElementById('id').classList.add('class')` |
+| `$("#id").removeClass('class')` | `document.getElementById('id').classList.remove('class')` |
 
 ---
 
