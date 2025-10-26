@@ -334,11 +334,43 @@ $formwriter->checkboxList('options', 'Options', [
 // V1
 echo $formwriter->datetimeinput('Start Time', 'start_time', 'ctrlHolder', $value, '', '', '');
 
-// V2
-$formwriter->datetimeinput('start_time', 'Start Time', [
-    'value' => $value
-]);
+// V2 - View file (automatic form filling)
+$event = new Event($event_id, TRUE);
+$form_values = $event->export_as_array();
+
+// Convert UTC times to user's timezone for display
+if($event->key && $form_values['evt_start_time']){
+    $form_values['evt_start_time'] = LibraryFunctions::convert_time(
+        $form_values['evt_start_time'],
+        'UTC',
+        $session->get_timezone(),
+        'Y-m-d H:i:s'
+    );
+}
+
+$formwriter = $page->getFormWriter('form1', 'v2', ['values' => $form_values]);
+$formwriter->datetimeinput('evt_start_time', 'Start Time');
+
+// V2 - Logic file (processing submitted datetime)
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
+
+if($_POST){
+    // Use static helper to process datetime and convert to UTC
+    $start_time = FormWriterV2Base::process_datetimeinput($_POST, 'evt_start_time', true);
+    if($start_time !== NULL){
+        $event->set('evt_start_time', $start_time);
+    }
+
+    $event->save();
+}
 ```
+
+**DateTime Processing Notes:**
+- `datetimeinput()` accepts DateTime objects or strings (maximum compatibility)
+- Use `LibraryFunctions::convert_time()` to convert UTC to user's timezone for display
+- Use `FormWriterV2Base::process_datetimeinput()` to process submissions and convert to UTC
+- The helper handles all the field name parsing (`_date`, `_time_hour`, `_time_minute`, `_time_ampm`)
+- Set `$to_utc` parameter to `false` if you don't want timezone conversion
 
 ##### HiddenInput Conversion
 ```php

@@ -1411,4 +1411,43 @@ abstract class FormWriterV2Base {
 
         return $output;
     }
+
+    /**
+     * Process a datetime input from POST data
+     *
+     * @param array $post_vars The POST data array
+     * @param string $field_name The base field name (e.g., 'ccd_start_time')
+     * @param bool $to_utc Whether to convert to UTC (default true)
+     * @return string|null The processed datetime string, or NULL if fields not present
+     */
+    public static function process_datetimeinput($post_vars, $field_name, $to_utc = true) {
+        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+        $date_field = $field_name . '_date';
+        $hour_field = $field_name . '_time_hour';
+        $minute_field = $field_name . '_time_minute';
+        $ampm_field = $field_name . '_time_ampm';
+
+        // Check if the required fields are present
+        if(empty($post_vars[$date_field]) || !isset($post_vars[$hour_field])){
+            return NULL;
+        }
+
+        // Combine hour, minute, ampm into time string
+        $hour = intval($post_vars[$hour_field]);
+        $minute = str_pad($post_vars[$minute_field], 2, '0', STR_PAD_LEFT);
+        $ampm = $post_vars[$ampm_field];
+        $time_string = $hour . ':' . $minute . $ampm;
+
+        // Combine date and time
+        $time_combined = $post_vars[$date_field] . ' ' . LibraryFunctions::toDBTime($time_string);
+
+        // Convert to UTC if requested
+        if($to_utc){
+            $session = SessionControl::get_instance();
+            return LibraryFunctions::convert_time($time_combined, $session->get_timezone(), 'UTC', 'c');
+        }
+
+        return $time_combined;
+    }
 }
