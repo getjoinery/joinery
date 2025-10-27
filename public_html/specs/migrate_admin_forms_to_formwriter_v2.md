@@ -43,9 +43,9 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 24/69 completed (34.8%)**
+**Progress: 30/69 completed + 5 pending testing = 35/69 total work done (43.5% completed, 7.2% pending user testing)**
 
-#### Completed ✅
+#### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
 - [x] `/adm/admin_coupon_code_edit.php` - ✅ **COMPLETED** (uses model option with field overrides, datetime processing, AJAX dropdown, require_one_group validation, visibility rules, checkboxList)
 - [x] `/adm/admin_api_key_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdowns, datetime fields with automatic timezone conversion)
@@ -70,28 +70,27 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_static_cache.php` - ✅ **COMPLETED** (multiple filter forms with textinput, hiddeninput, custom validation)
 - [x] `/adm/admin_url_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdown, hiddeninput, automatic model form filling)
 - [x] `/adm/admin_phone_verify.php` - ✅ **COMPLETED** (two forms with dropdowns, hiddeninput, custom form actions)
+- [x] `/adm/admin_group_edit.php` - ✅ **COMPLETED** (simple single-field form with validation)
+- [x] `/adm/admin_post_edit.php` - ✅ **COMPLETED** (two forms with textinput, textbox, multiple dropdowns, prepend, conditional fields)
+- [x] `/adm/admin_address_edit.php` - ✅ **COMPLETED** (form with PlainForm() helper, dropdown, textinputs with validation)
+- [x] `/adm/admin_email_edit.php` - ✅ **COMPLETED** (logic-based form with 7 dropdowns, textinput, textbox)
+- [x] `/adm/admin_file_edit.php` - ✅ **COMPLETED** (form with 3 dropdowns and MultiGroup/MultiEvent lookups)
+- [x] `/adm/admin_video_edit.php` - ✅ **COMPLETED** (complex form with 3 dropdowns and conditional fields)
+- [x] `/adm/admin_public_menu_edit.php` - ✅ **COMPLETED** (form with dynamic page linking and parent menu selection)
 
-#### Pending Conversion (45 pages)
+#### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
+- ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
 
-**A-C:**
-- [ ] `/adm/admin_address_edit.php`
+#### Pending Conversion (30 pages)
 
 **E:**
-- [ ] `/adm/admin_email_edit.php`
 - [ ] `/adm/admin_email_recipients_modify.php`
 - [ ] `/adm/admin_email_template_edit.php`
-- [ ] `/adm/admin_email_template_permanent_delete.php`
 - [ ] `/adm/admin_event.php`
 - [ ] `/adm/admin_event_bundle_edit.php`
 - [ ] `/adm/admin_event_edit.php`
 - [ ] `/adm/admin_event_session_edit.php`
 - [ ] `/adm/admin_event_type_edit.php`
-
-**F-G:**
-- [ ] `/adm/admin_file_edit.php`
-- [ ] `/adm/admin_file_upload.php`
-- [ ] `/adm/admin_group_edit.php`
-- [ ] `/adm/admin_group_permanent_delete.php`
 
 **L-M:**
 - [ ] `/adm/admin_log_event.php`
@@ -99,7 +98,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_message.php`
 
 **O:**
-- [ ] `/adm/admin_order_delete.php`
 - [ ] `/adm/admin_order_edit.php`
 - [ ] `/adm/admin_order_item_edit.php`
 - [ ] `/adm/admin_order_refund.php`
@@ -107,16 +105,11 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **P:**
 - [ ] `/adm/admin_page_content_edit.php`
-- [ ] `/adm/admin_page_content_permanent_delete.php`
 - [ ] `/adm/admin_page_edit.php`
-- [ ] `/adm/admin_phone_edit.php`
-- [ ] `/adm/admin_post_edit.php`
-- [ ] `/adm/admin_post_permanent_delete.php`
 - [ ] `/adm/admin_product_edit.php`
 - [ ] `/adm/admin_product_group_edit.php`
 - [ ] `/adm/admin_product_requirement_edit.php`
 - [ ] `/adm/admin_product_version_edit.php`
-- [ ] `/adm/admin_public_menu_edit.php`
 
 **Q-S:**
 - [ ] `/adm/admin_question.php`
@@ -125,7 +118,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_settings_email.php`
 - [ ] `/adm/admin_settings_payments.php`
 - [ ] `/adm/admin_shadow_session_edit.php`
-- [ ] `/adm/admin_softdelete.php`
 - [ ] `/adm/admin_stripe_orders.php`
 - [ ] `/adm/admin_subscription_tier_edit.php`
 - [ ] `/adm/admin_survey.php`
@@ -137,9 +129,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_users_edit.php`
 - [ ] `/adm/admin_users_message.php`
 - [ ] `/adm/admin_users_password_edit.php`
-- [ ] `/adm/admin_users_permanent_delete.php`
-- [ ] `/adm/admin_users_undelete.php`
-- [ ] `/adm/admin_video_edit.php`
 - [ ] `/adm/admin_yearly_report_donations.php`
 
 ---

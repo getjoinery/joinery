@@ -19,7 +19,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputTextInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
@@ -108,7 +108,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputPasswordInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
@@ -183,7 +183,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputTextarea($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
@@ -248,7 +248,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputDropInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
         $select_options = $options['options'] ?? [];
@@ -499,7 +499,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options (must include 'options' key)
      */
     protected function outputRadioInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $radio_options = $options['options'] ?? [];
 
         $has_errors = isset($this->errors[$name]);
@@ -564,7 +564,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputDateInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
 
@@ -621,7 +621,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputTimeInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
         $hour_id = $id . '_hour';
@@ -819,8 +819,8 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         // Derive date and time field names from the main name
         $date_name = $name . '_dateinput';
         $time_name = $name . '_timeinput';
-        $date_value = $options['value'] ?? $options['date_value'] ?? '';
-        $time_value = $options['time_value'] ?? '';
+        $date_value = $options['value'] ?? $options['date_value'] ?? ($this->values[$name] ?? '');
+        $time_value = $options['time_value'] ?? ($this->values[$time_name] ?? '');
         $class = $options['class'] ?? 'form-control';
         $date_id = $options['date_id'] ?? $date_name;
         $time_id = $options['time_id'] ?? $time_name;
@@ -1069,7 +1069,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
     public function textbox($name, $label, $options = []) {
         $rows = $options['rows'] ?? 5;
         $cols = $options['cols'] ?? 80;
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
         $htmlmode = $options['htmlmode'] ?? 'no';
 
