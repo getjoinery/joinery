@@ -17,7 +17,7 @@ function admin_comment_edit_logic($get_vars, $post_vars) {
 
 	if($post_vars){
 
-		$editable_fields = array('cmt_body', 'cmt_author_name', 'cmt_is_approved');
+		$editable_fields = array('cmt_body', 'cmt_author_name', 'cmt_is_approved', 'cmt_pst_post_id');
 
 		foreach($editable_fields as $field) {
 			$comment->set($field, $post_vars[$field]);
