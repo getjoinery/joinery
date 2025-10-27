@@ -1,7 +1,7 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	
+
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -21,24 +21,24 @@
 		if($_POST['fil_description']){
 				$_POST['fil_description'] = $_POST['fil_description'];
 		}
-		
+
 		if($_POST['fil_min_permission'] === NULL || $_POST['fil_min_permission'] === ''){
 			$file->set('fil_min_permission', NULL);
-		} 
+		}
 		else{
 			$file->set('fil_min_permission', $_POST['fil_min_permission']);
 		}
 
 		if($_POST['fil_grp_group_id'] === NULL || $_POST['fil_grp_group_id'] === ''){
 			$file->set('fil_grp_group_id', NULL);
-		} 
+		}
 		else{
 			$file->set('fil_grp_group_id', $_POST['fil_grp_group_id']);
 		}
-		
+
 		if($_POST['fil_evt_event_id'] === NULL || $_POST['fil_evt_event_id'] === ''){
 			$file->set('fil_evt_event_id', NULL);
-		} 
+		}
 		else{
 			$file->set('fil_evt_event_id', $_POST['fil_evt_event_id']);
 		}
@@ -52,13 +52,13 @@
 		$file->prepare();
 		$file->save();
 		$file->load();
-		
+
 		LibraryFunctions::redirect('/admin/admin_file?fil_file_id='.$file->key);
 		return;
 	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'files-parent',
 		'page_title' => 'File Edit',
@@ -72,51 +72,59 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing file
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_file_edit');
-	echo $formwriter->hiddeninput('fil_file_id', $file->key);
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $file
+	]);
+	$formwriter->begin_form();
+	$formwriter->hiddeninput('fil_file_id', ['value' => $file->key]);
 
-	echo $formwriter->textinput('File title', 'fil_title', NULL, 100, $file->get('fil_title'), '', 255, '');
+	$formwriter->textinput('fil_title', 'File title');
 
-	echo $formwriter->textbox('File Description', 'fil_description', 'ctrlHolder', 10, 80, $file->get('fil_description'), '', 'no');
-	
+	$formwriter->textbox('fil_description', 'File Description', [
+		'htmlmode' => 'no'
+	]);
+
 	$optionvals = array('Public (anyone)' => null, 'Any logged in user (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
-	echo $formwriter->dropinput("Permission level can access", "fil_min_permission", "ctrlHolder", $optionvals, $file->get('fil_min_permission'), '', FALSE, TRUE);
-	
+	$formwriter->dropinput("fil_min_permission", "Permission level can access", [
+		'options' => $optionvals
+	]);
+
 	$groups = new MultiGroup(
-		array('category'=>'user'),  //SEARCH 
+		array('category'=>'user'),  //SEARCH
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$groups->load();
 
-	$optionvals1['All'] = NULL;	
+	$optionvals1['All'] = NULL;
 	$optionvals2 = $groups->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
-	echo $formwriter->dropinput("Group can access", "fil_grp_group_id", "ctrlHolder", $optionvals, $file->get('fil_grp_group_id'), '', FALSE, TRUE);
+	$formwriter->dropinput("fil_grp_group_id", "Group can access", [
+		'options' => $optionvals
+	]);
 
 	$events = new MultiEvent(
-		array(),  //SEARCH 
+		array(),  //SEARCH
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$events->load();
 
-	$optionvals['All'] = NULL;	
+	$optionvals['All'] = NULL;
 	$optionvals2 = $events->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
-	echo $formwriter->dropinput("Event can access", "fil_evt_event_id", "ctrlHolder", $optionvals, $file->get('fil_evt_event_id'), '', FALSE, TRUE);
+	$formwriter->dropinput("fil_evt_event_id", "Event can access", [
+		'options' => $optionvals
+	]);
 
-	if($file->is_image()){ 
+	if($file->is_image()){
 	/*
 		echo $formwriter->checkboxinput("Include this image in the gallery", "fil_gal_gallery_id", "checkbox", "left", $file->get('fil_gal_gallery_id'), 1, "");
 		*/
 	}
-	
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 
 $page->end_box();
 	$page->admin_footer();
