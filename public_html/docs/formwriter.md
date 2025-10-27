@@ -944,26 +944,20 @@ $formwriter->textinput('loc_link', 'Link', [
 
 #### 7.1.2 Automatic Form Filling
 
-V2 can auto-populate all fields from model data using the `values` option:
+V2 can auto-populate all fields from model data using the `model` option:
 
 ```php
 // Load location model
 $location = new Location($location_id, TRUE);
 
-// Prepare form values
-$form_values = $location->export_as_array();
-// Override specific values if needed (e.g., from content version)
-$form_values['loc_name'] = $custom_title;
-$form_values['loc_description'] = $custom_content;
-
-// Pass values to FormWriter - auto-fills all fields!
+// Pass model directly to FormWriter - auto-fills all fields!
 $formwriter = $page->getFormWriter('form1', 'v2', [
-    'values' => $form_values
+    'model' => $location
 ]);
 
 $formwriter->begin_form();
 
-// No need to specify 'value' for each field - auto-filled!
+// No need to specify 'value' for each field - auto-filled from model!
 $formwriter->textinput('loc_name', 'Location name');
 $formwriter->textinput('loc_address', 'Address');
 $formwriter->textinput('loc_website', 'Website');
@@ -972,10 +966,42 @@ $formwriter->textinput('loc_link', 'Link');
 $formwriter->end_form();
 ```
 
+**With field overrides:**
+```php
+// Pass model AND additional values that override specific fields
+$override_values = [];
+if($coupon->key){
+    // Transform timezone-sensitive fields (overrides model value)
+    $override_values['ccd_start_time'] = LibraryFunctions::convert_time(
+        $coupon->get('ccd_start_time'), 'UTC', $session->get_timezone(), 'Y-m-d H:i:s'
+    );
+} else {
+    // Set defaults for new records
+    $override_values['ccd_is_active'] = 1;
+}
+
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $coupon,              // Auto-fills all model fields
+    'values' => $override_values     // Overrides specific fields (no conflicts!)
+]);
+```
+
+**Override behavior:**
+Values in the `values` array take precedence over model fields - no conflict detection needed:
+
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $location,              // Has loc_name = "Old Name"
+    'values' => ['loc_name' => 'New Name']  // Overrides model value
+]);
+// Result: loc_name will be "New Name" (values override model)
+```
+
 **Benefits:**
-- ✅ Less repetitive code
+- ✅ Pass model directly - no need to call `export_as_array()`
 - ✅ Automatic value population from model
-- ✅ Still allows field-specific overrides when needed
+- ✅ Simple override pattern - values take precedence
+- ✅ Perfect for timezone conversions and defaults
 - ✅ Works with all field types
 
 **Old way (manual):**
@@ -993,14 +1019,82 @@ $formwriter->textinput('loc_address', 'Address', [
 **New way (automatic):**
 ```php
 $formwriter = $page->getFormWriter('form1', 'v2', [
-    'values' => $location->export_as_array()  // One line!
+    'model' => $location  // One option!
 ]);
 $formwriter->textinput('loc_name', 'Location name');
 $formwriter->textinput('loc_address', 'Address');
 // ... etc - all auto-filled!
 ```
 
-#### 7.1.3 Input Group Prepend Text (Bootstrap)
+#### 7.1.3 Automatic Local Time Conversion
+
+V2 automatically converts UTC timestamp fields to the user's local timezone for display. This eliminates manual timezone conversion code in views.
+
+**How it works:**
+- Detects timestamp fields by checking model's `field_specifications` column types
+- Looks for field types: `timestamp` only (they have both date and timezone context)
+- Date and time fields are skipped (they lack timezone context)
+- Requires a model to be provided to FormWriter
+- Automatically converts DateTime objects and timestamp strings from UTC to user's timezone
+- Converts to `Y-m-d H:i:s` format for display in form fields
+- Handles errors gracefully (leaves value unchanged if conversion fails)
+
+**Before (V1 - manual conversion):**
+```php
+// Must manually convert timezone in view
+$form_values = $location->export_as_array();
+if($location->get('loc_created_time')){
+    $form_values['loc_created_time'] = LibraryFunctions::convert_time(
+        $location->get('loc_created_time'),
+        'UTC',
+        $session->get_timezone(),
+        'Y-m-d H:i:s'
+    );
+}
+$formwriter = $page->getFormWriter('form1', 'v1');
+// Then pass $form_values manually to each field
+```
+
+**After (V2 - automatic conversion):**
+```php
+// Just pass model - timezone conversion is automatic!
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $location  // All timestamp/date/time fields automatically converted
+]);
+```
+
+**Detection method:**
+
+FormWriter checks `model::$field_specifications` to identify timestamp columns:
+```php
+// In Location model's field_specifications:
+'loc_created_time' => array('type' => 'timestamp(6)'),  // ✅ Converted - has timezone context!
+'loc_birth_date' => array('type' => 'date'),            // ❌ Skipped - no timezone context
+'usr_lastlogin_time' => array('type' => 'timestamp(6)'), // ✅ Converted - has timezone context!
+'loc_opening_time' => array('type' => 'time'),          // ❌ Skipped - just time, no date context
+```
+
+**Important:** A model must be provided to FormWriter for automatic conversion to work. Without a model, FormWriter cannot access field_specifications and timezone conversion is disabled.
+
+**Overriding automatic conversion:**
+If you need to use a non-converted value for a timestamp field, simply pass it in the `values` array (which overrides model values):
+
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $location,
+    'values' => ['loc_created_time' => '2024-01-01 00:00:00']  // This won't be converted
+]);
+```
+
+**Benefits:**
+- ✅ Eliminates repetitive timezone conversion code
+- ✅ Works with both DateTime objects and timestamp strings
+- ✅ Automatic detection by column type (based on actual database schema)
+- ✅ No flags or options needed (just pass model)
+- ✅ Easy to override when needed (pass `values` array)
+- ✅ Handles errors gracefully
+
+#### 7.1.4 Input Group Prepend Text (Bootstrap)
 
 V2 Bootstrap supports prepending text to input fields using Bootstrap's input-group:
 
