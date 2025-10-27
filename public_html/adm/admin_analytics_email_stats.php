@@ -46,18 +46,20 @@ switch ($interval)
 		echo "Houston, we have a problem.";
 }
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_email_stats");
-echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);
-echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $enddate, "", 10);
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
+$formwriter->textinput('startdate', 'Start Date', [
+	'value' => $startdate
+]);
+$formwriter->textinput('enddate', 'End Date', [
+	'value' => $enddate
+]);
 /*
 $optionvals = array("Day"=>"0", "Week"=>"1", "Month"=>"2", "Quarter"=>"3", "Year"=>"4");
 $grouping = array("Day", "Week", "Month", "Quarter", "Year");
 $formwriter->radioinput("Group by:", "interval", "radioinput", $optionvals, $interval, "BlockLabel", "", TRUE);
 */
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
+$formwriter->submitbutton('btn_submit', 'Submit');
 
 echo $formwriter->end_form();
 

@@ -52,17 +52,23 @@ array(
 
 <?php
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_users");
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
 
-echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $page_vars['startdate'], "", 10);
-echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $page_vars['enddate'], "", 10);
-echo $formwriter->textinput("Minimum Total", "mintotal", "filterinput", 20, $page_vars['mintotal'], "", 10);
-echo $formwriter->checkboxinput("Exclude Disabled Users", "usr_is_disabled", "checkbox", "left", $page_vars['disabled'], 0, "");
+$formwriter->textinput('startdate', 'Start Date', [
+	'value' => $page_vars['startdate']
+]);
+$formwriter->textinput('enddate', 'End Date', [
+	'value' => $page_vars['enddate']
+]);
+$formwriter->textinput('mintotal', 'Minimum Total', [
+	'value' => $page_vars['mintotal']
+]);
+$formwriter->checkboxinput('usr_is_disabled', 'Exclude Disabled Users', [
+	'checked' => $page_vars['disabled']
+]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit', 'formsubmit', 'admin_analytics_users', 'Calculate');
-	echo $formwriter->end_buttons();
+$formwriter->submitbutton('btn_submit', 'Calculate');
 echo $formwriter->end_form();
 
 	$headers = array("Domain", "Total", "Total Verified", "% Email Verified");
