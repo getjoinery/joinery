@@ -31,66 +31,73 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        echo '<div class="form-group">';
+        $html = '<div class="form-group">';
 
         // Output label
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
         }
 
         // Open input-group if prepend text is provided
         if ($prepend) {
-            echo '<div class="input-group">';
-            echo '<div class="input-group-text">' . htmlspecialchars($prepend) . '</div>';
+            $html .= '<div class="input-group">';
+            $html .= '<div class="input-group-text">' . htmlspecialchars($prepend) . '</div>';
         }
 
         // Output input
-        echo '<input type="text"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="text"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         // Only show placeholder if field is empty (Bootstrap native behavior)
         if ($placeholder && !$value) {
-            echo ' placeholder="' . htmlspecialchars($placeholder) . '"';
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['autofocus'])) {
-            echo ' autofocus';
+            $html .= ' autofocus';
         }
         if (!empty($options['autocomplete'])) {
-            echo ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
+            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
         }
         if (!empty($options['onchange'])) {
-            echo ' onchange="' . htmlspecialchars($options['onchange']) . '"';
+            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
         }
 
-        echo '>';
+        $html .= '>';
 
         // Close input-group if prepend text was provided
         if ($prepend) {
-            echo '</div>';  // Close input-group
+            $html .= '</div>';  // Close input-group
         }
 
         // Display any errors for this field
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         // Display help text if provided
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -111,54 +118,61 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        echo '<div class="form-group">';
+        $html = '<div class="form-group">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<input type="password"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="password"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         if ($placeholder) {
-            echo ' placeholder="' . htmlspecialchars($placeholder) . '"';
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['autocomplete'])) {
-            echo ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
+            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
         }
 
-        echo '>';
+        $html .= '>';
 
         // Password strength meter if requested
         if (!empty($options['strength_meter'])) {
-            echo '<div class="password-strength-meter mt-2">';
-            echo '<div class="progress" style="height: 5px;">';
-            echo '<div class="progress-bar" role="progressbar" style="width: 0%"></div>';
-            echo '</div>';
-            echo '<small class="strength-text text-muted"></small>';
-            echo '</div>';
+            $html .= '<div class="password-strength-meter mt-2">';
+            $html .= '<div class="progress" style="height: 5px;">';
+            $html .= '<div class="progress-bar" role="progressbar" style="width: 0%"></div>';
+            $html .= '</div>';
+            $html .= '<small class="strength-text text-muted"></small>';
+            $html .= '</div>';
         }
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -180,43 +194,50 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        echo '<div class="form-group">';
+        $html = '<div class="form-group">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<textarea';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' rows="' . (int)$rows . '"';
+        $html .= '<textarea';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' rows="' . (int)$rows . '"';
 
         if ($placeholder) {
-            echo ' placeholder="' . htmlspecialchars($placeholder) . '"';
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
-        echo htmlspecialchars($value);
-        echo '</textarea>';
+        $html .= '>';
+        $html .= htmlspecialchars($value);
+        $html .= '</textarea>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -238,48 +259,48 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        echo '<div class="form-group">';
+        $html = '<div class="form-group">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<select';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
+        $html .= '<select';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
 
         if (!empty($options['multiple'])) {
-            echo ' multiple';
+            $html .= ' multiple';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['onchange'])) {
-            echo ' onchange="' . htmlspecialchars($options['onchange']) . '"';
+            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
         }
 
-        echo '>';
+        $html .= '>';
 
         // Default empty option
         if (!empty($options['empty_option'])) {
-            echo '<option value="">' . htmlspecialchars($options['empty_option']) . '</option>';
+            $html .= '<option value="">' . htmlspecialchars($options['empty_option']) . '</option>';
         }
 
         // Output options
         foreach ($select_options as $opt_label => $opt_value) {
-            echo '<option value="' . htmlspecialchars($opt_value) . '"';
+            $html .= '<option value="' . htmlspecialchars($opt_value) . '"';
             if ((string)$value === (string)$opt_value) {
-                echo ' selected';
+                $html .= ' selected';
             }
-            echo '>' . htmlspecialchars($opt_label) . '</option>';
+            $html .= '>' . htmlspecialchars($opt_label) . '</option>';
         }
 
-        echo '</select>';
+        $html .= '</select>';
 
         // AJAX dropdown support - output inline script
         if (!empty($ajaxendpoint)) {
-            echo '<script>
+            $html .= '<script>
 (function() {
   class AjaxSearchSelect {
     constructor(selectEl, ajaxUrl) {
@@ -385,22 +406,29 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
         // Check for visibility rules or custom scripts in options
         if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
-            echo $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
+            $html .= $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
         } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
-            echo $this->generateFieldScript($id, $options['custom_script']);
+            $html .= $this->generateFieldScript($id, $options['custom_script']);
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -982,10 +1010,17 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
     protected function outputHiddenInput($name, $options) {
         $value = $options['value'] ?? '';
 
-        echo '<input type="hidden"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
-        echo '>';
+        $html = '<input type="hidden"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= '>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -999,21 +1034,28 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $class = $options['class'] ?? 'btn btn-primary';
         $id = $options['id'] ?? $name;
 
-        echo '<button type="submit"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
+        $html = '<button type="submit"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
 
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['onclick'])) {
-            echo ' onclick="' . htmlspecialchars($options['onclick']) . '"';
+            $html .= ' onclick="' . htmlspecialchars($options['onclick']) . '"';
         }
 
-        echo '>';
-        echo htmlspecialchars($label);
-        echo '</button>';
+        $html .= '>';
+        $html .= htmlspecialchars($label);
+        $html .= '</button>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
