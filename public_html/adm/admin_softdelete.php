@@ -23,19 +23,17 @@ array(
 
 	echo '<h1>Delete User</h1>';
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("form", "post", "/profile/users_delete?disptype=return");
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
 
 echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will delete this user ('.$user->display_name() . ').</p>';
 
-echo $formwriter->hiddeninput("confirm", 1);
-echo $formwriter->hiddeninput("usr_user_id", $usr_user_id);
+$formwriter->hiddeninput('confirm', ['value' => 1]);
+$formwriter->hiddeninput('usr_user_id', ['value' => $usr_user_id]);
 
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
+$formwriter->submitbutton('btn_submit', 'Submit');
 
 	echo '</div>';
 echo '</fieldset>';

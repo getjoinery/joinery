@@ -23,19 +23,17 @@ array(
 $pageoptions['title'] = 'Delete Group '.$group->get('grp_name');
 $page->begin_box($pageoptions);
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("form", "post", "/admin/admin_group_permanent_delete");
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
 
 echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will permanently delete this group ('.$group->get('grp_name') . ').</p>';
 
-echo $formwriter->hiddeninput("confirm", 1);
-echo $formwriter->hiddeninput("grp_group_id", $grp_group_id);
+$formwriter->hiddeninput('confirm', ['value' => 1]);
+$formwriter->hiddeninput('grp_group_id', ['value' => $grp_group_id]);
 
-		echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+$formwriter->submitbutton('btn_submit', 'Submit');
 
 	echo '</div>';
 echo '</fieldset>';
