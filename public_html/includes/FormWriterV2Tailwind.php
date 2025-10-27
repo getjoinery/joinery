@@ -29,52 +29,59 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             $class .= ' border-red-500';
         }
 
-        echo '<div class="mb-4">';
+        $html = '<div class="mb-4">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '<input type="text"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="text"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         if ($placeholder) {
-            echo ' placeholder="' . htmlspecialchars($placeholder) . '"';
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['autofocus'])) {
-            echo ' autofocus';
+            $html .= ' autofocus';
         }
         if (!empty($options['autocomplete'])) {
-            echo ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
+            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
         }
         if (!empty($options['onchange'])) {
-            echo ' onchange="' . htmlspecialchars($options['onchange']) . '"';
+            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
         }
 
-        echo '>';
+        $html .= '>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -95,55 +102,62 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             $class .= ' border-red-500';
         }
 
-        echo '<div class="mb-4">';
+        $html = '<div class="mb-4">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '<input type="password"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="password"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         if ($placeholder) {
-            echo ' placeholder="' . htmlspecialchars($placeholder) . '"';
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['autocomplete'])) {
-            echo ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
+            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
         }
 
-        echo '>';
+        $html .= '>';
 
         if (!empty($options['strength_meter'])) {
-            echo '<div class="password-strength-meter mt-2">';
-            echo '<div class="w-full bg-gray-200 rounded-full h-1.5">';
-            echo '<div class="bg-blue-600 h-1.5 rounded-full" style="width: 0%"></div>';
-            echo '</div>';
-            echo '<p class="text-sm text-gray-500 mt-1 strength-text"></p>';
-            echo '</div>';
+            $html .= '<div class="password-strength-meter mt-2">';
+            $html .= '<div class="w-full bg-gray-200 rounded-full h-1.5">';
+            $html .= '<div class="bg-blue-600 h-1.5 rounded-full" style="width: 0%"></div>';
+            $html .= '</div>';
+            $html .= '<p class="text-sm text-gray-500 mt-1 strength-text"></p>';
+            $html .= '</div>';
         }
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -165,45 +179,52 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             $class .= ' border-red-500';
         }
 
-        echo '<div class="mb-4">';
+        $html = '<div class="mb-4">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '<textarea';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' rows="' . (int)$rows . '"';
+        $html .= '<textarea';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' rows="' . (int)$rows . '"';
 
         if ($placeholder) {
-            echo ' placeholder="' . htmlspecialchars($placeholder) . '"';
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
-        echo htmlspecialchars($value);
-        echo '</textarea>';
+        $html .= '>';
+        $html .= htmlspecialchars($value);
+        $html .= '</textarea>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -225,48 +246,48 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             $class .= ' border-red-500';
         }
 
-        echo '<div class="mb-4">';
+        $html = '<div class="mb-4">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '<select';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
+        $html .= '<select';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
 
         if (!empty($options['multiple'])) {
-            echo ' multiple';
+            $html .= ' multiple';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['onchange'])) {
-            echo ' onchange="' . htmlspecialchars($options['onchange']) . '"';
+            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
         }
 
-        echo '>';
+        $html .= '>';
 
         if (!empty($options['empty_option'])) {
-            echo '<option value="">' . htmlspecialchars($options['empty_option']) . '</option>';
+            $html .= '<option value="">' . htmlspecialchars($options['empty_option']) . '</option>';
         }
 
         foreach ($select_options as $opt_label => $opt_value) {
-            echo '<option value="' . htmlspecialchars($opt_value) . '"';
+            $html .= '<option value="' . htmlspecialchars($opt_value) . '"';
             if ((string)$value === (string)$opt_value) {
-                echo ' selected';
+                $html .= ' selected';
             }
-            echo '>' . htmlspecialchars($opt_label) . '</option>';
+            $html .= '>' . htmlspecialchars($opt_label) . '</option>';
         }
 
-        echo '</select>';
+        $html .= '</select>';
 
         // AJAX dropdown support - output inline script
         if (!empty($ajaxendpoint)) {
-            echo '<script>
+            $html .= '<script>
 (function() {
   class AjaxSearchSelect {
     constructor(selectEl, ajaxUrl) {
@@ -372,22 +393,29 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
         // Check for visibility rules or custom scripts in options
         if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
-            echo $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
+            $html .= $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
         } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
-            echo $this->generateFieldScript($id, $options['custom_script']);
+            $html .= $this->generateFieldScript($id, $options['custom_script']);
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -404,49 +432,56 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
         $has_errors = isset($this->errors[$name]);
 
-        echo '<div class="mb-4">';
-        echo '<div class="flex items-center">';
+        $html = '<div class="mb-4">';
+        $html .= '<div class="flex items-center">';
 
-        echo '<input type="checkbox"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' . ($has_errors ? ' border-red-500' : '') . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="checkbox"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' . ($has_errors ? ' border-red-500' : '') . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         if ($checked) {
-            echo ' checked';
+            $html .= ' checked';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
+        $html .= '>';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '" class="ml-2 block text-sm text-gray-900">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="ml-2 block text-sm text-gray-900">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
 
         // Check for visibility rules or custom scripts in options
         if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
-            echo $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
+            $html .= $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
         } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
-            echo $this->generateFieldScript($id, $options['custom_script']);
+            $html .= $this->generateFieldScript($id, $options['custom_script']);
+        }
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
         }
     }
 
@@ -463,55 +498,62 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
         $has_errors = isset($this->errors[$name]);
 
-        echo '<div class="mb-4">';
+        $html = '<div class="mb-4">';
 
         if ($label) {
-            echo '<label class="block text-sm font-medium text-gray-700 mb-2">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label class="block text-sm font-medium text-gray-700 mb-2">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '<div class="errorplacement space-y-2">';
+        $html .= '<div class="errorplacement space-y-2">';
 
         foreach ($radio_options as $opt_value => $opt_label) {
             $id = $name . '_' . $opt_value;
 
-            echo '<div class="flex items-center">';
-            echo '<input type="radio"';
-            echo ' name="' . htmlspecialchars($name) . '"';
-            echo ' id="' . htmlspecialchars($id) . '"';
-            echo ' class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500' . ($has_errors ? ' border-red-500' : '') . '"';
-            echo ' value="' . htmlspecialchars($opt_value) . '"';
+            $html .= '<div class="flex items-center">';
+            $html .= '<input type="radio"';
+            $html .= ' name="' . htmlspecialchars($name) . '"';
+            $html .= ' id="' . htmlspecialchars($id) . '"';
+            $html .= ' class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500' . ($has_errors ? ' border-red-500' : '') . '"';
+            $html .= ' value="' . htmlspecialchars($opt_value) . '"';
 
             if ((string)$value === (string)$opt_value) {
-                echo ' checked';
+                $html .= ' checked';
             }
             if (!empty($options['disabled'])) {
-                echo ' disabled';
+                $html .= ' disabled';
             }
 
-            echo '>';
+            $html .= '>';
 
-            echo '<label for="' . htmlspecialchars($id) . '" class="ml-2 block text-sm text-gray-900">';
-            echo htmlspecialchars($opt_label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="ml-2 block text-sm text-gray-900">';
+            $html .= htmlspecialchars($opt_label);
+            $html .= '</label>';
 
-            echo '</div>';
+            $html .= '</div>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -531,46 +573,53 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             $class .= ' border-red-500';
         }
 
-        echo '<div class="mb-4">';
+        $html = '<div class="mb-4">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '<input type="date"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="date"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         if (!empty($options['min'])) {
-            echo ' min="' . htmlspecialchars($options['min']) . '"';
+            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
         }
         if (!empty($options['max'])) {
-            echo ' max="' . htmlspecialchars($options['max']) . '"';
+            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
+        $html .= '>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -586,42 +635,49 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
         $has_errors = isset($this->errors[$name]);
 
-        echo '<div class="mb-4">';
+        $html = '<div class="mb-4">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '<input type="file"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
+        $html .= '<input type="file"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
 
         if (!empty($options['accept'])) {
-            echo ' accept="' . htmlspecialchars($options['accept']) . '"';
+            $html .= ' accept="' . htmlspecialchars($options['accept']) . '"';
         }
         if (!empty($options['multiple'])) {
-            echo ' multiple';
+            $html .= ' multiple';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
+        $html .= '>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
+                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -633,10 +689,17 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
     protected function outputHiddenInput($name, $options) {
         $value = $options['value'] ?? '';
 
-        echo '<input type="hidden"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
-        echo '>';
+        $html = '<input type="hidden"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= '>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -650,21 +713,28 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $class = $options['class'] ?? 'inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2';
         $id = $options['id'] ?? $name;
 
-        echo '<button type="submit"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
+        $html = '<button type="submit"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
 
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
         if (!empty($options['onclick'])) {
-            echo ' onclick="' . htmlspecialchars($options['onclick']) . '"';
+            $html .= ' onclick="' . htmlspecialchars($options['onclick']) . '"';
         }
 
-        echo '>';
-        echo htmlspecialchars($label);
-        echo '</button>';
+        $html .= '>';
+        $html .= htmlspecialchars($label);
+        $html .= '</button>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
@@ -701,7 +771,12 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
         // Validate input
         if (empty($optionvals)) {
-            echo '<div class="rounded-md bg-yellow-50 p-4"><div class="text-sm text-yellow-800">No options available for ' . htmlspecialchars($name) . '</div></div>';
+            $html = '<div class="rounded-md bg-yellow-50 p-4"><div class="text-sm text-yellow-800">No options available for ' . htmlspecialchars($name) . '</div></div>';
+            if ($this->use_deferred_output) {
+                $this->deferred_output[$name] = $html;
+            } else {
+                echo $html;
+            }
             return;
         }
 
@@ -716,12 +791,12 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             throw new DisplayableUserException('Invalid checkbox list type.');
         }
 
-        echo '<div id="' . htmlspecialchars($id) . '_container" class="mb-4">';
+        $html = '<div id="' . htmlspecialchars($id) . '_container" class="mb-4">';
         if ($label) {
-            echo '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<div class="mt-2 space-y-2">';
+        $html .= '<div class="mt-2 space-y-2">';
 
         foreach ($optionvals as $key => $value) {
             $uniqid = $id . '_' . htmlspecialchars($value);
@@ -731,22 +806,29 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             // Readonly means it cannot be changed but is submitted
             if (in_array($value, $readonly)) {
                 if (in_array($value, $checked)) {
-                    echo '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" />';
+                    $html .= '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" />';
                 }
-                echo '<div class="relative flex items-center">';
-                echo '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' disabled="disabled" />';
-                echo '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
-                echo '</div>';
+                $html .= '<div class="relative flex items-center">';
+                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' disabled="disabled" />';
+                $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
+                $html .= '</div>';
             } else {
-                echo '<div class="relative flex items-center">';
-                echo '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
-                echo '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
-                echo '</div>';
+                $html .= '<div class="relative flex items-center">';
+                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
+                $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
+                $html .= '</div>';
             }
         }
 
-        echo '</div>';
-        echo '</div>';
+        $html .= '</div>';
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
     }
 
     /**
