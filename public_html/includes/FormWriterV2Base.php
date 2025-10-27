@@ -826,9 +826,9 @@ abstract class FormWriterV2Base {
      * @param array $options Field options (includes date_name, time_name for separate fields)
      */
     public function datetimeinput($name, $label = '', $options = []) {
-        // Default to name_date and name_time if not specified
-        $date_name = $options['date_name'] ?? $name . '_date';
-        $time_name = $options['time_name'] ?? $name . '_time';
+        // Create unique field names for the date and time inputs
+        $date_name = $name . '_dateinput';
+        $time_name = $name . '_timeinput';
 
         // Auto-parse datetime value from database if it exists as a single field
         // Use PHP DateTime for maximum compatibility with various database datetime formats
@@ -859,7 +859,7 @@ abstract class FormWriterV2Base {
         $this->registerField($date_name, 'date', $label ? $label . ' (Date)' : '', $options);
         $this->registerField($time_name, 'time', $label ? $label . ' (Time)' : '', $options);
 
-        $this->outputDateTimeInput($name, $label, $options, $date_name, $time_name);
+        $this->outputDateTimeInput($name, $label, $options);
     }
 
     /**
@@ -1332,7 +1332,7 @@ abstract class FormWriterV2Base {
     abstract protected function outputRadioInput($name, $label, $options);
     abstract protected function outputDateInput($name, $label, $options);
     abstract protected function outputTimeInput($name, $label, $options);
-    abstract protected function outputDateTimeInput($name, $label, $options, $date_name, $time_name);
+    abstract protected function outputDateTimeInput($name, $label, $options);
     abstract protected function outputFileInput($name, $label, $options);
     abstract protected function outputHiddenInput($name, $options);
     abstract protected function outputSubmitButton($name, $label, $options);
@@ -1536,10 +1536,10 @@ abstract class FormWriterV2Base {
     public static function process_datetimeinput($post_vars, $field_name, $to_utc = true) {
         require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-        $date_field = $field_name . '_date';
-        $hour_field = $field_name . '_time_hour';
-        $minute_field = $field_name . '_time_minute';
-        $ampm_field = $field_name . '_time_ampm';
+        $date_field = $field_name . '_dateinput';
+        $hour_field = $field_name . '_timeinput_hour';
+        $minute_field = $field_name . '_timeinput_minute';
+        $ampm_field = $field_name . '_timeinput_ampm';
 
         // Check if the required fields are present
         if(empty($post_vars[$date_field]) || !isset($post_vars[$hour_field])){
