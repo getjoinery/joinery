@@ -22,37 +22,36 @@
 	$pageoptions['title'] = "Edit ApiKey";
 	$page->begin_box($pageoptions);
 
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
+	// Editing an existing API key
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $api_key
+	]);
 
-	$validation_rules = array();
-	$validation_rules['apk_name']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);
-
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_api_key_edit');
+	echo $formwriter->begin_form();
 
 	if($api_key->key){
-		echo $formwriter->hiddeninput('apk_api_key_id', $api_key->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('apk_api_key_id', ['value' => $api_key->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
 
-	echo $formwriter->textinput('Key name', 'apk_name', NULL, 100, $api_key->get('apk_name'), '', 255, '');
+	$formwriter->textinput('apk_name', 'Key name');
 
-	$optionvals = array("Yes"=>1,"No"=>0);
-	echo $formwriter->dropinput("Active", "apk_is_active", "", $optionvals, $api_key->get('apk_is_active'), '', FALSE);
+	$formwriter->dropinput('apk_is_active', 'Active', [
+		'options' => ['No' => 0, 'Yes' => 1]
+	]);
 
-	$optionvals = array("Read only"=>1, "Write only"=>2, "Read/Write"=>3, "Read/Write/Delete"=>4);
-	echo $formwriter->dropinput("Permission", "apk_permission", "", $optionvals, $api_key->get('apk_permission'), '', FALSE);
+	$formwriter->dropinput('apk_permission', 'Permission', [
+		'options' => ['Read only' => 1, 'Write only' => 2, 'Read/Write' => 3, 'Read/Write/Delete' => 4]
+	]);
 
-	echo $formwriter->textinput('Allowed IP addresses (comma separated) (optional)', 'apk_ip_restriction', NULL, 100, $api_key->get('apk_ip_restriction'), '', 255, '');
+	$formwriter->textinput('apk_ip_restriction', 'Allowed IP addresses (comma separated) (optional)');
 
-	echo $formwriter->datetimeinput('Key start time (optional)', 'apk_start_time', 'ctrlHolder', LibraryFunctions::convert_time($api_key->get('apk_start_time'), 'UTC', $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+	$formwriter->datetimeinput('apk_start_time', 'Key start time (optional)');
 
-	echo $formwriter->datetimeinput('Key expires time (optional)', 'apk_expires_time', 'ctrlHolder', LibraryFunctions::convert_time($api_key->get('apk_expires_time'), 'UTC', $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+	$formwriter->datetimeinput('apk_expires_time', 'Key expires time (optional)');
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	$formwriter->submitbutton('btn_submit', 'Submit');
+
 	echo $formwriter->end_form();
 
 	$page->end_box();

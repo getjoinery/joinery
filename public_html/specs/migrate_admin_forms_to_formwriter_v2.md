@@ -43,13 +43,14 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 2/69 completed (2.9%)**
+**Progress: 3/69 completed (4.3%)**
 
 #### Completed ✅
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
 - [x] `/adm/admin_coupon_code_edit.php` - ✅ **COMPLETED** (uses model option with field overrides, datetime processing, AJAX dropdown, require_one_group validation, visibility rules, checkboxList)
+- [x] `/adm/admin_api_key_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdowns, datetime fields with automatic timezone conversion)
 
-#### Pending Conversion (67 pages)
+#### Pending Conversion (66 pages)
 
 **A-C:**
 - [ ] `/adm/admin_address_edit.php`
@@ -59,7 +60,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_analytics_funnels.php`
 - [ ] `/adm/admin_analytics_stats.php`
 - [ ] `/adm/admin_analytics_users.php`
-- [ ] `/adm/admin_api_key_edit.php`
 - [ ] `/adm/admin_comment_edit.php`
 - [ ] `/adm/admin_comments.php`
 - [ ] `/adm/admin_contact_type_edit.php`
