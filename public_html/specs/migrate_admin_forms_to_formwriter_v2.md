@@ -138,6 +138,12 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 ### 2.2 Migration Process for Each Page
 
+#### Step 0: Create Backup File
+
+Before migrating, create a backup with `_bak.php` extension: `cp admin_page.php admin_page_bak.php` (easier to compare than `.bak`)
+
+---
+
 #### Step 1: Admin Pages Disable CSRF by Default
 
 **Important:** All admin form pages have CSRF protection **DISABLED** by default.
