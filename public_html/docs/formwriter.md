@@ -9,10 +9,11 @@ The FormWriter system provides a structured, consistent way to build forms in th
 1. [Overview](#1-overview)
 2. [Getting Started](#2-getting-started)
 3. [Field Types](#3-field-types)
-4. [Field Visibility & Custom Scripts](#4-field-visibility--custom-scripts)
-5. [Validation Integration](#5-validation-integration)
-6. [Best Practices](#6-best-practices)
-7. [V1 vs V2](#7-v1-vs-v2)
+4. [Deferred Output Mode](#4-deferred-output-mode)
+5. [Field Visibility & Custom Scripts](#5-field-visibility--custom-scripts)
+6. [Validation Integration](#6-validation-integration)
+7. [Best Practices](#7-best-practices)
+8. [V1 vs V2](#8-v1-vs-v2)
 
 ---
 
@@ -360,11 +361,63 @@ $formwriter->hiddeninput('user_id', '', ['value' => $user_id]);
 
 ---
 
-## 4. Field Visibility & Custom Scripts
+## 4. Deferred Output Mode
+
+**V2 Feature:** Store form field HTML instead of echoing immediately. Essential for multiple forms in loops.
+
+### 4.1 When to Use
+
+**Use deferred output:** Multiple forms in loops (inline action forms in listing pages)
+**Use immediate output (default):** Single forms in views
+
+### 4.2 Basic Usage
+
+```php
+// Enable deferred mode
+$form = $page->getFormWriter('form_' . $item->id, 'v2', [
+    'deferred_output' => true,
+    'action' => '/admin/process?id=' . $item->id
+]);
+
+// Add fields (stored, not echoed)
+$form->hiddeninput('action', ['value' => 'delete']);
+$form->submitbutton('btn_delete', 'Delete');
+
+// Get HTML as string
+$html = $form->getFieldsHTML();
+```
+
+### 4.3 Listing Page Example
+
+```php
+foreach ($items as $item) {
+    $row = [];
+    // ... add columns ...
+
+    $form = $page->getFormWriter('delete_' . $item->id, 'v2', [
+        'deferred_output' => true,
+        'action' => '/admin/process'
+    ]);
+
+    $form->hiddeninput('item_id', ['value' => $item->id]);
+    $form->submitbutton('btn_delete', 'Delete');
+
+    $row['action'] = $form->getFieldsHTML();
+    array_push($rowvalues, $row);
+}
+```
+
+### 4.4 Compatibility
+
+Works with all field types, validation, visibility rules, custom scripts, and both themes.
+
+---
+
+## 5. Field Visibility & Custom Scripts
 
 **New Feature (Added 2025-10-25):** FormWriter now supports dynamic field visibility with smooth fade transitions and custom JavaScript logic.
 
-### 4.1 Level 1: Convenience Rules (Auto-Generated)
+### 5.1 Level 1: Convenience Rules (Auto-Generated)
 
 **For simple show/hide based on select field values**, define rules and FormWriter generates JavaScript automatically:
 
@@ -416,7 +469,7 @@ The visibility system automatically checks for `field_id_container` elements fir
 const el = document.getElementById(id + "_container") || document.getElementById(id);
 ```
 
-### 4.2 Level 2: Field-Level Custom Scripts
+### 5.2 Level 2: Field-Level Custom Scripts
 
 **For custom logic on a specific field**, provide the event handler body - FormWriter wraps it with `addEventListener`:
 
@@ -454,7 +507,7 @@ $formwriter->textinput('bulk_warning', 'Bulk orders require manager approval', [
 - `change` event attached automatically
 - Full JavaScript access for complex logic
 
-### 4.3 Level 3: Form-Level Scripts
+### 5.3 Level 3: Form-Level Scripts
 
 **For cross-field logic**, add raw JavaScript to run when the form loads:
 
@@ -534,7 +587,7 @@ All visibility changes include smooth fade transitions:
 
 ---
 
-## 5. Validation Integration
+## 6. Validation Integration
 
 FormWriter integrates with the **JoineryValidator** system for client-side validation and works seamlessly with model-based server-side validation.
 
@@ -553,7 +606,7 @@ User Input → JavaScript Validation → Form Submission
          Model->save() → Database
 ```
 
-### 5.1 Basic Validation with set_validate()
+### 6.1 Basic Validation with set_validate()
 
 **Using V1 FormWriter:**
 
@@ -610,7 +663,7 @@ $formwriter->passwordinput('usr_password', 'Password', [
 $formwriter->end_form();
 ```
 
-### 5.2 Model-Aware Validation (V2 Feature)
+### 6.2 Model-Aware Validation (V2 Feature)
 
 FormWriter V2 can automatically generate validation rules from model `field_specifications`:
 
@@ -681,7 +734,7 @@ public static $field_specifications = array(
 );
 ```
 
-### 5.3 Available Validation Rules
+### 6.3 Available Validation Rules
 
 FormWriter supports all JoineryValidator rules:
 
@@ -699,7 +752,7 @@ FormWriter supports all JoineryValidator rules:
 | `pattern` | Regex match | `'pattern']['value'] = '"/^[A-Z0-9]+$/"'` |
 | `remote` | AJAX validation | `'remote']['value'] = '"/ajax/check_username"'` |
 
-### 5.4 Common Validation Patterns
+### 6.4 Common Validation Patterns
 
 **Email Signup Form:**
 
@@ -745,7 +798,7 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';
 echo $formwriter->set_validate($rules);
 ```
 
-### 5.5 Custom Error Messages
+### 6.5 Custom Error Messages
 
 ```php
 $validation_rules['email']['required']['value'] = 'true';
@@ -757,7 +810,7 @@ $validation_rules['password']['minlength']['value'] = '8';
 $validation_rules['password']['minlength']['message'] = '"Password must be at least 8 characters"';
 ```
 
-### 5.6 Debug Mode
+### 6.6 Debug Mode
 
 Enable console logging during development:
 
@@ -767,7 +820,7 @@ echo $formwriter->set_validate($validation_rules, NULL, true);  // true = debug 
 
 This logs validation initialization, rules, field validation attempts, and results.
 
-### 5.7 Server-Side Validation
+### 6.7 Server-Side Validation
 
 **Always validate on the server - never trust client-side validation alone!**
 
@@ -808,7 +861,7 @@ See **[validation.md](validation.md)**
 
 ---
 
-## 6. Best Practices
+## 7. Best Practices
 
 ### Security
 
@@ -862,7 +915,7 @@ See **[validation.md](validation.md)**
 
 ---
 
-## 7. V1 vs V2
+## 8. V1 vs V2
 
 ### When to Use V1
 
