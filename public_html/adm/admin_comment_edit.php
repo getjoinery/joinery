@@ -21,31 +21,32 @@
 	$pageoptions['title'] = "Edit Comment";
 	$page->begin_box($pageoptions);
 
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
+	// Editing an existing comment
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $comment
+	]);
 
-	$validation_rules = array();
-	$validation_rules['cmt_body']['required']['value'] = 'true';
-	$validation_rules['cmt_body']['minlength']['value'] = 10;
-	echo $formwriter->set_validate($validation_rules);
-
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_comment_edit');
+	echo $formwriter->begin_form();
 
 	if($comment->key){
-		echo $formwriter->hiddeninput('cmt_comment_id', $comment->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('cmt_comment_id', '', ['value' => $comment->key]);
+		$formwriter->hiddeninput('action', '', ['value' => 'edit']);
+		$formwriter->hiddeninput('cmt_pst_post_id', '', ['value' => $comment->get('cmt_pst_post_id')]);
 	}
 
-	echo $formwriter->textinput('Commenter Name', 'cmt_author_name', NULL, 100, $comment->get('cmt_author_name'), '', 255, '');
+	$formwriter->textinput('cmt_author_name', 'Commenter Name');
 
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Approved", "cmt_is_approved", "ctrlHolder", $optionvals, $comment->get('cmt_is_approved'), '', FALSE);
+	$formwriter->dropinput('cmt_is_approved', 'Approved', [
+		'options' => ['No' => 0, 'Yes' => 1]
+	]);
 
-	echo $formwriter->textbox('Comment', 'cmt_body', 'ctrlHolder', 5, 80, $comment->get('cmt_body'), '', 'no');
+	$formwriter->textarea('cmt_body', 'Comment', [
+		'rows' => 5,
+		'cols' => 80,
+		'validation' => ['required' => true, 'minlength' => 10]
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	$formwriter->submitbutton('btn_submit', 'Submit');
 	echo $formwriter->end_form();
 
 	$page->end_box();
