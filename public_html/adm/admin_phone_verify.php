@@ -35,30 +35,35 @@
 		<?php
 	}
 
-	$formwriter = $page->getFormWriter('form7');
+	$formwriter = $page->getFormWriter('form7', 'v2', [
+		'action' => '/profile/phone_verify_send?disptype=returnadmin',
+		'values' => $phone->export_as_array()
+	]);
 
-	echo $formwriter->begin_form("uniForm", "post", "/profile/phone_verify_send?disptype=returnadmin");
+	$formwriter->begin_form();
 
 	$optionvals = array();
 	foreach ($phone_numbers_unver as $phone_number) {
 		$optionvals[$phone_number->get('phn_phone_number')] = $phone_number->key;
 	}
-	echo $formwriter->dropinput("Number to resend text message", "phn_phone_number_id", 'ctrlHolder', $optionvals, $phone->key, '', FALSE);
-	echo $formwriter->dropinput("Choose your phone carrier to resend text", "phn_phone_carrier", "ctrlHolder",  PhoneNumber::$phone_carriers, $phone->get('phn_phone_carrier'), '', TRUE);
-	echo $formwriter->hiddeninput("sendcode", 1);
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Resend_gray');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->dropinput("phn_phone_number_id", "Number to resend text message", [
+		'options' => $optionvals
+	]);
+	$formwriter->dropinput("phn_phone_carrier", "Choose your phone carrier to resend text", [
+		'options' => PhoneNumber::$phone_carriers
+	]);
+	$formwriter->hiddeninput("sendcode", ['value' => 1]);
+	$formwriter->submitbutton('btn_resend', 'Resend');
+	$formwriter->end_form();
 
-	$formwriter = $page->getFormWriter('form8');
+	$formwriter = $page->getFormWriter('form8', 'v2', [
+		'action' => '/profile/phone_verify_check?disptype=returnadmin'
+	]);
 
-	echo $formwriter->begin_form("uniForm", "post", "/profile/phone_verify_check?disptype=returnadmin");
-	echo $formwriter->textinput("Verification Code", "act_code", "ctrlHolder", 20, @$act_code, '',255, '');
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Verify');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->begin_form();
+	$formwriter->textinput("act_code", "Verification Code");
+	$formwriter->submitbutton('btn_verify', 'Verify');
+	$formwriter->end_form();
 
 $page->admin_footer();
 ?>
