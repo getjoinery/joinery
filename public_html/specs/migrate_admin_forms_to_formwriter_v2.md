@@ -867,12 +867,10 @@ if($post_vars){
 ### Key Features Demonstrated
 
 1. **Automatic Local Time Conversion**:
-   - FormWriter V2 automatically detects timestamp fields by checking model's `field_specifications` column type
-   - Converts only `timestamp` type fields (they have both date and timezone context)
-   - Skips `date` and `time` fields (they lack timezone context)
-   - Requires a model to be passed to FormWriter
+   - FormWriter V2 automatically converts any DateTime objects found in form values
+   - DateTime objects are created by `export_as_array()` with UTC timezone already set
    - Automatically converts UTC datetime values to user's local timezone for display
-   - Works with both DateTime objects and timestamp strings
+   - Works with any model (no schema inspection needed)
    - Can be overridden by passing value in `values` array (values override model)
    - No manual timezone conversion needed in view code!
 

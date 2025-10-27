@@ -1028,15 +1028,13 @@ $formwriter->textinput('loc_address', 'Address');
 
 #### 7.1.3 Automatic Local Time Conversion
 
-V2 automatically converts UTC timestamp fields to the user's local timezone for display. This eliminates manual timezone conversion code in views.
+V2 automatically converts UTC DateTime objects to the user's local timezone for display. This eliminates manual timezone conversion code in views.
 
 **How it works:**
-- Detects timestamp fields by checking model's `field_specifications` column types
-- Looks for field types: `timestamp` only (they have both date and timezone context)
-- Date and time fields are skipped (they lack timezone context)
-- Requires a model to be provided to FormWriter
-- Automatically converts DateTime objects and timestamp strings from UTC to user's timezone
-- Converts to `Y-m-d H:i:s` format for display in form fields
+- Automatically converts any DateTime objects found in form values with UTC timezone
+- DateTime objects are created by `export_as_array()` with UTC timezone already set
+- Skips conversion if DateTime already has a non-UTC timezone
+- Converts from UTC to user's timezone to `Y-m-d H:i:s` format for display
 - Handles errors gracefully (leaves value unchanged if conversion fails)
 
 **Before (V1 - manual conversion):**
@@ -1057,27 +1055,35 @@ $formwriter = $page->getFormWriter('form1', 'v1');
 
 **After (V2 - automatic conversion):**
 ```php
-// Just pass model - timezone conversion is automatic!
+// Just pass model - any DateTime objects automatically converted!
 $formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $location  // All timestamp/date/time fields automatically converted
+    'model' => $location  // DateTime objects from export_as_array() auto-converted
 ]);
 ```
 
-**Detection method:**
+**How it works technically:**
 
-FormWriter checks `model::$field_specifications` to identify timestamp columns:
+1. `export_as_array()` creates DateTime objects with UTC timezone:
 ```php
-// In Location model's field_specifications:
-'loc_created_time' => array('type' => 'timestamp(6)'),  // ✅ Converted - has timezone context!
-'loc_birth_date' => array('type' => 'date'),            // ❌ Skipped - no timezone context
-'usr_lastlogin_time' => array('type' => 'timestamp(6)'), // ✅ Converted - has timezone context!
-'loc_opening_time' => array('type' => 'time'),          // ❌ Skipped - just time, no date context
+// In SystemBase::export_as_array():
+$out_array[$field_name] = new DateTime($this->get($field_name), new DateTimeZone('UTC'));
 ```
 
-**Important:** A model must be provided to FormWriter for automatic conversion to work. Without a model, FormWriter cannot access field_specifications and timezone conversion is disabled.
+2. FormWriter V2 converts UTC DateTime objects to user's timezone:
+```php
+// In FormWriterV2Base::convertDateTimeFieldsToLocalTime():
+foreach ($this->values as $key => &$value) {
+    if ($value instanceof DateTime) {
+        // Only convert if timezone is UTC (skip if already in another timezone)
+        if ($value->getTimezone()->getName() === 'UTC') {
+            $value = LibraryFunctions::convert_time($value, 'UTC', $user_timezone, 'Y-m-d H:i:s');
+        }
+    }
+}
+```
 
 **Overriding automatic conversion:**
-If you need to use a non-converted value for a timestamp field, simply pass it in the `values` array (which overrides model values):
+If you need to use a non-converted value, simply pass it in the `values` array (which overrides model values):
 
 ```php
 $formwriter = $page->getFormWriter('form1', 'v2', [
@@ -1088,11 +1094,11 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 
 **Benefits:**
 - ✅ Eliminates repetitive timezone conversion code
-- ✅ Works with both DateTime objects and timestamp strings
-- ✅ Automatic detection by column type (based on actual database schema)
-- ✅ No flags or options needed (just pass model)
+- ✅ Works automatically - no configuration needed
+- ✅ Simple: converts any DateTime object found in values
 - ✅ Easy to override when needed (pass `values` array)
 - ✅ Handles errors gracefully
+- ✅ Clean design: timezone is part of the DateTime object itself
 
 #### 7.1.4 Input Group Prepend Text (Bootstrap)
 

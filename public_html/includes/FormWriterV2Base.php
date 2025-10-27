@@ -72,28 +72,14 @@ abstract class FormWriterV2Base {
     }
 
     /**
-     * Convert UTC timestamp fields to user's local timezone
+     * Convert UTC DateTime objects to user's local timezone
      *
-     * Detects timestamp fields by checking model's field_specifications type.
-     * Only converts fields with type 'timestamp' (which have timezone context).
-     * Requires a model to be provided.
+     * Converts any DateTime objects in values from UTC to user's timezone.
+     * DateTime objects are created by export_as_array() with UTC timezone already set.
      *
      * Converts from UTC to the user's local timezone for display.
-     * Can be disabled with 'disable_local_time_conversion' => true option.
      */
     protected function convertDateTimeFieldsToLocalTime() {
-        // Need a model with field_specifications for detection
-        if (!isset($this->options['model'])) {
-            return;  // No model, skip conversion
-        }
-
-        $model = $this->options['model'];
-
-        // Check if model has field_specifications with type info
-        if (!is_object($model) || !property_exists($model, 'field_specifications')) {
-            return;  // No field_specifications, skip conversion
-        }
-
         // Need session for timezone info
         try {
             $session = SessionControl::get_instance();
@@ -103,50 +89,19 @@ abstract class FormWriterV2Base {
             return;
         }
 
-        // Get field types from model's field_specifications
-        $field_specs = $model::$field_specifications;
-
-        // Convert timestamp fields from UTC to user's timezone
-        foreach ($field_specs as $field_name => $spec) {
-            // Skip if field doesn't exist in values or spec doesn't have type
-            if (!isset($this->values[$field_name]) || !isset($spec['type']) || !is_string($spec['type'])) {
-                continue;
-            }
-
-            $value = $this->values[$field_name];
-
+        // Convert any DateTime objects from UTC to user's timezone
+        foreach ($this->values as $key => &$value) {
             // Skip null or empty values
             if ($value === null || $value === '') {
                 continue;
             }
 
-            $type_lower = strtolower($spec['type']);
-
-            // Only convert timestamp fields (they have both date and timezone context)
-            if (strpos($type_lower, 'timestamp') === false) {
-                continue;
-            }
-
-            // Try to convert DateTime object or string that looks like a timestamp
+            // Convert DateTime objects from UTC to user's timezone
             if ($value instanceof DateTime) {
-                // Convert DateTime object from UTC to user's timezone
-                try {
-                    $this->values[$field_name] = LibraryFunctions::convert_time(
-                        $value,
-                        'UTC',
-                        $user_timezone,
-                        'Y-m-d H:i:s'
-                    );
-                } catch (Exception $e) {
-                    // If conversion fails, leave value unchanged
-                }
-            } elseif (is_string($value)) {
-                // Check if string looks like a timestamp (contains date/time components)
-                if (preg_match('/\d{4}-\d{2}-\d{2}/', $value) ||
-                    preg_match('/\d{2}:\d{2}:\d{2}/', $value) ||
-                    preg_match('/^\d{10,}$/', $value)) {  // Unix timestamp
+                // Only convert if timezone is UTC (skip if already in another timezone)
+                if ($value->getTimezone()->getName() === 'UTC') {
                     try {
-                        $this->values[$field_name] = LibraryFunctions::convert_time(
+                        $value = LibraryFunctions::convert_time(
                             $value,
                             'UTC',
                             $user_timezone,
@@ -158,6 +113,7 @@ abstract class FormWriterV2Base {
                 }
             }
         }
+        unset($value);  // Unset reference
     }
 
     /**
