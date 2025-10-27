@@ -37,24 +37,24 @@
 	$pageoptions['title'] = "New Group";
 	$page->begin_box($pageoptions);
 
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['grp_name']['required']['value'] = 'true';	
-	echo $formwriter->set_validate($validation_rules);	
+	// Editing an existing group
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $group
+	]);
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_group_edit');
+	$formwriter->begin_form();
 
 	if($group->key){
-		echo $formwriter->hiddeninput('grp_group_id', $group->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('grp_group_id', ['value' => $group->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
-	
-	echo $formwriter->textinput('Group name', 'grp_name', NULL, 100, $group->get('grp_name'), '', 255, '');	
 
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_form();
+	$formwriter->textinput('grp_name', 'Group name', [
+		'validation' => ['required' => true]
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 
 	$page->end_box();
 	$page->admin_footer();

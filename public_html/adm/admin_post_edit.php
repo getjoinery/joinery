@@ -95,60 +95,69 @@
     <div class="col-md-8">
       <div class="p-3">';
 
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['pst_description']['required']['value'] = 'true';
-	$validation_rules['pst_description']['minlength']['value'] = 10;
-	$validation_rules['pst_subject']['required']['value'] = 'true';
-	$validation_rules['pst_subject']['minlength']['value'] = 10;
-	if($_SESSION['permission'] == 10){
-		$validation_rules['pst_link']['required']['value'] = 'true';
-	}	
-	echo $formwriter->set_validate($validation_rules);	
+	// Editing an existing post
+	// Prepare override values for form
+	$override_values = [
+		'pst_title' => $title,
+		'pst_body' => $content
+	];
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_post_edit');
-
-	$tags = '';
 	if($post->key){
-		echo $formwriter->hiddeninput('pst_post_id', $post->key);
-		echo $formwriter->hiddeninput('action', 'edit');
-		
 		$post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
-
 		$tags = implode(', ', $post_tags);
+		$override_values['tags'] = $tags;
 		$pst_is_on_homepage = $post->get('pst_is_on_homepage');
 	}
 	else{
 		$pst_is_on_homepage = 1;
+		$override_values['pst_is_on_homepage'] = $pst_is_on_homepage;
 	}
-	
-	echo $formwriter->textinput('Post title', 'pst_title', NULL, 100, $title, '', 255, '');	
-	
-	echo $formwriter->textinput('Short description (optional)', 'pst_short_description', NULL, 100, $post->get('pst_short_description'), '', 255, '');	
-	
-	echo $formwriter->textinput('Tags (optional, separate with comma)', 'tags', NULL, 100, $tags, '', 255, '');	
-	
+
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $post,
+		'values' => $override_values
+	]);
+
+	$formwriter->begin_form();
+
+	if($post->key){
+		$formwriter->hiddeninput('pst_post_id', ['value' => $post->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
+	}
+
+	$formwriter->textinput('pst_title', 'Post title', [
+		'validation' => ['required' => true, 'minlength' => 10]
+	]);
+
+	$formwriter->textinput('pst_short_description', 'Short description (optional)');
+
+	$formwriter->textinput('tags', 'Tags (optional, separate with comma)');
+
 	if(!$post->get('pst_link') || $_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', 'pst_link', NULL, 100, $post->get('pst_link'), '', 255, '');	
-	}	
+		$formwriter->textinput('pst_link', 'Link (only letters, numbers, and dashes)', [
+			'prepend' => $settings->get_setting('webDir').'/blog/'
+		]);
+	}
 
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Published", "pst_is_published", "ctrlHolder", $optionvals, $post->get('pst_is_published'), '', FALSE);
+	$formwriter->dropinput("pst_is_published", "Published", [
+		'options' => ["No"=>0, "Yes"=>1]
+	]);
 
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Pinned", "pst_is_pinned", "ctrlHolder", $optionvals, $post->get('pst_is_pinned'), '', FALSE);
-	
-	$optionvals = array("Yes"=>1, "No"=>0);
-	echo $formwriter->dropinput("Is listed and searchable?", "pst_is_on_homepage", "ctrlHolder", $optionvals, $pst_is_on_homepage, '', FALSE);
+	$formwriter->dropinput("pst_is_pinned", "Pinned", [
+		'options' => ["No"=>0, "Yes"=>1]
+	]);
 
-	echo $formwriter->textbox('Post content', 'pst_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
+	$formwriter->dropinput("pst_is_on_homepage", "Is listed and searchable?", [
+		'options' => ["Yes"=>1, "No"=>0]
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->textbox('pst_body', 'Post content', [
+		'validation' => ['required' => true, 'minlength' => 10],
+		'htmlmode' => 'yes'
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 
 	echo '    </div>
     </div>
@@ -165,13 +174,17 @@
 	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
-		$formwriter = $page->getFormWriter('form_load_version');
+		$formwriter = $page->getFormWriter('form_load_version', 'v2', [
+			'action' => '/admin/admin_post_edit'
+		]);
 
-		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_post_edit');
-		echo $formwriter->hiddeninput('pst_post_id', $post->key);
-		echo $formwriter->dropinput("Load another version", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-		echo $formwriter->new_form_button('Load');	
-		echo $formwriter->end_form();
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('pst_post_id', ['value' => $post->key]);
+		$formwriter->dropinput("cnv_content_version_id", "Load another version", [
+			'options' => $optionvals
+		]);
+		$formwriter->submitbutton('btn_load', 'Load');
+		$formwriter->end_form();
 	}
 	else{
 		echo 'No saved versions.';
