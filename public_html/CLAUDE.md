@@ -601,3 +601,15 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 **PathHelper** - Provides standardized path resolution and file operations across the system
 
 **ComponentBase** - Base class providing common functionality for PluginHelper and ThemeHelper
+
+## Workflow Notes
+
+### Viewing Files After Edits
+
+After making edits to any file, always provide a `batcat` command so the user can easily verify the changes:
+
+```bash
+batcat /path/to/file.php
+```
+
+This allows the user to quickly review what was changed without needing to ask for a file view.

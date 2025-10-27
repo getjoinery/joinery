@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 function admin_api_key_edit_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 
 	$session = SessionControl::get_instance();
@@ -25,26 +26,26 @@ function admin_api_key_edit_logic($get_vars, $post_vars) {
 			$api_key->set($field, $post_vars[$field]);
 		}
 
-		if($post_vars['apk_start_time_date'] && $post_vars['apk_start_time_time']){
-			$time_combined = $post_vars['apk_start_time_date'] . ' ' . LibraryFunctions::toDBTime($post_vars['apk_start_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-			$api_key->set('apk_start_time', $utc_time);
-			//$api_key->set('apk_start_time_local', $time_combined);
+		// Process datetime fields using FormWriter V2 helper
+		$start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'apk_start_time', true);
+		if($start_time !== NULL){
+			$api_key->set('apk_start_time', $start_time);
 		}
 
-		if($post_vars['apk_expires_time_date'] && $post_vars['apk_expires_time_time']){
-			$time_combined = $post_vars['evt_expires_time_date'] . ' ' . LibraryFunctions::toDBTime($post_vars['evt_expires_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-			$api_key->set('evt_expires_time', $utc_time);
-			//$api_key->set('evt_expires_time_local', $time_combined);
+		$expires_time = FormWriterV2Base::process_datetimeinput($post_vars, 'apk_expires_time', true);
+		if($expires_time !== NULL){
+			$api_key->set('apk_expires_time', $expires_time);
 		}
 
 		$api_key->set('apk_usr_user_id', $session->get_user_id());
-		$public_key = 'public_'.LibraryFunctions::random_string(16);
-		//$secret_key = 'secret_'.LibraryFunctions::random_string(16);
-		$secret_key = 'test1';
-		$api_key->set('apk_public_key', $public_key);
-		$api_key->set('apk_secret_key', ApiKey::GenerateKey($secret_key));
+
+		// Only set keys if creating new API key (not on edit)
+		if(!$api_key->key){
+			$public_key = 'public_'.LibraryFunctions::random_string(16);
+			$secret_key = 'secret_'.LibraryFunctions::random_string(16);
+			$api_key->set('apk_public_key', $public_key);
+			$api_key->set('apk_secret_key', ApiKey::GenerateKey($secret_key));
+		}
 
 		$api_key->prepare();
 		$api_key->save();
