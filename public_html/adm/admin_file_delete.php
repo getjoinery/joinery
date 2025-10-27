@@ -48,15 +48,12 @@
 	}
 
 	echo '<br /><br /><div>';
-	$formwriter = $page->getFormWriter('form2');
-	$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_file?fil_file_id='. $file->key);
-	$delform .= $formwriter->hiddeninput('action', 'remove');
-	$delform .= $formwriter->new_form_button('Delete this file permanently', 'secondary');
-	$delform .= $formwriter->end_form();
-	echo $delform;
+	$formwriter = $page->getFormWriter('form2', 'v2');
+	echo $formwriter->begin_form();
+	$formwriter->hiddeninput('action', ['value' => 'remove']);
+	$formwriter->submitbutton('btn_delete', 'Delete this file permanently', ['class' => 'btn-secondary']);
+	echo $formwriter->end_form();
 	echo '</div>';
-
-	$formwriter->end_form();
 
 	$page->end_box();
 
