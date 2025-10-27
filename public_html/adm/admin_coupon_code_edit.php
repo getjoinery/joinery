@@ -23,28 +23,21 @@
 	$pageoptions['title'] = "Edit Coupon Code";
 	$page->begin_box($pageoptions);
 
-	// Prepare form values - use automatic form filling from CouponCode model
-	$form_values = $coupon_code->export_as_array();
-	// Set default is_active for new coupons
+	// Prepare override values for defaults (timezone conversion is automatic)
+	$override_values = [];
+
 	if(!$coupon_code->key){
-		$form_values['ccd_is_active'] = 1;
+		// Set default is_active for new coupons
+		$override_values['ccd_is_active'] = 1;
 	}
 
-	// Convert UTC times to user's local timezone for display
-	if($coupon_code->key){
-		if($form_values['ccd_start_time']){
-			$form_values['ccd_start_time'] = LibraryFunctions::convert_time($form_values['ccd_start_time'], 'UTC', $session->get_timezone(), 'Y-m-d H:i:s');
-		}
-		if($form_values['ccd_end_time']){
-			$form_values['ccd_end_time'] = LibraryFunctions::convert_time($form_values['ccd_end_time'], 'UTC', $session->get_timezone(), 'Y-m-d H:i:s');
-		}
-	}
-
-	// Editing an existing coupon code - use V2 with automatic form filling
+	// Use V2 with model + override values
+	// Datetime fields with UTC values are automatically converted to user's local timezone
 	$formwriter = $page->getFormWriter('form1', 'v2', [
 		'debug' => true,
-		'values' => $form_values,
-		'form_debug' => true  // Enable verbose form-level debugging
+		'model' => $coupon_code,        // Auto-fills all model fields
+		'values' => $override_values,   // Overrides specific fields (defaults)
+		'form_debug' => true
 	]);
 
 	echo $formwriter->begin_form();

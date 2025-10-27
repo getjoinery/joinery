@@ -41,13 +41,123 @@ abstract class FormWriterV2Base {
         require_once(PathHelper::getIncludePath('includes/Validator.php'));
         $this->validator = new Validator();
 
-        // Store values array if provided
-        if (isset($this->options['values'])) {
-            $this->values = $this->options['values'];
+        // Build values from model and/or values array
+        $final_values = [];
+
+        // First, extract values from model if provided
+        if (isset($this->options['model'])) {
+            $model = $this->options['model'];
+
+            // Check if model has export_as_array method
+            if (is_object($model) && method_exists($model, 'export_as_array')) {
+                $final_values = $model->export_as_array();
+            } else {
+                throw new Exception('FormWriterV2: model option must be an object with export_as_array() method');
+            }
         }
+
+        // Second, merge in additional values array if provided (values override model)
+        if (isset($this->options['values']) && is_array($this->options['values'])) {
+            $final_values = array_merge($final_values, $this->options['values']);
+        }
+
+        // Store merged values
+        $this->values = $final_values;
+
+        // Apply automatic local time conversion to timestamp fields
+        $this->convertDateTimeFieldsToLocalTime();
 
         // Initialize CSRF if needed
         $this->initializeCSRF();
+    }
+
+    /**
+     * Convert UTC timestamp fields to user's local timezone
+     *
+     * Detects timestamp fields by checking model's field_specifications type.
+     * Only converts fields with type 'timestamp' (which have timezone context).
+     * Requires a model to be provided.
+     *
+     * Converts from UTC to the user's local timezone for display.
+     * Can be disabled with 'disable_local_time_conversion' => true option.
+     */
+    protected function convertDateTimeFieldsToLocalTime() {
+        // Need a model with field_specifications for detection
+        if (!isset($this->options['model'])) {
+            return;  // No model, skip conversion
+        }
+
+        $model = $this->options['model'];
+
+        // Check if model has field_specifications with type info
+        if (!is_object($model) || !property_exists($model, 'field_specifications')) {
+            return;  // No field_specifications, skip conversion
+        }
+
+        // Need session for timezone info
+        try {
+            $session = SessionControl::get_instance();
+            $user_timezone = $session->get_timezone();
+        } catch (Exception $e) {
+            // If session not available, skip conversion
+            return;
+        }
+
+        // Get field types from model's field_specifications
+        $field_specs = $model::$field_specifications;
+
+        // Convert timestamp fields from UTC to user's timezone
+        foreach ($field_specs as $field_name => $spec) {
+            // Skip if field doesn't exist in values or spec doesn't have type
+            if (!isset($this->values[$field_name]) || !isset($spec['type']) || !is_string($spec['type'])) {
+                continue;
+            }
+
+            $value = $this->values[$field_name];
+
+            // Skip null or empty values
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            $type_lower = strtolower($spec['type']);
+
+            // Only convert timestamp fields (they have both date and timezone context)
+            if (strpos($type_lower, 'timestamp') === false) {
+                continue;
+            }
+
+            // Try to convert DateTime object or string that looks like a timestamp
+            if ($value instanceof DateTime) {
+                // Convert DateTime object from UTC to user's timezone
+                try {
+                    $this->values[$field_name] = LibraryFunctions::convert_time(
+                        $value,
+                        'UTC',
+                        $user_timezone,
+                        'Y-m-d H:i:s'
+                    );
+                } catch (Exception $e) {
+                    // If conversion fails, leave value unchanged
+                }
+            } elseif (is_string($value)) {
+                // Check if string looks like a timestamp (contains date/time components)
+                if (preg_match('/\d{4}-\d{2}-\d{2}/', $value) ||
+                    preg_match('/\d{2}:\d{2}:\d{2}/', $value) ||
+                    preg_match('/^\d{10,}$/', $value)) {  // Unix timestamp
+                    try {
+                        $this->values[$field_name] = LibraryFunctions::convert_time(
+                            $value,
+                            'UTC',
+                            $user_timezone,
+                            'Y-m-d H:i:s'
+                        );
+                    } catch (Exception $e) {
+                        // If conversion fails, leave value unchanged
+                    }
+                }
+            }
+        }
     }
 
     /**
