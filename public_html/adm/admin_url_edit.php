@@ -76,29 +76,29 @@
 		$options['title'] = 'Edit Url';
 		$page->begin_box($options);
 
-		$formwriter = $page->getFormWriter('form1');
-		
-		$validation_rules = array();
-		$validation_rules['url_incoming']['required']['value'] = 'true'; 
-		echo $formwriter->set_validate($validation_rules);				
-			
-		echo $formwriter->begin_form('form1', 'POST', '/admin/admin_url_edit');
+		$formwriter = $page->getFormWriter('form1', 'v2', [
+			'values' => $url->export_as_array()
+		]);
+
+		$formwriter->begin_form();
 
 		if($url->key){
-			echo $formwriter->hiddeninput('url_url_id', $url->key);
-			echo $formwriter->hiddeninput('action', 'edit');
+			$formwriter->hiddeninput('url_url_id', ['value' => $url->key]);
+			$formwriter->hiddeninput('action', ['value' => 'edit']);
 		}
-		
-		echo $formwriter->textinput('Incoming url', 'url_incoming', NULL, 100, $url->get('url_incoming'), '', 255, '');
-		echo $formwriter->textinput('Redirect url', 'url_redirect_url', NULL, 100, $url->get('url_redirect_url'), '', 255, '');
+
+		$formwriter->textinput('url_incoming', 'Incoming url', [
+			'validation' => ['required' => true]
+		]);
+		$formwriter->textinput('url_redirect_url', 'Redirect url');
 		//echo $formwriter->textinput('Redirect to file', 'url_redirect_file', NULL, 100, $url->get('url_redirect_file'), '', 255, '');
 		$optionvals = array("Permanent (301)"=>301, "Temporary (302)"=>302);
-		echo $formwriter->dropinput("Redirect type", "url_type", "ctrlHolder", $optionvals, $url->get('url_type'), '', FALSE);
-			
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
-		echo $formwriter->end_form();
+		$formwriter->dropinput("url_type", "Redirect type", [
+			'options' => $optionvals
+		]);
+
+		$formwriter->submitbutton('btn_submit', 'Submit');
+		$formwriter->end_form();
 
 		$page->end_box();
 
