@@ -1,5 +1,5 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/videos_class.php'));
@@ -8,7 +8,7 @@
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-		
+
 	if($_REQUEST['vid_video_id']){
 		$video = new Video($_REQUEST['vid_video_id'], TRUE);
 	}
@@ -19,16 +19,16 @@
 	if($_POST){
 
 		if($_POST['vid_url']){
-		
+
 			//WHEN USER FEED IN TEXT CONTAINING VIDEO INFO
 			if(!$source = Video::extract_source_from_url($_POST['vid_url'])) {
 				require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
 				throw new ValidationException('We could not verify that the link you entered is from a video site we support.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.');
-			}	
+			}
 
 			if(!$vid_video_number = Video::extract_number_from_url($source, $_POST['vid_url'])) {
 				require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
-				throw new ValidationException('We could not verify that the link you entered is valid.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.');		
+				throw new ValidationException('We could not verify that the link you entered is valid.  Please check the link again and if you continue to have difficulty <a href="/contact">contact us</a> to help.');
 			}
 
 			$video->set('vid_usr_user_id', $session->get_user_id());
@@ -39,31 +39,31 @@
 
 		if($_POST['vid_min_permission'] === NULL || $_POST['vid_min_permission'] === ''){
 			$video->set('vid_min_permission', NULL);
-		} 
+		}
 		else{
 			$video->set('vid_min_permission', $_POST['vid_min_permission']);
 		}
 
 		if($_POST['vid_grp_group_id'] === NULL || $_POST['vid_grp_group_id'] === ''){
 			$video->set('vid_grp_group_id', NULL);
-		} 
+		}
 		else{
 			$video->set('vid_grp_group_id', $_POST['vid_grp_group_id']);
 		}
-		
+
 		if($_POST['vid_evt_event_id'] === NULL || $_POST['vid_evt_event_id'] === ''){
 			$video->set('vid_evt_event_id', NULL);
-		} 
+		}
 		else{
 			$video->set('vid_evt_event_id', $_POST['vid_evt_event_id']);
 		}
-		
+
 		$video->set('vid_title', $_POST['vid_title']);
 		$video->set('vid_description', $_POST['vid_description']);
-		
+
 		try {
 			$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-			$video->save(); 
+			$video->save();
 			$video->load();
 
 			if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
@@ -79,12 +79,12 @@
 			throw new SystemException($e->getMessage());
 		}
 
-		LibraryFunctions::redirect('/admin/admin_videos');						
+		LibraryFunctions::redirect('/admin/admin_videos');
 		return;
 
 	}
 	else{
-		
+
 		$breadcrumbs = array('Videos'=>'/admin/admin_videos');
 		if ($video->key) {
 			$breadcrumbs += array('Video '.$video->get('vid_title') => '/admin/admin_video?vid_video_id='.$video->key);
@@ -95,86 +95,93 @@
 		}
 
 		$page = new AdminPage();
-		$page->admin_header(	
+		$page->admin_header(
 		array(
 			'menu-id'=> 'videos',
 			'page_title' => 'Videos',
 			'readable_title' => 'Videos',
 			'breadcrumbs' => array(
-				'Videos'=>'/admin/admin_videos', 
+				'Videos'=>'/admin/admin_videos',
 				'Video '.$video->get('vid_title') => '/admin/admin_video?vid_video_id='.$video->key,
 				'Video Edit'=>'',
 			),
 			'session' => $session,
 		)
-		);			
-		
+		);
+
 		$options['title'] = 'Edit Video';
 		$page->begin_box($options);
-		
+
 		if(!$video->key){
 			?><p>We currently support YouTube and Vimeo.</p><?php
 		}
-		
-		$formwriter = $page->getFormWriter('form1');
-		
-		$validation_rules = array();
-		$validation_rules['vid_title']['required']['value'] = 'true'; 
-		if(!$video->key){
-			$validation_rules['vid_url']['required']['value'] = 'true';
-		}
-		echo $formwriter->set_validate($validation_rules);				
-			
-		echo $formwriter->begin_form('form1', 'POST', '/admin/admin_video_edit');
+
+		$formwriter = $page->getFormWriter('form1', 'v2', [
+			'model' => $video
+		]);
+
+		$formwriter->begin_form();
 
 		if($video->key){
-			echo $formwriter->hiddeninput('vid_video_id', $video->key);
-			echo $formwriter->hiddeninput('action', 'edit');
+			$formwriter->hiddeninput('vid_video_id', ['value' => $video->key]);
+			$formwriter->hiddeninput('action', ['value' => 'edit']);
 		}
-		
-		echo $formwriter->textinput('Video title', 'vid_title', NULL, 100, $video->get('vid_title'), '', 255, '');
+
+		$formwriter->textinput('vid_title', 'Video title', [
+			'validation' => ['required' => true]
+		]);
 		if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
-			echo $formwriter->textinput('Link (no spaces, optional): '.$settings->get_setting('webDir').'/video/', 'pag_link', NULL, 100, $video->get('vid_link'), '', 255, '');	
+			$formwriter->textinput('pag_link', 'Link (no spaces, optional)', [
+				'prepend' => $settings->get_setting('webDir').'/video/'
+			]);
 		}
-		echo $formwriter->textbox('Video description', 'vid_description', 'ctrlHolder', 5, 80, $video->get('vid_description'), '', 'no');		
-		
+		$formwriter->textbox('vid_description', 'Video description', [
+			'htmlmode' => 'no'
+		]);
+
 		if(!$video->key){
-			echo $formwriter->textinput('Video link', 'vid_url', 'ctrlHolder', 5, NULL, '', 'no'); 
+			$formwriter->textinput('vid_url', 'Video link', [
+				'validation' => ['required' => true]
+			]);
 		}
-		
+
 	//echo $formwriter->checkboxinput("List video in index", "vid_is_listed", "checkbox", "left", $file->get('vid_is_listed'), 1, "");
 
 	$optionvals = array('Public (anyone)' => null, 'Any logged in user (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
-	echo $formwriter->dropinput("Permission level can access", "vid_min_permission", "ctrlHolder", $optionvals, $video->get('vid_min_permission'), '', FALSE, TRUE);
-	
+	$formwriter->dropinput("vid_min_permission", "Permission level can access", [
+		'options' => $optionvals
+	]);
+
 	$groups = new MultiGroup(
-		array('category'=>'user'),  //SEARCH 
+		array('category'=>'user'),  //SEARCH
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$groups->load();
 
-	$optionvals1['All'] = NULL;	
+	$optionvals1['All'] = NULL;
 	$optionvals2 = $groups->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
-	echo $formwriter->dropinput("Group can access", "vid_grp_group_id", "ctrlHolder", $optionvals, $video->get('vid_grp_group_id'), '', FALSE, TRUE);
+	$formwriter->dropinput("vid_grp_group_id", "Group can access", [
+		'options' => $optionvals
+	]);
 
 	$events = new MultiEvent(
-		array(),  //SEARCH 
+		array(),  //SEARCH
 		NULL,		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$events->load();
 
-	$optionvals['All'] = NULL;	
+	$optionvals['All'] = NULL;
 	$optionvals2 = $events->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
-	echo $formwriter->dropinput("Event can access", "vid_evt_event_id", "ctrlHolder", $optionvals, $video->get('vid_evt_event_id'), '', FALSE, TRUE);
+	$formwriter->dropinput("vid_evt_event_id", "Event can access", [
+		'options' => $optionvals
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 
 		$page->end_box();
 
