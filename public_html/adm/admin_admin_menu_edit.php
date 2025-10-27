@@ -52,25 +52,22 @@
 	$pageoptions['title'] = "New Admin Menu Item";
 	$page->begin_box($pageoptions);
 
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['amu_menudisplay']['required']['value'] = 'true';	
-	$validation_rules['amu_min_permission']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);	
+	// Editing an existing admin menu item
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $admin_menu
+	]);
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_admin_menu_edit');
+	echo $formwriter->begin_form();
 
 	if($admin_menu->key){
-		echo $formwriter->hiddeninput('amu_admin_menu_id', $admin_menu->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('amu_admin_menu_id', ['value' => $admin_menu->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
-	
-	echo $formwriter->textinput('Menu name', 'amu_menudisplay', NULL, 100, $admin_menu->get('amu_menudisplay'), '', 255, '');	
-	echo $formwriter->textinput('Slug', 'amu_slug', NULL, 100, $admin_menu->get('amu_slug'), '', 255, '');	
-	echo $formwriter->textinput('Page (Full path starting with /)', 'amu_defaultpage', NULL, 100, $admin_menu->get('amu_defaultpage'), '', 255, '');
-	
+
+	$formwriter->textinput('amu_menudisplay', 'Menu name');
+	$formwriter->textinput('amu_slug', 'Slug');
+	$formwriter->textinput('amu_defaultpage', 'Page (Full path starting with /)');
+
 	$menulist = new MultiAdminMenu(
 		array('has_no_parent_menu_id'=>true),
 		NULL,		//SORT BY => DIRECTION
@@ -78,21 +75,22 @@
 		NULL);  //OFFSET
 	$menulist->load();
 	$optionvals = $menulist->get_dropdown_array();
-	echo $formwriter->dropinput("Parent Menu", "amu_parent_menu_id", "ctrlHolder", $optionvals, $admin_menu->get('amu_parent_menu_id'), '', TRUE);		
-	
-	echo $formwriter->textinput('Order', 'amu_order', NULL, 4, $admin_menu->get('amu_order'), '', 255, '');
-	echo $formwriter->textinput('Minimum permission', 'amu_min_permission', NULL, 4, $admin_menu->get('amu_min_permission'), '', 255, '');
-	
-	$optionvals = array("Enabled"=>0, 'Disabled' => 1);
-	echo $formwriter->dropinput("Enabled", "amu_disable", "ctrlHolder", $optionvals, $admin_menu->get('amu_disable'), '', FALSE);
-	
-	echo $formwriter->textinput('Icon name', 'amu_icon', NULL, 100, $admin_menu->get('amu_icon'), '', 255, '');
-	
-	echo $formwriter->textinput('Activate on setting (optional)', 'amu_setting_activate', NULL, 100, $admin_menu->get('amu_setting_activate'), '', 255, '');
+	$formwriter->dropinput('amu_parent_menu_id', 'Parent Menu', [
+		'options' => $optionvals
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	$formwriter->textinput('amu_order', 'Order');
+	$formwriter->textinput('amu_min_permission', 'Minimum permission');
+
+	$formwriter->dropinput('amu_disable', 'Enabled', [
+		'options' => ['Enabled' => 0, 'Disabled' => 1]
+	]);
+
+	$formwriter->textinput('amu_icon', 'Icon name');
+
+	$formwriter->textinput('amu_setting_activate', 'Activate on setting (optional)');
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
 	echo $formwriter->end_form();
 
 	$page->admin_footer();
