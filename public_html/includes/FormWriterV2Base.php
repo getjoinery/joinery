@@ -20,6 +20,8 @@ abstract class FormWriterV2Base {
     protected $values = [];
     protected $errors = [];
     protected $model_validated_fields = [];  // Track fields using automatic model validation
+    protected $use_deferred_output = false;  // Deferred output mode flag
+    protected $deferred_output = [];  // Collected field HTML when in deferred mode
 
     // Static property for custom validators
     protected static $custom_validators = [];
@@ -36,6 +38,9 @@ abstract class FormWriterV2Base {
     public function __construct($form_id, $options = []) {
         $this->form_id = $form_id;
         $this->options = array_merge($this->getDefaultOptions(), $options);
+
+        // Enable deferred output mode if requested
+        $this->use_deferred_output = $options['deferred_output'] ?? false;
 
         // Initialize validator
         require_once(PathHelper::getIncludePath('includes/Validator.php'));
@@ -973,41 +978,48 @@ abstract class FormWriterV2Base {
      * Output the opening form tag and CSRF token
      */
     public function begin_form() {
-        // Output CSS to ensure placeholders are visually distinct from actual input text
-        echo '<style>';
-        echo '#' . htmlspecialchars($this->form_id) . ' input::placeholder,';
-        echo '#' . htmlspecialchars($this->form_id) . ' textarea::placeholder {';
-        echo '  color: #999 !important;';
-        echo '  opacity: 0.8 !important;';
-        echo '}';
-        echo '</style>';
+        // Build CSS to ensure placeholders are visually distinct from actual input text
+        $html = '<style>';
+        $html .= '#' . htmlspecialchars($this->form_id) . ' input::placeholder,';
+        $html .= '#' . htmlspecialchars($this->form_id) . ' textarea::placeholder {';
+        $html .= '  color: #999 !important;';
+        $html .= '  opacity: 0.8 !important;';
+        $html .= '}';
+        $html .= '</style>';
 
-        // Output form tag with all attributes from options
-        echo '<form';
-        echo ' id="' . htmlspecialchars($this->form_id) . '"';
-        echo ' method="' . htmlspecialchars($this->options['method']) . '"';
-        echo ' action="' . htmlspecialchars($this->options['action']) . '"';
+        // Build form tag with all attributes from options
+        $html .= '<form';
+        $html .= ' id="' . htmlspecialchars($this->form_id) . '"';
+        $html .= ' method="' . htmlspecialchars($this->options['method']) . '"';
+        $html .= ' action="' . htmlspecialchars($this->options['action']) . '"';
 
         // Additional attributes
         if (!empty($this->options['class'])) {
-            echo ' class="' . htmlspecialchars($this->options['class']) . '"';
+            $html .= ' class="' . htmlspecialchars($this->options['class']) . '"';
         }
         if (!empty($this->options['enctype'])) {
-            echo ' enctype="' . htmlspecialchars($this->options['enctype']) . '"';
+            $html .= ' enctype="' . htmlspecialchars($this->options['enctype']) . '"';
         }
 
         // Any data-* attributes
         foreach ($this->options as $key => $value) {
             if (strpos($key, 'data-') === 0) {
-                echo ' ' . htmlspecialchars($key) . '="' . htmlspecialchars($value) . '"';
+                $html .= ' ' . htmlspecialchars($key) . '="' . htmlspecialchars($value) . '"';
             }
         }
 
-        echo '>';
+        $html .= '>';
 
-        // Output CSRF token if enabled
+        // Add CSRF token if enabled
         if ($this->csrf_token) {
-            echo '<input type="hidden" name="' . htmlspecialchars($this->options['csrf_field']) . '" value="' . htmlspecialchars($this->csrf_token) . '">';
+            $html .= '<input type="hidden" name="' . htmlspecialchars($this->options['csrf_field']) . '" value="' . htmlspecialchars($this->csrf_token) . '">';
+        }
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output['_form_begin'] = $html;
+        } else {
+            echo $html;
         }
     }
 
@@ -1015,14 +1027,62 @@ abstract class FormWriterV2Base {
      * Output the closing form tag
      */
     public function end_form() {
-        // Output JoineryValidator initialization if we have validation rules
-        // This is called AFTER all fields have been registered, so we have complete validation rules
+        $html = '';
+
+        // Get JavaScript validation (this returns HTML string)
+        $html .= $this->getJavascriptValidation();
+
+        // Get any ready scripts
+        $html .= $this->outputReadyScripts();
+
+        $html .= '</form>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output['_form_end'] = $html;
+        } else {
+            echo $html;
+        }
+    }
+
+    /**
+     * Get all deferred field HTML as a string
+     *
+     * Used when deferred_output mode is enabled to retrieve collected field HTML
+     * without echoing it immediately.
+     *
+     * @return string All collected field HTML including form tags
+     */
+    public function getFieldsHTML() {
+        $html = '';
+
+        // Output in correct order: form begin, fields, form end
+        if (isset($this->deferred_output['_form_begin'])) {
+            $html .= $this->deferred_output['_form_begin'];
+        }
+
+        // Output all fields (excluding special _form_begin and _form_end keys)
+        foreach ($this->deferred_output as $key => $field_html) {
+            if ($key !== '_form_begin' && $key !== '_form_end') {
+                $html .= $field_html;
+            }
+        }
+
+        // Output form end
+        if (isset($this->deferred_output['_form_end'])) {
+            $html .= $this->deferred_output['_form_end'];
+        }
+
+        return $html;
+    }
+
+    /**
+     * Get JavaScript validation initialization as string
+     */
+    protected function getJavascriptValidation() {
+        ob_start();
         $this->outputJavascriptValidation();
-
-        // Output any ready scripts added via addReadyScript()
-        echo $this->outputReadyScripts();
-
-        echo '</form>';
+        return ob_get_clean();
     }
 
     /**
