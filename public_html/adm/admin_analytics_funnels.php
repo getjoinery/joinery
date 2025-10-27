@@ -19,19 +19,36 @@ array(
 )
 );
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("uniForm", "get", "/admin/admin_analytics_funnels");
-echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $page_vars['startdate'], "", 10);
-echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $page_vars['enddate'], "", 10);
-echo $formwriter->dropinput("Page 1", "page_1", "ctrlHolder", $page_vars['optionvals'], $page_vars['page_1'], '', TRUE);
-echo $formwriter->dropinput("Page 2", "page_2", "ctrlHolder", $page_vars['optionvals'], $page_vars['page_2'], '', TRUE);
-echo $formwriter->dropinput("Page 3", "page_3", "ctrlHolder", $page_vars['optionvals'], $page_vars['page_3'], '', TRUE);
-echo $formwriter->dropinput("Page 4", "page_4", "ctrlHolder", $page_vars['optionvals'], $page_vars['page_4'], '', TRUE);
-echo $formwriter->dropinput("Page 5", "page_5", "ctrlHolder", $page_vars['optionvals'], $page_vars['page_5'], '', TRUE);
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
+$formwriter->textinput('startdate', 'Start Date', [
+	'value' => $page_vars['startdate']
+]);
+$formwriter->textinput('enddate', 'End Date', [
+	'value' => $page_vars['enddate']
+]);
+$formwriter->dropinput('page_1', 'Page 1', [
+	'options' => $page_vars['optionvals'],
+	'value' => $page_vars['page_1']
+]);
+$formwriter->dropinput('page_2', 'Page 2', [
+	'options' => $page_vars['optionvals'],
+	'value' => $page_vars['page_2']
+]);
+$formwriter->dropinput('page_3', 'Page 3', [
+	'options' => $page_vars['optionvals'],
+	'value' => $page_vars['page_3']
+]);
+$formwriter->dropinput('page_4', 'Page 4', [
+	'options' => $page_vars['optionvals'],
+	'value' => $page_vars['page_4']
+]);
+$formwriter->dropinput('page_5', 'Page 5', [
+	'options' => $page_vars['optionvals'],
+	'value' => $page_vars['page_5']
+]);
 
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
+$formwriter->submitbutton('btn_submit', 'Submit');
 
 echo $formwriter->end_form();
 

@@ -19,13 +19,15 @@ array(
 )
 );
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_stats");
-echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $page_vars['startdate'], "", 10);
-echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $page_vars['enddate'], "", 10);
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
+$formwriter->textinput('startdate', 'Start Date', [
+	'value' => $page_vars['startdate']
+]);
+$formwriter->textinput('enddate', 'End Date', [
+	'value' => $page_vars['enddate']
+]);
+$formwriter->submitbutton('btn_submit', 'Submit');
 
 echo $formwriter->end_form();
 
