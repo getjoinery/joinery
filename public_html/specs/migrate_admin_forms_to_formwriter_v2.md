@@ -545,7 +545,50 @@ $formwriter->textinput('website', 'Website', [
 
 Debug mode is **OFF by default**. Enable it only when troubleshooting validation issues by setting `'debug' => true` in FormWriter options. Always ensure it's disabled in production code.
 
-#### Step 11: No Changes Needed For
+#### Step 11: Deferred Output Mode (For Multiple Forms in Loops)
+
+**Use when:** Building multiple forms in loops (e.g., inline action forms in listing pages).
+
+**Basic usage:**
+```php
+// Enable deferred mode
+$form = $page->getFormWriter('delete_' . $item->id, 'v2', [
+    'deferred_output' => true  // Store HTML instead of echoing
+]);
+
+$form->hiddeninput('item_id', ['value' => $item->id]);
+$form->submitbutton('btn_delete', 'Delete');
+
+// Get HTML as string
+$html = $form->getFieldsHTML();
+```
+
+**Listing page example:**
+```php
+foreach ($items as $item) {
+    $row = [];
+    // ... add columns ...
+
+    $form = $page->getFormWriter('delete_' . $item->id, 'v2', [
+        'deferred_output' => true,
+        'action' => '/admin/process'
+    ]);
+
+    $form->hiddeninput('item_id', ['value' => $item->id]);
+    $form->submitbutton('btn_delete', 'Delete');
+
+    $row['action'] = $form->getFieldsHTML();
+    array_push($rowvalues, $row);
+}
+```
+
+**Key points:**
+- ✅ Use `'deferred_output' => true` in constructor
+- ✅ Call `getFieldsHTML()` to get accumulated HTML
+- ✅ Works with all field types and features
+- ✅ Fully backward compatible
+
+#### Step 12: No Changes Needed For
 
 - ✅ Business logic (getting values, loading data, etc.)
 - ✅ `end_form()` - compatible
