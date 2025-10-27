@@ -889,3 +889,19 @@
 		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_defaultpage = REPLACE(amu_defaultpage, '.php', '') WHERE amu_defaultpage LIKE '%.php%';";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// Add Contact Types menu item under Emails
+		$migration = array();
+		$migration['database_version'] = '0.66';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'contact-types'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('Contact Types', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'emails'), 'admin_contact_types', 3, 8, 0, '', 'contact-types');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add API Keys menu item under System
+		$migration = array();
+		$migration['database_version'] = '0.66';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'api_keys'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('API Keys', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_api_keys', 4, 8, 0, '', 'api_keys');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;

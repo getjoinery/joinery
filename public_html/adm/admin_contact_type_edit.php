@@ -24,23 +24,20 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing contact_type
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $contact_type
+	]);
 
-	$validation_rules = array();
-	echo $formwriter->set_validate($validation_rules);
-
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_contact_type_edit');
+	echo $formwriter->begin_form();
 	if($contact_type->key){
-		echo $formwriter->hiddeninput('ctt_contact_type_id', $contact_type->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('ctt_contact_type_id', ['value' => $contact_type->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
 
-	echo $formwriter->textinput('Name', 'ctt_name', NULL, 100, $contact_type->get('ctt_name'), '', 255, '');
-	echo $formwriter->textinput('Description', 'ctt_description', NULL, 100, $contact_type->get('ctt_description'), '', 255, '');
-	echo $formwriter->textinput('Mailchimp List ID', 'ctt_mailchimp_list_id', NULL, 100, $contact_type->get('ctt_mailchimp_list_id'), '', 255, '');
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	$formwriter->textinput('ctt_name', 'Name');
+	$formwriter->textinput('ctt_description', 'Description');
+	$formwriter->textinput('ctt_mailchimp_list_id', 'Mailchimp List ID');
+	$formwriter->submitbutton('btn_submit', 'Submit');
 	echo $formwriter->end_form();
 
 	$page->end_box();
