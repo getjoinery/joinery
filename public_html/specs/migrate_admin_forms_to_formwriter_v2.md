@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 5/69 completed (7.2%)**
+**Progress: 10/69 completed (14.5%)**
 
 #### Completed ✅
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -51,16 +51,16 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_api_key_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdowns, datetime fields with automatic timezone conversion)
 - [x] `/adm/admin_contact_type_edit.php` - ✅ **COMPLETED** (simple form with 3 textinput fields, uses logic file, automatic model validation)
 - [x] `/adm/admin_admin_menu_edit.php` - ✅ **COMPLETED** (textinput fields, dropdowns with MultiAdminMenu lookup, automatic model validation)
+- [x] `/adm/admin_analytics_activitybydate.php` - ✅ **COMPLETED** (filter form with textinput, checkbox, dropdown, no model binding)
+- [x] `/adm/admin_analytics_email_stats.php` - ✅ **COMPLETED** (filter form with two textinput fields)
+- [x] `/adm/admin_analytics_funnels.php` - ✅ **COMPLETED** (filter form with textinput and multiple dropdowns)
+- [x] `/adm/admin_analytics_stats.php` - ✅ **COMPLETED** (filter form with two textinput fields)
+- [x] `/adm/admin_analytics_users.php` - ✅ **COMPLETED** (filter form with textinput, checkbox)
 
-#### Pending Conversion (64 pages)
+#### Pending Conversion (59 pages)
 
 **A-C:**
 - [ ] `/adm/admin_address_edit.php`
-- [ ] `/adm/admin_analytics_activitybydate.php`
-- [ ] `/adm/admin_analytics_email_stats.php`
-- [ ] `/adm/admin_analytics_funnels.php`
-- [ ] `/adm/admin_analytics_stats.php`
-- [ ] `/adm/admin_analytics_users.php`
 - [ ] `/adm/admin_comment_edit.php`
 - [ ] `/adm/admin_comments.php`
 

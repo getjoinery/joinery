@@ -51,19 +51,27 @@ $session->check_permission(10);
 
 <?php
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("uniForm", "post", "/admin/admin_analytics_activitybydate");
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
 
-echo $formwriter->textinput("Start Date", "startdate", "dateinput", 30, $startdate, "", 10);
-echo $formwriter->textinput("End Date", "enddate", "dateinput", 30, $enddate, "", 10);
-echo $formwriter->checkboxinput("Exclude Disabled Users", "usr_is_disabled", "checkbox", "left", $usrdisabled, 1, "Check to filter out disabled users");
+$formwriter->textinput('startdate', 'Start Date', [
+	'value' => $startdate
+]);
+$formwriter->textinput('enddate', 'End Date', [
+	'value' => $enddate
+]);
+$formwriter->checkboxinput('usr_is_disabled', 'Exclude Disabled Users', [
+	'checked' => $usrdisabled,
+	'value' => 1
+]);
 
 $optionvals = array("Day"=>"0", "Week"=>"1", "Month"=>"2", "Quarter"=>"3", "Year"=>"4");
 $grouping = array("Day", "Week", "Month", "Quarter", "Year");
-echo $formwriter->dropinput("Group by:", "interval", "radioinput", $optionvals, $interval, "BlockLabel", "", TRUE);
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
+$formwriter->dropinput('interval', 'Group by:', [
+	'options' => $optionvals,
+	'value' => $interval
+]);
+$formwriter->submitbutton('btn_submit', 'Submit');
 
 echo $formwriter->end_form();
 
