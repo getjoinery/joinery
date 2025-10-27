@@ -58,38 +58,58 @@ foreach ($comments as $comment){
 	array_push($rowvalues, $status);
 
 	if($comment->get('cmt_delete_time')){
-		$formwriter = $page->getFormWriter('form2');
-		$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
-		$delform .= $formwriter->hiddeninput('action', 'undelete');
-		$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
-		$delform .= $formwriter->new_form_button('Undelete', 'secondary');
-		$delform .= $formwriter->end_form();
+		$formwriter = $page->getFormWriter('del_form_' . $comment->key, 'v2', [
+			'deferred_output' => true,
+			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
+			'csrf' => false
+		]);
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('action', '', ['value' => 'undelete']);
+		$formwriter->hiddeninput('cmt_comment_id', '', ['value' => $comment->key]);
+		$formwriter->submitbutton('btn_submit', 'Undelete', ['class' => 'btn btn-secondary']);
+		$formwriter->end_form();
+		$delform = $formwriter->getFieldsHTML();
 	}
 	else{
-		$formwriter = $page->getFormWriter('form2');
-		$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
-		$delform .= $formwriter->hiddeninput('action', 'delete');
-		$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
-		$delform .= $formwriter->new_form_button('Delete', 'secondary');
-		$delform .= $formwriter->end_form();
+		$formwriter = $page->getFormWriter('del_form_' . $comment->key, 'v2', [
+			'deferred_output' => true,
+			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
+			'csrf' => false
+		]);
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('action', '', ['value' => 'delete']);
+		$formwriter->hiddeninput('cmt_comment_id', '', ['value' => $comment->key]);
+		$formwriter->submitbutton('btn_submit', 'Delete', ['class' => 'btn btn-secondary']);
+		$formwriter->end_form();
+		$delform = $formwriter->getFieldsHTML();
 	}
 	array_push($rowvalues, $delform);
 
 	if($comment->get('cmt_is_approved')){
-		$formwriter = $page->getFormWriter('form2');
-		$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
-		$delform .= $formwriter->hiddeninput('action', 'unapprove');
-		$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
-		$delform .= $formwriter->new_form_button('Unapprove', 'secondary');
-		$delform .= $formwriter->end_form();
+		$formwriter = $page->getFormWriter('approve_form_' . $comment->key, 'v2', [
+			'deferred_output' => true,
+			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
+			'csrf' => false
+		]);
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('action', '', ['value' => 'unapprove']);
+		$formwriter->hiddeninput('cmt_comment_id', '', ['value' => $comment->key]);
+		$formwriter->submitbutton('btn_submit', 'Unapprove', ['class' => 'btn btn-secondary']);
+		$formwriter->end_form();
+		$delform = $formwriter->getFieldsHTML();
 	}
 	else{
-		$formwriter = $page->getFormWriter('form2');
-		$delform = $formwriter->begin_form('form2', 'POST', '/admin/admin_comment?cmt_comment_id='. $comment->key);
-		$delform .= $formwriter->hiddeninput('action', 'approve');
-		$delform .= $formwriter->hiddeninput('cmt_comment_id', $comment->key);
-		$delform .= $formwriter->new_form_button('Approve', 'secondary');
-		$delform .= $formwriter->end_form();
+		$formwriter = $page->getFormWriter('approve_form_' . $comment->key, 'v2', [
+			'deferred_output' => true,
+			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
+			'csrf' => false
+		]);
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('action', '', ['value' => 'approve']);
+		$formwriter->hiddeninput('cmt_comment_id', '', ['value' => $comment->key]);
+		$formwriter->submitbutton('btn_submit', 'Approve', ['class' => 'btn btn-secondary']);
+		$formwriter->end_form();
+		$delform = $formwriter->getFieldsHTML();
 	}
 	array_push($rowvalues, $delform);
 

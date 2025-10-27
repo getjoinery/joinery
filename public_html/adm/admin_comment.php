@@ -11,9 +11,8 @@
 	$session->check_permission(8);
 
 	$comment = new Comment($_REQUEST['cmt_comment_id'], TRUE);
-	$post = new Post($comment->get('cmt_pst_post_id'), TRUE);
 
-	if($_REQUEST['action'] == 'approve'){
+	if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'approve'){
 		$comment->set('cmt_is_approved', true);
 		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$comment->save();
@@ -21,7 +20,7 @@
 		header("Location: /admin/admin_comments");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'unapprove'){
+	else if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'unapprove'){
 
 		$comment->set('cmt_is_approved', false);
 		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -30,19 +29,28 @@
 		header("Location: /admin/admin_comments");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'delete'){
+	else if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'delete'){
 		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$comment->soft_delete();
 
 		header("Location: /admin/admin_comments");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'undelete'){
+	else if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'undelete'){
 		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$comment->undelete();
 
 		header("Location: /admin/admin_comments");
 		exit();
+	}
+
+	// Only load post if we're displaying the page (not processing an action)
+	// Check if post_id exists before trying to load
+	$post_id = $comment->get('cmt_pst_post_id');
+	if ($post_id) {
+		$post = new Post($post_id, TRUE);
+	} else {
+		$post = null;
 	}
 
 	$session->set_return();
