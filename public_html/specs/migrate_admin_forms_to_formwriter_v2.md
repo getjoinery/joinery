@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Priority:** High
 **Date Created:** 2025-10-26
-**Last Updated:** 2025-10-26
+**Last Updated:** 2025-10-27
 **Related Specifications:**
 - `/docs/formwriter.md` - FormWriter V2 documentation
 - `/specs/remove_jquery_dependency.md` - jQuery removal (related but separate)
@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 22/69 completed (31.9%)**
+**Progress: 23/69 completed (33.3%)**
 
 #### Completed ✅
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -68,8 +68,9 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_comment_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdown, textarea, custom validation)
 - [x] `/adm/admin_comments.php` - ✅ **COMPLETED** (listing page with multiple inline action forms using deferred output feature)
 - [x] `/adm/admin_static_cache.php` - ✅ **COMPLETED** (multiple filter forms with textinput, hiddeninput, custom validation)
+- [x] `/adm/admin_url_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdown, hiddeninput, automatic model form filling)
 
-#### Pending Conversion (47 pages)
+#### Pending Conversion (46 pages)
 
 **A-C:**
 - [ ] `/adm/admin_address_edit.php`
@@ -131,7 +132,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_survey_edit.php`
 
 **U-Y:**
-- [ ] `/adm/admin_url_edit.php`
 - [ ] `/adm/admin_user.php`
 - [ ] `/adm/admin_user_add.php`
 - [ ] `/adm/admin_users_edit.php`
