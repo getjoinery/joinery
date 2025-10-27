@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 19/69 completed (27.5%)**
+**Progress: 20/69 completed (29.0%)**
 
 #### Completed ✅
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -65,13 +65,13 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_softdelete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
 - [x] `/adm/admin_users_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with custom button styling)
 - [x] `/adm/admin_users_undelete.php` - ✅ **COMPLETED** (confirmation undelete form with two hidden inputs)
+- [x] `/adm/admin_comment_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdown, textarea, custom validation)
 
-#### Pending Conversion (50 pages)
+#### Pending Conversion (49 pages)
 
 **A-C:**
 - [ ] `/adm/admin_address_edit.php`
-- [ ] `/adm/admin_comment_edit.php`
-- [ ] `/adm/admin_comments.php`
+- [ ] `/adm/admin_comments.php` - (listing page with multiple inline action forms - needs special handling for V2)
 
 **E:**
 - [ ] `/adm/admin_email_edit.php`
