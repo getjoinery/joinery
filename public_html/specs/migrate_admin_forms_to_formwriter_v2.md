@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 10/69 completed (14.5%)**
+**Progress: 19/69 completed (27.5%)**
 
 #### Completed ✅
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -56,8 +56,17 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_analytics_funnels.php` - ✅ **COMPLETED** (filter form with textinput and multiple dropdowns)
 - [x] `/adm/admin_analytics_stats.php` - ✅ **COMPLETED** (filter form with two textinput fields)
 - [x] `/adm/admin_analytics_users.php` - ✅ **COMPLETED** (filter form with textinput, checkbox)
+- [x] `/adm/admin_file_delete.php` - ✅ **COMPLETED** (simple confirmation delete form with hidden input and button)
+- [x] `/adm/admin_email_template_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_group_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_order_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_page_content_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_post_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_softdelete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_users_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with custom button styling)
+- [x] `/adm/admin_users_undelete.php` - ✅ **COMPLETED** (confirmation undelete form with two hidden inputs)
 
-#### Pending Conversion (59 pages)
+#### Pending Conversion (50 pages)
 
 **A-C:**
 - [ ] `/adm/admin_address_edit.php`
@@ -76,7 +85,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_event_type_edit.php`
 
 **F-G:**
-- [ ] `/adm/admin_file_delete.php`
 - [ ] `/adm/admin_file_edit.php`
 - [ ] `/adm/admin_file_upload.php`
 - [ ] `/adm/admin_group_edit.php`

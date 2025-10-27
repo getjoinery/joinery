@@ -23,19 +23,17 @@ array(
 $pageoptions['title'] = 'Delete Page Content '.$page_content->get('pac_location_name');
 $page->begin_box($pageoptions);
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("form", "post", "/admin/admin_page_content_permanent_delete");
+$formwriter = $page->getFormWriter('form1', 'v2');
+echo $formwriter->begin_form();
 
 echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will permanently delete this page_content ('.$page_content->get('pac_location_name') . ').</p>';
 
-echo $formwriter->hiddeninput("confirm", 1);
-echo $formwriter->hiddeninput("pac_page_content_id", $pac_page_content_id);
+$formwriter->hiddeninput('confirm', ['value' => 1]);
+$formwriter->hiddeninput('pac_page_content_id', ['value' => $pac_page_content_id]);
 
-		echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+$formwriter->submitbutton('btn_submit', 'Submit');
 
 	echo '</div>';
 echo '</fieldset>';
