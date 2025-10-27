@@ -814,10 +814,11 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param string $name Field name
      * @param string $label Field label
      * @param array $options Field options
-     * @param string $date_name Date field name
-     * @param string $time_name Time field name
      */
-    protected function outputDateTimeInput($name, $label, $options, $date_name, $time_name) {
+    protected function outputDateTimeInput($name, $label, $options) {
+        // Derive date and time field names from the main name
+        $date_name = $name . '_dateinput';
+        $time_name = $name . '_timeinput';
         $date_value = $options['value'] ?? $options['date_value'] ?? '';
         $time_value = $options['time_value'] ?? '';
         $class = $options['class'] ?? 'form-control';
