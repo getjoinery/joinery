@@ -108,12 +108,13 @@ public function getFormWriter($form_id = 'form1', $version = 'v1') {
 
 **Total: 69 admin pages with forms**
 
-**Progress: 1/69 completed (1.4%)**
+**Progress: 2/69 completed (2.9%)**
 
 #### Completed ✅
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
+- [x] `/adm/admin_coupon_code_edit.php` - ✅ **COMPLETED** (uses model option with field overrides, datetime processing, AJAX dropdown, require_one_group validation, visibility rules, checkboxList)
 
-#### Pending Conversion (68 pages)
+#### Pending Conversion (67 pages)
 
 **A-C:**
 - [ ] `/adm/admin_address_edit.php`
@@ -127,7 +128,6 @@ public function getFormWriter($form_id = 'form1', $version = 'v1') {
 - [ ] `/adm/admin_comment_edit.php`
 - [ ] `/adm/admin_comments.php`
 - [ ] `/adm/admin_contact_type_edit.php`
-- [ ] `/adm/admin_coupon_code_edit.php`
 
 **E:**
 - [ ] `/adm/admin_email_edit.php`
@@ -709,6 +709,211 @@ This shows that V2 automatically detected the Location model and applied validat
 
 ---
 
+## 4.2 Advanced Example: admin_coupon_code_edit.php
+
+### Overview
+
+This page demonstrates advanced V2 features including:
+- **Model option** with automatic `export_as_array()` calling and field override pattern
+- **DateTime processing** with timezone conversion
+- **AJAX dropdown** for user search
+- **require_one_group validation** (at least one of multiple fields required)
+- **Visibility rules** (show/hide product list based on "Applies to" dropdown)
+- **CheckboxList** for product selection
+
+### Implementation (V2)
+
+```php
+// Prepare override values for defaults (timezone conversion is automatic)
+$override_values = [];
+
+if(!$coupon_code->key){
+    // Set default is_active for new coupons
+    $override_values['ccd_is_active'] = 1;
+}
+
+// Use V2 with model + override values
+// Datetime fields with UTC values are automatically converted to user's local timezone
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'debug' => true,
+    'model' => $coupon_code,        // Auto-fills all model fields
+    'values' => $override_values,   // Overrides specific fields (defaults)
+    'form_debug' => true
+]);
+
+echo $formwriter->begin_form();
+
+if($coupon_code->key){
+    $formwriter->hiddeninput('ccd_coupon_code_id', ['value' => $coupon_code->key]);
+    $formwriter->hiddeninput('action', ['value' => 'edit']);
+}
+
+$formwriter->textinput('ccd_code', 'Coupon code');
+
+$formwriter->dropinput('ccd_is_active', 'Active?', [
+    'options' => ['Inactive' => 0, 'Active' => 1]
+]);
+
+// require_one_group: at least one discount field required
+$formwriter->textinput('ccd_amount_discount', 'Amount of discount ('.$currency_symbol.')', [
+    'validation' => [
+        'require_one_group' => [
+            'value' => 'discount_fields',
+            'message' => 'Please enter either an amount or percent discount'
+        ]
+    ]
+]);
+
+$formwriter->textinput('ccd_percent_discount', 'or percent of discount', [
+    'validation' => [
+        'require_one_group' => [
+            'value' => 'discount_fields',
+            'message' => 'Please enter either an amount or percent discount'
+        ]
+    ]
+]);
+
+$formwriter->dropinput('ccd_is_stackable', 'Is this coupon stackable?', [
+    'options' => ['No' => 0, 'Yes' => 1]
+]);
+
+// Visibility rules: show products_list only when "Custom (below)" selected
+$formwriter->dropinput('ccd_applies_to', 'Applies to', [
+    'options' => [
+        'All products' => 0,
+        'Subscriptions only' => 1,
+        'One time purchases only' => 2,
+        'Custom (below)' => 3
+    ],
+    'visibility_rules' => [
+        '' => ['show' => [], 'hide' => ['products_list']],
+        3 => ['show' => ['products_list'], 'hide' => []],
+        0 => ['show' => [], 'hide' => ['products_list']],
+        1 => ['show' => [], 'hide' => ['products_list']],
+        2 => ['show' => [], 'hide' => ['products_list']]
+    ]
+]);
+
+// CheckboxList with pre-selected products
+$products = new MultiProduct($searches, array($sort=>$sdirection));
+$products->load();
+$optionvals = $products->get_dropdown_array();
+
+if ($coupon_code->key) {
+    $checkedvals = array();
+    $coupon_code_products = new MultiCouponCodeProduct(array(
+        'coupon_code_id' => $coupon_code->key,
+    ));
+    $coupon_code_products->load();
+    foreach ($coupon_code_products as $coupon_code_product){
+        $checkedvals[] = $coupon_code_product->get('ccp_pro_product_id');
+    }
+} else {
+    $checkedvals = array();
+}
+
+$formwriter->checkboxList('products_list', 'Valid products for this code', [
+    'options' => $optionvals,
+    'checked' => $checkedvals
+]);
+
+// DateTime fields (auto-filled from timezone-converted values)
+$formwriter->datetimeinput('ccd_start_time', 'Start time');
+$formwriter->datetimeinput('ccd_end_time', 'End time');
+
+$formwriter->textinput('ccd_max_num_uses', 'Maximum number of uses');
+
+// AJAX dropdown with pre-loaded affiliate user
+$affiliate_options = [];
+if ($coupon_code->get('ccd_usr_user_id_affiliate')) {
+    $affiliate_user = new User($coupon_code->get('ccd_usr_user_id_affiliate'), TRUE);
+    $display_text = $affiliate_user->display_name() . ' - ' . $affiliate_user->get('usr_email');
+    $affiliate_options = [$display_text => $affiliate_user->key];
+}
+
+$formwriter->dropinput('ccd_usr_user_id_affiliate', 'Affiliate User for this coupon', [
+    'options' => $affiliate_options,
+    'validation' => ['required' => false],
+    'ajaxendpoint' => '/ajax/user_search_ajax?includenone=1',
+    'empty_option' => '-- Type 3+ characters to search users --'
+]);
+
+$formwriter->submitbutton('btn_submit', 'Submit');
+echo $formwriter->end_form();
+```
+
+### Logic File Processing (admin_coupon_code_edit_logic.php)
+
+```php
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
+
+if($post_vars){
+    // Process datetime fields using static helper (converts to UTC)
+    $start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'ccd_start_time', true);
+    if($start_time !== NULL){
+        $coupon_code->set('ccd_start_time', $start_time);
+    }
+
+    $end_time = FormWriterV2Base::process_datetimeinput($post_vars, 'ccd_end_time', true);
+    if($end_time !== NULL){
+        $coupon_code->set('ccd_end_time', $end_time);
+    }
+
+    // ... rest of field processing
+    $coupon_code->save();
+}
+```
+
+### Key Features Demonstrated
+
+1. **Automatic Local Time Conversion**:
+   - FormWriter V2 automatically detects timestamp fields by checking model's `field_specifications` column type
+   - Converts only `timestamp` type fields (they have both date and timezone context)
+   - Skips `date` and `time` fields (they lack timezone context)
+   - Requires a model to be passed to FormWriter
+   - Automatically converts UTC datetime values to user's local timezone for display
+   - Works with both DateTime objects and timestamp strings
+   - Can be overridden by passing value in `values` array (values override model)
+   - No manual timezone conversion needed in view code!
+
+2. **Model Option with Field Overrides**:
+   - Pass `'model' => $coupon_code` to auto-fill all model fields
+   - Pass `'values' => $override_values` to override specific fields
+   - Values array takes precedence over model fields
+   - Perfect for setting defaults on new records
+
+3. **DateTime Processing in Logic**:
+   - Use `FormWriterV2Base::process_datetimeinput()` to process submissions
+   - Handles field name parsing and timezone conversion to UTC
+   - Static helper method simplifies processing
+
+4. **AJAX Dropdown**:
+   - Pre-load currently selected user for editing
+   - Use `ajaxendpoint` option for dynamic search
+   - Display format matches AJAX response format
+
+5. **require_one_group Validation**:
+   - At least one field in group must have a value
+   - Same group name on multiple fields
+   - Custom error message
+
+6. **Visibility Rules**:
+   - Show/hide product list based on "Applies to" selection
+   - Multiple values can trigger same behavior
+   - Uses field ID only (no _container suffix needed)
+
+### Why This Is a Good Reference
+
+- Demonstrates automatic local time conversion feature (UTC → user timezone)
+- Shows model + values override pattern for minimal code
+- Demonstrates AJAX dropdown with pre-populated data
+- Uses advanced validation (require_one_group) with custom messages
+- Shows visibility rules with multiple trigger values
+- Demonstrates checkboxList with dynamic options
+- Shows proper pattern for datetime processing in logic files
+
+---
+
 ## 5. Testing Strategy
 
 ### 5.1 Pre-Migration Testing (AdminPage Changes)
@@ -780,18 +985,23 @@ php -l /path/to/admin_page.php
 - [x] Test both V1 and V2 instantiation
 - [x] Ensure backward compatibility
 
-### Phase 2: Initial Implementation ✅ COMPLETED (1/69)
-- [x] admin_location_edit.php - First complete V2 migration
-- [x] Demonstrates all V2 features (automatic form filling, prepend, model validation, debug mode)
-- [x] Use as template for other page migrations
+### Phase 2: Initial Implementation ✅ COMPLETED (2/69)
+- [x] admin_location_edit.php - First complete V2 migration (basic features)
+  - Demonstrates automatic form filling, prepend, model validation, debug mode
+  - Good starter reference for simple forms
+- [x] admin_coupon_code_edit.php - Second complete V2 migration (advanced features)
+  - Demonstrates model option, datetime processing, AJAX dropdown, require_one_group, visibility rules
+  - Good reference for complex forms with advanced features
+- [x] Use both as templates for other page migrations
 - [x] Document patterns and gotchas
 
-### Phase 3: Ongoing Migration (68/69 remaining)
+### Phase 3: Ongoing Migration (67/69 remaining)
 
 **Recommended approach:**
 - Migrate pages incrementally as they're edited for other reasons
 - Prioritize pages that are frequently accessed or modified
-- Use admin_location_edit.php as reference implementation
+- Use admin_location_edit.php as reference for simple forms
+- Use admin_coupon_code_edit.php as reference for complex forms with advanced features
 - Test thoroughly after each migration
 - Update progress counter in section 3.1 after each completion
 
@@ -1151,13 +1361,16 @@ After Phase 1 completion:
 
 ---
 
-**Status: IN PROGRESS (1/69 pages migrated - 1.4% complete)**
+**Status: IN PROGRESS (2/69 pages migrated - 2.9% complete)**
 
 **Completed:**
 - ✅ Phase 1: AdminPage.getFormWriter() enhancement
-- ✅ Phase 2: First reference implementation (admin_location_edit.php)
+- ✅ Phase 2: Two reference implementations
+  - admin_location_edit.php (basic features)
+  - admin_coupon_code_edit.php (advanced features)
 
 **Next Steps:**
-- Continue migrating remaining 68 admin pages incrementally
-- Use admin_location_edit.php as reference template
+- Continue migrating remaining 67 admin pages incrementally
+- Use admin_location_edit.php as reference for simple forms
+- Use admin_coupon_code_edit.php as reference for complex forms
 - Update progress counter in section 3.1 after each completion
