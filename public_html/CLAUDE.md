@@ -606,7 +606,7 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 
 ### Viewing Files After Edits
 
-After making edits to any file, always provide a `batcat` command so the user can easily verify the changes:
+After making edits to any file, always provide a `batcat` command that the user can copy/paste to verify the changes. Do NOT run the batcat command yourself:
 
 ```bash
 batcat /path/to/file.php
