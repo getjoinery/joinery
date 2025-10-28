@@ -55,18 +55,24 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 
 #### Logic File Pattern
 ```php
-// Simple two-way check
+// Check POST for form submission, fallback to GET for initial page load
 if (isset($post_vars['edit_primary_key_value'])) {
-    // It's an edit - the key is in the hidden field
+    // Form submission with hidden field
     $product = new Product($post_vars['edit_primary_key_value'], TRUE);
+} elseif (isset($get_vars['pro_product_id'])) {
+    // Initial page load from URL parameter
+    $product = new Product($get_vars['pro_product_id'], TRUE);
 } else {
-    // It's an add - no hidden field present
+    // Creating a new record
     $product = new Product(NULL);
 }
-
-// For cleaner conditionals later:
-$is_edit = isset($post_vars['edit_primary_key_value']);
 ```
+
+**Key Points:**
+- POST check first (form submission has priority)
+- Fallback to GET (initial page load with URL parameter)
+- No unnecessary `$is_edit` variable
+- Object's `$key` property tells us what mode we're in when needed
 
 ### Why Explicit Over Automatic?
 
@@ -179,9 +185,9 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 
 ## 4. Benefits
 
-- ✅ **Simpler logic** - Just check for `edit_primary_key_value` field
+- ✅ **Simpler logic** - POST check, fallback to GET, that's it
 - ✅ **No field name tracking** - Always the same field name
-- ✅ **Clean conditionals** - `if (!$is_edit)` is crystal clear
+- ✅ **No unnecessary variables** - Use `$object->key` when needed
 - ✅ **Explicit control** - Developer decides when to add the field
 - ✅ **Self-documenting** - Can see the edit key in the FormWriter options
 
@@ -218,15 +224,15 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 // admin_product_edit_logic.php
 if (isset($post_vars['edit_primary_key_value'])) {
     $product = new Product($post_vars['edit_primary_key_value'], TRUE);
+} elseif (isset($get_vars['pro_product_id'])) {
+    $product = new Product($get_vars['pro_product_id'], TRUE);
 } else {
     $product = new Product(NULL);
 }
 
-$is_edit = isset($post_vars['edit_primary_key_value']);
-
 if($post_vars){
-    if (!$is_edit) {
-        // Adding new product
+    if (!$product->key) {
+        // Adding new product - use $product->key check
         $product->set('pro_created_by', $session->get_user_id());
     }
 
@@ -234,6 +240,12 @@ if($post_vars){
     $product->save();
 }
 ```
+
+**Key changes:**
+- POST check first (form submission)
+- GET fallback (initial page load)
+- No unnecessary `$is_edit` variable
+- Use `$product->key` check when needed in conditionals
 
 ---
 

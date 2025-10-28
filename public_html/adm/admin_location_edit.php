@@ -85,18 +85,14 @@
 	// Editing an existing location - use automatic form filling
 	$formwriter = $page->getFormWriter('form1', 'v2', [
 		'debug' => true,
-		'values' => $form_values
+		'values' => $form_values,
+		'edit_primary_key_value' => $location->key
 	]);
 
 	// Note: FormWriterV2 uses model-based validation auto-detection
 	// No need for set_validate() - validation rules come from Location model
 
 	echo $formwriter->begin_form();
-
-	if($location->key){
-		$formwriter->hiddeninput('loc_location_id', ['value' => $location->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('loc_name', 'Location name');
 

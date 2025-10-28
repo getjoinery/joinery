@@ -25,14 +25,11 @@
 
 	// Editing an existing contact_type
 	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $contact_type
+		'model' => $contact_type,
+		'edit_primary_key_value' => $contact_type->key
 	]);
 
 	echo $formwriter->begin_form();
-	if($contact_type->key){
-		$formwriter->hiddeninput('ctt_contact_type_id', ['value' => $contact_type->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('ctt_name', 'Name');
 	$formwriter->textinput('ctt_description', 'Description');

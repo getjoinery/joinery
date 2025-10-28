@@ -23,14 +23,11 @@ $page->begin_box($pageoptions);
 
 // Editing an existing email
 $formwriter = $page->getFormWriter('form1', 'v2', [
-	'model' => $email
+	'model' => $email,
+	'edit_primary_key_value' => $email->key
 ]);
 
 $formwriter->begin_form();
-if($email->key){
-	$formwriter->hiddeninput('eml_email_id', ['value' => $email->key]);
-	$formwriter->hiddeninput('action', ['value' => 'edit']);
-}
 
 $formwriter->textinput('eml_description', 'Description', [
 	'validation' => ['required' => true, 'minlength' => 10]

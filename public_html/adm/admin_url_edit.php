@@ -77,15 +77,11 @@
 		$page->begin_box($options);
 
 		$formwriter = $page->getFormWriter('form1', 'v2', [
-			'values' => $url->export_as_array()
+			'values' => $url->export_as_array(),
+			'edit_primary_key_value' => $url->key
 		]);
 
 		$formwriter->begin_form();
-
-		if($url->key){
-			$formwriter->hiddeninput('url_url_id', ['value' => $url->key]);
-			$formwriter->hiddeninput('action', ['value' => 'edit']);
-		}
 
 		$formwriter->textinput('url_incoming', 'Incoming url', [
 			'validation' => ['required' => true]

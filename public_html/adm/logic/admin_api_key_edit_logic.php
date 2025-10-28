@@ -11,7 +11,9 @@ function admin_api_key_edit_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 	$settings = Globalvars::get_instance();
 
-	if (isset($get_vars['apk_api_key_id'])) {
+	if (isset($post_vars['edit_primary_key_value'])) {
+		$api_key = new ApiKey($post_vars['edit_primary_key_value'], TRUE);
+	} elseif (isset($get_vars['apk_api_key_id'])) {
 		$api_key = new ApiKey($get_vars['apk_api_key_id'], TRUE);
 	}
 	else {

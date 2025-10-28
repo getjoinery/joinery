@@ -103,15 +103,11 @@
 
 	$formwriter = $paget->getFormWriter('form1', 'v2', [
 		'model' => $page,
-		'values' => $override_values
+		'values' => $override_values,
+		'edit_primary_key_value' => $page->key
 	]);
 
 	$formwriter->begin_form();
-
-	if($page->key){
-		$formwriter->hiddeninput('pag_page_id', ['value' => $page->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('pag_title', 'Page title', [
 		'validation' => ['required' => true]

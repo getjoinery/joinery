@@ -24,15 +24,11 @@
 
 	// Editing an existing API key
 	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $api_key
+		'model' => $api_key,
+		'edit_primary_key_value' => $api_key->key
 	]);
 
 	echo $formwriter->begin_form();
-
-	if($api_key->key){
-		$formwriter->hiddeninput('apk_api_key_id', ['value' => $api_key->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('apk_name', 'Key name');
 
