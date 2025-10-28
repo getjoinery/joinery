@@ -23,139 +23,146 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 	$currency_symbol = Product::$currency_symbols[$currency_code];
 
 	// Load or create product
-	if (isset($get_vars['p']) || isset($post_vars['p'])) {
-		$product_id = isset($post_vars['p']) ? $post_vars['p'] : $get_vars['p'];
-		$product = new Product($product_id, TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission first), fallback to GET
+	if (isset($post_vars['edit_primary_key_value'])) {
+		$product = new Product($post_vars['edit_primary_key_value'], TRUE);
+	} elseif (isset($get_vars['pro_product_id'])) {
+		$product = new Product($get_vars['pro_product_id'], TRUE);
+	} elseif (isset($get_vars['p'])) {
+		// Backward compatibility: old URL parameter 'p'
+		$product = new Product($get_vars['p'], TRUE);
 	} else {
 		$product = new Product(NULL);
 	}
 
 	// Process POST actions
-	if ($post_vars || $get_vars['action']) {
+	// CRITICAL: Check for POST submission
+	if ($post_vars) {
+		// Add-only logic
+		if (!$product->key) {
+			$product->set('pro_created_by', $session->get_user_id());
+		}
 
-		if ($post_vars['action'] == 'add' || $post_vars['action'] == 'edit') {
-
-			if($post_vars['pro_requirements']){
-				$total_value = 0;
-				foreach ($post_vars['pro_requirements'] as $choice => $value){
-					$total_value += $value;
-				}
-				$product->set('pro_requirements', $total_value);
+		if($post_vars['pro_requirements']){
+			$total_value = 0;
+			foreach ($post_vars['pro_requirements'] as $choice => $value){
+				$total_value += $value;
 			}
+			$product->set('pro_requirements', $total_value);
+		}
 
-			$product->save_requirement_instances($post_vars['additional_pro_requirements']);
+		$product->save_requirement_instances($post_vars['additional_pro_requirements']);
 
-			if($post_vars['pro_evt_event_id'] == '' || $post_vars['pro_evt_event_id'] == 0){
-				$product->set('pro_evt_event_id', NULL);
+		if($post_vars['pro_evt_event_id'] == '' || $post_vars['pro_evt_event_id'] == 0){
+			$product->set('pro_evt_event_id', NULL);
 
+		}
+		else{
+			$product->set('pro_evt_event_id', intval($post_vars['pro_evt_event_id']));
+		}
+
+		//MUST BE INTEGER
+		$product->set('pro_expires', (int)$post_vars['pro_expires']);
+		$product->set('pro_prg_product_group_id', (int)$post_vars['pro_prg_product_group_id']);
+
+		//PRICE MUST BE INTEGER
+		if($post_vars['pro_grp_group_id']){
+			$post_vars['pro_grp_group_id'] = (int)$post_vars['pro_grp_group_id'];
+		}
+		else{
+			$post_vars['pro_grp_group_id'] = NULL;
+		}
+
+		// Handle subscription tier ID
+		if($post_vars['pro_sbt_subscription_tier_id']){
+			$post_vars['pro_sbt_subscription_tier_id'] = (int)$post_vars['pro_sbt_subscription_tier_id'];
+		}
+		else{
+			$post_vars['pro_sbt_subscription_tier_id'] = NULL;
+		}
+
+		//STORE THE PRODUCT SCRIPTS
+		$product->set('pro_product_scripts', NULL);
+		if(is_array($post_vars['product_scripts'])){
+			$product->set('pro_product_scripts', implode(',', $post_vars['product_scripts']));
+		}
+
+		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description');
+
+		foreach($editable_fields as $field) {
+			$product->set($field, $post_vars[$field]);
+		}
+
+		if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
+			if($post_vars['pro_link']){
+				$product->set('pro_link', $product->create_url($post_vars['pro_link']));
 			}
 			else{
-				$product->set('pro_evt_event_id', intval($post_vars['pro_evt_event_id']));
+				$product->set('pro_link', $product->create_url($product->get('pro_name')));
 			}
+		}
 
-			//MUST BE INTEGER
-			$product->set('pro_expires', (int)$post_vars['pro_expires']);
-			$product->set('pro_prg_product_group_id', (int)$post_vars['pro_prg_product_group_id']);
+		$product->prepare();
 
-			//PRICE MUST BE INTEGER
-			if($post_vars['pro_grp_group_id']){
-				$post_vars['pro_grp_group_id'] = (int)$post_vars['pro_grp_group_id'];
-			}
-			else{
-				$post_vars['pro_grp_group_id'] = NULL;
-			}
+		//IF STRIPE IS ENABLED, CREATE A PRODUCT
+		if($settings->get_setting('checkout_type') != 'none'){
+			$stripe_helper = new StripeHelper();
+			$product_info=array();
+			$product_info['name'] = $product->get('pro_name');
+			//$product_info['description'] = '';
 
-			// Handle subscription tier ID
-			if($post_vars['pro_sbt_subscription_tier_id']){
-				$post_vars['pro_sbt_subscription_tier_id'] = (int)$post_vars['pro_sbt_subscription_tier_id'];
-			}
-			else{
-				$post_vars['pro_sbt_subscription_tier_id'] = NULL;
-			}
-
-			//STORE THE PRODUCT SCRIPTS
-			$product->set('pro_product_scripts', NULL);
-			if(is_array($post_vars['product_scripts'])){
-				$product->set('pro_product_scripts', implode(',', $post_vars['product_scripts']));
-			}
-
-			$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description');
-
-			foreach($editable_fields as $field) {
-				$product->set($field, $post_vars[$field]);
-			}
-
-			if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
-				if($post_vars['pro_link']){
-					$product->set('pro_link', $product->create_url($post_vars['pro_link']));
-				}
-				else{
-					$product->set('pro_link', $product->create_url($event->get('pro_name')));
-				}
-			}
-
-			$product->prepare();
-
-			//IF STRIPE IS ENABLED, CREATE A PRODUCT
-			if($settings->get_setting('checkout_type') != 'none'){
-				$stripe_helper = new StripeHelper();
-				$product_info=array();
-				$product_info['name'] = $product->get('pro_name');
-				//$product_info['description'] = '';
-
-				if($stripe_helper->test_mode){
-					if(!$product->get('pro_stripe_product_id_test')){
-						$stripe_product = $stripe_helper->create_product($product_info);
-						$product->set('pro_stripe_product_id_test', $stripe_product['id']);
-						if(!$stripe_product['id']){
-							throw new SystemDisplayablePermanentError("Unable to create a stripe product.");
-						}
+			if($stripe_helper->test_mode){
+				if(!$product->get('pro_stripe_product_id_test')){
+					$stripe_product = $stripe_helper->create_product($product_info);
+					$product->set('pro_stripe_product_id_test', $stripe_product['id']);
+					if(!$stripe_product['id']){
+						throw new SystemDisplayablePermanentError("Unable to create a stripe product.");
 					}
 				}
-				else{
-					if(!$product->get('pro_stripe_product_id')){
-						$stripe_product = $stripe_helper->create_product($product_info);
-						if(!$stripe_product['id']){
-							throw new SystemDisplayablePermanentError("Unable to create a stripe product.");
-						}
-						$product->set('pro_stripe_product_id', $stripe_product['id']);
+			}
+			else{
+				if(!$product->get('pro_stripe_product_id')){
+					$stripe_product = $stripe_helper->create_product($product_info);
+					if(!$stripe_product['id']){
+						throw new SystemDisplayablePermanentError("Unable to create a stripe product.");
 					}
+					$product->set('pro_stripe_product_id', $stripe_product['id']);
 				}
-
 			}
 
-			$product->save();
-			$product->load();
-
 		}
 
-		if ($get_vars['action'] == 'new_version') {
-			$product_version = new ProductVersion(NULL);
-			$product_version->set('prv_pro_product_id', $product->key);
-			$product_version->set('prv_version_name', $get_vars['version_name']);
-			$product_version->set('prv_version_price', $get_vars['version_price']);
-			$product_version->set('prv_price_type', $get_vars['prv_price_type']);
-			$product_version->set('prv_trial_period_days', $get_vars['prv_trial_period_days']);
-			$product_version->set('prv_status', 1);
-			$product_version->prepare();
-			$product_version->save();
-		}
-		else if ($get_vars['action'] == 'remove_version') {
-			$product_version = new ProductVersion($get_vars['v'], TRUE);
-			$product_version->set('prv_status', 0);
-			$product_version->prepare();
-			$product_version->save();
-		}
-		else if ($get_vars['action'] == 'activate_version') {
-			$product_version = new ProductVersion($get_vars['v'], TRUE);
-			$product_version->set('prv_status', 1);
-			$product_version->prepare();
-			$product_version->save();
-		}
+		$product->save();
+		$product->load();
 
-		if($post_vars['json_confirm']){
-			echo json_encode($product->key);
-		}
+		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
+	}
+
+	// Handle GET actions for version management
+	if ($get_vars['action'] == 'new_version') {
+		$product_version = new ProductVersion(NULL);
+		$product_version->set('prv_pro_product_id', $product->key);
+		$product_version->set('prv_version_name', $get_vars['version_name']);
+		$product_version->set('prv_version_price', $get_vars['version_price']);
+		$product_version->set('prv_price_type', $get_vars['prv_price_type']);
+		$product_version->set('prv_trial_period_days', $get_vars['prv_trial_period_days']);
+		$product_version->set('prv_status', 1);
+		$product_version->prepare();
+		$product_version->save();
+		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
+	}
+	else if ($get_vars['action'] == 'remove_version') {
+		$product_version = new ProductVersion($get_vars['v'], TRUE);
+		$product_version->set('prv_status', 0);
+		$product_version->prepare();
+		$product_version->save();
+		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
+	}
+	else if ($get_vars['action'] == 'activate_version') {
+		$product_version = new ProductVersion($get_vars['v'], TRUE);
+		$product_version->set('prv_status', 1);
+		$product_version->prepare();
+		$product_version->save();
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
 

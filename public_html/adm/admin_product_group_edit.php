@@ -1,84 +1,58 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	require_once(PathHelper::getIncludePath('data/product_groups_class.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_product_group_edit_logic.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(7);
-	
-	if (isset($_REQUEST['prg_product_group_id'])) {
-		$product_group = new ProductGroup($_REQUEST['prg_product_group_id'], TRUE);
-	} else {
-		$product_group = new ProductGroup(NULL);
+$page_vars = process_logic(admin_product_group_edit_logic($_GET, $_POST));
+extract($page_vars);
 
-	}
+$page = new AdminPage();
+$page->admin_header(
+array(
+	'menu-id'=> 'product-groups',
+	'page_title' => 'Product Groups',
+	'readable_title' => 'Product Groups',
+	'breadcrumbs' => array(
+		'Products'=>'/admin/admin_products',
+		'Product Groups' => '',
+	),
+	'session' => $session,
+)
+);
 
-	if ($_POST) {
-		// Submitting a product edit
+$page->begin_box($pageoptions);
 
-		$editable_fields = array('prg_max_items', 'prg_error', 'prg_name', 'prg_description', 'prg_subtitle', 'prg_type');
+// FormWriter V2 with model and edit_primary_key_value
+$formwriter = $page->getFormWriter('form1', 'v2', [
+	'model' => $product_group,
+	'edit_primary_key_value' => $product_group->key
+]);
 
-		foreach($editable_fields as $field) {
-			$product_group->set($field, $_POST[$field]);
-		}
+$formwriter->begin_form();
 
-		$product_group->save();
+$formwriter->textinput('prg_name', 'Product Group Name', [
+	'validation' => ['required' => true, 'maxlength' => 255]
+]);
 
-		LibraryFunctions::redirect('/admin/admin_product_groups');	
-		return;
-	} 
+$formwriter->textinput('prg_max_items', 'Max Number of items in this product group that can be added to cart:', [
+	'validation' => ['required' => true]
+]);
 
-	$page = new AdminPage();
-	$page->admin_header(	
-	array(
-		'menu-id'=> 'product-groups',
-		'page_title' => 'Product Groups',
-		'readable_title' => 'Product Groups',
-		'breadcrumbs' => array(
-			'Products'=>'/admin/admin_products', 
-			'Product Groups' => '',
-		),
-		'session' => $session,
-	)
-	);
+$formwriter->textbox('prg_error', 'Error message if they add too many items:', [
+	'rows' => 5,
+	'cols' => 80
+]);
 
-	$options['title'] = 'Edit Product Group';
-	$page->begin_box($options);
+$formwriter->textbox('prg_description', 'Product Group Description', [
+	'rows' => 10,
+	'cols' => 80
+]);
 
-	// Editing an existing product
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['prg_name']['required']['value'] = 'true';
-	$validation_rules['prg_max_items']['required']['value'] = 'true';
-	$validation_rules['prg_error']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);				
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
 
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_group_edit');
-	if($product_group->key){
-		echo $formwriter->hiddeninput('prg_product_group_id', $product_group->key);
-	}
-	echo $formwriter->textinput('Product Group Name', 'prg_name', NULL, 100, $product_group->get('prg_name'), '', 255, '');
-	/*
-	$optionvals = array("Category (For /events grouping)"=>ProductGroup::TYPE_CATEGORY,"Subscription Plan (For /pricing page)"=>ProductGroup::TYPE_PLAN);
-	echo $formwriter->dropinput("Type of group", "prg_type", "", $optionvals, $product_group->get('prg_type'), '', FALSE);	
-*/
-	
-	echo $formwriter->textinput('Max Number of items in this product group that can be added to cart:', 'prg_max_items', 'ctrlHolder', 100, $product_group->get('prg_max_items'), '', 255, '');
+$page->end_box();
 
-	echo $formwriter->textbox('Error message if they add too many items:', 'prg_error', 'ctrlHolder', 10, 80, $product_group->get('prg_error'), '');
-	echo $formwriter->textbox('Product Group Description', 'prg_description', 'ctrlHolder', 10, 80, $product_group->get('prg_description'), '');
-
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
-	
-	$page->end_box();
-
-	$page->admin_footer();
+$page->admin_footer();
 
 ?>

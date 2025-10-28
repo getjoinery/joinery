@@ -182,64 +182,6 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param string $label Field label
      * @param array $options Field options
      */
-    protected function outputTextarea($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $placeholder = $options['placeholder'] ?? '';
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-        $rows = $options['rows'] ?? 3;
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
-            $class .= ' is-invalid';
-        }
-
-        $html = '<div class="form-group">';
-
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
-        }
-
-        $html .= '<textarea';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' rows="' . (int)$rows . '"';
-
-        if ($placeholder) {
-            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
-        }
-        if (!empty($options['readonly'])) {
-            $html .= ' readonly';
-        }
-        if (!empty($options['disabled'])) {
-            $html .= ' disabled';
-        }
-
-        $html .= '>';
-        $html .= htmlspecialchars($value);
-        $html .= '</textarea>';
-
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
-                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
-            }
-        }
-
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
-        }
-
-        $html .= '</div>';
-
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
-    }
-
     /**
      * Output a select dropdown field with Bootstrap styling
      *
