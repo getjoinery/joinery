@@ -5,6 +5,7 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/products_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -72,6 +73,18 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 			$post_vars['evt_loc_location_id'] = NULL;
 		}
 
+		// Handle start time using FormWriterV2Base helper
+		$start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_start_time', true);
+		if($start_time !== NULL){
+			$event->set('evt_start_time', $start_time);
+		}
+
+		// Handle end time using FormWriterV2Base helper
+		$end_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_end_time', true);
+		if($end_time !== NULL){
+			$event->set('evt_end_time', $end_time);
+		}
+
 		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required','evt_loc_location_id');
 
 		foreach($editable_fields as $field) {
@@ -85,20 +98,6 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 			else{
 				$event->set('evt_link', $event->create_url($event->get('evt_name')));
 			}
-		}
-
-		if($post_vars['evt_start_time_date'] && $post_vars['evt_start_time_time']){
-			$time_combined = $post_vars['evt_start_time_date'] . ' ' . LibraryFunctions::toDBTime($post_vars['evt_start_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
-			$event->set('evt_start_time', $utc_time);
-			$event->set('evt_start_time_local', $time_combined);
-		}
-
-		if($post_vars['evt_end_time_date'] && $post_vars['evt_end_time_time']){
-			$time_combined = $post_vars['evt_end_time_date'] . ' ' . LibraryFunctions::toDBTime($post_vars['evt_end_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
-			$event->set('evt_end_time', $utc_time);
-			$event->set('evt_end_time_local', $time_combined);
 		}
 
 		$event->prepare();

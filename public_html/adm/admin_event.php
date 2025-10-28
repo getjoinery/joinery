@@ -46,11 +46,11 @@
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Start Date:</td>
-								<td class="p-1 text-600"><?php echo $event->get_timezone_corrected_time('evt_start_time', $session, 'M j, Y g:i A T'); ?></td>
+								<td class="p-1 text-600"><?php echo $event->get('evt_start_time') ? $event->get_timezone_corrected_time('evt_start_time', $session, 'M j, Y g:i A T') : '—'; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">End Date:</td>
-								<td class="p-1 text-600"><?php echo $event->get_timezone_corrected_time('evt_end_time', $session, 'M j, Y g:i A T'); ?></td>
+								<td class="p-1 text-600"><?php echo $event->get('evt_end_time') ? $event->get_timezone_corrected_time('evt_end_time', $session, 'M j, Y g:i A T') : '—'; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Timezone:</td>
@@ -166,9 +166,7 @@
 							<tr>
 								<td class="p-1" style="width: 35%;">Sessions:</td>
 								<td class="p-1 text-600">
-									<a href="/admin/admin_event_sessions?evt_event_id=<?php echo $event->key; ?>">
-										<?php echo $numsessions; ?> session<?php echo $numsessions != 1 ? 's' : ''; ?>
-									</a>
+									<?php echo $numsessions; ?> session<?php echo $numsessions != 1 ? 's' : ''; ?>
 								</td>
 							</tr>
 							<?php endif; ?>
@@ -360,7 +358,7 @@
 	$page->tableheader($headers, $box_vars, $rpager);
 
 	// Initialize FormWriter for form buttons
-	$formwriter = $page->getFormWriter('form2');
+	$formwriter = $page->getFormWriter('form2', 'v2');
 
 	$registrant_emails = '';
 	foreach($event_registrants as $event_registrant){
@@ -485,69 +483,68 @@
 	}
 
 	//SESSIONS TABLE
-	if($numsessions > 0) {
-		$headers = array("Session #", "Title", "Start Time", "Duration", "Action");
-		$altlinks = array();
-		if(!$event->get('evt_delete_time')) {
-			if($_SESSION['permission'] >= 8){
-				$altlinks +=  array('Manage Sessions' => '/admin/admin_event_sessions?evt_event_id='.$event->key);
-			}
+	$headers = array("Session #", "Title", "Start Time", "Duration", "Action");
+	$altlinks = array();
+	if(!$event->get('evt_delete_time')) {
+		if($_SESSION['permission'] >= 8){
+			$altlinks +=  array('Create Session' => '/admin/admin_event_session_edit?evt_event_id='.$event->key);
 		}
-		$box_vars =	array(
-			'altlinks' => $altlinks,
-			'title' => "Sessions",
-			'card' => true
-		);
-
-		$page->tableheader($headers, $box_vars, $spager);
-
-		foreach($event_sessions_paged as $session){
-			$rowvalues=array();
-
-			// Session number
-			array_push($rowvalues, $session->get('evs_session_number') ? $session->get('evs_session_number') : '—');
-
-			// Title with link
-			$title_link = '<a href="/admin/admin_event_session_edit?evs_event_session_id='.$session->key.'">'
-				. htmlspecialchars($session->get('evs_title'))
-				. '</a>';
-			array_push($rowvalues, $title_link);
-
-			// Start time
-			if($session->get('evs_start_time')) {
-				array_push($rowvalues, LibraryFunctions::convert_time($session->get('evs_start_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A'));
-			} else {
-				array_push($rowvalues, '—');
-			}
-
-			// Duration
-			if($session->get('evs_start_time') && $session->get('evs_end_time')) {
-				$start = new DateTime($session->get('evs_start_time'));
-				$end = new DateTime($session->get('evs_end_time'));
-				$diff = $start->diff($end);
-
-				if($diff->h > 0) {
-					$duration = $diff->h . ' hour' . ($diff->h != 1 ? 's' : '');
-					if($diff->i > 0) {
-						$duration .= ', ' . $diff->i . ' min';
-					}
-				} else {
-					$duration = $diff->i . ' minutes';
-				}
-				array_push($rowvalues, $duration);
-			} else {
-				array_push($rowvalues, '—');
-			}
-
-			// Action
-			$action_link = '<a href="/admin/admin_event_session_edit?evs_event_session_id='.$session->key.'" class="btn btn-sm btn-falcon-default">Edit</a>';
-			array_push($rowvalues, $action_link);
-
-			$page->disprow($rowvalues);
-		}
-
-		$page->endtable($spager);
 	}
+	$box_vars =	array(
+		'altlinks' => $altlinks,
+		'title' => "Sessions",
+		'card' => true
+	);
+
+	$page->tableheader($headers, $box_vars, $spager);
+
+	foreach($event_sessions_paged as $event_session){
+		$rowvalues=array();
+
+		// Session number
+		array_push($rowvalues, $event_session->get('evs_session_number') ? $event_session->get('evs_session_number') : '—');
+
+		// Title with link
+		$title_link = '<a href="/admin/admin_event_session_edit?evs_event_session_id='.$event_session->key.'">'
+			. htmlspecialchars($event_session->get('evs_title'))
+			. '</a>';
+		array_push($rowvalues, $title_link);
+
+		// Start time
+		if($event_session->get('evs_start_time')) {
+			array_push($rowvalues, LibraryFunctions::convert_time($event_session->get('evs_start_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A'));
+		} else {
+			array_push($rowvalues, '—');
+		}
+
+		// Duration
+		if($event_session->get('evs_start_time') && $event_session->get('evs_end_time')) {
+			$start = new DateTime($event_session->get('evs_start_time'));
+			$end = new DateTime($event_session->get('evs_end_time'));
+			$diff = $start->diff($end);
+
+			if($diff->h > 0) {
+				$duration = $diff->h . ' hour' . ($diff->h != 1 ? 's' : '');
+				if($diff->i > 0) {
+					$duration .= ', ' . $diff->i . ' min';
+				}
+			} else {
+				$duration = $diff->i . ' minutes';
+			}
+			array_push($rowvalues, $duration);
+		} else {
+			array_push($rowvalues, '—');
+		}
+
+		// Action
+		$action_link = '<a href="/admin/admin_event_session_edit?evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-falcon-default">Edit</a> ';
+		$action_link .= '<a href="/admin/admin_event_session_edit?action=delete&evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-falcon-danger" onclick="return confirm(\'Are you sure you want to delete this session?\')">Delete</a>';
+		array_push($rowvalues, $action_link);
+
+		$page->disprow($rowvalues);
+	}
+
+	$page->endtable($spager);
 
 	//MESSAGES
 	$headers = array("Sender", "Message", "Time");

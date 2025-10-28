@@ -47,24 +47,22 @@ else{
 	$page->admin_header(10);
 
 	echo '<h1>Event Log</h1>';
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("form", "post", "/admin/admin_log_event");
+	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter->begin_form('form', 'POST', '/admin/admin_log_event');
 
 	echo '<fieldset><h4>Confirm</h4>';
-		echo '<div class="fields full">';
-		echo '<p>You are logging the following event ('.EventLog::$event_descriptions[$log_type].') for user: '.$user->display_name() . '.</p>';
+	echo '<div class="fields full">';
+	echo '<p>You are logging the following event ('.EventLog::$event_descriptions[$log_type].') for user: '.$user->display_name() . '.</p>';
 
-		echo $formwriter->hiddeninput("confirm", 1);
-		echo $formwriter->hiddeninput("usr_user_id", $usr_user_id);
-		echo $formwriter->hiddeninput("log_type", $log_type);
+	$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+	$formwriter->hiddeninput('usr_user_id', '', ['value' => $usr_user_id]);
+	$formwriter->hiddeninput('log_type', '', ['value' => $log_type]);
 
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
-		echo '</div>';
+	echo '</div>';
 	echo '</fieldset>';
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 	$page->admin_footer();
 }
 ?>
