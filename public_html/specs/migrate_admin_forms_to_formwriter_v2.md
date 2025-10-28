@@ -178,22 +178,15 @@ $override_values = [
     'field_name' => $some_value  // Only override if needed
 ];
 
-// ✅ CRITICAL: Create FormWriter with model
+// ✅ CRITICAL: Create FormWriter with model and edit_primary_key_value
 $formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $object,           // Model for auto-fill
-    'values' => $override_values   // Override specific fields
+    'model' => $object,                          // Model for auto-fill
+    'edit_primary_key_value' => $object->key,    // Explicit edit key (NULL for new records)
+    'values' => $override_values                 // Override specific fields
 ]);
 
 $formwriter->begin_form();
-
-// ✅ CRITICAL: Check if editing vs creating NEW RECORD
-if($object->key){
-    // EDITING existing record - include primary key as hidden field
-    $formwriter->hiddeninput('obj_object_id', ['value' => $object->key]);
-    $formwriter->hiddeninput('action', ['value' => 'edit']);
-}
-// If creating NEW record, don't include primary key hidden field
-// Logic will detect this as 'add' because no primary key in POST
+// FormWriter automatically adds: <input type="hidden" name="edit_primary_key_value" value="...">
 
 // Add form fields (no manual 'value' needed - auto-filled from model)
 $formwriter->textinput('obj_name', 'Name');
@@ -220,16 +213,25 @@ function admin_page_edit_logic($get_vars, $post_vars) {
     $session = SessionControl::get_instance();
     $session->check_permission(5);
 
-    // ✅ CRITICAL: Load object from GET parameter (URL when page first loads)
-    // Primary key will ONLY come from GET on first load
-    if (isset($get_vars['obj_object_id'])) {
-        $object = new Page($get_vars['obj_object_id'], TRUE);
+    // ✅ CRITICAL: Check for edit_primary_key_value to determine add vs edit
+    if (isset($post_vars['edit_primary_key_value'])) {
+        // EDIT: Load existing object using the hidden field value
+        $object = new Page($post_vars['edit_primary_key_value'], TRUE);
     } else {
-        $object = new Page(NULL);  // Creating NEW object
+        // ADD: Create new object
+        $object = new Page(NULL);
     }
+
+    // Set flag for cleaner conditionals
+    $is_edit = isset($post_vars['edit_primary_key_value']);
 
     // ✅ CRITICAL: Check for POST submission (form submit)
     if($post_vars){
+
+        // Add-only logic (runs only when creating new records)
+        if (!$is_edit) {
+            $object->set('obj_created_by', $session->get_user_id());
+        }
 
         // Define which fields can be edited
         $editable_fields = array('obj_name', 'obj_description', 'obj_is_active');
@@ -269,31 +271,38 @@ function admin_page_edit_logic($get_vars, $post_vars) {
 
 ##### Key Rules (Memorize These!)
 
-1. **View File - Primary Key Hidden Field**
+1. **View File - Pass edit_primary_key_value to FormWriter**
    ```php
-   if($object->key){  // If object has a primary key, it's an EDIT
-       $formwriter->hiddeninput('obj_object_id', ['value' => $object->key]);
-       $formwriter->hiddeninput('action', ['value' => 'edit']);  // Optional but recommended
-   }
-   // If no primary key (NULL), it's an ADD - don't include hidden field
+   // ✅ CORRECT: Explicitly pass the key
+   $formwriter = $page->getFormWriter('form1', 'v2', [
+       'model' => $object,
+       'edit_primary_key_value' => $object->key  // NULL for add, ID for edit
+   ]);
+   // FormWriter automatically generates the hidden field
    ```
 
-2. **Logic File - Load from GET**
+2. **Logic File - Check edit_primary_key_value**
    ```php
-   // Load on first page visit (GET request)
-   if (isset($get_vars['obj_object_id'])) {
-       $object = new Page($get_vars['obj_object_id'], TRUE);
+   // Check the standardized hidden field
+   if (isset($post_vars['edit_primary_key_value'])) {
+       $object = new Page($post_vars['edit_primary_key_value'], TRUE);  // EDIT
    } else {
-       $object = new Page(NULL);  // NEW record
+       $object = new Page(NULL);  // ADD
    }
+
+   // Set flag for cleaner conditionals
+   $is_edit = isset($post_vars['edit_primary_key_value']);
    ```
 
 3. **Logic File - Process POST**
    ```php
-   // Form submission (POST request)
    if($post_vars){
-       // Set fields, prepare, save
-       // NO NEED to check action value - both add and edit use same code
+       // Add-only logic
+       if (!$is_edit) {
+           $object->set('obj_created_by', $session->get_user_id());
+       }
+
+       // Common processing
        $object->prepare();
        $object->save();
        // Always redirect using primary key (will be generated if new)
@@ -303,32 +312,37 @@ function admin_page_edit_logic($get_vars, $post_vars) {
 
 4. **Don't Do This** ❌
    ```php
-   // ❌ WRONG - Trying to get primary key from POST
-   $primary_key = $post_vars['obj_object_id'] ?? $get_vars['obj_object_id'];
-
-   // ❌ WRONG - Including primary key hidden field for new records
-   if(!$object->key){
-       $formwriter->hiddeninput('obj_object_id', ['value' => '']);
+   // ❌ WRONG - Manually adding hidden field in view
+   if($object->key){
+       $formwriter->hiddeninput('obj_object_id', ['value' => $object->key]);
    }
 
-   // ❌ WRONG - Checking action to decide whether to save
-   if ($post_vars['action'] == 'add' || $post_vars['action'] == 'edit') {
-       // Different processing for add vs edit
+   // ❌ WRONG - Using action field
+   $formwriter->hiddeninput('action', ['value' => 'edit']);
+
+   // ❌ WRONG - Loading from GET in logic
+   if (isset($get_vars['obj_object_id'])) {
+       $object = new Page($get_vars['obj_object_id'], TRUE);
+   }
+
+   // ❌ WRONG - Checking action value
+   if ($post_vars['action'] == 'edit') {
+       // Don't branch on action
    }
    ```
 
 ##### Add vs Edit - How It Works
 
-The system automatically distinguishes add from edit:
+The system uses the standardized `edit_primary_key_value` hidden field:
 
-| Scenario | Primary Key | Hidden Field | Logic Processing |
-|----------|-------------|--------------|------------------|
-| **Load NEW form** | NULL | Not included | render display |
+| Scenario | Object Key | edit_primary_key_value | Logic Processing |
+|----------|------------|------------------------|------------------|
+| **Load NEW form** | NULL | Not passed to FormWriter | render display |
 | **Submit NEW form (add)** | NULL | Not in POST | save() creates new record |
-| **Load EDIT form** | 123 | Included as hidden | render display |
+| **Load EDIT form** | 123 | Passed to FormWriter | render display |
 | **Submit EDIT form** | 123 | Included in POST | save() updates existing |
 
-**No action checking needed!** The presence/absence of the primary key tells the system whether it's add or edit.
+**No action field or GET checking needed!** The presence/absence of `edit_primary_key_value` tells the system whether it's add or edit.
 
 ---
 

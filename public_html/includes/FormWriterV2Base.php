@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.0.0
+ * @version 2.1.0
+ * @changelog 2.1.0 - Added automatic edit_primary_key_value hidden field support
  */
 
 abstract class FormWriterV2Base {
@@ -22,6 +23,7 @@ abstract class FormWriterV2Base {
     protected $model_validated_fields = [];  // Track fields using automatic model validation
     protected $use_deferred_output = false;  // Deferred output mode flag
     protected $deferred_output = [];  // Collected field HTML when in deferred mode
+    protected $edit_primary_key_value = null;  // Store edit key for automatic hidden field
 
     // Static property for custom validators
     protected static $custom_validators = [];
@@ -68,6 +70,11 @@ abstract class FormWriterV2Base {
 
         // Store merged values
         $this->values = $final_values;
+
+        // Handle edit_primary_key_value for automatic hidden field
+        if (isset($this->options['edit_primary_key_value']) && $this->options['edit_primary_key_value'] !== null) {
+            $this->edit_primary_key_value = $this->options['edit_primary_key_value'];
+        }
 
         // Apply automatic local time conversion to timestamp fields
         $this->convertDateTimeFieldsToLocalTime();
@@ -1013,6 +1020,11 @@ abstract class FormWriterV2Base {
         // Add CSRF token if enabled
         if ($this->csrf_token) {
             $html .= '<input type="hidden" name="' . htmlspecialchars($this->options['csrf_field']) . '" value="' . htmlspecialchars($this->csrf_token) . '">';
+        }
+
+        // Add edit_primary_key_value hidden field if provided
+        if ($this->edit_primary_key_value !== null) {
+            $html .= '<input type="hidden" name="edit_primary_key_value" value="' . htmlspecialchars($this->edit_primary_key_value) . '">';
         }
 
         // Either echo immediately or store for deferred output
