@@ -26,25 +26,22 @@ echo '<div class="row">
     <div class="col-md-8">
       <div class="p-3">';
 
-// Editing an existing event
-$formwriter = $page->getFormWriter('form1');
+// FormWriter V2 with model and edit_primary_key_value
+$formwriter = $page->getFormWriter('form1', 'v2', [
+	'model' => $event,
+	'edit_primary_key_value' => $event->key
+]);
 
-$validation_rules = array();
-$validation_rules['evt_name']['required']['value'] = 'true';
-$validation_rules['evt_external_register_link']['minlength']['value'] = '5';
-echo $formwriter->set_validate($validation_rules);
+$formwriter->begin_form();
 
-echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_edit');
-
-if($event->key){
-	echo $formwriter->hiddeninput('evt_event_id', $event->key);
-	echo $formwriter->hiddeninput('action', 'edit');
-}
-
-echo $formwriter->textinput('Event name', 'evt_name', NULL, 100, $title, '', 255, '');
+$formwriter->textinput('evt_name', 'Event name', [
+	'validation' => ['required' => true, 'maxlength' => 255]
+]);
 
 $optionvals = $files->get_image_dropdown_array();
-echo $formwriter->imageinput("Main image", "evt_fil_file_id", "ctrlHolder", $optionvals, $event->get('evt_fil_file_id'), '', TRUE, TRUE, FALSE, TRUE);
+$formwriter->imageinput('evt_fil_file_id', 'Main image', [
+	'options' => $optionvals
+]);
 
 //echo $formwriter->textinput('Picture link', 'evt_picture_link', NULL, 100, $event->get('evt_picture_link'), '', 255, '');
 
@@ -62,47 +59,76 @@ if($numlocations){
 		$visibility_rules[$value] = array('show' => array(), 'hide' => array('evt_location_container'));
 	}
 
-	echo $formwriter->dropinput('Location', 'evt_loc_location_id', array(
+	$formwriter->dropinput('evt_loc_location_id', 'Location', [
+		'options' => $optionvals,
+		'empty_option' => 'Custom location',
 		'visibility_rules' => $visibility_rules
-	), $optionvals, $location_id, '', 'Custom location');
+	]);
 
-	echo $formwriter->textinput('Custom location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
+	$formwriter->textinput('evt_location', 'Custom location', [
+		'maxlength' => 255
+	]);
 }
 else{
-	echo $formwriter->textinput('Location', 'evt_location', NULL, 100, $event->get('evt_location'), '', 255, '');
+	$formwriter->textinput('evt_location', 'Location', [
+		'maxlength' => 255
+	]);
 }
 
-echo $formwriter->textinput('Max signups (number)', 'evt_max_signups', NULL, 100, $event->get('evt_max_signups'), '', 255, '');
+$formwriter->textinput('evt_max_signups', 'Max signups (number)');
 
-echo $formwriter->textinput('Event short description (no html)', 'evt_short_description', NULL, 100, $event->get('evt_short_description'), '', 255, '');
-echo $formwriter->textinput('External register link (if needed)', 'evt_external_register_link', NULL, 100, $event->get('evt_external_register_link'), '', 255, '');
+$formwriter->textinput('evt_short_description', 'Event short description (no html)', [
+	'maxlength' => 255
+]);
+
+$formwriter->textinput('evt_external_register_link', 'External register link (if needed)', [
+	'validation' => ['minlength' => 5],
+	'maxlength' => 255
+]);
 
 $optionvals = $users->get_user_dropdown_array();
-
-echo $formwriter->dropinput('Led by', 'evt_usr_user_id_leader', 'ctrlHolder', $optionvals, $event->get('evt_usr_user_id_leader'), '', 'None');
+$formwriter->dropinput('evt_usr_user_id_leader', 'Led by', [
+	'options' => $optionvals,
+	'empty_option' => 'None'
+]);
 
 $optionvals = Address::get_timezone_drop_array();
-echo $formwriter->dropinput("Event Time Zone", "evt_timezone", "ctrlHolder", $optionvals, $timezone, '', FALSE);
+$formwriter->dropinput('evt_timezone', 'Event Time Zone', [
+	'options' => $optionvals
+]);
 
 $optionvals = array("Active"=>1, "Completed"=>2, "Cancelled"=>3);
-echo $formwriter->dropinput("Status", "evt_status", "ctrlHolder", $optionvals, $event->get('evt_status'), '', FALSE);
+$formwriter->dropinput('evt_status', 'Status', [
+	'options' => $optionvals
+]);
 
 if($num_event_types){
 	$optionvals = $event_types->get_dropdown_array();
-	echo $formwriter->dropinput("Type of event", "evt_ety_event_type_id", "ctrlHolder", $optionvals, $event->get('evt_ety_event_type_id'), '', FALSE);
+	$formwriter->dropinput('evt_ety_event_type_id', 'Type of event', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
 }
 
 $optionvals = array("Hidden"=>0, "Live"=>1, "Live but unlisted"=>2);
-echo $formwriter->dropinput("Visibility", "evt_visibility", "ctrlHolder", $optionvals, $event->get('evt_visibility'), '', FALSE);
+$formwriter->dropinput('evt_visibility', 'Visibility', [
+	'options' => $optionvals
+]);
 
 $optionvals = array("Closed"=>0, "Open"=>1);
-echo $formwriter->dropinput("Registration", "evt_is_accepting_signups", "ctrlHolder", $optionvals, $event->get('evt_is_accepting_signups'), '', FALSE);
+$formwriter->dropinput('evt_is_accepting_signups', 'Registration', [
+	'options' => $optionvals
+]);
 
 $optionvals = array("Allow"=>1, "Prevent"=>0);
-echo $formwriter->dropinput("Waiting list", "evt_allow_waiting_list", "ctrlHolder", $optionvals, $event->get('evt_allow_waiting_list'), '', FALSE);
+$formwriter->dropinput('evt_allow_waiting_list', 'Waiting list', [
+	'options' => $optionvals
+]);
 
 $optionvals = array("Show"=>1, "Hide"=>0);
-echo $formwriter->dropinput("Show calendar link", "evt_show_add_to_calendar_link", "ctrlHolder", $optionvals, $event->get('evt_show_add_to_calendar_link'), '', FALSE);
+$formwriter->dropinput('evt_show_add_to_calendar_link', 'Show calendar link', [
+	'options' => $optionvals
+]);
 
 /*
 $surveys = new MultiSurvey(
@@ -138,27 +164,33 @@ echo $formwriter->dropinput("Event survey required before registration", "evt_su
 </script>
  <?php
  */
-echo $formwriter->hiddeninput('evt_collect_extra_info', '0');
+$formwriter->hiddeninput('evt_collect_extra_info', '', ['value' => 0]);
 
 $optionvals = array("Condensed (all on one page)"=>1, "Separate (separate pages for each session)"=>2);
-echo $formwriter->dropinput("Session display style", "evt_session_display_type", "ctrlHolder", $optionvals, $event->get('evt_session_display_type'), '', FALSE);
+$formwriter->dropinput('evt_session_display_type', 'Session display style', [
+	'options' => $optionvals
+]);
 
-echo $formwriter->datetimeinput('Event start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evt_start_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+$formwriter->datetimeinput('evt_start_time', 'Event start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)');
 
-echo $formwriter->datetimeinput('Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)', 'evt_end_time', 'ctrlHolder', LibraryFunctions::convert_time($event->get('evt_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+$formwriter->datetimeinput('evt_end_time', 'Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)');
 
 //echo $formwriter->textinput('Max attendees:', 'evt_max_purchase_count', 'ctrlHolder', 100, $event->get('evt_max_purchase_count'), '', 255, '');
 
-echo $formwriter->textbox('Event Description', 'evt_description', 'ctrlHolder', 10, 80, $content, '', 'yes');
-//echo $formwriter->textbox('After Purchase Message', 'evt_after_purchase_message', 'ctrlHolder', 10, 80, $event->get('evt_after_purchase_message'), '', 'no');
+$formwriter->textbox('evt_description', 'Event Description', [
+	'rows' => 10,
+	'cols' => 80,
+	'htmlmode' => 'yes'
+]);
 
-echo $formwriter->textbox('Info only for registrants', 'evt_private_info', 'ctrlHolder', 10, 80, $event->get('evt_private_info'), '', 'yes');
+$formwriter->textbox('evt_private_info', 'Info only for registrants', [
+	'rows' => 10,
+	'cols' => 80,
+	'htmlmode' => 'yes'
+]);
 
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
-
-echo $formwriter->end_form();
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
 
 echo '    </div>
     </div>
@@ -168,12 +200,15 @@ echo '    </div>
 $optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 if(count($optionvals)){
-	$formwriter = $page->getFormWriter('form_load_version');
-	echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_event_edit');
-	echo $formwriter->hiddeninput('evt_event_id', $event->key);
-	echo $formwriter->dropinput("Load another description", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-	echo $formwriter->new_form_button('Load');
-	echo $formwriter->end_form();
+	$formwriter = $page->getFormWriter('form_load_version', 'v2');
+	$formwriter->begin_form('form_load_version', 'GET', '/admin/admin_event_edit');
+	$formwriter->hiddeninput('evt_event_id', '', ['value' => $event->key]);
+	$formwriter->dropinput('cnv_content_version_id', 'Load another description', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
+	$formwriter->submitbutton('btn_load', 'Load');
+	$formwriter->end_form();
 }
 else{
 	echo 'No saved versions.';

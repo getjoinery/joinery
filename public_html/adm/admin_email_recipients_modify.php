@@ -132,8 +132,8 @@
 		}
 
 		echo '<tr><td colspan="3">';
-		$formwriter = $page->getFormWriter('form3');
-		echo $formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
+		$formwriter = $page->getFormWriter('form3', 'v2');
+		$formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
 
 		$groups = new MultiGroup(
 			array('category'=>'user', 'deleted'=>false),
@@ -143,18 +143,24 @@
 		$groups->load();
 
 		$optionvals = $groups->get_dropdown_array();
-		echo $formwriter->hiddeninput('action', 'addgroup');
-		echo $formwriter->hiddeninput('eml_email_id', $email->key);
-		echo $formwriter->hiddeninput('op', $op);
+		$formwriter->hiddeninput('action', '', ['value' => 'addgroup']);
+		$formwriter->hiddeninput('eml_email_id', '', ['value' => $email->key]);
+		$formwriter->hiddeninput('op', '', ['value' => $op]);
 		if($op == 'add'){
-			echo $formwriter->dropinput("Add group members", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+			$formwriter->dropinput('grp_group_id', 'Add group members', [
+				'options' => $optionvals,
+				'empty_option' => '-- Select --'
+			]);
 			echo $formwriter->new_form_button('Add group members');
 		}
 		else{
-			echo $formwriter->dropinput("Exclude group members", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
+			$formwriter->dropinput('grp_group_id', 'Exclude group members', [
+				'options' => $optionvals,
+				'empty_option' => '-- Select --'
+			]);
 			echo $formwriter->new_form_button('Exclude group members');
 		}
-		echo $formwriter->end_form();
+		$formwriter->end_form();
 
 		$events = new MultiEvent(
 			array(),  //SEARCH
@@ -163,22 +169,28 @@
 			NULL);  //OFFSET
 		$events->load();
 
-		$formwriter = $page->getFormWriter('form4');
-		echo $formwriter->begin_form('form4', 'POST', '/admin/admin_email_recipients_modify');
+		$formwriter = $page->getFormWriter('form4', 'v2');
+		$formwriter->begin_form('form4', 'POST', '/admin/admin_email_recipients_modify');
 		$optionvals = $events->get_dropdown_array();
 
-		echo $formwriter->hiddeninput('action', 'addevent');
-		echo $formwriter->hiddeninput('eml_email_id', $email->key);
-		echo $formwriter->hiddeninput('op', $op);
+		$formwriter->hiddeninput('action', '', ['value' => 'addevent']);
+		$formwriter->hiddeninput('eml_email_id', '', ['value' => $email->key]);
+		$formwriter->hiddeninput('op', '', ['value' => $op]);
 		if($op == 'add'){
-			echo $formwriter->dropinput("Add event attendees", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE, TRUE);
+			$formwriter->dropinput('evt_event_id', 'Add event attendees', [
+				'options' => $optionvals,
+				'empty_option' => '-- Select --'
+			]);
 			echo $formwriter->new_form_button('Add event attendees');
 		}
 		else{
-			echo $formwriter->dropinput("Exclude event attendees", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE, TRUE);
+			$formwriter->dropinput('evt_event_id', 'Exclude event attendees', [
+				'options' => $optionvals,
+				'empty_option' => '-- Select --'
+			]);
 			echo $formwriter->new_form_button('Exclude event attendees');
 		}
-		echo $formwriter->end_form();
+		$formwriter->end_form();
 		echo '</td></tr>';
 
 		$page->endtable();

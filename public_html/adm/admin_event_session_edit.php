@@ -1,7 +1,8 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/videos_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -10,19 +11,20 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if (isset($_REQUEST['evs_event_session_id'])) {
-		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
+	if (isset($_REQUEST['evs_event_session_id']) || isset($_POST['edit_primary_key_value'])) {
+		$session_id = isset($_POST['edit_primary_key_value']) ? $_POST['edit_primary_key_value'] : $_REQUEST['evs_event_session_id'];
+		$event_session = new EventSession($session_id, TRUE);
 		$event = new Event($event_session->get('evs_evt_event_id'), TRUE);
-	} 
+	}
 	else if (isset($_REQUEST['evt_event_id'])) {
 		$event_session = new EventSession(NULL);
 		$event = new Event($_REQUEST['evt_event_id'], TRUE);
-	}	
+	}
 	else{
 		echo 'Need an event or a session';
 		exit();
 	}
-	
+
 	if($_REQUEST['action'] == 'delete'){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -37,22 +39,22 @@
 		catch(PDOException $e){
 			$dbhelper->handle_query_error($e);
 		}
-		LibraryFunctions::redirect('/admin/admin_event_sessions?evt_event_id='.$event->key);
-		return;		
+		LibraryFunctions::redirect('/admin/admin_event?evt_event_id='.$event->key);
+		return;
 	}
 	else if($_REQUEST['action'] == 'addfile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
 		$event_session->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		
+
 		//IF SOMEONE JUST CLICKS THE BUTTON, FAIL SILENTLY
 		if($_REQUEST['fil_file_id']){
 			$event_session->add_file($_REQUEST['fil_file_id']);
 		}
-		
+
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_event_session_edit?evs_event_session_id=".$event_session->key);
-		exit();		
-	}	
+		exit();
+	}
 	else if($_REQUEST['action'] == 'removefile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
 		$event_session->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -60,9 +62,9 @@
 
 		//$returnurl = $session->get_return();
 		header("Location: /admin/admin_event_session_edit?evs_event_session_id=".$event_session->key);
-		exit();		
-	}	
-	else if($_REQUEST['action'] == 'newsession-days'){	
+		exit();
+	}
+	else if($_REQUEST['action'] == 'newsession-days'){
 
 		//PULL LATEST Session
 		$searches = array();
@@ -70,28 +72,28 @@
 		$event_sessions = new MultiEventSessions(
 			$searches,
 			array('evs_start_time'=>'DESC', 'evs_session_number'=>'DESC')
-		); 
-		$event_sessions->load();	
+		);
+		$event_sessions->load();
 		$latest_session = $event_sessions->get(0);
-		
+
 		if(!$latest_session){
 			throw new SystemDisplayableError('There is no previous session with a date and time.');
-			exit();			
+			exit();
 		}
 		else if(!$latest_session->get('evs_start_time')){
 			throw new SystemDisplayableError('The previous session has no date and time.  Cannot auto generate a new session.  Please enter the new session manually.');
-			exit();					
+			exit();
 		}
 		else{
 
 			$new_session_number = NULL;
 			$event_session = new EventSession(NULL);
-			$event_session->set('evs_evt_event_id', $event->key);		
+			$event_session->set('evs_evt_event_id', $event->key);
 			if($latest_session->get('evs_session_number')){
 				$new_session_number = $latest_session->get('evs_session_number') + 1;
 				$event_session->set('evs_session_number', $new_session_number);
 			}
-			
+
 			if($_POST['evs_title']){
 				$event_session->set('evs_title', $_POST['evs_title']);
 			}
@@ -101,14 +103,14 @@
 			else{
 				$event_session->set('evs_title', 'New Session');
 			}
-			
+
 			if($latest_session->get('evs_start_time')){
 				$start_time = LibraryFunctions::time_shift($latest_session->get('evs_start_time'), $_POST['num_days'], 'c');
 				$start_time_local = LibraryFunctions::time_shift($latest_session->get('evs_start_time_local'), $_POST['num_days'], 'c');
 				$event_session->set('evs_start_time', $start_time);
 				$event_session->set('evs_start_time_local', $start_time_local);
 			}
-			
+
 			if($latest_session->get('evs_end_time')){
 				$end_time = LibraryFunctions::time_shift($latest_session->get('evs_end_time'), $_POST['num_days'], 'c');
 				$end_time_local = LibraryFunctions::time_shift($latest_session->get('evs_end_time_local'), $_POST['num_days'], 'c');
@@ -117,18 +119,18 @@
 			}
 
 			$event_session->save();
-			
-			header("Location: /admin/admin_event_sessions?evt_event_id=".$event->key);
-			exit();	
+
+			header("Location: /admin/admin_event?evt_event_id=".$event->key);
+			exit();
 		}
-	
+
 	}
 	else if($_POST){
-		
+
 		//TODO FIX THIS FROM HAVING TO BE DONE
-		
+
 		if(!$_POST['evs_vid_video_id']){
-			$_POST['evs_vid_video_id'] = NULL; 
+			$_POST['evs_vid_video_id'] = NULL;
 		}
 
 		if (isset($_POST['evs_session_number'])){
@@ -136,7 +138,7 @@
 				$event_session->set('evs_session_number', NULL);
 			}
 			else if($_POST['evs_session_number'] >= 0){
-				$event_sessions = new MultiEventSessions(		
+				$event_sessions = new MultiEventSessions(
 					array('event_id'=>$event->key, 'session_number'=>$_POST['evs_session_number'],'deleted'=>false),
 					NULL,
 					10,
@@ -162,133 +164,92 @@
 			}
 		}
 
-		$editable_fields = array('evs_evt_event_id', 'evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_title', 'evs_vid_video_id');
+		// For new sessions, ensure evs_evt_event_id is set from the event object
+	if(!$event_session->get('evs_evt_event_id')){
+		$event_session->set('evs_evt_event_id', $event->key);
+	}
 
-		foreach($editable_fields as $field) {
-			$event_session->set($field, $_POST[$field]);
-		}
+	// Handle start time using FormWriterV2Base helper
+	$start_time = FormWriterV2Base::process_datetimeinput($_POST, 'evs_start_time', true);
+	if($start_time !== NULL){
+		$event_session->set('evs_start_time', $start_time);
+	}
 
-		if($_POST['evs_start_time_date'] && $_POST['evs_start_time_time']){
-			$time_combined = $_POST['evs_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evs_start_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
-			$event_session->set('evs_start_time', $utc_time);
-			$event_session->set('evs_start_time_local', $time_combined);
-		}
-		
-		if($_POST['evs_end_time_date'] && $_POST['evs_end_time_time']){
-			$time_combined = $_POST['evs_end_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['evs_end_time_time']);
-			$utc_time = LibraryFunctions::convert_time($time_combined, $event->get('evt_timezone'),  'UTC', 'c');
-			$event_session->set('evs_end_time', $utc_time);	
-			$event_session->set('evs_end_time_local', $time_combined);			
-		}
+	// Handle end time using FormWriterV2Base helper
+	$end_time = FormWriterV2Base::process_datetimeinput($_POST, 'evs_end_time', true);
+	if($end_time !== NULL){
+		$event_session->set('evs_end_time', $end_time);
+	}
 
-		$event_session->prepare();
-		$event_session->save();
+	$editable_fields = array('evs_content', 'evs_links', 'evs_picture_link', 'evs_is_public', 'evs_title', 'evs_vid_video_id');
 
-		LibraryFunctions::redirect('/admin/admin_event_sessions?evt_event_id='.$event_session->get('evs_evt_event_id'));
+	foreach($editable_fields as $field) {
+		$event_session->set($field, $_POST[$field]);
+	}
+
+	$event_session->prepare();
+	$event_session->save();
+
+		LibraryFunctions::redirect('/admin/admin_event?evt_event_id='.$event_session->get('evs_evt_event_id'));
 		return;
 	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'events',
 		'page_title' => 'Event session edit',
 		'readable_title' => 'Event session edit',
-		'breadcrumbs' => array('Events'=>'/admin/admin_events', $event->get('evt_name')=>'/admin/admin_event_sessions?evt_event_id='.$event->key,'Add Session'=> ''),
+		'breadcrumbs' => array('Events'=>'/admin/admin_events', $event->get('evt_name')=>'/admin/admin_event?evt_event_id='.$event->key,'Add Session'=> ''),
 		'uploader' => TRUE,
 		'session' => $session,
 	)
-	);	
-	
+	);
+
 	$pageoptions['title'] = "New Session";
 	$page->begin_box($pageoptions);
 
-	// Editing an existing event
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	//$validation_rules['evs_start_time_time']['required']['value'] = 'true';
-	//$validation_rules['evs_start_time_date']['required']['value'] = 'true';
-	$validation_rules['evs_title']['required']['value'] = 'true';
-	$validation_rules['evs_session_number']['required']['value'] = 'true';
-	$validation_rules['evs_session_number']['digits']['value'] = 'true';	
-	echo $formwriter->set_validate($validation_rules);	
-	
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_session_edit');
-	
-	if($event_session->key){
-		echo $formwriter->hiddeninput('evs_event_session_id', $event_session->key);
-		echo $formwriter->hiddeninput('evs_evt_event_id', $event_session->get('evs_evt_event_id'));
-	}
-	else if($event->key){
-		echo $formwriter->hiddeninput('evt_event_id', $event->key);
-		echo $formwriter->hiddeninput('evs_evt_event_id', $event->key);
-	}	
-	echo $formwriter->textinput('Title', 'evs_title', NULL, 100, @$event_session->get('evs_title'), '', 255, '');
+	// FormWriter V2 with model and edit_primary_key_value
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $event_session,
+		'edit_primary_key_value' => $event_session->key
+	]);
 
-	//FILL IN A SESSION NUMBER IF IT'S BLANK
-	/*
-	$event_session_fill = $event_session->get('evs_session_number');
-	if(!$event_session_fill){
+	$formwriter->begin_form();
 
-		//GET THE LOWEST SESSION NUMBER
-		$searches = array();
-		$searches['event_id'] = $event->key;
-		$event_sessions_search = new MultiEventSessions(
-			$searches,
-			array('evs_session_number'=>'DESC', 'evs_title'=>'DESC'),
-			NULL,
-			NULL,
-			'AND'
-		);
-		
-		if(!$event_sessions_search->count_all()){	
-			echo 'There are no sessions.';
-			exit();
-		}
-		
-		$event_sessions_search->load();
-		$event_session_fill = $event_sessions_search->get(0)->get('evs_session_number') + 1;
+	// Pass event ID for new sessions (when there's no session ID yet)
+	if(!$event_session->key){
+		$formwriter->hiddeninput('evt_event_id', '', ['value' => $event->key]);
 	}
 
-	//echo $formwriter->textinput('Session number (number, for ordering)', 'evs_session_number', NULL, 100, @$event_session_fill, '', 255, '');
-	*/
+	$formwriter->textinput('evs_title', 'Title', [
+		'validation' => ['required' => true]
+	]);
 
 	$optionvals = $event->get_all_valid_session_numbers();
-	//ADD IN THE CURRENT SESSION NUMBER 
+	//ADD IN THE CURRENT SESSION NUMBER
 	if($event_session->get('evs_session_number')){
 		$optionvals[$event_session->get('evs_session_number')] = $event_session->get('evs_session_number');
 	}
 
-	echo $formwriter->dropinput("Session number (number, for ordering)", "evs_session_number", "ctrlHolder", $optionvals, $event_session->get('evs_session_number'), '', false);	
-	echo $formwriter->datetimeinput('Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_start_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+	$formwriter->dropinput('evs_session_number', 'Session number (number, for ordering)', [
+		'options' => $optionvals,
+		'validation' => ['required' => true, 'digits' => true]
+	]);
 
-	echo $formwriter->datetimeinput('Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', 'evs_end_time', 'ctrlHolder', LibraryFunctions::convert_time(@$event_session->get('evs_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia'), '', '', '');
+	$formwriter->datetimeinput('evs_start_time', 'Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', [
+		'value' => LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia')
+	]);
 
-	//$optionvals = array("Hidden"=>0, "Live"=>1);
-	//echo $formwriter->dropinput("Published", "evs_is_public", "ctrlHolder", $optionvals, $event_session->get('evs_is_public'), '', FALSE);
+	$formwriter->datetimeinput('evs_end_time', 'Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', [
+		'value' => LibraryFunctions::convert_time(@$event_session->get('evs_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia')
+	]);
 
-	//echo $formwriter->textinput('Order', 'evs_order', NULL, 100, $event_session->get('evs_order'), '', 255, '');
-	
-	/*
-	$events = new MultiEvent(
-		array('deleted'=>false),
-		NULL,		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$events->load();
-	$optionvals = $events->get_dropdown_array();
-	echo $formwriter->dropinput("Event registration?", "evs_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);		
-	*/
-	
-	echo $formwriter->textbox('Session description', 'evs_content', 'ctrlHolder', 5, 80, @$event_session->get('evs_content'), '', 'yes');
-	//echo $formwriter->textbox('Session location', 'evs_location', 'ctrlHolder', 5, 80, $event_session->get('evs_location'), '', 'no');
-
-	//echo $formwriter->textbox('Event links', 'evs_links', 'ctrlHolder', 5, 80, $event_session->get('evs_links'), '', 'no');
-	
-	//echo $formwriter->textinput('Picture link', 'evs_picture_link', NULL, 100, $event_session->get('evs_picture_link'), '', 255, '');
-	//echo $formwriter->textbox('Session video embed', 'evs_video_link', 'ctrlHolder', 5, 80, $event_session->get('evs_video_link'), '', 'no');
+	$formwriter->textbox('evs_content', 'Session description', [
+		'rows' => 5,
+		'cols' => 80,
+		'htmlmode' => 'yes'
+	]);
 
 	$videos = new MultiVideo(
 		array('deleted'=>false),
@@ -297,12 +258,13 @@
 		NULL);  //OFFSET
 	$videos->load();
 	$optionvals = $videos->get_video_dropdown_array();
-	echo $formwriter->dropinput("Video", "evs_vid_video_id", "ctrlHolder", $optionvals, @$event_session->get('evs_vid_video_id'), '', TRUE);
+	$formwriter->dropinput('evs_vid_video_id', 'Video', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 	$page->end_box();
 
 	if($event_session->key){
@@ -310,13 +272,13 @@
 		$page->begin_box($pageoptions);
 
 		// Editing an existing event
-		$formwriter = $page->getFormWriter('form2');
-		
-		echo $formwriter->begin_form('form2', 'POST', '/admin/admin_event_session_edit');
-		
-		echo $formwriter->hiddeninput('action', 'addfile');
-		echo $formwriter->hiddeninput('evs_event_session_id', $event_session->key);
-		echo $formwriter->hiddeninput('evs_evt_event_id', $event_session->get('evs_evt_event_id'));
+		$formwriter = $page->getFormWriter('form2', 'v2');
+
+		$formwriter->begin_form('form2', 'POST', '/admin/admin_event_session_edit');
+
+		$formwriter->hiddeninput('action', '', ['value' => 'addfile']);
+		$formwriter->hiddeninput('evs_event_session_id', '', ['value' => $event_session->key]);
+		$formwriter->hiddeninput('evs_evt_event_id', '', ['value' => $event_session->get('evs_evt_event_id')]);
 
 		$session_files = $event_session->get_files();
 		$rowcontent = '<ul>';
@@ -333,23 +295,24 @@
 			NULL);  //OFFSET
 		$files->load();
 		$optionvals = $files->get_file_dropdown_array();
-		echo $formwriter->dropinput("Add file", "fil_file_id", "ctrlHolder", $optionvals, NULL, '', TRUE, TRUE, FALSE, TRUE);
+		$formwriter->dropinput('fil_file_id', 'Add file', [
+			'options' => $optionvals,
+			'empty_option' => '-- Select --'
+		]);
 
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Add file');
-		echo $formwriter->end_buttons();
-		echo $formwriter->end_form();
+		$formwriter->submitbutton('btn_submit', 'Add file');
+		$formwriter->end_form();
 
 		//$page->begin_box();
 		echo '<hr><div style="margin-left:20px"><h4>Bulk upload</h4>';
-		$formwriter = $page->getFormWriter('fileupload');
-	
+		$formwriter = $page->getFormWriter('fileupload', 'v2');
+
 		echo $formwriter->file_upload_full(array('evs_event_session_id'=> $event_session->key));
-		echo $formwriter->end_form();
+		$formwriter->end_form();
 		echo '</div>';
 		//$page->end_box();
 
-		$page->end_box();	
+		$page->end_box();
 	}
 	$page->admin_footer();
 

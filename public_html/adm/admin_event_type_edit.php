@@ -1,13 +1,13 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('adm/logic/admin_event_type_edit_logic.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_event_type_edit_logic.php'));
 
-	$page_vars = process_logic(admin_event_type_edit_logic($_GET, $_POST));
-	extract($page_vars);
+$page_vars = process_logic(admin_event_type_edit_logic($_GET, $_POST));
+extract($page_vars);
 
-	$page = new AdminPage();
-	$page->admin_header(
+$page = new AdminPage();
+$page->admin_header(
 	array(
 		'menu-id'=> 'events',
 		'page_title' => 'Event Types',
@@ -18,31 +18,28 @@
 		),
 		'session' => $session,
 	)
-	);
+);
 
-	$options['title'] = 'Edit Event Type';
-	$page->begin_box($options);
+$options['title'] = 'Edit Event Type';
+$page->begin_box($options);
 
-	// Editing an existing product
-	$formwriter = $page->getFormWriter('form1');
+// FormWriter V2 with model and edit_primary_key_value
+$formwriter = $page->getFormWriter('form1', 'v2', [
+	'model' => $event_type,
+	'edit_primary_key_value' => $event_type->key
+]);
 
-	$validation_rules = array();
-	$validation_rules['ety_name']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);
+$formwriter->begin_form();
 
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_event_type_edit');
-	if($event_type->key){
-		echo $formwriter->hiddeninput('ety_event_type_id', $event_type->key);
-	}
-	echo $formwriter->textinput('Event Type Name', 'ety_name', NULL, 100, $event_type->get('ety_name'), '', 255, '');
+$formwriter->textinput('ety_name', 'Event Type Name', [
+	'validation' => ['required' => true, 'maxlength' => 255]
+]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
 
-	$page->end_box();
+$page->end_box();
 
-	$page->admin_footer();
+$page->admin_footer();
 
 ?>

@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 39/69 completed + 1 pending testing = 40/69 total work done (57.9% completed, 1.4% pending user testing)**
+**Progress: 47/69 completed + 1 pending testing = 48/69 total work done (68.1% completed, 1.4% pending user testing)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -83,19 +83,9 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
 
-#### Pending Conversion (39 pages)
-
-**E:**
-- [ ] `/adm/admin_email_recipients_modify.php`
-- [ ] `/adm/admin_email_template_edit.php`
-- [ ] `/adm/admin_event.php`
-- [ ] `/adm/admin_event_bundle_edit.php`
-- [ ] `/adm/admin_event_edit.php`
-- [ ] `/adm/admin_event_session_edit.php`
-- [ ] `/adm/admin_event_type_edit.php`
+#### Pending Conversion (21 pages)
 
 **L-M:**
-- [ ] `/adm/admin_log_event.php`
 - [ ] `/adm/admin_mailing_list_edit.php`
 - [ ] `/adm/admin_message.php`
 
@@ -112,6 +102,16 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_product_group_edit.php` - ✅ **COMPLETED** (simple form with textinput and textbox)
 - [x] `/adm/admin_product_requirement_edit.php` - ✅ **COMPLETED** (dropdowns with load, file dropdown, textinput)
 - [x] `/adm/admin_product_version_edit.php` - ✅ **COMPLETED** (conditional field visibility for new vs existing versions, Stripe integration, trial period fields)
+
+**E - Event-Related Forms:**
+- [x] `/adm/admin_email_recipients_modify.php` - ✅ **COMPLETED** (two V2 forms with dropinput for groups/events, hiddeninput fields, conditional display)
+- [x] `/adm/admin_email_template_edit.php` - ✅ **COMPLETED** (V2 form with textinput, textbox, dropinput, two-column layout with version history sidebar)
+- [x] `/adm/admin_event.php` - ✅ **COMPLETED** (display page with minimal form, uses V2 for form buttons)
+- [x] `/adm/admin_event_bundle_edit.php` - ✅ **COMPLETED** (V2 form with textinput, checkboxList for event selection, model-based validation)
+- [x] `/adm/admin_event_edit.php` - ✅ **COMPLETED** (complex V2 form with 20+ fields, dropinput with visibility rules, datetimeinput, textbox with htmlmode, content version sidebar)
+- [x] `/adm/admin_event_session_edit.php` - ✅ **COMPLETED** (V2 form with datetimeinput, dropinput for videos/files, textbox with htmlmode, multiple action forms for file management)
+- [x] `/adm/admin_event_type_edit.php` - ✅ **COMPLETED** (simple V2 form with single textinput field)
+- [x] `/adm/admin_log_event.php` - ✅ **COMPLETED** (simple V2 form with hiddeninput fields, confirmation page)
 
 **Q-S:**
 - [ ] `/adm/admin_question.php`
@@ -456,13 +456,17 @@ $formwriter->checkboxList('options', 'Options', [
 
 ##### DateTime Conversion
 
-**Automatic Processing - Zero Manual Code Required!**
+**V2 Provides Automatic Timezone Conversion in Both Directions**
+
+###### In the View File (admin_page_edit.php)
+
+On form display, FormWriter V2 automatically converts UTC datetimes to user's local timezone:
 
 ```php
 // V1
 echo $formwriter->datetimeinput('Start Time', 'start_time', 'ctrlHolder', $value, '', '', '');
 
-// V2 - FULLY AUTOMATIC TIMEZONE CONVERSION
+// V2 - AUTOMATIC DISPLAY CONVERSION (UTC → User's Timezone)
 $event = new Event($event_id, TRUE);
 
 // Create FormWriter with model - automatic form filling + automatic timezone conversion
@@ -473,23 +477,105 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 $formwriter->datetimeinput('evt_start_time', 'Start Time');
 ```
 
-**How it works automatically:**
+**How display works automatically:**
+- `$event->export_as_array()` creates DateTime objects with UTC timezone set
+- FormWriter V2 constructor detects DateTime objects with UTC timezone
+- Automatically converts to user's local timezone using `LibraryFunctions::convert_time()`
+- User sees times in their local timezone
 
-1. **On Form Display (automatic):**
-   - `$event->export_as_array()` creates DateTime objects with UTC timezone set
-   - FormWriter V2 constructor detects DateTime objects with UTC timezone
-   - Automatically converts to user's local timezone using `LibraryFunctions::convert_time()`
-   - No manual conversion code needed!
+###### In the Logic File (admin_page_edit_logic.php)
 
-2. **On Form Submission (automatic):**
-   - FormWriter V2's `getFieldValue()` method processes datetime fields
-   - Automatically converts user's local time back to UTC for database storage
-   - Handles field name parsing (`_date`, `_time_hour`, `_time_minute`, `_time_ampm`)
-   - No manual processing code needed!
+On form submission, the logic file must use `FormWriterV2Base::process_datetimeinput()` to convert user's local time back to UTC:
+
+```php
+<?php
+require_once(__DIR__ . '/../../includes/PathHelper.php');
+
+function admin_event_edit_logic($get_vars, $post_vars) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));  // ← REQUIRED
+    require_once(PathHelper::getIncludePath('data/events_class.php'));
+
+    // ... permission checks, object loading ...
+
+    if($post_vars){
+        // ✅ CRITICAL: Use FormWriterV2Base::process_datetimeinput() to convert timezone
+        // This converts user's local time → UTC for database storage
+        $start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_start_time', true);
+        if($start_time !== NULL){
+            $event->set('evt_start_time', $start_time);
+        }
+
+        $end_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_end_time', true);
+        if($end_time !== NULL){
+            $event->set('evt_end_time', $end_time);
+        }
+
+        // ... handle other fields ...
+
+        $event->prepare();
+        $event->save();
+        return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
+    }
+
+    // ... render form ...
+}
+?>
+```
+
+**How submission works:**
+
+1. FormWriter V2 sends datetime as three POST fields:
+   - `evt_start_time_dateinput` - The date (YYYY-MM-DD)
+   - `evt_start_time_timeinput_hour` - The hour
+   - `evt_start_time_timeinput_minute` - The minute
+   - `evt_start_time_timeinput_ampm` - AM/PM indicator
+
+2. `FormWriterV2Base::process_datetimeinput()` does:
+   - Combines the date/time/ampm fields into a datetime string
+   - Converts from user's local timezone to UTC (if second parameter is `true`)
+   - Returns UTC-formatted datetime string ready for database storage
+   - Returns NULL if any field is missing
+
+3. Set the converted value on your object:
+   ```php
+   if($start_time !== NULL){
+       $event->set('evt_start_time', $start_time);
+   }
+   ```
+
+**Method signature:**
+```php
+FormWriterV2Base::process_datetimeinput($post_vars, $field_name, $to_utc = true)
+// Returns: UTC datetime string or NULL
+```
+
+**Parameters:**
+- `$post_vars` - The $_POST array
+- `$field_name` - Base field name (e.g., 'evt_start_time') - method automatically looks for `_dateinput`, `_timeinput_*` suffixes
+- `$to_utc` - If true, converts from user's timezone to UTC; if false, returns as-is
+
+**Complete datetime field flow example:**
+
+```php
+// VIEW FILE (automatic)
+$formwriter = $page->getFormWriter('form1', 'v2', ['model' => $event]);
+$formwriter->datetimeinput('evt_start_time', 'Event start time');
+// User sees: Oct 27, 2025 2:30 PM (their timezone)
+
+// LOGIC FILE (must process in submit handler)
+if($post_vars){
+    $start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_start_time', true);
+    if($start_time !== NULL){
+        $event->set('evt_start_time', $start_time);  // Stored as UTC in database
+    }
+    $event->save();
+}
+```
 
 **Override automatic conversion if needed:**
 
-If you want to pass a pre-converted or custom datetime value, use the `values` option:
+If you want to pass a pre-converted or custom datetime value, use the `values` option in the view:
 
 ```php
 $override_values = [
@@ -503,9 +589,13 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 ```
 
 **Important Notes:**
-- `datetimeinput()` accepts DateTime objects or strings for maximum compatibility
-- DateTime conversion only applies to DateTime objects with UTC timezone
-- If you pass a non-UTC DateTime or a raw string in values, conversion is skipped
+- ✅ Always use `FormWriterV2Base::process_datetimeinput()` in logic files for datetime fields
+- ✅ Always pass `true` as the third parameter to convert to UTC
+- ✅ Check for NULL return value before setting (user may have cleared the field)
+- ✅ Require FormWriterV2Base.php in your logic file
+- ❌ Don't manually parse the `_dateinput`, `_timeinput_*` POST fields - use the helper method
+- DateTime conversion only applies to DateTime objects with UTC timezone in view files
+- If you pass a non-UTC DateTime or raw string in values, conversion is skipped
 - All date/time conversions use the user's session timezone from `SessionControl::get_timezone()`
 
 ##### HiddenInput Conversion
