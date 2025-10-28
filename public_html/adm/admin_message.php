@@ -54,8 +54,6 @@
 	}
 	$page->begin_box($options);
 
-	$formwriter = $page->getFormWriter('form1');
-
 	/*
  	echo '<div id="actionmenu"><div id="actiontitle">Page Actions</div><ul>'
 	echo '<li><a class="sortlink" href="/admin/admin_message_edit?msg_message_id='.$message->key.'">[Edit Message]</a></li>';

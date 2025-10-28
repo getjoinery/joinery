@@ -87,7 +87,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **L-M:**
 - [ ] `/adm/admin_mailing_list_edit.php`
-- [ ] `/adm/admin_message.php`
+- [x] `/adm/admin_message.php` - ✅ **COMPLETED** (view-only display page, no FormWriter needed)
 
 **O:**
 - [ ] `/adm/admin_order_edit.php`
@@ -104,14 +104,14 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_product_version_edit.php` - ✅ **COMPLETED** (conditional field visibility for new vs existing versions, Stripe integration, trial period fields)
 
 **E - Event-Related Forms:**
-- [x] `/adm/admin_email_recipients_modify.php` - ✅ **COMPLETED** (two V2 forms with dropinput for groups/events, hiddeninput fields, conditional display)
-- [x] `/adm/admin_email_template_edit.php` - ✅ **COMPLETED** (V2 form with textinput, textbox, dropinput, two-column layout with version history sidebar)
-- [x] `/adm/admin_event.php` - ✅ **COMPLETED** (display page with minimal form, uses V2 for form buttons)
-- [x] `/adm/admin_event_bundle_edit.php` - ✅ **COMPLETED** (V2 form with textinput, checkboxList for event selection, model-based validation)
-- [x] `/adm/admin_event_edit.php` - ✅ **COMPLETED** (complex V2 form with 20+ fields, dropinput with visibility rules, datetimeinput, textbox with htmlmode, content version sidebar)
-- [x] `/adm/admin_event_session_edit.php` - ✅ **COMPLETED** (V2 form with datetimeinput, dropinput for videos/files, textbox with htmlmode, multiple action forms for file management)
-- [x] `/adm/admin_event_type_edit.php` - ✅ **COMPLETED** (simple V2 form with single textinput field)
-- [x] `/adm/admin_log_event.php` - ✅ **COMPLETED** (simple V2 form with hiddeninput fields, confirmation page)
+- [x] `/adm/admin_email_recipients_modify.php` - ✅ **TESTED & APPROVED** (two V2 forms with dropinput for groups/events, hiddeninput fields, conditional display)
+- [x] `/adm/admin_email_template_edit.php` - ✅ **TESTED & APPROVED** (V2 form with textinput, textbox, dropinput, two-column layout with version history sidebar)
+- [x] `/adm/admin_event.php` - ✅ **TESTED & APPROVED** (display page with minimal form, uses V2 for form buttons, sessions table with edit/delete buttons)
+- [x] `/adm/admin_event_bundle_edit.php` - ✅ **TESTED & APPROVED** (V2 form with textinput, checkboxList for event selection, model-based validation)
+- [x] `/adm/admin_event_edit.php` - ✅ **TESTED & APPROVED** (complex V2 form with 20+ fields, dropinput with visibility rules, datetimeinput with timezone conversion, textbox with htmlmode, content version sidebar)
+- [x] `/adm/admin_event_session_edit.php` - ✅ **TESTED & APPROVED** (V2 form with datetimeinput with timezone conversion, dropinput for videos/files, textbox with htmlmode, multiple action forms for file management, file upload bulk functionality)
+- [x] `/adm/admin_event_type_edit.php` - ✅ **TESTED & APPROVED** (simple V2 form with single textinput field)
+- [x] `/adm/admin_log_event.php` - ✅ **TESTED & APPROVED** (simple V2 form with hiddeninput fields, confirmation page)
 
 **Q-S:**
 - [ ] `/adm/admin_question.php`
