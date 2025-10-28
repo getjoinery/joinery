@@ -154,6 +154,184 @@ This is set in `AdminPage.getFormWriter()` for all V2 forms:
 
 ---
 
+#### Step 1b: Standardized Add/Edit Pattern (CRITICAL)
+
+**This pattern MUST be used consistently across all add/edit forms. Deviations cause 50% of migration bugs.**
+
+##### View File Pattern (admin_page_edit.php)
+
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_page_edit_logic.php'));
+
+// ✅ CRITICAL: Call logic function with $_GET and $_POST
+$page_vars = process_logic(admin_page_edit_logic($_GET, $_POST));
+extract($page_vars);
+
+$page = new AdminPage();
+$page->admin_header([...]);
+$page->begin_box($pageoptions);
+
+// Prepare override values if needed (e.g., defaults, conditional fields)
+$override_values = [
+    'field_name' => $some_value  // Only override if needed
+];
+
+// ✅ CRITICAL: Create FormWriter with model
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $object,           // Model for auto-fill
+    'values' => $override_values   // Override specific fields
+]);
+
+$formwriter->begin_form();
+
+// ✅ CRITICAL: Check if editing vs creating NEW RECORD
+if($object->key){
+    // EDITING existing record - include primary key as hidden field
+    $formwriter->hiddeninput('obj_object_id', ['value' => $object->key]);
+    $formwriter->hiddeninput('action', ['value' => 'edit']);
+}
+// If creating NEW record, don't include primary key hidden field
+// Logic will detect this as 'add' because no primary key in POST
+
+// Add form fields (no manual 'value' needed - auto-filled from model)
+$formwriter->textinput('obj_name', 'Name');
+$formwriter->textbox('obj_description', 'Description');
+
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
+
+$page->end_box();
+$page->admin_footer();
+?>
+```
+
+##### Logic File Pattern (admin_page_edit_logic.php)
+
+```php
+<?php
+require_once(__DIR__ . '/../../includes/PathHelper.php');
+
+function admin_page_edit_logic($get_vars, $post_vars) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('data/pages_class.php'));
+
+    $session = SessionControl::get_instance();
+    $session->check_permission(5);
+
+    // ✅ CRITICAL: Load object from GET parameter (URL when page first loads)
+    // Primary key will ONLY come from GET on first load
+    if (isset($get_vars['obj_object_id'])) {
+        $object = new Page($get_vars['obj_object_id'], TRUE);
+    } else {
+        $object = new Page(NULL);  // Creating NEW object
+    }
+
+    // ✅ CRITICAL: Check for POST submission (form submit)
+    if($post_vars){
+
+        // Define which fields can be edited
+        $editable_fields = array('obj_name', 'obj_description', 'obj_is_active');
+
+        // Set each field from POST data
+        foreach($editable_fields as $field) {
+            $object->set($field, $post_vars[$field]);
+        }
+
+        // Handle special fields (links, timestamps, etc.)
+        if(!$object->get('obj_link') || $_SESSION['permission'] == 10){
+            if($post_vars['obj_link']){
+                $object->set('obj_link', $object->create_url($post_vars['obj_link']));
+            }
+        }
+
+        // Prepare and save (prepare() does validation)
+        $object->prepare();
+        $object->save();
+        $object->load();  // Reload to get any DB-generated values
+
+        // ✅ CRITICAL: Redirect using primary key
+        // This ensures user sees the newly created object if it was an add
+        return LogicResult::redirect('/admin/admin_object?obj_object_id='.$object->key);
+    }
+
+    // Not a POST submission - just render the form
+    $page_vars = array(
+        'object' => $object,
+        'session' => $session,
+    );
+
+    return LogicResult::render($page_vars);
+}
+?>
+```
+
+##### Key Rules (Memorize These!)
+
+1. **View File - Primary Key Hidden Field**
+   ```php
+   if($object->key){  // If object has a primary key, it's an EDIT
+       $formwriter->hiddeninput('obj_object_id', ['value' => $object->key]);
+       $formwriter->hiddeninput('action', ['value' => 'edit']);  // Optional but recommended
+   }
+   // If no primary key (NULL), it's an ADD - don't include hidden field
+   ```
+
+2. **Logic File - Load from GET**
+   ```php
+   // Load on first page visit (GET request)
+   if (isset($get_vars['obj_object_id'])) {
+       $object = new Page($get_vars['obj_object_id'], TRUE);
+   } else {
+       $object = new Page(NULL);  // NEW record
+   }
+   ```
+
+3. **Logic File - Process POST**
+   ```php
+   // Form submission (POST request)
+   if($post_vars){
+       // Set fields, prepare, save
+       // NO NEED to check action value - both add and edit use same code
+       $object->prepare();
+       $object->save();
+       // Always redirect using primary key (will be generated if new)
+       return LogicResult::redirect('/admin/admin_object?obj_object_id='.$object->key);
+   }
+   ```
+
+4. **Don't Do This** ❌
+   ```php
+   // ❌ WRONG - Trying to get primary key from POST
+   $primary_key = $post_vars['obj_object_id'] ?? $get_vars['obj_object_id'];
+
+   // ❌ WRONG - Including primary key hidden field for new records
+   if(!$object->key){
+       $formwriter->hiddeninput('obj_object_id', ['value' => '']);
+   }
+
+   // ❌ WRONG - Checking action to decide whether to save
+   if ($post_vars['action'] == 'add' || $post_vars['action'] == 'edit') {
+       // Different processing for add vs edit
+   }
+   ```
+
+##### Add vs Edit - How It Works
+
+The system automatically distinguishes add from edit:
+
+| Scenario | Primary Key | Hidden Field | Logic Processing |
+|----------|-------------|--------------|------------------|
+| **Load NEW form** | NULL | Not included | render display |
+| **Submit NEW form (add)** | NULL | Not in POST | save() creates new record |
+| **Load EDIT form** | 123 | Included as hidden | render display |
+| **Submit EDIT form** | 123 | Included in POST | save() updates existing |
+
+**No action checking needed!** The presence/absence of the primary key tells the system whether it's add or edit.
+
+---
+
 #### Step 2: Analyze Current V1 Form
 
 Read the current admin page and identify:
