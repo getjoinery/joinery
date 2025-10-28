@@ -915,6 +915,56 @@ $formwriter->textinput('loc_link', 'Link', [
 
 ---
 
+### Pattern 8: GET variable naming standardization
+
+**Important:** When migrating forms that use GET variables (especially in logic files), standardize abbreviated parameter names to full column names.
+
+**Problem - Abbreviated GET variables:**
+```php
+// V1 - uses abbreviated parameter 'p' for product_id
+if (isset($get_vars['p']) || isset($post_vars['p'])) {
+    $product_id = isset($post_vars['p']) ? $post_vars['p'] : $get_vars['p'];
+    $product = new Product($product_id, TRUE);
+}
+
+// In the view, edit link uses abbreviation:
+// '/admin/admin_product_edit?p=' . $product->key
+```
+
+**Issues this causes:**
+- Inconsistent naming across codebase (some pages use 'p', others use full names)
+- Hard to understand what 'p' means without context
+- Breaks form submission when view file uses different parameter name than logic expects
+- Makes code harder to maintain and audit
+
+**Solution - Use full column names:**
+```php
+// ✅ CORRECT - Uses full parameter name
+if (isset($get_vars['pro_product_id']) || isset($post_vars['pro_product_id'])) {
+    $product_id = isset($post_vars['pro_product_id']) ? $post_vars['pro_product_id'] : $get_vars['pro_product_id'];
+    $product = new Product($product_id, TRUE);
+}
+
+// In the view, edit link uses full name:
+// '/admin/admin_product_edit?pro_product_id=' . $product->key
+```
+
+**Conversion checklist:**
+- [ ] Check logic files for abbreviated GET parameter usage (look for `$_GET['x']`, `$get_vars['x']` where x is 1-2 chars)
+- [ ] Replace with full column name from database schema (e.g., `pro_product_id`, `usr_user_id`)
+- [ ] Update edit/action links in view files to match
+- [ ] Update view file forms to use matching parameter names in hidden inputs
+- [ ] Test form submission to ensure parameters are received by logic file
+
+**Common abbreviations to standardize:**
+- `'p'` → `'pro_product_id'` (product)
+- `'u'` → `'usr_user_id'` (user)
+- `'e'` → `'evt_event_id'` (event)
+- `'l'` → `'loc_location_id'` (location)
+- `'v'` → version IDs (check context - may need full name like `'prv_product_version_id'`)
+
+---
+
 ### Gotcha: Disabling validation accidentally
 
 **Problem:**
