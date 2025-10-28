@@ -84,15 +84,11 @@
 
 	// Editing an existing public menu
 	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $public_menu
+		'model' => $public_menu,
+		'edit_primary_key_value' => $public_menu->key
 	]);
 
 	$formwriter->begin_form();
-
-	if($public_menu->key){
-		$formwriter->hiddeninput('pmu_public_menu_id', ['value' => $public_menu->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('pmu_name', 'Menu name', [
 		'validation' => ['required' => true]

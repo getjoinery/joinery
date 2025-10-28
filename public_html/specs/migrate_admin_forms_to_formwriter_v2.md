@@ -213,23 +213,24 @@ function admin_page_edit_logic($get_vars, $post_vars) {
     $session = SessionControl::get_instance();
     $session->check_permission(5);
 
-    // ✅ CRITICAL: Check for edit_primary_key_value to determine add vs edit
+    // ✅ CRITICAL: Check for edit_primary_key_value (form submission)
+    // Fallback to GET for initial page load
     if (isset($post_vars['edit_primary_key_value'])) {
-        // EDIT: Load existing object using the hidden field value
+        // Form submission with hidden field
         $object = new Page($post_vars['edit_primary_key_value'], TRUE);
+    } elseif (isset($get_vars['obj_object_id'])) {
+        // Initial page load from URL parameter
+        $object = new Page($get_vars['obj_object_id'], TRUE);
     } else {
-        // ADD: Create new object
+        // Creating new object
         $object = new Page(NULL);
     }
-
-    // Set flag for cleaner conditionals
-    $is_edit = isset($post_vars['edit_primary_key_value']);
 
     // ✅ CRITICAL: Check for POST submission (form submit)
     if($post_vars){
 
         // Add-only logic (runs only when creating new records)
-        if (!$is_edit) {
+        if (!$object->key) {
             $object->set('obj_created_by', $session->get_user_id());
         }
 
@@ -281,24 +282,23 @@ function admin_page_edit_logic($get_vars, $post_vars) {
    // FormWriter automatically generates the hidden field
    ```
 
-2. **Logic File - Check edit_primary_key_value**
+2. **Logic File - Check edit_primary_key_value (with GET fallback)**
    ```php
-   // Check the standardized hidden field
+   // POST check first (form submission), fallback to GET (initial page load)
    if (isset($post_vars['edit_primary_key_value'])) {
        $object = new Page($post_vars['edit_primary_key_value'], TRUE);  // EDIT
+   } elseif (isset($get_vars['obj_object_id'])) {
+       $object = new Page($get_vars['obj_object_id'], TRUE);  // Initial load
    } else {
        $object = new Page(NULL);  // ADD
    }
-
-   // Set flag for cleaner conditionals
-   $is_edit = isset($post_vars['edit_primary_key_value']);
    ```
 
 3. **Logic File - Process POST**
    ```php
    if($post_vars){
-       // Add-only logic
-       if (!$is_edit) {
+       // Add-only logic - use $object->key check
+       if (!$object->key) {
            $object->set('obj_created_by', $session->get_user_id());
        }
 
@@ -320,14 +320,13 @@ function admin_page_edit_logic($get_vars, $post_vars) {
    // ❌ WRONG - Using action field
    $formwriter->hiddeninput('action', ['value' => 'edit']);
 
-   // ❌ WRONG - Loading from GET in logic
-   if (isset($get_vars['obj_object_id'])) {
-       $object = new Page($get_vars['obj_object_id'], TRUE);
-   }
+   // ❌ WRONG - Setting unnecessary $is_edit variable
+   $is_edit = isset($post_vars['edit_primary_key_value']);
+   if (!$is_edit) { ... }  // Use $object->key instead
 
    // ❌ WRONG - Checking action value
    if ($post_vars['action'] == 'edit') {
-       // Don't branch on action
+       // Don't use action fields
    }
    ```
 
@@ -342,7 +341,11 @@ The system uses the standardized `edit_primary_key_value` hidden field:
 | **Load EDIT form** | 123 | Passed to FormWriter | render display |
 | **Submit EDIT form** | 123 | Included in POST | save() updates existing |
 
-**No action field or GET checking needed!** The presence/absence of `edit_primary_key_value` tells the system whether it's add or edit.
+**How the flow works:**
+- Initial page load: GET parameter loads the object
+- Form submission: POST with `edit_primary_key_value` hidden field loads the object
+- Save logic: Model's `save()` method automatically INSERTs (null key) or UPDATEs (non-null key)
+- Conditional logic: Use `$object->key` check when needed (no separate `$is_edit` variable needed)
 
 ---
 

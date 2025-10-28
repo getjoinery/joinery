@@ -9,7 +9,9 @@ function admin_comment_edit_logic($get_vars, $post_vars) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
-	if (isset($get_vars['cmt_comment_id'])) {
+	if (isset($post_vars['edit_primary_key_value'])) {
+		$comment = new Comment($post_vars['edit_primary_key_value'], TRUE);
+	} elseif (isset($get_vars['cmt_comment_id'])) {
 		$comment = new Comment($get_vars['cmt_comment_id'], TRUE);
 	} else {
 		$comment = new Comment(NULL);

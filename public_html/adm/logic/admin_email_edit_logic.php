@@ -14,9 +14,10 @@ function admin_email_edit_logic($get_vars, $post_vars) {
 	$settings = Globalvars::get_instance();
 
 	// Load or create email
-	if (isset($get_vars['eml_email_id']) || isset($post_vars['eml_email_id'])) {
-		$eml_email_id = isset($post_vars['eml_email_id']) ? $post_vars['eml_email_id'] : $get_vars['eml_email_id'];
-		$email = new Email($eml_email_id, TRUE);
+	if (isset($post_vars['edit_primary_key_value'])) {
+		$email = new Email($post_vars['edit_primary_key_value'], TRUE);
+	} elseif (isset($get_vars['eml_email_id'])) {
+		$email = new Email($get_vars['eml_email_id'], TRUE);
 	} else {
 		$email = new Email(NULL);
 	}

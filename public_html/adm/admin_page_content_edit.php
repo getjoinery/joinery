@@ -104,16 +104,12 @@
 
 	$formwriter = $page->getFormWriter('form1', 'v2', [
 		'model' => $page_content,
-		'values' => $override_values
+		'values' => $override_values,
+		'edit_primary_key_value' => $page_content->key
 	]);
 	// Note: $page here is the AdminPage object, $page_content is the PageContent model
 
 	$formwriter->begin_form();
-
-	if($page_content->key){
-		$formwriter->hiddeninput('pac_page_content_id', ['value' => $page_content->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('pac_location_name', 'Name for this content', [
 		'validation' => ['required' => true]
