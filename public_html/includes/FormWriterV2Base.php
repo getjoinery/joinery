@@ -760,11 +760,6 @@ abstract class FormWriterV2Base {
      * @param string $label Field label
      * @param array $options Field options
      */
-    public function textarea($name, $label = '', $options = []) {
-        $this->registerField($name, 'textarea', $label, $options);
-        $this->outputTextarea($name, $label, $options);
-    }
-
     /**
      * Create a select dropdown field
      *
@@ -1338,7 +1333,6 @@ abstract class FormWriterV2Base {
 
     abstract protected function outputTextInput($name, $label, $options);
     abstract protected function outputPasswordInput($name, $label, $options);
-    abstract protected function outputTextarea($name, $label, $options);
     abstract protected function outputDropInput($name, $label, $options);
     abstract protected function outputCheckboxInput($name, $label, $options);
     abstract protected function outputRadioInput($name, $label, $options);

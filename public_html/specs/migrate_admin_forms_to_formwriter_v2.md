@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 32/69 completed + 1 pending testing = 33/69 total work done (46.4% completed, 1.4% pending user testing)**
+**Progress: 36/69 completed + 1 pending testing = 37/69 total work done (52.2% completed, 1.4% pending user testing)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -108,10 +108,10 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 **P:**
 - [ ] `/adm/admin_page_content_edit.php`
 - [ ] `/adm/admin_page_edit.php`
-- [ ] `/adm/admin_product_edit.php`
-- [ ] `/adm/admin_product_group_edit.php`
-- [ ] `/adm/admin_product_requirement_edit.php`
-- [ ] `/adm/admin_product_version_edit.php`
+- [x] `/adm/admin_product_edit.php` - ✅ **COMPLETED** (uses checkboxList with readonly handling, multiple dropdowns, textarea fields, model-based auto-fill, subscription tier dropdown with custom formatting)
+- [x] `/adm/admin_product_group_edit.php` - ✅ **COMPLETED** (simple form with textinput and textarea)
+- [x] `/adm/admin_product_requirement_edit.php` - ✅ **COMPLETED** (dropdowns with load, file dropdown, textinput)
+- [x] `/adm/admin_product_version_edit.php` - ✅ **COMPLETED** (conditional field visibility for new vs existing versions, Stripe integration, trial period fields)
 
 **Q-S:**
 - [ ] `/adm/admin_question.php`

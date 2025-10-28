@@ -39,7 +39,7 @@
 		'options' => ['No' => 0, 'Yes' => 1]
 	]);
 
-	$formwriter->textarea('cmt_body', 'Comment', [
+	$formwriter->textbox('cmt_body', 'Comment', [
 		'rows' => 5,
 		'cols' => 80,
 		'validation' => ['required' => true, 'minlength' => 10]

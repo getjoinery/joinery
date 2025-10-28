@@ -30,19 +30,19 @@ array(
 
 $page->begin_box($options);
 
-// Editing an existing product
-$formwriter = $page->getFormWriter('form1');
+// Set default product status for new products
+if (!$product->key) {
+	$override_values = ['pro_is_active' => 1];
+} else {
+	$override_values = [];
+}
 
-$validation_rules = array();
-
-$validation_rules['pro_name']['required']['value'] = 'true';
-$validation_rules['pro_name']['maxlength']['value'] = 255;
-$validation_rules['pro_link']['required']['value'] = 'true';
-$validation_rules['pro_max_cart_count']['required']['value'] = 'true';
-$validation_rules['pro_max_purchase_count']['required']['value'] = 'true';
-$validation_rules['pro_requirements']['required']['value'] = 'true';
-
-echo $formwriter->set_validate($validation_rules);
+// FormWriter V2 with model and edit_primary_key_value
+$formwriter = $page->getFormWriter('form1', 'v2', [
+	'model' => $product,
+	'edit_primary_key_value' => $product->key,
+	'values' => $override_values
+]);
 
 ?>
 <script type="text/javascript">
@@ -72,42 +72,51 @@ echo $formwriter->set_validate($validation_rules);
 </script>
 <?php
 
-echo $formwriter->begin_form('form1', 'POST', '/admin/admin_product_edit');
+$formwriter->begin_form();
 
-if($product->key){
-	$action = 'edit';
-	echo $formwriter->hiddeninput('p', $product->key);
-	echo $formwriter->hiddeninput('action', 'edit');
-	$product_status = $product->get('pro_is_active');
-}
-else{
-	$action = 'add';
-	echo $formwriter->hiddeninput('action', 'add');
-	$product_status = 1;
-}
+$formwriter->dropinput('pro_is_active', 'Active?', [
+	'options' => ['Disabled' => 0, 'Active' => 1],
+	'value' => !$product->key ? 1 : NULL
+]);
 
-$optionvals = array("Active"=>1, "Disabled"=>0 );
-echo $formwriter->dropinput("Active?", "pro_is_active", "ctrlHolder", $optionvals, $product_status, '', FALSE);
-echo $formwriter->textinput('Product Name', 'pro_name', NULL, 100, $product->get('pro_name'), '', 255, '');
+$formwriter->textinput('pro_name', 'Product Name', [
+	'validation' => ['required' => true, 'maxlength' => 255]
+]);
 
-echo $formwriter->textbox('Short Description', 'pro_short_description', 'ctrlHolder', 5, 80, $product->get('pro_short_description'), '', 'yes');
-echo $formwriter->textbox('Description', 'pro_description', 'ctrlHolder', 5, 80, $product->get('pro_description'), '', 'yes');
+$formwriter->textbox('pro_short_description', 'Short Description', [
+	'rows' => 5,
+	'cols' => 80,
+	'htmlmode' => 'yes'
+]);
 
-echo $formwriter->textinput('Digital item link', 'pro_digital_link', NULL, 100, $product->get('pro_digital_link'), '', 255, '');
+$formwriter->textbox('pro_description', 'Description', [
+	'rows' => 5,
+	'cols' => 80,
+	'htmlmode' => 'yes'
+]);
+
+$formwriter->textinput('pro_digital_link', 'Digital item link', [
+	'validation' => ['maxlength' => 255]
+]);
 
 if($numevents){
 	$optionvals = $events->get_dropdown_array();
-	echo $formwriter->dropinput("Event registration", "pro_evt_event_id", "ctrlHolder", $optionvals, $product->get('pro_evt_event_id'), '', TRUE);
+	$formwriter->dropinput('pro_evt_event_id', 'Event registration', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
 }
 
 if($numbundles){
 	$optionvals = $groups->get_dropdown_array();
-	echo $formwriter->dropinput("Event Bundle", "pro_grp_group_id", "ctrlHolder", $optionvals, $product->get('pro_grp_group_id'), '', TRUE);
+	$formwriter->dropinput('pro_grp_group_id', 'Event Bundle', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
 }
 
-// Add Subscription Tier dropdown
-$tier_options = array('-- None --' => '');
-
+// Subscription Tier dropdown
+$tier_options = ['-- None --' => ''];
 foreach ($subscription_tiers as $tier) {
 	$display_name = sprintf(
 		'%s (Level %d)',
@@ -116,83 +125,80 @@ foreach ($subscription_tiers as $tier) {
 	);
 	$tier_options[$display_name] = $tier->key;
 }
+$formwriter->dropinput('pro_sbt_subscription_tier_id', 'Subscription Tier', [
+	'options' => $tier_options,
+	'help_text' => 'Select a tier this product grants when purchased',
+	'empty_option' => '-- Select --'
+]);
 
-echo $formwriter->dropinput(
-	"Subscription Tier",
-	"pro_sbt_subscription_tier_id",
-	"ctrlHolder",
-	$tier_options,
-	$product->get('pro_sbt_subscription_tier_id'),
-	'Select a tier this product grants when purchased',
-	TRUE
-);
+$formwriter->textinput('pro_max_purchase_count', 'Total Number available for purchase (0 for unlimited)', [
+	'validation' => ['required' => true]
+]);
 
-if(!$pro_max_purchase_count_fill = $product->get('pro_max_purchase_count')){
-	$pro_max_purchase_count_fill = 0;
-}
-echo $formwriter->textinput('Total Number available for purchase (0 for unlimited):', 'pro_max_purchase_count', 'ctrlHolder', 100, $pro_max_purchase_count_fill, '', 3, '');
+$formwriter->textinput('pro_max_cart_count', 'Max Number that can be added to cart per user (0 for unlimited)', [
+	'validation' => ['required' => true]
+]);
 
-if(!$pro_max_cart_count_fill = $product->get('pro_max_cart_count')){
-	$pro_max_cart_count_fill = 0;
-}
-echo $formwriter->textinput('Max Number that can be added to cart per user (0 for unlimited):', 'pro_max_cart_count', 'ctrlHolder', 100, $pro_max_cart_count_fill, '', 3, '');
-
-if(!$pro_expires_fill = $product->get('pro_expires')){
-	$pro_expires_fill = 0;
-}
-echo $formwriter->textinput('Purchase expires after (days, 0 for never)', 'pro_expires', NULL, 100, $pro_expires_fill, '', 4, '');
+$formwriter->textinput('pro_expires', 'Purchase expires after (days, 0 for never)');
 
 if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
-	echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/product/', 'pro_link', NULL, 100, $product->get('pro_link'), '', 255, '');
+	$formwriter->textinput('pro_link', 'Link (optional): '.$settings->get_setting('webDir').'/product/', [
+		'validation' => ['required' => true, 'maxlength' => 255]
+	]);
 }
 
 if($has_product_groups){
 	$optionvals = $pgs->get_dropdown_array();
-	echo $formwriter->dropinput("Product Group", "pro_prg_product_group_id", "ctrlHolder", $optionvals, $product->get('pro_prg_product_group_id'), '', TRUE);
+	$formwriter->dropinput('pro_prg_product_group_id', 'Product Group', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
 }
 
+// Info to collect at purchase - with readonly handling
 $optionvals = array(
 	'Name' => 1,
 	'Email' => 64,
 	'Phone Number' => 2,
 	'Date of Birth' => 4,
 	'Address' => 8,
-	//'GDPR Notice' => 16,
 	'Consent to record' => 32,
 	'Optional One-time Donation' => 128,
 	'Newsletter Signup' => 256,
 	'Comment' => 512
 );
+
 if ($product->key) {
-	//FILL THE CHECKED VALUES AND DECLARE EMAIL AND NAME READ ONLY
+	//FILL THE CHECKED VALUES
 	$checkedvals = $product->get_requirement_info('ids');
 	$checkedvals[] = 1;
 	$checkedvals[] = 64;
-	$readonlyvals = array(1, 64); //DEFAULT
-}
-else{
+} else {
 	$checkedvals = array(1, 64);
-	$readonlyvals = array(1, 64); //DEFAULT
 }
-$disabledvals = array();
 
-echo $formwriter->checkboxList("Info to collect at purchase", 'pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+$formwriter->checkboxList('pro_requirements', 'Info to collect at purchase', [
+	'options' => $optionvals,
+	'checked' => $checkedvals,
+	'validation' => ['required' => true]
+]);
 
-//PRODUCT SCRIPTS
+// Product Scripts
 if(!empty($product_scripts_optionvals)){
 	$optionvals = array_combine($product_scripts_optionvals, $product_scripts_optionvals);
-	$readonlyvals = array();
-	$checkedvals = explode(',', $product->get('pro_product_scripts'));
-	$disabledvals = array();
-	echo $formwriter->checkboxList("Run these scripts upon purchase", 'product_scripts', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	$checkedvals = array_filter(explode(',', $product->get('pro_product_scripts')));
+
+	$formwriter->checkboxList('product_scripts', 'Run these scripts upon purchase', [
+		'options' => $optionvals,
+		'checked' => $checkedvals
+	]);
 }
 
+// Additional Product Requirements
 if($has_product_requirements){
 	$optionvals = $product_requirements->get_dropdown_array();
 
-	$readonlyvals = array();
 	$checkedvals = array();
-	$disabledvals = array();
 	foreach ($product_requirements as $product_requirement){
 		if($product_requirement->get('prq_is_default_checked')){
 			$checkedvals[] = $product_requirement->key;
@@ -205,30 +211,14 @@ if($has_product_requirements){
 		}
 	}
 
-	echo $formwriter->checkboxList("Additional Info to collect at purchase", 'additional_pro_requirements', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	$formwriter->checkboxList('additional_pro_requirements', 'Additional Info to collect at purchase', [
+		'options' => $optionvals,
+		'checked' => $checkedvals
+	]);
 }
 
-//echo $formwriter->textinput('After Purchase Message', 'pro_after_purchase_message', 'ctrlHolder', 100, $product->get('pro_after_purchase_message'), '', 255);
-
-/*
-//REMOVED
-$templates = new MultiEmailTemplateStore(
-	array('template_type' => EmailTemplateStore::TEMPLATE_TYPE_INNER),
-	NULL,		//SORT BY => DIRECTION
-	NULL,  //NUM PER PAGE
-	NULL);  //OFFSET
-$templates->load();
-$optionvals = $templates->get_dropdown_array();
-echo $formwriter->dropinput("Receipt template", "pro_receipt_template", "ctrlHolder", $optionvals, $product->get('pro_receipt_template'), '', TRUE);
-
-echo $formwriter->textinput('Receipt subject (if no template chosen)', 'pro_receipt_subject', NULL, 100, $product->get('pro_receipt_subject'), '', 255, '');
-echo $formwriter->textbox('Receipt body  (if no template chosen)', 'pro_receipt_body', 'ctrlHolder', 10, 80, $product->get('pro_receipt_body'), '');
-*/
-
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
-echo $formwriter->end_form();
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
 
 $page->end_box();
 
