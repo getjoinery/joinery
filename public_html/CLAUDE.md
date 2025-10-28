@@ -15,6 +15,10 @@ This is a custom PHP membership and event management platform with a modular MVC
 1. **READ operations** (SELECT, SHOW, DESCRIBE, \d, \dt, etc.) - Execute without asking
 2. **WRITE operations** (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE) - ALWAYS ask for explicit user confirmation before executing
 
+## Version Control Rules
+
+**CRITICAL:** NEVER commit to git unless explicitly directed to by the user. File changes are allowed, but git commits require explicit user permission.
+
 ## CRITICAL: File Include Rules
 
 **⚠️ NEVER REQUIRE PathHelper, Globalvars, or SessionControl - THEY ARE ALWAYS AVAILABLE! ⚠️**
