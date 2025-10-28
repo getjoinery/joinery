@@ -37,15 +37,11 @@
 		'debug' => true,
 		'model' => $coupon_code,        // Auto-fills all model fields
 		'values' => $override_values,   // Overrides specific fields (defaults)
-		'form_debug' => true
+		'form_debug' => true,
+		'edit_primary_key_value' => $coupon_code->key
 	]);
 
 	echo $formwriter->begin_form();
-
-	if($coupon_code->key){
-		$formwriter->hiddeninput('ccd_coupon_code_id', ['value' => $coupon_code->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('ccd_code', 'Coupon code');
 

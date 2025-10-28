@@ -23,14 +23,13 @@
 
 	// Editing an existing comment
 	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $comment
+		'model' => $comment,
+		'edit_primary_key_value' => $comment->key
 	]);
 
 	echo $formwriter->begin_form();
 
 	if($comment->key){
-		$formwriter->hiddeninput('cmt_comment_id', '', ['value' => $comment->key]);
-		$formwriter->hiddeninput('action', '', ['value' => 'edit']);
 		$formwriter->hiddeninput('cmt_pst_post_id', '', ['value' => $comment->get('cmt_pst_post_id')]);
 	}
 

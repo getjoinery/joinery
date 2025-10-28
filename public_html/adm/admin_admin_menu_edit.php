@@ -54,15 +54,11 @@
 
 	// Editing an existing admin menu item
 	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $admin_menu
+		'model' => $admin_menu,
+		'edit_primary_key_value' => $admin_menu->key
 	]);
 
 	echo $formwriter->begin_form();
-
-	if($admin_menu->key){
-		$formwriter->hiddeninput('amu_admin_menu_id', ['value' => $admin_menu->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('amu_menudisplay', 'Menu name');
 	$formwriter->textinput('amu_slug', 'Slug');

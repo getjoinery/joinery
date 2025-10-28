@@ -73,10 +73,10 @@
 
 	// Editing an existing file
 	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $file
+		'model' => $file,
+		'edit_primary_key_value' => $file->key
 	]);
 	$formwriter->begin_form();
-	$formwriter->hiddeninput('fil_file_id', ['value' => $file->key]);
 
 	$formwriter->textinput('fil_title', 'File title');
 

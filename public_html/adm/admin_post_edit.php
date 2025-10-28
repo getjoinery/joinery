@@ -115,15 +115,11 @@
 
 	$formwriter = $page->getFormWriter('form1', 'v2', [
 		'model' => $post,
-		'values' => $override_values
+		'values' => $override_values,
+		'edit_primary_key_value' => $post->key
 	]);
 
 	$formwriter->begin_form();
-
-	if($post->key){
-		$formwriter->hiddeninput('pst_post_id', ['value' => $post->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('pst_title', 'Post title', [
 		'validation' => ['required' => true, 'minlength' => 10]

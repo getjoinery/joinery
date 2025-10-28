@@ -39,15 +39,11 @@
 
 	// Editing an existing group
 	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $group
+		'model' => $group,
+		'edit_primary_key_value' => $group->key
 	]);
 
 	$formwriter->begin_form();
-
-	if($group->key){
-		$formwriter->hiddeninput('grp_group_id', ['value' => $group->key]);
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
 
 	$formwriter->textinput('grp_name', 'Group name', [
 		'validation' => ['required' => true]

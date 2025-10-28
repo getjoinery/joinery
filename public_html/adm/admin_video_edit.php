@@ -117,15 +117,11 @@
 		}
 
 		$formwriter = $page->getFormWriter('form1', 'v2', [
-			'model' => $video
+			'model' => $video,
+			'edit_primary_key_value' => $video->key
 		]);
 
 		$formwriter->begin_form();
-
-		if($video->key){
-			$formwriter->hiddeninput('vid_video_id', ['value' => $video->key]);
-			$formwriter->hiddeninput('action', ['value' => 'edit']);
-		}
 
 		$formwriter->textinput('vid_title', 'Video title', [
 			'validation' => ['required' => true]

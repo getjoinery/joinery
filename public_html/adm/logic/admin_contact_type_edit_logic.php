@@ -9,7 +9,9 @@ function admin_contact_type_edit_logic($get_vars, $post_vars) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if (isset($get_vars['ctt_contact_type_id'])) {
+	if (isset($post_vars['edit_primary_key_value'])) {
+		$contact_type = new ContactType($post_vars['edit_primary_key_value'], TRUE);
+	} elseif (isset($get_vars['ctt_contact_type_id'])) {
 		$contact_type = new ContactType($get_vars['ctt_contact_type_id'], TRUE);
 	} else {
 		$contact_type = new ContactType(NULL);
