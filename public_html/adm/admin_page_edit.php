@@ -12,12 +12,14 @@
 
 	if (isset($_REQUEST['pag_page_id'])) {
 		$page = new Page($_REQUEST['pag_page_id'], TRUE);
-	} 
+	}
 	else {
 		$page = new Page(NULL);
 	}
 
-	if($_POST){
+	// Only process form submission if this is a POST request
+	// GET requests (from version loading) should skip form processing
+	if($_POST && !isset($_GET['cnv_content_version_id'])){
 
 		$editable_fields = array('pag_title');
 
@@ -92,62 +94,81 @@
 	echo '<div class="row">
     <div class="col-md-8"><div class="p-3">';
 	
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['pag_title']['required']['value'] = 'true';
-	$validation_rules['pag_link']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);	
+	// Prepare override values for form
+	$override_values = [
+		'pag_title' => $title,
+		'pag_body' => $content,
+		'pag_is_published' => $is_published
+	];
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_page_edit');
+	$formwriter = $paget->getFormWriter('form1', 'v2', [
+		'model' => $page,
+		'values' => $override_values
+	]);
+
+	$formwriter->begin_form();
 
 	if($page->key){
-		echo $formwriter->hiddeninput('pag_page_id', $page->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('pag_page_id', ['value' => $page->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
-	
-	echo $formwriter->textinput('Page title', 'pag_title', NULL, 100, $title, '', 255, '');		
+
+	$formwriter->textinput('pag_title', 'Page title', [
+		'validation' => ['required' => true]
+	]);
 
 	if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Link (no spaces): ', 'pag_link', NULL, 100, $page->get('pag_link'), '', 255, '', TRUE, $settings->get_setting('webDir').'/page/', 'default');	
+		$formwriter->textinput('pag_link', 'Link (no spaces)', [
+			'prepend' => $settings->get_setting('webDir').'/page/',
+			'validation' => ['required' => true]
+		]);
 	}
 
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Published", "pag_is_published", "ctrlHolder", $optionvals, $is_published, '', FALSE);
+	$formwriter->dropinput('pag_is_published', 'Published', [
+		'options' => ['No' => 0, 'Yes' => 1]
+	]);
 
-	echo $formwriter->textbox('Content', 'pag_body', 'ctrlHolder', 5, 80, $content, '', 'yes');	
+	$formwriter->textbox('pag_body', 'Content', [
+		'validation' => ['required' => true, 'minlength' => 10],
+		'htmlmode' => 'yes'
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 
 	echo '  </div>
     </div>
     <div class="col-md-4"><div class="p-3">';
 
-	$content_versions = new MultiContentVersion(
-		array('type'=>ContentVersion::TYPE_PAGE, 'foreign_key_id' => $page->key),
-		array('create_time' => 'DESC'),		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$content_versions->load();
-	
-	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
-	
-	if(count($optionvals)){
+	// Only show version history if this is an existing page (has a key)
+	if($page->key){
+		$content_versions = new MultiContentVersion(
+			array('type'=>ContentVersion::TYPE_PAGE, 'foreign_key_id' => $page->key),
+			array('create_time' => 'DESC'),		//SORT BY => DIRECTION
+			NULL,  //NUM PER PAGE
+			NULL);  //OFFSET
+		$content_versions->load();
 
-		$formwriter = $page->getFormWriter('form_load_version');
+		$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
-		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_page_edit');
-		echo $formwriter->hiddeninput('pag_page_id', $page->key);
-		echo $formwriter->dropinput("Load another version", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-		echo $formwriter->new_form_button('Load');	
-		echo $formwriter->end_form();
-	}
-	else{
-		echo 'No saved versions.';
+		if(count($optionvals)){
+
+			$formwriter = $paget->getFormWriter('form_load_version', 'v2', [
+				'action' => '/admin/admin_page_edit',
+				'method' => 'GET'
+			]);
+
+			$formwriter->begin_form();
+			$formwriter->hiddeninput('pag_page_id', ['value' => $page->key]);
+			$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
+				'options' => $optionvals
+			]);
+			$formwriter->submitbutton('btn_load', 'Load');
+			$formwriter->end_form();
+		}
+		else{
+			echo 'No saved versions.';
+		}
 	}
 
 	echo '	</div>

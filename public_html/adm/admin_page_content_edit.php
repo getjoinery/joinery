@@ -14,12 +14,14 @@
 
 	if (isset($_REQUEST['pac_page_content_id'])) {
 		$page_content = new PageContent($_REQUEST['pac_page_content_id'], TRUE);
-	} 
+	}
 	else {
 		$page_content = new PageContent(NULL);
 	}
 
-	if($_POST){
+	// Only process form submission if this is a POST request
+	// GET requests (from version loading) should skip form processing
+	if($_POST && !isset($_GET['cnv_content_version_id'])){
 		
 		$page_content->set('pac_body', $_POST['pac_body']);
 
@@ -94,75 +96,90 @@
     <div class="col-md-8">
       <div class="p-3">';
 	
-	// Editing an existing email
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['pac_body']['required']['value'] = 'true';
-	$validation_rules['pac_link']['required']['value'] = 'true';
-	$validation_rules['pac_location_name']['required']['value'] = 'true';
-	$validation_rules['pac_body']['minlength']['value'] = 10;
-	echo $formwriter->set_validate($validation_rules);	
+	// Prepare override values for form
+	$override_values = [
+		'pac_body' => $content,
+		'pac_link' => $page_link
+	];
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_page_content_edit');
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $page_content,
+		'values' => $override_values
+	]);
+	// Note: $page here is the AdminPage object, $page_content is the PageContent model
+
+	$formwriter->begin_form();
 
 	if($page_content->key){
-		echo $formwriter->hiddeninput('pac_page_content_id', $page_content->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('pac_page_content_id', ['value' => $page_content->key]);
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
-	
-	echo $formwriter->textinput('Name for this content', 'pac_location_name', NULL, 100, $page_content->get('pac_location_name'), '', 255, '');	
-	//echo $formwriter->textinput('Page title (optional)', 'pac_title', NULL, 100, $page_content->get('pac_title'), '', 255, '');		
 
-	$pages = new MultiPage(
-		);
+	$formwriter->textinput('pac_location_name', 'Name for this content', [
+		'validation' => ['required' => true]
+	]);
+
+	$pages = new MultiPage();
 	$pages->load();
 	$optionvals = $pages->get_dropdown_array();
 
-	echo $formwriter->dropinput('Page', 'pac_pag_page_id', 'ctrlHolder', $optionvals, $page_content->get('pac_pag_page_id'), '', TRUE);
+	$formwriter->dropinput('pac_pag_page_id', 'Page', [
+		'options' => $optionvals,
+		'validation' => ['required' => true]
+	]);
 
 	if(!$page_content->get('pac_link') || $_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Content slug (no spaces):', 'pac_link', NULL, 100, $page_link, '', 255, '');	
+		$formwriter->textinput('pac_link', 'Content slug (no spaces)', [
+			'validation' => ['required' => true]
+		]);
 	}
-	
-	//echo $formwriter->textinput('Script file (optional)', 'pac_script_filename', NULL, 100, $page_content->get('pac_script_filename'), '', 255, '');
 
-	$optionvals = array("No"=>0, "Yes"=>1);
-	echo $formwriter->dropinput("Published", "pac_is_published", "ctrlHolder", $optionvals, $page_content->get('pac_is_published'), '', FALSE);
+	$formwriter->dropinput('pac_is_published', 'Published', [
+		'options' => ['No' => 0, 'Yes' => 1]
+	]);
 
-	echo $formwriter->textbox('Content', 'pac_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
+	$formwriter->textbox('pac_body', 'Content', [
+		'validation' => ['required' => true, 'minlength' => 10],
+		'htmlmode' => 'yes'
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('btn_submit', 'Submit');
+	$formwriter->end_form();
 
 	echo '    </div>
     </div>
     <div class="col-md-4">
       <div class="p-3">';
 
-	$content_versions = new MultiContentVersion(
-		array('type'=>ContentVersion::TYPE_PAGE_CONTENT, 'foreign_key_id' => $page_content->key),
-		array('create_time' => 'DESC'),		//SORT BY => DIRECTION
-		NULL,  //NUM PER PAGE
-		NULL);  //OFFSET
-	$content_versions->load();
-	
-	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
-	
-	if(count($optionvals)){
+	// Show version history if this is an existing page_content (has a key)
+	if($page_content->key){
+		$content_versions = new MultiContentVersion(
+			array('type'=>ContentVersion::TYPE_PAGE_CONTENT, 'foreign_key_id' => $page_content->key),
+			array('create_time' => 'DESC'),		//SORT BY => DIRECTION
+			NULL,  //NUM PER PAGE
+			NULL);  //OFFSET
+		$content_versions->load();
 
-		$formwriter = $page->getFormWriter('form_load_version');
+		$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
-		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_page_content_edit');
-		echo $formwriter->hiddeninput('pac_page_content_id', $page_content->key);
-		echo $formwriter->dropinput("Load another version", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-		echo $formwriter->new_form_button('Load');	
-		echo $formwriter->end_form();
-	}
-	else{
-		echo 'No saved versions.';
+		if(count($optionvals) > 0){
+
+			$formwriter = $page->getFormWriter('form_load_version', 'v2', [
+				'action' => '/admin/admin_page_content_edit',
+				'method' => 'GET'
+			]);
+
+			$formwriter->begin_form();
+			$formwriter->hiddeninput('pac_page_content_id', ['value' => $page_content->key]);
+			$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
+				'options' => $optionvals
+			]);
+			$formwriter->submitbutton('btn_load', 'Load');
+			$formwriter->end_form();
+		}
+		else{
+			echo 'No saved versions.';
+		}
 	}
 
 	echo '	</div>

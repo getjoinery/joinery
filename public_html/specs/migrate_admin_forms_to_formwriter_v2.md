@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 30/69 completed + 5 pending testing = 35/69 total work done (43.5% completed, 7.2% pending user testing)**
+**Progress: 32/69 completed + 1 pending testing = 33/69 total work done (46.4% completed, 1.4% pending user testing)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -77,11 +77,13 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_file_edit.php` - ✅ **COMPLETED** (form with 3 dropdowns and MultiGroup/MultiEvent lookups)
 - [x] `/adm/admin_video_edit.php` - ✅ **COMPLETED** (complex form with 3 dropdowns and conditional fields)
 - [x] `/adm/admin_public_menu_edit.php` - ✅ **COMPLETED** (form with dynamic page linking and parent menu selection)
+- [x] `/adm/admin_page_edit.php` - ✅ **COMPLETED** (two forms with textinput, textbox, dropdowns, prepend, content version loading with GET method)
+- [x] `/adm/admin_page_content_edit.php` - ✅ **COMPLETED** (two forms with textinput, dropdown, textbox, MultiPage lookup, content version loading with GET method)
 
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
 
-#### Pending Conversion (30 pages)
+#### Pending Conversion (39 pages)
 
 **E:**
 - [ ] `/adm/admin_email_recipients_modify.php`
