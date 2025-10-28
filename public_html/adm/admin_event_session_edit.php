@@ -237,13 +237,9 @@
 		'validation' => ['required' => true, 'digits' => true]
 	]);
 
-	$formwriter->datetimeinput('evs_start_time', 'Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', [
-		'value' => LibraryFunctions::convert_time(@$event_session->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia')
-	]);
+	$formwriter->datetimeinput('evs_start_time', 'Session start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)');
 
-	$formwriter->datetimeinput('evs_end_time', 'Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)', [
-		'value' => LibraryFunctions::convert_time(@$event_session->get('evs_end_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), 'Y-m-d h:ia')
-	]);
+	$formwriter->datetimeinput('evs_end_time', 'Session end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)');
 
 	$formwriter->textbox('evs_content', 'Session description', [
 		'rows' => 5,
@@ -268,6 +264,8 @@
 	$page->end_box();
 
 	if($event_session->key){
+		echo '<h3 style="margin-top: 30px; margin-bottom: 20px;">Additional File Management</h3>';
+
 		$pageoptions['title'] = "Files";
 		$page->begin_box($pageoptions);
 
