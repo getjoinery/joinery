@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 36/69 completed + 1 pending testing = 37/69 total work done (52.2% completed, 1.4% pending user testing)**
+**Progress: 39/69 completed + 1 pending testing = 40/69 total work done (57.9% completed, 1.4% pending user testing)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -106,10 +106,10 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_orders.php`
 
 **P:**
-- [ ] `/adm/admin_page_content_edit.php`
-- [ ] `/adm/admin_page_edit.php`
-- [x] `/adm/admin_product_edit.php` - ✅ **COMPLETED** (uses checkboxList with readonly handling, multiple dropdowns, textarea fields, model-based auto-fill, subscription tier dropdown with custom formatting)
-- [x] `/adm/admin_product_group_edit.php` - ✅ **COMPLETED** (simple form with textinput and textarea)
+- [x] `/adm/admin_page_content_edit.php` - ✅ **COMPLETED** (V2 form with version history sidebar, two-column layout, textbox with htmlmode, hidden fields, override values for content loading)
+- [x] `/adm/admin_page_edit.php` - ✅ **COMPLETED** (V2 form with version history sidebar, two-column layout, textbox with htmlmode, prepend text, override values, published status handling)
+- [x] `/adm/admin_product_edit.php` - ✅ **COMPLETED** (uses checkboxList with readonly handling, multiple dropdowns, textbox fields, model-based auto-fill, subscription tier dropdown with custom formatting)
+- [x] `/adm/admin_product_group_edit.php` - ✅ **COMPLETED** (simple form with textinput and textbox)
 - [x] `/adm/admin_product_requirement_edit.php` - ✅ **COMPLETED** (dropdowns with load, file dropdown, textinput)
 - [x] `/adm/admin_product_version_edit.php` - ✅ **COMPLETED** (conditional field visibility for new vs existing versions, Stripe integration, trial period fields)
 
