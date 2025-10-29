@@ -453,7 +453,7 @@ $page->endtable($events_pager);
 // Orders Table
 require_once(PathHelper::getIncludePath('data/orders_class.php'));
 require_once(PathHelper::getIncludePath('data/products_class.php'));
-$headers = array('Order ID', 'Order Time', 'Products', 'Total');
+$headers = array('Order ID', 'Order Time', 'Products', 'Status', 'Total');
 $table_options = array('title' => 'Orders', 'card' => true);
 $page->tableheader($headers, $table_options, $orders_pager);
 
@@ -486,9 +486,20 @@ foreach($orders as $order):
 	$order_id_cell = '<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>';
 	$order_time_cell = LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone());
 	$products_cell = implode('<br>', $order_items_out);
+
+	// Determine status display
+	$status_cell = '';
+	if($order->get('ord_status') == Order::STATUS_UNPAID) {
+		$status_cell = '<span class="badge badge-subtle-warning">Unpaid</span>';
+	} elseif($order->get('ord_status') == Order::STATUS_PAID) {
+		$status_cell = '<span class="badge badge-subtle-success">Paid</span>';
+	} elseif($order->get('ord_status') == Order::STATUS_ERROR) {
+		$status_cell = '<span class="badge badge-subtle-danger">Error</span>';
+	}
+
 	$total_cell = '$'.number_format($order->get('ord_total_cost'), 2);
 
-	$page->disprow(array($order_id_cell, $order_time_cell, $products_cell, $total_cell));
+	$page->disprow(array($order_id_cell, $order_time_cell, $products_cell, $status_cell, $total_cell));
 endforeach;
 
 $page->endtable($orders_pager);

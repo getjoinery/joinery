@@ -520,9 +520,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		//RUN THE PRODUCT SCRIPTS
 		$product->run_product_scripts($user, $order_item);
 
-		// Handle subscription tier assignment
-		require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-		SubscriptionTier::handleProductPurchase($user, $product, $order_item, $order);
+		// Handle subscription tier assignment - ONLY if payment was successful
+		if($order_item->get('odi_status') == OrderItem::STATUS_PAID) {
+			require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+			SubscriptionTier::handleProductPurchase($user, $product, $order_item, $order);
+		}
 
 		if($product_version->get('prv_trial_period_days')){
 			$trial = ' (' . $product_version->get('prv_trial_period_days') . ' day free trial)';	

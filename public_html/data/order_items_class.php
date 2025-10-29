@@ -406,11 +406,11 @@ class MultiOrderItem extends SystemMultiBase {
 		}
 
 		if (isset($this->options['is_active_subscription'])) {
-			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NULL";
+			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NULL AND odi_status = " . OrderItem::STATUS_PAID;
 		}
 
 		if (isset($this->options['is_cancelled_subscription'])) {
-			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NOT NULL";
+			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NOT NULL AND odi_status = " . OrderItem::STATUS_PAID;
 		}
 
 		return $this->_get_resultsv2('odi_order_items', $filters, $this->order_by, $only_count, $debug);
