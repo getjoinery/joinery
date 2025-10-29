@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 47/69 completed + 1 pending testing = 48/69 total work done (68.1% completed, 1.4% pending user testing)**
+**Progress: 54/69 completed = 54/69 total work done (78.3% completed)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -79,21 +79,17 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_public_menu_edit.php` - ✅ **COMPLETED** (form with dynamic page linking and parent menu selection)
 - [x] `/adm/admin_page_edit.php` - ✅ **COMPLETED** (two forms with textinput, textbox, dropdowns, prepend, content version loading with GET method)
 - [x] `/adm/admin_page_content_edit.php` - ✅ **COMPLETED** (two forms with textinput, dropdown, textbox, MultiPage lookup, content version loading with GET method)
+- [x] `/adm/admin_mailing_list_edit.php` - ✅ **TESTED & APPROVED** (V2 form with multiple dropdowns, optional integer fields, empty string to NULL conversion in logic layer)
+- [x] `/adm/admin_orders.php` - ✅ **TESTED & APPROVED** (listing page with date filter form)
+- [x] `/adm/admin_order_edit.php` - ✅ **TESTED & APPROVED** (V2 form with AJAX dropdown, timezone-corrected datetime override values)
+- [x] `/adm/admin_order_item_edit.php` - ✅ **TESTED & APPROVED** (complex edit form with AJAX dropdowns, conditional fields, FormWriter V2 edit_primary_key_value hidden field handling)
+- [x] `/adm/admin_order_refund.php` - ✅ **TESTED & APPROVED** (form with conditional display based on refund amount)
+- [x] `/adm/admin_stripe_orders.php` - ✅ **TESTED & APPROVED** (listing page with date filter form)
 
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
 
-#### Pending Conversion (21 pages)
-
-**L-M:**
-- [ ] `/adm/admin_mailing_list_edit.php`
-- [x] `/adm/admin_message.php` - ✅ **COMPLETED** (view-only display page, no FormWriter needed)
-
-**O:**
-- [ ] `/adm/admin_order_edit.php`
-- [ ] `/adm/admin_order_item_edit.php`
-- [ ] `/adm/admin_order_refund.php`
-- [ ] `/adm/admin_orders.php`
+#### Pending Conversion (13 pages)
 
 **P:**
 - [x] `/adm/admin_page_content_edit.php` - ✅ **COMPLETED** (V2 form with version history sidebar, two-column layout, textbox with htmlmode, hidden fields, override values for content loading)

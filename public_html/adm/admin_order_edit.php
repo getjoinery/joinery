@@ -22,32 +22,40 @@ array(
 $pageoptions['title'] = "Edit Order";
 $page->begin_box($pageoptions);
 
-// Editing an existing order
-$formwriter = $page->getFormWriter('form1');
-
-echo $formwriter->begin_form('form1', 'POST', '/admin/admin_order_edit');
-
-if($order->key){
-	echo $formwriter->hiddeninput('ord_order_id', $order->key);
-	echo $formwriter->hiddeninput('action', 'edit');
+// Prepare override values for timezone conversion
+$override_values = [];
+if($order->key && $order->get('ord_timestamp')){
+	$override_values['ord_timestamp'] = LibraryFunctions::convert_time(
+		$order->get('ord_timestamp'),
+		'UTC',
+		$session->get_timezone(),
+		'Y-m-d H:i:s'
+	);
 }
 
-$optionvals = $users->get_dropdown_array();
+// Editing an existing order
+$formwriter = $page->getFormWriter('form1', 'v2', [
+	'model' => $order,
+	'edit_primary_key_value' => $order->key,
+	'values' => $override_values
+]);
 
-echo $formwriter->dropinput("Billing User", "ord_usr_user_id", "ctrlHolder", $optionvals, $order_user ? $order_user->key : NULL, '', TRUE, FALSE, '/ajax/user_search_ajax');
+$formwriter->begin_form();
+
+$optionvals = $users->get_dropdown_array();
+$formwriter->dropinput('ord_usr_user_id', 'Billing User', [
+	'options' => $optionvals,
+	'ajaxendpoint' => '/ajax/user_search_ajax'
+]);
 
 //ALLOW THESE OTHER FIELDS IF IT IS A NEW ORDER OR NOT A STRIPE ORDER
 if(!$order->key || !$order->is_stripe_order()){
-	echo $formwriter->textinput('Order total', 'ord_total_cost', NULL, 100, $order->get('ord_total_cost'), '', 255, '');
-
-	echo $formwriter->datetimeinput('Order time', 'ord_timestamp', 'ctrlHolder', LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+	$formwriter->textinput('ord_total_cost', 'Order total');
+	$formwriter->datetimeinput('ord_timestamp', 'Order time');
 }
 
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
-
-echo $formwriter->end_form();
+$formwriter->submitbutton('submit_button', 'Submit');
+$formwriter->end_form();
 
 $page->end_box();
 
