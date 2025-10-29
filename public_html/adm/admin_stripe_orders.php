@@ -91,15 +91,20 @@
 
 	}
 	
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("", "get", "/admin/admin_stripe_orders");
-	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
-	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
-	echo $formwriter->hiddeninput('source', 'form');
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();	
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'method' => 'GET',
+		'action' => '/admin/admin_stripe_orders'
+	]);
+	$formwriter->begin_form();
+	$formwriter->dateinput('startdate', 'Start Date', [
+		'value' => $display_startdate
+	]);
+	$formwriter->dateinput('enddate', 'End Date', [
+		'value' => $display_enddate
+	]);
+	$formwriter->hiddeninput('source', ['value' => 'form']);
+	$formwriter->submitbutton('submit', 'Submit');
+	$formwriter->end_form();	
 	
 	//PAGINATION
 	echo '<br /><br />';
