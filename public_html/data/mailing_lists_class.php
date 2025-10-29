@@ -62,7 +62,6 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	    'mlt_link' => array('type'=>'varchar(255)', 'required'=>true),
 	    'mlt_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'mlt_delete_time' => array('type'=>'timestamp(6)'),
-	    'mlt_emt_welcome_email_template_id' => array('type'=>'int4'),
 	    'mlt_emt_email_template_id' => array('type'=>'int4'),
 	    'mlt_fil_file_id' => array('type'=>'int4'),
 	    'mlt_ctt_contact_type_id' => array('type'=>'int4'),
@@ -156,11 +155,11 @@ function get_subscribed_users($return='object'){
 			$registrant->prepare();
 			$registrant->save();
 			$registrant->load();
-			
-			if($this->get('mlt_emt_welcome_email_template_id')){
+
+			if($this->get('mlt_emt_email_template_id')){
 				//SEND WELCOME EMAIL
 				$user = new User($usr_user_id, TRUE);
-				$template = new EmailTemplateStore($this->get('mlt_emt_welcome_email_template_id'), TRUE);
+				$template = new EmailTemplateStore($this->get('mlt_emt_email_template_id'), TRUE);
 				EmailSender::sendTemplate($template->get('emt_machine_name'),
 					$user->get('usr_email'),
 					[
