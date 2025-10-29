@@ -91,43 +91,26 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 #### Pending Conversion (13 pages)
 
-**P:**
-- [x] `/adm/admin_page_content_edit.php` - ✅ **COMPLETED** (V2 form with version history sidebar, two-column layout, textbox with htmlmode, hidden fields, override values for content loading)
-- [x] `/adm/admin_page_edit.php` - ✅ **COMPLETED** (V2 form with version history sidebar, two-column layout, textbox with htmlmode, prepend text, override values, published status handling)
-- [x] `/adm/admin_product_edit.php` - ✅ **COMPLETED** (uses checkboxList with readonly handling, multiple dropdowns, textbox fields, model-based auto-fill, subscription tier dropdown with custom formatting)
-- [x] `/adm/admin_product_group_edit.php` - ✅ **COMPLETED** (simple form with textinput and textbox)
-- [x] `/adm/admin_product_requirement_edit.php` - ✅ **COMPLETED** (dropdowns with load, file dropdown, textinput)
-- [x] `/adm/admin_product_version_edit.php` - ✅ **COMPLETED** (conditional field visibility for new vs existing versions, Stripe integration, trial period fields)
+**Q:**
+- [ ] `/adm/admin_question.php` (complex - display page with dynamic form generation)
+- [ ] `/adm/admin_question_edit.php` (complex - multiple forms, jQuery visibility logic, serialized validation data)
 
-**E - Event-Related Forms:**
-- [x] `/adm/admin_email_recipients_modify.php` - ✅ **TESTED & APPROVED** (two V2 forms with dropinput for groups/events, hiddeninput fields, conditional display)
-- [x] `/adm/admin_email_template_edit.php` - ✅ **TESTED & APPROVED** (V2 form with textinput, textbox, dropinput, two-column layout with version history sidebar)
-- [x] `/adm/admin_event.php` - ✅ **TESTED & APPROVED** (display page with minimal form, uses V2 for form buttons, sessions table with edit/delete buttons)
-- [x] `/adm/admin_event_bundle_edit.php` - ✅ **TESTED & APPROVED** (V2 form with textinput, checkboxList for event selection, model-based validation)
-- [x] `/adm/admin_event_edit.php` - ✅ **TESTED & APPROVED** (complex V2 form with 20+ fields, dropinput with visibility rules, datetimeinput with timezone conversion, textbox with htmlmode, content version sidebar)
-- [x] `/adm/admin_event_session_edit.php` - ✅ **TESTED & APPROVED** (V2 form with datetimeinput with timezone conversion, dropinput for videos/files, textbox with htmlmode, multiple action forms for file management, file upload bulk functionality)
-- [x] `/adm/admin_event_type_edit.php` - ✅ **TESTED & APPROVED** (simple V2 form with single textinput field)
-- [x] `/adm/admin_log_event.php` - ✅ **TESTED & APPROVED** (simple V2 form with hiddeninput fields, confirmation page)
-
-**Q-S:**
-- [ ] `/adm/admin_question.php`
-- [ ] `/adm/admin_question_edit.php`
-- [ ] `/adm/admin_settings.php`
-- [ ] `/adm/admin_settings_email.php`
-- [ ] `/adm/admin_settings_payments.php`
+**S:**
+- [ ] `/adm/admin_settings.php` (settings management form)
+- [ ] `/adm/admin_settings_email.php` (email settings form)
+- [ ] `/adm/admin_settings_payments.php` (payment settings form)
 - [ ] `/adm/admin_shadow_session_edit.php`
-- [ ] `/adm/admin_stripe_orders.php`
 - [ ] `/adm/admin_subscription_tier_edit.php`
-- [ ] `/adm/admin_survey.php`
-- [ ] `/adm/admin_survey_edit.php`
+- [ ] `/adm/admin_survey.php` (survey listing/management)
+- [ ] `/adm/admin_survey_edit.php` (survey editing form)
 
-**U-Y:**
-- [ ] `/adm/admin_user.php`
-- [ ] `/adm/admin_user_add.php`
-- [ ] `/adm/admin_users_edit.php`
-- [ ] `/adm/admin_users_message.php`
-- [ ] `/adm/admin_users_password_edit.php`
-- [ ] `/adm/admin_yearly_report_donations.php`
+**U:**
+- [ ] `/adm/admin_user.php` (user display/management page)
+- [ ] `/adm/admin_user_add.php` (user creation form)
+- [ ] `/adm/admin_users_edit.php` (bulk user editing)
+- [ ] `/adm/admin_users_message.php` (message users form)
+- [ ] `/adm/admin_users_password_edit.php` (password change form)
+- [ ] `/adm/admin_yearly_report_donations.php` (donation report - may be view-only)
 
 ---
 
