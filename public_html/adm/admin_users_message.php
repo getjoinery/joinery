@@ -58,48 +58,44 @@
 
 	$page->begin_box();
 
-	$formwriter = $page->getFormWriter('form1');
-
-	$validation_rules = array();
-	$validation_rules['eml_subject']['required']['value'] = 'true';
-	$validation_rules['eml_subject']['minlength']['value'] = 10;
-	$validation_rules['eml_message']['required']['value'] = 'true';
-	$validation_rules['eml_message']['minlength']['value'] = 10;
-	echo $formwriter->set_validate($validation_rules);
-
-	echo $formwriter->begin_form("form1", "post", "/admin/admin_users_message");
+	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter->begin_form();
 
 	$formwriter->text('to-field', 'To:', $page_vars['to_field'], NULL);
-	
+
 	$placeholder = 'RE: ';
-	if($page_vars['event']){	
+	if($page_vars['event']){
 		$placeholder = $page_vars['event']->get('evt_name');
 	}
 	else if($page_vars['group']){
 		$placeholder = $page_vars['group']->get('grp_name');
 	}
-	echo $formwriter->textinput("Subject", "eml_subject", "ctrlHolder", 30, $placeholder, "", 255, ""); 
-	
-	echo $formwriter->textbox('Message', 'eml_message', 'ctrlHolder', 10, 80, '', '', 'yes');
+	$formwriter->textinput('eml_subject', 'Subject', [
+		'value' => $placeholder,
+		'validation' => ['required' => true, 'minlength' => 10]
+	]);
+
+	$formwriter->textbox('eml_message', 'Message', [
+		'htmlmode' => 'yes',
+		'validation' => ['required' => true, 'minlength' => 10]
+	]);
 
 	if(isset($_REQUEST['waiting_list'])){
-		echo $formwriter->hiddeninput('waiting_list', 1);
-	}
-	
-	if($page_vars['event']){
-		echo $formwriter->hiddeninput('evt_event_id', $page_vars['event']->key);
-	}
-	else if($page_vars['group']){
-		echo $formwriter->hiddeninput('grp_group_id', $page_vars['group']->key);
-	}
-	else{
-		echo $formwriter->hiddeninput('usr_user_id', $page_vars['recipient']->key);
+		$formwriter->hiddeninput('waiting_list', ['value' => 1]);
 	}
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	if($page_vars['event']){
+		$formwriter->hiddeninput('evt_event_id', ['value' => $page_vars['event']->key]);
+	}
+	else if($page_vars['group']){
+		$formwriter->hiddeninput('grp_group_id', ['value' => $page_vars['group']->key]);
+	}
+	else{
+		$formwriter->hiddeninput('usr_user_id', ['value' => $page_vars['recipient']->key]);
+	}
+
+	$formwriter->submitbutton('submit_button', 'Submit');
+	$formwriter->end_form();
 
 	$page->end_box();
 

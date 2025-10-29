@@ -30,47 +30,66 @@ $session = SessionControl::get_instance();
 	$pageoptions['title'] = 'Add User';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2');
 
-	$validation_rules = array();
-	$validation_rules['usr_first_name']['required']['value'] = 'true';
-	$validation_rules['usr_first_name']['minlength']['value'] = 1;
-	$validation_rules['usr_first_name']['maxlength']['value'] = 32;
-	$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
-	$validation_rules['usr_last_name']['required']['value'] = 'true';
-	$validation_rules['usr_last_name']['minlength']['value'] = 2;
-	$validation_rules['usr_last_name']['maxlength']['value'] = 32;
-	$validation_rules['usr_email']['required']['value'] = 'true';
-	$validation_rules['usr_email']['email']['value'] = 'true';
-	$validation_rules['usr_email']['maxlength']['value'] = 64;
-	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";
-	$validation_rules['usr_email']['remote']['message'] = "'This email already exists.'";
-	if($nickname_display){
-		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
-	}
-	echo $formwriter->set_validate($validation_rules);
+	$formwriter->begin_form();
 
-	echo $formwriter->begin_form("form1", "post", "/admin/admin_user_add");
+	$formwriter->textinput('usr_first_name', 'First Name', [
+		'validation' => [
+			'required' => true,
+			'minlength' => 1,
+			'maxlength' => 32,
+			'custom' => ['rule' => 'required', 'message' => 'Please enter your first name.']
+		]
+	]);
+	$formwriter->textinput('usr_last_name', 'Last Name', [
+		'validation' => [
+			'required' => true,
+			'minlength' => 2,
+			'maxlength' => 32
+		]
+	]);
 
-	echo $formwriter->textinput("First Name", "usr_first_name", "ctrlHolder", 20, NULL, "",32, "");
-	echo $formwriter->textinput("Last Name", "usr_last_name", "ctrlHolder", 20, NULL, "" , 32, "");
 	$nickname_display = $settings->get_setting('nickname_display_as');
 	if($nickname_display){
-		echo $formwriter->textinput($nickname_display, "usr_nickname", "ctrlHolder", 20, @$form_fields->usr_nickname, "" , 32, "");
+		$formwriter->textinput('usr_nickname', $nickname_display, [
+			'validation' => ['maxlength' => 32]
+		]);
 	}
-	echo $formwriter->textinput("Email", "usr_email", "ctrlHolder", 20, NULL, "" , 64, "");
-	echo $formwriter->textinput("Password ", "password", "ctrlHolder", 20, NULL, "" , 255, "");
+
+	$formwriter->textinput('usr_email', 'Email', [
+		'validation' => [
+			'required' => true,
+			'email' => true,
+			'maxlength' => 64,
+			'custom' => [
+				'rule' => 'email_check',
+				'message' => 'This email already exists.',
+				'url' => '/ajax/email_check_ajax'
+			]
+		]
+	]);
+
+	$formwriter->textinput('password', 'Password', [
+		'validation' => ['required' => true]
+	]);
+
 	$optionvals = Address::get_timezone_drop_array();
 	$default_timezone = $settings->get_setting('default_timezone');
-	echo $formwriter->dropinput("Time Zone", "usr_timezone", "ctrlHolder", $optionvals, $default_timezone, '', FALSE);
+	$formwriter->dropinput('usr_timezone', 'Time Zone', [
+		'options' => $optionvals,
+		'value' => $default_timezone
+	]);
 
-	echo $formwriter->checkboxinput("Add to the mailing list", "newsletter", "ctrlHolder", "normal", NULL, "yes", '');
-	echo $formwriter->checkboxinput("Send an activation email", "send_activation_email", "ctrlHolder", "normal", "yes", "yes", '');
+	$formwriter->checkboxinput('newsletter', 'Add to the mailing list', [
+		'checked' => false
+	]);
+	$formwriter->checkboxinput('send_activation_email', 'Send an activation email', [
+		'checked' => true
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('submit_button', 'Submit');
+	$formwriter->end_form();
 
 	$page->end_box();
 

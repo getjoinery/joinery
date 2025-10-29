@@ -280,11 +280,9 @@ array(
 							<tr>
 								<td colspan="2" class="pt-3">
 									<?php
-										$formwriter = $page->getFormWriter('form5');
-										$validation_rules = array();
-										$validation_rules['grp_group_id']['required']['value'] = 'true';
-										echo $formwriter->set_validate($validation_rules);
-										echo $formwriter->begin_form('form5', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
+										$formwriter = $page->getFormWriter('form5', 'v2', [
+											'deferred_output' => true
+										]);
 
 										$group_drops = new MultiGroup(
 											array('category'=>'user'),
@@ -300,11 +298,14 @@ array(
 										}
 
 										$optionvals = $group_drops->get_dropdown_array();
-										echo $formwriter->hiddeninput('action', 'add_to_group');
-										echo $formwriter->hiddeninput('usr_user_id', $user->key);
-										echo $formwriter->dropinput("Add to group", "grp_group_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-										echo $formwriter->new_form_button('Add');
-										echo $formwriter->end_form();
+										$formwriter->hiddeninput('action', ['value' => 'add_to_group']);
+										$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
+										$formwriter->dropinput('grp_group_id', 'Add to group', [
+											'options' => $optionvals,
+											'validation' => ['required' => true]
+										]);
+										$formwriter->submitbutton('submit_button', 'Add');
+										echo $formwriter->getFieldsHTML();
 									?>
 								</td>
 							</tr>
@@ -418,11 +419,9 @@ foreach ($event_registrations as $event_registration):
 endforeach;
 
 // Add event form row
-$formwriter = $page->getFormWriter('form3');
-$validation_rules = array();
-$validation_rules['evt_event_id']['required']['value'] = 'true';
-$add_form = $formwriter->set_validate($validation_rules);
-$add_form .= $formwriter->begin_form('form2', 'POST', '/admin/admin_user?usr_user_id='. $user->key);
+$formwriter = $page->getFormWriter('form3', 'v2', [
+	'deferred_output' => true
+]);
 
 $events = new MultiEvent(
 	array('deleted'=>false),
@@ -438,11 +437,14 @@ foreach($event_ids_for_user as $event_id) {
 }
 
 $optionvals = $events->get_dropdown_array();
-$add_form .= $formwriter->hiddeninput('action', 'add_to_event');
-$add_form .= $formwriter->hiddeninput('usr_user_id', $user->key);
-$add_form .= $formwriter->dropinput("Add to event", "evt_event_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-$add_form .= $formwriter->new_form_button('Add');
-$add_form .= $formwriter->end_form();
+$formwriter->hiddeninput('action', ['value' => 'add_to_event']);
+$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
+$formwriter->dropinput('evt_event_id', 'Add to event', [
+	'options' => $optionvals,
+	'validation' => ['required' => true]
+]);
+$formwriter->submitbutton('submit_button', 'Add');
+$add_form = $formwriter->getFieldsHTML();
 
 echo '<tr><td colspan="4" class="pt-3">'.$add_form.'</td></tr>';
 

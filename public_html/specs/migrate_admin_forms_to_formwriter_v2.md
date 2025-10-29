@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 54/69 completed = 54/69 total work done (78.3% completed)**
+**Progress: 60/69 completed = 60/69 total work done (87.0% completed)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -85,11 +85,17 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_order_item_edit.php` - ✅ **TESTED & APPROVED** (complex edit form with AJAX dropdowns, conditional fields, FormWriter V2 edit_primary_key_value hidden field handling)
 - [x] `/adm/admin_order_refund.php` - ✅ **TESTED & APPROVED** (form with conditional display based on refund amount)
 - [x] `/adm/admin_stripe_orders.php` - ✅ **TESTED & APPROVED** (listing page with date filter form)
+- [x] `/adm/admin_yearly_report_donations.php` - ✅ **TESTED & APPROVED** (simple filter form with two date inputs)
+- [x] `/adm/admin_user.php` - ✅ **TESTED & APPROVED** (display page with two embedded V1 forms converted to deferred output)
+- [x] `/adm/admin_user_add.php` - ✅ **TESTED & APPROVED** (add form with custom validation rules and checkboxes)
+- [x] `/adm/admin_users_edit.php` - ✅ **TESTED & APPROVED** (edit form with checkboxList, conditional permission check)
+- [x] `/adm/admin_users_message.php` - ✅ **TESTED & APPROVED** (message form with textbox and conditional hidden inputs)
+- [x] `/adm/admin_users_password_edit.php` - ✅ **TESTED & APPROVED** (simple password change form)
 
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
 
-#### Pending Conversion (13 pages)
+#### Pending Conversion (7 pages)
 
 **Q:**
 - [ ] `/adm/admin_question.php` (complex - display page with dynamic form generation)
@@ -103,14 +109,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_subscription_tier_edit.php`
 - [ ] `/adm/admin_survey.php` (survey listing/management)
 - [ ] `/adm/admin_survey_edit.php` (survey editing form)
-
-**U:**
-- [ ] `/adm/admin_user.php` (user display/management page)
-- [ ] `/adm/admin_user_add.php` (user creation form)
-- [ ] `/adm/admin_users_edit.php` (bulk user editing)
-- [ ] `/adm/admin_users_message.php` (message users form)
-- [ ] `/adm/admin_users_password_edit.php` (password change form)
-- [ ] `/adm/admin_yearly_report_donations.php` (donation report - may be view-only)
 
 ---
 
