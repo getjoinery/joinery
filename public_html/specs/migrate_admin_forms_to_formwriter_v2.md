@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 60/69 completed = 60/69 total work done (87.0% completed)**
+**Progress: 61/69 completed = 61/69 total work done (88.4% completed)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -94,8 +94,9 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
+- ⏳ `/adm/admin_subscription_tier_edit.php` - 🔄 **PENDING TESTING** (hybrid form - V2 for standard fields, raw HTML for dynamic features section from JSON config)
 
-#### Pending Conversion (7 pages)
+#### Pending Conversion (6 pages)
 
 **Q:**
 - [ ] `/adm/admin_question.php` (complex - display page with dynamic form generation)
@@ -106,7 +107,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_settings_email.php` (email settings form)
 - [ ] `/adm/admin_settings_payments.php` (payment settings form)
 - [ ] `/adm/admin_shadow_session_edit.php`
-- [ ] `/adm/admin_subscription_tier_edit.php`
 - [ ] `/adm/admin_survey.php` (survey listing/management)
 - [ ] `/adm/admin_survey_edit.php` (survey editing form)
 
