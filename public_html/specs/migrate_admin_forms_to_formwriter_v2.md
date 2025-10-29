@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 61/69 completed = 61/69 total work done (88.4% completed)**
+**Progress: 63/69 completed = 63/69 total work done (91.3% completed)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -91,12 +91,13 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_users_edit.php` - ✅ **TESTED & APPROVED** (edit form with checkboxList, conditional permission check)
 - [x] `/adm/admin_users_message.php` - ✅ **TESTED & APPROVED** (message form with textbox and conditional hidden inputs)
 - [x] `/adm/admin_users_password_edit.php` - ✅ **TESTED & APPROVED** (simple password change form)
+- [x] `/adm/admin_subscription_tier_edit.php` - ✅ **TESTED & APPROVED** (hybrid form - V2 for standard fields, raw HTML for dynamic features section from JSON config, fieldset for features grouping)
 
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
-- ⏳ `/adm/admin_subscription_tier_edit.php` - 🔄 **PENDING TESTING** (hybrid form - V2 for standard fields, raw HTML for dynamic features section from JSON config)
+- ⏳ `/adm/admin_shadow_session_edit.php` - 🔄 **PENDING TESTING** (product detail form with simple textinput and textarea, logic file separation)
 
-#### Pending Conversion (6 pages)
+#### Pending Conversion (5 pages)
 
 **Q:**
 - [ ] `/adm/admin_question.php` (complex - display page with dynamic form generation)
