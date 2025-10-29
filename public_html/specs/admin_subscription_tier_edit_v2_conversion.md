@@ -240,3 +240,261 @@ This provides:
 - Flexibility for the complex features section only where needed
 
 **This is NOT optional** - the FormWriter V1 portions must be migrated to V2.
+
+## Lessons Learned (Post-Implementation)
+
+This section documents mistakes made during the actual conversion and how to prevent them in future migrations.
+
+### ❌ Mistake 1: Adding Unnecessary 'action' Hidden Field
+
+**What Happened:**
+Initial implementation added a hidden field for 'action':
+```php
+$formwriter->hiddeninput('action', ['value' => 'save']);
+
+// In logic file:
+if (isset($post['action']) && $post['action'] == 'save') {
+```
+
+**Why This Was Wrong:**
+- Modern FormWriter V2 pattern doesn't use action fields
+- The field was receiving empty string instead of 'save'
+- Caused POST processing to be skipped entirely
+
+**Correct Pattern:**
+```php
+// NO action field in view
+$formwriter->begin_form();
+// ... fields ...
+
+// In logic file - just check if POST exists:
+if($post){
+    // process form
+    return LogicResult::redirect(...);
+}
+```
+
+**Prevention:** Always reference a working migrated form (like `admin_order_edit_logic.php`) before implementing patterns from memory.
+
+### ❌ Mistake 2: Using Redundant $is_edit Variable
+
+**What Happened:**
+Initial implementation created and returned a separate `$is_edit` boolean:
+```php
+// In logic file:
+$is_edit = false;
+if ($tier_id) {
+    $tier = new SubscriptionTier($tier_id, TRUE);
+    $is_edit = true;
+}
+return LogicResult::render(['tier' => $tier, 'is_edit' => $is_edit]);
+
+// In view:
+if ($is_edit) {
+    $formwriter->checkboxinput('sbt_is_active', 'Active');
+}
+```
+
+**Why This Was Wrong:**
+- Redundant - the tier object itself indicates edit vs create mode
+- Adds unnecessary variable to track
+- Inconsistent with other migrated forms
+
+**Correct Pattern:**
+```php
+// In logic file - no $is_edit variable needed:
+return LogicResult::render(['tier' => $tier, 'session' => $session]);
+
+// In view - check tier object directly:
+if ($tier && $tier->key) {
+    $formwriter->checkboxinput('sbt_is_active', 'Active');
+} else {
+    $formwriter->hiddeninput('sbt_is_active', ['value' => '1']);
+}
+```
+
+**Prevention:** Don't create boolean tracking variables when the model object itself provides the necessary state.
+
+### ❌ Mistake 3: Incorrect Primary Key Passing Approach
+
+**What Happened:**
+Initial attempt to pass primary key used a manual hidden field:
+```php
+$formwriter->hiddeninput('id', ['value' => $tier->key]);
+```
+
+**Why This Was Wrong:**
+- Primary keys should use FormWriter V2's built-in `edit_primary_key_value` mechanism
+- Manual hidden fields bypass FormWriter's automatic handling
+- Caused form to lose the ID parameter on submission
+
+**Correct Pattern:**
+```php
+// In view - use edit_primary_key_value in options:
+$formwriter = $page->getFormWriter('admin_tier_edit', 'v2', [
+    'model' => $tier,
+    'edit_primary_key_value' => ($tier && $tier->key) ? $tier->key : null
+]);
+
+// In logic file - check POST first, fallback to GET:
+if (isset($get['id']) || isset($post['edit_primary_key_value'])) {
+    $tier_id = isset($post['edit_primary_key_value']) ? $post['edit_primary_key_value'] : $get['id'];
+    $tier = new SubscriptionTier($tier_id, TRUE);
+}
+```
+
+**Prevention:** Always use `edit_primary_key_value` in FormWriter options for primary key passing, never manual hidden fields.
+
+### ❌ Mistake 4: Not Following Established Patterns
+
+**What Happened:**
+Initial implementation didn't match the exact pattern from other successfully migrated forms like `admin_order_edit_logic.php`.
+
+**Why This Was Wrong:**
+- Consistency is critical across migrated forms
+- Patterns exist for a reason - they've been tested and work
+- Custom approaches introduce bugs
+
+**Correct Approach:**
+1. Open a working reference file (e.g., `/adm/logic/admin_order_edit_logic.php`)
+2. Copy the exact pattern for:
+   - Model loading (lines 16-24)
+   - POST detection (line 26: `if($post_vars)`)
+   - Primary key handling
+   - LogicResult returns
+3. Adapt field names and model class, but keep structure identical
+
+**Prevention:** ALWAYS reference working examples first. Don't implement patterns from scratch.
+
+### ✅ Final Working Pattern
+
+**Logic File** (`/adm/logic/admin_subscription_tier_edit_logic.php`):
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+require_once(PathHelper::getIncludePath('data/change_tracking_class.php'));
+
+function admin_subscription_tier_edit_logic($get, $post) {
+    $session = SessionControl::get_instance();
+    $session->check_permission(5);
+
+    // Load or create tier - check POST first for edit_primary_key_value
+    if (isset($get['id']) || isset($post['edit_primary_key_value'])) {
+        $tier_id = isset($post['edit_primary_key_value']) ? $post['edit_primary_key_value'] : $get['id'];
+        try {
+            $tier = new SubscriptionTier($tier_id, TRUE);
+            if (!$tier || $tier->get('sbt_delete_time')) {
+                return LogicResult::redirect('/admin/admin_subscription_tiers?error=tier_not_found');
+            }
+        } catch (Exception $e) {
+            return LogicResult::redirect('/admin/admin_subscription_tiers?error=tier_not_found');
+        }
+    } else {
+        $tier = new SubscriptionTier(NULL);
+    }
+
+    // Process POST - no action field check, just if($post)
+    if($post){
+        try {
+            // Process features with type conversion
+            $features = array();
+            $available_features = SubscriptionTier::getAllAvailableFeatures();
+            if (isset($post['features']) && is_array($post['features'])) {
+                foreach ($post['features'] as $key => $value) {
+                    $definition = isset($available_features[$key]) ? $available_features[$key] : null;
+                    if ($definition && $definition['type'] === 'integer') {
+                        $features[$key] = intval($value);
+                    } elseif ($definition && $definition['type'] === 'boolean') {
+                        $features[$key] = ($value === '1' || $value === 'true' || $value === true);
+                    } elseif (is_numeric($value)) {
+                        $features[$key] = intval($value);
+                    } else {
+                        $features[$key] = $value;
+                    }
+                }
+            }
+
+            if ($tier && $tier->key) {
+                // Update existing
+                $tier->set('sbt_name', $post['sbt_name']);
+                $tier->set('sbt_display_name', $post['sbt_display_name']);
+                $tier->set('sbt_tier_level', $post['sbt_tier_level']);
+                $tier->set('sbt_description', $post['sbt_description']);
+                $tier->set('sbt_is_active', isset($post['sbt_is_active']) ? true : false);
+                $tier->setFeatures($features);
+                $tier->save();
+
+                ChangeTracking::logChange('subscription_tier', $tier->key, null, 'updated',
+                    null, $tier->get('sbt_name'), 'admin_update', 'admin_action', null,
+                    $session->get_user_id());
+            } else {
+                // Create new
+                $tier = new SubscriptionTier(NULL);
+                $tier->set('sbt_name', $post['sbt_name']);
+                $tier->set('sbt_display_name', $post['sbt_display_name']);
+                $tier->set('sbt_tier_level', $post['sbt_tier_level']);
+                $tier->set('sbt_description', $post['sbt_description']);
+                $tier->set('sbt_is_active', isset($post['sbt_is_active']) ? true : false);
+                $tier->setFeatures($features);
+                $tier->save();
+
+                ChangeTracking::logChange('subscription_tier', $tier->key, null, 'created',
+                    null, $tier->get('sbt_name'), 'admin_create', 'admin_action', null,
+                    $session->get_user_id());
+            }
+
+            return LogicResult::redirect('/admin/admin_subscription_tiers?success=1');
+        } catch (Exception $e) {
+            $error_message = $e->getMessage();
+        }
+    }
+
+    return LogicResult::render([
+        'tier' => $tier,
+        'error_message' => $error_message ?? null,
+        'session' => $session
+    ]);
+}
+```
+
+**View File** (`/adm/admin_subscription_tier_edit.php`):
+```php
+// FormWriter initialization - use edit_primary_key_value
+$formwriter = $page->getFormWriter('admin_tier_edit', 'v2', [
+    'model' => $tier,
+    'edit_primary_key_value' => ($tier && $tier->key) ? $tier->key : null
+]);
+
+$formwriter->begin_form();
+// NO action hidden field
+
+$formwriter->textinput('sbt_name', 'Tier Name', [
+    'placeholder' => 'Internal name (e.g., premium)',
+    'validation' => ['required' => true, 'maxlength' => 100]
+]);
+
+// ... other fields ...
+
+// Features section remains as raw HTML (lines 67-148)
+
+// Conditional based on tier object, not $is_edit
+if ($tier && $tier->key) {
+    $formwriter->checkboxinput('sbt_is_active', 'Active');
+} else {
+    $formwriter->hiddeninput('sbt_is_active', ['value' => '1']);
+}
+
+$formwriter->submitbutton('submit_button', ($tier && $tier->key) ? 'Update Tier' : 'Create Tier');
+$formwriter->end_form();
+```
+
+### Key Takeaways for Future Conversions
+
+1. **No action fields** - Just check `if($post)` in logic file
+2. **No tracking variables** - Use `$model && $model->key` directly
+3. **Use edit_primary_key_value** - Never manual hidden fields for primary keys
+4. **Copy working patterns** - Reference admin_order_edit_logic.php line-by-line
+5. **Check POST first** - `isset($post['edit_primary_key_value']) ? $post['edit_primary_key_value'] : $get['id']`
+
+These patterns are now proven to work and should be followed exactly for remaining conversions.
