@@ -73,15 +73,20 @@
 	)
 	);	
 
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("", "get", "/admin/admin_orders");
-	echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
-	echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
-	echo $formwriter->hiddeninput('source', 'form');
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();	
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'method' => 'GET',
+		'action' => '/admin/admin_orders'
+	]);
+	$formwriter->begin_form();
+	$formwriter->dateinput('startdate', 'Start Date', [
+		'value' => $display_startdate
+	]);
+	$formwriter->dateinput('enddate', 'End Date', [
+		'value' => $display_enddate
+	]);
+	$formwriter->hiddeninput('source', ['value' => 'form']);
+	$formwriter->submitbutton('submit_button', 'Submit');
+	$formwriter->end_form();	
 	
 	$headers = array('Order ID', 'User', 'Order Time', 'Products', 'Total');
 	$altlinks = array('Sync Invoices' => '/utils/admin_stripe_invoices_synchronize?html-format=1', 'Sync Orders' => '/utils/stripe_charges_synchronize?html-format=1', 'New Order' => '/admin/admin_order_edit');
