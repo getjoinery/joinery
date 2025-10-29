@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 
 function admin_order_edit_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('/data/orders_class.php'));
@@ -28,11 +29,10 @@ function admin_order_edit_logic($get_vars, $post_vars) {
 			$order->set('ord_total_cost', $post_vars['ord_total_cost']);
 			$order->set('ord_status', Order::STATUS_PAID);
 
-			if($post_vars['ord_timestamp_date'] && $post_vars['ord_timestamp_time']){
-				$time_combined = $post_vars['ord_timestamp_date'] . ' ' . LibraryFunctions::toDBTime($post_vars['ord_timestamp_time']);
-				$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
-				$order->set('ord_timestamp', $utc_time);
-				//$event->set('evt_start_time_local', $time_combined);
+			// Process datetime from FormWriter V2
+			$timestamp = FormWriterV2Base::process_datetimeinput($post_vars, 'ord_timestamp', true);
+			if($timestamp !== NULL){
+				$order->set('ord_timestamp', $timestamp);
 			}
 		}
 

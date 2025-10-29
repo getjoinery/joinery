@@ -98,29 +98,30 @@ else{
 	$pageoptions['title'] = 'Refund charge';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/admin/admin_order_refund',
+		'method' => 'POST'
+	]);
 
-	$validation_rules = array();
-	$validation_rules['refund_amount']['required']['value'] = 'true';
-	$validation_rules['refund_amount']['max']['value'] = $amount_left;
-	echo $formwriter->set_validate($validation_rules);	
-	
-	echo $formwriter->begin_form("form", "post", "/admin/admin_order_refund");
+	$formwriter->begin_form();
 
 	echo '<fieldset><h4>Confirm Refund ('.$product->get('pro_name').')</h4>';
-		echo '<div class="fields full">';	
+		echo '<div class="fields full">';
 		echo 'Total charge: ', $currency_symbol.$charge->amount/100 .'. '.$currency_symbol.$amount_refunded. ' refunded so far.';
-	
-	if($amount_left != 0){
-		echo $formwriter->textinput("Amount to refund (".$currency_symbol.$amount_left. " maximum)", 'refund_amount',"ctrlHolder", 20, $amount_left , '', 255, NULL);	
-		echo $formwriter->textinput("Refund description or reason", 'odi_refund_note',"ctrlHolder", 20, $order_item->get('odi_refund_note'), '', 255, '');	
-		echo $formwriter->hiddeninput("confirm", 1);
-		echo $formwriter->hiddeninput("charge_id", $charge_id);
-		echo $formwriter->hiddeninput("order_item_id", $order_item->key);
 
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
+	if($amount_left != 0){
+		$formwriter->textinput('refund_amount', 'Amount to refund ('.$currency_symbol.$amount_left. ' maximum)', [
+			'value' => $amount_left,
+			'validation' => ['required' => true, 'max' => $amount_left]
+		]);
+		$formwriter->textinput('odi_refund_note', 'Refund description or reason', [
+			'value' => $order_item->get('odi_refund_note')
+		]);
+		$formwriter->hiddeninput('confirm', ['value' => 1]);
+		$formwriter->hiddeninput('charge_id', ['value' => $charge_id]);
+		$formwriter->hiddeninput('order_item_id', ['value' => $order_item->key]);
+
+		$formwriter->submitbutton('submit_button', 'Submit');
 	}
 	else{
 		echo '<p>You cannot refund any more.</p>';
@@ -128,7 +129,7 @@ else{
 
 		echo '</div>';
 	echo '</fieldset>';
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 }
 	$page->end_box();

@@ -13,11 +13,15 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if (isset($_REQUEST['odi_order_item_id'])) {
-		$order_item = new OrderItem($_REQUEST['odi_order_item_id'], TRUE);
+	// FormWriter V2 uses 'edit_primary_key_value' for the primary key hidden field
+	// Check POST first (form submission), then GET (initial page load)
+	$item_id = isset($_POST['edit_primary_key_value']) ? $_POST['edit_primary_key_value'] : (isset($_GET['odi_order_item_id']) ? $_GET['odi_order_item_id'] : NULL);
+
+	if ($item_id) {
+		$order_item = new OrderItem($item_id, TRUE);
 		$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
 		$user = new User($order_item->get('odi_usr_user_id'), TRUE);
-	} 
+	}
 	else {
 		$order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL,1,'You must pass an order id');
 		$order_item = new OrderItem(NULL);
@@ -25,17 +29,25 @@
 	}
 
 	if($_POST){
-		
+
 		if($order_item->key){
-			$order_item->set('odi_price', $_POST['odi_price']);	
+			// Editing existing order item - preserve the order ID relationship
+			if(isset($_POST['odi_price'])){
+				$order_item->set('odi_price', $_POST['odi_price']);
+			}
+			// Ensure odi_ord_order_id is preserved (not in form but required in DB)
+			if(!$order_item->get('odi_ord_order_id')){
+				$order_item->set('odi_ord_order_id', $order->key);
+			}
 		}
 		else{
-			$order_item->set('odi_price', $_POST['odi_price']);	
+			// Creating new order item
+			$order_item->set('odi_price', $_POST['odi_price']);
 			$order_item->set('odi_status', OrderItem::STATUS_PAID);
 			$order_item->set('odi_status_change_time', 'now()');
-			$order_item->set('odi_ord_order_id', $order->key);	
+			$order_item->set('odi_ord_order_id', $order->key);
 		}
-		
+
 		$order_item->set('odi_usr_user_id', $_POST['odi_usr_user_id']);
 		$user = new User($_POST['odi_usr_user_id'], TRUE);
 		
@@ -87,56 +99,60 @@
 	$pageoptions['title'] = "Edit Order Item";
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $order_item,
+		'edit_primary_key_value' => $order_item->key
+	]);
 
-	$validation_rules = array();
+	$formwriter->begin_form();
+
+	// Always pass order ID (required for new items, helpful for existing)
+	$order_id_value = $order_item->key ? $order->key : (isset($_GET['ord_order_id']) ? $_GET['ord_order_id'] : $order->key);
+	$formwriter->hiddeninput('ord_order_id', ['value' => $order_id_value]);
+
 	if(!$order_item->key || !$order->is_stripe_order()){
-		$validation_rules['odi_price']['required']['value'] = 'true';
-	}
-	$validation_rules['odi_usr_user_id']['required']['value'] = 'true';
-	$validation_rules['odi_pro_product_id']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);	
-	
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_order_item_edit');
-
-	if($order_item->key){
-		echo $formwriter->hiddeninput('odi_order_item_id', $order_item->key);
-		echo $formwriter->hiddeninput('action', 'edit');
-	}
-	else{
-		echo $formwriter->hiddeninput('ord_order_id', $_GET['ord_order_id']);
+		$validation_opts = [];
+		if(!$order_item->key || !$order->is_stripe_order()){
+			$validation_opts['validation'] = ['required' => true];
+		}
+		$formwriter->textinput('odi_price', 'Price', $validation_opts);
 	}
 
-	echo $formwriter->textinput('Price', 'odi_price', NULL, 100, $order_item->get('odi_price'), '', 255, '');
-	
 	if($order_item->get('odi_usr_user_id')){
 		$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	}
 	$users = new MultiUser(array('deleted' => FALSE), array('last_name' => 'ASC'));
 	$users->load();
 	$optionvals = $users->get_dropdown_array();
-	echo $formwriter->dropinput("User", "odi_usr_user_id", "ctrlHolder", $optionvals, $order_item->get('odi_usr_user_id'), '', TRUE, FALSE, '/ajax/user_search_ajax');	 
+	$formwriter->dropinput('odi_usr_user_id', 'User', [
+		'options' => $optionvals,
+		'ajaxendpoint' => '/ajax/user_search_ajax',
+		'validation' => ['required' => true]
+	]);
 
 	$products = new MultiProduct(array('user_id'=> $user->key));
 	$products->load();
 	$optionvals = $products->get_dropdown_array();
-	echo $formwriter->dropinput("Product purchased", "odi_pro_product_id", "ctrlHolder", $optionvals, $order_item->get('odi_pro_product_id'), '', TRUE);	
+	$formwriter->dropinput('odi_pro_product_id', 'Product purchased', [
+		'options' => $optionvals,
+		'validation' => ['required' => true]
+	]);
 
 	$event_registrants = new MultiEventRegistrant(array('user_id' => $order_item->get('odi_usr_user_id')), array('event_id'=> 'DESC'));
 	$num_events = $event_registrants->count_all();
 	if($num_events){
-		$event_registrants->load();	
+		$event_registrants->load();
 		$optionvals = $event_registrants->get_dropdown_array();
-		echo $formwriter->dropinput("Event registration", "odi_evr_event_registrant_id", "ctrlHolder", $optionvals, $order_item->get('odi_evr_event_registrant_id'), '', TRUE);			
+		$formwriter->dropinput('odi_evr_event_registrant_id', 'Event registration', [
+			'options' => $optionvals
+		]);
 	}
 
-	echo $formwriter->textinput('Comment/note', 'odi_comment', NULL, 100, $order_item->get('odi_comment'), '', 255, '');
+	$formwriter->textinput('odi_comment', 'Comment/note');
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	$formwriter->submitbutton('submit_button', 'Submit');
 
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 	$page->end_box();
 
