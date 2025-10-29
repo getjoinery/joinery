@@ -43,24 +43,23 @@
 	echo '<h2>Edit sessions for '.$user->display_name() .'</h2>';
 
 	// Editing an existing event
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_shadow_session_edit');
-	echo '<fieldset>';
-	echo '<div class="fields full">';
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $product_detail,
+		'edit_primary_key_value' => $product_detail->key
+	]);
+	$formwriter->begin_form();
 	
 	if($product_detail->key){
-		echo $formwriter->hiddeninput('prd_product_detail_id', $product_detail->key);
-		echo $formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('action', ['value' => 'edit']);
 	}
 
-	echo $formwriter->textinput('Sessions used', 'prd_num_used', NULL, 100, $product_detail->get('prd_num_used'), '', 255, '');
-	echo $formwriter->textbox('Notes (dates when used, etc)', 'prd_notes', 'ctrlHolder', 5, 80, $product_detail->get('prd_notes'), '', 'no');
+	$formwriter->textinput('prd_num_used', 'Sessions used');
+	$formwriter->textbox('prd_notes', 'Notes (dates when used, etc)', [
+		'htmlmode' => 'no'
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo '</div></fieldset>';
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('submit_button', 'Submit');
+	$formwriter->end_form();
 
 	$page->admin_footer();
 
