@@ -41,6 +41,12 @@ abstract class FormWriterV2Base {
         $this->form_id = $form_id;
         $this->options = array_merge($this->getDefaultOptions(), $options);
 
+        // Auto-detect form action if not specified
+        // If action is empty, default to current page (without .php extension)
+        if (empty($this->options['action'])) {
+            $this->options['action'] = $this->getDefaultFormAction();
+        }
+
         // Enable deferred output mode if requested
         $this->use_deferred_output = $options['deferred_output'] ?? false;
 
@@ -146,6 +152,36 @@ abstract class FormWriterV2Base {
             'enctype' => null,
             'debug' => false  // Debug mode - outputs validation details to console
         ];
+    }
+
+    /**
+     * Get default form action based on current page
+     *
+     * Automatically determines the form's action attribute if none is specified.
+     * Returns the current page URL without the .php extension (for routing compatibility).
+     *
+     * @return string The form action URL
+     */
+    protected function getDefaultFormAction() {
+        // Get the current request URI from $_SERVER
+        // The routing system removes .php extensions, so we need to reconstruct the URL
+
+        if (isset($_SERVER['REQUEST_URI'])) {
+            $uri = $_SERVER['REQUEST_URI'];
+
+            // Remove query string if present
+            $uri = strtok($uri, '?');
+
+            // Remove .php extension if present (for backward compatibility with direct .php calls)
+            if (substr($uri, -4) === '.php') {
+                $uri = substr($uri, 0, -4);
+            }
+
+            return $uri;
+        }
+
+        // Fallback: return empty string (form posts to itself)
+        return '';
     }
 
     /**
