@@ -22,15 +22,20 @@ array(
 )
 );
 
-$formwriter = $page->getFormWriter('form1');
-echo $formwriter->begin_form("", "get", "/admin/admin_yearly_report_donations");
-echo $formwriter->dateinput("Start Date (UTC Time)", "startdate", "dateinput", 30, $page_vars['startdate'], "", 10);
-echo $formwriter->dateinput("End Date (UTC Time)", "enddate", "dateinput", 30, $page_vars['enddate'], "", 10);
-echo $formwriter->hiddeninput('source', 'form');
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit');
-echo $formwriter->end_buttons();
-echo $formwriter->end_form();
+$formwriter = $page->getFormWriter('form1', 'v2', [
+	'method' => 'GET',
+	'action' => '/admin/admin_yearly_report_donations'
+]);
+$formwriter->begin_form();
+$formwriter->dateinput('startdate', 'Start Date (UTC Time)', [
+	'value' => $page_vars['startdate']
+]);
+$formwriter->dateinput('enddate', 'End Date (UTC Time)', [
+	'value' => $page_vars['enddate']
+]);
+$formwriter->hiddeninput('source', ['value' => 'form']);
+$formwriter->submitbutton('submit_button', 'Submit');
+$formwriter->end_form();
 
 $headers = array('Name', 'Product', 'Total');
 $altlinks = array();
