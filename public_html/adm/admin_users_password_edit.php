@@ -45,9 +45,9 @@
 	$pageoptions['title'] = 'Change Password';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("form1", "post", "/admin/admin_users_password_edit");
-	echo $formwriter->hiddeninput("usr_user_id", $user->key);
+	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter->begin_form();
+	$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
 
 	echo '<fieldset><h4>Change password for '.$user->display_name().'</h4>';
 		echo '<div class="fields full">';
@@ -56,14 +56,14 @@
 				echo 'password updated successfully';
 			}
 			else {
-				echo $formwriter->textinput("New Password", "usr_password", NULL, 20, NULL , NULL, 255, "");
+				$formwriter->textinput('usr_password', 'New Password', [
+					'validation' => ['required' => true]
+				]);
 
-				echo $formwriter->start_buttons();
-				echo $formwriter->new_form_button('Submit');
-				echo $formwriter->end_buttons();
+				$formwriter->submitbutton('submit_button', 'Submit');
 			}
 		echo '</div>';
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 	$page->end_box();
 
