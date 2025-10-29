@@ -1,66 +1,39 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
-	
-	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_shadow_session_edit_logic.php'));
 
-	require_once(PathHelper::getIncludePath('/data/events_class.php'));
-	require_once(PathHelper::getIncludePath('/data/product_details_class.php'));
+// Process logic
+$page_vars = process_logic(admin_shadow_session_edit_logic($_GET, $_POST));
+extract($page_vars);
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(5);
+$page = new AdminPage();
+$page->admin_header(31);
 
-	if (isset($_REQUEST['prd_product_detail_id'])) {
-		$product_detail = new ProductDetail($_REQUEST['prd_product_detail_id'], TRUE);
-	} else {
-		$product_detail = new ProductDetail(NULL);
-	}
+if ($error_message) {
+	echo '<div class="alert alert-danger">' . htmlspecialchars($error_message) . '</div>';
+}
 
-	if($_POST){
+if ($user) {
+	echo '<h2>Edit sessions for ' . htmlspecialchars($user->display_name()) . '</h2>';
+} else {
+	echo '<h2>Edit Session</h2>';
+}
 
-		if($_POST['action'] != 'edit'){
-			$product_detail = new ProductDetail(NULL);
-		}
+// Initialize FormWriter V2
+$formwriter = $page->getFormWriter('form1', 'v2', [
+	'model' => $product_detail,
+	'edit_primary_key_value' => ($product_detail && $product_detail->key) ? $product_detail->key : null
+]);
 
-		$editable_fields = array('prd_num_used', 'prd_notes');
+$formwriter->begin_form();
 
-		foreach($editable_fields as $field) {
-			$product_detail->set($field, $_POST[$field]);
-		}
+$formwriter->textinput('prd_num_used', 'Sessions used');
+$formwriter->textbox('prd_notes', 'Notes (dates when used, etc)', [
+	'htmlmode' => 'no'
+]);
 
-		$product_detail->prepare();
-		$product_detail->save();
+$formwriter->submitbutton('submit_button', 'Submit');
+$formwriter->end_form();
 
-		LibraryFunctions::redirect('/admin/admin_shadow_sessions');
-		return;
-	}
-
-	$page = new AdminPage();
-	$page->admin_header(31);
-	
-	$user = new User($product_detail->get('prd_usr_user_id'), TRUE);
-
-	echo '<h2>Edit sessions for '.$user->display_name() .'</h2>';
-
-	// Editing an existing event
-	$formwriter = $page->getFormWriter('form1', 'v2', [
-		'model' => $product_detail,
-		'edit_primary_key_value' => $product_detail->key
-	]);
-	$formwriter->begin_form();
-	
-	if($product_detail->key){
-		$formwriter->hiddeninput('action', ['value' => 'edit']);
-	}
-
-	$formwriter->textinput('prd_num_used', 'Sessions used');
-	$formwriter->textbox('prd_notes', 'Notes (dates when used, etc)', [
-		'htmlmode' => 'no'
-	]);
-
-	$formwriter->submitbutton('submit_button', 'Submit');
-	$formwriter->end_form();
-
-	$page->admin_footer();
-
+$page->admin_footer();
 ?>
