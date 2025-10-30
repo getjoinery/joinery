@@ -277,8 +277,8 @@ $formwriter3->passwordinput('password_confirm', 'Confirm Password', [
     ]
 ]);
 
-// Textarea
-$formwriter3->textarea('user_comments', 'Comments', [
+// Textarea (textbox in FormWriter V2)
+$formwriter3->textbox('user_comments', 'Comments', [
     'rows' => 4,
     'placeholder' => 'Enter your comments',
     'validation' => ['required' => true, 'minlength' => 10, 'maxlength' => 500]
