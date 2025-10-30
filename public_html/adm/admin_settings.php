@@ -50,209 +50,198 @@
 	);
 	echo AdminPage::tab_menu($tab_menus, 'General Settings');
 
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2');
 
 		?>
 		<script type="text/javascript">
 
 		function set_booking_choices(){
-			var value = $("#bookings_active").val();
-			if(value == 0 || value == ''){  
-				$("#calendly_organization_uri_container").hide();
-				$("#calendly_organization_name_container").hide();
-				$("#calendly_api_key_container").hide();
-				$("#calendly_api_token_container").hide();
-			}	
-			else{ 
-				$("#calendly_organization_uri_container").show();
-				$("#calendly_organization_name_container").show();
-				$("#calendly_api_key_container").show();
-				$("#calendly_api_token_container").show();
-			}		
+			const bookingsActive = document.getElementById('bookings_active');
+			const value = bookingsActive ? bookingsActive.value : '';
+
+			const containers = [
+				'calendly_organization_uri_container',
+				'calendly_organization_name_container',
+				'calendly_api_key_container',
+				'calendly_api_token_container'
+			];
+
+			const display = (value == 0 || value == '') ? 'none' : 'block';
+
+			containers.forEach(function(containerId) {
+				const container = document.getElementById(containerId);
+				if (container) {
+					container.style.display = display;
+				}
+			});
 		}
 
 		function set_blog_choices(){
-			var value = $("#blog_active").val();
-			if(value == 0 || value == ''){  
-				$("#show_comments_container").hide();
-				$("#comments_active_container").hide();
-				$("#comments_unregistered_users_container").hide();
-				$("#default_comment_status_container").hide();
-				$("#comment_notification_emails_container").hide();
-				$("#anti_spam_answer_comments_container").hide();
-				$("#use_captcha_comments_container").hide();
-				$("#blog_footer_text_container").hide();
-			}	
-			else{ 
-				$("#show_comments_container").show();
-				$("#comments_active_container").show();
-				$("#comments_unregistered_users_container").show();
-				$("#default_comment_status_container").show();
-				$("#comment_notification_emails_container").show();
-				$("#anti_spam_answer_comments_container").show();
-				$("#use_captcha_comments_container").show();
-				$("#blog_footer_text_container").show();
-			}		
+			const blogActive = document.getElementById('blog_active');
+			const value = blogActive ? blogActive.value : '';
+
+			const containers = [
+				'show_comments_container',
+				'comments_active_container',
+				'comments_unregistered_users_container',
+				'default_comment_status_container',
+				'comment_notification_emails_container',
+				'anti_spam_answer_comments_container',
+				'use_captcha_comments_container',
+				'blog_footer_text_container'
+			];
+
+			const display = (value == 0 || value == '') ? 'none' : 'block';
+
+			containers.forEach(function(containerId) {
+				const container = document.getElementById(containerId);
+				if (container) {
+					container.style.display = display;
+				}
+			});
 		}
 
 		function check_social_content(){
 			// Check if any social field has content
-			var social_fields = [
-				"#social_facebook_link",
-				"#social_instagram_link",
-				"#social_soundcloud_link",
-				"#social_spotify_link",
-				"#social_youtube_link",
-				"#social_mixcloud_link",
-				"#social_discord_link",
-				"#social_google_link",
-				"#social_linkedin_link",
-				"#social_pinterest_link",
-				"#social_stack_link",
-				"#social_telegram_link",
-				"#social_tiktok_link",
-				"#social_snapchat_link",
-				"#social_slack_link",
-				"#social_github_link",
-				"#social_reddit_link",
-				"#social_whatsapp_link",
-				"#social_twitch_link"
+			const social_field_ids = [
+				'social_facebook_link',
+				'social_instagram_link',
+				'social_soundcloud_link',
+				'social_spotify_link',
+				'social_youtube_link',
+				'social_mixcloud_link',
+				'social_discord_link',
+				'social_google_link',
+				'social_linkedin_link',
+				'social_pinterest_link',
+				'social_stack_link',
+				'social_telegram_link',
+				'social_tiktok_link',
+				'social_snapchat_link',
+				'social_slack_link',
+				'social_github_link',
+				'social_reddit_link',
+				'social_whatsapp_link',
+				'social_twitch_link'
 			];
-			
-			var has_content = false;
-			for(var i = 0; i < social_fields.length; i++){
-				if($(social_fields[i]).val() && $(social_fields[i]).val().trim() !== ''){
+
+			let has_content = false;
+			for(let i = 0; i < social_field_ids.length; i++){
+				const field = document.getElementById(social_field_ids[i]);
+				if(field && field.value && field.value.trim() !== ''){
 					has_content = true;
 					break;
 				}
 			}
-			
+
 			// Set the dropdown value based on content
-			$("#social_settings_active").val(has_content ? '1' : '0');
+			const socialSettingsActive = document.getElementById('social_settings_active');
+			if (socialSettingsActive) {
+				socialSettingsActive.value = has_content ? '1' : '0';
+			}
 		}
 
 		function set_social_choices(){
-			var value = $("#social_settings_active").val();
-			if(value == 0 || value == ''){  
-				$("#social_facebook_link_container").hide();
-				$("#social_instagram_link_container").hide();
-				$("#social_soundcloud_link_container").hide();
-				$("#social_spotify_link_container").hide();
-				$("#social_youtube_link_container").hide();
-				$("#social_mixcloud_link_container").hide();
-				$("#social_discord_link_container").hide();
-				$("#social_google_link_container").hide();
-				$("#social_linkedin_link_container").hide();
-				$("#social_pinterest_link_container").hide();
-				$("#social_stack_link_container").hide();
-				$("#social_telegram_link_container").hide();
-				$("#social_tiktok_link_container").hide();
-				$("#social_snapchat_link_container").hide();
-				$("#social_slack_link_container").hide();
-				$("#social_github_link_container").hide();
-				$("#social_reddit_link_container").hide();
-				$("#social_whatsapp_link_container").hide();
-				$("#social_twitch_link_container").hide();
-			}	
-			else{ 
-				$("#social_facebook_link_container").show();
-				$("#social_instagram_link_container").show();
-				$("#social_soundcloud_link_container").show();
-				$("#social_spotify_link_container").show();
-				$("#social_youtube_link_container").show();
-				$("#social_mixcloud_link_container").show();
-				$("#social_discord_link_container").show();
-				$("#social_google_link_container").show();
-				$("#social_linkedin_link_container").show();
-				$("#social_pinterest_link_container").show();
-				$("#social_stack_link_container").show();
-				$("#social_telegram_link_container").show();
-				$("#social_tiktok_link_container").show();
-				$("#social_snapchat_link_container").show();
-				$("#social_slack_link_container").show();
-				$("#social_github_link_container").show();
-				$("#social_reddit_link_container").show();
-				$("#social_whatsapp_link_container").show();
-				$("#social_twitch_link_container").show();
-			}		
+			const socialSettingsActive = document.getElementById('social_settings_active');
+			const value = socialSettingsActive ? socialSettingsActive.value : '';
+
+			const containers = [
+				'social_facebook_link_container',
+				'social_instagram_link_container',
+				'social_soundcloud_link_container',
+				'social_spotify_link_container',
+				'social_youtube_link_container',
+				'social_mixcloud_link_container',
+				'social_discord_link_container',
+				'social_google_link_container',
+				'social_linkedin_link_container',
+				'social_pinterest_link_container',
+				'social_stack_link_container',
+				'social_telegram_link_container',
+				'social_tiktok_link_container',
+				'social_snapchat_link_container',
+				'social_slack_link_container',
+				'social_github_link_container',
+				'social_reddit_link_container',
+				'social_whatsapp_link_container',
+				'social_twitch_link_container'
+			];
+
+			const display = (value == 0 || value == '') ? 'none' : 'block';
+
+			containers.forEach(function(containerId) {
+				const container = document.getElementById(containerId);
+				if (container) {
+					container.style.display = display;
+				}
+			});
 		}
-		
+
 		function set_tracking_choices(){
-			var value = $("#tracking").val();
-			if(value == 'custom'){  
-				$("#tracking_code_container").show();
-			}	
-			else{ 
-				$("#tracking_code_container").hide();
-			}		
+			const tracking = document.getElementById('tracking');
+			const value = tracking ? tracking.value : '';
+
+			const trackingCodeContainer = document.getElementById('tracking_code_container');
+			if (trackingCodeContainer) {
+				trackingCodeContainer.style.display = (value == 'custom') ? 'block' : 'none';
+			}
 		}
-		
+
 		function set_plugin_theme_choices(){
-			var value = $("#theme_template").val();
-			if(value === 'plugin'){  
-				$("#plugin_theme_selector").show();
-			} else { 
-				$("#plugin_theme_selector").hide();
-			}		
+			const themeTemplate = document.getElementById('theme_template');
+			const value = themeTemplate ? themeTemplate.value : '';
+
+			const pluginThemeSelector = document.getElementById('plugin_theme_selector');
+			if (pluginThemeSelector) {
+				pluginThemeSelector.style.display = (value === 'plugin') ? 'block' : 'none';
+			}
 		}
 
 		function isValidEmail(email) {
-			var re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+			const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 			return re.test(email);
 		}
 
-		$(document).ready(function() {
-			
+		document.addEventListener('DOMContentLoaded', function() {
+
 			set_booking_choices();
 			set_blog_choices();
 			check_social_content(); // Check content before setting visibility
 			set_social_choices();
 			set_tracking_choices();
 			set_plugin_theme_choices();
-			
-			$("#bookings_active").change(function() {	
-				set_booking_choices();
-			});	
-			$("#blog_active").change(function() {	
-				set_blog_choices();
-			});	
-			$("#social_settings_active").change(function() {	
-				set_social_choices();
-			});	
-			$("#tracking").change(function() {	
-				set_tracking_choices();
-			});	
-			$("#theme_template").change(function(){
-				set_plugin_theme_choices();
-			});
+
+			const bookingsActive = document.getElementById('bookings_active');
+			if (bookingsActive) {
+				bookingsActive.addEventListener('change', set_booking_choices);
+			}
+
+			const blogActive = document.getElementById('blog_active');
+			if (blogActive) {
+				blogActive.addEventListener('change', set_blog_choices);
+			}
+
+			const socialSettingsActive = document.getElementById('social_settings_active');
+			if (socialSettingsActive) {
+				socialSettingsActive.addEventListener('change', set_social_choices);
+			}
+
+			const tracking = document.getElementById('tracking');
+			if (tracking) {
+				tracking.addEventListener('change', set_tracking_choices);
+			}
+
+			const themeTemplate = document.getElementById('theme_template');
+			if (themeTemplate) {
+				themeTemplate.addEventListener('change', set_plugin_theme_choices);
+			}
 
 		});
 
 		</script>
 		<?php
-	
-	$validation_rules = array();
-	
-	// Add validation for webDir (only if not read-only from Globalvars_site.php)
-	if (!isset($globalvars_hardcoded['webDir'])) {
-		$validation_rules['webDir']['weburl']['value'] = 'true';
-	}
-	
-	// Add validation for Apache error log path using remote validation
-	$validation_rules['apache_error_log']['remote']['value'] = '/ajax/validate_file_ajax';
-	$validation_rules['apache_error_log']['remote']['message'] = 'File does not exist or is not readable';
 
-	// Add validation for preview image using remote validation
-	$validation_rules['preview_image']['remote']['value'] = '/ajax/validate_file_ajax';
-	$validation_rules['preview_image']['remote']['message'] = 'File does not exist or is not readable';
-
-	// Add validation for logo link using remote validation
-	$validation_rules['logo_link']['remote']['value'] = '/ajax/validate_file_ajax';
-	$validation_rules['logo_link']['remote']['message'] = 'Must start with / and file must exist';
-
-	echo $formwriter->set_validate($validation_rules);	
-
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings');
+	$formwriter->begin_form();
 	
 	if($_SESSION['permission'] == 10){
 		
@@ -290,25 +279,45 @@
 
 		// Base path - check if hardcoded in Globalvars_site.php
 		if (isset($globalvars_hardcoded['baseDir'])) {
-			echo $formwriter->textinput("Base path (Loaded from Globalvars_site.php)", 'baseDir_readonly', '', 20, $settings->get_setting('baseDir'), '', 255, 'readonly');
+			$formwriter->textinput('baseDir_readonly', 'Base path (Loaded from Globalvars_site.php)', [
+				'value' => $settings->get_setting('baseDir'),
+				'readonly' => true
+			]);
 		} else {
-			echo $formwriter->textinput("Base path", 'baseDir', '', 20, $settings->get_setting('baseDir'), '', 255, '');
+			$formwriter->textinput('baseDir', 'Base path', [
+				'value' => $settings->get_setting('baseDir')
+			]);
 		}
-		
+
 		// Site path - always calculated, read-only
-		echo $formwriter->textinput("Site path (Auto-calculated)", 'siteDir_readonly', '', 20, $settings->get_setting('siteDir'), '', 255, 'readonly');
-		
+		$formwriter->textinput('siteDir_readonly', 'Site path (Auto-calculated)', [
+			'value' => $settings->get_setting('siteDir'),
+			'readonly' => true
+		]);
+
 		// Static files path - always calculated, read-only
-		echo $formwriter->textinput("Static files path (Auto-calculated)", 'static_files_dir_readonly', '', 20, $settings->get_setting('static_files_dir'), '', 255, 'readonly');
-		
+		$formwriter->textinput('static_files_dir_readonly', 'Static files path (Auto-calculated)', [
+			'value' => $settings->get_setting('static_files_dir'),
+			'readonly' => true
+		]);
+
 		// Upload path - always calculated, read-only
-		echo $formwriter->textinput("Upload path (Auto-calculated)", 'upload_dir_readonly', '', 20, $settings->get_setting('upload_dir'), '', 255, 'readonly');
-		
+		$formwriter->textinput('upload_dir_readonly', 'Upload path (Auto-calculated)', [
+			'value' => $settings->get_setting('upload_dir'),
+			'readonly' => true
+		]);
+
 		// Upload web directory - check if hardcoded in Globalvars_site.php
 		if (isset($globalvars_hardcoded['upload_web_dir'])) {
-			echo $formwriter->textinput("Upload web directory (Loaded from Globalvars_site.php)", 'upload_web_dir_readonly', '', 20, $settings->get_setting('upload_web_dir'), '', 255, 'readonly');
+			$formwriter->textinput('upload_web_dir_readonly', 'Upload web directory (Loaded from Globalvars_site.php)', [
+				'value' => $settings->get_setting('upload_web_dir'),
+				'readonly' => true
+			]);
 		} else {
-			echo $formwriter->textinput("Upload web directory", 'upload_web_dir', '', 20, $settings->get_setting('upload_web_dir'), '', 255, 'Usually just "uploads" - relative path visible on web');
+			$formwriter->textinput('upload_web_dir', 'Upload web directory', [
+				'value' => $settings->get_setting('upload_web_dir'),
+				'placeholder' => 'Usually just "uploads" - relative path visible on web'
+			]);
 		}
 		
 		// Create dropdown for site folder based on directories under base path
@@ -339,35 +348,47 @@
 		// Site location - check if it's hardcoded in Globalvars_site.php
 		if (isset($globalvars_hardcoded['site_template'])) {
 			// It's hardcoded, make it read-only
-			echo $formwriter->textinput("Site location (Loaded from Globalvars_site.php)", 'site_template_readonly', '', 20, $settings->get_setting('site_template'), '', 255, 'readonly');
+			$formwriter->textinput('site_template_readonly', 'Site location (Loaded from Globalvars_site.php)', [
+				'value' => $settings->get_setting('site_template'),
+				'readonly' => true
+			]);
 		} else {
 			// It's database-driven, make it editable
-			echo $formwriter->dropinput("Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", "site_template", $site_folder_error, $site_optionvals, $settings->get_setting('site_template'), '', FALSE);
+			$formwriter->dropinput('site_template', "Site location (The site we are running, basically the folder at " . htmlspecialchars($base_path) . ")", [
+				'options' => $site_optionvals,
+				'value' => $settings->get_setting('site_template')
+			]);
 		}
-		
+
 		// Web URL - check if hardcoded in Globalvars_site.php
 		$current_webDir = $settings->get_setting('webDir');
 		$webDir_valid = true;
-		
+
 		// Validate webDir format regardless of source (for display purposes)
 		if ($current_webDir && (preg_match('/^https?:\/\//', $current_webDir) || substr($current_webDir, -1) === '/')) {
 			$webDir_valid = false;
 		}
-		
+
 		if (isset($globalvars_hardcoded['webDir'])) {
-			$readonly_class = '';
 			$readonly_label = $webDir_valid ? "Web Domain (Loaded from Globalvars_site.php)" : "Web Domain (Loaded from Globalvars_site.php - INVALID FORMAT)";
-			echo $formwriter->textinput($readonly_label, 'webDir_readonly', $readonly_class, 20, $current_webDir, '', 255, 'readonly');
+			$formwriter->textinput('webDir_readonly', $readonly_label, [
+				'value' => $current_webDir,
+				'readonly' => true
+			]);
 			if (!$webDir_valid) {
 				echo '<div class="text-danger small">webDir should contain domain only (e.g. \'example.com\' or \'localhost:8080\'). Protocol is set by Protocol Mode.</div>';
 			}
 		} else {
-			echo $formwriter->textinput("Web Domain", 'webDir', '', 20, $current_webDir, 'Enter domain only (e.g. example.com or localhost:8080). Protocol is set by Protocol Mode below.' , 255, "");
+			$formwriter->textinput('webDir', 'Web Domain', [
+				'value' => $current_webDir,
+				'placeholder' => 'Enter domain only (e.g. example.com or localhost:8080). Protocol is set by Protocol Mode below.',
+				'validation' => ['weburl' => true]
+			]);
 		}
 		
 		$optionvals = array(
 			'auto' => 'Auto-detect',
-			'http' => 'HTTP only', 
+			'http' => 'HTTP only',
 			'https' => 'HTTPS only',
 			'https_redirect' => 'HTTPS with redirects'
 		);
@@ -376,13 +397,21 @@
 		if (empty($protocol_mode_value)) {
 			$protocol_mode_value = 'auto'; // Default value
 		}
-		echo $formwriter->dropinput("Protocol Mode", "protocol_mode", '', $optionvals, $protocol_mode_value, 'Controls protocol for generated URLs and redirect behavior', FALSE);	
+		$formwriter->dropinput('protocol_mode', 'Protocol Mode', [
+			'options' => $optionvals,
+			'value' => $protocol_mode_value,
+			'help' => 'Controls protocol for generated URLs and redirect behavior'
+		]);
 
-		$optionvals = array("Yes"=>1, 'No' => 0);
-		echo $formwriter->dropinput("CSS Debug Mode (tailwind themes only)", "debug_css", '', $optionvals, $settings->get_setting('debug_css'), '', FALSE);
-		
-		$optionvals = array("Yes (show to screen)"=>1, 'No (logged)' => 0);
-		echo $formwriter->dropinput("Show errors", "show_errors", '', $optionvals, $settings->get_setting('show_errors'), '', FALSE);		
+		$formwriter->dropinput('debug_css', 'CSS Debug Mode (tailwind themes only)', [
+			'options' => ["Yes"=>1, 'No' => 0],
+			'value' => $settings->get_setting('debug_css')
+		]);
+
+		$formwriter->dropinput('show_errors', 'Show errors', [
+			'options' => ["Yes (show to screen)"=>1, 'No (logged)' => 0],
+			'value' => $settings->get_setting('show_errors')
+		]);		
 		
 		// Get themes from directory only
 		$directory_themes = ThemeHelper::getAvailableThemes();
@@ -396,48 +425,76 @@
 			$optionvals[$display_name] = $theme_name;  // Fixed: display_name as key, theme_name as value
 		}
 
-		//echo $formwriter->textinput("Alternate theme (optional theme other than default)", 'theme_template', '', 20, $settings->get_setting('theme_template'), "" , 255, "");
-		echo $formwriter->dropinput("Active theme", "theme_template", '', $optionvals, $settings->get_setting('theme_template'), '', FALSE);
-		
+		$formwriter->dropinput('theme_template', 'Active theme', [
+			'options' => $optionvals,
+			'value' => $settings->get_setting('theme_template')
+		]);
+
 		// Always render plugin selector dropdown, JavaScript will control visibility
 		// Use existing method to get available plugins
 		$available_plugins = PluginHelper::getAvailablePlugins();
-		
+
 		// Create FormWriter dropdown following existing admin_settings pattern
 		$current_plugin = $settings->get_setting('active_theme_plugin');
-		
+
 		// Build options array for FormWriter
-		$plugin_options = array('-- Select Plugin --' => '');  // Fixed: display text as key, value as value
+		$plugin_options = array('-- Select Plugin --' => '');
 		foreach ($available_plugins as $plugin_name => $plugin_helper) {
 			// PluginHelper::getAvailablePlugins returns array of PluginHelper instances
 			$display_name = $plugin_helper->getPluginName();
-			$plugin_options[$display_name] = $plugin_name;  // Fixed: display_name as key, plugin_name as value
+			$plugin_options[$display_name] = $plugin_name;
 		}
-		
+
 		// Wrap in a div that JavaScript can show/hide
 		// Note: The dropdown inside needs to be ignored by validation when hidden
 		$current_theme = $settings->get_setting('theme_template');
 		$initial_display = ($current_theme === 'plugin') ? 'block' : 'none';
 		echo '<div id="plugin_theme_selector" style="display: ' . $initial_display . ';">';
-		echo $formwriter->dropinput('Active Theme Plugin', 'active_theme_plugin', '', $plugin_options, $current_plugin, 'Select which plugin provides the user interface', FALSE);
+		$formwriter->dropinput('active_theme_plugin', 'Active Theme Plugin', [
+			'options' => $plugin_options,
+			'value' => $current_plugin,
+			'help' => 'Select which plugin provides the user interface'
+		]);
 		echo '</div>';
-		
-		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
-		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
-		echo $formwriter->textinput("Default Email Name", 'defaultemailname', '', 20, $settings->get_setting('defaultemailname'), "" , 255, "");
 
-		echo $formwriter->textinput("Site Name", 'site_name', '', 20, $settings->get_setting('site_name'), "" , 255, "");
-		echo $formwriter->textinput("Site Description", 'site_description', '', 20, $settings->get_setting('site_description'), "" , 255, "");
+		$formwriter->textinput('webmaster_email', 'Webmaster Email', [
+			'value' => $settings->get_setting('webmaster_email')
+		]);
+		$formwriter->textinput('defaultemail', 'Default Email', [
+			'value' => $settings->get_setting('defaultemail')
+		]);
+		$formwriter->textinput('defaultemailname', 'Default Email Name', [
+			'value' => $settings->get_setting('defaultemailname')
+		]);
 
-		echo $formwriter->textinput("Link to Logo", 'logo_link', '', 20, $settings->get_setting('logo_link'), "" , 255, "");
+		$formwriter->textinput('site_name', 'Site Name', [
+			'value' => $settings->get_setting('site_name')
+		]);
+		$formwriter->textinput('site_description', 'Site Description', [
+			'value' => $settings->get_setting('site_description')
+		]);
 
-		echo $formwriter->textinput("Node Path (Example: /var/www/html/test/node)", 'node_dir', '', 20, $settings->get_setting('node_dir'), "" , 255, "");
+		$formwriter->textinput('logo_link', 'Link to Logo', [
+			'value' => $settings->get_setting('logo_link'),
+			'validation' => [
+				'remote' => [
+					'url' => '/ajax/validate_file_ajax',
+					'message' => 'Must start with / and file must exist'
+				]
+			]
+		]);
+
+		$formwriter->textinput('node_dir', 'Node Path (Example: /var/www/html/test/node)', [
+			'value' => $settings->get_setting('node_dir')
+		]);
 		
 		// Composer section with two-column layout and package validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Composer Settings</h5>';
-		echo $formwriter->textinput("Composer Path (Example: /home/user1/vendor/)", 'composerAutoLoad', '', 20, $settings->get_setting('composerAutoLoad'), "" , 255, "");
+		$formwriter->textinput('composerAutoLoad', 'Composer Path (Example: /home/user1/vendor/)', [
+			'value' => $settings->get_setting('composerAutoLoad')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Installed Packages</h5>';
@@ -594,9 +651,19 @@
 		echo '<div style="margin: 50px 0;"></div>';
 		
 		$site_template = $settings->get_setting('site_template');
-		echo $formwriter->textinput("Apache Error Log Path (Example: /var/www/html/{$site_template}/logs/error.log)", 'apache_error_log', '', 20, $settings->get_setting('apache_error_log'), "" , 255, "");
-		
-		echo $formwriter->textinput("Standard Error Message", 'standard_error', '', 20, $settings->get_setting('standard_error'), "" , 255, "");
+		$formwriter->textinput('apache_error_log', "Apache Error Log Path (Example: /var/www/html/{$site_template}/logs/error.log)", [
+			'value' => $settings->get_setting('apache_error_log'),
+			'validation' => [
+				'remote' => [
+					'url' => '/ajax/validate_file_ajax',
+					'message' => 'File does not exist or is not readable'
+				]
+			]
+		]);
+
+		$formwriter->textinput('standard_error', 'Standard Error Message', [
+			'value' => $settings->get_setting('standard_error')
+		]);
 		
 		echo '<div style="margin: 50px 0;"></div>';
 		
@@ -604,8 +671,12 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>hCaptcha Settings</h5>';
-		echo $formwriter->textinput("HCaptcha Public Key", 'hcaptcha_public', '', 20, $settings->get_setting('hcaptcha_public'), "" , 255, "");
-		echo $formwriter->textinput("HCaptcha Private Key", 'hcaptcha_private', '', 20, $settings->get_setting('hcaptcha_private'), "" , 255, "");
+		$formwriter->textinput('hcaptcha_public', 'HCaptcha Public Key', [
+			'value' => $settings->get_setting('hcaptcha_public')
+		]);
+		$formwriter->textinput('hcaptcha_private', 'HCaptcha Private Key', [
+			'value' => $settings->get_setting('hcaptcha_private')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live Preview</h5>';
@@ -633,8 +704,12 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Google reCAPTCHA Settings</h5>';
-		echo $formwriter->textinput("Google Captcha Public Key", 'captcha_public', '', 20, $settings->get_setting('captcha_public'), "" , 255, "");
-		echo $formwriter->textinput("Google Captcha Private Key", 'captcha_private', '', 20, $settings->get_setting('captcha_private'), "" , 255, "");
+		$formwriter->textinput('captcha_public', 'Google Captcha Public Key', [
+			'value' => $settings->get_setting('captcha_public')
+		]);
+		$formwriter->textinput('captcha_private', 'Google Captcha Private Key', [
+			'value' => $settings->get_setting('captcha_private')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live Preview</h5>';
@@ -661,8 +736,12 @@
 		// Acuity API Key and User ID with validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
-		echo $formwriter->textinput("Acuity API Key (Example: 7d97bfea536935sgd8b14d266b105ab1)", 'acuity_api_key', '', 20, $settings->get_setting('acuity_api_key'), "" , 255, "");
-		echo $formwriter->textinput("Acuity User ID (Example: 18623423)", 'acuity_user_id', '', 20, $settings->get_setting('acuity_user_id'), "" , 255, "");
+		$formwriter->textinput('acuity_api_key', 'Acuity API Key (Example: 7d97bfea536935sgd8b14d266b105ab1)', [
+			'value' => $settings->get_setting('acuity_api_key')
+		]);
+		$formwriter->textinput('acuity_user_id', 'Acuity User ID (Example: 18623423)', [
+			'value' => $settings->get_setting('acuity_user_id')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;">';
@@ -723,209 +802,377 @@
 	}
 
 	echo '<h3>General Settings</h3>';
-	
-	echo $formwriter->textbox('Custom CSS', 'custom_css', 'ctrlHolder', 10, 80, $settings->get_setting('custom_css'), '', 'no');
 
-	echo $formwriter->textinput("Preview image (for facebook, google, etc)", 'preview_image', '', 20, $settings->get_setting('preview_image'), "" , 255, "");
+	$yes_no_options = ["Yes"=>1, 'No' => 0];
 
-	$optionvals = array("Use built in tracking"=>'internal', 'Use custom tracking' => 'custom');
-	echo $formwriter->dropinput("Visit tracking", "tracking", '', $optionvals, $settings->get_setting('tracking'), '', FALSE);	
-	echo $formwriter->textinput("Tracking code", "tracking_code", '', 20, $settings->get_setting('tracking_code'), "" , 255, "");	
+	$formwriter->textbox('custom_css', 'Custom CSS', [
+		'value' => $settings->get_setting('custom_css'),
+		'rows' => 10,
+		'cols' => 80,
+		'htmlmode' => 'no'
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Registration active", "register_active", '', $optionvals, $settings->get_setting('register_active'), '', FALSE);
+	$formwriter->textinput('preview_image', 'Preview image (for facebook, google, etc)', [
+		'value' => $settings->get_setting('preview_image'),
+		'validation' => [
+			'remote' => [
+				'url' => '/ajax/validate_file_ajax',
+				'message' => 'File does not exist or is not readable'
+			]
+		]
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Subscriptions active", "subscriptions_active", '', $optionvals, $settings->get_setting('subscriptions_active'), '', FALSE);
+	$formwriter->dropinput('tracking', 'Visit tracking', [
+		'options' => ["Use built in tracking"=>'internal', 'Use custom tracking' => 'custom'],
+		'value' => $settings->get_setting('tracking')
+	]);
+	$formwriter->textinput('tracking_code', 'Tracking code', [
+		'value' => $settings->get_setting('tracking_code')
+	]);
 
-	$optionvals = Address::get_timezone_drop_array();
-	echo $formwriter->dropinput("Default timezone", "default_timezone", '', $optionvals, $settings->get_setting('default_timezone'), '', FALSE); 
+	$formwriter->dropinput('register_active', 'Registration active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('register_active')
+	]);
 
-	echo $formwriter->textinput("Nickname display as (blank for no nicknames)", "nickname_display_as", '', 20, $settings->get_setting('nickname_display_as'), "" , 255, "");	
-	$optionvals = array("Default (UIKit)"=>'', 'Bootstrap' => 'admin', 'Tailwind' => 'tailwind');
-	echo $formwriter->dropinput("Form styling", "form_style", '', $optionvals, $settings->get_setting('form_style'), '', FALSE);	
+	$formwriter->dropinput('subscriptions_active', 'Subscriptions active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('subscriptions_active')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Require email activation to log on", "activation_required_login", '', $optionvals, $settings->get_setting('activation_required_login'), '', FALSE);	
+	$formwriter->dropinput('default_timezone', 'Default timezone', [
+		'options' => Address::get_timezone_drop_array(),
+		'value' => $settings->get_setting('default_timezone')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Newsletter active", "newsletter_active", '', $optionvals, $settings->get_setting('newsletter_active'), '', FALSE);	
-	
-	echo $formwriter->textinput("Emails to receive subscription notifications (separate with comma)", "subscription_notification_emails", '', 20, $settings->get_setting('subscription_notification_emails'), "" , 255, "");	
+	$formwriter->textinput('nickname_display_as', 'Nickname display as (blank for no nicknames)', [
+		'value' => $settings->get_setting('nickname_display_as')
+	]);
+	$formwriter->dropinput('form_style', 'Form styling', [
+		'options' => ["Default (UIKit)"=>'', 'Bootstrap' => 'admin', 'Tailwind' => 'tailwind'],
+		'value' => $settings->get_setting('form_style')
+	]);
 
-	echo $formwriter->textinput("Emails to receive one time purchase notifications (separate with comma)", "single_purchase_notification_emails", '', 20, $settings->get_setting('single_purchase_notification_emails'), "" , 255, "");	
+	$formwriter->dropinput('activation_required_login', 'Require email activation to log on', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('activation_required_login')
+	]);
 
-	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
-	echo $formwriter->dropinput("Site Currency", "site_currency", '', $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
+	$formwriter->dropinput('newsletter_active', 'Newsletter active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('newsletter_active')
+	]);
 
-	echo $formwriter->textbox('Robots.txt entry', 'robots_text', 'ctrlHolder', 10, 80, $settings->get_setting('robots_text'), '', 'no');
+	$formwriter->textinput('subscription_notification_emails', 'Emails to receive subscription notifications (separate with comma)', [
+		'value' => $settings->get_setting('subscription_notification_emails')
+	]);
+
+	$formwriter->textinput('single_purchase_notification_emails', 'Emails to receive one time purchase notifications (separate with comma)', [
+		'value' => $settings->get_setting('single_purchase_notification_emails')
+	]);
+
+	$formwriter->dropinput('site_currency', 'Site Currency', [
+		'options' => ["US Dollar"=>'usd', 'Euro' => 'eur'],
+		'value' => $settings->get_setting('site_currency')
+	]);
+
+	$formwriter->textbox('robots_text', 'Robots.txt entry', [
+		'value' => $settings->get_setting('robots_text'),
+		'rows' => 10,
+		'cols' => 80,
+		'htmlmode' => 'no'
+	]);
 
 	echo '<h3>Survey Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Survey module active", "surveys_active", '', $optionvals, $settings->get_setting('surveys_active'), '', FALSE);	
+	$formwriter->dropinput('surveys_active', 'Survey module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('surveys_active')
+	]);
 
 	echo '<h3>Blog Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Blog module active", "blog_active", '', $optionvals, $settings->get_setting('blog_active'), '', FALSE);
+	$formwriter->dropinput('blog_active', 'Blog module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('blog_active')
+	]);
 
 	/*DEPRECATED
 	$optionvals = array("Yes"=>1, 'No' => 0);
 	echo $formwriter->dropinput("Use blog as homepage", "use_blog_as_homepage", '', $optionvals, $settings->get_setting('use_blog_as_homepage'), '', FALSE);
 */	
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Show comments", "show_comments", '', $optionvals, $settings->get_setting('show_comments'), '', FALSE);	
+	$formwriter->dropinput('show_comments', 'Show comments', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('show_comments')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow comments", "comments_active", '', $optionvals, $settings->get_setting('comments_active'), '', FALSE);	
+	$formwriter->dropinput('comments_active', 'Allow comments', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('comments_active')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow comments from unregistered users", "comments_unregistered_users", '', $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
+	$formwriter->dropinput('comments_unregistered_users', 'Allow comments from unregistered users', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('comments_unregistered_users')
+	]);
 
-	$optionvals = array("Approved"=>'approved', 'Unapproved' => 'unapproved');
-	echo $formwriter->dropinput("Default comment status", "default_comment_status", '', $optionvals, $settings->get_setting('default_comment_status'), '', FALSE);
+	$formwriter->dropinput('default_comment_status', 'Default comment status', [
+		'options' => ["Approved"=>'approved', 'Unapproved' => 'unapproved'],
+		'value' => $settings->get_setting('default_comment_status')
+	]);
 
-	echo $formwriter->textinput("Emails to receive comment notifications (separate with comma)", "comment_notification_emails", '', 20, $settings->get_setting('comment_notification_emails'), "" , 255, "");		
+	$formwriter->textinput('comment_notification_emails', 'Emails to receive comment notifications (separate with comma)', [
+		'value' => $settings->get_setting('comment_notification_emails')
+	]);
 
-	echo $formwriter->textinput("Comment anti spam word (blank for none)", "anti_spam_answer_comments", '', 20, $settings->get_setting('anti_spam_answer'), "" , 255, "");
+	$formwriter->textinput('anti_spam_answer_comments', 'Comment anti spam word (blank for none)', [
+		'value' => $settings->get_setting('anti_spam_answer')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Use captcha on comments", "use_captcha_comments", '', $optionvals, $settings->get_setting('use_captcha_comments'), '', FALSE);	
+	$formwriter->dropinput('use_captcha_comments', 'Use captcha on comments', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('use_captcha_comments')
+	]);
 
-	echo $formwriter->textbox('Blog footer text', 'blog_footer_text', 'ctrlHolder', 10, 80, $settings->get_setting('blog_footer_text'), '', 'no');	
+	$formwriter->textbox('blog_footer_text', 'Blog footer text', [
+		'value' => $settings->get_setting('blog_footer_text'),
+		'rows' => 10,
+		'cols' => 80,
+		'htmlmode' => 'no'
+	]);	
  
 	echo '<hr>';
  
  	echo '<h3>Spam Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Use form honeypots", "use_honeypot", '', $optionvals, $settings->get_setting('use_honeypot'), '', FALSE);	
+	$formwriter->dropinput('use_honeypot', 'Use form honeypots', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('use_honeypot')
+	]);
 
-	echo $formwriter->textinput("Anti spam word (blank for none)", "anti_spam_answer", '', 20, $settings->get_setting('anti_spam_answer'), "" , 255, "");	
+	$formwriter->textinput('anti_spam_answer', 'Anti spam word (blank for none)', [
+		'value' => $settings->get_setting('anti_spam_answer')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Use captcha", "use_captcha", '', $optionvals, $settings->get_setting('use_captcha'), '', FALSE);	
+	$formwriter->dropinput('use_captcha', 'Use captcha', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('use_captcha')
+	]);	
 	
 	echo '<hr>';
 
  	echo '<h3>Social Settings</h3>';
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Social settings active", "social_settings_active", '', $optionvals, '0', '', FALSE);
+	$formwriter->dropinput('social_settings_active', 'Social settings active', [
+		'options' => $yes_no_options,
+		'value' => '0'
+	]);
 
-	echo $formwriter->textinput("Facebook link", "social_facebook_link", '', 20, $settings->get_setting('social_facebook_link'), "" , 255, "");	
+	$formwriter->textinput('social_facebook_link', 'Facebook link', [
+		'value' => $settings->get_setting('social_facebook_link')
+	]);
 
-	echo $formwriter->textinput("Instagram link", "social_instagram_link", '', 20, $settings->get_setting('social_instagram_link'), "" , 255, "");
-		
-	echo $formwriter->textinput("Soundcloud link", "social_soundcloud_link", '', 20, $settings->get_setting('social_soundcloud_link'), "" , 255, "");
-			
-	echo $formwriter->textinput("Spotify link", "social_spotify_link", '', 20, $settings->get_setting('social_spotify_link'), "" , 255, "");
-				
-	echo $formwriter->textinput("Youtube link", "social_youtube_link", '', 20, $settings->get_setting('social_youtube_link'), "" , 255, "");
-					
-	echo $formwriter->textinput("Mixcloud link", "social_mixcloud_link", '', 20, $settings->get_setting('social_mixcloud_link'), "" , 255, "");
+	$formwriter->textinput('social_instagram_link', 'Instagram link', [
+		'value' => $settings->get_setting('social_instagram_link')
+	]);
 
-	echo $formwriter->textinput("Discord link", "social_discord_link", '', 20, $settings->get_setting('social_discord_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Google link", "social_google_link", '', 20, $settings->get_setting('social_google_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Linkedin link", "social_linkedin_link", '', 20, $settings->get_setting('social_linkedin_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Pinterest link", "social_pinterest_link", '', 20, $settings->get_setting('social_pinterest_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Stack Overflow link", "social_stack_link", '', 20, $settings->get_setting('social_stack_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Telegram link", "social_telegram_link", '', 20, $settings->get_setting('social_telegram_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Tiktok link", "social_tiktok_link", '', 20, $settings->get_setting('social_tiktok_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Snapchat link", "social_snapchat_link", '', 20, $settings->get_setting('social_snapchat_link'), "" , 255, "");
-	
-	echo $formwriter->textinput("Slack link", "social_slack_link", '', 20, $settings->get_setting('social_slack_link'), "" , 255, "");
-	echo $formwriter->textinput("Github link", "social_github_link", '', 20, $settings->get_setting('social_github_link'), "" , 255, "");
-	echo $formwriter->textinput("Reddit link", "social_reddit_link", '', 20, $settings->get_setting('social_reddit_link'), "" , 255, "");
-	echo $formwriter->textinput("Whatsapp link", "social_whatsapp_link", '', 20, $settings->get_setting('social_whatsapp_link'), "" , 255, "");
-	echo $formwriter->textinput("Twitch link", "social_twitch_link", '', 20, $settings->get_setting('social_twitch_link'), "" , 255, "");
+	$formwriter->textinput('social_soundcloud_link', 'Soundcloud link', [
+		'value' => $settings->get_setting('social_soundcloud_link')
+	]);
+
+	$formwriter->textinput('social_spotify_link', 'Spotify link', [
+		'value' => $settings->get_setting('social_spotify_link')
+	]);
+
+	$formwriter->textinput('social_youtube_link', 'Youtube link', [
+		'value' => $settings->get_setting('social_youtube_link')
+	]);
+
+	$formwriter->textinput('social_mixcloud_link', 'Mixcloud link', [
+		'value' => $settings->get_setting('social_mixcloud_link')
+	]);
+
+	$formwriter->textinput('social_discord_link', 'Discord link', [
+		'value' => $settings->get_setting('social_discord_link')
+	]);
+
+	$formwriter->textinput('social_google_link', 'Google link', [
+		'value' => $settings->get_setting('social_google_link')
+	]);
+
+	$formwriter->textinput('social_linkedin_link', 'Linkedin link', [
+		'value' => $settings->get_setting('social_linkedin_link')
+	]);
+
+	$formwriter->textinput('social_pinterest_link', 'Pinterest link', [
+		'value' => $settings->get_setting('social_pinterest_link')
+	]);
+
+	$formwriter->textinput('social_stack_link', 'Stack Overflow link', [
+		'value' => $settings->get_setting('social_stack_link')
+	]);
+
+	$formwriter->textinput('social_telegram_link', 'Telegram link', [
+		'value' => $settings->get_setting('social_telegram_link')
+	]);
+
+	$formwriter->textinput('social_tiktok_link', 'Tiktok link', [
+		'value' => $settings->get_setting('social_tiktok_link')
+	]);
+
+	$formwriter->textinput('social_snapchat_link', 'Snapchat link', [
+		'value' => $settings->get_setting('social_snapchat_link')
+	]);
+
+	$formwriter->textinput('social_slack_link', 'Slack link', [
+		'value' => $settings->get_setting('social_slack_link')
+	]);
+	$formwriter->textinput('social_github_link', 'Github link', [
+		'value' => $settings->get_setting('social_github_link')
+	]);
+	$formwriter->textinput('social_reddit_link', 'Reddit link', [
+		'value' => $settings->get_setting('social_reddit_link')
+	]);
+	$formwriter->textinput('social_whatsapp_link', 'Whatsapp link', [
+		'value' => $settings->get_setting('social_whatsapp_link')
+	]);
+	$formwriter->textinput('social_twitch_link', 'Twitch link', [
+		'value' => $settings->get_setting('social_twitch_link')
+	]);
 
 	echo '<h3>Booking Settings</h3>';
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Booking module active", "bookings_active", '', $optionvals, $settings->get_setting('bookings_active'), '', FALSE);
+	$formwriter->dropinput('bookings_active', 'Booking module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('bookings_active')
+	]);
 
-	echo $formwriter->textinput("Calendly Organization URI (Example: https://api.calendly.com/organizations/EHDBUSLIPJFCKXAE)", 'calendly_organization_uri', '', 20, $settings->get_setting('calendly_organization_uri'), "" , 255, "");
-	echo $formwriter->textinput("Calendly Organization Name (Example: test-organization)", 'calendly_organization_name', '', 20, $settings->get_setting('calendly_organization_name'), "" , 255, "");
-	echo $formwriter->textinput("Calendly API Key (Example: INEEMNBGGN53553SDFGBESNICRDW74)", 'calendly_api_key', '', 20, $settings->get_setting('calendly_api_key'), "" , 255, "");
-	echo $formwriter->textbox('Calendly API Token (Example: eyJraWQiOiIxY2UxZT...ZWJjY)', 'calendly_api_token', 'ctrlHolder', 10, 80, $settings->get_setting('calendly_api_token'), '', 'no');
+	$formwriter->textinput('calendly_organization_uri', 'Calendly Organization URI (Example: https://api.calendly.com/organizations/EHDBUSLIPJFCKXAE)', [
+		'value' => $settings->get_setting('calendly_organization_uri')
+	]);
+	$formwriter->textinput('calendly_organization_name', 'Calendly Organization Name (Example: test-organization)', [
+		'value' => $settings->get_setting('calendly_organization_name')
+	]);
+	$formwriter->textinput('calendly_api_key', 'Calendly API Key (Example: INEEMNBGGN53553SDFGBESNICRDW74)', [
+		'value' => $settings->get_setting('calendly_api_key')
+	]);
+	$formwriter->textbox('calendly_api_token', 'Calendly API Token (Example: eyJraWQiOiIxY2UxZT...ZWJjY)', [
+		'value' => $settings->get_setting('calendly_api_token'),
+		'rows' => 10,
+		'cols' => 80,
+		'htmlmode' => 'no'
+	]);
 
  	echo '<h3>Events Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Event module active", "events_active", '', $optionvals, $settings->get_setting('events_active'), '', FALSE);
+	$formwriter->dropinput('events_active', 'Event module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('events_active')
+	]);
 
-	echo $formwriter->textinput("Events label", 'events_label', '', 20, $settings->get_setting('events_label'), "" , 255, "");
+	$formwriter->textinput('events_label', 'Events label', [
+		'value' => $settings->get_setting('events_label')
+	]);
 
  	echo '<h3>Product Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Product module active", "products_active", '', $optionvals, $settings->get_setting('products_active'), '', FALSE);
+	$formwriter->dropinput('products_active', 'Product module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('products_active')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("List regular products on product index", "products_list_items_active", '', $optionvals, $settings->get_setting('products_list_items_active'), '', FALSE);
+	$formwriter->dropinput('products_list_items_active', 'List regular products on product index', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('products_list_items_active')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("List event products on product index", "products_list_events_active", '', $optionvals, $settings->get_setting('products_list_events_active'), '', FALSE);
+	$formwriter->dropinput('products_list_events_active', 'List event products on product index', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('products_list_events_active')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow coupon codes", "coupons_active", '', $optionvals, $settings->get_setting('coupons_active'), '', FALSE);
+	$formwriter->dropinput('coupons_active', 'Allow coupon codes', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('coupons_active')
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Activate pricing (/pricing) page", "pricing_page", '', $optionvals, $settings->get_setting('pricing_page'), '', FALSE);
+	$formwriter->dropinput('pricing_page', 'Activate pricing (/pricing) page', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('pricing_page')
+	]);
 
 	$max_subscriptions_per_user = 0;
 	if($settings->get_setting('max_subscriptions_per_user')){
 		$max_subscriptions_per_user = $settings->get_setting('max_subscriptions_per_user');
 	}
-	echo $formwriter->textinput("Max number of subscriptions per user (0 for no limit)", 'max_subscriptions_per_user', '', 20, $max_subscriptions_per_user, "" , 255, "");
+	$formwriter->textinput('max_subscriptions_per_user', 'Max number of subscriptions per user (0 for no limit)', [
+		'value' => $max_subscriptions_per_user
+	]);
 
 	// Subscription Tier Management Settings
 	echo '<h4>Subscription Tier Management</h4>';
 	echo '<p class="text-muted">Control how users can change their subscription tiers</p>';
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow subscription downgrades", "subscription_downgrades_enabled", '', $optionvals, $settings->get_setting('subscription_downgrades_enabled'), 'Allow users to downgrade to lower subscription tiers', FALSE);
+	$formwriter->dropinput('subscription_downgrades_enabled', 'Allow subscription downgrades', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('subscription_downgrades_enabled'),
+		'help' => 'Allow users to downgrade to lower subscription tiers'
+	]);
 
-	$optionvals = array("Immediate"=>'immediate', 'End of billing period' => 'end_of_period');
-	echo $formwriter->dropinput("Downgrade timing", "subscription_downgrade_timing", '', $optionvals, $settings->get_setting('subscription_downgrade_timing'), 'When downgrades take effect (only applies if downgrades are enabled)', FALSE);
+	$formwriter->dropinput('subscription_downgrade_timing', 'Downgrade timing', [
+		'options' => ["Immediate"=>'immediate', 'End of billing period' => 'end_of_period'],
+		'value' => $settings->get_setting('subscription_downgrade_timing'),
+		'help' => 'When downgrades take effect (only applies if downgrades are enabled)'
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow subscription cancellations", "subscription_cancellation_enabled", '', $optionvals, $settings->get_setting('subscription_cancellation_enabled'), 'Allow users to cancel their subscriptions', FALSE);
+	$formwriter->dropinput('subscription_cancellation_enabled', 'Allow subscription cancellations', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('subscription_cancellation_enabled'),
+		'help' => 'Allow users to cancel their subscriptions'
+	]);
 
-	$optionvals = array("Immediate"=>'immediate', 'End of billing period' => 'end_of_period');
-	echo $formwriter->dropinput("Cancellation timing", "subscription_cancellation_timing", '', $optionvals, $settings->get_setting('subscription_cancellation_timing'), 'When cancellations take effect', FALSE);
+	$formwriter->dropinput('subscription_cancellation_timing', 'Cancellation timing', [
+		'options' => ["Immediate"=>'immediate', 'End of billing period' => 'end_of_period'],
+		'value' => $settings->get_setting('subscription_cancellation_timing'),
+		'help' => 'When cancellations take effect'
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Issue prorated refunds on cancellation", "subscription_cancellation_prorate", '', $optionvals, $settings->get_setting('subscription_cancellation_prorate'), 'Issue refunds for unused time (only for immediate cancellations)', FALSE);
+	$formwriter->dropinput('subscription_cancellation_prorate', 'Issue prorated refunds on cancellation', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('subscription_cancellation_prorate'),
+		'help' => 'Issue refunds for unused time (only for immediate cancellations)'
+	]);
 
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Allow subscription reactivation", "subscription_reactivation_enabled", '', $optionvals, $settings->get_setting('subscription_reactivation_enabled'), 'Allow users to reactivate cancelled subscriptions before they expire', FALSE);
+	$formwriter->dropinput('subscription_reactivation_enabled', 'Allow subscription reactivation', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('subscription_reactivation_enabled'),
+		'help' => 'Allow users to reactivate cancelled subscriptions before they expire'
+	]);
 	
 	echo '<hr>';
 
 	echo '<h3>File Hosting Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("File hosting module active", "files_active", '', $optionvals, $settings->get_setting('files_active'), '', FALSE);	
+	$formwriter->dropinput('files_active', 'File hosting module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('files_active')
+	]);
 
 	if(!$settings->get_setting('allowed_upload_extensions')){
 		$allowed_upload_extensions = 'gif,jpeg,jpg,png,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a';
 	} else {
 		$allowed_upload_extensions = $settings->get_setting('allowed_upload_extensions');
 	}
-	echo $formwriter->textinput("Allowed file upload extensions (comma separated)", 'allowed_upload_extensions', '', 20, $allowed_upload_extensions, "" , 255, "");
+	$formwriter->textinput('allowed_upload_extensions', 'Allowed file upload extensions (comma separated)', [
+		'value' => $allowed_upload_extensions
+	]);
 
 	echo '<h3>Video Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Video module active", "videos_active", '', $optionvals, $settings->get_setting('videos_active'), '', FALSE);
+	$formwriter->dropinput('videos_active', 'Video module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('videos_active')
+	]);
 
 	echo '<h3>CMS Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("CMS module active", "page_contents_active", '', $optionvals, $settings->get_setting('page_contents_active'), '', FALSE);
+	$formwriter->dropinput('page_contents_active', 'CMS module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('page_contents_active')
+	]);
 
 	$pages = new MultiPage(
 		array('deleted' => false, 'published' => true),
@@ -935,24 +1182,33 @@
 	$pages->load();
 	$optionvals = $pages->get_dropdown_array_link();
 	$optionvals['Blog homepage'] = '/blog';
-	echo $formwriter->dropinput("Alternate page to use as homepage (optional)", "alternate_homepage", '', $optionvals, $settings->get_setting('alternate_homepage'), '', TRUE);	
-	
-	echo $formwriter->textinput("Alternate page to use as logged in homepage (optional)", 'alternate_loggedin_homepage', '', 20, $settings->get_setting('alternate_loggedin_homepage'), "" , 255, "");
+	$formwriter->dropinput('alternate_homepage', 'Alternate page to use as homepage (optional)', [
+		'options' => $optionvals,
+		'value' => $settings->get_setting('alternate_homepage'),
+		'empty_option' => true
+	]);
+
+	$formwriter->textinput('alternate_loggedin_homepage', 'Alternate page to use as logged in homepage (optional)', [
+		'value' => $settings->get_setting('alternate_loggedin_homepage')
+	]);
 
 	echo '<h3>Url Rewrite Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Url rewrite module active", "urls_active", '', $optionvals, $settings->get_setting('urls_active'), '', FALSE);
-
-	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
-	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);
+	$formwriter->dropinput('urls_active', 'Url rewrite module active', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('urls_active')
+	]);
 
 	echo '<h3>Upgrade Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Act as upgrade server", "upgrade_server_active", '', $optionvals, $settings->get_setting('upgrade_server_active'), '', FALSE);	
+	$formwriter->dropinput('upgrade_server_active', 'Act as upgrade server', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('upgrade_server_active')
+	]);
 	if(!$upgrade_source = $settings->get_setting('upgrade_source')){
 		$upgrade_source = 'https://getjoinery.com';
 	}
-	echo $formwriter->textinput("Upgrade source", "upgrade_source", '', 20, $upgrade_source, "" , 255, "");
+	$formwriter->textinput('upgrade_source', 'Upgrade source', [
+		'value' => $upgrade_source
+	]);
 
 	echo '<hr><h2>Plugin Settings</h2>';
 
@@ -968,10 +1224,8 @@
 		}
 	}
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('submit_button', 'Submit');
+	$formwriter->end_form();
 
 	$page->end_box();
 
