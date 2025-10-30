@@ -51,106 +51,103 @@
 	);
 	echo AdminPage::tab_menu($tab_menus, 'Email Settings');
 
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2');
 
 		?>
 		<script type="text/javascript">
 
 		function set_smtp_auth_choices(){
-			var value = $("#smtp_auth").val();
-			if(value == 0 || value == ''){  
-				$("#smtp_auth_fields").hide();
-			} else { 
-				$("#smtp_auth_fields").show();
-			}		
+			const smtpAuth = document.getElementById('smtp_auth');
+			const value = smtpAuth ? smtpAuth.value : '';
+
+			const smtpAuthFields = document.getElementById('smtp_auth_fields');
+			if (smtpAuthFields) {
+				smtpAuthFields.style.display = (value == 0 || value == '') ? 'none' : 'block';
+			}
 		}
 
 		function set_email_test_choices(){
-			var value = $("#email_test_mode").val();
-			if(value == 0 || value == ''){  
-				$("#email_test_fields").hide();
-			} else { 
-				$("#email_test_fields").show();
-			}		
+			const emailTestMode = document.getElementById('email_test_mode');
+			const value = emailTestMode ? emailTestMode.value : '';
+
+			const emailTestFields = document.getElementById('email_test_fields');
+			if (emailTestFields) {
+				emailTestFields.style.display = (value == 0 || value == '') ? 'none' : 'block';
+			}
 		}
 
 		function isValidEmail(email) {
-			var re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+			const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 			return re.test(email);
 		}
 
-		$(document).ready(function() {
+		document.addEventListener('DOMContentLoaded', function() {
 
 			// SMTP Authentication toggle
-			$("#smtp_auth").on('change', function(){
-				set_smtp_auth_choices();
-			});
+			const smtpAuth = document.getElementById('smtp_auth');
+			if (smtpAuth) {
+				smtpAuth.addEventListener('change', set_smtp_auth_choices);
+			}
 			set_smtp_auth_choices();
-			
+
 			// Email test mode toggle
-			$("#email_test_mode").on('change', function(){
-				set_email_test_choices();
-			});
+			const emailTestMode = document.getElementById('email_test_mode');
+			if (emailTestMode) {
+				emailTestMode.addEventListener('change', set_email_test_choices);
+			}
 			set_email_test_choices();
-			
+
 			// SMTP port validation
-			$("#smtp_port").on('blur', function(){
-				var port = $(this).val();
-				if(port && ![25, 465, 587, 2525].includes(parseInt(port))){
-					$(this).addClass('is-invalid');
-					if(!$(this).next('.invalid-feedback').length){
-						$(this).after('<div class="invalid-feedback">Common ports: 25, 465, 587, 2525</div>');
+			const smtpPort = document.getElementById('smtp_port');
+			if (smtpPort) {
+				smtpPort.addEventListener('blur', function(){
+					const port = this.value;
+					if(port && ![25, 465, 587, 2525].includes(parseInt(port))){
+						this.classList.add('is-invalid');
+						if(!this.nextElementSibling || !this.nextElementSibling.classList.contains('invalid-feedback')){
+							const feedback = document.createElement('div');
+							feedback.className = 'invalid-feedback';
+							feedback.textContent = 'Common ports: 25, 465, 587, 2525';
+							this.parentNode.insertBefore(feedback, this.nextSibling);
+						}
+					} else {
+						this.classList.remove('is-invalid');
+						const feedback = this.nextElementSibling;
+						if(feedback && feedback.classList.contains('invalid-feedback')){
+							feedback.remove();
+						}
 					}
-				} else {
-					$(this).removeClass('is-invalid');
-					$(this).next('.invalid-feedback').remove();
-				}
-			});
-			
+				});
+			}
+
 			// Email validation for test recipient
-			$("#email_test_recipient").on('blur', function(){
-				var email = $(this).val();
-				if(email && !isValidEmail(email)){
-					$(this).addClass('is-invalid');
-					if(!$(this).next('.invalid-feedback').length){
-						$(this).after('<div class="invalid-feedback">Please enter a valid email address</div>');
+			const emailTestRecipient = document.getElementById('email_test_recipient');
+			if (emailTestRecipient) {
+				emailTestRecipient.addEventListener('blur', function(){
+					const email = this.value;
+					if(email && !isValidEmail(email)){
+						this.classList.add('is-invalid');
+						if(!this.nextElementSibling || !this.nextElementSibling.classList.contains('invalid-feedback')){
+							const feedback = document.createElement('div');
+							feedback.className = 'invalid-feedback';
+							feedback.textContent = 'Please enter a valid email address';
+							this.parentNode.insertBefore(feedback, this.nextSibling);
+						}
+					} else {
+						this.classList.remove('is-invalid');
+						const feedback = this.nextElementSibling;
+						if(feedback && feedback.classList.contains('invalid-feedback')){
+							feedback.remove();
+						}
 					}
-				} else {
-					$(this).removeClass('is-invalid');
-					$(this).next('.invalid-feedback').remove();
-				}
-			});
+				});
+			}
 		});
 
 		</script>
 		<?php
-	
-	$validation_rules = array();
 
-	// Add email SMTP validation rules
-	$validation_rules['smtp_host']['maxlength']['value'] = '255';
-	$validation_rules['smtp_host']['maxlength']['message'] = "'SMTP host too long (max 255 characters)'";
-
-	$validation_rules['smtp_port']['number']['value'] = 'true';
-	$validation_rules['smtp_port']['number']['message'] = "'Port must be a number'";
-	$validation_rules['smtp_port']['range']['value'] = '[1, 65535]';
-	$validation_rules['smtp_port']['range']['message'] = "'Port must be between 1 and 65535'";
-
-	$validation_rules['smtp_sender']['email']['value'] = 'true';
-	$validation_rules['smtp_sender']['email']['message'] = "'Must be a valid email address'";
-
-	$validation_rules['email_test_recipient']['email']['value'] = 'true';
-	$validation_rules['email_test_recipient']['email']['message'] = "'Must be a valid email address'";
-
-	// Add these rules only if fields are not empty
-	$validation_rules['smtp_helo']['maxlength']['value'] = '255';
-	$validation_rules['smtp_hostname']['maxlength']['value'] = '255';
-	$validation_rules['smtp_username']['maxlength']['value'] = '255';
-	$validation_rules['smtp_password']['maxlength']['value'] = '255';
-	
-	echo $formwriter->set_validate($validation_rules);	
-
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings_email');
+	$formwriter->begin_form();
 	
 	if($_SESSION['permission'] == 10){
 		
@@ -158,15 +155,23 @@
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
 
-		echo $formwriter->textinput("Webmaster Email", 'webmaster_email', '', 20, $settings->get_setting('webmaster_email'), "" , 255, "");
-		echo $formwriter->textinput("Default Email", 'defaultemail', '', 20, $settings->get_setting('defaultemail'), "" , 255, "");
-		echo $formwriter->textinput("Default Email Name", 'defaultemailname', '', 20, $settings->get_setting('defaultemailname'), "" , 255, "");
+		$formwriter->textinput('webmaster_email', 'Webmaster Email', [
+			'value' => $settings->get_setting('webmaster_email')
+		]);
+		$formwriter->textinput('defaultemail', 'Default Email', [
+			'value' => $settings->get_setting('defaultemail')
+		]);
+		$formwriter->textinput('defaultemailname', 'Default Email Name', [
+			'value' => $settings->get_setting('defaultemailname')
+		]);
 
 		// Mailchimp section with two-column layout and API validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Mailchimp Settings</h5>';
-		echo $formwriter->textinput("Mailchimp API Key", 'mailchimp_api_key', '', 20, $settings->get_setting('mailchimp_api_key'), "" , 255, "");
+		$formwriter->textinput('mailchimp_api_key', 'Mailchimp API Key', [
+			'value' => $settings->get_setting('mailchimp_api_key')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>API Status</h5>';
@@ -242,10 +247,19 @@
 		
 		// Email service selection settings
 		$service_optionvals = array('Mailgun' => 'mailgun', 'SMTP' => 'smtp');
-		
-		//dropinput($label, $id, $class, &$optionvals, $input, $hint, $showdefault=TRUE, $forcestrict=FALSE, $ajaxendpoint=FALSE, $imagedropdown=FALSE, $layout='default') {
-		echo $formwriter->dropinput("Primary Email Service", "email_service", '', $service_optionvals, $settings->get_setting('email_service'), 'Service used for sending emails', TRUE, FALSE, FALSE, FALSE, 'default');
-		echo $formwriter->dropinput("Fallback Email Service", "email_fallback_service", '', $service_optionvals, $settings->get_setting('email_fallback_service'), 'Service used if primary fails', FALSE);
+
+		$formwriter->dropinput('email_service', 'Primary Email Service', [
+			'options' => $service_optionvals,
+			'value' => $settings->get_setting('email_service'),
+			'help' => 'Service used for sending emails',
+			'empty_option' => true
+		]);
+		$formwriter->dropinput('email_fallback_service', 'Fallback Email Service', [
+			'options' => $service_optionvals,
+			'value' => $settings->get_setting('email_fallback_service'),
+			'help' => 'Service used if primary fails',
+			'empty_option' => true
+		]);
 		
 		echo '</div>';
 		echo '<div class="col-md-6">';
@@ -297,11 +311,19 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Mailgun Settings</h5>';
-		$optionvals = array("Version 2.X"=>'1', 'Version 3.X' => '2');
-		echo $formwriter->dropinput("Mailgun Version", "mailgun_version", '', $optionvals, $settings->get_setting('mailgun_version'), '', FALSE);	
-		echo $formwriter->textinput("Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)", 'mailgun_api_key', '', 20, $settings->get_setting('mailgun_api_key'), "" , 255, "");
-		echo $formwriter->textinput("Mailgun Domain (Example: mg.domain.net)", 'mailgun_domain', '', 20, $settings->get_setting('mailgun_domain'), "" , 255, "");
-		echo $formwriter->textinput("Mailgun EU API Link (Example: https://api.eu.mailgun.net)", 'mailgun_eu_api_link', '', 20, $settings->get_setting('mailgun_eu_api_link'), "" , 255, "");
+		$formwriter->dropinput('mailgun_version', 'Mailgun Version', [
+			'options' => ["Version 2.X"=>'1', 'Version 3.X' => '2'],
+			'value' => $settings->get_setting('mailgun_version')
+		]);
+		$formwriter->textinput('mailgun_api_key', 'Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)', [
+			'value' => $settings->get_setting('mailgun_api_key')
+		]);
+		$formwriter->textinput('mailgun_domain', 'Mailgun Domain (Example: mg.domain.net)', [
+			'value' => $settings->get_setting('mailgun_domain')
+		]);
+		$formwriter->textinput('mailgun_eu_api_link', 'Mailgun EU API Link (Example: https://api.eu.mailgun.net)', [
+			'value' => $settings->get_setting('mailgun_eu_api_link')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>API Status</h5>';
@@ -421,18 +443,36 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>SMTP Server Settings</h5>';
-		echo $formwriter->textinput("SMTP Host", 'smtp_host', '', 20, $settings->get_setting('smtp_host'), "" , 255, "");
-		echo $formwriter->textinput("SMTP Port (25, 465, 587, 2525)", 'smtp_port', '', 20, $settings->get_setting('smtp_port'), "" , 10, "");
-		echo $formwriter->textinput("SMTP HELO/EHLO Hostname", 'smtp_helo', '', 20, $settings->get_setting('smtp_helo'), "" , 255, "");
-		echo $formwriter->textinput("SMTP Hostname (for headers)", 'smtp_hostname', '', 20, $settings->get_setting('smtp_hostname'), "" , 255, "");
-		echo $formwriter->textinput("SMTP Bounce Address", 'smtp_sender', '', 20, $settings->get_setting('smtp_sender'), "" , 255, "");
+		$formwriter->textinput('smtp_host', 'SMTP Host', [
+			'value' => $settings->get_setting('smtp_host')
+		]);
+		$formwriter->textinput('smtp_port', 'SMTP Port (25, 465, 587, 2525)', [
+			'value' => $settings->get_setting('smtp_port')
+		]);
+		$formwriter->textinput('smtp_helo', 'SMTP HELO/EHLO Hostname', [
+			'value' => $settings->get_setting('smtp_helo')
+		]);
+		$formwriter->textinput('smtp_hostname', 'SMTP Hostname (for headers)', [
+			'value' => $settings->get_setting('smtp_hostname')
+		]);
+		$formwriter->textinput('smtp_sender', 'SMTP Bounce Address', [
+			'value' => $settings->get_setting('smtp_sender')
+		]);
 
 		$auth_optionvals = array('No' => 0, 'Yes' => 1);
-		echo $formwriter->dropinput("SMTP Authentication Required", "smtp_auth", '', $auth_optionvals, $settings->get_setting('smtp_auth'), '', FALSE);
+		$formwriter->dropinput('smtp_auth', 'SMTP Authentication Required', [
+			'options' => $auth_optionvals,
+			'value' => $settings->get_setting('smtp_auth'),
+			'empty_option' => false
+		]);
 
 		echo '<div id="smtp_auth_fields" style="' . ($settings->get_setting('smtp_auth') ? '' : 'display:none;') . '">';
-		echo $formwriter->textinput("SMTP Username", 'smtp_username', '', 20, $settings->get_setting('smtp_username'), "" , 255, "");
-		echo $formwriter->passwordinput("SMTP Password", 'smtp_password', '', 20, $settings->get_setting('smtp_password'), "" , 255, "");
+		$formwriter->textinput('smtp_username', 'SMTP Username', [
+			'value' => $settings->get_setting('smtp_username')
+		]);
+		$formwriter->passwordinput('smtp_password', 'SMTP Password', [
+			'value' => $settings->get_setting('smtp_password')
+		]);
 		echo '</div>';
 
 		echo '</div>';
@@ -515,14 +555,28 @@
 		echo '</div>';
 
 		$test_optionvals = array('No' => 0, 'Yes' => 1);
-		echo $formwriter->dropinput("Global Test Mode (redirect all emails to test recipient)", "email_test_mode", '', $test_optionvals, $settings->get_setting('email_test_mode'), '', FALSE);
+		$formwriter->dropinput('email_test_mode', 'Global Test Mode (redirect all emails to test recipient)', [
+			'options' => $test_optionvals,
+			'value' => $settings->get_setting('email_test_mode'),
+			'empty_option' => false
+		]);
 
 		echo '<div id="email_test_fields" style="' . ($settings->get_setting('email_test_mode') ? '' : 'display:none;') . '">';
-		echo $formwriter->textinput("Test Recipient Email (receives all redirected emails)", 'email_test_recipient', '', 20, $settings->get_setting('email_test_recipient'), "" , 255, "");
+		$formwriter->textinput('email_test_recipient', 'Test Recipient Email (receives all redirected emails)', [
+			'value' => $settings->get_setting('email_test_recipient')
+		]);
 		echo '</div>';
 
-		echo $formwriter->dropinput("Dry Run Mode (prevent all sending, just log)", "email_dry_run", '', $test_optionvals, $settings->get_setting('email_dry_run'), '', FALSE);
-		echo $formwriter->dropinput("Debug Mode (log all emails to debug_email_logs)", "email_debug_mode", '', $test_optionvals, $settings->get_setting('email_debug_mode'), '', FALSE);
+		$formwriter->dropinput('email_dry_run', 'Dry Run Mode (prevent all sending, just log)', [
+			'options' => $test_optionvals,
+			'value' => $settings->get_setting('email_dry_run'),
+			'empty_option' => false
+		]);
+		$formwriter->dropinput('email_debug_mode', 'Debug Mode (log all emails to debug_email_logs)', [
+			'options' => $test_optionvals,
+			'value' => $settings->get_setting('email_debug_mode'),
+			'empty_option' => false
+		]);
 
 		echo '</div>';
 		echo '</div>';
@@ -532,7 +586,11 @@
 
 	echo '<h3>Email Settings</h3>';
 	$optionvals = array("Yes"=>1, 'No' => 0);
-	echo $formwriter->dropinput("Email module active", "emails_active", '', $optionvals, $settings->get_setting('emails_active'), '', FALSE);	
+	$formwriter->dropinput('emails_active', 'Email module active', [
+		'options' => $optionvals,
+		'value' => $settings->get_setting('emails_active'),
+		'empty_option' => false
+	]);	
 
 	$templates = new MultiMailingList(
 		array('deleted' => false),
@@ -545,14 +603,26 @@
 	$outer_optionvals = array_merge($outer_optionvals, $templates->get_dropdown_array());
 	
 	if($settings->get_setting('default_mailing_list')){
-		echo $formwriter->dropinput("Default mailing list", "default_mailing_list", '', $outer_optionvals, $settings->get_setting('default_mailing_list'), '', TRUE);	
+		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
+			'options' => $outer_optionvals,
+			'value' => $settings->get_setting('default_mailing_list'),
+			'empty_option' => true
+		]);
 	}
 	else if($numtemplates){
 		$first_template = $templates->get(0);
-		echo $formwriter->dropinput("Default mailing list", "default_mailing_list", '', $outer_optionvals, $first_template, '', TRUE);			
+		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
+			'options' => $outer_optionvals,
+			'value' => $first_template,
+			'empty_option' => true
+		]);
 	}
 	else{
-		echo $formwriter->dropinput("Default mailing list", "default_mailing_list", '', $outer_optionvals, $settings->get_setting('default_mailing_list'), '', TRUE);			
+		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
+			'options' => $outer_optionvals,
+			'value' => $settings->get_setting('default_mailing_list'),
+			'empty_option' => true
+		]);
 	}
 	
 	$templates = new MultiEmailTemplateStore(
@@ -579,23 +649,56 @@
 	$templates->load();
 	$footer_optionvals = $templates->get_dropdown_array();
 
-	echo $formwriter->dropinput("Bulk email outer template", "bulk_outer_template", '', $outer_optionvals, $settings->get_setting('bulk_outer_template'), '', FALSE);	
-	echo $formwriter->dropinput("Bulk email footer", "bulk_footer", '', $footer_optionvals, $settings->get_setting('bulk_footer'), '', FALSE);	
-	echo $formwriter->dropinput("Individual email inner template", "individual_email_inner_template", '', $inner_optionvals, $settings->get_setting('individual_email_inner_template'), '', FALSE);	
-	echo $formwriter->dropinput("Group email footer template", "group_email_footer_template", '', $footer_optionvals, $settings->get_setting('group_email_footer_template'), '', FALSE);	
-	echo $formwriter->dropinput("Group email outer template", "group_email_outer_template", '', $outer_optionvals, $settings->get_setting('group_email_outer_template'), '', FALSE);
-	echo $formwriter->dropinput("Group email inner template", "group_email_inner_template", '', $inner_optionvals, $settings->get_setting('group_email_inner_template'), '', FALSE);
-	echo $formwriter->dropinput("Event email footer template", "event_email_footer_template", '', $footer_optionvals, $settings->get_setting('event_email_footer_template'), '', FALSE);
-	echo $formwriter->dropinput("Event email outer template", "event_email_outer_template", '', $outer_optionvals, $settings->get_setting('event_email_outer_template'), '', FALSE);
-	echo $formwriter->dropinput("Event email inner template", "event_email_inner_template", '', $inner_optionvals, $settings->get_setting('event_email_inner_template'), '', FALSE);
+	$formwriter->dropinput('bulk_outer_template', 'Bulk email outer template', [
+		'options' => $outer_optionvals,
+		'value' => $settings->get_setting('bulk_outer_template'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('bulk_footer', 'Bulk email footer', [
+		'options' => $footer_optionvals,
+		'value' => $settings->get_setting('bulk_footer'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('individual_email_inner_template', 'Individual email inner template', [
+		'options' => $inner_optionvals,
+		'value' => $settings->get_setting('individual_email_inner_template'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('group_email_footer_template', 'Group email footer template', [
+		'options' => $footer_optionvals,
+		'value' => $settings->get_setting('group_email_footer_template'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('group_email_outer_template', 'Group email outer template', [
+		'options' => $outer_optionvals,
+		'value' => $settings->get_setting('group_email_outer_template'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('group_email_inner_template', 'Group email inner template', [
+		'options' => $inner_optionvals,
+		'value' => $settings->get_setting('group_email_inner_template'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('event_email_footer_template', 'Event email footer template', [
+		'options' => $footer_optionvals,
+		'value' => $settings->get_setting('event_email_footer_template'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('event_email_outer_template', 'Event email outer template', [
+		'options' => $outer_optionvals,
+		'value' => $settings->get_setting('event_email_outer_template'),
+		'empty_option' => false
+	]);
+	$formwriter->dropinput('event_email_inner_template', 'Event email inner template', [
+		'options' => $inner_optionvals,
+		'value' => $settings->get_setting('event_email_inner_template'),
+		'empty_option' => false
+	]);
 
 	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
 	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('submit', 'Submit');
 
 	$page->end_box();
 

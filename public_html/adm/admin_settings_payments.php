@@ -74,35 +74,37 @@
 	);
 	echo AdminPage::tab_menu($tab_menus, 'Payment Settings');
 
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2');
 
 		?>
 		<script type="text/javascript">
-	
-		function set_choices(){
-			var value = $("#use_paypal_checkout").val();
-			if(value == 0 || value == ''){  
-				$("#paypal_api_key_container").hide();
-				$("#paypal_api_secret_container").hide();
-				$("#paypal_api_key_test_container").hide();
-				$("#paypal_api_secret_test_container").hide();	
 
-			}	
-			else{ 
-				$("#paypal_api_key_container").show();
-				$("#paypal_api_secret_container").show();
-				$("#paypal_api_key_test_container").show();
-				$("#paypal_api_secret_test_container").show();	
-			}		
+		function set_choices(){
+			const controlField = document.getElementById('use_paypal_checkout');
+			const value = controlField ? controlField.value : '';
+
+			const containers = ['paypal_api_key_container', 'paypal_api_secret_container',
+			                   'paypal_api_key_test_container', 'paypal_api_secret_test_container'];
+			const display = (value == 0 || value == '') ? 'none' : 'block';
+
+			containers.forEach(function(containerId) {
+				const container = document.getElementById(containerId);
+				if (container) {
+					container.style.display = display;
+				}
+			});
 		}
 
-		$(document).ready(function() {
+		document.addEventListener('DOMContentLoaded', function() {
 			set_choices();
-			
-			$("#use_paypal_checkout").change(function() {	
-				set_choices();
-			});	
-			
+
+			const controlField = document.getElementById('use_paypal_checkout');
+			if (controlField) {
+				controlField.addEventListener('change', function() {
+					set_choices();
+				});
+			}
+
 		});
 		
 		// Wait for document ready to ensure jQuery and validator are loaded
@@ -136,30 +138,21 @@
 		
 		</script>
 		<?php
-	
-	$validation_rules = array();
-	$validation_rules['stg_value']['required']['value'] = 'true';
-	$validation_rules['stg_name']['required']['value'] = 'true';
 
-	// Add Stripe key validation rules using custom validation methods
-	$validation_rules['stripe_api_key']['stripePublishableKey']['value'] = 'true';
-	
-	$validation_rules['stripe_api_pkey']['stripeSecretKey']['value'] = 'true';
-	
-	$validation_rules['stripe_api_key_test']['stripeTestPublishableKey']['value'] = 'true';
-	
-	$validation_rules['stripe_api_pkey_test']['stripeTestSecretKey']['value'] = 'true';
+	// Note: Validation rules moved to individual field definitions in V2
 
-	echo $formwriter->set_validate($validation_rules);	
-
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_settings_payments');
+	$formwriter->begin_form();
 
 		if(StripeHelper::isTestMode()){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
 
 		$optionvals = array("Yes"=>1, 'No' => 0);
-		echo $formwriter->dropinput("Payment Debug Mode ", "debug", '', $optionvals, $settings->get_setting('debug'), '', FALSE);
+		$formwriter->dropinput('debug', 'Payment Debug Mode', [
+			'options' => $optionvals,
+			'value' => $settings->get_setting('debug'),
+			'empty_option' => false
+		]);
 
 		// Stripe Configuration Section
 		echo '<h4>Stripe Configuration</h4>';
@@ -168,8 +161,14 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Live API Settings</h5>';
-		echo $formwriter->textinput("Stripe Publishable Key (Example: pk_live_xxxx)", 'stripe_api_key', '', 20, $settings->get_setting('stripe_api_key'), "" , 255, "");
-		echo $formwriter->textinput("Stripe Secret/Private Key (Example: sk_live_xxxx)", 'stripe_api_pkey', '', 20, $settings->get_setting('stripe_api_pkey'), "" , 255, "");
+		$formwriter->textinput('stripe_api_key', 'Stripe Publishable Key (Example: pk_live_xxxx)', [
+			'value' => $settings->get_setting('stripe_api_key'),
+			'validate' => ['stripePublishableKey' => true]
+		]);
+		$formwriter->textinput('stripe_api_pkey', 'Stripe Secret/Private Key (Example: sk_live_xxxx)', [
+			'value' => $settings->get_setting('stripe_api_pkey'),
+			'validate' => ['stripeSecretKey' => true]
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live API Status</h5>';
@@ -252,8 +251,14 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Test API Settings</h5>';
-		echo $formwriter->textinput("Test Stripe Publishable Key (Example: pk_test_xxxx)", 'stripe_api_key_test', '', 20, $settings->get_setting('stripe_api_key_test'), "" , 255, "");
-		echo $formwriter->textinput("Test Stripe Secret/Private Key (Example: sk_test_xxxx)", 'stripe_api_pkey_test', '', 20, $settings->get_setting('stripe_api_pkey_test'), "" , 255, "");
+		$formwriter->textinput('stripe_api_key_test', 'Test Stripe Publishable Key (Example: pk_test_xxxx)', [
+			'value' => $settings->get_setting('stripe_api_key_test'),
+			'validate' => ['stripeTestPublishableKey' => true]
+		]);
+		$formwriter->textinput('stripe_api_pkey_test', 'Test Stripe Secret/Private Key (Example: sk_test_xxxx)', [
+			'value' => $settings->get_setting('stripe_api_pkey_test'),
+			'validate' => ['stripeTestSecretKey' => true]
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Test API Status</h5>';
@@ -336,7 +341,9 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>Stripe Webhook Settings</h5>';
-		echo $formwriter->textinput("Stripe Endpoint Secret (Example: whsec_xxxx)", 'stripe_endpoint_secret', '', 20, $settings->get_setting('stripe_endpoint_secret'), "" , 255, "");
+		$formwriter->textinput('stripe_endpoint_secret', 'Stripe Endpoint Secret (Example: whsec_xxxx)', [
+			'value' => $settings->get_setting('stripe_endpoint_secret')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Webhook Configuration</h5>';
@@ -387,21 +394,33 @@
 		// Checkout Configuration Section
 		echo '<h4>Checkout Configuration</h4>';
 		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
-		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', 'None' => 'none'); 
-		echo $formwriter->dropinput("Checkout Type", "checkout_type", '', $optionvals, $settings->get_setting('checkout_type'), '', FALSE);
+		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', 'None' => 'none');
+		$formwriter->dropinput('checkout_type', 'Checkout Type', [
+			'options' => $optionvals,
+			'value' => $settings->get_setting('checkout_type'),
+			'empty_option' => false
+		]);
 		echo '<div style="margin: 50px 0;"></div>';
 		
 		// PayPal Configuration Section
 		echo '<h4>PayPal Configuration</h4>';
 		$optionvals = array("Yes"=>1, 'No' => 0);
-		echo $formwriter->dropinput("Enable Paypal Checkout", "use_paypal_checkout", '', $optionvals, $settings->get_setting('use_paypal_checkout'), '', FALSE);
-		
+		$formwriter->dropinput('use_paypal_checkout', 'Enable Paypal Checkout', [
+			'options' => $optionvals,
+			'value' => $settings->get_setting('use_paypal_checkout'),
+			'empty_option' => false
+		]);
+
 		// PayPal Live API section with two-column layout and API validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>PayPal Live API Settings</h5>';
-		echo $formwriter->textinput("Paypal Client ID (Example: ATF46g-L-ler2xxxx)", 'paypal_api_key', '', 20, $settings->get_setting('paypal_api_key'), "" , 255, "");
-		echo $formwriter->textinput("Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)", 'paypal_api_secret', '', 20, $settings->get_setting('paypal_api_secret'), "" , 255, "");
+		$formwriter->textinput('paypal_api_key', 'Paypal Client ID (Example: ATF46g-L-ler2xxxx)', [
+			'value' => $settings->get_setting('paypal_api_key')
+		]);
+		$formwriter->textinput('paypal_api_secret', 'Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)', [
+			'value' => $settings->get_setting('paypal_api_secret')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Live API Status</h5>';
@@ -542,8 +561,12 @@
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
 		echo '<h5>PayPal Test API Settings</h5>';
-		echo $formwriter->textinput("Test Paypal Client ID (Example: ATF46g-L-ler2xxxx)", 'paypal_api_key_test', '', 20, $settings->get_setting('paypal_api_key_test'), "" , 255, "");
-		echo $formwriter->textinput("Test Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)", 'paypal_api_secret_test', '', 20, $settings->get_setting('paypal_api_secret_test'), "" , 255, "");
+		$formwriter->textinput('paypal_api_key_test', 'Test Paypal Client ID (Example: ATF46g-L-ler2xxxx)', [
+			'value' => $settings->get_setting('paypal_api_key_test')
+		]);
+		$formwriter->textinput('paypal_api_secret_test', 'Test Paypal Client Secret (Example: ELTF_ie6uGhueKxxxx)', [
+			'value' => $settings->get_setting('paypal_api_secret_test')
+		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		echo '<h5>Test API Status</h5>';
@@ -688,13 +711,14 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
-	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur'); 
-	echo $formwriter->dropinput("Site Currency", "site_currency", '', $optionvals, $settings->get_setting('site_currency'), '', FALSE);	
+	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur');
+	$formwriter->dropinput('site_currency', 'Site Currency', [
+		'options' => $optionvals,
+		'value' => $settings->get_setting('site_currency'),
+		'empty_option' => false
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->submitbutton('submit', 'Submit');
 
 	$page->end_box();
 
