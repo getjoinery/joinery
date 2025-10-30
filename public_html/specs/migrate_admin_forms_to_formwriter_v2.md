@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 68/69 completed = 68/69 total work done (98.6% completed)**
+**Progress: 71/72 completed = 71/72 total work done (98.6% completed)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -97,19 +97,18 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_survey.php` - ✅ **TESTED & APPROVED** (survey listing with inline remove forms using deferred output pattern, logic file separation)
 - [x] `/adm/admin_survey_edit.php` - ✅ **TESTED & APPROVED** (simple survey create/edit form with logic file separation)
 
+- [x] `/adm/admin_settings.php` - ✅ **TESTED & APPROVED** (100+ form fields, jQuery to plain JavaScript visibility functions, special migration spec)
+- [x] `/adm/admin_settings_email.php` - ✅ **TESTED & APPROVED** (email configuration with API validation, SMTP settings, template selection dropdowns)
+- [x] `/adm/admin_settings_payments.php` - ✅ **TESTED & APPROVED** (payment configuration with Stripe/PayPal API validation, webhook settings, custom validation rules)
+
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
 
-#### Pending Conversion (5 pages)
+#### Pending Conversion (2 pages - Complex/Deferred)
 
-**Q:**
-- [ ] `/adm/admin_question.php` (complex - display page with dynamic form generation)
+**Question Pages (require significant refactoring - see surveys_questions_investigation.md):**
+- [ ] `/adm/admin_question.php` (complex - display page with dynamic form generation from Question class)
 - [ ] `/adm/admin_question_edit.php` (complex - multiple forms, jQuery visibility logic, serialized validation data)
-
-**S:**
-- [ ] `/adm/admin_settings.php` (settings management form)
-- [ ] `/adm/admin_settings_email.php` (email settings form)
-- [ ] `/adm/admin_settings_payments.php` (payment settings form)
 
 ---
 
