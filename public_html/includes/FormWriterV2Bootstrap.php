@@ -31,7 +31,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        $html = '<div class="form-group">';
+        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
 
         // Output label
         if ($label) {
@@ -201,7 +201,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        $html = '<div class="form-group">';
+        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
 
         if ($label) {
             $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
