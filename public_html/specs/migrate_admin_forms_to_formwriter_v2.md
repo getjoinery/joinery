@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 63/69 completed = 63/69 total work done (91.3% completed)**
+**Progress: 68/69 completed = 68/69 total work done (98.6% completed)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -92,10 +92,13 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_users_message.php` - ✅ **TESTED & APPROVED** (message form with textbox and conditional hidden inputs)
 - [x] `/adm/admin_users_password_edit.php` - ✅ **TESTED & APPROVED** (simple password change form)
 - [x] `/adm/admin_subscription_tier_edit.php` - ✅ **TESTED & APPROVED** (hybrid form - V2 for standard fields, raw HTML for dynamic features section from JSON config, fieldset for features grouping)
+- [x] `/adm/admin_shadow_session_edit.php` - ✅ **TESTED & APPROVED** (product detail form with simple textinput and textarea, logic file separation)
+
+- [x] `/adm/admin_survey.php` - ✅ **TESTED & APPROVED** (survey listing with inline remove forms using deferred output pattern, logic file separation)
+- [x] `/adm/admin_survey_edit.php` - ✅ **TESTED & APPROVED** (simple survey create/edit form with logic file separation)
 
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
 - ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
-- ⏳ `/adm/admin_shadow_session_edit.php` - 🔄 **PENDING TESTING** (product detail form with simple textinput and textarea, logic file separation)
 
 #### Pending Conversion (5 pages)
 
@@ -107,9 +110,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [ ] `/adm/admin_settings.php` (settings management form)
 - [ ] `/adm/admin_settings_email.php` (email settings form)
 - [ ] `/adm/admin_settings_payments.php` (payment settings form)
-- [ ] `/adm/admin_shadow_session_edit.php`
-- [ ] `/adm/admin_survey.php` (survey listing/management)
-- [ ] `/adm/admin_survey_edit.php` (survey editing form)
 
 ---
 
