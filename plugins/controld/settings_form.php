@@ -8,7 +8,8 @@
 // Pattern: {plugin_name}_{setting_name}
 
 echo '<p>Configure your ControlD integration settings below.</p>';
-echo $formwriter->textinput("ControlD API Key", 'controld_key', '', 20,
-    $settings->get_setting('controld_key'),
-    "Get your API key from ControlD dashboard", 255, "");
+$formwriter->textinput('controld_key', 'ControlD API Key', [
+    'value' => $settings->get_setting('controld_key'),
+    'placeholder' => 'Get your API key from ControlD dashboard'
+]);
 ?>

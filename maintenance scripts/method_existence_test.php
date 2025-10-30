@@ -90,6 +90,11 @@ class MethodExistenceTest {
             'public static $field_constraints' => 'field_constraints was removed - validation is now handled via field_specifications (required, unique, unique_with)',
             "static \$field_constraints" => 'field_constraints was removed - validation is now handled via field_specifications (required, unique, unique_with)',
             "::field_constraints[" => 'field_constraints was removed - validation is now handled via field_specifications (required, unique, unique_with)',
+
+            // FormWriter V2 anti-patterns
+            "\$formwriter->submitbutton('submit'" => "Never use submitbutton('submit' - shadows form.submit() method. Use submitbutton('submit_button' or similar instead",
+            "\$formwriter->textarea(" => "FormWriter V2 uses textbox() not textarea() - change ->textarea( to ->textbox(",
+            "->textarea(" => "FormWriter V2 uses textbox() not textarea() - change ->textarea( to ->textbox(",
         ],
     ];
 
