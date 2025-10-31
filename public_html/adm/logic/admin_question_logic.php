@@ -12,7 +12,9 @@ function admin_question_logic($get_vars, $post_vars) {
 	$session->check_permission(5);
 	$session->set_return();
 
-	$question = new Question($get_vars['qst_question_id'], TRUE);
+	// Get question ID from GET or POST (POST when form is submitted)
+	$question_id = $get_vars['qst_question_id'] ?? $post_vars['qst_question_id'] ?? null;
+	$question = new Question($question_id, TRUE);
 
 	if($get_vars['action'] == 'delete'){
 		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));

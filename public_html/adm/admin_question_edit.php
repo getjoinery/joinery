@@ -26,155 +26,149 @@
 	<script type="text/javascript">
 
 		function set_validation_choices(){
-			var value = $("#qst_type").val();
+			var value = document.getElementById("qst_type").value;
+
+			// FormWriter V2 generates checkbox IDs as: fieldname_value
+			var integerCheckbox = document.getElementById("validation_options_integer");
+			var decimalCheckbox = document.getElementById("validation_options_decimal");
+
 			if(value == 1){  //SHORT TEXT
-				$("#validation_optionsinteger").prop('disabled', false);
-				$("#validation_optionsdecimal").prop('disabled', false);
-				$("#max_length_container").show();
-				$("#min_length_container").show();
-				$("#max_value_container").show();
-				$("#min_value_container").show();
+				if(integerCheckbox) integerCheckbox.disabled = false;
+				if(decimalCheckbox) decimalCheckbox.disabled = false;
+				document.getElementById("max_length_container").style.display = "block";
+				document.getElementById("min_length_container").style.display = "block";
+				document.getElementById("max_value_container").style.display = "block";
+				document.getElementById("min_value_container").style.display = "block";
+				document.getElementById("answersbox").style.display = "none";
 			}
 			else if(value == 2){  //LONG TEXT
-				$("#validation_optionsinteger").prop('disabled', true);
-				$("#validation_optionsdecimal").prop('disabled', true);
-				$("#max_length_container").show();
-				$("#min_length_container").show();
-				$("#max_value_container").hide();
-				$("#min_value_container").hide();
+				if(integerCheckbox) {
+					integerCheckbox.disabled = true;
+					integerCheckbox.checked = false;
+				}
+				if(decimalCheckbox) {
+					decimalCheckbox.disabled = true;
+					decimalCheckbox.checked = false;
+				}
+				document.getElementById("max_length_container").style.display = "block";
+				document.getElementById("min_length_container").style.display = "block";
+				document.getElementById("max_value_container").style.display = "none";
+				document.getElementById("min_value_container").style.display = "none";
+				document.getElementById("answersbox").style.display = "none";
 			}
-			else if(value == 3){  //DROPDOWN
-				$("#validation_optionsinteger").prop('disabled', true);
-                $("#validation_optionsinteger").attr('checked', false);
-				$("#validation_optionsdecimal").prop('disabled', true);
-                $("#validation_optionsdecimal").attr('checked', false);
-				$("#max_length_container").hide();
-				$("#min_length_container").hide();
-				$("#max_value_container").hide();
-				$("#min_value_container").hide();
-			}
-			else if(value == 4){  //RADIO
-				$("#validation_optionsinteger").prop('disabled', true);
-                $("#validation_optionsinteger").attr('checked', false);
-				$("#validation_optionsdecimal").prop('disabled', true);
-                $("#validation_optionsdecimal").attr('checked', false);
-				$("#max_length_container").hide();
-				$("#min_length_container").hide();
-				$("#max_value_container").hide();
-				$("#min_value_container").hide();
-			}
-			else if(value == 5){  //CHECKBOX
-				$("#validation_optionsinteger").prop('disabled', true);
-                $("#validation_optionsinteger").attr('checked', false);
-				$("#validation_optionsdecimal").prop('disabled', true);
-                $("#validation_optionsdecimal").attr('checked', false);
-				$("#max_length_container").hide();
-				$("#min_length_container").hide();
-				$("#max_value_container").hide();
-				$("#min_value_container").hide();
-			}
-			else if(value == 6){  //CHECKBOX LIST
-				$("#validation_optionsinteger").prop('disabled', true);
-                $("#validation_optionsinteger").attr('checked', false);
-				$("#validation_optionsdecimal").prop('disabled', true);
-                $("#validation_optionsdecimal").attr('checked', false);
-				$("#max_length_container").hide();
-				$("#min_length_container").hide();
-				$("#max_value_container").hide();
-				$("#min_value_container").hide();
+			else {  //DROPDOWN, RADIO, CHECKBOX, CHECKBOX_LIST
+				if(integerCheckbox) {
+					integerCheckbox.disabled = true;
+					integerCheckbox.checked = false;
+				}
+				if(decimalCheckbox) {
+					decimalCheckbox.disabled = true;
+					decimalCheckbox.checked = false;
+				}
+				document.getElementById("max_length_container").style.display = "none";
+				document.getElementById("min_length_container").style.display = "none";
+				document.getElementById("max_value_container").style.display = "none";
+				document.getElementById("min_value_container").style.display = "none";
+				document.getElementById("answersbox").style.display = "block";
 			}
 
+			// Additional checkbox-specific logic
+			if(value == 5){  //CHECKBOX - limit to one option
+				var existingOptions = document.querySelectorAll('.question-option-item');
+				if(existingOptions.length >= 1){
+					var addForm = document.getElementById("add-option-form");
+					if(addForm) addForm.style.display = "none";
+				}
+			} else {
+				var addForm = document.getElementById("add-option-form");
+				if(addForm) addForm.style.display = "block";
+			}
 		}
 
-		$(document).ready(function() {
-
+		// Replace jQuery document ready and change handler
+		document.addEventListener('DOMContentLoaded', function() {
 			set_validation_choices();
-
-			$("#qst_type").change(function() {
-				set_validation_choices();
-			});
+			document.getElementById("qst_type").addEventListener('change', set_validation_choices);
 		});
 </script>
 	<?php
 
-	$formwriter = $page->getFormWriter('form1');
+	// Get V2 FormWriter instance
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/admin/admin_question_edit',
+		'method' => 'POST',
+		'model' => $question,
+		'edit_primary_key_value' => $question->key  // NULL for add, ID for edit
+	]);
 
-	$validation_rules = array();
-	$validation_rules['qst_question']['required']['value'] = 'true';
-	$validation_rules['qst_type']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);
+	$formwriter->begin_form();
+	// FormWriter automatically adds: <input type="hidden" name="edit_primary_key_value" value="...">
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_question_edit');
-
-	if($question->key){
-		echo $formwriter->hiddeninput('qst_question_id', $question->key);
-		echo $formwriter->hiddeninput('action', 'edit');
-	}
-
-	echo $formwriter->textinput('Question', 'qst_question', NULL, 100, $question->get('qst_question'), '', 255, '');
+	$formwriter->textinput('qst_question', 'Question', [
+		'value' => $question->get('qst_question'),
+		'maxlength' => 255,
+		'validation' => ['required' => true]
+	]);
 
 	$optionvals = array("Short text"=>Question::TYPE_SHORT_TEXT, "Long Text"=>Question::TYPE_LONG_TEXT, 'Dropdown'=>Question::TYPE_DROPDOWN, 'Radio'=>Question::TYPE_RADIO, 'Checkbox'=>Question::TYPE_CHECKBOX, 'Checkbox List'=>Question::TYPE_CHECKBOX_LIST);
-	echo $formwriter->dropinput("Type", "qst_type", "ctrlHolder", $optionvals, $question->get('qst_type'), '', FALSE);
+	$formwriter->dropinput('qst_type', 'Type', [
+		'options' => $optionvals,
+		'value' => $question->get('qst_type'),
+		'showdefault' => false,
+		'validation' => ['required' => true]
+	]);
 
-	$optionvals = array('Required'=>'required', 'Integer (Example: 5)'=>'integer', 'Decimal (Example: 5.5)'=>'decimal');
+	// Validation checkboxes - unserialize and convert
+	$validation_data = unserialize($question->get('qst_validate')) ?: [];
+	$checked_vals = [];
+	if (!empty($validation_data['required'])) $checked_vals[] = 'required';
+	if (!empty($validation_data['integer'])) $checked_vals[] = 'integer';
+	if (!empty($validation_data['decimal'])) $checked_vals[] = 'decimal';
 
-	if ($question->key) {
-		//FILL THE CHECKED VALUES
-		$checkedvals = unserialize($question->get('qst_validate'));
-		$max_length = $checkedvals['max_length'];
-		unset($checkedvals['max_length']);
-		$min_length = $checkedvals['min_length'];
-		unset($checkedvals['min_length']);
-		$max_value = $checkedvals['max_value'];
-		unset($checkedvals['max_value']);
-		$min_value = $checkedvals['min_value'];
-		unset($checkedvals['min_value']);
-	}
-	else{
-		$checkedvals = array();
-	}
-	$disabledvals = array();
-	$readonlyvals = array();
-	echo $formwriter->checkboxList("Validation options", 'validation_options', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
+	$formwriter->checkboxlist('validation_options', 'Validation options', [
+		'options' => [
+			'Required' => 'required',
+			'Integer (Example: 5)' => 'integer',
+			'Decimal (Example: 5.5)' => 'decimal'
+		],
+		'checked' => $checked_vals
+	]);
 
-	echo $formwriter->textinput('Validation Maximum Length', 'max_length', NULL, 14, $max_length, '', 3, '');
-	echo $formwriter->textinput('Validation Minimum Length', 'min_length', NULL, 100, $min_length, '', 3, '');
-	echo $formwriter->textinput('Validation Maximum Value', 'max_value', NULL, 100, $max_value, '', 10, '');
-	echo $formwriter->textinput('Validation Minimum Value', 'min_value', NULL, 100, $min_value, '', 10, '');
+	// Validation parameter fields (keep existing HTML containers for JavaScript)
+	echo '<div id="max_length_container" style="display:none;">';
+	$formwriter->textinput('max_length', 'Validation Maximum Length', [
+		'value' => $validation_data['max_length'] ?? '',
+		'maxlength' => 3
+	]);
+	echo '</div>';
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	echo '<div id="min_length_container" style="display:none;">';
+	$formwriter->textinput('min_length', 'Validation Minimum Length', [
+		'value' => $validation_data['min_length'] ?? '',
+		'maxlength' => 3
+	]);
+	echo '</div>';
+
+	echo '<div id="max_value_container" style="display:none;">';
+	$formwriter->textinput('max_value', 'Validation Maximum Value', [
+		'value' => $validation_data['max_value'] ?? '',
+		'maxlength' => 10
+	]);
+	echo '</div>';
+
+	echo '<div id="min_value_container" style="display:none;">';
+	$formwriter->textinput('min_value', 'Validation Minimum Value', [
+		'value' => $validation_data['min_value'] ?? '',
+		'maxlength' => 10
+	]);
+	echo '</div>';
+
+	$formwriter->submitbutton('submit_button', 'Submit');
+	$formwriter->end_form();
 
 	$page->end_box();
 
-		?>
-		<script>
-		$(document).ready(function() {
-
-				if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_SHORT_TEXT; ?>) {
-					$('#answersbox').hide();
-				}
-				else if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_LONG_TEXT; ?>) {
-					$('#answersbox').hide();
-				}
-				else $('#answersbox').show();
-
-			$('#qst_type').change(function () {
-				if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_SHORT_TEXT; ?>) {
-					$('#answersbox').hide();
-				}
-				else if ($('#qst_type option:selected').val() == <?php echo Question::TYPE_LONG_TEXT; ?>) {
-					$('#answersbox').hide();
-				}
-				else $('#answersbox').show(); // hide div
-			});
-		});
-		</script>
-		<?php
-
-		$pageoptions['title'] = "Edit Answers";
+	$pageoptions['title'] = "Edit Answers";
 		$page->begin_box($pageoptions);
 		echo '<span id="answersbox">';
 		$question_options = $question->get_question_options();
@@ -194,24 +188,30 @@
 			//DON'T SHOW THE NEW QUESTION BOX
 		}
 		else{
+			echo '<div id="add-option-form">';
 			echo '<h4>Add New Question Option</h4>';
-			$formwriter = $page->getFormWriter('form2');
+			$formwriter2 = $page->getFormWriter('form2', 'v2', [
+				'action' => '/admin/admin_question_edit',
+				'method' => 'POST'
+			]);
 
-			$validation_rules = array();
-			$validation_rules['qop_question_option_label']['required']['value'] = 'true';
-			$validation_rules['qop_question_option_value']['required']['value'] = 'true';
-			echo $formwriter->set_validate($validation_rules);
+			$formwriter2->begin_form();
+			$formwriter2->hiddeninput('qst_question_id', '', ['value' => $question->key]);
+			$formwriter2->hiddeninput('action', '', ['value' => 'add_question_option']);
 
-			echo $formwriter->begin_form('form2', 'POST', '/admin/admin_question_edit');
+			$formwriter2->textinput('qop_question_option_label', 'Label', [
+				'maxlength' => 255,
+				'validation' => ['required' => true]
+			]);
 
-			echo $formwriter->hiddeninput('qst_question_id', $question->key);
-			echo $formwriter->hiddeninput('action', 'add_question_option');
-			echo $formwriter->textinput('Label', 'qop_question_option_label', NULL, 100, '', '', 255, '');
-			echo $formwriter->textinput('Value', 'qop_question_option_value', 'ctrlHolder', 100, '', '', 255, '');
-			echo $formwriter->start_buttons();
-			echo $formwriter->new_form_button('Submit');
-			echo $formwriter->end_buttons();
-			echo $formwriter->end_form();
+			$formwriter2->textinput('qop_question_option_value', 'Value', [
+				'maxlength' => 255,
+				'validation' => ['required' => true]
+			]);
+
+			$formwriter2->submitbutton('add_option', 'Submit');
+			$formwriter2->end_form();
+			echo '</div>';
 
 			echo '</span>';
 			$page->end_box();
