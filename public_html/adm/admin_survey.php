@@ -149,37 +149,34 @@ $table_options = array(
 );
 $page->tableheader($headers, $table_options, $pager);
 
-// Prepare remove forms with deferred output
-$remove_forms = [];
-
 foreach ($survey_questions as $survey_question) {
     $question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 
     $rowvalues = array();
     $rowvalues[] = '<a href="/admin/admin_question?qst_question_id=' . $survey_question->get('srq_qst_question_id') . '">' . htmlspecialchars($question->get('qst_question')) . '</a>';
 
-    // Create form with deferred output
+    // Create inline remove form
     $form_id = 'remove_form_' . $survey_question->key;
+    ob_start();
+
     $formwriter = $page->getFormWriter($form_id, 'v2', [
-        'deferred_output' => true,
         'action' => '/admin/admin_survey'
     ]);
 
     $formwriter->begin_form();
-    $formwriter->hiddeninput('action', ['value' => 'removequestion']);
-    $formwriter->hiddeninput('svy_survey_id', ['value' => $survey->key]);
-    $formwriter->hiddeninput('srq_survey_question_id', ['value' => $survey_question->key]);
+    $formwriter->hiddeninput('action', '', ['value' => 'removequestion']);
+    $formwriter->hiddeninput('svy_survey_id', '', ['value' => $survey->key]);
+    $formwriter->hiddeninput('srq_survey_question_id', '', ['value' => $survey_question->key]);
     $formwriter->submitbutton('remove_button', 'Remove', ['class' => 'btn btn-sm btn-danger']);
     $formwriter->end_form();
 
-    $remove_forms[] = $formwriter->get_deferred_output();
-    $rowvalues[] = '<div id="' . $form_id . '"></div>';
+    $rowvalues[] = ob_get_clean();
 
     $page->disprow($rowvalues);
 }
 
-// Add question form
-if ($numquestions) {
+// Add question form (only show if we have a valid survey)
+if ($numquestions && $survey->key) {
     echo '<tr><td colspan="3">';
 
     $formwriter = $page->getFormWriter('form_add_question', 'v2', [
@@ -187,8 +184,8 @@ if ($numquestions) {
     ]);
 
     $formwriter->begin_form();
-    $formwriter->hiddeninput('action', ['value' => 'addquestion']);
-    $formwriter->hiddeninput('svy_survey_id', ['value' => $survey->key]);
+    $formwriter->hiddeninput('action', '', ['value' => 'addquestion']);
+    $formwriter->hiddeninput('svy_survey_id', '', ['value' => $survey->key]);
 
     $optionvals = $questions->get_dropdown_array();
     $formwriter->dropinput('qst_question_id', 'Add question to survey', [
@@ -204,11 +201,6 @@ if ($numquestions) {
 }
 
 $page->endtable($pager);
-
-// Output deferred forms
-foreach ($remove_forms as $form_html) {
-    echo $form_html;
-}
 
 $page->admin_footer();
 ?>

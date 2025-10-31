@@ -52,19 +52,20 @@
 		echo '<b>'.$valid.'</b>';
 	}
 
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form('form1', 'POST', '/admin/admin_question');
+	// Get V2 FormWriter instance
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/admin/admin_question',
+		'method' => 'POST'
+	]);
 
-	$validation_rules = array();
-	$validation_rules = $question->output_js_validation($validation_rules);
-	echo $formwriter->set_validate($validation_rules);
-	echo $formwriter->hiddeninput('qst_question_id', $question->key);
+	$formwriter->begin_form();
+	$formwriter->hiddeninput('qst_question_id', $question->key);
 
-	echo $question->output_question($formwriter);
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Test');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	// The Question class output_question() method now uses V2 syntax
+	$question->output_question($formwriter);
+
+	$formwriter->submitbutton('test_button', 'Test');
+	$formwriter->end_form();
 
 	$page->end_box();
 
