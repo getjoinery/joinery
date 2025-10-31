@@ -21,6 +21,7 @@ function admin_survey_logic($get, $post) {
         if (isset($post['action'])) {
             switch ($post['action']) {
                 case 'addquestion':
+                    error_log("DEBUG addquestion: svy_survey_id=" . ($post['svy_survey_id'] ?? 'NULL') . ", qst_question_id=" . ($post['qst_question_id'] ?? 'NULL'));
                     $survey_question = new SurveyQuestion(NULL);
                     $survey_question->set('srq_svy_survey_id', $post['svy_survey_id']);
                     $survey_question->set('srq_qst_question_id', $post['qst_question_id']);
@@ -79,7 +80,7 @@ function admin_survey_logic($get, $post) {
     }
 
     // Load survey data
-    $svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
+    $svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, NULL);
     $survey = new Survey($svy_survey_id, TRUE);
 
     // Pagination
@@ -88,16 +89,21 @@ function admin_survey_logic($get, $post) {
     $sort = LibraryFunctions::fetch_variable('sort', 'survey_question_id', 0, '');
     $sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 
-    // Load survey questions
-    $survey_questions = new MultiSurveyQuestion(
-        array('survey_id' => $survey->key),
-        array($sort => $sdirection),
-        $numperpage,
-        $offset,
-        'AND'
-    );
-    $numrecords = $survey_questions->count_all();
-    $survey_questions->load();
+    // Load survey questions (only if we have a valid survey)
+    if ($survey->key) {
+        $survey_questions = new MultiSurveyQuestion(
+            array('survey_id' => $survey->key),
+            array($sort => $sdirection),
+            $numperpage,
+            $offset,
+            'AND'
+        );
+        $numrecords = $survey_questions->count_all();
+        $survey_questions->load();
+    } else {
+        $survey_questions = new MultiSurveyQuestion(array());
+        $numrecords = 0;
+    }
 
     // Load all available questions for dropdown
     $questions = new MultiQuestion(

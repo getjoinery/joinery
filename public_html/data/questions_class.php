@@ -55,16 +55,16 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	    'qst_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-function output_js_validation($validation_rules){
-		$validation_options = unserialize($this->get('qst_validate')); 
-		
+	function output_js_validation($validation_rules){
+		$validation_options = unserialize($this->get('qst_validate')) ?: [];
+
 		if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$question_name = '"question_'.$this->key.'[]"';
 		}
 		else{
 			$question_name = 'question_'.$this->key;
 		}
-		
+
 		if(array_key_exists('required', $validation_options)){
 			$validation_rules[$question_name]['required']['value'] = 'true';
 		}
@@ -76,7 +76,7 @@ function output_js_validation($validation_rules){
 		}
 		if(array_key_exists('max_length', $validation_options)){
 			$validation_rules[$question_name]['maxlength']['value'] = $validation_options['max_length'];
-		}	
+		}
 		if(array_key_exists('min_length', $validation_options)){
 			$validation_rules[$question_name]['minlength']['value'] = $validation_options['min_length'];
 		}
@@ -85,12 +85,12 @@ function output_js_validation($validation_rules){
 		}
 		if(array_key_exists('min_value', $validation_options)){
 			$validation_rules[$question_name]['min']['value'] = $validation_options['min_value'];
-		}		
+		}
 		return $validation_rules;
 	}
 	
 	function validate_answers($answers){
-		$validation_options = unserialize($this->get('qst_validate')); 
+		$validation_options = unserialize($this->get('qst_validate')) ?: [];
 
 		if(array_key_exists('required', $validation_options)){
 			if($answers == '' || $answers === NULL || count($answers) == 0){
@@ -137,12 +137,49 @@ function output_js_validation($validation_rules){
 		if($this->get('max_length')){
 			$field_max_length = $this->get('max_length');
 		}
-		
+
+		// Get validation options
+		$validation_options = unserialize($this->get('qst_validate')) ?: [];
+		$validation = [];
+
+		if (!empty($validation_options['required'])) {
+			$validation['required'] = true;
+		}
+		if (!empty($validation_options['integer'])) {
+			$validation['digits'] = true;
+		}
+		if (!empty($validation_options['decimal'])) {
+			$validation['number'] = true;
+		}
+		if (!empty($validation_options['max_length'])) {
+			$validation['maxlength'] = $validation_options['max_length'];
+		}
+		if (!empty($validation_options['min_length'])) {
+			$validation['minlength'] = $validation_options['min_length'];
+		}
+		if (!empty($validation_options['max_value'])) {
+			$validation['max'] = $validation_options['max_value'];
+		}
+		if (!empty($validation_options['min_value'])) {
+			$validation['min'] = $validation_options['min_value'];
+		}
+
 		if ($this->get('qst_type') == Question::TYPE_SHORT_TEXT){
-			return $formwriter->textinput($question_text, $field_name , 'sm:col-span-6', 100, $value, '', $field_max_length, '');
+			$formwriter->textinput($field_name, $question_text, [
+				'size' => 100,
+				'value' => $value,
+				'maxlength' => $field_max_length,
+				'validation' => $validation
+			]);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_LONG_TEXT){
-			return $formwriter->textbox($question_text, $field_name, 'sm:col-span-6', 5, 80, $value, '', 'no');
+			$formwriter->textbox($field_name, $question_text, [
+				'rows' => 5,
+				'cols' => 80,
+				'value' => $value,
+				'htmlmode' => 'no',
+				'validation' => $validation
+			]);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_DROPDOWN){
 			$options = new MultiQuestionOption(
@@ -151,9 +188,14 @@ function output_js_validation($validation_rules){
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
 			$options->load();
-			
+
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->dropinput($question_text, $field_name, 'sm:col-span-6', $optionvals, $value, '', TRUE);
+			$formwriter->dropinput($field_name, $question_text, [
+				'options' => $optionvals,
+				'value' => $value,
+				'showdefault' => true,
+				'validation' => $validation
+			]);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_RADIO){
 			$options = new MultiQuestionOption(
@@ -165,7 +207,11 @@ function output_js_validation($validation_rules){
 
 			$checkedval = NULL;
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->radioinput($question_text, $field_name, "radioinput sm:col-span-6", $optionvals, $value, NULL, "", NULL);		
+			$formwriter->radioinput($field_name, $question_text, [
+				'options' => $optionvals,
+				'value' => $value,
+				'validation' => $validation
+			]);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX){
 			$options = new MultiQuestionOption(
@@ -176,9 +222,13 @@ function output_js_validation($validation_rules){
 			$options->load();
 
 			$truevalue = $options->get(0)->get('qop_question_option_value');
-			
-			//TODO ERROR CHECKING HERE 
-			echo $formwriter->checkboxinput($question_text, $field_name, '', NULL, $truevalue, $value, '');			
+
+			//TODO ERROR CHECKING HERE
+			$formwriter->checkboxinput($field_name, $question_text, [
+				'checked' => ($value == $truevalue),
+				'value' => $truevalue,
+				'validation' => $validation
+			]);
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
@@ -187,9 +237,13 @@ function output_js_validation($validation_rules){
 				NULL,  //NUM PER PAGE
 				NULL);  //OFFSET
 			$options->load();
-			
+
 			$optionvals = $options->get_dropdown_array();
-			echo $formwriter->checkboxlist($question_text, $field_name, 'sm:col-span-6', $optionvals, $value, '', TRUE);			
+			$formwriter->checkboxlist($field_name, $question_text, [
+				'options' => $optionvals,
+				'checked' => $value,
+				'validation' => $validation
+			]);
 		}
 	}
 
