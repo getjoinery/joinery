@@ -149,17 +149,19 @@ $table_options = array(
 );
 $page->tableheader($headers, $table_options, $pager);
 
+// Prepare remove forms with deferred output
+$remove_forms = [];
+
 foreach ($survey_questions as $survey_question) {
     $question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 
     $rowvalues = array();
     $rowvalues[] = '<a href="/admin/admin_question?qst_question_id=' . $survey_question->get('srq_qst_question_id') . '">' . htmlspecialchars($question->get('qst_question')) . '</a>';
 
-    // Create inline remove form
+    // Create form with deferred output
     $form_id = 'remove_form_' . $survey_question->key;
-    ob_start();
-
     $formwriter = $page->getFormWriter($form_id, 'v2', [
+        'deferred_output' => true,
         'action' => '/admin/admin_survey'
     ]);
 
@@ -170,7 +172,8 @@ foreach ($survey_questions as $survey_question) {
     $formwriter->submitbutton('remove_button', 'Remove', ['class' => 'btn btn-sm btn-danger']);
     $formwriter->end_form();
 
-    $rowvalues[] = ob_get_clean();
+    $remove_forms[] = $formwriter->getFieldsHTML();
+    $rowvalues[] = '<div id="' . $form_id . '"></div>';
 
     $page->disprow($rowvalues);
 }
@@ -201,6 +204,30 @@ if ($numquestions && $survey->key) {
 }
 
 $page->endtable($pager);
+
+// Output deferred forms - these will be injected into placeholder divs via JavaScript
+foreach ($remove_forms as $form_html) {
+    echo $form_html;
+}
+
+// Script to move forms into their placeholder divs
+?>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Move each deferred form into its table cell placeholder
+    var forms = document.querySelectorAll('form[id^="remove_form_"]');
+    forms.forEach(function(form) {
+        var formId = form.getAttribute('id');
+        var placeholder = document.getElementById(formId);
+        // The form and placeholder have the same ID, but the placeholder is a div in the table
+        // and the form is output after the table. We need to find the div and replace it with the form.
+        if (placeholder && placeholder.tagName === 'DIV') {
+            placeholder.parentNode.replaceChild(form, placeholder);
+        }
+    });
+});
+</script>
+<?php
 
 $page->admin_footer();
 ?>
