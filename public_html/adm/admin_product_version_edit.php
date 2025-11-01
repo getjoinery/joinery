@@ -30,29 +30,6 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 ]);
 
 ?>
-<script type="text/javascript">
-
-	function set_subscription_choices(){
-		var value = $("#prv_price_type").val();
-		if(value == 'single' || value == 'user'){
-			$("#prv_trial_period_days_container").hide();
-		}
-		else {
-			$("#prv_trial_period_days_container").show();
-		}
-
-	}
-
-	$(document).ready(function() {
-
-		set_subscription_choices();
-		$("#prv_price_type").change(function() {
-			set_subscription_choices();
-		});
-	});
-
-</script>
-<?php
 
 $formwriter->begin_form();
 
@@ -70,7 +47,15 @@ if(!$product_version->key){
 	$optionvals = array("One price"=>'single', 'User Chooses' => 'user', 'Daily Subscription'=>'day', 'Weekly Subscription'=>'week', 'Monthly Subscription'=>'month', 'Yearly Subscription'=>'year',);
 	$formwriter->dropinput('prv_price_type', 'Pricing', [
 		'options' => $optionvals,
-		'validation' => ['required' => true]
+		'validation' => ['required' => true],
+		'visibility_rules' => [
+			'single' => ['show' => [], 'hide' => ['prv_trial_period_days']],
+			'user' => ['show' => [], 'hide' => ['prv_trial_period_days']],
+			'day' => ['show' => ['prv_trial_period_days'], 'hide' => []],
+			'week' => ['show' => ['prv_trial_period_days'], 'hide' => []],
+			'month' => ['show' => ['prv_trial_period_days'], 'hide' => []],
+			'year' => ['show' => ['prv_trial_period_days'], 'hide' => []]
+		]
 	]);
 
 	$formwriter->textinput('prv_trial_period_days', 'Subscription trial period (days):', [
