@@ -293,14 +293,6 @@ public static $phone_carriers = array(
 		}
 	}	
 
-	public static function PlainForm($formwriter, $phone_number=NULL, $options=NULL) {
-		if($phone_number){
-			echo $formwriter->hiddeninput('phn_phone_number_id', $phone_number->key);
-		}
-		$optionvals = PhoneNumber::get_country_code_drop_array();
-		echo $formwriter->dropinput("Country code", "phn_cco_country_code_id", "", $optionvals, ($phone_number ? $phone_number->get('phn_cco_country_code_id') : ''), '', FALSE);
-		echo $formwriter->textinput("Phone Number", "phn_phone_number", "", 20, ($phone_number ? $phone_number->get('phn_phone_number') : ''), NULL , 20, "");
-	}
 
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {

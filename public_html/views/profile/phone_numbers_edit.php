@@ -20,18 +20,15 @@
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Edit Phone Number');
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['phn_phone_number']['required']['value'] = 'true';
-	$validation_rules['privacy_policy']['required']['value'] = 'true';
-	$validation_rules['evr_first_event']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);	
-	
-	echo $formwriter->begin_form("", "post", "/profile/phone_numbers_edit");
+	$formwriter = $page->getFormWriter('form1', 'v2');
+
+	// Validation is now handled in PhoneNumber::PlainForm()
+	// Additional validation for privacy_policy and evr_first_event if needed
+
+	$formwriter->begin_form();
 
 	foreach($page_vars['display_messages'] AS $display_message) {
-		if($display_message->identifier == 'phonebox') {	
+		if($display_message->identifier == 'phonebox') {
 			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}
@@ -39,9 +36,9 @@
 	PhoneNumber::PlainForm($formwriter, $page_vars['phone_number']);
 
 	echo '<a href="/profile/account_edit">Cancel</a> ';
-	echo $formwriter->new_form_button('Submit');
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 	$page->endtable();
 	

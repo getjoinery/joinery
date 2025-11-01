@@ -134,21 +134,6 @@ private static function UcAddress($string) {
 	    return $string;
 	}
 
-	public static function PlainForm($formwriter, $address=NULL, $options=NULL) {
-
-		if($address){
-			echo $formwriter->hiddeninput('usa_address_id', $address->key);
-		}
-		
-		$optionvals = Address::get_country_drop_array2();
-		echo $formwriter->dropinput("Country", "usa_cco_country_code_id", "sm:col-span-6", $optionvals, ($address ? $address->get('usa_cco_country_code_id') : ''), '', FALSE);
-		echo $formwriter->textinput("Street Address", "usa_address1", "sm:col-span-6", 20, ($address ? $address->get('usa_address1') : ''), "", 255,"");
-		echo $formwriter->textinput("Apt, Suite, etc. (optional)", "usa_address2", "sm:col-span-6", 20, ($address ? $address->get('usa_address2') : ''), "", 255,"");
-		echo $formwriter->textinput("City", "usa_city", "sm:col-span-6", 20, ($address ? $address->get('usa_city') : ''), "", 255,"");
-		echo $formwriter->textinput("State/Province", "usa_state", "sm:col-span-6", 20, ($address ? $address->get('usa_state') : ''), "", 255,"");
-		//echo $formwriter->generatestatedrop("State/Province", "usa_state", "sm:col-span-6", ($address ? $address->get('usa_state') : ''));
-		echo $formwriter->textinput("Zip/Postcode", "usa_zip_code_id", "sm:col-span-6", 20, ($address ? $address->get('usa_zip_code_id') : ''), "", 255,"");
-	}
 
 	public static function IsInMetroCode($address, $metro_code) {
 		// Check to see if the given address is in one of the given area codes
