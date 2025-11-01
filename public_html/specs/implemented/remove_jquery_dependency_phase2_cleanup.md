@@ -65,15 +65,16 @@ Remove jQuery script tags that load jQuery globally on every page. These appear 
 
 **Files to Modify:**
 
-1. **`/includes/PublicPageFalcon.php`**
+1. **`/includes/PublicPageFalcon.php`** ✅ DONE
    - Remove jQuery 3.7.1 CDN script tag
    - This jQuery loads on all public pages using Falcon theme
 
-2. **`/includes/PublicPageTailwind.php`**
-   - Remove jQuery 3.7.1 CDN script tag
-   - This jQuery loads on all public pages using Tailwind theme
+2. **`/includes/PublicPageTailwind.php`** ⚠️ SKIPPED - Tailwind Theme Requires jQuery
+   - **DO NOT REMOVE** - Tailwind theme inherently requires jQuery for its menu interactions and DOM manipulation
+   - jQuery 3.7.1 CDN remains at line 184
+   - Tailwind uses jQuery for interactive components and will be kept as-is
 
-3. **`/includes/AdminPage-uikit3.php`**
+3. **`/includes/AdminPage-uikit3.php`** ✅ DONE
    - Remove both jQuery 3.4.1 CDN script tags (appears twice in this file)
    - This jQuery loads on all admin pages
 
@@ -101,12 +102,12 @@ Remove jQuery Validate plugin files that are no longer used after Phase 1 migrat
 
 ## 4. Theme and Plugin jQuery Migration Guide
 
-After Phase 1 (FormWriter V2 migration) and Phase 2 cleanup, only ControlD plugin and Canvas/Tailwind themes require jQuery updates.
+After Phase 1 (FormWriter V2 migration) and Phase 2 cleanup, ControlD plugin, Canvas theme, and Tailwind theme have jQuery requirements.
 
 **Themes and Plugins After Migration:**
-- ControlD Plugin: Must load jQuery independently (extensive jQuery usage)
-- Canvas Theme: Migrate to vanilla JavaScript (recommended)
-- Tailwind Theme: Migrate to vanilla JavaScript (recommended)
+- ControlD Plugin: Must load jQuery independently (extensive jQuery usage) ✅ DONE - has own jQuery loading
+- Canvas Theme: Migrated to vanilla JavaScript ✅ DONE
+- Tailwind Theme: Kept jQuery loading (inherent theme requirement) ✅ DONE - jQuery remains active
 - All other themes: jQuery eliminated automatically by FormWriter V2
 
 **Legacy FormWriter (V1) Note:** If V1 FormWriter is still in use anywhere, it requires jQuery only for Trumbowyg editor (not validation).
@@ -273,14 +274,17 @@ Add this to your theme CSS file to provide the animation transition:
 - [ ] Verify animation displays smoothly
 - [ ] Verify multiple toggles work correctly
 
-### 4.3 Tailwind Theme - Action Required
+### 4.3 Tailwind Theme - No Action Required ✅
 
-Tailwind theme uses jQuery in:
-- `views/events.php` - Category selector navigation with redirect
+**Status:** KEPT AS-IS with jQuery
+
+Tailwind theme inherently requires jQuery for its interactive components:
+- `views/events.php` - Category selector navigation with redirect (uses jQuery `$(location).attr`)
 - `views/cart.php` - Form submission handling and field visibility
 
-**Recommended Approach:**
-Convert to vanilla JavaScript (preferred approach)
+**Decision:** Tailwind theme continues to use jQuery as it is a core dependency of the theme design. The jQuery 3.7.1 CDN remains loaded in `/includes/PublicPageTailwind.php` at line 184. No migration is required for this theme.
+
+**Migration Details Below (For Reference Only - Not Applied):**
 
 #### Tailwind Theme - `views/events.php` - Category Selector Navigation with Redirect
 
