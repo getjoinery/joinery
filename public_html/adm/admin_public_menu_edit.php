@@ -56,29 +56,6 @@
 	)
 	);
 
-	?>
-	<script type="text/javascript">
-
-		function set_pricing_choices(){
-			var value = $("#pmu_link_choose").val();
-			if(value == ''){  //ONE PRICE
-				$("#pmu_link_container").show();
-			}
-			else{  //MULTIPLE PRICES
-				$("#pmu_link_container").hide();
-			}
-		}
-
-		$(document).ready(function() {
-			set_pricing_choices();
-			$("#pmu_link_choose").change(function() {
-				set_pricing_choices();
-			});
-		});
-
-	</script>
-	<?php
-
 	$pageoptions['title'] = "New Public Menu";
 	$page->begin_box($pageoptions);
 
@@ -105,7 +82,11 @@
 		$pages->load();
 		$optionvals = $pages->get_dropdown_array_link();
 		$formwriter->dropinput("pmu_link_choose", "Link existing page", [
-			'options' => $optionvals
+			'options' => $optionvals,
+			'visibility_rules' => [
+				'' => ['show' => ['pmu_link'], 'hide' => []],
+				'default' => ['show' => [], 'hide' => ['pmu_link']]
+			]
 		]);
 	}
 
