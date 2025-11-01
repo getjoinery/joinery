@@ -72,8 +72,7 @@ class AdminPage{
 		
 			<!-- jQuery 3 -->
 			<!-- jQuery 3.2.1 <script src="/adm/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
-			<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
+				<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
 			<!-- Joinery validation -->
 			<script src="/assets/js/joinery-validate.js"></script>
@@ -93,8 +92,7 @@ class AdminPage{
 		
 			<!-- jQuery 3 -->
 			<!-- jQuery 3.2.1 <script src="/adm/assets/vendor_components/jquery/dist/jquery.min.js"></script>-->
-			<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-			<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
+				<!--<script src="https://code.jquery.com/jquery-migrate-3.1.0.min.js"></script>-->
 			
 			<!-- Joinery validation -->
 			<script src="/assets/js/joinery-validate.js"></script>			
