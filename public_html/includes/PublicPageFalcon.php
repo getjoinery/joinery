@@ -496,9 +496,6 @@ class PublicPageFalcon extends PublicPageBase {
 
 
 
-    <!-- Jquery -->
-	<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>	
-	
 	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo PathHelper::getThemeFilePath('simplebar.min.css', 'assets/vendors/simplebar', 'web', 'falcon'); ?>">
 	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo PathHelper::getThemeFilePath('theme.css', 'assets/css', 'web', 'falcon'); ?>">
 	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo PathHelper::getThemeFilePath('user_exceptions.css', 'assets/css', 'web', 'falcon'); ?>">

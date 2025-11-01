@@ -270,17 +270,24 @@ class AddressRequirement extends BasicProductRequirement {
 
 	function get_javascript() {
 		return '
-		$("#address").change(function() {
-			if ($("#address").val() == "new") {
-				$("#new_address_block").slideDown(500);
-			} else {
-				$("#new_address_block").hide();
+		document.addEventListener("DOMContentLoaded", function() {
+			const addressSelect = document.getElementById("address");
+			const newAddressBlock = document.getElementById("new_address_block");
+
+			if (addressSelect && newAddressBlock) {
+				addressSelect.addEventListener("change", function() {
+					if (this.value === "new") {
+						newAddressBlock.style.display = "block";
+					} else {
+						newAddressBlock.style.display = "none";
+					}
+				});
 			}
-			return true;
 		});
 
 		function is_new_address(element) {
-			return $("#address").val() == "new";
+			const addressSelect = document.getElementById("address");
+			return addressSelect && addressSelect.value === "new";
 		}';
 	}
 
@@ -345,8 +352,8 @@ class GDPRNoticeRequirement extends BasicProductRequirement {
 	public function get_form($formwriter, $user=NULL) {
 		echo '<div id="gdpr_terms_container" class=NULL>';
 		echo '<label for="gdpr_terms">Privacy Notice</label>';
-		echo "<div><div onclick=\"$('#gdpr_terms').attr('checked', !$('#gdpr_terms').attr('checked')); return false;\" style=\"overflow:auto; height: 100px; border: 1px solid #DDDAD3; width: 45%; padding: 6px; margin-bottom: 5px; background-color: #f5f5f5;\">Your personal data will be used to process your order, support your experience throughout this website, and for other purposes described in our privacy policy.</div>";
-		echo '<label></label><input name="gdpr_terms" id="gdpr_terms" value="1" type="checkbox"  /><span onclick="$(\'#gdpr_terms\').attr(\'checked\', !$(\'#gdpr_terms\').attr(\'checked\')); return false;"> I have read and agree to the privacy policy.</span></div>';
+		echo "<div><div onclick=\"document.getElementById('gdpr_terms').checked = !document.getElementById('gdpr_terms').checked; return false;\" style=\"overflow:auto; height: 100px; border: 1px solid #DDDAD3; width: 45%; padding: 6px; margin-bottom: 5px; background-color: #f5f5f5;\">Your personal data will be used to process your order, support your experience throughout this website, and for other purposes described in our privacy policy.</div>";
+		echo '<label></label><input name="gdpr_terms" id="gdpr_terms" value="1" type="checkbox"  /><span onclick="document.getElementById(\'gdpr_terms\').checked = !document.getElementById(\'gdpr_terms\').checked; return false;"> I have read and agree to the privacy policy.</span></div>';
 	}
 
 	function validate_form($data, $session=NULL) {
