@@ -130,40 +130,6 @@ $formwriter->dropinput('evt_show_add_to_calendar_link', 'Show calendar link', [
 	'options' => $optionvals
 ]);
 
-/*
-$surveys = new MultiSurvey(
-	array('deleted'=>false));
-$surveys->load();
-$optionvals = $surveys->get_survey_dropdown_array();
-echo $formwriter->dropinput("Event survey", "evt_svy_survey_id", "ctrlHolder", $optionvals, $event->get('evt_svy_survey_id'), '', 'No Survey');
-
-$optionvals = array("Required"=>1, "Not Required"=>0);
-echo $formwriter->dropinput("Event survey required before registration", "evt_survey_required", "ctrlHolder", $optionvals, $event->get('evt_survey_required'), '', FALSE);
-
- ?>
-<script type="text/javascript">
-
-	function set_survey_choices(){
-		var value = $("#evt_svy_survey_id").val();
-		if(value == ''){
-			$("#evt_survey_required_container").hide();
-		}
-		else {
-			$("#evt_survey_required_container").show();
-		}
-	}
-
-	$(document).ready(function() {
-		set_survey_choices();
-		$("#evt_svy_survey_id").change(function() {
-			set_survey_choices();
-		});
-
-	});
-
-</script>
- <?php
- */
 $formwriter->hiddeninput('evt_collect_extra_info', '', ['value' => 0]);
 
 $optionvals = array("Condensed (all on one page)"=>1, "Separate (separate pages for each session)"=>2);
