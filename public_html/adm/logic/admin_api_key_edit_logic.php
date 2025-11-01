@@ -47,11 +47,20 @@ function admin_api_key_edit_logic($get_vars, $post_vars) {
 			$secret_key = 'secret_'.LibraryFunctions::random_string(16);
 			$api_key->set('apk_public_key', $public_key);
 			$api_key->set('apk_secret_key', ApiKey::GenerateKey($secret_key));
+
+			// Store plain text secret in session for one-time display
+			$_SESSION['new_api_secret'] = $secret_key;
+			$_SESSION['new_api_key_id'] = null; // Will be set after save
 		}
 
 		$api_key->prepare();
 		$api_key->save();
 		$api_key->load();
+
+		// Update session with the saved key ID
+		if(isset($_SESSION['new_api_secret'])){
+			$_SESSION['new_api_key_id'] = $api_key->key;
+		}
 
 		return LogicResult::redirect('/admin/admin_api_key?apk_api_key_id='. $api_key->key);
 	}

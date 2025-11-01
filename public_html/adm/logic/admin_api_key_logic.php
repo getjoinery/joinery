@@ -34,6 +34,20 @@ function admin_api_key_logic($get_vars, $post_vars) {
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
+	if($get_vars['action'] == 'regenerate_secret'){
+		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+
+		// Generate new secret
+		$new_secret = 'secret_'.LibraryFunctions::random_string(16);
+		$api_key->set('apk_secret_key', ApiKey::GenerateKey($new_secret));
+		$api_key->save();
+
+		// Store in session for one-time display
+		$_SESSION['new_api_secret'] = $new_secret;
+		$_SESSION['new_api_key_id'] = $api_key->key;
+
+		return LogicResult::redirect('/admin/admin_api_key?apk_api_key_id='.$api_key->key);
+	}
 
 	$owner = new User($api_key->get('apk_usr_user_id'), TRUE);
 	$now = LibraryFunctions::get_current_time_obj('UTC');
