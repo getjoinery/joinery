@@ -21,29 +21,24 @@
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Edit Address');
 	
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1');
-	
-	$validation_rules = array();
-	$validation_rules['usa_type']['required']['value'] = 'true';
-	$validation_rules['usa_city']['required']['value'] = 'true';
-	$validation_rules['usa_state']['required']['value'] = 'true';
-	$validation_rules['usa_zip_code_id']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);					
-	
-	echo $formwriter->begin_form("", "post", "/profile/address_edit");
+	$formwriter = $page->getFormWriter('form1', 'v2');
+
+	// Validation is now handled in Address::PlainForm()
+
+	$formwriter->begin_form();
 
 	foreach($page_vars['display_messages'] AS $display_message) {
-		if($display_message->identifier == 'addressbox') {	
+		if($display_message->identifier == 'addressbox') {
 			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
-	}	
+	}
 
 	Address::PlainForm($formwriter, $page_vars['address']);
 
 	echo '<a href="/profile/account_edit">Cancel</a> ';
-	echo $formwriter->new_form_button('Submit');
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 	$page->endtable();
 
