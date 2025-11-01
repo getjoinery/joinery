@@ -1,37 +1,10 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('data/address_class.php'));
-
-	require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_address_edit_logic.php'));
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-
-	$address_id = $_REQUEST['usa_address_id'];
-	$address = NULL;
-	if($address_id){
-		$address = new Address($address_id, TRUE);
-		$user_id=$address->get('usa_usr_user_id');
-	}
-	else{
-		$user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must pass a user id');
-	}
-
-	if($_POST){
-
-		$address = Address::CreateAddressFromForm($_POST, $user_id, $address);
-
-		if(!$address_id){
-			$address->set('usa_is_default', TRUE);
-			$address->save();
-		}
-
-		LibraryFunctions::redirect('/admin/admin_user?usr_user_id='. $user_id );
-		return;
-
-	}
+	$page_vars = process_logic(admin_address_edit_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -44,44 +17,53 @@
 	)
 	);
 
-	$pageoptions['title'] = 'Edit Address';
+	$pageoptions['title'] = $address->key ? 'Edit Address' : 'Add Address';
 	$page->begin_box($pageoptions);
-	?>
 
-			<section class="contact-page-area section-gap">
-				<div class="container">
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $address,
+		'edit_primary_key_value' => $address->key
+	]);
 
-				<?php
+	$formwriter->begin_form();
 
-				$formwriter = $page->getFormWriter('form1');
+	// Hidden field to preserve user_id through form submission
+	$formwriter->hiddeninput('usr_user_id', '', ['value' => $user_id]);
 
-				$validation_rules = array();
-				$validation_rules['usa_type']['required']['value'] = 'true';
-				$validation_rules['usa_city']['required']['value'] = 'true';
-				$validation_rules['usa_state']['required']['value'] = 'true';
-				$validation_rules['usa_zip_code_id']['required']['value'] = 'true';
-				echo $formwriter->set_validate($validation_rules);
+	// Get country code options
+	$country_codes = Address::get_country_drop_array2();
+	$formwriter->dropinput('usa_cco_country_code_id', 'Country', [
+		'options' => $country_codes
+	]);
 
-				echo $formwriter->begin_form("", "post", "/admin/admin_address_edit");
+	$formwriter->textinput('usa_address1', 'Street Address', [
+		'maxlength' => 255,
+		'validation' => ['required' => true]
+	]);
 
-				echo '<div id="newaddressblock">';
-				echo $formwriter->hiddeninput('usr_user_id', $user_id);
-				Address::PlainForm($formwriter, $address);
-				echo '</div>';
+	$formwriter->textinput('usa_address2', 'Apt, Suite, etc. (optional)', [
+		'maxlength' => 255
+	]);
 
-					echo $formwriter->start_buttons();
-					echo $formwriter->new_form_button('Submit');
-					echo $formwriter->end_buttons();
-					echo '</fieldset>';
+	$formwriter->textinput('usa_city', 'City', [
+		'maxlength' => 255,
+		'validation' => ['required' => true]
+	]);
 
-				echo $formwriter->end_form();
+	$formwriter->textinput('usa_state', 'State/Province', [
+		'maxlength' => 255,
+		'validation' => ['required' => true]
+	]);
 
-				$page->endtable();
-				?>
-	    </div>
-	</section>
+	$formwriter->textinput('usa_zip_code_id', 'Zip/Postcode', [
+		'maxlength' => 255,
+		'validation' => ['required' => true]
+	]);
 
-	<?php
+	$formwriter->submitbutton('btn_submit', 'Submit');
+
+	$formwriter->end_form();
+
 	$page->end_box();
 	$page->admin_footer();
 

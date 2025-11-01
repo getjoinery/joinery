@@ -43,7 +43,7 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 
 **Total: 69 admin pages with forms**
 
-**Progress: 71/72 completed = 71/72 total work done (98.6% completed)**
+**Progress: 70/72 completed = 70/72 total work done (97.2% completed)**
 
 #### Completed ✅ (Tested & Approved)
 - [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
@@ -72,7 +72,6 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_phone_verify.php` - ✅ **COMPLETED** (two forms with dropdowns, hiddeninput, custom form actions)
 - [x] `/adm/admin_group_edit.php` - ✅ **COMPLETED** (simple single-field form with validation)
 - [x] `/adm/admin_post_edit.php` - ✅ **COMPLETED** (two forms with textinput, textbox, multiple dropdowns, prepend, conditional fields)
-- [x] `/adm/admin_address_edit.php` - ✅ **COMPLETED** (form with PlainForm() helper, dropdown, textinputs with validation)
 - [x] `/adm/admin_email_edit.php` - ✅ **COMPLETED** (logic-based form with 7 dropdowns, textinput, textbox)
 - [x] `/adm/admin_file_edit.php` - ✅ **COMPLETED** (form with 3 dropdowns and MultiGroup/MultiEvent lookups)
 - [x] `/adm/admin_video_edit.php` - ✅ **COMPLETED** (complex form with 3 dropdowns and conditional fields)
@@ -102,7 +101,8 @@ $formwriter = $page->getFormWriter('form1', 'v2');
 - [x] `/adm/admin_settings_payments.php` - ✅ **TESTED & APPROVED** (payment configuration with Stripe/PayPal API validation, webhook settings, custom validation rules)
 
 #### Converted - Pending User Testing ⏳ (Syntax validated, ready for testing)
-- ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (form with PhoneNumber::PlainForm() call)
+- ⏳ `/adm/admin_phone_edit.php` - 🔄 **PENDING TESTING** (migrated to standard add/edit pattern with logic file, removed PlainForm() dependency)
+- ⏳ `/adm/admin_address_edit.php` - 🔄 **PENDING TESTING** (migrated to standard add/edit pattern with logic file, removed PlainForm() dependency)
 
 #### Pending Conversion (2 pages - Complex/Deferred)
 
@@ -1306,7 +1306,62 @@ After Phase 1 completion:
 
 ---
 
-## 11. Related Documentation
+## 11. Architectural Changes
+
+### Removal of PlainForm() Pattern
+
+**Date:** 2025-11-01
+
+During the migration, the `PlainForm()` pattern (used by `PhoneNumber::PlainForm()` and `Address::PlainForm()`) was removed in favor of the standard add/edit pattern used throughout the admin interface.
+
+**Before (PlainForm pattern):**
+```php
+// View file
+$formwriter = $page->getFormWriter('form1', 'v2');
+PhoneNumber::PlainForm($formwriter, $phone_number);
+
+// Model method
+public static function PlainForm($formwriter, $phone_number=NULL, $options=NULL) {
+    // Form fields defined in model
+}
+```
+
+**After (Standard pattern):**
+```php
+// View file (/adm/admin_phone_edit.php)
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $phone_number,
+    'edit_primary_key_value' => $phone_number->key
+]);
+$formwriter->textinput('phn_phone_number', 'Phone Number', [...]);
+
+// Logic file (/adm/logic/admin_phone_edit_logic.php)
+function admin_phone_edit_logic($get_vars, $post_vars) {
+    // Standard edit_primary_key_value pattern
+    // Follows same structure as admin_coupon_code_edit_logic.php
+}
+```
+
+**Benefits:**
+- Consistent architecture across all admin pages
+- Logic separation (view vs. business logic)
+- Standard edit_primary_key_value handling
+- Easier to maintain and understand
+- No special-case form methods in models
+
+**Files affected:**
+- `/adm/admin_phone_edit.php` - Converted to standard pattern
+- `/adm/logic/admin_phone_edit_logic.php` - Created
+- `/adm/admin_address_edit.php` - Converted to standard pattern
+- `/adm/logic/admin_address_edit_logic.php` - Created
+- `/data/phone_number_class.php` - Removed PlainForm() method
+- `/data/address_class.php` - Removed PlainForm() method
+
+**Note:** Profile pages (`/views/profile/phone_numbers_edit.php` and `/views/profile/address_edit.php`) still reference the old PlainForm() methods and will need to be updated separately to use their own logic files or inline form definitions.
+
+---
+
+## 12. Related Documentation
 
 - **[FormWriter Documentation](/docs/formwriter.md)** - Complete V1 and V2 API reference
 - **[Admin Pages Documentation](/docs/admin_pages.md)** - Admin page patterns and best practices

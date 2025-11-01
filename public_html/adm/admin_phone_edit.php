@@ -1,6 +1,6 @@
 <?php
 
-	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('adm/logic/admin_phone_edit_logic.php'));
 
 	$page_vars = process_logic(admin_phone_edit_logic($_GET, $_POST));
@@ -17,34 +17,35 @@
 	)
 	);
 
-	//PhoneNumber::ValidateJS();
-?>
+	$pageoptions['title'] = $phone_number->key ? 'Edit Phone Number' : 'Add Phone Number';
+	$page->begin_box($pageoptions);
 
-			<section class="contact-page-area section-gap">
-				<div class="container">
-<?php if (isset($phn_phone_number_id)) { ?>
-		   <h3>Edit Phone Number</h3>
-<?php } else { ?>
-		   <h3>Add Phone Number</h3>
-<?php }
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $phone_number,
+		'edit_primary_key_value' => $phone_number->key
+	]);
 
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("", "post", "/admin/admin_phone_edit");
+	$formwriter->begin_form();
 
-	PhoneNumber::PlainForm($formwriter, $phone_number);
-	echo $formwriter->hiddeninput('usr_user_id', $user_id);
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
+	// Hidden field to preserve user_id through form submission
+	$formwriter->hiddeninput('usr_user_id', '', ['value' => $user_id]);
 
-	echo $formwriter->end_form();
+	// Get country code options
+	$country_codes = PhoneNumber::get_country_code_drop_array();
+	$formwriter->dropinput('phn_cco_country_code_id', 'Country code', [
+		'options' => $country_codes
+	]);
 
-	$page->endtable();
-?>
+	$formwriter->textinput('phn_phone_number', 'Phone Number', [
+		'maxlength' => 20,
+		'validation' => ['required' => true]
+	]);
 
-    </div>
-</section>
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
-<?php
+	$formwriter->end_form();
+
+	$page->end_box();
 	$page->admin_footer();
+
 ?>
