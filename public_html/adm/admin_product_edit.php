@@ -45,31 +45,6 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 ]);
 
 ?>
-<script type="text/javascript">
-/*
-	function set_pricing_choices(){
-		var value = $("#pro_price_type").val();
-		if(value == 1){  //ONE PRICE
-			$("#pro_price_container").show();
-		}
-		else if(value == 2){  //MULTIPLE PRICES
-			$("#pro_price_container").hide();
-		}
-		else if(value == 3){  //USER CHOOSES PRICE
-			$("#pro_price_container").hide();
-		}
-	}
-
-	$(document).ready(function() {
-		set_pricing_choices();
-		$("#pro_price_type").change(function() {
-			set_pricing_choices();
-		});
-
-	});
-*/
-
-</script>
 <?php
 
 $formwriter->begin_form();
