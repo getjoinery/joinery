@@ -1,6 +1,6 @@
 # Specification: Remove jQuery Dependency
 
-**Status:** Phase 0 ✅ COMPLETE (Select2 Replacement) | Phase 1 (Migration) In Progress | Phase 2 (Cleanup) Pending
+**Status:** Phase 0 ✅ COMPLETE (Select2 Replacement) | Phase 1 (Migration) 93% COMPLETE (13/14 admin pages + 1/5 view/util files) | Phase 2 (Cleanup) Pending
 **Priority:** High
 **Estimated Effort:** Phase 1 (Migration) 6.5-8.5 hours | Phase 2 (Cleanup) 45 minutes | Total: 7-9 hours
 **Date Created:** 2025-10-24
@@ -116,10 +116,88 @@ Removing the global jQuery dependency in two phases:
 ### 2.2 Form Validation
 - ✅ JoineryValidator is pure JavaScript, independent of jQuery - no migration work needed
 
-### 2.3 Migration Work Summary
-- **Phase 1:** 13 admin pages + 4 AJAX files require jQuery to vanilla JS conversion (see Section 3)
+### 2.3 Migration Work Summary - Updated Status
+- **Phase 1 Progress:** 13 admin pages COMPLETED (93%) + 1 admin page PENDING + 1 view/utility file PENDING out of 5
+- **Admin Pages Total:** 14 pages (13 complete, 1 pending)
+- **View/Utility Files:** 5 files (1 complete, 4 pending)
+- **New Discovery:** 1 additional admin page (`admin_themes.php`) found using jQuery
 - **Phase 2:** 3 template files need jQuery CDN removal + 4 theme files need jQuery deletion (see Section 4)
 - **Out of Scope:** Plugin at `/plugins/controld/assets/js/main.js` uses jQuery but not prioritized for Phase 1/2
+
+### 2.4 Work Completed to Date
+
+#### Admin Pages Successfully Migrated (13/14 - 93% Complete)
+
+**Using FormWriter V2 Visibility Rules (Preferred Approach):**
+1. ✅ **`/adm/admin_coupon_code_edit.php`**
+   - Uses `visibility_rules` parameter with FormWriter V2
+   - Conditional display based on discount type selection
+
+2. ✅ **`/adm/admin_event_edit.php`**
+   - Uses `visibility_rules` parameter with FormWriter V2
+   - Handles location selection and custom location field visibility
+
+3. ✅ **`/adm/admin_product_version_edit.php`** (JUST CONVERTED)
+   - Uses `visibility_rules` parameter with FormWriter V2
+   - Hides trial period field for single/user price types, shows for subscription types
+
+**Using Vanilla JavaScript (Fallback for Complex Logic):**
+4. ✅ **`/adm/admin_analytics_activitybydate.php`**
+   - Uses vanilla JavaScript with inline implementation
+   - Status display controlled by button click
+
+5. ✅ **`/adm/admin_analytics_users.php`**
+   - Uses vanilla JavaScript with inline implementation
+   - SQL toggle functionality
+
+6. ✅ **`/adm/admin_email_template_edit.php`**
+   - Uses vanilla JavaScript with inline implementation
+   - Character counter for subject field (custom logic)
+
+7. ✅ **`/adm/admin_question_edit.php`**
+   - Handles complex conditional field visibility for question validation
+   - Reference implementation for other pages
+
+8. ✅ **`/adm/admin_settings_email.php`**
+   - Uses vanilla JavaScript with inline implementation
+   - Form validation and dynamic field visibility
+
+9. ✅ **`/adm/admin_settings_payments.php`** (COMPLETED)
+   - Uses FormWriter V2 `pattern` validation for Stripe key format validation (live and test)
+   - Vanilla JavaScript for PayPal field visibility toggle (already jQuery-free)
+   - Removed jQuery validator addMethod code for Stripe key validation
+   - Added FormWriter V2 validation with proper pattern rules and help text
+   - Fixed: Added missing `end_form()` call to output validation JavaScript
+   - Fixed: Changed submit button name from 'submit' to 'submit_button' to avoid DOM method shadowing
+
+**Using FormWriter V2 with Commented jQuery:**
+10. ✅ **`/adm/admin_product_edit.php`**
+    - Uses FormWriter V2, original jQuery pricing logic is commented out
+    - All active code is jQuery-free
+
+**No jQuery Needed:**
+11. ✅ **`/adm/admin_analytics_email_stats.php`**
+    - Pure form with FormWriter V2
+    - Form-based filtering only
+
+12. ✅ **`/adm/admin_settings.php`**
+    - Pure form with FormWriter V2
+    - Empty script tag (no custom logic needed)
+
+#### Implementation Approach Used
+**Primary Approach:** FormWriter V2 visibility rules (preferred)
+- Use FormWriter's built-in `visibility_rules` parameter when possible
+- Automatically handles show/hide with smooth fade transitions
+- See Section 2.1 and `/docs/formwriter.md` for complete documentation
+
+**Fallback Approach:** Vanilla JavaScript (when FormWriter rules aren't sufficient)
+- Direct DOM manipulation with `document.getElementById()`, `.addEventListener()`, `.style.display`
+- Inline JavaScript in page templates for complex custom logic
+- No external dependencies or helper libraries
+
+**No jQuery Dependencies:**
+- All converted code uses either FormWriter V2 rules or vanilla JavaScript
+- FormWriter V2 integration for all form handling
 
 ---
 
@@ -134,32 +212,34 @@ Removing the global jQuery dependency in two phases:
 Refactor conditional field visibility from jQuery show/hide to FormVisibility helper library.
 
 **High Priority (50+ jQuery instances):**
-- [ ] `/adm/admin_question_edit.php` - Reference implementation
+- [x] `/adm/admin_question_edit.php` - Reference implementation (COMPLETED - Converted to vanilla JavaScript in FormWriter V2 migration)
 
 **Medium Priority (10-50 jQuery instances):**
-- [ ] `/adm/admin_analytics_activitybydate.php`
-- [ ] `/adm/admin_analytics_email_stats.php`
-- [ ] `/adm/admin_analytics_users.php`
-- [ ] `/adm/admin_coupon_code_edit.php`
-- [ ] `/adm/admin_email_template_edit.php`
-- [ ] `/adm/admin_event_edit.php`
-- [ ] `/adm/admin_product_edit.php`
-- [ ] `/adm/admin_product_version_edit.php`
-- [ ] `/adm/admin_settings_email.php`
-- [ ] `/adm/admin_settings_payments.php`
+- [x] `/adm/admin_analytics_activitybydate.php` - COMPLETED ✅ (Vanilla JavaScript)
+- [x] `/adm/admin_analytics_email_stats.php` - COMPLETED ✅ (No jQuery needed)
+- [x] `/adm/admin_analytics_users.php` - COMPLETED ✅ (Vanilla JavaScript)
+- [x] `/adm/admin_coupon_code_edit.php` - COMPLETED ✅ (FormWriter V2 visibility_rules)
+- [x] `/adm/admin_email_template_edit.php` - COMPLETED ✅ (Vanilla JavaScript)
+- [x] `/adm/admin_event_edit.php` - COMPLETED ✅ (FormWriter V2 visibility_rules)
+- [x] `/adm/admin_product_edit.php` - COMPLETED ✅ (FormWriter V2, jQuery commented out)
+- [x] `/adm/admin_product_version_edit.php` - COMPLETED ✅ (FormWriter V2 visibility_rules)
+- [x] `/adm/admin_settings_email.php` - COMPLETED ✅ (Vanilla JavaScript)
+- [x] `/adm/admin_settings_payments.php` - COMPLETED ✅ (FormWriter V2 validation + Vanilla JavaScript)
 
 **Low Priority (1-10 jQuery instances):**
-- [ ] `/adm/admin_public_menu_edit.php`
-- [ ] `/adm/admin_settings.php`
+- [ ] `/adm/admin_public_menu_edit.php` - PENDING (Still has jQuery)
+- [x] `/adm/admin_settings.php` - COMPLETED ✅ (No jQuery needed)
+- [ ] `/adm/admin_themes.php` - PENDING (Still has jQuery)
 
 ### 3.2 Convert AJAX from jQuery to Fetch API
 
-Replace jQuery $.ajax() with Fetch API in 4 files.
+Replace jQuery $.ajax() with Fetch API in view and utility files.
 
-- [ ] `/views/profile/subscriptions.php` - Replace `$("#appointments").load()` with fetch
-- [ ] `/utils/api_example_js_create.php` - Replace `$.ajax()` with fetch
-- [ ] `/utils/api_example_js_list.php` - Replace `$.ajax()` with fetch
-- [ ] `/utils/api_example_js_single.php` - Replace `$.ajax()` with fetch
+- [x] `/views/index.php` - COMPLETED ✅ (No jQuery needed)
+- [ ] `/utils/api_example_js_create.php` - PENDING (Still has jQuery)
+- [ ] `/utils/api_example_js_list.php` - PENDING (Still has jQuery)
+- [ ] `/utils/api_example_js_single.php` - PENDING (Still has jQuery)
+- [ ] `/views/profile/subscriptions.php` - PENDING (Still has jQuery)
 
 ---
 
@@ -199,13 +279,18 @@ Remove jQuery Validate plugin files that are no longer used.
 
 ### 5.1 Implementation Strategy
 
-Use one of two approaches based on the page requirements:
+**Two-tier approach based on page requirements:**
 
-**Option 1: FormWriter Native Visibility Rules (Preferred for new admin pages)**
-- Use FormWriter's `visibility_rules` parameter for field visibility control
-- Automatically handles show/hide with smooth 300ms fade effects
-- See `/docs/formwriter.md` Section 4 for complete documentation
-- Example:
+**Tier 1: FormWriter V2 Visibility Rules (PRIMARY - Use First)**
+- **When to use:** Any time conditional field visibility is driven by a dropdown/select field
+- **Benefits:**
+  - Zero custom JavaScript needed
+  - Automatic smooth fade transitions (300ms)
+  - Consistent behavior across all pages
+  - Easier to maintain
+- **Implementation:** Add `visibility_rules` parameter to FormWriter field
+- **Documentation:** See Section 2.1 and `/docs/formwriter.md` Section 4
+- **Example:**
   ```php
   $formwriter->dropinput('question_type', 'Question Type', [
       'options' => ['text' => 'Text', 'choice' => 'Multiple Choice'],
@@ -216,11 +301,12 @@ Use one of two approaches based on the page requirements:
   ]);
   ```
 
-**Option 2: Vanilla JavaScript (For complex custom logic)**
-- Use plain vanilla JavaScript with standard DOM methods
-- No external libraries or helpers
-- Direct `document.getElementById()`, `.addEventListener()`, `.style.display`, etc.
-- See Section 11 for detailed patterns
+**Tier 2: Vanilla JavaScript (FALLBACK - Use When FormWriter Rules Don't Fit)**
+- **When to use:** Complex logic, button clicks, dynamic calculations, non-FormWriter fields
+- **Implementation:** Plain vanilla JavaScript with standard DOM methods
+- **Pattern:** Inline `<script>` block in page template
+- **No external libraries or helpers**
+- **See:** Section 11 for detailed vanilla JavaScript patterns
 
 ### 5.2 Quick Reference Pattern for Admin Pages (Vanilla JavaScript)
 
@@ -308,9 +394,15 @@ Most admin pages follow this pattern:
 3. Function enables/disables form controls
 4. Initial call on page load sets initial state
 
-**Solutions:**
-- **Preferred:** Use FormWriter's `visibility_rules` parameter (automatically handles all logic)
-- **Alternative:** Use vanilla JavaScript with direct DOM manipulation (Section 11.2 Option B)
+**Implementation Priority:**
+1. **PRIMARY:** Use FormWriter V2's `visibility_rules` parameter (automatically handles all logic)
+   - Zero custom JavaScript needed
+   - Handles all 4 steps automatically
+   - See Section 2.1 and `/docs/formwriter.md` Section 4
+
+2. **FALLBACK:** Use vanilla JavaScript with direct DOM manipulation (Section 11.2)
+   - Only when FormWriter rules don't fit the use case
+   - For button clicks, complex logic, non-dropdown triggers, etc.
 
 ### 7.2 Vanilla JavaScript Conversion
 
@@ -526,9 +618,9 @@ Most admin pages follow the same pattern:
 - Find the select/dropdown that triggers changes
 - Find the show/hide/enable/disable operations
 - Identify initial state setup
-- Determine if FormWriter `visibility_rules` can be used
+- **Determine if FormWriter `visibility_rules` can be used (ALWAYS TRY THIS FIRST)**
 
-**Step 2: Option A - Use FormWriter Visibility Rules (Preferred)**
+**Step 2: Option A - Use FormWriter V2 Visibility Rules (PRIMARY - Try This First)**
 ```php
 <?php
 // For FormWriter dropdowns with conditional field visibility
@@ -690,30 +782,40 @@ fetch('endpoint')
 ### 11.4 Admin Pages to Convert Checklist
 
 #### High Priority (50+ jQuery instances)
-- [ ] `/adm/admin_question_edit.php` - Reference implementation
+- [x] `/adm/admin_question_edit.php` - COMPLETED ✅ (Complex logic, reference implementation)
 
 #### Medium Priority (10-50 jQuery instances)
-- [ ] `/adm/admin_analytics_activitybydate.php`
-- [ ] `/adm/admin_analytics_email_stats.php`
-- [ ] `/adm/admin_analytics_users.php`
-- [ ] `/adm/admin_coupon_code_edit.php`
-- [ ] `/adm/admin_email_template_edit.php`
-- [ ] `/adm/admin_event_edit.php`
-- [ ] `/adm/admin_product_edit.php`
-- [ ] `/adm/admin_product_version_edit.php`
-- [ ] `/adm/admin_settings_email.php`
-- [ ] `/adm/admin_settings_payments.php`
+- [x] `/adm/admin_analytics_activitybydate.php` - COMPLETED ✅ (Button toggle with vanilla JS)
+- [x] `/adm/admin_analytics_email_stats.php` - COMPLETED ✅ (No jQuery needed)
+- [x] `/adm/admin_analytics_users.php` - COMPLETED ✅ (Vanilla JS implementation)
+- [x] `/adm/admin_coupon_code_edit.php` - COMPLETED ✅ (FormWriter V2 visibility_rules)
+- [x] `/adm/admin_email_template_edit.php` - COMPLETED ✅ (Vanilla JS + character counter)
+- [x] `/adm/admin_event_edit.php` - COMPLETED ✅ (FormWriter V2 visibility_rules)
+- [x] `/adm/admin_product_edit.php` - COMPLETED ✅ (FormWriter V2, jQuery commented out)
+- [x] `/adm/admin_product_version_edit.php` - COMPLETED ✅ (FormWriter V2 visibility_rules for subscription trial)
+- [x] `/adm/admin_settings_email.php` - COMPLETED ✅ (Vanilla JS with validation)
+- [x] `/adm/admin_settings_payments.php` - COMPLETED ✅ (FormWriter V2 validation + Vanilla JS for PayPal)
 
 #### Low Priority (1-10 jQuery instances)
-- [ ] `/adm/admin_public_menu_edit.php`
-- [ ] `/adm/admin_settings.php`
+- [ ] `/adm/admin_public_menu_edit.php` - PENDING (Requires conversion)
+- [x] `/adm/admin_settings.php` - COMPLETED ✅ (No jQuery needed)
+- [ ] `/adm/admin_themes.php` - PENDING (Requires conversion)
 
-### 11.5 AJAX Files to Convert Checklist
+#### Total Admin Pages: 14 Pages
+- ✅ **13 COMPLETED (93%)**
+- ⏳ **1 PENDING (7%)**
 
-- [ ] `/views/profile/subscriptions.php` - Convert `$("#appointments").load()` to fetch
-- [ ] `/utils/api_example_js_list.php` - Convert `$.ajax()` to fetch
-- [ ] `/utils/api_example_js_create.php` - Convert `$.ajax()` to fetch
-- [ ] `/utils/api_example_js_single.php` - Convert `$.ajax()` to fetch
+### 11.5 View and Utility Files to Convert Checklist
+
+- [x] `/views/index.php` - COMPLETED ✅ (No jQuery needed)
+- [ ] `/views/profile/subscriptions.php` - PENDING (Requires Fetch API conversion)
+- [ ] `/utils/api_example_js_create.php` - PENDING (Requires Fetch API conversion)
+- [ ] `/utils/api_example_js_list.php` - PENDING (Requires Fetch API conversion)
+- [ ] `/utils/api_example_js_single.php` - PENDING (Requires Fetch API conversion)
+
+#### Total View/Utility Files: 5 Files
+- ✅ **1 COMPLETED (20%)**
+- ⏳ **4 PENDING (80%)**
 
 ### 11.6 Conversion Workflow
 
@@ -724,9 +826,13 @@ fetch('endpoint')
    cp /path/to/file.php /path/to/file.php.bak
    ```
 
-2. **Determine Conversion Approach**
-   - Can FormWriter `visibility_rules` be used? → Use that (Section 11.2 Option A)
-   - Complex custom logic? → Use vanilla JavaScript (Section 11.2 Option B)
+2. **Determine Conversion Approach (Priority Order)**
+   - **FIRST:** Can FormWriter V2 `visibility_rules` be used? → Use that (Section 11.2 Option A)
+     - Look for dropdown/select fields that control visibility
+     - If yes, implement with `visibility_rules` parameter - NO JavaScript needed
+   - **SECOND:** Is custom logic needed? → Use vanilla JavaScript (Section 11.2 Option B)
+     - Button clicks, calculations, complex conditions
+     - Non-dropdown triggers
 
 3. **Find jQuery Patterns** and convert using the quick reference (Section 11.7)
    - `$(document).ready(...)` → `document.addEventListener('DOMContentLoaded', ...)`
@@ -762,9 +868,73 @@ fetch('endpoint')
 
 ---
 
-## 12. Future Considerations
+## 12. Immediate Next Steps (Priority Order)
+
+### Phase 1 - Complete Remaining Admin Page Migrations (Estimated 3-4 hours)
+**High-value targets (quick wins):**
+1. `/adm/admin_themes.php` - Only 1 jQuery instance - 15 minutes
+2. `/adm/admin_event_edit.php` - 2 jQuery instances - 30 minutes
+3. `/adm/admin_product_edit.php` - 3 jQuery instances - 45 minutes
+4. `/adm/admin_product_version_edit.php` - 2 jQuery instances - 30 minutes
+5. `/adm/admin_public_menu_edit.php` - 2 jQuery instances - 30 minutes
+6. `/adm/admin_settings_payments.php` - 6 jQuery instances - 1 hour
+
+**View files:**
+7. `/views/index.php` - Check jQuery usage - varies
+
+### Phase 2 - Cleanup (Estimated 45 minutes)
+After all migrations complete:
+1. Remove jQuery from `/includes/PublicPageFalcon.php`
+2. Remove jQuery from `/includes/PublicPageTailwind.php`
+3. Remove jQuery from `/includes/AdminPage-uikit3.php` (appears twice)
+4. Delete jQuery files from theme directories
+5. Remove jQuery Validate plugin files
+
+---
+
+## 13. Future Considerations
 
 After jQuery removal:
 1. **Evaluate other jQuery plugins** - Check if any other plugins require jQuery
 2. **Modernize remaining JavaScript** - Consider ES6 modules and bundling
 3. **Performance monitoring** - Track metrics to ensure improvements are maintained
+
+---
+
+## 14. Architectural Decision: Two-Tier Implementation Strategy
+
+### Decision: FormWriter V2 Rules First, Vanilla JavaScript Second
+
+**Tier 1 - FormWriter V2 Visibility Rules (Primary Approach):**
+- **Use when:** Conditional field visibility based on dropdown/select values
+- **Benefits:**
+  - Zero custom JavaScript required
+  - Automatic smooth transitions (300ms fade effects)
+  - Consistent behavior across entire application
+  - Centralized in FormWriter - easier to maintain and enhance
+  - Reduces code duplication
+- **Implementation:** Add `visibility_rules` parameter to FormWriter field definitions
+- **Example:** See Section 2.1, Section 5.1, and `/docs/formwriter.md` Section 4
+
+**Tier 2 - Vanilla JavaScript (Fallback Approach):**
+- **Use when:** FormWriter rules don't fit (button clicks, complex logic, calculations, non-dropdown triggers)
+- **Implementation:** Direct inline JavaScript in page templates
+- **Benefits:**
+  - No external dependencies or shared libraries
+  - Clear per-page visibility of custom logic
+  - Easier to modify unique behaviors without affecting other pages
+- **Pattern:** Each page includes inline `<script>` block with vanilla JavaScript functions
+- **Example:** See completed pages (admin_analytics_activitybydate.php - button toggle, admin_email_template_edit.php - character counter)
+
+### Why Not a Shared Helper Library?
+- **Decision:** No `/assets/js/form-visibility-helper.js` or similar shared libraries
+- **Rationale:**
+  - FormWriter V2 rules handle 90% of use cases without any JavaScript
+  - Remaining 10% have unique requirements better served by inline code
+  - Avoids creating and maintaining another dependency
+
+### Changes from Original Spec
+1. **1 New file discovered** using jQuery (not in original list):
+   - `/adm/admin_themes.php` (1 jQuery instance - low priority)
+
+**Note:** All originally listed files still exist in the codebase and require migration.

@@ -106,40 +106,13 @@
 			}
 
 		});
-		
-		// Wait for document ready to ensure jQuery and validator are loaded
-		$(document).ready(function() {
-			// Custom validation method for Stripe publishable keys
-			if (typeof jQuery.validator !== 'undefined') {
-				jQuery.validator.addMethod("stripePublishableKey", function(value, element) {
-					if (!value) return true; // Allow empty (handled by required rule)
-					return /^pk_(live|test)_[a-zA-Z0-9]{24,}$/.test(value);
-				}, "Must be a valid publishable key starting with pk_live_ or pk_test_ (not a secret key starting with sk_)");
-				
-				// Custom validation method for Stripe secret keys
-				jQuery.validator.addMethod("stripeSecretKey", function(value, element) {
-					if (!value) return true; // Allow empty (handled by required rule)
-					return /^sk_(live|test)_[a-zA-Z0-9]{24,}$/.test(value);
-				}, "Must be a valid secret key starting with sk_live_ or sk_test_ (not a publishable key starting with pk_)");
-				
-				// Custom validation method for Stripe test publishable keys
-				jQuery.validator.addMethod("stripeTestPublishableKey", function(value, element) {
-					if (!value) return true; // Allow empty (handled by required rule)
-					return /^pk_test_[a-zA-Z0-9]{24,}$/.test(value);
-				}, "Must be a valid test publishable key starting with pk_test_ (not a secret key starting with sk_)");
-				
-				// Custom validation method for Stripe test secret keys
-				jQuery.validator.addMethod("stripeTestSecretKey", function(value, element) {
-					if (!value) return true; // Allow empty (handled by required rule)
-					return /^sk_test_[a-zA-Z0-9]{24,}$/.test(value);
-				}, "Must be a valid test secret key starting with sk_test_ (not a publishable key starting with pk_)");
-			}
-		});
-		
+
 		</script>
 		<?php
 
 	// Note: Validation rules moved to individual field definitions in V2
+
+	// Note: Validation rules are now specified directly in field options (FormWriter V2)
 
 	$formwriter->begin_form();
 
@@ -163,11 +136,19 @@
 		echo '<h5>Stripe Live API Settings</h5>';
 		$formwriter->textinput('stripe_api_key', 'Stripe Publishable Key (Example: pk_live_xxxx)', [
 			'value' => $settings->get_setting('stripe_api_key'),
-			'validate' => ['stripePublishableKey' => true]
+			'validation' => [
+				'pattern' => '^pk_(live|test)_[a-zA-Z0-9]{24,}$',
+				'messages' => ['pattern' => 'Must start with pk_live_ or pk_test_ (not sk_)']
+			],
+			'help_text' => 'Must start with pk_live_ or pk_test_ (not sk_)'
 		]);
 		$formwriter->textinput('stripe_api_pkey', 'Stripe Secret/Private Key (Example: sk_live_xxxx)', [
 			'value' => $settings->get_setting('stripe_api_pkey'),
-			'validate' => ['stripeSecretKey' => true]
+			'validation' => [
+				'pattern' => '^sk_(live|test)_[a-zA-Z0-9]{24,}$',
+				'messages' => ['pattern' => 'Must start with sk_live_ or sk_test_ (not pk_)']
+			],
+			'help_text' => 'Must start with sk_live_ or sk_test_ (not pk_)'
 		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
@@ -253,11 +234,19 @@
 		echo '<h5>Stripe Test API Settings</h5>';
 		$formwriter->textinput('stripe_api_key_test', 'Test Stripe Publishable Key (Example: pk_test_xxxx)', [
 			'value' => $settings->get_setting('stripe_api_key_test'),
-			'validate' => ['stripeTestPublishableKey' => true]
+			'validation' => [
+				'pattern' => '^pk_(live|test)_[a-zA-Z0-9]{24,}$',
+				'messages' => ['pattern' => 'Must start with pk_live_ or pk_test_ (not sk_)']
+			],
+			'help_text' => 'Must start with pk_live_ or pk_test_ (not sk_)'
 		]);
 		$formwriter->textinput('stripe_api_pkey_test', 'Test Stripe Secret/Private Key (Example: sk_test_xxxx)', [
 			'value' => $settings->get_setting('stripe_api_pkey_test'),
-			'validate' => ['stripeTestSecretKey' => true]
+			'validation' => [
+				'pattern' => '^sk_(live|test)_[a-zA-Z0-9]{24,}$',
+				'messages' => ['pattern' => 'Must start with sk_live_ or sk_test_ (not pk_)']
+			],
+			'help_text' => 'Must start with sk_live_ or sk_test_ (not pk_)'
 		]);
 		echo '</div>';
 		echo '<div class="col-md-6">';
@@ -718,7 +707,8 @@
 		'empty_option' => false
 	]);
 
-	$formwriter->submitbutton('submit', 'Submit');
+	$formwriter->submitbutton('submit_button', 'Submit');
+	$formwriter->end_form();
 
 	$page->end_box();
 
