@@ -15,6 +15,7 @@ $page_vars = $page_vars->data;
 	$session = $page_vars['session'];
 	$mailing_lists = $page_vars['mailing_lists'];
 	$numlists = $page_vars['numlists'];
+	$user_subscribed_list = $page_vars['user_subscribed_list'];
 	
 	$page = new PublicPage();
 	$hoptions = array(
@@ -176,18 +177,19 @@ $page_vars = $page_vars->data;
 									<p class="text-muted mb-3">Check the box to subscribe:</p>
 									
 									<div class="row g-3">
-										<?php 
+										<?php
 										$optionvals = $mailing_lists->get_dropdown_array();
 										$checkedvals = $user_subscribed_list;
-										foreach($optionvals as $val => $label): 
+										// get_dropdown_array returns [label => id], so swap the variable names
+										foreach($optionvals as $label => $val):
 											$is_checked = in_array($val, (array)$checkedvals);
 										?>
 										<div class="col-12">
 											<div class="form-check p-3 bg-light rounded-4">
-												<input type="checkbox" 
-													   name="new_list_subscribes[]" 
-													   id="list_<?php echo $val; ?>" 
-													   class="form-check-input" 
+												<input type="checkbox"
+													   name="new_list_subscribes[]"
+													   id="list_<?php echo $val; ?>"
+													   class="form-check-input"
 													   value="<?php echo $val; ?>"
 													   <?php echo $is_checked ? 'checked' : ''; ?> />
 												<label for="list_<?php echo $val; ?>" class="form-check-label fw-semibold">
