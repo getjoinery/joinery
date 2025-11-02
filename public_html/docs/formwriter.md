@@ -9,11 +9,12 @@ The FormWriter system provides a structured, consistent way to build forms in th
 1. [Overview](#1-overview)
 2. [Getting Started](#2-getting-started)
 3. [Field Types](#3-field-types)
-4. [Deferred Output Mode](#4-deferred-output-mode)
-5. [Field Visibility & Custom Scripts](#5-field-visibility--custom-scripts)
-6. [Validation Integration](#6-validation-integration)
-7. [Best Practices](#7-best-practices)
-8. [V1 vs V2](#8-v1-vs-v2)
+4. [Model Form Helpers](#4-model-form-helpers)
+5. [Deferred Output Mode](#5-deferred-output-mode)
+6. [Field Visibility & Custom Scripts](#6-field-visibility--custom-scripts)
+7. [Validation Integration](#7-validation-integration)
+8. [Best Practices](#8-best-practices)
+9. [V1 vs V2](#9-v1-vs-v2)
 
 ---
 
@@ -361,16 +362,209 @@ $formwriter->hiddeninput('user_id', '', ['value' => $user_id]);
 
 ---
 
-## 4. Deferred Output Mode
+## 4. Model Form Helpers
+
+### Overview
+
+Model Form Helpers are static methods in data model classes that render complete form field sets using FormWriter. They encapsulate field definitions, validation rules, and configuration within the model itself, following the DRY principle while maintaining MVC separation.
+
+### Why Use Model Form Helpers?
+
+**Benefits:**
+- ✅ **Single method call** replaces dozens of lines of field definitions
+- ✅ **Centralized field logic** - all form definitions in one place (the model)
+- ✅ **Reusable across pages** - admin, profile, public forms all use same method
+- ✅ **Easy to maintain** - update field definitions in one location
+- ✅ **No direct HTML output** - models don't echo, they provide methods
+- ✅ **MVC compliant** - models know their own structure
+
+### 4.1 Using Existing Model Form Helpers
+
+Models with form helpers provide static methods like `renderFormFields()`:
+
+**Address Form Example:**
+
+```php
+// In admin page, profile page, or any form
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $address,
+    'edit_primary_key_value' => $address->key
+]);
+
+$formwriter->begin_form();
+
+// Single method call renders: country, address1, address2, city, state, zip
+Address::renderFormFields($formwriter, [
+    'required' => true,
+    'include_country' => true,
+    'include_user_id' => false,
+    'model' => $address
+]);
+
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
+```
+
+**PhoneNumber Form Example:**
+
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $phone_number,
+    'edit_primary_key_value' => $phone_number->key
+]);
+
+$formwriter->begin_form();
+
+// Single method call renders: country code, phone number
+PhoneNumber::renderFormFields($formwriter, [
+    'required' => true,
+    'include_user_id' => false,
+    'model' => $phone_number
+]);
+
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
+```
+
+### 4.2 Available Model Form Helpers
+
+**Address::renderFormFields()**
+
+```php
+Address::renderFormFields($formwriter, [
+    'required' => true,          // Make all fields required (default: true)
+    'include_country' => true,   // Show country dropdown (default: true)
+    'include_user_id' => false,  // Add hidden user_id field (default: false)
+    'user_id' => $user->key,     // User ID value if include_user_id is true
+    'model' => $address          // Address object for prepopulation (default: null)
+]);
+```
+
+**Renders fields:**
+- Country code dropdown
+- Street address (required)
+- Apt/Suite (optional)
+- City (required)
+- State/Province (required)
+- Zip/Postcode (required)
+
+**PhoneNumber::renderFormFields()**
+
+```php
+PhoneNumber::renderFormFields($formwriter, [
+    'required' => true,          // Make all fields required (default: true)
+    'include_user_id' => false,  // Add hidden user_id field (default: false)
+    'user_id' => $user->key,     // User ID value if include_user_id is true
+    'model' => $phone_number     // PhoneNumber object for prepopulation (default: null)
+]);
+```
+
+**Renders fields:**
+- Country code dropdown
+- Phone number (required)
+
+### 4.3 Usage Patterns
+
+**Admin Page (Edit Mode):**
+```php
+$address = new Address($address_id, TRUE);
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $address,
+    'edit_primary_key_value' => $address->key
+]);
+
+$formwriter->begin_form();
+Address::renderFormFields($formwriter, [
+    'required' => true,
+    'include_country' => true,
+    'include_user_id' => true,
+    'user_id' => $user_id,
+    'model' => $address
+]);
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
+```
+
+**Profile Page (Optional Fields):**
+```php
+if(!Address::GetDefaultAddressForUser($user_id)) {
+    $user_address = $user->address();
+    Address::renderFormFields($formwriter, [
+        'required' => true,
+        'include_country' => true,
+        'include_user_id' => false,
+        'model' => $user_address
+    ]);
+}
+```
+
+**Product Registration (Create New):**
+```php
+PhoneNumber::renderFormFields($formwriter, [
+    'required' => true,
+    'include_user_id' => false,
+    'model' => NULL  // No prepopulation for new records
+]);
+```
+
+### 4.4 Comparison: Before vs After
+
+**Before (Manual Field Definitions):**
+```php
+// 33 lines of field definitions
+$country_codes = Address::get_country_drop_array2();
+$formwriter->dropinput('usa_cco_country_code_id', 'Country', [
+    'options' => $country_codes
+]);
+$formwriter->textinput('usa_address1', 'Street Address', [
+    'maxlength' => 255,
+    'validation' => ['required' => true]
+]);
+$formwriter->textinput('usa_address2', 'Apt, Suite, etc. (optional)', [
+    'maxlength' => 255
+]);
+// ... more fields ...
+```
+
+**After (Model Form Helper):**
+```php
+// 6 lines - single method call
+Address::renderFormFields($formwriter, [
+    'required' => true,
+    'include_country' => true,
+    'include_user_id' => false,
+    'model' => $address
+]);
+```
+
+**Benefits:**
+- 80% less code
+- Consistent across all pages
+- Easy to update field definitions
+- No duplication between pages
+
+### 4.5 Architecture Principles
+
+Model Form Helpers follow these principles:
+
+1. **Encapsulation** - Model knows its own field structure
+2. **No Direct Output** - Methods don't echo, they use FormWriter's methods
+3. **Options Array** - Flexible configuration via `$options` parameter
+4. **FormWriter Agnostic** - Works with any FormWriter implementation
+5. **Consistent Naming** - Standard `renderFormFields()` method name
+
+---
+
+## 5. Deferred Output Mode
 
 **V2 Feature:** Store form field HTML instead of echoing immediately. Essential for multiple forms in loops.
 
-### 4.1 When to Use
+### 5.1 When to Use
 
 **Use deferred output:** Multiple forms in loops (inline action forms in listing pages)
 **Use immediate output (default):** Single forms in views
 
-### 4.2 Basic Usage
+### 5.2 Basic Usage
 
 ```php
 // Enable deferred mode
@@ -387,7 +581,7 @@ $form->submitbutton('btn_delete', 'Delete');
 $html = $form->getFieldsHTML();
 ```
 
-### 4.3 Listing Page Example
+### 5.3 Listing Page Example
 
 ```php
 foreach ($items as $item) {
@@ -407,17 +601,17 @@ foreach ($items as $item) {
 }
 ```
 
-### 4.4 Compatibility
+### 5.4 Compatibility
 
 Works with all field types, validation, visibility rules, custom scripts, and both themes.
 
 ---
 
-## 5. Field Visibility & Custom Scripts
+## 6. Field Visibility & Custom Scripts
 
 **New Feature (Added 2025-10-25):** FormWriter now supports dynamic field visibility with smooth fade transitions and custom JavaScript logic.
 
-### 5.1 Level 1: Convenience Rules (Auto-Generated)
+### 6.1 Level 1: Convenience Rules (Auto-Generated)
 
 **For simple show/hide based on select field values**, define rules and FormWriter generates JavaScript automatically:
 
@@ -469,7 +663,7 @@ The visibility system automatically checks for `field_id_container` elements fir
 const el = document.getElementById(id + "_container") || document.getElementById(id);
 ```
 
-### 5.2 Level 2: Field-Level Custom Scripts
+### 6.2 Level 2: Field-Level Custom Scripts
 
 **For custom logic on a specific field**, provide the event handler body - FormWriter wraps it with `addEventListener`:
 
@@ -507,7 +701,7 @@ $formwriter->textinput('bulk_warning', 'Bulk orders require manager approval', [
 - `change` event attached automatically
 - Full JavaScript access for complex logic
 
-### 5.3 Level 3: Form-Level Scripts
+### 6.3 Level 3: Form-Level Scripts
 
 **For cross-field logic**, add raw JavaScript to run when the form loads:
 
@@ -561,7 +755,7 @@ $formwriter->addReadyScript('
 
 **Pro Tip:** When hiding fields in form-level scripts, target `field_id_container` elements rather than field IDs directly. This hides the entire field wrapper (label + input) instead of just the input. FormWriter automatically wraps form fields in these containers, so they're always available to target.
 
-### 4.4 Fade Effects
+### 6.4 Fade Effects
 
 All visibility changes include smooth fade transitions:
 
@@ -587,7 +781,7 @@ All visibility changes include smooth fade transitions:
 
 ---
 
-## 6. Validation Integration
+## 7. Validation Integration
 
 FormWriter integrates with the **JoineryValidator** system for client-side validation and works seamlessly with model-based server-side validation.
 
@@ -606,7 +800,7 @@ User Input → JavaScript Validation → Form Submission
          Model->save() → Database
 ```
 
-### 6.1 Basic Validation with set_validate()
+### 7.1 Basic Validation with set_validate()
 
 **Using V1 FormWriter:**
 
@@ -663,7 +857,7 @@ $formwriter->passwordinput('usr_password', 'Password', [
 $formwriter->end_form();
 ```
 
-### 6.2 Model-Aware Validation (V2 Feature)
+### 7.2 Model-Aware Validation (V2 Feature)
 
 FormWriter V2 can automatically generate validation rules from model `field_specifications`:
 
@@ -734,7 +928,7 @@ public static $field_specifications = array(
 );
 ```
 
-### 6.3 Available Validation Rules
+### 7.3 Available Validation Rules
 
 FormWriter supports all JoineryValidator rules:
 
@@ -752,7 +946,7 @@ FormWriter supports all JoineryValidator rules:
 | `pattern` | Regex match | `'pattern']['value'] = '"/^[A-Z0-9]+$/"'` |
 | `remote` | AJAX validation | `'remote']['value'] = '"/ajax/check_username"'` |
 
-### 6.4 Common Validation Patterns
+### 7.4 Common Validation Patterns
 
 **Email Signup Form:**
 
@@ -798,7 +992,7 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';
 echo $formwriter->set_validate($rules);
 ```
 
-### 6.5 Custom Error Messages
+### 7.5 Custom Error Messages
 
 ```php
 $validation_rules['email']['required']['value'] = 'true';
@@ -810,7 +1004,7 @@ $validation_rules['password']['minlength']['value'] = '8';
 $validation_rules['password']['minlength']['message'] = '"Password must be at least 8 characters"';
 ```
 
-### 6.6 Debug Mode
+### 7.6 Debug Mode
 
 Enable console logging during development:
 
@@ -820,7 +1014,7 @@ echo $formwriter->set_validate($validation_rules, NULL, true);  // true = debug 
 
 This logs validation initialization, rules, field validation attempts, and results.
 
-### 6.7 Server-Side Validation
+### 7.7 Server-Side Validation
 
 **Always validate on the server - never trust client-side validation alone!**
 
@@ -861,7 +1055,7 @@ See **[validation.md](validation.md)**
 
 ---
 
-## 7. Best Practices
+## 8. Best Practices
 
 ### Security
 
@@ -915,7 +1109,7 @@ See **[validation.md](validation.md)**
 
 ---
 
-## 8. V1 vs V2
+## 9. V1 vs V2
 
 ### When to Use V1
 
@@ -933,11 +1127,11 @@ See **[validation.md](validation.md)**
 - Password strength meters
 - Input group prepend/append text
 
-### 7.1 V2 Automatic Features
+### 9.1 V2 Automatic Features
 
 FormWriter V2 includes powerful automatic features that reduce boilerplate code:
 
-#### 7.1.1 Automatic Model Validation
+#### 9.1.1 Automatic Model Validation
 
 V2 automatically detects validation rules from model `field_specifications` based on field naming conventions:
 
@@ -995,7 +1189,7 @@ $formwriter->textinput('loc_link', 'Link', [
 ]);
 ```
 
-#### 7.1.2 Automatic Form Filling
+#### 9.1.2 Automatic Form Filling
 
 V2 can auto-populate all fields from model data using the `model` option:
 
@@ -1079,7 +1273,7 @@ $formwriter->textinput('loc_address', 'Address');
 // ... etc - all auto-filled!
 ```
 
-#### 7.1.3 Automatic Local Time Conversion
+#### 9.1.3 Automatic Local Time Conversion
 
 V2 automatically converts UTC DateTime objects to the user's local timezone for display. This eliminates manual timezone conversion code in views.
 
@@ -1153,7 +1347,7 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 - ✅ Handles errors gracefully
 - ✅ Clean design: timezone is part of the DateTime object itself
 
-#### 7.1.4 Input Group Prepend Text (Bootstrap)
+#### 9.1.4 Input Group Prepend Text (Bootstrap)
 
 V2 Bootstrap supports prepending text to input fields using Bootstrap's input-group:
 
@@ -1215,8 +1409,17 @@ FormWriter provides:
 - ✅ Custom JavaScript support at three levels
 - ✅ Theme-aware styling
 - ✅ Accessibility features
+- ✅ **Model Form Helpers** - Reusable form field sets from data models
+
+**Key Features:**
+- **Model Form Helpers** (NEW) - Static methods in models render complete form field sets (Address, PhoneNumber, etc.)
+- **V2 Automatic Features** - Model validation detection, form filling, timezone conversion
+- **Two Versions** - V1 for compatibility, V2 for modern development
+- **Complete Flexibility** - Visibility rules, custom scripts, validation patterns
 
 **For more information:**
+- [Model Form Helpers](#4-model-form-helpers) - Encapsulated field definitions in models
 - [Validation System](validation.md) - Complete validation documentation
 - [Admin Pages](admin_pages.md) - Using FormWriter in admin interfaces
+- [Specification: Model Form Helpers](/specs/implemented/model_form_helpers.md) - Architecture and implementation details
 - Example forms: `/utils/forms_example_bootstrap.php`, `/utils/forms_example_bootstrapv2.php`
