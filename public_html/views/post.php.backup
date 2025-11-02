@@ -18,8 +18,8 @@ $page_vars = $page_vars->data;
 		'is_valid_page' => $is_valid_page,
 		'title' => $post->get('pst_title')
 	);
-	$page->public_header($hoptions);
-
+	$page->public_header($hoptions); 
+	
 	echo PublicPage::BeginPage();
 ?>
 
@@ -28,13 +28,13 @@ $page_vars = $page_vars->data;
 	<div class="content-wrap">
 		<div class="container">
 			<div class="row gx-5">
-
+				
 				<main class="postcontent col-lg-9">
 					<div class="single-post mb-0">
-
+						
 						<!-- Single Post -->
 						<article class="entry">
-
+							
 							<!-- Entry Title -->
 							<div class="entry-title text-center mb-4">
 								<span class="badge bg-primary rounded-pill mb-3 px-3 py-2">Blog</span>
@@ -53,7 +53,7 @@ $page_vars = $page_vars->data;
 										<time><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', 'America/New_York'); ?></time>
 									</li>
 								</ul>
-
+								
 								<!-- Tags -->
 								<div class="d-flex justify-content-center flex-wrap gap-2 mb-4">
 									<?php foreach ($page_vars['tags'] as $tag): ?>
@@ -69,7 +69,7 @@ $page_vars = $page_vars->data;
 								<div class="mb-5">
 									<?php echo $post->get('pst_body'); ?>
 								</div>
-
+								
 								<?php if($page_vars['settings']->get_setting('blog_footer_text')): ?>
 								<div class="border-top pt-4 mt-5">
 									<?php echo $page_vars['settings']->get_setting('blog_footer_text'); ?>
@@ -84,7 +84,7 @@ $page_vars = $page_vars->data;
 				<!-- Sidebar -->
 				<aside class="sidebar col-lg-3">
 					<div class="sidebar-widgets-wrap">
-
+						
 						<!-- Back to Blog -->
 						<div class="widget mb-4">
 							<div class="widget-title">
@@ -112,7 +112,7 @@ $page_vars = $page_vars->data;
 							</div>
 						</div>
 						<?php endif; ?>
-
+						
 					</div>
 				</aside>
 			</div>
@@ -121,7 +121,7 @@ $page_vars = $page_vars->data;
 			<?php if($page_vars['settings']->get_setting('comments_active')): ?>
 			<div class="row mt-5">
 				<div class="col-lg-9">
-
+					
 					<!-- Add Comment Form -->
 					<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
 					<div class="card shadow-sm rounded-4 mb-5">
@@ -131,69 +131,52 @@ $page_vars = $page_vars->data;
 						<div class="card-body p-4">
 							<?php
 							$settings = Globalvars::get_instance();
-							$formwriter = $page->getFormWriter('form1', 'v2');
+							$formwriter = $page->getFormWriter('form1');
+							$validation_rules = array();
+							$validation_rules['cmt']['required']['value'] = 'true';
+							$validation_rules['cmt']['minlength']['value'] = 20;
+							$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
+							$validation_rules['name']['required']['value'] = 'true';
+							$validation_rules['name']['minlength']['value'] = 2;
+							$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+							echo $formwriter->set_validate($validation_rules);
 
-							$formwriter->begin_form([
-								'id' => '',
-								'method' => 'POST',
-								'action' => $_SERVER['REQUEST_URI'],
-								'ajax' => true
-							]);
+							echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
 							?>
 
 							<div class="row g-3">
 								<div class="col-md-6">
 									<div class="form-group">
 										<label for="name" class="form-label">Name <span class="text-danger">*</span></label>
-										<?php
-										$formwriter->textinput('name', '', [
-											'class' => 'form-control',
-											'maxlength' => 255,
-											'required' => true,
-											'minlength' => 2
-										]);
-										?>
+										<?php echo $formwriter->textinput("", "name", 'form-control', 20, NULL , "",255, ""); ?>
 									</div>
 								</div>
 								<div class="col-12">
 									<div class="form-group">
 										<label for="cmt" class="form-label">Comment <span class="text-danger">*</span></label>
-										<?php
-										$formwriter->textbox('cmt', '', [
-											'class' => 'form-control',
-											'rows' => 4,
-											'cols' => 80,
-											'required' => true,
-											'minlength' => 20,
-											'data-msg-minlength' => 'Comment must be at least 20 characters'
-										]);
-										?>
+										<?php echo $formwriter->textbox('', 'cmt', 'form-control', 4, 80, NULL, '', ''); ?>
 									</div>
 								</div>
-
+								
 								<?php if(!$page_vars['session']->get_user_id()): ?>
 								<div class="col-12">
-									<?php
-									$formwriter->antispam_question_input('blog');
-									$formwriter->honeypot_hidden_input();
-									$formwriter->honeypot_hidden_input('Comment', 'comment');
-									$formwriter->captcha_hidden_input('blog');
+									<?php 
+									echo $formwriter->antispam_question_input('blog');
+									echo $formwriter->honeypot_hidden_input();
+									echo $formwriter->honeypot_hidden_input('Comment', 'comment');
+									echo $formwriter->captcha_hidden_input('blog');
 									?>
 								</div>
 								<?php endif; ?>
-
+								
 								<div class="col-12">
 									<div class="d-flex justify-content-end">
-										<?php
-										$formwriter->submitbutton('submit', 'Post Comment', [
-											'class' => 'btn btn-primary'
-										]);
-										?>
+										<?php echo $formwriter->new_form_button('Post Comment', 'btn btn-primary'); ?>
 									</div>
 								</div>
 							</div>
 
-							<?php $formwriter->end_form(); ?>
+							<?php echo $formwriter->end_form(true); ?>
 						</div>
 					</div>
 					<?php endif; ?>
@@ -213,7 +196,7 @@ $page_vars = $page_vars->data;
 								});
 							});
 							</script>
-
+							
 							<?php foreach($page_vars['comments'] as $comment): ?>
 							<div class="border-bottom p-4">
 								<div class="d-flex align-items-start">
@@ -229,76 +212,59 @@ $page_vars = $page_vars->data;
 											<?php echo $comment->get_sanitized_comment(); ?>
 										</div>
 										<button id="comment<?php echo $comment->key; ?>" class="commentbutton btn btn-outline-primary btn-sm">Reply</button>
-
+										
 										<!-- Reply Form -->
 										<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
 										<div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="mt-3 p-3 bg-light rounded">
 											<?php
-											$formwriter = $page->getFormWriter('form'.$comment->key, 'v2');
+											$formwriter = $page->getFormWriter('form'.$comment->key);
 
-											$formwriter->begin_form([
-												'id' => 'form'.$comment->key,
-												'method' => 'POST',
-												'action' => $_SERVER['REQUEST_URI'],
-												'ajax' => true
-											]);
+											$validation_rules = array();
+											$validation_rules['cmt']['required']['value'] = 'true';
+											$validation_rules['cmt']['minlength']['value'] = 20;
+											$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
+											$validation_rules['name']['required']['value'] = 'true';
+											$validation_rules['name']['minlength']['value'] = 2;
+											$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+											echo $formwriter->set_validate($validation_rules);
 
-											$formwriter->hiddeninput('cmt_comment_id_parent', ['value' => $comment->key]);
+											echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
+											echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
 											?>
-
+											
 											<div class="row g-3">
 												<div class="col-md-6">
 													<div class="form-group">
 														<label class="form-label">Your name</label>
-														<?php
-														$formwriter->textinput('name', '', [
-															'class' => 'form-control',
-															'maxlength' => 255,
-															'required' => true,
-															'minlength' => 2
-														]);
-														?>
+														<?php echo $formwriter->textinput("", "name", 'form-control', 20, NULL , "",255, ""); ?>
 													</div>
 												</div>
 												<div class="col-12">
 													<div class="form-group">
 														<label class="form-label">Your reply</label>
-														<?php
-														$formwriter->textbox('cmt', '', [
-															'class' => 'form-control',
-															'rows' => 3,
-															'cols' => 80,
-															'required' => true,
-															'minlength' => 20,
-															'data-msg-minlength' => 'Comment must be at least 20 characters'
-														]);
-														?>
+														<?php echo $formwriter->textbox('', 'cmt', 'form-control', 3, 80, NULL, '', ''); ?>
 													</div>
 												</div>
-
+												
 												<?php if(!$page_vars['session']->get_user_id()): ?>
 												<div class="col-12">
-													<?php
-													$formwriter->antispam_question_input('blog');
-													$formwriter->honeypot_hidden_input();
-													$formwriter->honeypot_hidden_input('Comment', 'comment');
-													$formwriter->captcha_hidden_input('blog');
+													<?php 
+													echo $formwriter->antispam_question_input('blog');
+													echo $formwriter->honeypot_hidden_input();
+													echo $formwriter->honeypot_hidden_input('Comment', 'comment');
+													echo $formwriter->captcha_hidden_input('blog');
 													?>
 												</div>
 												<?php endif; ?>
-
+												
 												<div class="col-12">
 													<div class="d-flex justify-content-end">
-														<?php
-														$formwriter->submitbutton('submit', 'Reply', [
-															'class' => 'btn btn-primary btn-sm'
-														]);
-														?>
+														<?php echo $formwriter->new_form_button('Reply', 'btn btn-primary btn-sm'); ?>
 													</div>
 												</div>
 											</div>
 
-											<?php $formwriter->end_form(); ?>
+											<?php echo $formwriter->end_form(true); ?>
 										</div>
 										<?php endif; ?>
 
@@ -309,7 +275,7 @@ $page_vars = $page_vars->data;
 											array('comment_id'=>'DESC'),
 											NULL,
 											NULL
-										);
+										);	 
 										$numreplies = $replies->count_all();
 
 										if($numreplies):

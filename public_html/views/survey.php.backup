@@ -1,5 +1,5 @@
 <?php
-
+	
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('survey_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -15,13 +15,8 @@
 	echo PublicPage::BeginPage($survey->get('svy_name'));
 	echo PublicPage::BeginPanel();
 
-	$formwriter = $page->getFormWriter('form1', 'v2');
-	$formwriter->begin_form([
-		'id' => 'form1',
-		'method' => 'POST',
-		'action' => '/survey',
-		'ajax' => true
-	]);
+	$formwriter = $page->getFormWriter();
+	echo $formwriter->begin_form('form1', 'POST', '/survey', true);
 
 	if($invalid_messages){
 		foreach ($invalid_messages as $invalid_message){
@@ -32,7 +27,7 @@
 	$validation_rules = array();
 	foreach ($page_vars['survey_questions'] as $survey_question){
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
-
+		
 		foreach ($page_vars['survey_answers'] as $survey_answer){
 			$answer_fill = NULL;
 			if($survey_answer->get('sva_qst_question_id') == $question->key){
@@ -44,29 +39,22 @@
 					$answer_fill = $survey_answer->get('sva_answer');
 					break;
 				}
-
+				
 			}
 		}
-
-		$formwriter->hiddeninput('survey_id', ['value' => LibraryFunctions::encode($survey->key)]);
+		
+		echo $formwriter->hiddeninput('survey_id', LibraryFunctions::encode($survey->key));
 		$validation_rules = $question->output_js_validation($validation_rules);
 
 		echo $question->output_question($formwriter,$answer_fill);
 	}
 
-	// Note: Questions may still use old validation API via output_js_validation()
-	// This is handled by the Question class and doesn't need conversion here
-	if(!empty($validation_rules)){
-		echo $formwriter->set_validate($validation_rules);
-	}
-
-	$formwriter->submitbutton('submit', 'Submit', [
-		'class' => 'btn btn-primary'
-	]);
-
-	$formwriter->end_form();
-
+	echo $formwriter->set_validate($validation_rules);
+	echo $formwriter->new_form_button('Submit');	
+	echo $formwriter->end_form();
+  
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>
+
