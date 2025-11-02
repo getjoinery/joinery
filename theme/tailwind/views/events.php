@@ -22,18 +22,23 @@
 	?>
 
 	<script language="javascript">
-	 $(document).ready(function() {
-		$('#tab_select').change(function() {
-			<?php
-			foreach($page_vars['tab_menus'] as $id => $name){
-				?>
-				if($('#tab_select').val() == "<?php echo htmlspecialchars($name); ?>"){
-					$(location).attr("href","/events?type=<?php echo htmlspecialchars($id); ?>");
-				}
+	document.addEventListener('DOMContentLoaded', function() {
+		const tabSelect = document.getElementById('tab_select');
+
+		if (tabSelect) {
+			tabSelect.addEventListener('change', function() {
+				const selectedValue = this.value;
 				<?php
-			}
-			?>
-		});
+				foreach($page_vars['tab_menus'] as $id => $name){
+					?>
+					if(selectedValue == "<?php echo htmlspecialchars($name); ?>"){
+						window.location.href = "/events?type=<?php echo htmlspecialchars($id); ?>";
+					}
+					<?php
+				}
+				?>
+			});
+		}
 	});
 	</script>
 <div>

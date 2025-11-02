@@ -95,6 +95,12 @@ class MethodExistenceTest {
             "\$formwriter->submitbutton('submit'" => "Never use submitbutton('submit' - shadows form.submit() method. Use submitbutton('submit_button' or similar instead",
             "\$formwriter->textarea(" => "FormWriter V2 uses textbox() not textarea() - change ->textarea( to ->textbox(",
             "->textarea(" => "FormWriter V2 uses textbox() not textarea() - change ->textarea( to ->textbox(",
+            "\$formwriter->begin(" => "FormWriter V2 uses begin_form() not begin() - change ->begin() to ->begin_form()",
+            "->begin(" => "FormWriter V2 uses begin_form() not begin() - change ->begin() to ->begin_form()",
+            "\$formwriter->submit(" => "FormWriter V2 uses submitbutton() not submit() - change ->submit('Label') to ->submitbutton('name', 'Label')",
+            "->submit(" => "FormWriter V2 uses submitbutton() not submit() - change ->submit('Label') to ->submitbutton('name', 'Label')",
+            "'class' => 'ctrlHolder'" => "ctrlHolder is a FormWriter V1 class - remove it. FormWriter V2 applies Bootstrap classes automatically",
+            "'ctrlHolder'" => "ctrlHolder is a FormWriter V1 class - remove it. FormWriter V2 applies Bootstrap classes automatically",
         ],
     ];
 

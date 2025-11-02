@@ -189,14 +189,34 @@ $page_vars = $page_vars->data;
 						</div>
 						<div class="card-body p-0">
 							<script>
-							$(document).ready(function(){
-								$('.commentbutton').click(function(){
-									var cid = $(this).attr('id');
-									$('#' + cid + 'container').toggle(500);
+							document.addEventListener('DOMContentLoaded', function() {
+								const commentButtons = document.querySelectorAll('.commentbutton');
+
+								commentButtons.forEach(btn => {
+									btn.addEventListener('click', function() {
+										const cid = this.id;
+										const container = document.getElementById(cid + 'container');
+
+										if (container) {
+											container.classList.toggle('d-none');
+										}
+									});
 								});
 							});
 							</script>
-							
+
+							<style>
+							.comment-container {
+								transition: opacity 0.5s ease-in-out;
+								opacity: 1;
+							}
+
+							.comment-container.d-none {
+								opacity: 0;
+								display: none !important;
+							}
+							</style>
+
 							<?php foreach($page_vars['comments'] as $comment): ?>
 							<div class="border-bottom p-4">
 								<div class="d-flex align-items-start">

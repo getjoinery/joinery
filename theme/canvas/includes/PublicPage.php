@@ -206,10 +206,12 @@ class PublicPage extends PublicPageFalcon {
     <!-- JavaScripts -->
     <!-- jQuery and plugins.min.js moved to header -->
     <script src="/theme/canvas/assets/js/functions.bundle.js"></script>
-    
+
 </body>
 </html>
         <?php
+        // Call parent to handle message clearing and other base functionality
+        parent::public_footer($options);
     }
 }
 ?>

@@ -294,32 +294,31 @@
 </div>
 
 	<script>
-	$(document).ready(function() {
+	document.addEventListener('DOMContentLoaded', function() {
 		// Disable all submit buttons after first click to prevent duplicate submissions
-		$('form').on('submit', function() {
-			var $form = $(this);
-			var $submitButtons = $form.find('button[type="submit"], input[type="submit"]');
-			
-			// Disable buttons and show loading state
-			$submitButtons.prop('disabled', true);
-			$submitButtons.each(function() {
-				var $btn = $(this);
-				$btn.data('original-text', $btn.text());
-				$btn.text('Processing...');
-			});
-			
-			// Re-enable after 10 seconds as failsafe (in case of network issues)
-			setTimeout(function() {
-				$submitButtons.prop('disabled', false);
-				$submitButtons.each(function() {
-					var $btn = $(this);
-					if ($btn.data('original-text')) {
-						$btn.text($btn.data('original-text'));
-					}
+		const forms = document.querySelectorAll('form');
+
+		forms.forEach(form => {
+			form.addEventListener('submit', function() {
+				const submitButtons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+
+				// Disable buttons and show loading state
+				submitButtons.forEach(btn => {
+					btn.disabled = true;
+					btn.dataset.originalText = btn.textContent;
+					btn.textContent = 'Processing...';
 				});
-			}, 10000);
-			
-			return true; // Allow form submission to proceed
+
+				// Re-enable after 10 seconds as failsafe (in case of network issues)
+				setTimeout(function() {
+					submitButtons.forEach(btn => {
+						btn.disabled = false;
+						if (btn.dataset.originalText) {
+							btn.textContent = btn.dataset.originalText;
+						}
+					});
+				}, 10000);
+			});
 		});
 	});
 	</script>
