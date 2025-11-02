@@ -15,7 +15,7 @@ $hoptions = array(
 );
 $page->public_header($hoptions, NULL);
 
-$formwriter = $page->getFormWriter('tier_form');
+$formwriter = $page->getFormWriter('tier_form', 'v2');
 
 echo PublicPage::BeginPage('Change Tier', $hoptions);
 
@@ -60,12 +60,12 @@ if (isset($page_vars['success_message'])): ?>
 
     <?php if ($page_vars['show_reactivate_button']): ?>
         <div class="mt-6 text-center">
-            <?php echo $formwriter->form_start('reactivate_form', '', 'POST'); ?>
+            <?php $formwriter->begin_form(); ?>
             <input type="hidden" name="action" value="reactivate">
             <button type="submit" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
                 Reactivate Subscription
             </button>
-            <?php echo $formwriter->form_end(); ?>
+            <?php $formwriter->end_form(); ?>
         </div>
     <?php endif; ?>
 
@@ -132,16 +132,16 @@ if (isset($page_vars['success_message'])): ?>
                         <?php elseif ($tier_data['button_enabled'] && !empty($tier_data['products'])): ?>
                             <?php if (count($tier_data['products']) == 1): ?>
                                 <?php // Single product - direct action ?>
-                                <?php echo $formwriter->form_start('tier_action_' . $tier->key, '', 'POST'); ?>
+                                <?php $formwriter->begin_form(); ?>
                                 <input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
                                 <input type="hidden" name="product_id" value="<?php echo $tier_data['products'][0]['id']; ?>">
                                 <button type="submit" class="block w-full py-2 px-4 border border-transparent rounded-md text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
                                     <?php echo htmlspecialchars($tier_data['button_text']); ?>
                                 </button>
-                                <?php echo $formwriter->form_end(); ?>
+                                <?php $formwriter->end_form(); ?>
                             <?php else: ?>
                                 <?php // Multiple products - show dropdown ?>
-                                <?php echo $formwriter->form_start('tier_action_' . $tier->key, '', 'POST'); ?>
+                                <?php $formwriter->begin_form(); ?>
                                 <input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
                                 <div class="mb-2">
                                     <select name="product_id" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
@@ -160,7 +160,7 @@ if (isset($page_vars['success_message'])): ?>
                                 <button type="submit" class="block w-full py-2 px-4 border border-transparent rounded-md text-center text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">
                                     <?php echo htmlspecialchars($tier_data['button_text']); ?>
                                 </button>
-                                <?php echo $formwriter->form_end(); ?>
+                                <?php $formwriter->end_form(); ?>
                             <?php endif; ?>
                         <?php else: ?>
                             <button class="block w-full py-2 px-4 border border-gray-300 rounded-md text-sm font-medium text-gray-400 bg-gray-100 cursor-not-allowed" disabled>
@@ -176,13 +176,13 @@ if (isset($page_vars['success_message'])): ?>
 
     <?php if ($page_vars['show_cancel_button']): ?>
         <div class="mt-8 text-center">
-            <?php echo $formwriter->form_start('cancel_form', '', 'POST'); ?>
+            <?php $formwriter->begin_form(); ?>
             <input type="hidden" name="action" value="cancel">
             <button type="submit" class="inline-flex justify-center py-2 px-4 border border-red-300 shadow-sm text-sm font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
                     onclick="return confirm('Are you sure you want to cancel your subscription?');">
                 <?php echo htmlspecialchars($page_vars['cancel_button_text']); ?>
             </button>
-            <?php echo $formwriter->form_end(); ?>
+            <?php $formwriter->end_form(); ?>
         </div>
     <?php endif; ?>
 </div>
