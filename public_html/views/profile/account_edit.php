@@ -27,23 +27,34 @@
 	echo PublicPage::tab_menu($page_vars['tab_menus'],'Edit Account');
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("", "post", "/profile/account_edit");
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'model' => $page_vars['user'],
+		'action' => '/profile/account_edit'
+	]);
+	$formwriter->begin_form();
 
-	echo $formwriter->textinput("First Name", "usr_first_name", NULL, 20, $page_vars['user']->get('usr_first_name'), "",255, "");
-	echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 20, $page_vars['user']->get('usr_last_name'), "" , 255, "");
-	
+	$formwriter->textinput('usr_first_name', 'First Name', [
+		'maxlength' => 255
+	]);
+	$formwriter->textinput('usr_last_name', 'Last Name', [
+		'maxlength' => 255
+	]);
+
 	$nickname_display = $page_vars['settings']->get_setting('nickname_display_as');
 	if($nickname_display){
-		echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, $page_vars['user']->get('usr_nickname'), "" , 255, "");
+		$formwriter->textinput('usr_nickname', $nickname_display, [
+			'maxlength' => 255
+		]);
 	}
 
 	$optionvals = Address::get_timezone_drop_array();
-	echo $formwriter->dropinput("Your Time Zone", "usr_timezone", NULL, $optionvals, $page_vars['user']->get('usr_timezone'), '', FALSE);
+	$formwriter->dropinput('usr_timezone', 'Your Time Zone', [
+		'options' => $optionvals
+	]);
 
-	echo $formwriter->new_form_button('Submit');
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 	echo PublicPage::EndPage();	
 	$page->public_footer($foptions=array('track'=>TRUE));
