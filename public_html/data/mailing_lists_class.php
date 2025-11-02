@@ -118,7 +118,7 @@ function get_subscribed_users($return='object'){
 			$subscriptions->load();
 			return $subscriptions->get(0);
 		}
-		
+
 	}
 
 	function add_registrant($usr_user_id){

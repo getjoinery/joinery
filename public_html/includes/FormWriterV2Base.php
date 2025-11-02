@@ -833,6 +833,18 @@ abstract class FormWriterV2Base {
     }
 
     /**
+     * Create a checkbox list (multiple checkboxes with same name)
+     *
+     * @param string $name Field name (will be submitted as array name[])
+     * @param string $label Field label
+     * @param array $options Field options including 'options', 'checked_values', 'disabled_values', 'readonly_values'
+     */
+    public function checkboxList($name, $label = '', $options = []) {
+        $this->registerField($name, 'checkboxlist', $label, $options);
+        $this->outputCheckboxList($name, $label, $options);
+    }
+
+    /**
      * Create a date input field
      *
      * @param string $name Field name
@@ -1372,6 +1384,7 @@ abstract class FormWriterV2Base {
     abstract protected function outputDropInput($name, $label, $options);
     abstract protected function outputCheckboxInput($name, $label, $options);
     abstract protected function outputRadioInput($name, $label, $options);
+    abstract protected function outputCheckboxList($name, $label, $options);
     abstract protected function outputDateInput($name, $label, $options);
     abstract protected function outputTimeInput($name, $label, $options);
     abstract protected function outputDateTimeInput($name, $label, $options);

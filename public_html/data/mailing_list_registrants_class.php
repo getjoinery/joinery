@@ -57,8 +57,8 @@ public static function CheckIfExists($user_id, $mailing_list_id) {
 		return false;
 	}	
 
-	function prepare() {	
-		
+	function prepare() {
+
 		if(!$this->key){
 			if($this->check_for_duplicate(array('mlr_mlt_mailing_list_id', 'mlr_usr_user_id'))){
 				throw new MailingListRegistrantException('This is a duplicate mailing list registrant:'. $this->get('mlr_usr_user_id'));

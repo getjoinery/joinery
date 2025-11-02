@@ -35,21 +35,28 @@
 	}
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1');
-	echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
-	
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/profile/contact_preferences'
+	]);
+	$formwriter->begin_form();
+
 	if(empty($page_vars['optionvals'])){
 		echo '<p>You are currently not subscribed to any newsletters.</p>';
 	}
 	else{
 
-		echo $formwriter->checkboxList("Check the box to subscribe:", 'new_list_subscribes', "ctrlHolder", $page_vars['optionvals'], $page_vars['checkedvals'], $page_vars['disabledvals'], $page_vars['readonlyvals']);	
+		$formwriter->checkboxList('new_list_subscribes', 'Check the box to subscribe:', [
+			'options' => $page_vars['optionvals'],
+			'checked' => $page_vars['checkedvals'],
+			'disabled' => $page_vars['disabledvals'],
+			'readonly' => $page_vars['readonlyvals']
+		]);
 
-		echo $formwriter->hiddeninput('zone', 'optional');
+		$formwriter->hiddeninput('zone', '', ['value' => 'optional']);
 		echo '<a href="/profile/account_edit">Cancel</a> ';
-		echo $formwriter->new_form_button('Submit');
+		$formwriter->submitbutton('btn_submit', 'Submit');
 	}
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array());

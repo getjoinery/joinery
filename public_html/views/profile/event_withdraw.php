@@ -17,20 +17,21 @@
 	}
 	else if(!$event->get('evt_end_time') || $event->get('evt_end_time') > date('Y-m-d H:i:s')){
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
-		echo $formwriter->begin_form("form", "post", "/profile/event_withdraw");
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/profile/event_withdraw'
+	]);
+	$formwriter->begin_form();
 
-		echo '<h4>Confirm withdrawal from '.$event->get('evt_name').'</h4>';
-			echo '<p>Withdrawing from the course/event will remove you from the attendee list and the mailing list. </p><p><strong>It will NOT refund any payments.  To refund a payment, contact us at <a href="mailto:'.$settings->get_setting('defaultemail').'">'.$settings->get_setting('defaultemail').'</a></p>';
+	echo '<h4>Confirm withdrawal from '.$event->get('evt_name').'</h4>';
+	echo '<p>Withdrawing from the course/event will remove you from the attendee list and the mailing list. </p><p><strong>It will NOT refund any payments.  To refund a payment, contact us at <a href="mailto:'.$settings->get_setting('defaultemail').'">'.$settings->get_setting('defaultemail').'</a></p>';
 
-		echo $formwriter->hiddeninput("confirm", 1);
-		echo $formwriter->hiddeninput("evr_event_registrant_id", $evr_event_registrant_id);
+	$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+	$formwriter->hiddeninput('evr_event_registrant_id', '', ['value' => $evr_event_registrant_id]);
 
-		echo $formwriter->new_form_button('Confirm');
-		echo ' <a href="/profile">Cancel, I changed my mind</a>';
+	$formwriter->submitbutton('btn_submit', 'Confirm');
+	echo ' <a href="/profile">Cancel, I changed my mind</a>';
 
-			echo '</div>';
-		echo $formwriter->end_form();
+	$formwriter->end_form();
 		
 	}
 	else{

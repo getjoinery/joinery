@@ -21,37 +21,29 @@
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Change Password');
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1');
-				
-	$validation_rules = array();
-	if ($page_vars['has_old_password']) {
-		$validation_rules['usr_old_password']['required']['value'] = 'true';
-	}
-	$validation_rules['usr_password']['required']['value'] = 'true';
-	$validation_rules['usr_password']['minlength']['value'] = 5;
-	$validation_rules['usr_password_again']['required']['value'] = 'true';
-	$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
-	$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
-	$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-	echo $formwriter->set_validate($validation_rules);					
-				
-	echo $formwriter->begin_form("", "post", "/profile/password_edit");
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/profile/password_edit'
+	]);
+
+	$formwriter->begin_form();
 
 	foreach($page_vars['display_messages'] AS $display_message) {
-		if($display_message->identifier == 'addressbox') {	
+		if($display_message->identifier == 'addressbox') {
 			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}
 
 	if ($page_vars['has_old_password']) {
-		echo $formwriter->passwordinput("Old Password", "usr_old_password", NULL, 20, NULL , '',255, "");
+		$formwriter->passwordinput('usr_old_password', 'Old Password');
 	}
-	echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
-	echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
+	$formwriter->passwordinput('usr_password', 'New Password', [
+		'description' => 'Must be at least 5 characters.'
+	]);
+	$formwriter->passwordinput('usr_password_again', 'Retype New Password');
 	echo '<a href="/profile/account_edit">Cancel</a> ';
-	echo $formwriter->new_form_button('Submit');
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
-	echo $formwriter->end_form();		
+	$formwriter->end_form();		
 
 	echo PublicPage::EndPage();
 	

@@ -216,6 +216,47 @@ $formwriter->radioinput('subscription', 'Subscription Plan', [
 ]);
 ```
 
+### Checkbox List
+
+Multiple checkboxes that submit as an array (use `name[]` in form submission):
+
+```php
+// V2 Example: Newsletter subscriptions
+$formwriter->checkboxList('newsletter_subscriptions', 'Select Newsletters to Subscribe:', [
+    'options' => [
+        1 => 'Weekly Updates',
+        2 => 'Monthly Digest',
+        3 => 'Special Announcements'
+    ],
+    'checked' => [1, 3],  // Pre-select these options
+    'disabled' => [],     // Disable specific options (user can't interact)
+    'readonly' => [2]     // Read-only (can't change, but submits current state as hidden input)
+]);
+```
+
+**Option Keys:**
+- `options` (required) - Associative array of value => label pairs
+- `checked` - Array of values that should be checked initially
+- `disabled` - Array of values to disable (user cannot interact)
+- `readonly` - Array of values that are read-only (disabled visually, but submitted via hidden input)
+
+**Form Submission:**
+When the form submits, checked values are sent as an array:
+```
+POST data: newsletter_subscriptions[] = [1, 3]
+```
+
+In PHP, access via:
+```php
+$_POST['newsletter_subscriptions']  // Array of checked values
+```
+
+**Use Cases:**
+- Newsletter subscriptions
+- Multiple permissions checkboxes
+- Feature/module selections
+- Tag/category multi-select
+
 ### Date and Time Fields
 
 ```php
