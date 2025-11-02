@@ -229,8 +229,8 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $html .= '<option value="">' . htmlspecialchars($options['empty_option']) . '</option>';
         }
 
-        // Output options
-        foreach ($select_options as $opt_label => $opt_value) {
+        // Output options - Standard convention: [id => label]
+        foreach ($select_options as $opt_value => $opt_label) {
             $html .= '<option value="' . htmlspecialchars($opt_value) . '"';
             if ((string)$value === (string)$opt_value) {
                 $html .= ' selected';
@@ -1249,24 +1249,26 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             echo '<label class="form-label">' . htmlspecialchars($label) . '</label>';
         }
 
+        // Standard convention: $optionvals is [id => label]
+        // $key is the ID (value to submit), $value is the display label
         foreach ($optionvals as $key => $value) {
-            $uniqid = $id . '_' . htmlspecialchars($value);
-            $is_checked = in_array($value, $checked) ? 'checked="checked"' : '';
-            $is_disabled = in_array($value, $disabled) ? 'disabled="disabled"' : '';
+            $uniqid = $id . '_' . htmlspecialchars($key);
+            $is_checked = in_array($key, $checked) ? 'checked="checked"' : '';
+            $is_disabled = in_array($key, $disabled) ? 'disabled="disabled"' : '';
 
             // Readonly means it cannot be changed but is submitted
-            if (in_array($value, $readonly)) {
-                if (in_array($value, $checked)) {
-                    echo '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" />';
+            if (in_array($key, $readonly)) {
+                if (in_array($key, $checked)) {
+                    echo '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" />';
                 }
                 echo '<div class="form-check">';
-                echo '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' disabled="disabled" />';
-                echo '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($key) . '</label>';
+                echo '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
+                echo '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
                 echo '</div>';
             } else {
                 echo '<div class="form-check">';
-                echo '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
-                echo '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($key) . '</label>';
+                echo '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
+                echo '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
                 echo '</div>';
             }
         }

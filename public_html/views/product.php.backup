@@ -23,11 +23,11 @@ $page_vars = $page_vars->data;
 	));
 
 	if(!$product->get('pro_is_active')){
-		PublicPage::OutputGenericPublicPage('Product not available', 'Product not available', '<p>Sorry, this item is currently not available for purchase/registration.</p>');
+		PublicPage::OutputGenericPublicPage('Product not available', 'Product not available', '<p>Sorry, this item is currently not available for purchase/registration.</p>');	
 	}
-
+	
 	echo PublicPage::BeginPage('Product Details');
-
+	
 	if (!$page_vars['display_empty_form']) {
 		echo '<div class="container mt-5">';
 		echo '<div class="row justify-content-center">';
@@ -38,16 +38,12 @@ $page_vars = $page_vars->data;
 		echo '</div>';
 		echo '<div class="card-body p-4">';
 		echo '<p class="mb-4">Is everything correct?</p>';
+		
+		$formwriter = $page->getFormWriter('product_form');
+		echo $formwriter->begin_form("", "POST", "/product"); 
 
-		$formwriter = $page->getFormWriter('product_form', 'v2');
-		$formwriter->begin_form([
-			'id' => '',
-			'method' => 'POST',
-			'action' => '/product'
-		]);
-
-		$formwriter->hiddeninput('product_id', ['value' => $product_id]);
-		$formwriter->hiddeninput('product_key', ['value' => $form_key]);
+		echo $formwriter->hiddeninput('product_id', $product_id);
+		echo $formwriter->hiddeninput('product_key', $form_key);
 
 		foreach($page_vars['display_data'] as $key => $value) {
 			echo '<div class="mb-3">';
@@ -56,12 +52,10 @@ $page_vars = $page_vars->data;
 		}
 
 		echo '<div class="d-grid">';
-		$formwriter->submitbutton('submit', 'Confirm Order', [
-			'class' => 'btn btn-primary btn-lg'
-		]);
+		echo $formwriter->new_form_button('Confirm Order', 'btn btn-primary btn-lg');
 		echo '</div>';
-		$formwriter->end_form();
-
+		echo $formwriter->end_form();
+		
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
@@ -70,26 +64,26 @@ $page_vars = $page_vars->data;
 		echo PublicPage::EndPage();
 		$page->public_footer($foptions=array('track'=>TRUE));
 		exit;
-	}
+	} 
 ?>
 
 <!-- Canvas Single Product Section -->
 <section id="content">
 	<div class="content-wrap">
 		<div class="container">
-
+			
 			<!-- Single Product -->
 			<div class="single-product">
 				<div class="product">
 					<div class="row gx-5">
-
+						
 						<!-- Left Column: Product Image and Description -->
 						<div class="col-lg-6">
 							<div class="product-image mb-4">
 								<!-- Product image placeholder -->
 								<div class="text-center position-relative">
 									<img src="https://via.placeholder.com/500x500/f8f9fa/6c757d?text=Product+Image" class="img-fluid rounded-4 shadow-sm" alt="<?php echo htmlspecialchars($product->get('pro_name')); ?>" style="max-height: 500px;">
-
+									
 									<!-- Sale Badge -->
 									<?php if($product->get('pro_on_sale')): ?>
 										<div class="position-absolute top-0 start-0 m-3">
@@ -98,7 +92,7 @@ $page_vars = $page_vars->data;
 									<?php endif; ?>
 								</div>
 							</div>
-
+							
 							<!-- Product Description -->
 							<?php if($product->get('pro_description')): ?>
 							<div class="product-description">
@@ -113,7 +107,7 @@ $page_vars = $page_vars->data;
 						<!-- Right Column: Product Details and Form -->
 						<div class="col-lg-6">
 							<div class="product-info">
-
+								
 								<!-- Product Title & Price -->
 								<div class="mb-4">
 									<h1 class="product-title h2 mb-3"><?php echo htmlspecialchars($product->get('pro_name')); ?></h1>
@@ -124,16 +118,16 @@ $page_vars = $page_vars->data;
 											<strong>Sold Out</strong>
 										</div>
 										<?php
-									elseif($product->get_readable_price()):
+									elseif($product->get_readable_price()): 
 										?>
 										<div class="product-price h3 text-primary mb-0">
 											<?php echo $product->get_readable_price(); ?>
 										</div>
 										<?php
-									endif;
+									endif; 
 									?>
 								</div>
-
+								
 								<!-- Product Form -->
 								<div class="product-form mb-4">
 									<h5 class="mb-3">Product Details</h5>
@@ -149,30 +143,23 @@ $page_vars = $page_vars->data;
 											<?php
 										elseif(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)):
 											// Product can be added to cart
-											$formwriter = $page->getFormWriter('product_form', 'v2');
-											$formwriter->begin_form([
-												'id' => 'product-quantity',
-												'method' => 'POST',
-												'action' => $product->get_url(),
-												'ajax' => true
-											]);
-											$formwriter->hiddeninput('product_id', ['value' => $product_id]);
-
+											$formwriter = $page->getFormWriter('product_form');
+											echo $formwriter->begin_form("product-quantity", "POST", $product->get_url(), true); 
+											echo $formwriter->hiddeninput('product_id', $product_id);
+											
 											if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 												echo '<div class="d-grid gap-2 mt-3">';
-												$formwriter->submitbutton('submit', 'Add to Cart', [
-													'class' => 'btn btn-primary btn-lg'
-												]);
+												echo $formwriter->new_form_button('Add to Cart', 'btn btn-primary btn-lg', 'full');
 												echo '</div>';
 											} else {
 												echo '<div class="alert alert-info mb-0">';
 												echo '<i class="bi-info-circle me-2"></i>Product configuration options will appear here.';
 												echo '</div>';
 											}
-
-											$formwriter->end_form();
+											
+											echo $formwriter->end_form(true);
 											$product->output_javascript($formwriter, array());
-
+											
 										elseif($product_version && !$cart->can_add_to_cart($product_version)):
 											// Product cannot be added due to cart restrictions
 											?>

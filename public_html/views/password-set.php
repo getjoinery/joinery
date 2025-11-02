@@ -1,5 +1,5 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password-set_logic.php', 'logic'));
@@ -9,7 +9,7 @@
 	$page = new PublicPage();
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
-		'title'=>'Password Set', 
+		'title'=>'Password Set',
 	);
 	$page->public_header($hoptions,NULL);
 
@@ -20,30 +20,38 @@
 	}
 	else{
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
+		$formwriter = $page->getFormWriter('form1', 'v2');
 
-		$validation_rules = array();
-		$validation_rules['usr_password']['required']['value'] = 'true';
-		$validation_rules['usr_password']['minlength']['value'] = 5;
-		$validation_rules['usr_password_again']['required']['value'] = 'true';
-		$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
-		$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
-		$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-		echo $formwriter->set_validate($validation_rules);	
+		$formwriter->begin_form([
+			'id' => 'form1',
+			'method' => 'POST',
+			'action' => '/password-set',
+			'ajax' => true
+		]);
 
-		echo $formwriter->begin_form("form1", "post", "/password-set", true);
+		$formwriter->passwordinput('usr_password', 'New Password', [
+			'maxlength' => 255,
+			'required' => true,
+			'minlength' => 5,
+			'help_text' => 'Must be at least 5 characters.'
+		]);
 
-		echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
-		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
+		$formwriter->passwordinput('usr_password_again', 'Retype New Password', [
+			'maxlength' => 255,
+			'required' => true,
+			'data-msg-required' => 'You must enter your password twice to confirm',
+			'data-rule-equalTo' => '#usr_password',
+			'data-msg-equalTo' => 'Your password did not match the one you entered above'
+		]);
 
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons(); 
+		$formwriter->submitbutton('submit', 'Submit', [
+			'class' => 'btn btn-primary'
+		]);
 
-		echo $formwriter->end_form();
+		$formwriter->end_form();
 	}
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE, 'formvalidate'=>TRUE));
-	
+
 ?>

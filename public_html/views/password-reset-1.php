@@ -91,27 +91,40 @@ $page_vars = $page_vars->data;
 							<p class="text-muted mb-4">Enter your email address and we'll send you a link to reset your password.</p>
 
 							<?php
-							$formwriter = $page->getFormWriter('form1');
-							$validation_rules = array();
-							$validation_rules['usr_email']['required']['value'] = 'true';
-							$validation_rules['usr_email']['email']['value'] = 'true';
-							echo $formwriter->set_validate($validation_rules);
+							$formwriter = $page->getFormWriter('form1', 'v2');
 
-							echo $formwriter->begin_form("", "post", "/password-reset-1", TRUE, 'class="mb-0"');
+							$formwriter->begin_form([
+								'id' => '',
+								'method' => 'POST',
+								'action' => '/password-reset-1',
+								'ajax' => true,
+								'attributes' => 'class="mb-0"'
+							]);
 							?>
 
 							<div class="row">
 								<div class="col-12 form-group">
 									<label for="usr_email">Email Address:</label>
-									<?php echo $formwriter->textinput("", "usr_email", 'form-control', 50, '', '', 64, ""); ?>
+									<?php
+									$formwriter->textinput('usr_email', '', [
+										'class' => 'form-control',
+										'maxlength' => 64,
+										'required' => true,
+										'type' => 'email'
+									]);
+									?>
 								</div>
 
 								<div class="col-12 form-group">
-									<?php echo $formwriter->new_form_button('Send Reset Link', 'button button-3d button-black m-0'); ?>
+									<?php
+									$formwriter->submitbutton('submit', 'Send Reset Link', [
+										'class' => 'button button-3d button-black m-0'
+									]);
+									?>
 								</div>
 							</div>
 
-							<?php echo $formwriter->end_form(); ?>
+							<?php $formwriter->end_form(); ?>
 
 							<div class="w-100"></div>
 

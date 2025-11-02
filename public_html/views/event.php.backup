@@ -143,7 +143,7 @@ $page_vars = $page_vars->data;
 							}
 
 							foreach($page_vars['register_urls'] as $register_url){
-								$formwriter = $page->getFormWriter('form1', 'v2');
+								$formwriter = $page->getFormWriter('form1');
 								echo '<div class="d-grid mb-2">';
 								echo '<a href="'.$register_url['link'].'" class="button button-3d button-rounded button-dirtygreen">'.$register_url['label'].'</a>';
 								echo '</div>';
