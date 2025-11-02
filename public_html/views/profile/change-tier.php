@@ -1,4 +1,5 @@
 <?php
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('change_tier_logic.php', 'logic'));
 
