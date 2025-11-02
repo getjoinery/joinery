@@ -3,7 +3,7 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic'));
-	
+
 	$page_vars = login_logic($_GET, $_POST);
 	// Handle LogicResult return format
 if ($page_vars->redirect) {
@@ -46,7 +46,7 @@ $page_vars = $page_vars->data;
 
 						<div class="card mb-0">
 							<div class="card-body" style="padding: 40px;">
-								
+
 								<h3>Login to your Account</h3>
 
 								<?php
@@ -56,35 +56,51 @@ $page_vars = $page_vars->data;
 									}
 								}
 
-								$formwriter = $page->getFormWriter('form1');
+								$formwriter = $page->getFormWriter('form1', 'v2');
 
-								$validation_rules = array();
-								$validation_rules['email']['required']['value'] = 'true';
-								$validation_rules['password']['required']['value'] = 'true';
-								echo $formwriter->set_validate($validation_rules);
-								echo $formwriter->begin_form('form1', 'POST', '/login', TRUE, 'class="mb-0"');
+								$formwriter->begin_form([
+									'id' => 'form1',
+									'method' => 'POST',
+									'action' => '/login',
+									'ajax' => true,
+									'attributes' => 'class="mb-0"'
+								]);
 								?>
-								
+
 								<div class="row">
 									<div class="col-12 form-group">
-										<label for="email">Username:</label>
-										<input type="email" id="email" name="email" value="" class="form-control">
+										<?php
+										$formwriter->textinput('email', 'Username:', [
+											'class' => 'form-control',
+											'type' => 'email',
+											'required' => true
+										]);
+										?>
 									</div>
 
 									<div class="col-12 form-group">
-										<label for="password">Password:</label>
-										<input type="password" id="password" name="password" value="" class="form-control">
+										<?php
+										$formwriter->passwordinput('password', 'Password:', [
+											'class' => 'form-control',
+											'required' => true
+										]);
+										?>
 									</div>
 
 									<div class="col-12 form-group">
 										<div class="d-flex justify-content-between">
-											<button class="button button-3d button-black m-0" id="login-form-submit" name="login-form-submit" value="login">Login</button>
+											<?php
+											$formwriter->submitbutton('login-form-submit', 'Login', [
+												'class' => 'button button-3d button-black m-0',
+												'value' => 'login'
+											]);
+											?>
 											<a href="<?php echo $forgot_link; ?>">Forgot Password?</a>
 										</div>
 									</div>
 								</div>
-								
-								<?php echo $formwriter->end_form(); ?>
+
+								<?php $formwriter->end_form(); ?>
 
 								<div class="w-100"></div>
 

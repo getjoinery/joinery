@@ -1,5 +1,5 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('lists_logic.php', 'logic'));
@@ -9,7 +9,7 @@
 	$session = $page_vars['session'];
 	$mailing_lists = $page_vars['mailing_lists'];
 	$numlists = $page_vars['numlists'];
-	
+
 	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
@@ -26,69 +26,95 @@
 			echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
 		}
 	}
-	
+
 	if($numlists == 0){
 		echo '<p>There are currently no mailing lists to register for.</p>';
 	}
 	else{
 
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
-		
-		$validation_rules = array();
-		$validation_rules['usr_first_name']['required']['value'] = 'true';
-		$validation_rules['usr_first_name']['minlength']['value'] = 1;
-		$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
-		$validation_rules['usr_first_name']['maxlength']['value'] = 32;
-		$validation_rules['usr_last_name']['required']['value'] = 'true';
-		$validation_rules['usr_last_name']['maxlength']['value'] = 32;
-		$validation_rules['privacy']['required']['value'] = 'true';
-		$validation_rules['usr_email']['required']['value'] = 'true';
-		$validation_rules['usr_email']['email']['value'] = 'true';
-		$validation_rules['usr_email']['maxlength']['value'] = 64;
-		$validation_rules = $formwriter->antispam_question_validate($validation_rules);
-		echo $formwriter->set_validate($validation_rules);		
-		
-		echo $formwriter->begin_form("", "post", "/lists", true);
+		$formwriter = $page->getFormWriter('form1', 'v2');
+
+		$formwriter->begin_form([
+			'id' => '',
+			'method' => 'POST',
+			'action' => '/lists',
+			'ajax' => true
+		]);
 
 		if(!$session->get_user_id()){
-			echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");
-			echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 30, '', "", 32, "");
+			$formwriter->textinput('usr_first_name', 'First Name', [
+				'maxlength' => 32,
+				'required' => true,
+				'minlength' => 1,
+				'data-msg-required' => 'Please enter your first name.'
+			]);
+
+			$formwriter->textinput('usr_last_name', 'Last Name', [
+				'maxlength' => 32,
+				'required' => true
+			]);
+
 			$settings = Globalvars::get_instance();
 			$nickname_display = $settings->get_setting('nickname_display_as');
 			if($nickname_display){
-				echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, NULL, "" , 32, "");
+				$formwriter->textinput('usr_nickname', $nickname_display, [
+					'maxlength' => 32
+				]);
 			}
-			echo $formwriter->textinput("Email", "usr_email", NULL, 30, strip_tags($_GET['email']), "", 64, "");
-			
+
+			$formwriter->textinput('usr_email', 'Email', [
+				'maxlength' => 64,
+				'value' => strip_tags($_GET['email']),
+				'required' => true,
+				'type' => 'email'
+			]);
+
 			$optionvals = Address::get_timezone_drop_array();
 			$default_timezone = $settings->get_setting('default_timezone');
-			echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);	
-			
-			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "", "left", 1, NULL, "");
+			$formwriter->dropinput('usr_timezone', 'Your timezone', [
+				'options' => $optionvals,
+				'value' => $default_timezone
+			]);
+
+			$formwriter->checkboxinput('privacy', 'I consent to the privacy policy.', [
+				'required' => true,
+				'checked' => true
+			]);
 		}
 
-		$optionvals = $mailing_lists->get_dropdown_array();	
+		$optionvals = $mailing_lists->get_dropdown_array();
+		// get_dropdown_array returns [label => id], but FormWriter V2 expects [id => label]
+		// Flip the array to convert to standard format
+		$optionvals = array_flip($optionvals);
 		$checkedvals = $user_subscribed_list;
 		$readonlyvals = array(); //DEFAULT
 		$disabledvals = array();
 
-		echo $formwriter->checkboxList("Check the box to subscribe:", 'new_list_subscribes', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);	
-		echo $formwriter->hiddeninput('form_submitted', 1);
-		
+		$formwriter->checkboxList('new_list_subscribes', 'Check the box to subscribe:', [
+			'options' => $optionvals,
+			'checked' => $checkedvals,
+			'disabled' => $disabledvals,
+			'readonly' => $readonlyvals
+		]);
+
+		$formwriter->hiddeninput('form_submitted', ['value' => 1]);
+
 		if(!$session->get_user_id()){
-			echo $formwriter->antispam_question_input();
-			echo $formwriter->honeypot_hidden_input();
-			echo $formwriter->captcha_hidden_input();
+			$formwriter->antispam_question_input();
+			$formwriter->honeypot_hidden_input();
+			$formwriter->captcha_hidden_input();
 		}
 
 		echo '<div>';
-		echo $formwriter->new_form_button('Submit');
+		$formwriter->submitbutton('submit', 'Submit', [
+			'class' => 'btn btn-primary'
+		]);
 		echo '</div>';
-		echo $formwriter->end_form();
-		
+		$formwriter->end_form();
+
 	}
-	
+
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();
 	$page->public_footer(array('track'=>TRUE));

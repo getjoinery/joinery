@@ -87,46 +87,56 @@ $page_vars = $page_vars->data;
 									<h3>Set New Password</h3>
 
 									<?php
-									$formwriter = $page->getFormWriter('form1');
-									$validation_rules = array();
-									$validation_rules['usr_password']['required']['value'] = 'true';
-									$validation_rules['usr_password']['minlength']['value'] = 5;
-									$validation_rules['usr_password_again']['required']['value'] = 'true';
-									$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
-									$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
-									$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-									echo $formwriter->set_validate($validation_rules);
-									echo $formwriter->begin_form("", "post", "/password-reset-2", true, 'class="mb-0"');
-									echo $formwriter->hiddeninput('act_code',$page_vars['act_code']);
+									$formwriter = $page->getFormWriter('form1', 'v2');
+
+									$formwriter->begin_form([
+										'id' => '',
+										'method' => 'POST',
+										'action' => '/password-reset-2',
+										'ajax' => true,
+										'attributes' => 'class="mb-0"'
+									]);
+
+									$formwriter->hiddeninput('act_code', ['value' => $page_vars['act_code']]);
 									?>
 
 									<div class="row">
 										<div class="col-12 form-group">
 											<label for="usr_password">New Password:</label>
-											<input type="password"
-												   name="usr_password"
-												   id="usr_password"
-												   class="form-control"
-												   autocomplete="new-password" />
+											<?php
+											$formwriter->passwordinput('usr_password', '', [
+												'class' => 'form-control',
+												'required' => true,
+												'minlength' => 5,
+												'autocomplete' => 'new-password'
+											]);
+											?>
 										</div>
 
 										<div class="col-12 form-group">
 											<label for="usr_password_again">Confirm Password:</label>
-											<input type="password"
-												   name="usr_password_again"
-												   id="usr_password_again"
-												   class="form-control"
-												   autocomplete="new-password" />
+											<?php
+											$formwriter->passwordinput('usr_password_again', '', [
+												'class' => 'form-control',
+												'required' => true,
+												'data-msg-required' => 'You must enter your password twice to confirm',
+												'data-rule-equalTo' => '#usr_password',
+												'data-msg-equalTo' => 'Your password did not match the one you entered above',
+												'autocomplete' => 'new-password'
+											]);
+											?>
 										</div>
 
 										<div class="col-12 form-group">
-											<button type="submit" name="submit" class="button button-3d button-black m-0">
-												Set Password
-											</button>
+											<?php
+											$formwriter->submitbutton('submit', 'Set Password', [
+												'class' => 'button button-3d button-black m-0'
+											]);
+											?>
 										</div>
 									</div>
 
-									<?php echo $formwriter->end_form(); ?>
+									<?php $formwriter->end_form(); ?>
 								</div>
 							</div>
 
