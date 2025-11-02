@@ -279,6 +279,83 @@ private static function UcAddress($string) {
 		}
 		return $str;
 	}
+
+	/**
+	 * Render address form fields using provided FormWriter instance
+	 *
+	 * Renders all address fields (country, address lines, city, state, zip) through FormWriter
+	 * without direct HTML output. Designed to replace the old PlainForm() method.
+	 *
+	 * @param FormWriterBase $formwriter The FormWriter instance to use for rendering
+	 * @param array $options Configuration options:
+	 *   - required: Whether address fields are required (default: true)
+	 *   - include_country: Include country dropdown (default: true)
+	 *   - include_user_id: Include hidden user_id field (default: false)
+	 *   - user_id: User ID value for hidden field (default: null)
+	 *   - model: Address object for prepopulation (default: null)
+	 * @return void
+	 */
+	public static function renderFormFields($formwriter, $options = []) {
+		$defaults = [
+			'required' => true,
+			'include_country' => true,
+			'include_user_id' => false,
+			'user_id' => null,
+			'model' => null
+		];
+		$opts = array_merge($defaults, $options);
+
+		// Hidden user_id field if requested
+		if ($opts['include_user_id'] && $opts['user_id']) {
+			$formwriter->hiddeninput('usr_user_id', '', [
+				'value' => $opts['user_id']
+			]);
+		}
+
+		// Country dropdown
+		if ($opts['include_country']) {
+			$country_codes = self::get_country_drop_array2();
+			$formwriter->dropinput('usa_cco_country_code_id', 'Country', [
+				'options' => $country_codes,
+				'value' => $opts['model'] ? $opts['model']->get('usa_cco_country_code_id') : null
+			]);
+		}
+
+		// Street Address
+		$formwriter->textinput('usa_address1', 'Street Address', [
+			'maxlength' => 255,
+			'validation' => $opts['required'] ? ['required' => true] : [],
+			'value' => $opts['model'] ? $opts['model']->get('usa_address1') : null
+		]);
+
+		// Apt/Suite (optional)
+		$formwriter->textinput('usa_address2', 'Apt, Suite, etc. (optional)', [
+			'maxlength' => 255,
+			'value' => $opts['model'] ? $opts['model']->get('usa_address2') : null
+		]);
+
+		// City
+		$formwriter->textinput('usa_city', 'City', [
+			'maxlength' => 255,
+			'validation' => $opts['required'] ? ['required' => true] : [],
+			'value' => $opts['model'] ? $opts['model']->get('usa_city') : null
+		]);
+
+		// State/Province
+		$formwriter->textinput('usa_state', 'State/Province', [
+			'maxlength' => 255,
+			'validation' => $opts['required'] ? ['required' => true] : [],
+			'value' => $opts['model'] ? $opts['model']->get('usa_state') : null
+		]);
+
+		// Zip/Postcode
+		$formwriter->textinput('usa_zip_code_id', 'Zip/Postcode', [
+			'maxlength' => 255,
+			'validation' => $opts['required'] ? ['required' => true] : [],
+			'value' => $opts['model'] ? $opts['model']->get('usa_zip_code_id') : null
+		]);
+	}
+
 	public function check_for_duplicate($fields=NULL, $search_deleted=false) {
 		//FIELDS WILL BE UNUSED IN THIS FUNCTION, INCLUDED TO MATCH SYSTEMCLASS DECLARATION
 		
