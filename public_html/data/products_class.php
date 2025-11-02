@@ -115,7 +115,11 @@ class PhoneNumberRequirement extends BasicProductRequirement {
 	
 	public function get_form($formwriter, $user=NULL) {
 		//echo $formwriter->textinput("Phone Number", "phone", NULL, 11, '', "Example: 123-456-6789", 17, "");
-		PhoneNumber::PlainForm($formwriter, NULL);
+		PhoneNumber::renderFormFields($formwriter, [
+			'required' => true,
+			'include_user_id' => false,
+			'model' => NULL
+		]);
 	}
 
 	public function get_validation_info() {
@@ -254,17 +258,32 @@ class AddressRequirement extends BasicProductRequirement {
 					'</select></div>';
 				$new_address_display = false;
 				echo '<div id="new_address_block" class="sm:col-span-6" style="display:none;">';
-				Address::PlainForm($formwriter, NULL, array('privacy' => 1, 'usa_type' => 'HM'));
+				Address::renderFormFields($formwriter, [
+					'required' => true,
+					'include_country' => true,
+					'include_user_id' => false,
+					'model' => NULL
+				]);
 				echo '</div>';
 			} 
 			else {
 				echo $formwriter->hiddeninput('address', 'new');
-				Address::PlainForm($formwriter, NULL, array('privacy' => 1, 'usa_type' => 'HM'));
+				Address::renderFormFields($formwriter, [
+					'required' => true,
+					'include_country' => true,
+					'include_user_id' => false,
+					'model' => NULL
+				]);
 			}
 		}
 		else{
 			echo $formwriter->hiddeninput('address', 'new');
-			Address::PlainForm($formwriter, NULL, array('privacy' => 1, 'usa_type' => 'HM'));			
+			Address::renderFormFields($formwriter, [
+				'required' => true,
+				'include_country' => true,
+				'include_user_id' => false,
+				'model' => NULL
+			]);
 		}
 	}
 

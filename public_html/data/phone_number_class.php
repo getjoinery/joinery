@@ -115,6 +115,51 @@ public static $phone_carriers = array(
 		return $phone_number->key;
 	}
 
+	/**
+	 * Render phone number form fields using provided FormWriter instance
+	 *
+	 * Renders all phone number fields (country code, phone number) through FormWriter
+	 * without direct HTML output. Designed to replace the old PlainForm() method.
+	 *
+	 * @param FormWriterBase $formwriter The FormWriter instance to use for rendering
+	 * @param array $options Configuration options:
+	 *   - required: Whether phone fields are required (default: true)
+	 *   - include_user_id: Include hidden user_id field (default: false)
+	 *   - user_id: User ID value for hidden field (default: null)
+	 *   - model: PhoneNumber object for prepopulation (default: null)
+	 * @return void
+	 */
+	public static function renderFormFields($formwriter, $options = []) {
+		$defaults = [
+			'required' => true,
+			'include_user_id' => false,
+			'user_id' => null,
+			'model' => null
+		];
+		$opts = array_merge($defaults, $options);
+
+		// Hidden user_id field if requested
+		if ($opts['include_user_id'] && $opts['user_id']) {
+			$formwriter->hiddeninput('usr_user_id', '', [
+				'value' => $opts['user_id']
+			]);
+		}
+
+		// Country code dropdown
+		$country_codes = self::get_country_code_drop_array();
+		$formwriter->dropinput('phn_cco_country_code_id', 'Country code', [
+			'options' => $country_codes,
+			'value' => $opts['model'] ? $opts['model']->get('phn_cco_country_code_id') : null
+		]);
+
+		// Phone number
+		$formwriter->textinput('phn_phone_number', 'Phone Number', [
+			'maxlength' => 20,
+			'validation' => $opts['required'] ? ['required' => true] : [],
+			'value' => $opts['model'] ? $opts['model']->get('phn_phone_number') : null
+		]);
+	}
+
 	function check_for_duplicates() {
 		$number_count = new MultiPhoneNumber(array(
 			'deleted' => FALSE,

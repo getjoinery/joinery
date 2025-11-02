@@ -34,34 +34,12 @@
 		}
 	}
 
-	// Get country code options
-	$country_codes = Address::get_country_drop_array2();
-	$formwriter->dropinput('usa_cco_country_code_id', 'Country', [
-		'options' => $country_codes
-	]);
-
-	$formwriter->textinput('usa_address1', 'Street Address', [
-		'maxlength' => 255,
-		'validation' => ['required' => true]
-	]);
-
-	$formwriter->textinput('usa_address2', 'Apt, Suite, etc. (optional)', [
-		'maxlength' => 255
-	]);
-
-	$formwriter->textinput('usa_city', 'City', [
-		'maxlength' => 255,
-		'validation' => ['required' => true]
-	]);
-
-	$formwriter->textinput('usa_state', 'State/Province', [
-		'maxlength' => 255,
-		'validation' => ['required' => true]
-	]);
-
-	$formwriter->textinput('usa_zip_code_id', 'Zip/Postcode', [
-		'maxlength' => 255,
-		'validation' => ['required' => true]
+	// Render all address fields using the model's static helper method
+	Address::renderFormFields($formwriter, [
+		'required' => true,
+		'include_country' => true,
+		'include_user_id' => false,
+		'model' => $address
 	]);
 
 	echo '<a href="/profile/account_edit">Cancel</a> ';

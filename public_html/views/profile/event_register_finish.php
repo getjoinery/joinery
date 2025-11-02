@@ -16,48 +16,58 @@
 	echo '<h3>Please fill out this extra info for your registration in the <strong>'. $event->get('evt_name') . '</strong> event.</h3>';
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1');
-	$validation_rules = array();
-	$validation_rules['phn_phone_number']['required']['value'] = 'true';
-	$validation_rules['privacy_policy']['required']['value'] = 'true';
-	$validation_rules['evr_first_event']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);			
+	$formwriter = $page->getFormWriter('form1', 'v2');
 
-	echo $formwriter->begin_form("", "post", "/profile/event_register_finish");
+	$formwriter->begin_form();
 
-	echo $formwriter->hiddeninput("eventregistrantid", $evr_event_registrant_id);
-	echo $formwriter->hiddeninput("userid", $user->key);
-	echo $formwriter->hiddeninput("act_code", $act_code);
-	
+	$formwriter->hiddeninput("eventregistrantid", "", ['value' => $evr_event_registrant_id]);
+	$formwriter->hiddeninput("userid", "", ['value' => $user->key]);
+	$formwriter->hiddeninput("act_code", "", ['value' => $act_code]);
+
 	if(!Address::GetDefaultAddressForUser($user_id)){
-		//echo $formwriter->hiddeninput("address_id", $usa_users_addr_id);
 		$user_address = $user->address();
-		Address::PlainForm($formwriter, $user_address, array('privacy' => 1, 'usa_type' => 'HM'));	
+		Address::renderFormFields($formwriter, [
+			'required' => true,
+			'include_country' => true,
+			'include_user_id' => false,
+			'model' => $user_address
+		]);
 		echo '<hr><br><br>';
 	}
-	
+
 	if(!$phone_number = $user->phone()){
-		PhoneNumber::PlainForm($formwriter, $phone_number);
-		/*
-		$user_phone = $user->phone();
-		$optionvals = PhoneNumber::get_country_code_drop_array();
-		echo $formwriter->dropinput("Country code", "phn_cco_country_code_id", NULL, $optionvals, ($user_phone ? $user_phone->get('phn_cco_country_code_id') : ''), '', FALSE);
-		echo $formwriter->textinput("Phone Number*", "phn_phone_number", NULL, 20, ($user_phone ? $user_phone->get('phn_phone_number') : ''), NULL , 20, "");
+		PhoneNumber::renderFormFields($formwriter, [
+			'required' => true,
+			'include_user_id' => false,
+			'model' => $phone_number
+		]);
 		echo '<hr><br><br>';
-		*/
-	}	
+	}
 	$nickname_display = $settings->get_setting('nickname_display_as');
 	if($nickname_display){
-		echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, @$form_fields->usr_nickname, "" , 255, "");
+		$formwriter->textinput('usr_nickname', $nickname_display, [
+			'maxlength' => 255,
+			'value' => @$form_fields->usr_nickname
+		]);
 	}
 	$optionvals = array("Yes"=>"1", "No"=>"0");
-	echo $formwriter->dropinput("Is this your first event with us?*", "evr_first_event", NULL, $optionvals, $settings->get_setting('comments_unregistered_users'), '', FALSE);	
+	$formwriter->dropinput('evr_first_event', 'Is this your first event with us?', [
+		'options' => $optionvals,
+		'value' => $settings->get_setting('comments_unregistered_users'),
+		'validation' => ['required' => true]
+	]);
 
-	echo $formwriter->textinput("If no, what other events have you attended?", "evr_other_events", NULL, 20, ($event_registrant ? $event_registrant->get('evr_other_events') : ''), "", 255,"");
-	echo '<br />';		
-	echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy-policy/'>privacy policy</a>", "privacy_policy", "checkbox", "left", NULL, 1, "");
+	$formwriter->textinput('evr_other_events', 'If no, what other events have you attended?', [
+		'maxlength' => 255,
+		'value' => ($event_registrant ? $event_registrant->get('evr_other_events') : '')
+	]);
 
-	echo $formwriter->new_form_button('Submit');
+	$formwriter->checkboxinput('privacy_policy', 'I have read and agree to the <a href="/privacy-policy/">privacy policy</a>', [
+		'value' => 1,
+		'validation' => ['required' => true]
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
 	echo $formwriter->end_form();
 

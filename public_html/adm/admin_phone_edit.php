@@ -27,18 +27,12 @@
 
 	$formwriter->begin_form();
 
-	// Hidden field to preserve user_id through form submission
-	$formwriter->hiddeninput('usr_user_id', '', ['value' => $user_id]);
-
-	// Get country code options
-	$country_codes = PhoneNumber::get_country_code_drop_array();
-	$formwriter->dropinput('phn_cco_country_code_id', 'Country code', [
-		'options' => $country_codes
-	]);
-
-	$formwriter->textinput('phn_phone_number', 'Phone Number', [
-		'maxlength' => 20,
-		'validation' => ['required' => true]
+	// Render all phone number fields using the model's static helper method
+	PhoneNumber::renderFormFields($formwriter, [
+		'required' => true,
+		'include_user_id' => true,
+		'user_id' => $user_id,
+		'model' => $phone_number
 	]);
 
 	$formwriter->submitbutton('btn_submit', 'Submit');

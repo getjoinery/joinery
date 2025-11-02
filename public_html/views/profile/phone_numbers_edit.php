@@ -34,15 +34,11 @@
 		}
 	}
 
-	// Get country code options
-	$country_codes = PhoneNumber::get_country_code_drop_array();
-	$formwriter->dropinput('phn_cco_country_code_id', 'Country code', [
-		'options' => $country_codes
-	]);
-
-	$formwriter->textinput('phn_phone_number', 'Phone Number', [
-		'maxlength' => 20,
-		'validation' => ['required' => true]
+	// Render all phone number fields using the model's static helper method
+	PhoneNumber::renderFormFields($formwriter, [
+		'required' => true,
+		'include_user_id' => false,
+		'model' => $phone_number
 	]);
 
 	echo '<a href="/profile/account_edit">Cancel</a> ';
