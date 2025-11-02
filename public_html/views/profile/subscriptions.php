@@ -1,7 +1,7 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('subscriptions_logic.php', 'logic'));
 
 	$page_vars = process_logic(subscriptions_logic($_GET, $_POST));

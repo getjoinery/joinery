@@ -1,7 +1,7 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('address_edit_logic.php', 'logic'));
 
 	$page_vars = process_logic(address_edit_logic($_GET, $_POST));
