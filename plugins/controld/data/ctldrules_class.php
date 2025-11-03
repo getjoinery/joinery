@@ -53,10 +53,10 @@ class MultiCtldRule extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $ctldrule) {
-			$items['('.$ctldrule->key.') '.$ctldrule->get('cdr_rule_hostname')] = $ctldrule->key;
+			$items[$ctldrule->key] = '('.$ctldrule->key.') '.$ctldrule->get('cdr_rule_hostname');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 

@@ -57,10 +57,10 @@ class MultiCtldDeviceBackup extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $ctlddevice_backup) {
-			$items['('.$ctlddevice_backup->key.') '.$ctlddevice_backup->get('cdb_ctlddevice_backup')] = $ctlddevice_backup->key;
+			$items[$ctlddevice_backup->key] = '('.$ctlddevice_backup->key.') '.$ctlddevice_backup->get('cdb_ctlddevice_backup');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 

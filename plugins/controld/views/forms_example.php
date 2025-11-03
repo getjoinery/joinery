@@ -42,7 +42,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	
 	
-	$optionvals = array("Inactive"=>0, "Active"=>1);
+	$optionvals = array(0=>"Inactive", 1=>"Active");
 	echo $formwriter->dropinput("", "ccd_is_active", "", $optionvals, NULL, '', TRUE);
 	
 	echo $formwriter->checkboxinput("Single checkbox", "single_checkbox", "sm:col-span-6", "left", NULL, 1, "Check to filter out disabled users");
@@ -57,7 +57,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	echo $formwriter->dateinput("Date only", "startdate", NULL, 30, NULL, "", 10);
 	
-	$optionvals = array("Day"=>"0", "Week"=>"1", "Month"=>"2", "Quarter"=>"3", "Year"=>"4");
+	$optionvals = array("0"=>"Day", "1"=>"Week", "2"=>"Month", "3"=>"Quarter", "4"=>"Year");
 	$disabledvals = array();
 	$readonlyvals = array();
 	echo $formwriter->radioinput("Group by:", "interval", NULL, $optionvals, $interval, $disabledvals , $readonlyvals, 'hint');	

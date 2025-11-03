@@ -130,7 +130,7 @@
 		echo $formwriter->textinput('Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', 'itm_link', NULL, 100, $item->get('itm_link'), '', 255, '');	
 	}	
 
-	$optionvals = array("No"=>0, "Yes"=>1);
+	$optionvals = array(0=>"No", 1=>"Yes");
 	echo $formwriter->dropinput("Published", "itm_is_published", "ctrlHolder", $optionvals, $item->get('itm_is_published'), '', FALSE);
 
 	echo $formwriter->textbox('Item content', 'itm_body', 'ctrlHolder', 5, 80, $content, '', 'yes');

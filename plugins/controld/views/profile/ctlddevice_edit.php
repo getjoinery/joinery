@@ -100,7 +100,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	}	
 
 	if($device->are_filters_editable()){
-		$optionvals = array("Only on Sundays"=>0,"Anytime"=>1);
+		$optionvals = array(0=>"Only on Sundays", 1=>"Anytime");
 		echo $formwriter->dropinput("I want to be able to edit my blocked sites", "cdd_allow_device_edits", '', $optionvals, $device->get('cdd_allow_device_edits'), '', TRUE);
 	}
 	

@@ -53,10 +53,10 @@ class MultiCtldService extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $ctldservice) {
-			$items['('.$ctldservice->key.') '.$ctldservice->get('cds_service_pk')] = $ctldservice->key;
+			$items[$ctldservice->key] = '('.$ctldservice->key.') '.$ctldservice->get('cds_service_pk');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 

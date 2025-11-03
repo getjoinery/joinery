@@ -593,10 +593,10 @@ class MultiCtldProfile extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $ctldprofile) {
-			$items['('.$ctldprofile->key.') '.$ctldprofile->get('cdp_ctldprofile')] = $ctldprofile->key;
+			$items[$ctldprofile->key] = '('.$ctldprofile->key.') '.$ctldprofile->get('cdp_ctldprofile');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 

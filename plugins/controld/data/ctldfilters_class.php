@@ -51,10 +51,10 @@ class MultiCtldFilter extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $ctldfilter) {
-			$items['('.$ctldfilter->key.') '.$ctldfilter->get('cdf_filter_pk')] = $ctldfilter->key;
+			$items[$ctldfilter->key] = '('.$ctldfilter->key.') '.$ctldfilter->get('cdf_filter_pk');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 

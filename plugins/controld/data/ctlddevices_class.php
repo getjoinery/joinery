@@ -440,10 +440,10 @@ class MultiCtldDevice extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $ctlddevice) {
-			$items['('.$ctlddevice->key.') '.$ctlddevice->get('cdd_ctlddevice')] = $ctlddevice->key;
+			$items[$ctlddevice->key] = '('.$ctlddevice->key.') '.$ctlddevice->get('cdd_ctlddevice');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 

@@ -69,11 +69,11 @@ class MultiItem extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $entry) {
-			$option_display = $entry->get('itm_name'); 
-			$items[$option_display] = $entry->key;
+			$option_display = $entry->get('itm_name');
+			$items[$entry->key] = $option_display;
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 
@@ -82,10 +82,10 @@ class MultiItem extends SystemMultiBase {
 	function get_dropdown_array_link($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->get('itm_name')] = $item->get_url();
+			$items[$item->get_url()] = $item->get('itm_name');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 

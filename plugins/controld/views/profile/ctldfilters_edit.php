@@ -118,10 +118,10 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'controld_advanced_filters', false)){
 		echo '<h5>Ad and Malware</h5>';
-		$optionvals = array("No blocking" => 0, "Light blocking"=>'ads_small', 'Medium blocking'=>'ads_medium' /*, 'Aggressive blocking'=>'ads'*/);
+		$optionvals = array(0 => "No blocking", 'ads_small'=>"Light blocking", 'ads_medium'=>'Medium blocking' /*, 'ads'=>'Aggressive blocking'*/);
 		echo $formwriter->dropinput("Ads", "block_ads", "", $optionvals, $filters['ads'], '', TRUE);
 
-		$optionvals = array("No blocking" => 0,/* "Light blocking"=>'malware', */'Medium blocking'=>'ip_malware' /*, 'Aggressive blocking'=>'ai_malware'*/);
+		$optionvals = array(0 => "No blocking",/* 'malware'=>"Light blocking", */'ip_malware'=>'Medium blocking' /*, 'ai_malware'=>'Aggressive blocking'*/);
 		echo $formwriter->dropinput("Malware", "block_malware", "", $optionvals, $filters['malware'], '', TRUE);	
 		
 		echo $formwriter->toggleinput("Clickbait and disinformation sites", "block_fakenews", '', $filters['fakenews'], 1, '');
@@ -137,30 +137,30 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			echo '<div class="row">';
 			echo '<div class="col-md-6">';
 			$optionvals = [
-			"12:00 AM" => "00:00",
-			"1:00 AM"  => "01:00",
-			"2:00 AM"  => "02:00",
-			"3:00 AM"  => "03:00",
-			"4:00 AM"  => "04:00",
-			"5:00 AM"  => "05:00",
-			"6:00 AM"  => "06:00",
-			"7:00 AM"  => "07:00",
-			"8:00 AM"  => "08:00",
-			"9:00 AM"  => "09:00",
-			"10:00 AM" => "10:00",
-			"11:00 AM" => "11:00",
-			"12:00 PM" => "12:00",
-			"1:00 PM"  => "13:00",
-			"2:00 PM"  => "14:00",
-			"3:00 PM"  => "15:00",
-			"4:00 PM"  => "16:00",
-			"5:00 PM"  => "17:00",
-			"6:00 PM"  => "18:00",
-			"7:00 PM"  => "19:00",
-			"8:00 PM"  => "20:00",
-			"9:00 PM"  => "21:00",
-			"10:00 PM" => "22:00",
-			"11:00 PM" => "23:00"
+			"00:00" => "12:00 AM",
+			"01:00"  => "1:00 AM",
+			"02:00"  => "2:00 AM",
+			"03:00"  => "3:00 AM",
+			"04:00"  => "4:00 AM",
+			"05:00"  => "5:00 AM",
+			"06:00"  => "6:00 AM",
+			"07:00"  => "7:00 AM",
+			"08:00"  => "8:00 AM",
+			"09:00"  => "9:00 AM",
+			"10:00" => "10:00 AM",
+			"11:00" => "11:00 AM",
+			"12:00" => "12:00 PM",
+			"13:00"  => "1:00 PM",
+			"14:00"  => "2:00 PM",
+			"15:00"  => "3:00 PM",
+			"16:00"  => "4:00 PM",
+			"17:00"  => "5:00 PM",
+			"18:00"  => "6:00 PM",
+			"19:00"  => "7:00 PM",
+			"20:00"  => "8:00 PM",
+			"21:00"  => "9:00 PM",
+			"22:00" => "10:00 PM",
+			"23:00" => "11:00 PM"
 		];
 
 			echo $formwriter->dropinput("Time to start blocking", "start_time", '', $optionvals, $profile->get('cdp_schedule_start'), '', TRUE);		
@@ -172,13 +172,13 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			echo '</div>';
 
 			$optionvals = array(
-				'Monday' => 'mon',
-				'Tuesday' => 'tue',
-				'Wednesday' => 'wed',
-				'Thursday' => 'thu',
-				'Friday' => 'fri',
-				'Saturday' => 'sat',
-				'Sunday' => 'sun',		
+				'mon' => 'Monday',
+				'tue' => 'Tuesday',
+				'wed' => 'Wednesday',
+				'thu' => 'Thursday',
+				'fri' => 'Friday',
+				'sat' => 'Saturday',
+				'sun' => 'Sunday',
 			);
 			$checkedvals =  unserialize($profile->get('cdp_schedule_days'));
 			$disabledvals = array();

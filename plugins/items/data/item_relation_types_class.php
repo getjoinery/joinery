@@ -41,10 +41,10 @@ class MultiItemRelationType extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->get('itt_name')] = $item->key;
+			$items[$item->key] = $item->get('itt_name');
 		}
 		if ($include_new) {
-			$items['new'] = 'Enter New Below';
+			$items['Enter New Below'] = 'new';
 		}
 		return $items;
 
