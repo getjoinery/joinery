@@ -43,16 +43,16 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	);
 
 public static $phone_carriers = array(
-		'Alltel'=>'message.alltel.com',
-		'AT&T'=>'txt.att.net',
-		'Boost'=>'myboostmobile.com',
-		'Cricket'=>'mms.mycricket.com',
-		'MetroPCS'=>'mymetropcs.com',
-		'nTelos'=>'pcs.ntelos.com',
-		'Sprint'=>'messaging.sprintpcs.com',
-		'T-Mobile USA'=>'tmomail.net',
-		'Verizon Wireless'=>'vtext.com',
-		'Virgin Mobile USA'=>'vmobl.com'
+		'message.alltel.com'=>'Alltel',
+		'txt.att.net'=>'AT&T',
+		'myboostmobile.com'=>'Boost',
+		'mms.mycricket.com'=>'Cricket',
+		'mymetropcs.com'=>'MetroPCS',
+		'pcs.ntelos.com'=>'nTelos',
+		'messaging.sprintpcs.com'=>'Sprint',
+		'tmomail.net'=>'T-Mobile USA',
+		'vtext.com'=>'Verizon Wireless',
+		'vmobl.com'=>'Virgin Mobile USA'
 	);	
 	
 	public static function CreateFromForm($form_data, $owner, $phone_number = NULL, $use_transaction=TRUE) {
@@ -273,9 +273,9 @@ public static $phone_carriers = array(
 		$optionvals = array();
 		while ($country = $q->fetch()) {
 			$countryval = '+'.$country->cco_code . ' ' . $country->cco_country;
-			$optionvals[$countryval] = $country->cco_country_code_id;
+			$optionvals[$country->cco_country_code_id] = $countryval;
 		}
-		return $optionvals;		
+		return $optionvals;
 	}	
 
 	function set_default($use_transaction=TRUE) {

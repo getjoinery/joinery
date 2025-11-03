@@ -800,12 +800,12 @@ class MultiUser extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->display_name().' - '.$item->get('usr_email')] = $item->key;
+			$items[$item->key] = $item->display_name().' - '.$item->get('usr_email');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
 		}
-		return $items; 
+		return $items;
 
 	}
 	protected function getMultiResults($only_count = false, $debug = false) {

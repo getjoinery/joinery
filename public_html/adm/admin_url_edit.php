@@ -88,7 +88,7 @@
 		]);
 		$formwriter->textinput('url_redirect_url', 'Redirect url');
 		//echo $formwriter->textinput('Redirect to file', 'url_redirect_file', NULL, 100, $url->get('url_redirect_file'), '', 255, '');
-		$optionvals = array("Permanent (301)"=>301, "Temporary (302)"=>302);
+		$optionvals = array(301=>"Permanent (301)", 302=>"Temporary (302)");
 		$formwriter->dropinput("url_type", "Redirect type", [
 			'options' => $optionvals
 		]);

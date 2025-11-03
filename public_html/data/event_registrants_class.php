@@ -168,8 +168,8 @@ class MultiEventRegistrant extends SystemMultiBase {
 		foreach($this as $entry) {
 			$user = new User($entry->get('evr_usr_user_id'), TRUE);
 			$event = new Event($entry->get('evr_evt_event_id'), TRUE);
-			$option_display = $user->display_name() . ' - ' . $event->get('evt_name'); 
-			$items[$option_display] = $entry->key;
+			$option_display = $user->display_name() . ' - ' . $event->get('evt_name');
+			$items[$entry->key] = $option_display;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

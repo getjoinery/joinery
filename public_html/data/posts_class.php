@@ -113,7 +113,7 @@ class MultiPost extends SystemMultiBase {
 	function get_post_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $post) {
-			$items['('.$post->key.') '.$post->get('pst_title')] = $post->key;
+			$items[$post->key] = '('.$post->key.') '.$post->get('pst_title');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

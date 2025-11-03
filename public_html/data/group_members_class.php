@@ -69,7 +69,7 @@ class MultiGroupMember extends SystemMultiBase {
 		$items = array();
 		foreach($this as $item) {
 			$user = new User($item->get('grm_foreign_key_id'), TRUE);
-			$items[$user->display_name()] = $user->key;
+			$items[$user->key] = $user->display_name();
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
@@ -81,7 +81,7 @@ class MultiGroupMember extends SystemMultiBase {
 		$items = array();
 		foreach($this as $item) {
 			$event = new Event($item->get('grm_foreign_key_id'), TRUE);
-			$items[$event->get('evt_name')] = $event->key;
+			$items[$event->key] = $event->get('evt_name');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

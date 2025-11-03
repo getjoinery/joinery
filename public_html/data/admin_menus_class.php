@@ -64,8 +64,8 @@ class MultiAdminMenu extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $entry) {
-			$option_display = $entry->get('amu_menudisplay'); 
-			$items[$option_display] = $entry->key;
+			$option_display = $entry->get('amu_menudisplay');
+			$items[$entry->key] = $option_display;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

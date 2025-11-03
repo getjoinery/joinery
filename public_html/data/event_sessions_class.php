@@ -371,8 +371,8 @@ class MultiEventSessions extends SystemMultiBase {
 		$items = array();
 		foreach($this as $session) {
 			$event = new Event($session->get('evs_evt_event_id'), TRUE);
-			$option_display = $event->get('evt_name').' - '.$session->get('evs_title'); 
-			$items[$option_display] = $session->key;
+			$option_display = $event->get('evt_name').' - '.$session->get('evs_title');
+			$items[$session->key] = $option_display;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

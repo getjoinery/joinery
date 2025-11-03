@@ -803,7 +803,7 @@
 
 	echo '<h3>General Settings</h3>';
 
-	$yes_no_options = ["Yes"=>1, 'No' => 0];
+	$yes_no_options = [1=>"Yes", 0=>'No'];
 
 	$formwriter->textbox('custom_css', 'Custom CSS', [
 		'value' => $settings->get_setting('custom_css'),

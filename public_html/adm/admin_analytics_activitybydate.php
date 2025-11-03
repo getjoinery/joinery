@@ -65,7 +65,7 @@ $formwriter->checkboxinput('usr_is_disabled', 'Exclude Disabled Users', [
 	'value' => 1
 ]);
 
-$optionvals = array("Day"=>"0", "Week"=>"1", "Month"=>"2", "Quarter"=>"3", "Year"=>"4");
+$optionvals = array("0"=>"Day", "1"=>"Week", "2"=>"Month", "3"=>"Quarter", "4"=>"Year");
 $grouping = array("Day", "Week", "Month", "Quarter", "Year");
 $formwriter->dropinput('interval', 'Group by:', [
 	'options' => $optionvals,

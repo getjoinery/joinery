@@ -108,8 +108,8 @@ class MultiPage extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $entry) {
-			$option_display = $entry->get('pag_title'); 
-			$items[$option_display] = $entry->key;
+			$option_display = $entry->get('pag_title');
+			$items[$entry->key] = $option_display;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
@@ -121,7 +121,7 @@ class MultiPage extends SystemMultiBase {
 	function get_dropdown_array_link($include_new=FALSE) {
 		$items = array();
 		foreach($this as $page) {
-			$items[$page->get('pag_title')] = $page->get_url();
+			$items[$page->get_url()] = $page->get('pag_title');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

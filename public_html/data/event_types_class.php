@@ -42,7 +42,7 @@ class MultiEventType extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->get('ety_name')] = $item->key;
+			$items[$item->key] = $item->get('ety_name');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

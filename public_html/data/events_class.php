@@ -433,7 +433,7 @@ function get_leader() {
 			$version_dropdown = array();
 			foreach ($products as $product) {
 				$output_string = $product->get('pro_name');
-				$version_dropdown[$output_string] = $product->key;
+				$version_dropdown[$product->key] = $output_string;
 			}
 			
 			echo $formwriter->dropinput(
@@ -561,8 +561,8 @@ class MultiEvent extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $entry) {
-			$option_display = LibraryFunctions::convert_time($entry->get('evt_start_time'), "UTC", "UTC", 'M j, Y') . ' ' . $entry->get('evt_name'); 
-			$items[$option_display] = $entry->key;
+			$option_display = LibraryFunctions::convert_time($entry->get('evt_start_time'), "UTC", "UTC", 'M j, Y') . ' ' . $entry->get('evt_name');
+			$items[$entry->key] = $option_display;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

@@ -58,7 +58,7 @@ class MultiContactType extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $contact_type) {
-			$items[$contact_type->get('ctt_name')] = $contact_type->key;
+			$items[$contact_type->key] = $contact_type->get('ctt_name');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

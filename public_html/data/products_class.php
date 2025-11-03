@@ -1268,7 +1268,7 @@ public function get_requirement_info($output='text') {
 			$version_dropdown = array();
 			foreach ($versions as $version) {
 				$output_string = $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price');
-				$version_dropdown[$output_string] = $version->key;
+				$version_dropdown[$version->key] = $output_string;
 			}
 			echo $formwriter->dropinput(
 				'Product',
@@ -1329,7 +1329,7 @@ class MultiProduct extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->get('pro_name')] = $item->key;
+			$items[$item->key] = $item->get('pro_name');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

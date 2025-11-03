@@ -35,12 +35,12 @@
 	
 	echo $formwriter->begin_form('', 'post', '');
 	echo $formwriter->textinput('Coupon code', 'ccd_code', NULL, 100, NULL, 'test text', 255);
-	$active_options = array('Yes'=>'1', 'No'=>'0');
+	$active_options = array('1'=>'Yes', '0'=>'No');
 	echo $formwriter->dropinput("Active?", "ccd_is_active", "", $active_options, NULL, "");
 	echo $formwriter->textbox("Body text", "cmt_body", "", 10, 50, "Test message text", "Type your message here");
 
 	// Use test data for demonstration
-	$optionvals = array('Test Option 1'=>'1', 'Test Option 2'=>'2', 'Test Option 3'=>'3', 'Test Option 4'=>'4');
+	$optionvals = array('1'=>'Test Option 1', '2'=>'Test Option 2', '3'=>'Test Option 3', '4'=>'Test Option 4');
 	$checkedvals = array('2', '3'); // Pre-select options 2 and 3
 	$disabledvals = array();
 	$readonlyvals = array(); 

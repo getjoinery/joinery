@@ -289,7 +289,7 @@ class MultiVideo extends SystemMultiBase {
 	function get_video_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $video) {
-			$items['('.$video->key.') '.$video->get('vid_title')] = $video->key;
+			$items[$video->key] = '('.$video->key.') '.$video->get('vid_title');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
