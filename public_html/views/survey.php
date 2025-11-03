@@ -57,7 +57,6 @@
 	// Note: Questions may still use old validation API via output_js_validation()
 	// This is handled by the Question class and doesn't need conversion here
 	if(!empty($validation_rules)){
-		echo $formwriter->set_validate($validation_rules);
 	}
 
 	$formwriter->submitbutton('submit', 'Submit', [

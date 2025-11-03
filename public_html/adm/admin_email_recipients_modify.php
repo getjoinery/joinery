@@ -151,14 +151,14 @@
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->new_form_button('Add group members');
+			echo $formwriter->submitbutton('submit', 'Add group members', ['class' => 'btn btn-primary']);
 		}
 		else{
 			$formwriter->dropinput('grp_group_id', 'Exclude group members', [
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->new_form_button('Exclude group members');
+			echo $formwriter->submitbutton('submit', 'Exclude group members', ['class' => 'btn btn-primary']);
 		}
 		$formwriter->end_form();
 
@@ -181,14 +181,14 @@
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->new_form_button('Add event attendees');
+			echo $formwriter->submitbutton('submit', 'Add event attendees', ['class' => 'btn btn-primary']);
 		}
 		else{
 			$formwriter->dropinput('evt_event_id', 'Exclude event attendees', [
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->new_form_button('Exclude event attendees');
+			echo $formwriter->submitbutton('submit', 'Exclude event attendees', ['class' => 'btn btn-primary']);
 		}
 		$formwriter->end_form();
 		echo '</td></tr>';

@@ -35,9 +35,7 @@
 	echo '<fieldset class="inlineLabels">';
 	echo $formwriter->fileinput("File to Upload", "files[]", "ctrlHolder", 30, '');
 		echo '</fieldset>';
-						echo $formwriter->start_buttons();
-				echo $formwriter->new_form_button('Submit');
-				echo $formwriter->end_buttons();
+				echo $formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
 	echo $formwriter->end_form();
 	echo '<hr>';
 	*/

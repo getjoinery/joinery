@@ -635,7 +635,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo '<input type="number"';
         echo ' id="' . htmlspecialchars($hour_id) . '"';
         echo ' name="' . htmlspecialchars($id . '_hour') . '"';
-        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 80px;"';
+        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
         echo ' min="1" max="12"';
         echo ' placeholder="HH"';
         echo ' value="' . htmlspecialchars($hour) . '"';
@@ -654,7 +654,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo '<input type="number"';
         echo ' id="' . htmlspecialchars($minute_id) . '"';
         echo ' name="' . htmlspecialchars($id . '_minute') . '"';
-        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 80px;"';
+        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
         echo ' min="0" max="59"';
         echo ' placeholder="MM"';
         echo ' value="' . htmlspecialchars($minute) . '"';
@@ -839,7 +839,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo '<input type="number"';
         echo ' id="' . htmlspecialchars($time_hour_id) . '"';
         echo ' name="' . htmlspecialchars($time_name . '_hour') . '"';
-        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 80px;"';
+        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
         echo ' min="1" max="12" placeholder="HH"';
         echo ' value="' . htmlspecialchars($hour) . '"';
         if (!empty($options['readonly'])) echo ' readonly';
@@ -850,7 +850,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo '<input type="number"';
         echo ' id="' . htmlspecialchars($time_minute_id) . '"';
         echo ' name="' . htmlspecialchars($time_name . '_minute') . '"';
-        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 80px;"';
+        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
         echo ' min="0" max="59" placeholder="MM"';
         echo ' value="' . htmlspecialchars($minute) . '"';
         if (!empty($options['readonly'])) echo ' readonly';
