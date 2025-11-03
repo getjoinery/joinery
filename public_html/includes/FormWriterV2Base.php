@@ -804,6 +804,11 @@ abstract class FormWriterV2Base {
      * @param array $options Field options (must include 'options' key with select options)
      */
     public function dropinput($name, $label = '', $options = []) {
+        // Validate option format in debug mode
+        if (isset($options['options'])) {
+            $this->validateOptionFormat($options['options'], "dropinput('$name')");
+        }
+
         $this->registerField($name, 'select', $label, $options);
         $this->outputDropInput($name, $label, $options);
     }
@@ -828,6 +833,11 @@ abstract class FormWriterV2Base {
      * @param array $options Field options (must include 'options' key with radio options)
      */
     public function radioinput($name, $label = '', $options = []) {
+        // Validate option format in debug mode
+        if (isset($options['options'])) {
+            $this->validateOptionFormat($options['options'], "radioinput('$name')");
+        }
+
         $this->registerField($name, 'radio', $label, $options);
         $this->outputRadioInput($name, $label, $options);
     }
@@ -840,6 +850,11 @@ abstract class FormWriterV2Base {
      * @param array $options Field options including 'options', 'checked_values', 'disabled_values', 'readonly_values'
      */
     public function checkboxList($name, $label = '', $options = []) {
+        // Validate option format in debug mode
+        if (isset($options['options'])) {
+            $this->validateOptionFormat($options['options'], "checkboxList('$name')");
+        }
+
         $this->registerField($name, 'checkboxlist', $label, $options);
         $this->outputCheckboxList($name, $label, $options);
     }
@@ -2193,5 +2208,84 @@ abstract class FormWriterV2Base {
     <!-- Modern browsers handle CORS natively, no IE8/9 support needed -->
       <?php
         return ob_get_clean();
+    }
+
+    /**
+     * Validate option array format - detects reversed [label => id] arrays
+     * Only runs when debug mode is enabled in settings
+     *
+     * @param array $options The options array to validate
+     * @param string $context Context info (field name/type) for error message
+     */
+    protected function validateOptionFormat($options, $context = '') {
+        // Only run in debug mode
+        $settings = Globalvars::get_instance();
+        if (!$settings->get_setting('debug')) {
+            return;
+        }
+
+        if (!is_array($options)) return;
+
+        // Whitelist: Known valid patterns
+        static $whitelist = ['new' => true];
+
+        foreach ($options as $key => $value) {
+            // Skip whitelisted keys
+            if (isset($whitelist[$key])) continue;
+
+            // Skip if key is not string (already correct format: numeric => string)
+            if (!is_string($key)) continue;
+
+            $confidence = 0;
+
+            // Fast checks first (most reliable indicators)
+
+            // Check 1: String key with numeric value (HIGH confidence)
+            // Pattern: "Active" => 1, "Yes" => 0
+            if (is_numeric($value)) {
+                $confidence += 50;
+            }
+
+            // Check 2: Key contains spaces (MEDIUM confidence)
+            // Pattern: "United States" => 'us', "Test Option 1" => '1'
+            if ($confidence < 50 && strpos($key, ' ') !== false) {
+                $confidence += 40;
+            }
+
+            // Check 3: Key contains special patterns (MEDIUM confidence)
+            // Patterns: "(123) Name", "+1 United States", "Name - Description"
+            if ($confidence < 50) {
+                if (strpos($key, '(') !== false ||
+                    strpos($key, '+') === 0 ||
+                    strpos($key, ' - ') !== false) {
+                    $confidence += 35;
+                }
+            }
+
+            // Check 4: Key much longer than value (LOW confidence, helper)
+            // Pattern: "Windows Computer" => "desktop-windows"
+            if ($confidence < 50 && is_string($value)) {
+                if (strlen($key) > strlen($value) * 2) {
+                    $confidence += 25;
+                }
+            }
+
+            // Report if confidence threshold met
+            if ($confidence >= 50) {
+                // Get caller info for debugging
+                $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
+                $caller = $backtrace[2] ?? $backtrace[1] ?? [];
+
+                error_log(sprintf(
+                    "[REVERSED_ARRAY] Confidence: %d%% | '%s' => '%s' | File: %s:%d | Field: %s",
+                    $confidence,
+                    substr($key, 0, 40),
+                    is_scalar($value) ? substr($value, 0, 40) : gettype($value),
+                    basename($caller['file'] ?? 'unknown'),
+                    $caller['line'] ?? 0,
+                    $context
+                ));
+            }
+        }
     }
 }
