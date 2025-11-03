@@ -33,12 +33,12 @@
 	
 	echo $formwriter->begin_form('', 'post', '');
 	echo $formwriter->textinput('Coupon code', 'ccd_code', NULL, 100, NULL, 'test text', 255);
-	$active_options = array('Yes'=>'1', 'No'=>'0');
+	$active_options = array('1'=>'Yes', '0'=>'No');
 	echo $formwriter->dropinput("Active?", "ccd_is_active", "", $active_options, NULL, "");
 	echo $formwriter->textbox("Body text", "cmt_body", "", 10, 50, "Test message text", "Type your message here");
 
 	// Use test data for demonstration
-	$optionvals = array('Test Option 1'=>'1', 'Test Option 2'=>'2', 'Test Option 3'=>'3', 'Test Option 4'=>'4');
+	$optionvals = array('1'=>'Test Option 1', '2'=>'Test Option 2', '3'=>'Test Option 3', '4'=>'Test Option 4');
 	$checkedvals = array('2', '3'); // Pre-select options 2 and 3
 	$disabledvals = array();
 	$readonlyvals = array(); 
@@ -52,7 +52,7 @@
 	echo $formwriter->textinput('Coupon code', 'ccd_code2', 'sm:col-span-6', 100, 'test text', '', 255);	
 	echo $formwriter->checkboxinput("Single checkbox", "single_checkbox2", "sm:col-span-6", "left", NULL, 1, "Check to filter out disabled users");
 	echo $formwriter->textinput('Input prefix horizontal', 'ccd_code4', 'sm:col-span-6', 100, 'test text', '', 255, '', TRUE, 'https://');	
-	$active_options2 = array('Yes'=>'1', 'No'=>'0');
+	$active_options2 = array('1'=>'Yes', '0'=>'No');
 	echo $formwriter->dropinput("Active?", "ccd_is_active2", "sm:col-span-6", $active_options2, NULL, '');	
 
 	echo $formwriter->start_buttons();

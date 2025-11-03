@@ -75,7 +75,7 @@
 		'help_text' => 'Email subject line (required)'
 	]);
 
-	$optionvals = array("Outer"=>EmailTemplateStore::TEMPLATE_TYPE_OUTER, "Inner"=>EmailTemplateStore::TEMPLATE_TYPE_INNER, "Footer"=>EmailTemplateStore::TEMPLATE_TYPE_FOOTER);
+	$optionvals = array(EmailTemplateStore::TEMPLATE_TYPE_OUTER=>"Outer", EmailTemplateStore::TEMPLATE_TYPE_INNER=>"Inner", EmailTemplateStore::TEMPLATE_TYPE_FOOTER=>"Footer");
 	$formwriter->dropinput('emt_type', 'Template Type', [
 		'options' => $optionvals
 	]);

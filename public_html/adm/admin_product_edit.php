@@ -91,14 +91,14 @@ if($numbundles){
 }
 
 // Subscription Tier dropdown
-$tier_options = ['-- None --' => ''];
+$tier_options = ['' => '-- None --'];
 foreach ($subscription_tiers as $tier) {
 	$display_name = sprintf(
 		'%s (Level %d)',
 		$tier->get('sbt_display_name'),
 		$tier->get('sbt_tier_level')
 	);
-	$tier_options[$display_name] = $tier->key;
+	$tier_options[$tier->key] = $display_name;
 }
 $formwriter->dropinput('pro_sbt_subscription_tier_id', 'Subscription Tier', [
 	'options' => $tier_options,
@@ -132,15 +132,15 @@ if($has_product_groups){
 
 // Info to collect at purchase - with readonly handling
 $optionvals = array(
-	'Name' => 1,
-	'Email' => 64,
-	'Phone Number' => 2,
-	'Date of Birth' => 4,
-	'Address' => 8,
-	'Consent to record' => 32,
-	'Optional One-time Donation' => 128,
-	'Newsletter Signup' => 256,
-	'Comment' => 512
+	1 => 'Name',
+	64 => 'Email',
+	2 => 'Phone Number',
+	4 => 'Date of Birth',
+	8 => 'Address',
+	32 => 'Consent to record',
+	128 => 'Optional One-time Donation',
+	256 => 'Newsletter Signup',
+	512 => 'Comment'
 );
 
 if ($product->key) {

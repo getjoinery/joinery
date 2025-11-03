@@ -120,7 +120,7 @@
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';
 		}		
 
-		$optionvals = array("Yes"=>1, 'No' => 0);
+		$optionvals = array(1=>"Yes", 0=>'No');
 		$formwriter->dropinput('debug', 'Payment Debug Mode', [
 			'options' => $optionvals,
 			'value' => $settings->get_setting('debug'),
@@ -383,7 +383,7 @@
 		// Checkout Configuration Section
 		echo '<h4>Checkout Configuration</h4>';
 		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
-		$optionvals = array("Stripe Regular"=>'stripe_regular', 'Stripe Checkout' => 'stripe_checkout', 'None' => 'none');
+		$optionvals = array('stripe_regular'=>"Stripe Regular", 'stripe_checkout' => 'Stripe Checkout', 'none' => 'None');
 		$formwriter->dropinput('checkout_type', 'Checkout Type', [
 			'options' => $optionvals,
 			'value' => $settings->get_setting('checkout_type'),
@@ -393,7 +393,7 @@
 		
 		// PayPal Configuration Section
 		echo '<h4>PayPal Configuration</h4>';
-		$optionvals = array("Yes"=>1, 'No' => 0);
+		$optionvals = array(1=>"Yes", 0=>'No');
 		$formwriter->dropinput('use_paypal_checkout', 'Enable Paypal Checkout', [
 			'options' => $optionvals,
 			'value' => $settings->get_setting('use_paypal_checkout'),
@@ -700,7 +700,7 @@
 		echo '</div>';
 		echo '<div style="margin: 50px 0;"></div>';
 
-	$optionvals = array("US Dollar"=>'usd', 'Euro' => 'eur');
+	$optionvals = array('usd'=>"US Dollar", 'eur' => 'Euro');
 	$formwriter->dropinput('site_currency', 'Site Currency', [
 		'options' => $optionvals,
 		'value' => $settings->get_setting('site_currency'),

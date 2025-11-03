@@ -44,7 +44,7 @@
 
 	$optionvals = array();
 	foreach ($phone_numbers_unver as $phone_number) {
-		$optionvals[$phone_number->get('phn_phone_number')] = $phone_number->key;
+		$optionvals[$phone_number->key] = $phone_number->get('phn_phone_number');
 	}
 	$formwriter->dropinput("phn_phone_number_id", "Number to resend text message", [
 		'options' => $optionvals

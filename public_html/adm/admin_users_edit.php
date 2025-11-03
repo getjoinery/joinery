@@ -45,7 +45,7 @@ $formwriter->checkboxList('new_list_subscribes', 'Mailing list subscriptions', [
 	'checked' => $user_subscribed_list
 ]);
 
-$optionvals = array('On'=>0, 'Off'=>1);
+$optionvals = array(0=>'On', 1=>'Off');
 $formwriter->dropinput('usr_password_recovery_disabled', 'Password recovery', [
 	'options' => $optionvals
 ]);
@@ -66,7 +66,7 @@ $formwriter->dropinput('usr_timezone', 'Time Zone', [
 ]);
 
 if($_SESSION['permission'] == 10){
-	$optionvals = array('Regular User (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
+	$optionvals = array(0=>'Regular User (0)', 5=>'Assistant (5)', 8=>'Admin (8)', 10 => 'Master Admin (10)');
 	$formwriter->dropinput('usr_permission', 'Permission level', [
 		'options' => $optionvals
 	]);

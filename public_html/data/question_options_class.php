@@ -57,7 +57,7 @@ class MultiQuestionOption extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $question_option) {
-			$items[$question_option->get('qop_question_option_label')] = $question_option->get('qop_question_option_value');
+			$items[$question_option->get('qop_question_option_value')] = $question_option->get('qop_question_option_label');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

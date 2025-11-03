@@ -389,7 +389,7 @@ class MultiQuestion extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $question) {
-			$items['('.$question->key.') '.$question->get('qst_question')] = $question->key;
+			$items[$question->key] = '('.$question->key.') '.$question->get('qst_question');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

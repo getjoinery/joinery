@@ -356,9 +356,9 @@ class MultiMailingList extends SystemMultiBase {
 		foreach($this as $entry) {
 			$option_display = $entry->get('mlt_name');
 			if($entry->get('mlt_description')){
-				$option_display .= ' - ' . $entry->get('mlt_description'); 
+				$option_display .= ' - ' . $entry->get('mlt_description');
 			}
-			$items[$option_display] = $entry->key;
+			$items[$entry->key] = $option_display;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

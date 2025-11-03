@@ -420,18 +420,18 @@ class MultiFile extends SystemMultiBase {
 	function get_file_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $file) {
-			$items['('.$file->key.') '.$file->get('fil_title')] = $file->key;
+			$items[$file->key] = '('.$file->key.') '.$file->get('fil_title');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
 		}
 		return $items;
-	}	
+	}
 
 	function get_image_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $file) {
-			$items['<span class="dropimagewidth"><img loading="lazy" src="'.$file->get_url('thumbnail').'"></span>('.$file->key.') '.$file->get('fil_title')] = $file->key;
+			$items[$file->key] = '<span class="dropimagewidth"><img loading="lazy" src="'.$file->get_url('thumbnail').'"></span>('.$file->key.') '.$file->get('fil_title');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

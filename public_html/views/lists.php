@@ -84,9 +84,7 @@
 		}
 
 		$optionvals = $mailing_lists->get_dropdown_array();
-		// get_dropdown_array returns [label => id], but FormWriter V2 expects [id => label]
-		// Flip the array to convert to standard format
-		$optionvals = array_flip($optionvals);
+		// get_dropdown_array returns [id => label] format, ready for FormWriter V2
 		$checkedvals = $user_subscribed_list;
 		$readonlyvals = array(); //DEFAULT
 		$disabledvals = array();

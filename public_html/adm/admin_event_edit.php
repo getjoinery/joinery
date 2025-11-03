@@ -97,7 +97,7 @@ $formwriter->dropinput('evt_timezone', 'Event Time Zone', [
 	'options' => $optionvals
 ]);
 
-$optionvals = array("Active"=>1, "Completed"=>2, "Cancelled"=>3);
+$optionvals = array(1=>"Active", 2=>"Completed", 3=>"Cancelled");
 $formwriter->dropinput('evt_status', 'Status', [
 	'options' => $optionvals
 ]);
@@ -110,29 +110,29 @@ if($num_event_types){
 	]);
 }
 
-$optionvals = array("Hidden"=>0, "Live"=>1, "Live but unlisted"=>2);
+$optionvals = array(0=>"Hidden", 1=>"Live", 2=>"Live but unlisted");
 $formwriter->dropinput('evt_visibility', 'Visibility', [
 	'options' => $optionvals
 ]);
 
-$optionvals = array("Closed"=>0, "Open"=>1);
+$optionvals = array(0=>"Closed", 1=>"Open");
 $formwriter->dropinput('evt_is_accepting_signups', 'Registration', [
 	'options' => $optionvals
 ]);
 
-$optionvals = array("Allow"=>1, "Prevent"=>0);
+$optionvals = array(1=>"Allow", 0=>"Prevent");
 $formwriter->dropinput('evt_allow_waiting_list', 'Waiting list', [
 	'options' => $optionvals
 ]);
 
-$optionvals = array("Show"=>1, "Hide"=>0);
+$optionvals = array(1=>"Show", 0=>"Hide");
 $formwriter->dropinput('evt_show_add_to_calendar_link', 'Show calendar link', [
 	'options' => $optionvals
 ]);
 
 $formwriter->hiddeninput('evt_collect_extra_info', '', ['value' => 0]);
 
-$optionvals = array("Condensed (all on one page)"=>1, "Separate (separate pages for each session)"=>2);
+$optionvals = array(1=>"Condensed (all on one page)", 2=>"Separate (separate pages for each session)");
 $formwriter->dropinput('evt_session_display_type', 'Session display style', [
 	'options' => $optionvals
 ]);

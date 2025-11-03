@@ -143,7 +143,7 @@
 
 	//echo $formwriter->checkboxinput("List video in index", "vid_is_listed", "checkbox", "left", $file->get('vid_is_listed'), 1, "");
 
-	$optionvals = array('Public (anyone)' => null, 'Any logged in user (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
+	$optionvals = array(null => 'Public (anyone)', 0=>'Any logged in user (0)', 5=>'Assistant (5)', 8=>'Admin (8)', 10 => 'Master Admin (10)');
 	$formwriter->dropinput("vid_min_permission", "Permission level can access", [
 		'options' => $optionvals
 	]);
