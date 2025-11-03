@@ -60,7 +60,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing public menu
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $public_menu,
 		'edit_primary_key_value' => $public_menu->key
 	]);

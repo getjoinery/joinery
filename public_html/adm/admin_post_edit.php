@@ -113,7 +113,7 @@
 		$override_values['pst_is_on_homepage'] = $pst_is_on_homepage;
 	}
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $post,
 		'values' => $override_values,
 		'edit_primary_key_value' => $post->key
@@ -170,7 +170,7 @@
 	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
-		$formwriter = $page->getFormWriter('form_load_version', 'v2', [
+		$formwriter = $page->getFormWriter('form_load_version', [
 			'action' => '/admin/admin_post_edit'
 		]);
 

@@ -131,7 +131,7 @@ $page_vars = $page_vars->data;
 						<div class="card-body p-4">
 							<?php
 							$settings = Globalvars::get_instance();
-							$formwriter = $page->getFormWriter('form1', 'v2');
+							$formwriter = $page->getFormWriter('form1');
 
 							$formwriter->begin_form([
 								'id' => '',
@@ -234,7 +234,7 @@ $page_vars = $page_vars->data;
 										<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
 										<div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="mt-3 p-3 bg-light rounded">
 											<?php
-											$formwriter = $page->getFormWriter('form'.$comment->key, 'v2');
+											$formwriter = $page->getFormWriter('form'.$comment->key);
 
 											$formwriter->begin_form([
 												'id' => 'form'.$comment->key,

@@ -48,7 +48,7 @@
 	}
 
 	echo '<br /><br /><div>';
-	$formwriter = $page->getFormWriter('form2', 'v2');
+	$formwriter = $page->getFormWriter('form2');
 	echo $formwriter->begin_form();
 	$formwriter->hiddeninput('action', ['value' => 'remove']);
 	$formwriter->submitbutton('btn_delete', 'Delete this file permanently', ['class' => 'btn-secondary']);

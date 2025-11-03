@@ -79,16 +79,10 @@ abstract class PublicPageBase {
 	 * @param array $options Configuration options for V2 FormWriter (model, action, etc.)
 	 * @return FormWriter|FormWriterV2Bootstrap The appropriate FormWriter instance
 	 */
-	public function getFormWriter($form_id = 'form1', $version = 'v1', $options = []) {
-        if ($version === 'v2') {
-            // Load FormWriterV2 for modern form handling
-            require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-            return new FormWriterV2Bootstrap($form_id, $options);
-        } else {
-            // Load FormWriter V1 using standard theme/plugin override pattern
-            require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
-            return new FormWriter($form_id);
-        }
+	public function getFormWriter($form_id = 'form1', $options = []) {
+        // FormWriter v2 is now the default and only supported version
+        require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+        return new FormWriterV2Bootstrap($form_id, $options);
     }
 	
 	public static function get_public_menu(){

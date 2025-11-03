@@ -20,7 +20,7 @@ if ($user) {
 }
 
 // Initialize FormWriter V2
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
 	'model' => $product_detail,
 	'edit_primary_key_value' => ($product_detail && $product_detail->key) ? $product_detail->key : null
 ]);

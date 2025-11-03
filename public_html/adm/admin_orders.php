@@ -73,7 +73,7 @@
 	)
 	);	
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'method' => 'GET',
 		'action' => '/admin/admin_orders'
 	]);

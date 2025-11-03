@@ -33,7 +33,7 @@
 
 	// Use V2 with model + override values
 	// Datetime fields with UTC values are automatically converted to user's local timezone
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'debug' => true,
 		'model' => $coupon_code,        // Auto-fills all model fields
 		'values' => $override_values,   // Overrides specific fields (defaults)

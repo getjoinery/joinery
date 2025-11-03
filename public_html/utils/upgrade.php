@@ -658,7 +658,7 @@
 		$page->begin_box($pageoptions);
 
 		// Get FormWriter from AdminPage (which loads the correct theme-specific FormWriter)
-		$formwriter = $page->getFormWriter('form1', 'v2');
+		$formwriter = $page->getFormWriter('form1');
 		echo $formwriter->begin_form("form", "post", "/utils/upgrade");
 
 		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';

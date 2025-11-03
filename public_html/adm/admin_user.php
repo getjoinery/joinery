@@ -280,7 +280,7 @@ array(
 							<tr>
 								<td colspan="2" class="pt-3">
 									<?php
-										$formwriter = $page->getFormWriter('form5', 'v2', [
+										$formwriter = $page->getFormWriter('form5', [
 											'deferred_output' => true
 										]);
 
@@ -419,7 +419,7 @@ foreach ($event_registrations as $event_registration):
 endforeach;
 
 // Add event form row
-$formwriter = $page->getFormWriter('form3', 'v2', [
+$formwriter = $page->getFormWriter('form3', [
 	'deferred_output' => true
 ]);
 

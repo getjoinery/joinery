@@ -30,7 +30,7 @@ $session = SessionControl::get_instance();
 	$pageoptions['title'] = 'Add User';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter = $page->getFormWriter('form1');
 
 	$formwriter->begin_form();
 

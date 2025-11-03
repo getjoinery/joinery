@@ -24,7 +24,7 @@ array(
 $pageoptions['title'] = "User Edit";
 $page->begin_box($pageoptions);
 
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
 	'model' => $user
 ]);
 

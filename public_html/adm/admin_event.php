@@ -358,7 +358,7 @@
 	$page->tableheader($headers, $box_vars, $rpager);
 
 	// Initialize FormWriter for form buttons
-	$formwriter = $page->getFormWriter('form2', 'v2');
+	$formwriter = $page->getFormWriter('form2');
 
 	$registrant_emails = '';
 	foreach($event_registrants as $event_registrant){

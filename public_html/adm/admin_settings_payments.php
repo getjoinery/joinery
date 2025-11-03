@@ -74,7 +74,7 @@
 	);
 	echo AdminPage::tab_menu($tab_menus, 'Payment Settings');
 
-	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter = $page->getFormWriter('form1');
 
 		?>
 		<script type="text/javascript">

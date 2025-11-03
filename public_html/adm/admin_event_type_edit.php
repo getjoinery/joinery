@@ -24,7 +24,7 @@ $options['title'] = 'Edit Event Type';
 $page->begin_box($options);
 
 // FormWriter V2 with model and edit_primary_key_value
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
 	'model' => $event_type,
 	'edit_primary_key_value' => $event_type->key
 ]);

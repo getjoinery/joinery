@@ -58,7 +58,7 @@
 
 	$page->begin_box();
 
-	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter = $page->getFormWriter('form1');
 	$formwriter->begin_form();
 
 	echo '<p><strong>To:</strong> ' . htmlspecialchars($page_vars['to_field']) . '</p>';

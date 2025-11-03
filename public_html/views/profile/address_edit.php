@@ -21,7 +21,7 @@
 	echo PublicPage::tab_menu($tab_menus, 'Edit Address');
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $address,
 		'edit_primary_key_value' => $address->key
 	]);

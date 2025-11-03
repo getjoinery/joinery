@@ -35,7 +35,7 @@
 	}
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/profile/contact_preferences'
 	]);
 	$formwriter->begin_form();

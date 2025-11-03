@@ -53,7 +53,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing admin menu item
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $admin_menu,
 		'edit_primary_key_value' => $admin_menu->key
 	]);

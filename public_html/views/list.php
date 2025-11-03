@@ -27,7 +27,7 @@
 	}
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter = $page->getFormWriter('form1');
 
 	$formwriter->begin_form([
 		'id' => '',

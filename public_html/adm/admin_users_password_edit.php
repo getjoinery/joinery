@@ -45,7 +45,7 @@
 	$pageoptions['title'] = 'Change Password';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter = $page->getFormWriter('form1');
 	$formwriter->begin_form();
 	$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
 

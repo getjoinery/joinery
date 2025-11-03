@@ -51,7 +51,7 @@ $session->check_permission(10);
 
 <?php
 
-$formwriter = $page->getFormWriter('form1', 'v2');
+$formwriter = $page->getFormWriter('form1');
 echo $formwriter->begin_form();
 
 $formwriter->textinput('startdate', 'Start Date', [

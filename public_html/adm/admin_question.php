@@ -53,7 +53,7 @@
 	}
 
 	// Get V2 FormWriter instance
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/admin/admin_question',
 		'method' => 'POST'
 	]);
