@@ -1,4 +1,12 @@
 <?php
+/**
+ * Tailwind Forms Example - FormWriter v1 Reference File
+ *
+ * ⚠️ DEPRECATED - FormWriter v1 Example File
+ * This file demonstrates FormWriter v1 field syntax and is kept for reference/backward compatibility testing.
+ * NEW PROJECTS should use FormWriter v2 syntax. See /docs/formwriter.md for v2 documentation.
+ * This file will NOT be updated to v2 - it is intentionally frozen at v1 for reference purposes.
+ */
 
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));

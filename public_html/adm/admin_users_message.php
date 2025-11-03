@@ -61,7 +61,7 @@
 	$formwriter = $page->getFormWriter('form1', 'v2');
 	$formwriter->begin_form();
 
-	$formwriter->text('to-field', 'To:', $page_vars['to_field'], NULL);
+	echo '<p><strong>To:</strong> ' . htmlspecialchars($page_vars['to_field']) . '</p>';
 
 	$placeholder = 'RE: ';
 	if($page_vars['event']){
