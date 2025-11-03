@@ -2,6 +2,11 @@
 /**
  * Complete Bootstrap Forms Test - Joinery Validation System
  *
+ * ⚠️ DEPRECATED - FormWriter v1 Example File
+ * This file demonstrates FormWriter v1 field syntax and is kept for reference/backward compatibility testing.
+ * NEW PROJECTS should use FormWriter v2 syntax. See /docs/formwriter.md for v2 documentation.
+ * This file will NOT be updated to v2 - it is intentionally frozen at v1 for reference purposes.
+ *
  * Tests ALL FormWriter field types with comprehensive validation rules.
  * This matches all fields from forms_example_bootstrap_experimental.php
  *
