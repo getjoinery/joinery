@@ -47,8 +47,8 @@ FormWriter expects options in the format:
 
 ```php
 $options = [
-    'id_value' => 'Display Label',  // ✅ CORRECT: ID as key, label as value
-    'id_value2' => 'Display Label 2'
+    1 => 'Display Label',  // ✅ CORRECT: ID as key, label as value
+    2 => 'Display Label 2'
 ];
 ```
 

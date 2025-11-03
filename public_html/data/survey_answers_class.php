@@ -94,7 +94,7 @@ class MultiSurveyAnswer extends SystemMultiBase {
 		$items = array();
 		foreach($this as $item) {
 			$user = new User($item->get('sva_usr_user_id'), TRUE);
-			$items[$user->display_name()] = $user->key;
+			$items[$user->key] = $user->display_name();
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

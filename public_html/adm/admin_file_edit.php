@@ -84,7 +84,7 @@
 		'htmlmode' => 'no'
 	]);
 
-	$optionvals = array('Public (anyone)' => null, 'Any logged in user (0)'=>0, 'Assistant (5)'=>5, 'Admin (8)'=>8, 'Master Admin (10)' => 10);
+	$optionvals = array(null => 'Public (anyone)', 0=>'Any logged in user (0)', 5=>'Assistant (5)', 8=>'Admin (8)', 10 => 'Master Admin (10)');
 	$formwriter->dropinput("fil_min_permission", "Permission level can access", [
 		'options' => $optionvals
 	]);
@@ -96,7 +96,7 @@
 		NULL);  //OFFSET
 	$groups->load();
 
-	$optionvals1['All'] = NULL;
+	$optionvals1[NULL] = 'All';
 	$optionvals2 = $groups->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
 	$formwriter->dropinput("fil_grp_group_id", "Group can access", [
@@ -110,7 +110,7 @@
 		NULL);  //OFFSET
 	$events->load();
 
-	$optionvals['All'] = NULL;
+	$optionvals1[NULL] = 'All';
 	$optionvals2 = $events->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
 	$formwriter->dropinput("fil_evt_event_id", "Event can access", [

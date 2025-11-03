@@ -110,7 +110,7 @@
 		'validation' => ['required' => true]
 	]);
 
-	$optionvals = array("Short text"=>Question::TYPE_SHORT_TEXT, "Long Text"=>Question::TYPE_LONG_TEXT, 'Dropdown'=>Question::TYPE_DROPDOWN, 'Radio'=>Question::TYPE_RADIO, 'Checkbox'=>Question::TYPE_CHECKBOX, 'Checkbox List'=>Question::TYPE_CHECKBOX_LIST);
+	$optionvals = array(Question::TYPE_SHORT_TEXT=>"Short text", Question::TYPE_LONG_TEXT=>"Long Text", Question::TYPE_DROPDOWN=>'Dropdown', Question::TYPE_RADIO=>'Radio', Question::TYPE_CHECKBOX=>'Checkbox', Question::TYPE_CHECKBOX_LIST=>'Checkbox List');
 	$formwriter->dropinput('qst_type', 'Type', [
 		'options' => $optionvals,
 		'value' => $question->get('qst_type'),

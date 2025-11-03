@@ -70,8 +70,8 @@ class MultiProductRequirement extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$option_display = $item->get('prq_title'); 
-			$items[$option_display] = $item->key;
+			$option_display = $item->get('prq_title');
+			$items[$item->key] = $option_display;
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

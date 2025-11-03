@@ -82,7 +82,7 @@ class MultiSurvey extends SystemMultiBase {
 	function get_survey_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $survey) {
-			$items[$survey->get('svy_name')] = $survey->key;
+			$items[$survey->key] = $survey->get('svy_name');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

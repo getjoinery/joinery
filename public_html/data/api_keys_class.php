@@ -76,7 +76,7 @@ class MultiApiKey extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $api_key) {
-			$items['('.$api_key->key.') '.$api_key->get('apk_api_key')] = $api_key->key;
+			$items[$api_key->key] = '('.$api_key->key.') '.$api_key->get('apk_api_key');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

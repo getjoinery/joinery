@@ -246,7 +246,7 @@
 		echo '<h3>Email Settings</h3>';
 		
 		// Email service selection settings
-		$service_optionvals = array('Mailgun' => 'mailgun', 'SMTP' => 'smtp');
+		$service_optionvals = array('mailgun' => 'Mailgun', 'smtp' => 'SMTP');
 
 		$formwriter->dropinput('email_service', 'Primary Email Service', [
 			'options' => $service_optionvals,
@@ -459,7 +459,7 @@
 			'value' => $settings->get_setting('smtp_sender')
 		]);
 
-		$auth_optionvals = array('No' => 0, 'Yes' => 1);
+		$auth_optionvals = array(0 => 'No', 1 => 'Yes');
 		$formwriter->dropinput('smtp_auth', 'SMTP Authentication Required', [
 			'options' => $auth_optionvals,
 			'value' => $settings->get_setting('smtp_auth'),
@@ -554,7 +554,7 @@
 		echo '(<code>$_SESSION[\'send_emails\']</code>) used for programmatic testing that logs to debug_email_logs.';
 		echo '</div>';
 
-		$test_optionvals = array('No' => 0, 'Yes' => 1);
+		$test_optionvals = array(0 => 'No', 1 => 'Yes');
 		$formwriter->dropinput('email_test_mode', 'Global Test Mode (redirect all emails to test recipient)', [
 			'options' => $test_optionvals,
 			'value' => $settings->get_setting('email_test_mode'),
@@ -585,7 +585,7 @@
 	}
 
 	echo '<h3>Email Settings</h3>';
-	$optionvals = array("Yes"=>1, 'No' => 0);
+	$optionvals = array(1=>"Yes", 0=>'No');
 	$formwriter->dropinput('emails_active', 'Email module active', [
 		'options' => $optionvals,
 		'value' => $settings->get_setting('emails_active'),
@@ -599,7 +599,7 @@
 		NULL);  //OFFSET
 	$templates->load();
 	$numtemplates = $templates->count_all();
-	$outer_optionvals = array('All Lists' => 'all');
+	$outer_optionvals = array('all' => 'All Lists');
 	$outer_optionvals = array_merge($outer_optionvals, $templates->get_dropdown_array());
 	
 	if($settings->get_setting('default_mailing_list')){

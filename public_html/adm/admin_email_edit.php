@@ -45,7 +45,7 @@ if($contact_types->count()){
 }
 
 $optionvals = $mailing_lists->get_dropdown_array();
-$optionvals['Custom'] = NULL;
+$optionvals[NULL] = 'Custom';
 $formwriter->dropinput("eml_mlt_mailing_list_id", "Mailing list or custom list", [
 	'options' => $optionvals
 ]);
@@ -62,7 +62,7 @@ $formwriter->dropinput("eml_from_name", "From Name", [
 	'options' => $optionvals
 ]);
 
-$optionvals = array("Blank HTML Template"=>"blank_template", "Standard HTML Template"=>"newsletter-1");
+$optionvals = array("blank_template"=>"Blank HTML Template", "newsletter-1"=>"Standard HTML Template");
 $formwriter->dropinput("eml_message_template_html", "Template", [
 	'options' => $optionvals
 ]);

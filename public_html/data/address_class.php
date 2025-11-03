@@ -631,7 +631,7 @@ private static function UcAddress($string) {
 
 		$optionvals = array();
 		while ($country = $q->fetch()) {
-			$optionvals[$country->country_name] = $country->country_code;
+			$optionvals[$country->country_code] = $country->country_name;
 		}
 		return $optionvals;
 	}
@@ -651,9 +651,9 @@ private static function UcAddress($string) {
 
 		$optionvals = array();
 		while ($country = $q->fetch()) {
-			$optionvals[$country->cco_country] = $country->cco_country_code_id;
+			$optionvals[$country->cco_country_code_id] = $country->cco_country;
 		}
-		return $optionvals;		
+		return $optionvals;
 	}
 
 	static function get_timezone_drop_array($country_code = NULL) {
@@ -782,7 +782,7 @@ class MultiAddress extends SystemMultiBase {
 		$items = array();
 		foreach($this as $address) {
 			if ($address->get('usa_address1')) {
-				$items[LibraryFunctions::encode($address->key)] =
+				$items[$address->key] =
 					($short_address ? htmlspecialchars($address->get('usa_address1')) : $address->get_address_string(' ')) .
 					($message ? ' ' . $message : '');
 			}

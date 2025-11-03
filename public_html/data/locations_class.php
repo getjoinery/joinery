@@ -67,7 +67,7 @@ class MultiLocation extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $location) {
-			$items[$location->get('loc_name')] = $location->key;
+			$items[$location->key] = $location->get('loc_name');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

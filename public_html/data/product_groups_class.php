@@ -46,7 +46,7 @@ class MultiProductGroup extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->get('prg_name')] = $item->key;
+			$items[$item->key] = $item->get('prg_name');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';

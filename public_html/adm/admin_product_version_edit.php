@@ -44,7 +44,7 @@ if(!$product_version->key){
 		'validation' => ['required' => true]
 	]);
 
-	$optionvals = array("One price"=>'single', 'User Chooses' => 'user', 'Daily Subscription'=>'day', 'Weekly Subscription'=>'week', 'Monthly Subscription'=>'month', 'Yearly Subscription'=>'year',);
+	$optionvals = array('single'=>"One price", 'user' => 'User Chooses', 'day'=>'Daily Subscription', 'week'=>'Weekly Subscription', 'month'=>'Monthly Subscription', 'year'=>'Yearly Subscription');
 	$formwriter->dropinput('prv_price_type', 'Pricing', [
 		'options' => $optionvals,
 		'validation' => ['required' => true],

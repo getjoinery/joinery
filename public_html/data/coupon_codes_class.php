@@ -142,7 +142,7 @@ class MultiCouponCode extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $coupon_code) {
-			$items['('.$coupon_code->key.') '.$coupon_code->get('ccd_coupon_code')] = $coupon_code->key;
+			$items[$coupon_code->key] = '('.$coupon_code->key.') '.$coupon_code->get('ccd_coupon_code');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
