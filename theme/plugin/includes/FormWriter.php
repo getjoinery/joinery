@@ -1,7 +1,7 @@
 <?php
-require_once(PathHelper::getIncludePath('includes/FormWriterHTML5.php'));
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
 
-class FormWriter extends FormWriterHTML5 {
+class FormWriter extends FormWriterV2Bootstrap {
     // Fallback FormWriter for plugin theme delegation
 }
 ?>

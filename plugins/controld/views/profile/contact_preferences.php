@@ -35,7 +35,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
 	}	
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/profile/contact_preferences'
 	]);
 	$formwriter->begin_form();

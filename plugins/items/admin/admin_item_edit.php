@@ -96,7 +96,7 @@
       <div class="p-3">';
 
 	// Editing an existing item
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/admin/admin_item_edit'
 	]);
 
@@ -173,7 +173,7 @@
 	$optionvals = $content_versions->get_dropdown_array(FALSE, $session);
 
 	if(count($optionvals)){
-		$formwriter = $page->getFormWriter('form_load_version', 'v2', [
+		$formwriter = $page->getFormWriter('form_load_version', [
 			'action' => '/admin/admin_item_edit',
 			'method' => 'GET'
 		]);

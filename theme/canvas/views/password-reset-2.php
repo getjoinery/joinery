@@ -87,7 +87,7 @@ $page_vars = $page_vars->data;
 									<h3>Set New Password</h3>
 
 									<?php
-									$formwriter = $page->getFormWriter('form1', 'v2', [
+									$formwriter = $page->getFormWriter('form1', [
 										'action' => '/password-reset-2',
 										'class' => 'mb-0'
 									]);

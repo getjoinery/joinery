@@ -50,7 +50,7 @@ $page_vars = $page_vars->data;
 							<div class="card-body p-4 p-lg-5">
 								<?php
 								$settings = Globalvars::get_instance();
-								$formwriter = $page->getFormWriter('form1', 'v2', [
+								$formwriter = $page->getFormWriter('form1', [
 									'action' => '/password-set'
 								]);
 

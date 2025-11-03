@@ -150,7 +150,7 @@ $page_vars = $page_vars->data;
 								</div>
 								<div class="card-body">
 									<?php
-									$formwriter = $page->getFormWriter('form2', 'v2', [
+									$formwriter = $page->getFormWriter('form2', [
 										'action' => '/cart'
 									]);
 									$validation_rules = array();
@@ -251,7 +251,7 @@ $page_vars = $page_vars->data;
 
 									<!-- Add Coupon Form -->
 									<?php
-									$formwriter = $page->getFormWriter('form_coupon', 'v2', [
+									$formwriter = $page->getFormWriter('form_coupon', [
 										'action' => '/cart',
 										'method' => 'GET'
 									]);
@@ -341,7 +341,7 @@ $page_vars = $page_vars->data;
 									<div class="card-body text-center">
 										<p class="text-muted mb-4">Your order total is <?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></p>
 										<?php
-										$formwriter = $page->getFormWriter('form4', 'v2', [
+										$formwriter = $page->getFormWriter('form4', [
 											'action' => '/cart_charge'
 										]);
 										$formwriter->begin_form();

@@ -39,7 +39,7 @@ $page_vars = $page_vars->data;
 		echo '<div class="card-body p-4">';
 		echo '<p class="mb-4">Is everything correct?</p>';
 
-		$formwriter = $page->getFormWriter('product_form', 'v2', [
+		$formwriter = $page->getFormWriter('product_form', [
 			'action' => '/product'
 		]);
 		$formwriter->begin_form(); 

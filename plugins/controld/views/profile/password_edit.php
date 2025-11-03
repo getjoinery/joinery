@@ -30,7 +30,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	echo PublicPage::tab_menu($tab_menus, 'Change Password');
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/profile/password_edit'
 	]);
 

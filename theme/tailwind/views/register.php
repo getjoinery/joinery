@@ -33,7 +33,7 @@
 	$settings = Globalvars::get_instance();
 	$nickname_display = $settings->get_setting('nickname_display_as');
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/register'
 	]);
 

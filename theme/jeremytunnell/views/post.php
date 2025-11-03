@@ -94,7 +94,7 @@ $page_vars = $page_vars->data;
 				echo 'Your comment has been submitted.';
 			}
 			else{
-				$formwriter = $page->getFormWriter("form1", 'v2', [
+				$formwriter = $page->getFormWriter("form1", [
 					'action' => $_SERVER['REQUEST_URI']
 				]);
 

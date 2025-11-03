@@ -29,7 +29,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$name = $device->get_readable_name();
 	}
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/profile/ctlddevice_edit'
 	]);
 

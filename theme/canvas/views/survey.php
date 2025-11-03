@@ -40,7 +40,7 @@ $page_vars = $page_vars->data;
 					<div class="card shadow-sm rounded-4 border-0">
 						<div class="card-body p-4 p-lg-5">
 							<?php
-							$formwriter = $page->getFormWriter('form1', 'v2', [
+							$formwriter = $page->getFormWriter('form1', [
 								'action' => '/survey'
 							]);
 							$formwriter->begin_form();

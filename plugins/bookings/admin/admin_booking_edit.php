@@ -98,7 +98,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing booking
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/admin/admin_booking_edit'
 	]);
 

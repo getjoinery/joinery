@@ -131,7 +131,7 @@ $page_vars = $page_vars->data;
 						<div class="card-body p-4">
 							<?php
 							$settings = Globalvars::get_instance();
-							$formwriter = $page->getFormWriter('form1', 'v2', [
+							$formwriter = $page->getFormWriter('form1', [
 								'action' => $_SERVER['REQUEST_URI']
 							]);
 							$validation_rules = array();

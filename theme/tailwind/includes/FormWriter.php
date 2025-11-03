@@ -6,8 +6,8 @@
  * The theme can customize FormWriter behavior by overriding methods here.
  */
 
-require_once(PathHelper::getIncludePath('includes/FormWriterTailwind.php'));
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
 
-class FormWriter extends FormWriterTailwind {
+class FormWriter extends FormWriterV2Bootstrap {
     // Theme-specific FormWriter customizations can be added here
 }

@@ -143,7 +143,7 @@
 		$point->save();
 	}
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/explorer',
 		'method' => 'GET'
 	]);

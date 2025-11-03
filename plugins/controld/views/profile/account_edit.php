@@ -38,7 +38,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 */
 	echo PublicPage::tab_menu($tab_menus, 'Edit Account');
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/profile/account_edit'
 	]);
 	$formwriter->begin_form();
