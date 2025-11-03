@@ -136,7 +136,7 @@ $page_vars = $page_vars->data;
 											<small class="text-muted"><?php echo htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'); ?></small>
 										</div>
 										<?php
-										$formwriter = $page->getFormWriter('form_billing_user', 'v2');
+										$formwriter = $page->getFormWriter('form_billing_user');
 										$formwriter->linkbutton('change', 'Change', [
 											'href' => '/cart?newbilling=1',
 											'class' => 'btn btn-outline-secondary btn-sm'
@@ -153,7 +153,7 @@ $page_vars = $page_vars->data;
 								</div>
 								<div class="card-body">
 									<?php
-									$formwriter = $page->getFormWriter('form2', 'v2');
+									$formwriter = $page->getFormWriter('form2');
 
 									$formwriter->begin_form([
 										'id' => '',
@@ -287,7 +287,7 @@ $page_vars = $page_vars->data;
 
 									<!-- Add Coupon Form -->
 									<?php
-									$formwriter = $page->getFormWriter('form_coupon', 'v2');
+									$formwriter = $page->getFormWriter('form_coupon');
 									$formwriter->begin_form([
 										'id' => '',
 										'method' => 'GET',
@@ -345,7 +345,7 @@ $page_vars = $page_vars->data;
 									</div>
 									<div class="card-body">
 										<?php
-										$formwriter = $page->getFormWriter('form_stripe', 'v2');
+										$formwriter = $page->getFormWriter('form_stripe');
 										if($settings->get_setting('checkout_type') == 'stripe_checkout'):
 											echo $page_vars['stripe_helper']->output_stripe_checkout_form($cart->get_hash());
 										else:
@@ -388,7 +388,7 @@ $page_vars = $page_vars->data;
 									<div class="card-body text-center">
 										<p class="text-muted mb-4">Your order total is <?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></p>
 										<?php
-										$formwriter = $page->getFormWriter('form4', 'v2');
+										$formwriter = $page->getFormWriter('form4');
 										$formwriter->begin_form([
 											'id' => '',
 											'method' => 'POST',

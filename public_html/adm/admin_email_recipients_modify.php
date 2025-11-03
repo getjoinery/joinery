@@ -132,7 +132,7 @@
 		}
 
 		echo '<tr><td colspan="3">';
-		$formwriter = $page->getFormWriter('form3', 'v2');
+		$formwriter = $page->getFormWriter('form3');
 		$formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
 
 		$groups = new MultiGroup(
@@ -169,7 +169,7 @@
 			NULL);  //OFFSET
 		$events->load();
 
-		$formwriter = $page->getFormWriter('form4', 'v2');
+		$formwriter = $page->getFormWriter('form4');
 		$formwriter->begin_form('form4', 'POST', '/admin/admin_email_recipients_modify');
 		$optionvals = $events->get_dropdown_array();
 

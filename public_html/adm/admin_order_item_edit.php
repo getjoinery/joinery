@@ -99,7 +99,7 @@
 	$pageoptions['title'] = "Edit Order Item";
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $order_item,
 		'edit_primary_key_value' => $order_item->key
 	]);

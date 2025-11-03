@@ -94,7 +94,7 @@ if ($dry_run['can_delete']) {
 	$pageoptions['title'] = 'Delete User '.$user->display_name();
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter = $page->getFormWriter('form1');
 	echo $formwriter->begin_form();
 
 	echo '<fieldset><h4>Confirm Delete</h4>';

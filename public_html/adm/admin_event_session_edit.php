@@ -210,7 +210,7 @@
 	$page->begin_box($pageoptions);
 
 	// FormWriter V2 with model and edit_primary_key_value
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $event_session,
 		'edit_primary_key_value' => $event_session->key
 	]);
@@ -270,7 +270,7 @@
 		$page->begin_box($pageoptions);
 
 		// Editing an existing event
-		$formwriter = $page->getFormWriter('form2', 'v2');
+		$formwriter = $page->getFormWriter('form2');
 
 		$formwriter->begin_form('form2', 'POST', '/admin/admin_event_session_edit');
 
@@ -303,7 +303,7 @@
 
 		//$page->begin_box();
 		echo '<hr><div style="margin-left:20px"><h4>Bulk upload</h4>';
-		$formwriter = $page->getFormWriter('fileupload', 'v2');
+		$formwriter = $page->getFormWriter('fileupload');
 
 		echo $formwriter->file_upload_full(array('evs_event_session_id'=> $event_session->key));
 		$formwriter->end_form();

@@ -21,7 +21,7 @@
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'Change Password');
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/profile/password_edit'
 	]);
 

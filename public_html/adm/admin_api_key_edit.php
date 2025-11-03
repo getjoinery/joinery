@@ -23,7 +23,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing API key
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $api_key,
 		'edit_primary_key_value' => $api_key->key
 	]);

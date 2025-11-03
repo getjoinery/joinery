@@ -24,7 +24,7 @@ if ($error_message) {
 }
 
 // Initialize FormWriter V2
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
     'model' => $survey,
     'edit_primary_key_value' => ($survey && $survey->key) ? $survey->key : null
 ]);

@@ -116,7 +116,7 @@
 			?><p>We currently support YouTube and Vimeo.</p><?php
 		}
 
-		$formwriter = $page->getFormWriter('form1', 'v2', [
+		$formwriter = $page->getFormWriter('form1', [
 			'model' => $video,
 			'edit_primary_key_value' => $video->key
 		]);

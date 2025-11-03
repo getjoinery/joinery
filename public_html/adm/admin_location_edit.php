@@ -83,7 +83,7 @@
 	$form_values['loc_description'] = $content;
 
 	// Editing an existing location - use automatic form filling
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'debug' => true,
 		'values' => $form_values,
 		'edit_primary_key_value' => $location->key
@@ -146,7 +146,7 @@
 	
 	if(count($optionvals)){
 
-		$formwriter = $page->getFormWriter('form_load_version', 'v2');
+		$formwriter = $page->getFormWriter('form_load_version');
 
 		echo $formwriter->begin_form();
 		$formwriter->hiddeninput('loc_location_id', ['value' => $location->key]);

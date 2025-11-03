@@ -47,7 +47,7 @@ else{
 	$page->admin_header(10);
 
 	echo '<h1>Event Log</h1>';
-	$formwriter = $page->getFormWriter('form1', 'v2');
+	$formwriter = $page->getFormWriter('form1');
 	$formwriter->begin_form('form', 'POST', '/admin/admin_log_event');
 
 	echo '<fieldset><h4>Confirm</h4>';

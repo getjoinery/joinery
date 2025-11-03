@@ -76,7 +76,7 @@
 		$options['title'] = 'Edit Url';
 		$page->begin_box($options);
 
-		$formwriter = $page->getFormWriter('form1', 'v2', [
+		$formwriter = $page->getFormWriter('form1', [
 			'values' => $url->export_as_array(),
 			'edit_primary_key_value' => $url->key
 		]);

@@ -46,7 +46,7 @@
 	$files->load();
 
 	// Editing an existing mailing_list
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $mailing_list,
 		'edit_primary_key_value' => $mailing_list->key
 	]);

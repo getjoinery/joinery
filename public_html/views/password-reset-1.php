@@ -91,7 +91,7 @@ $page_vars = $page_vars->data;
 							<p class="text-muted mb-4">Enter your email address and we'll send you a link to reset your password.</p>
 
 							<?php
-							$formwriter = $page->getFormWriter('form1', 'v2');
+							$formwriter = $page->getFormWriter('form1');
 
 							$formwriter->begin_form([
 								'id' => '',

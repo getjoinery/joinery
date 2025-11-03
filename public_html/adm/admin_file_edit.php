@@ -72,7 +72,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing file
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $file,
 		'edit_primary_key_value' => $file->key
 	]);

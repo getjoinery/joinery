@@ -24,8 +24,8 @@ class AdminPage extends PublicPageFalcon {
      *
      * Usage:
      *   $formwriter = $page->getFormWriter('form1');                                    // V1 (default)
-     *   $formwriter = $page->getFormWriter('form1', 'v2');                             // V2 (modern)
-     *   $formwriter = $page->getFormWriter('form1', 'v2', ['csrf' => false]);          // V2 without CSRF
+     *   $formwriter = $page->getFormWriter('form1');                             // V2 (modern)
+     *   $formwriter = $page->getFormWriter('form1', ['csrf' => false]);          // V2 without CSRF
      */
     public function getFormWriter($form_id = 'form1', $version = 'v1', $form_options = []) {
         if ($version === 'v2') {

@@ -165,7 +165,7 @@
 
 
 		// Get FormWriter using theme-aware pattern
-		$formwriter = $page->getFormWriter('form1', 'v2');	
+		$formwriter = $page->getFormWriter('form1');	
 		
 		
 		echo $formwriter->begin_form('form1', 'POST', '/utils/publish_upgrade');

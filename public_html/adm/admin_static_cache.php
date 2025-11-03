@@ -452,7 +452,7 @@ if (!empty($display_messages)) {
     <div class="col-12">
         <h5 class="mb-3">Cache Diagnostic Tool</h5>
                 <?php
-                $formwriter = $page->getFormWriter('diagnose_form', 'v2');
+                $formwriter = $page->getFormWriter('diagnose_form');
 
                 $formwriter->begin_form();
                 $formwriter->textinput('diagnose_url', 'URL to diagnose', [
@@ -629,7 +629,7 @@ if (!empty($display_messages)) {
     <div class="col-md-6">
         <h5 class="mb-3">Invalidate Specific URL</h5>
                 <?php
-                $formwriter = $page->getFormWriter('invalidate_form', 'v2');
+                $formwriter = $page->getFormWriter('invalidate_form');
 
                 $formwriter->begin_form();
                 $formwriter->textinput('url', 'URL to invalidate', [
@@ -645,7 +645,7 @@ if (!empty($display_messages)) {
     <div class="col-md-6">
         <h5 class="mb-3">Mark URL as Non-Cacheable</h5>
                 <?php
-                $formwriter = $page->getFormWriter('nostatic_form', 'v2');
+                $formwriter = $page->getFormWriter('nostatic_form');
 
                 $formwriter->begin_form();
                 $formwriter->textinput('url', 'URL to exclude', [

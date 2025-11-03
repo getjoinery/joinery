@@ -20,7 +20,7 @@
 	$pageoptions['title'] = $address->key ? 'Edit Address' : 'Add Address';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $address,
 		'edit_primary_key_value' => $address->key
 	]);

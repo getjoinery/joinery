@@ -27,7 +27,7 @@
 	echo PublicPage::tab_menu($page_vars['tab_menus'],'Edit Account');
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $page_vars['user'],
 		'action' => '/profile/account_edit'
 	]);

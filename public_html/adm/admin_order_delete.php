@@ -23,7 +23,7 @@ $options['title'] = 'Delete Order';
 //$options['altlinks'] = array('Edit Url'=>'/admin/admin_url_edit?url_url_id='.$url->key);
 $page->begin_box($options);
 
-$formwriter = $page->getFormWriter('form1', 'v2');
+$formwriter = $page->getFormWriter('form1');
 echo $formwriter->begin_form();
 
 echo '<fieldset><h4>Confirm Delete</h4>';

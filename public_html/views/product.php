@@ -39,7 +39,7 @@ $page_vars = $page_vars->data;
 		echo '<div class="card-body p-4">';
 		echo '<p class="mb-4">Is everything correct?</p>';
 
-		$formwriter = $page->getFormWriter('product_form', 'v2');
+		$formwriter = $page->getFormWriter('product_form');
 		$formwriter->begin_form([
 			'id' => '',
 			'method' => 'POST',
@@ -149,7 +149,7 @@ $page_vars = $page_vars->data;
 											<?php
 										elseif(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)):
 											// Product can be added to cart
-											$formwriter = $page->getFormWriter('product_form', 'v2');
+											$formwriter = $page->getFormWriter('product_form');
 											$formwriter->begin_form([
 												'id' => 'product-quantity',
 												'method' => 'POST',

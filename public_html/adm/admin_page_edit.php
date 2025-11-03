@@ -101,7 +101,7 @@
 		'pag_is_published' => $is_published
 	];
 
-	$formwriter = $paget->getFormWriter('form1', 'v2', [
+	$formwriter = $paget->getFormWriter('form1', [
 		'model' => $page,
 		'values' => $override_values,
 		'edit_primary_key_value' => $page->key
@@ -149,7 +149,7 @@
 
 		if(count($optionvals)){
 
-			$formwriter = $paget->getFormWriter('form_load_version', 'v2', [
+			$formwriter = $paget->getFormWriter('form_load_version', [
 				'action' => '/admin/admin_page_edit',
 				'method' => 'GET'
 			]);

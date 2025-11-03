@@ -15,7 +15,7 @@ $hoptions = array(
 );
 $page->public_header($hoptions, NULL);
 
-$formwriter = $page->getFormWriter('tier_form', 'v2');
+$formwriter = $page->getFormWriter('tier_form');
 
 echo PublicPage::BeginPage('Change Tier', $hoptions);
 

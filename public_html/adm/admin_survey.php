@@ -160,7 +160,7 @@ foreach ($survey_questions as $survey_question) {
 
     // Create form with deferred output
     $form_id = 'remove_form_' . $survey_question->key;
-    $formwriter = $page->getFormWriter($form_id, 'v2', [
+    $formwriter = $page->getFormWriter($form_id, [
         'deferred_output' => true,
         'action' => '/admin/admin_survey'
     ]);
@@ -182,7 +182,7 @@ foreach ($survey_questions as $survey_question) {
 if ($numquestions && $survey->key) {
     echo '<tr><td colspan="3">';
 
-    $formwriter = $page->getFormWriter('form_add_question', 'v2', [
+    $formwriter = $page->getFormWriter('form_add_question', [
         'action' => '/admin/admin_survey?svy_survey_id=' . $survey->key
     ]);
 

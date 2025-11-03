@@ -98,7 +98,7 @@ else{
 	$pageoptions['title'] = 'Refund charge';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/admin/admin_order_refund',
 		'method' => 'POST'
 	]);

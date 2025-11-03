@@ -35,7 +35,7 @@
 		<?php
 	}
 
-	$formwriter = $page->getFormWriter('form7', 'v2', [
+	$formwriter = $page->getFormWriter('form7', [
 		'action' => '/profile/phone_verify_send?disptype=returnadmin',
 		'values' => $phone->export_as_array()
 	]);
@@ -56,7 +56,7 @@
 	$formwriter->submitbutton('btn_resend', 'Resend');
 	$formwriter->end_form();
 
-	$formwriter = $page->getFormWriter('form8', 'v2', [
+	$formwriter = $page->getFormWriter('form8', [
 		'action' => '/profile/phone_verify_check?disptype=returnadmin'
 	]);
 
