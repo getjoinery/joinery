@@ -23,7 +23,7 @@ array(
 
 	echo '<h1>Delete User</h1>';
 
-$formwriter = $page->getFormWriter('form1', 'v2');
+$formwriter = $page->getFormWriter('form1');
 echo $formwriter->begin_form();
 
 echo '<fieldset><h4>Confirm Delete</h4>';

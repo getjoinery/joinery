@@ -34,7 +34,7 @@ if($order->key && $order->get('ord_timestamp')){
 }
 
 // Editing an existing order
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
 	'model' => $order,
 	'edit_primary_key_value' => $order->key,
 	'values' => $override_values

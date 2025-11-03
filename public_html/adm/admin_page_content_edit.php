@@ -102,7 +102,7 @@
 		'pac_link' => $page_link
 	];
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $page_content,
 		'values' => $override_values,
 		'edit_primary_key_value' => $page_content->key
@@ -160,7 +160,7 @@
 
 		if(count($optionvals) > 0){
 
-			$formwriter = $page->getFormWriter('form_load_version', 'v2', [
+			$formwriter = $page->getFormWriter('form_load_version', [
 				'action' => '/admin/admin_page_content_edit',
 				'method' => 'GET'
 			]);

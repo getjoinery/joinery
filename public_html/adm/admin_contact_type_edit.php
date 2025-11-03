@@ -24,7 +24,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing contact_type
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $contact_type,
 		'edit_primary_key_value' => $contact_type->key
 	]);

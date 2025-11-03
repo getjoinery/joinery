@@ -52,7 +52,7 @@
 	$page->begin_box($pageoptions);
 
 	// FormWriter V2 with model and edit_primary_key_value
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $group,
 		'edit_primary_key_value' => $group->key
 	]);

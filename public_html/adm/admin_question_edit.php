@@ -94,7 +94,7 @@
 	<?php
 
 	// Get V2 FormWriter instance
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/admin/admin_question_edit',
 		'method' => 'POST',
 		'model' => $question,
@@ -190,7 +190,7 @@
 		else{
 			echo '<div id="add-option-form">';
 			echo '<h4>Add New Question Option</h4>';
-			$formwriter2 = $page->getFormWriter('form2', 'v2', [
+			$formwriter2 = $page->getFormWriter('form2', [
 				'action' => '/admin/admin_question_edit',
 				'method' => 'POST'
 			]);

@@ -20,7 +20,7 @@
 	$pageoptions['title'] = $phone_number->key ? 'Edit Phone Number' : 'Add Phone Number';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $phone_number,
 		'edit_primary_key_value' => $phone_number->key
 	]);

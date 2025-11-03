@@ -38,7 +38,7 @@ if (!$product->key) {
 }
 
 // FormWriter V2 with model and edit_primary_key_value
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
 	'model' => $product,
 	'edit_primary_key_value' => $product->key,
 	'values' => $override_values

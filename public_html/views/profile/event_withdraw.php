@@ -17,7 +17,7 @@
 	}
 	else if(!$event->get('evt_end_time') || $event->get('evt_end_time') > date('Y-m-d H:i:s')){
 		$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'action' => '/profile/event_withdraw'
 	]);
 	$formwriter->begin_form();

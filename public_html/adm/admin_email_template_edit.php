@@ -59,7 +59,7 @@
       <div class="p-3">';
 
 	// FormWriter V2 with model and edit_primary_key_value
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $email_template,
 		'edit_primary_key_value' => $email_template->key
 	]);
@@ -105,7 +105,7 @@
 	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
-		$formwriter = $page->getFormWriter('form_load_version', 'v2');
+		$formwriter = $page->getFormWriter('form_load_version');
 		$formwriter->begin_form('form_load_version', 'GET', '/admin/admin_email_template_edit');
 		$formwriter->hiddeninput('emt_email_template_id', '', ['value' => $email_template->key]);
 		$formwriter->dropinput('cnv_content_version_id', 'Load another version', [

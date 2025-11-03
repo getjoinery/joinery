@@ -33,7 +33,7 @@ $page->admin_header(array(
 
     <?php
     // Initialize FormWriter V2
-    $formwriter = $page->getFormWriter('admin_tier_edit', 'v2', [
+    $formwriter = $page->getFormWriter('admin_tier_edit', [
         'model' => $tier,
         'edit_primary_key_value' => ($tier && $tier->key) ? $tier->key : null,
         'validation' => false  // Temporarily disable validation for debugging

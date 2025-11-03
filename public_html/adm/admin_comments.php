@@ -58,7 +58,7 @@ foreach ($comments as $comment){
 	array_push($rowvalues, $status);
 
 	if($comment->get('cmt_delete_time')){
-		$formwriter = $page->getFormWriter('del_form_' . $comment->key, 'v2', [
+		$formwriter = $page->getFormWriter('del_form_' . $comment->key, [
 			'deferred_output' => true,
 			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
 			'csrf' => false
@@ -71,7 +71,7 @@ foreach ($comments as $comment){
 		$delform = $formwriter->getFieldsHTML();
 	}
 	else{
-		$formwriter = $page->getFormWriter('del_form_' . $comment->key, 'v2', [
+		$formwriter = $page->getFormWriter('del_form_' . $comment->key, [
 			'deferred_output' => true,
 			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
 			'csrf' => false
@@ -86,7 +86,7 @@ foreach ($comments as $comment){
 	array_push($rowvalues, $delform);
 
 	if($comment->get('cmt_is_approved')){
-		$formwriter = $page->getFormWriter('approve_form_' . $comment->key, 'v2', [
+		$formwriter = $page->getFormWriter('approve_form_' . $comment->key, [
 			'deferred_output' => true,
 			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
 			'csrf' => false
@@ -99,7 +99,7 @@ foreach ($comments as $comment){
 		$delform = $formwriter->getFieldsHTML();
 	}
 	else{
-		$formwriter = $page->getFormWriter('approve_form_' . $comment->key, 'v2', [
+		$formwriter = $page->getFormWriter('approve_form_' . $comment->key, [
 			'deferred_output' => true,
 			'action' => '/admin/admin_comment?cmt_comment_id=' . $comment->key,
 			'csrf' => false

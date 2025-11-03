@@ -22,7 +22,7 @@ $pageoptions['title'] = "New Email";
 $page->begin_box($pageoptions);
 
 // Editing an existing email
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
 	'model' => $email,
 	'edit_primary_key_value' => $email->key
 ]);

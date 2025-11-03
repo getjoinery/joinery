@@ -22,7 +22,7 @@
 	$page->begin_box($pageoptions);
 
 	// Editing an existing comment
-	$formwriter = $page->getFormWriter('form1', 'v2', [
+	$formwriter = $page->getFormWriter('form1', [
 		'model' => $comment,
 		'edit_primary_key_value' => $comment->key
 	]);

@@ -27,7 +27,7 @@ echo '<div class="row">
       <div class="p-3">';
 
 // FormWriter V2 with model and edit_primary_key_value
-$formwriter = $page->getFormWriter('form1', 'v2', [
+$formwriter = $page->getFormWriter('form1', [
 	'model' => $event,
 	'edit_primary_key_value' => $event->key
 ]);
@@ -166,7 +166,7 @@ echo '    </div>
 $optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 if(count($optionvals)){
-	$formwriter = $page->getFormWriter('form_load_version', 'v2');
+	$formwriter = $page->getFormWriter('form_load_version');
 	$formwriter->begin_form('form_load_version', 'GET', '/admin/admin_event_edit');
 	$formwriter->hiddeninput('evt_event_id', '', ['value' => $event->key]);
 	$formwriter->dropinput('cnv_content_version_id', 'Load another description', [

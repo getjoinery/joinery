@@ -46,7 +46,7 @@ switch ($interval)
 		echo "Houston, we have a problem.";
 }
 
-$formwriter = $page->getFormWriter('form1', 'v2');
+$formwriter = $page->getFormWriter('form1');
 echo $formwriter->begin_form();
 $formwriter->textinput('startdate', 'Start Date', [
 	'value' => $startdate

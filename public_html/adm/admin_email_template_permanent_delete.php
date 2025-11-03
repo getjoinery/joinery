@@ -23,7 +23,7 @@ array(
 $pageoptions['title'] = 'Delete Email Template '.$email_template->get('emt_name');
 $page->begin_box($pageoptions);
 
-$formwriter = $page->getFormWriter('form1', 'v2');
+$formwriter = $page->getFormWriter('form1');
 echo $formwriter->begin_form();
 
 echo '<fieldset><h4>Confirm Delete</h4>';
