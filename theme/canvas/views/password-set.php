@@ -50,7 +50,9 @@ $page_vars = $page_vars->data;
 							<div class="card-body p-4 p-lg-5">
 								<?php
 								$settings = Globalvars::get_instance();
-								$formwriter = $page->getFormWriter('form1');
+								$formwriter = $page->getFormWriter('form1', 'v2', [
+									'action' => '/password-set'
+								]);
 
 								$validation_rules = array();
 								$validation_rules['usr_password']['required']['value'] = 'true';
@@ -59,9 +61,8 @@ $page_vars = $page_vars->data;
 								$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
 								$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
 								$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-								echo $formwriter->set_validate($validation_rules);	
 
-								echo $formwriter->begin_form("form1", "post", "/password-set", true);
+								$formwriter->begin_form();
 								?>
 								
 								<div class="mb-4">

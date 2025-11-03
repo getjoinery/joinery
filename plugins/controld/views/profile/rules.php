@@ -72,7 +72,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			$validation_rules = array();
 			$validation_rules['cdr_rule_hostname']['required']['value'] = 'true';
 			$validation_rules['cdr_rule_action']['required']['value'] = 'true';	
-			echo $formwriter->set_validate($validation_rules);	
 			echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/rules', true);
 			echo $formwriter->hiddeninput('device_id', $device->key);
 			echo $formwriter->hiddeninput('profile_choice', $profile_choice);
@@ -88,7 +87,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			echo $formwriter->dropinput("&nbsp;", "cdr_rule_action", "", $optionvals, NULL, '', FALSE);	
 			echo '</td><td>';
 			echo '<br>';
-			echo $formwriter->new_form_button('New Rule', 'th-btn');
+			echo $formwriter->submitbutton('submit', 'New Rule', ['class' => 'btn btn-primary']);
 			
 			echo '</td></tr>';
 			echo $formwriter->end_form(true);	

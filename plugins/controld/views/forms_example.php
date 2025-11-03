@@ -1,11 +1,11 @@
 <?php
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	// PathHelper is already loaded
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
-		
+
 	$page = new PublicPage(TRUE);
 	$hoptions=array(
 		'is_valid_page' => $is_valid_page,
@@ -14,59 +14,86 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('Log In');
-	
-	
-	$formwriter = $page->getFormWriter();
-	
-	
 
-	
-	$validation_rules = array();
-	$validation_rules['ccd_code']['required']['value'] = 'true';
-	$validation_rules['ccd_is_active']['required']['value'] = 'true';	
-	$validation_rules['cmt_body']['required']['value'] = 'true';	
-	$validation_rules['"products_list[]"']['required']['value'] = 'true';	
-	$validation_rules['single_checkbox']['required']['value'] = 'true';
-	echo $formwriter->set_validate($validation_rules);	
 
-	echo $formwriter->begin_form('contact-form style2', 'POST', '/admin/admin', true);
-	
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/admin/admin'
+	]);
 
-	
-	echo $formwriter->text('Text only field', 'To:', 'something something here is some text to test out columns', NULL);
 
-	echo $formwriter->textinput('', 'ccd_code', NULL, 100, NULL, 'Coupon code', 255, '');	
-	
-	echo $formwriter->textinput('', 'website', NULL, 100, NULL, 'Website', 255, '', '', 'www.text.com/');	
-	
-	
-	
-	
+
+
+	// Note: FormWriter v2 handles validation differently - validation rules are applied per-field through options array
+	// The set_validate() method from v1 is not available in v2
+
+	$formwriter->begin_form('contact-form style2', 'POST');
+
+	$formwriter->textinput('ccd_code', '', [
+		'maxlength' => 255,
+		'placeholder' => 'Coupon code'
+	]);
+
+	$formwriter->textinput('website', '', [
+		'maxlength' => 255,
+		'placeholder' => 'Website',
+		'prefix' => 'www.text.com/'
+	]);
+
+
+
+
 	$optionvals = array(0=>"Inactive", 1=>"Active");
-	echo $formwriter->dropinput("", "ccd_is_active", "", $optionvals, NULL, '', TRUE);
-	
-	echo $formwriter->checkboxinput("Single checkbox", "single_checkbox", "sm:col-span-6", "left", NULL, 1, "Check to filter out disabled users");
-	
-	echo $formwriter->toggleinput("Facebook", "single_toggle", '', 0, 1, '');
-	
-	echo $formwriter->fileinput("File to Upload", "files[]", "sm:col-span-6", 30, '');
+	$formwriter->dropinput("ccd_is_active", "", [
+		'options' => $optionvals
+	]);
 
-	echo $formwriter->textbox('Comment', 'cmt_body', 'sm:col-span-6', 5, 80, NULL, '', 'no');
+	$formwriter->checkboxinput("single_checkbox", "Single checkbox", [
+		'value' => 1,
+		'hint' => "Check to filter out disabled users"
+	]);
 
-	echo $formwriter->textbox('Comment', 'cmt_body2', 'sm:col-span-6', 5, 80, NULL, '', 'yes');
-	
-	echo $formwriter->dateinput("Date only", "startdate", NULL, 30, NULL, "", 10);
-	
+	// Note: toggleinput() does not exist in FormWriter v2
+	// Use checkboxinput or radioinput instead
+
+	$formwriter->fileinput("files[]", "File to Upload", [
+		'maxlength' => 30
+	]);
+
+	$formwriter->textbox('cmt_body', 'Comment', [
+		'rows' => 5,
+		'cols' => 80,
+		'use_editor' => false
+	]);
+
+	$formwriter->textbox('cmt_body2', 'Comment', [
+		'rows' => 5,
+		'cols' => 80,
+		'use_editor' => true
+	]);
+
+	$formwriter->dateinput("startdate", "Date only", [
+		'maxlength' => 30
+	]);
+
 	$optionvals = array("0"=>"Day", "1"=>"Week", "2"=>"Month", "3"=>"Quarter", "4"=>"Year");
 	$disabledvals = array();
 	$readonlyvals = array();
-	echo $formwriter->radioinput("Group by:", "interval", NULL, $optionvals, $interval, $disabledvals , $readonlyvals, 'hint');	
+	$formwriter->radioinput("interval", "Group by:", [
+		'options' => $optionvals,
+		'hint' => 'hint'
+	]);
 
-	echo $formwriter->textinput('City', 'city', 'sm:col-span-2', 100, NULL, '', 255, '');	
-	echo $formwriter->textinput('State', 'state', 'sm:col-span-2', 100, NULL, '', 255, '');	
-	echo $formwriter->textinput('Zip', 'zip', 'sm:col-span-2', 100, NULL, '', 255, '');	
+	$formwriter->textinput('city', 'City', [
+		'maxlength' => 255
+	]);
+	$formwriter->textinput('state', 'State', [
+		'maxlength' => 255
+	]);
+	$formwriter->textinput('zip', 'Zip', [
+		'maxlength' => 255
+	]);
 
-	
+
 	//GET ALL PRODUCTS
 	$searches = array();
 	$sort = LibraryFunctions::fetch_variable('sort', 'product_id', 0, '');
@@ -75,8 +102,8 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$searches,
 		array($sort=>$sdirection));
 	$products->load();
-	$optionvals = $products->get_dropdown_array();	
-	
+	$optionvals = $products->get_dropdown_array();
+
 	if ($coupon_code->key) {
 		//FILL THE CHECKED VALUES
 		$checkedvals = array();
@@ -92,26 +119,31 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$checkedvals = array();
 	}
 	$disabledvals = array();
-	$readonlyvals = array(); 
-	echo $formwriter->checkboxList("Valid products for this code", 'products_list', "", $optionvals, $checkedvals, $disabledvals, $readonlyvals);	
-	
-	
-	echo $formwriter->datetimeinput('Start time', 'ccd_start_time', 'sm:col-span-6', LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
+	$readonlyvals = array();
+	$formwriter->checkboxList('products_list', "Valid products for this code", [
+		'options' => $optionvals,
+		'checked' => $checkedvals
+	]);
 
-	 
-	echo $formwriter->datetimeinput('End time', 'ccd_end_time', 'sm:col-span-3', LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia'), '', '', '');
-	
-	
 
-	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Submit', 'th-btn');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form(true);
+	$formwriter->datetimeinput('ccd_start_time', 'Start time', [
+		'value' => LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia')
+	]);
 
-	
 
-	
+	$formwriter->datetimeinput('ccd_end_time', 'End time', [
+		'value' => LibraryFunctions::convert_time('UTC', $session->get_timezone(), $session->get_timezone(), 'Y-m-d h:ia')
+	]);
+
+	// Note: start_buttons(), new_form_button(), and end_buttons() are v1 methods
+	// Use submitbutton() instead in FormWriter v2
+	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->end_form(true);
+
+
+
+
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));
-	
+
 ?>

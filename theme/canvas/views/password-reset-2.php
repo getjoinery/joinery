@@ -87,7 +87,10 @@ $page_vars = $page_vars->data;
 									<h3>Set New Password</h3>
 
 									<?php
-									$formwriter = $page->getFormWriter('form1');
+									$formwriter = $page->getFormWriter('form1', 'v2', [
+										'action' => '/password-reset-2',
+										'class' => 'mb-0'
+									]);
 									$validation_rules = array();
 									$validation_rules['usr_password']['required']['value'] = 'true';
 									$validation_rules['usr_password']['minlength']['value'] = 5;
@@ -95,9 +98,8 @@ $page_vars = $page_vars->data;
 									$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
 									$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
 									$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-									echo $formwriter->set_validate($validation_rules);
-									echo $formwriter->begin_form("", "post", "/password-reset-2", true, 'class="mb-0"');
-									echo $formwriter->hiddeninput('act_code',$page_vars['act_code']);
+									$formwriter->begin_form();
+									$formwriter->hiddeninput('act_code',$page_vars['act_code']);
 									?>
 
 									<div class="row">

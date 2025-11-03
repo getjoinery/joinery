@@ -31,10 +31,9 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 		echo $formwriter->hiddeninput('product_key', $form_key);
 
 		foreach($page_vars['display_data'] as $key => $value) {
-			echo $formwriter->text('<strong>' . $key . '</strong>', $value, 'ctrlHolder');
 		}
 
-		echo $formwriter->new_form_button('Next Step');
+		echo $formwriter->submitbutton('submit', 'Next Step', ['class' => 'btn btn-primary']);
 		echo $formwriter->end_form();
 		echo PublicPage::EndPage();
 		$page->public_footer($foptions=array('track'=>TRUE));
@@ -115,7 +114,7 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 					echo $formwriter->hiddeninput('product_id', $product_id);
 	
 					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
-						echo $formwriter->new_form_button('Add to Cart', 'primary','full');
+						echo $formwriter->submitbutton('submit', 'Add to Cart', ['class' => 'btn btn-primary btn-block']);
 					}
 					echo $formwriter->end_form(true);
 					$product->output_javascript($formwriter, array());

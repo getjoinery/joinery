@@ -47,8 +47,7 @@
 		$validation_rules['usr_email']['email']['value'] = 'true';
 		$validation_rules['usr_email']['maxlength']['value'] = 64;
 		$validation_rules = $formwriter->antispam_question_validate($validation_rules);
-		echo $formwriter->set_validate($validation_rules);		
-		
+
 		echo $formwriter->begin_form("", "post", "/lists", true);
 
 		if(!$session->get_user_id()){
@@ -83,7 +82,7 @@
 		}
 
 		echo '<div>';
-		echo $formwriter->new_form_button('Submit');
+		echo $formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
 		echo '</div>';
 		echo $formwriter->end_form();
 		

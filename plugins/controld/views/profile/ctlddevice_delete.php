@@ -28,7 +28,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$validation_rules = array();
 	$validation_rules['confirm']['required']['value'] = 'true';
 
-	echo $formwriter->set_validate($validation_rules);	
 
 	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctlddevice_delete', true);
 	
@@ -48,9 +47,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	echo $formwriter->checkboxinput("Confirm deletion", "confirm", "checkbox", "left", 0, 1, "");
 
-	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Delete', 'th-btn');
-	echo $formwriter->end_buttons();
+	echo $formwriter->submitbutton('submit', 'Delete', ['class' => 'btn btn-primary']);
 	echo $formwriter->end_form(true);	
 
 	echo PublicPage::EndPage();

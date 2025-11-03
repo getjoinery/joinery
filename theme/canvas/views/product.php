@@ -38,9 +38,11 @@ $page_vars = $page_vars->data;
 		echo '</div>';
 		echo '<div class="card-body p-4">';
 		echo '<p class="mb-4">Is everything correct?</p>';
-		
-		$formwriter = $page->getFormWriter('product_form');
-		echo $formwriter->begin_form("", "POST", "/product"); 
+
+		$formwriter = $page->getFormWriter('product_form', 'v2', [
+			'action' => '/product'
+		]);
+		$formwriter->begin_form(); 
 
 		echo $formwriter->hiddeninput('product_id', $product_id);
 		echo $formwriter->hiddeninput('product_key', $form_key);
@@ -52,7 +54,7 @@ $page_vars = $page_vars->data;
 		}
 
 		echo '<div class="d-grid">';
-		echo $formwriter->new_form_button('Confirm Order', 'btn btn-primary btn-lg');
+		echo $formwriter->submitbutton('submit', 'Confirm Order', ['class' => 'btn btn-primary']);
 		echo '</div>';
 		echo $formwriter->end_form();
 		
@@ -149,7 +151,7 @@ $page_vars = $page_vars->data;
 											
 											if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 												echo '<div class="d-grid gap-2 mt-3">';
-												echo $formwriter->new_form_button('Add to Cart', 'btn btn-primary btn-lg', 'full');
+												echo $formwriter->submitbutton('submit', 'Add to Cart', ['class' => 'btn btn-primary']);
 												echo '</div>';
 											} else {
 												echo '<div class="alert alert-info mb-0">';

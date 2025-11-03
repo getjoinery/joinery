@@ -30,21 +30,14 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	echo PublicPage::tab_menu($tab_menus, 'Change Password');
 
-	$formwriter = $page->getFormWriter();
-				
-	$validation_rules = array();
-	if ($page_vars['has_old_password']) {
-		$validation_rules['usr_old_password']['required']['value'] = 'true';
-	}
-	$validation_rules['usr_password']['required']['value'] = 'true';
-	$validation_rules['usr_password']['minlength']['value'] = 5;
-	$validation_rules['usr_password_again']['required']['value'] = 'true';
-	$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
-	$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
-	$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-	echo $formwriter->set_validate($validation_rules);					
-				
-	echo $formwriter->begin_form("", "post", "/profile/password_edit");
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/profile/password_edit'
+	]);
+
+	// Note: FormWriter v2 handles validation differently - validation rules applied per-field
+	// The set_validate() method is not available in v2
+
+	$formwriter->begin_form();
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'addressbox') {	
@@ -53,14 +46,19 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	}
 
 	if ($page_vars['has_old_password']) {
-		echo $formwriter->passwordinput("Old Password", "usr_old_password", NULL, 20, NULL , '',255, "");
+		$formwriter->passwordinput('usr_old_password', 'Old Password', ['maxlength' => 255]);
 	}
-	echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
-	echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
+	$formwriter->passwordinput('usr_password', 'New Password', [
+		'maxlength' => 255,
+		'hint' => 'Must be at least 5 characters.'
+	]);
+	$formwriter->passwordinput('usr_password_again', 'Retype New Password', [
+		'maxlength' => 255
+	]);
 
-	echo $formwriter->new_form_button('Submit', 'th-btn');
+	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
 
-	echo $formwriter->end_form();		
+	$formwriter->end_form();		
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE));

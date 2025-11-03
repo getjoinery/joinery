@@ -1,6 +1,6 @@
 <?php
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	
+
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/items_class.php'));
@@ -17,7 +17,7 @@
 	}
 
 	if($_POST){
-		
+
 		$editable_fields = array('itm_body', 'itm_title', 'itm_is_published', 'itm_description', 'itm_body', 'itm_is_pinned');
 
 		foreach($editable_fields as $field) {
@@ -32,19 +32,19 @@
 				$item->set('itm_link', $item->create_url($event->get('itm_title')));
 			}
 		}
-		
+
 		if($_REQUEST['itm_is_published']){
 			if(!$item->get('itm_published_time')){
 				$item->set('itm_published_time', 'NOW()');
 			}
-		}	
+		}
 		else {
 			$item->set('itm_published_time', NULL);
 		}
-		
+
 		if(!$item->key){
 			$item->set('itm_usr_user_id',$session->get_user_id());
-		}	
+		}
 
 		$item->prepare();
 		$item->save();
@@ -59,12 +59,12 @@
 				$tags_array[$key] = preg_replace("/[^A-Za-z0-9 -_]/", '', trim($tag));
 			}
 			Group::AddMemberBulkByName($item->key, $tags_array, 'item_tag');
-			
+
 			//$item->save_tags($tags_array);
 		}
 */
 		LibraryFunctions::redirect('/admin/admin_item?itm_item_id='. $item->key);
-		exit;		
+		exit;
 	}
 
 	$title = $item->get('itm_name');
@@ -77,16 +77,16 @@
 	}
 
 	$page = new AdminPage();
-	$page->admin_header(	
+	$page->admin_header(
 	array(
 		'menu-id'=> 'blog-items',
 		'breadcrumbs' => array(
-			'Items'=>'/admin/admin_items', 
+			'Items'=>'/admin/admin_items',
 			'Edit Item' => '',
 		),
 		'session' => $session,
 	)
-	);	
+	);
 
 	$pageoptions['title'] = "Edit Item";
 	$page->begin_box($pageoptions);
@@ -95,9 +95,11 @@
     <div class="col-md-8">
       <div class="p-3">';
 
-	// Editing an existing email
-	$formwriter = LibraryFunctions::get_formwriter_object('form1', 'admin');
-	
+	// Editing an existing item
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/admin/admin_item_edit'
+	]);
+
 	$validation_rules = array();
 	$validation_rules['itm_description']['required']['value'] = 'true';
 	$validation_rules['itm_description']['minlength']['value'] = 10;
@@ -105,40 +107,56 @@
 	$validation_rules['itm_name']['minlength']['value'] = 2;
 	if($_SESSION['permission'] == 10){
 		$validation_rules['itm_link']['required']['value'] = 'true';
-	}	
-	echo $formwriter->set_validate($validation_rules);	
+	}
 
-	echo $formwriter->begin_form('form', 'POST', '/admin/admin_item_edit');
+	$formwriter->begin_form();
 
 	$tags = '';
 	if($item->key){
-		echo $formwriter->hiddeninput('itm_item_id', $item->key);
-		echo $formwriter->hiddeninput('action', 'edit');
-		
+		$formwriter->hiddeninput('itm_item_id', $item->key);
+		$formwriter->hiddeninput('action', 'edit');
+
 		//$item_tags = Group::get_groups_for_member($item->key, 'item_tag', false, 'names');
 
 		//$tags = implode(', ', $item_tags);
 	}
 
-	echo $formwriter->textinput('Item name', 'itm_title', NULL, 100, $title, '', 255, '');	
-	
-	echo $formwriter->textinput('Short description (optional)', 'itm_short_description', NULL, 100, $item->get('itm_short_description'), '', 255, '');	
-	
-	//echo $formwriter->textinput('Tags (optional, separate with comma)', 'tags', NULL, 100, $tags, '', 255, '');	
-	
+	$formwriter->textinput('itm_title', 'Item name', [
+		'value' => $title,
+		'maxlength' => 255
+	]);
+
+	$formwriter->textinput('itm_short_description', 'Short description (optional)', [
+		'value' => $item->get('itm_short_description'),
+		'maxlength' => 255
+	]);
+
+	//echo $formwriter->textinput('Tags (optional, separate with comma)', 'tags', NULL, 100, $tags, '', 255, '');
+
 	if(!$item->get('itm_link') || $_SESSION['permission'] == 10){
-		echo $formwriter->textinput('Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', 'itm_link', NULL, 100, $item->get('itm_link'), '', 255, '');	
-	}	
+		$formwriter->textinput('itm_link', 'Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', [
+			'value' => $item->get('itm_link'),
+			'maxlength' => 255
+		]);
+	}
 
 	$optionvals = array(0=>"No", 1=>"Yes");
-	echo $formwriter->dropinput("Published", "itm_is_published", "ctrlHolder", $optionvals, $item->get('itm_is_published'), '', FALSE);
+	$formwriter->dropinput("itm_is_published", "Published", [
+		'options' => $optionvals,
+		'value' => $item->get('itm_is_published')
+	]);
 
-	echo $formwriter->textbox('Item content', 'itm_body', 'ctrlHolder', 5, 80, $content, '', 'yes');
+	$formwriter->textbox('itm_body', 'Item content', [
+		'rows' => 5,
+		'cols' => 80,
+		'value' => $content,
+		'use_editor' => true
+	]);
 
-	echo $formwriter->start_buttons();
-	echo $formwriter->new_form_button('Submit');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form();
+	$formwriter->start_buttons();
+	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->end_buttons();
+	$formwriter->end_form();
 
 	echo '    </div>
     </div>
@@ -151,21 +169,26 @@
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$content_versions->load();
-	
+
 	$optionvals = $content_versions->get_dropdown_array(FALSE, $session);
 
 	if(count($optionvals)){
-		$formwriter = LibraryFunctions::get_formwriter_object('form_load_version', 'admin');
-		echo $formwriter->begin_form('form_load_version', 'GET', '/admin/admin_item_edit');
-		echo $formwriter->hiddeninput('itm_item_id', $item->key);
-		echo $formwriter->dropinput("Load another version", "cnv_content_version_id", "ctrlHolder", $optionvals, NULL, '', TRUE);
-		echo $formwriter->new_form_button('Load');	
-		echo $formwriter->end_form();
+		$formwriter = $page->getFormWriter('form_load_version', 'v2', [
+			'action' => '/admin/admin_item_edit',
+			'method' => 'GET'
+		]);
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('itm_item_id', $item->key);
+		$formwriter->dropinput("cnv_content_version_id", "Load another version", [
+			'options' => $optionvals
+		]);
+		$formwriter->submitbutton('submit', 'Load', ['class' => 'btn btn-primary']);
+		$formwriter->end_form();
 	}
 	else{
 		echo 'No saved versions.';
 	}
-	
+
 	echo '	</div>
 	</div>
 </div>	';

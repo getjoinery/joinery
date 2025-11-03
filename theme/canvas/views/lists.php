@@ -71,8 +71,10 @@ $page_vars = $page_vars->data;
 							<div class="card-body p-4 p-lg-5">
 								<?php
 								$settings = Globalvars::get_instance();
-								$formwriter = $page->getFormWriter('form1');
-								
+								$formwriter = $page->getFormWriter('form1', 'v2', [
+									'action' => '/lists'
+								]);
+
 								$validation_rules = array();
 								$validation_rules['usr_first_name']['required']['value'] = 'true';
 								$validation_rules['usr_first_name']['minlength']['value'] = 1;
@@ -85,9 +87,8 @@ $page_vars = $page_vars->data;
 								$validation_rules['usr_email']['email']['value'] = 'true';
 								$validation_rules['usr_email']['maxlength']['value'] = 64;
 								$validation_rules = $formwriter->antispam_question_validate($validation_rules);
-								echo $formwriter->set_validate($validation_rules);		
-								
-								echo $formwriter->begin_form("", "post", "/lists", true);
+
+								$formwriter->begin_form();
 								?>
 
 								<?php if(!$session->get_user_id()): ?>

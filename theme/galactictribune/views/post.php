@@ -159,7 +159,6 @@ $page_vars = $page_vars->data;
 						$validation_rules['name']['required']['value'] = 'true';
 						$validation_rules['name']['minlength']['value'] = 2;
 						$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-						echo $formwriter->set_validate($validation_rules);
 
 						echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
 						echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
@@ -240,7 +239,6 @@ $page_vars = $page_vars->data;
 			$validation_rules['name']['required']['value'] = 'true';
 			$validation_rules['name']['minlength']['value'] = 2;
 			$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-			echo $formwriter->set_validate($validation_rules);
 
 			echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
 			?>

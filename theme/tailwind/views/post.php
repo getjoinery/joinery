@@ -72,7 +72,6 @@
 								$validation_rules['name']['required']['value'] = 'true';
 								$validation_rules['name']['minlength']['value'] = 2;
 								$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-								echo $formwriter->set_validate($validation_rules);			
 
 								echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
 
@@ -88,9 +87,9 @@
 									echo $formwriter->captcha_hidden_input('blog');
 								}
 
-								echo $formwriter->start_buttons('flex justify-end sm:col-span-6');
-								echo $formwriter->new_form_button('Comment', 'secondary');
-								echo $formwriter->end_buttons();
+								
+								echo $formwriter->submitbutton('submit', 'Comment', ['class' => 'btn btn-primary']);
+								
 								echo $formwriter->end_form(true);
 								?>
 
@@ -157,7 +156,6 @@
 											$validation_rules['name']['required']['value'] = 'true';
 											$validation_rules['name']['minlength']['value'] = 2;
 											$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-											echo $formwriter->set_validate($validation_rules);			
 
 											echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
 											echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
@@ -173,9 +171,9 @@
 												echo $formwriter->captcha_hidden_input('blog');
 											}
 
-											echo $formwriter->start_buttons('flex justify-end sm:col-span-6');
-											echo $formwriter->new_form_button('Comment', 'secondary');
-											echo $formwriter->end_buttons();
+											
+											echo $formwriter->submitbutton('submit', 'Comment', ['class' => 'btn btn-primary']);
+											
 											echo $formwriter->end_form(true);
 											echo '</div>';
 										}

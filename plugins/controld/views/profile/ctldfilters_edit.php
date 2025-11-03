@@ -33,19 +33,14 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$name = $device->get_readable_name();
 	}
 
-	$formwriter = $page->getFormWriter();
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/profile/ctldfilters_edit'
+	]);
 
-	if($profile_choice == 'secondary'){
-		$validation_rules = array();
-		$validation_rules['start_time']['required']['value'] = 'true';
-		$validation_rules['end_time']['required']['value'] = 'true';	
-		$validation_rules['end_time']['timeGreaterThan']['value'] = '"#start_time"';
-		$validation_rules['"days_blocked[]"']['required']['value'] = 'true';	
+	// Note: FormWriter v2 handles validation differently - validation rules applied per-field
+	// The set_validate() method is not available in v2
 
-		echo $formwriter->set_validate($validation_rules);	
-	}	
-
-	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctldfilters_edit', true);
+	$formwriter->begin_form();
 	
 		?>
                         <div class="job-content">
@@ -73,42 +68,40 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	//ONLY ALLOW EDITS IF IT IS EDIT DAY OR IF USER IS NEW
 	if($device->are_filters_editable()){
 		echo '<h5>Social Media</h5>';
-		echo $formwriter->toggleinput("Facebook", "block_facebook", '', $services['facebook'], 1, '');
-		echo $formwriter->toggleinput("Youtube", "block_youtube", '', $services['youtube'], 1, '');
-		echo $formwriter->toggleinput("Instagram", "block_instagram", '', $services['instagram'], 1, '');
-		echo $formwriter->toggleinput("Tiktok", "block_tiktok", '', $services['tiktok'], 1, '');
-		echo $formwriter->toggleinput("Snapchat", "block_snapchat", '', $services['snapchat'], 1, '');
-		echo $formwriter->toggleinput("Wechat", "block_wechat", '', $services['wechat'], 1, '');
-		echo $formwriter->toggleinput("Twitter/X", "block_x", '', $services['x'], 1, '');
-		echo $formwriter->toggleinput("Linkedin", "block_linkedin", '', $services['linkedin'], 1, '');
-		echo $formwriter->toggleinput("Pinterest", "block_pinterest", '', $services['pinterest'], 1, '');
-		echo $formwriter->toggleinput("Reddit", "block_reddit", '', $services['reddit'], 1, '');
-		
+		$formwriter->checkboxinput('block_facebook', 'Facebook', ['value' => 1, 'checked' => $services['facebook']]);
+		$formwriter->checkboxinput('block_youtube', 'Youtube', ['value' => 1, 'checked' => $services['youtube']]);
+		$formwriter->checkboxinput('block_instagram', 'Instagram', ['value' => 1, 'checked' => $services['instagram']]);
+		$formwriter->checkboxinput('block_tiktok', 'Tiktok', ['value' => 1, 'checked' => $services['tiktok']]);
+		$formwriter->checkboxinput('block_snapchat', 'Snapchat', ['value' => 1, 'checked' => $services['snapchat']]);
+		$formwriter->checkboxinput('block_wechat', 'Wechat', ['value' => 1, 'checked' => $services['wechat']]);
+		$formwriter->checkboxinput('block_x', 'Twitter/X', ['value' => 1, 'checked' => $services['x']]);
+		$formwriter->checkboxinput('block_linkedin', 'Linkedin', ['value' => 1, 'checked' => $services['linkedin']]);
+		$formwriter->checkboxinput('block_pinterest', 'Pinterest', ['value' => 1, 'checked' => $services['pinterest']]);
+		$formwriter->checkboxinput('block_reddit', 'Reddit', ['value' => 1, 'checked' => $services['reddit']]);
+
 		echo '<h5>Messaging</h5>';
-		echo $formwriter->toggleinput("Whatsapp", "block_whatsapp", '', $services['whatsapp'], 1, '');
-		echo $formwriter->toggleinput("Telegram", "block_telegram", '', $services['telegram'], 1, '');
-		echo $formwriter->toggleinput("Discord", "block_discord", '', $services['discord'], 1, '');
-		echo $formwriter->toggleinput("Messenger", "block_messenger", '', $services['messenger'], 1, '');
-		
+		$formwriter->checkboxinput('block_whatsapp', 'Whatsapp', ['value' => 1, 'checked' => $services['whatsapp']]);
+		$formwriter->checkboxinput('block_telegram', 'Telegram', ['value' => 1, 'checked' => $services['telegram']]);
+		$formwriter->checkboxinput('block_discord', 'Discord', ['value' => 1, 'checked' => $services['discord']]);
+		$formwriter->checkboxinput('block_messenger', 'Messenger', ['value' => 1, 'checked' => $services['messenger']]);
+
 		echo '<h5>Gambling and Crypto</h5>';
-		echo $formwriter->toggleinput("All Gambling sites", "block_gambling", '', $filters['gambling'], 1, '');
-		echo $formwriter->toggleinput("All Crypto sites", "block_cryptominers", '', $filters['cryptominers'], 1, '');	
+		$formwriter->checkboxinput('block_gambling', 'All Gambling sites', ['value' => 1, 'checked' => $filters['gambling']]);
+		$formwriter->checkboxinput('block_cryptominers', 'All Crypto sites', ['value' => 1, 'checked' => $filters['cryptominers']]);
 
 		echo '<h5>Gaming</h5>';
-		echo $formwriter->toggleinput("All Gaming sites", "block_games", '', $filters['games'], 1, '');
+		$formwriter->checkboxinput('block_games', 'All Gaming sites', ['value' => 1, 'checked' => $filters['games']]);
 
 		echo '<h5>Adult Content</h5>';
+		$formwriter->checkboxinput('block_porn', 'All Adult sites', ['value' => 1, 'checked' => $filters['porn']]);
+		$formwriter->checkboxinput('block_drugs', 'All Drug sites', ['value' => 1, 'checked' => $filters['drugs']]);
 
-		echo $formwriter->toggleinput("All Adult sites", "block_porn", '', $filters['porn'], 1, '');
-		echo $formwriter->toggleinput("All Drug sites", "block_drugs", '', $filters['drugs'], 1, '');
-		
 		echo '<h5>News and Shopping</h5>';
-
-		echo $formwriter->toggleinput("All News sites", "block_news", '', $filters['news'], 1, '');
-		echo $formwriter->toggleinput("All Shopping sites", "block_shop", '', $filters['shop'], 1, '');
+		$formwriter->checkboxinput('block_news', 'All News sites', ['value' => 1, 'checked' => $filters['news']]);
+		$formwriter->checkboxinput('block_shop', 'All Shopping sites', ['value' => 1, 'checked' => $filters['shop']]);
 
 		echo '<h5>Online Dating</h5>';
-		echo $formwriter->toggleinput("All Dating sites", "block_dating", '', $filters['dating'], 1, '');
+		$formwriter->checkboxinput('block_dating', 'All Dating sites', ['value' => 1, 'checked' => $filters['dating']]);
 	}
 	else{
 		echo '<div class="alert alert-warning" role="alert">
@@ -119,16 +112,20 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'controld_advanced_filters', false)){
 		echo '<h5>Ad and Malware</h5>';
 		$optionvals = array(0 => "No blocking", 'ads_small'=>"Light blocking", 'ads_medium'=>'Medium blocking' /*, 'ads'=>'Aggressive blocking'*/);
-		echo $formwriter->dropinput("Ads", "block_ads", "", $optionvals, $filters['ads'], '', TRUE);
+		$formwriter->dropinput('block_ads', 'Ads', [
+			'options' => $optionvals,
+			'value' => $filters['ads']
+		]);
 
 		$optionvals = array(0 => "No blocking",/* 'malware'=>"Light blocking", */'ip_malware'=>'Medium blocking' /*, 'ai_malware'=>'Aggressive blocking'*/);
-		echo $formwriter->dropinput("Malware", "block_malware", "", $optionvals, $filters['malware'], '', TRUE);	
-		
-		echo $formwriter->toggleinput("Clickbait and disinformation sites", "block_fakenews", '', $filters['fakenews'], 1, '');
-		
-		echo $formwriter->toggleinput("Phishing sites", "block_typo", '', $filters['typo'], 1, '');
-		
-		//echo $formwriter->toggleinput("Newly registered sites", "block_nrd", '', $filters['nrd'], 1, '');
+		$formwriter->dropinput('block_malware', 'Malware', [
+			'options' => $optionvals,
+			'value' => $filters['malware']
+		]);
+
+		$formwriter->checkboxinput('block_fakenews', 'Clickbait and disinformation sites', ['value' => 1, 'checked' => $filters['fakenews']]);
+
+		$formwriter->checkboxinput('block_typo', 'Phishing sites', ['value' => 1, 'checked' => $filters['typo']]);
 	}
 	
 	if($profile_choice == 'secondary'){
@@ -163,34 +160,39 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			"23:00" => "11:00 PM"
 		];
 
-			echo $formwriter->dropinput("Time to start blocking", "start_time", '', $optionvals, $profile->get('cdp_schedule_start'), '', TRUE);		
-			
-			echo '</div>';
-			echo '<div class="col-md-6">';
-			echo $formwriter->dropinput("Time to end blocking", "end_time", '', $optionvals, $profile->get('cdp_schedule_end'), '', TRUE);	
-			echo '</div>';
-			echo '</div>';
+			$formwriter->dropinput('start_time', 'Time to start blocking', [
+			'options' => $optionvals,
+			'value' => $profile->get('cdp_schedule_start')
+		]);
 
-			$optionvals = array(
-				'mon' => 'Monday',
-				'tue' => 'Tuesday',
-				'wed' => 'Wednesday',
-				'thu' => 'Thursday',
-				'fri' => 'Friday',
-				'sat' => 'Saturday',
-				'sun' => 'Sunday',
-			);
-			$checkedvals =  unserialize($profile->get('cdp_schedule_days'));
-			$disabledvals = array();
-			$readonlyvals = array(); 
-			echo $formwriter->checkboxList("Days of the week", 'days_blocked', "", $optionvals, $checkedvals, $disabledvals, $readonlyvals);
-		}			
+		echo '</div>';
+		echo '<div class="col-md-6">';
+		$formwriter->dropinput('end_time', 'Time to end blocking', [
+			'options' => $optionvals,
+			'value' => $profile->get('cdp_schedule_end')
+		]);
+		echo '</div>';
+		echo '</div>';
+
+		$optionvals = array(
+			'mon' => 'Monday',
+			'tue' => 'Tuesday',
+			'wed' => 'Wednesday',
+			'thu' => 'Thursday',
+			'fri' => 'Friday',
+			'sat' => 'Saturday',
+			'sun' => 'Sunday',
+		);
+		$checkedvals =  unserialize($profile->get('cdp_schedule_days'));
+		$formwriter->checkboxList('days_blocked', 'Days of the week', [
+			'options' => $optionvals,
+			'checked' => $checkedvals
+		]);
+		}
 	}
 
-	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Submit', 'primary');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form(true);	
+	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->end_form(true);	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

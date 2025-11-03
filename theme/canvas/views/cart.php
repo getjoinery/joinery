@@ -150,15 +150,17 @@ $page_vars = $page_vars->data;
 								</div>
 								<div class="card-body">
 									<?php
-									$formwriter = $page->getFormWriter('form2');
+									$formwriter = $page->getFormWriter('form2', 'v2', [
+										'action' => '/cart'
+									]);
 									$validation_rules = array();
 									$validation_rules['billing_email']['required']['value'] = 'true';
 									$validation_rules['billing_first_name']['required']['value'] = 'true';
-									$validation_rules['billing_last_name']['required']['value'] = 'true';		
+									$validation_rules['billing_last_name']['required']['value'] = 'true';
 									$validation_rules['password']['required']['value'] = 'true';
 									echo $formwriter->set_validate($validation_rules);
 
-									echo $formwriter->begin_form("", "post", "/cart");
+									$formwriter->begin_form();
 									?>
 
 									<?php if($page_vars['session']->is_logged_in()): ?>
@@ -200,7 +202,7 @@ $page_vars = $page_vars->data;
 										</div>
 										<div class="col-12">
 											<div class="d-grid">
-												<?php echo $formwriter->new_form_button('Save Billing Information', 'btn btn-primary btn-lg'); ?>
+												<?php echo $formwriter->submitbutton('submit', 'Save Billing Information', ['class' => 'btn btn-primary']); ?>
 											</div>
 										</div>
 									</div>
@@ -249,14 +251,17 @@ $page_vars = $page_vars->data;
 
 									<!-- Add Coupon Form -->
 									<?php
-									$formwriter = $page->getFormWriter('form_coupon');
-									echo $formwriter->begin_form("", "get", '/cart');
+									$formwriter = $page->getFormWriter('form_coupon', 'v2', [
+										'action' => '/cart',
+										'method' => 'GET'
+									]);
+									$formwriter->begin_form();
 									?>
 									
 									<div class="input-group">
 										<?php echo $formwriter->textinput('', 'coupon_code', 'form-control', 64, NULL, 'Enter coupon code', 255, ''); ?>
 										<div class="input-group-append">
-											<?php echo $formwriter->new_form_button('Apply', 'btn btn-outline-primary'); ?>
+											<?php echo $formwriter->submitbutton('submit', 'Apply', ['class' => 'btn btn-primary']); ?>
 										</div>
 									</div>
 									
@@ -336,12 +341,14 @@ $page_vars = $page_vars->data;
 									<div class="card-body text-center">
 										<p class="text-muted mb-4">Your order total is <?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></p>
 										<?php
-										$formwriter = $page->getFormWriter('form4');
-										echo $formwriter->begin_form("", "post", '/cart_charge');
-										echo $formwriter->hiddeninput('novalue', '');
+										$formwriter = $page->getFormWriter('form4', 'v2', [
+											'action' => '/cart_charge'
+										]);
+										$formwriter->begin_form();
+										$formwriter->hiddeninput('novalue', '');
 										?>
 										<div class="d-grid">
-											<?php echo $formwriter->new_form_button('Complete Order', 'btn btn-success btn-lg'); ?>
+											<?php echo $formwriter->submitbutton('submit', 'Complete Order', ['class' => 'btn btn-primary']); ?>
 										</div>
 										<?php echo $formwriter->end_form(); ?>
 									</div>

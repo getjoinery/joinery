@@ -35,20 +35,25 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		echo PublicPage::alert($message['message_title'], $message['message'], $message['message_type']);
 	}	
 
-	$formwriter = $page->getFormWriter();
-	echo $formwriter->begin_form("", "post", "/profile/contact_preferences");
-	
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/profile/contact_preferences'
+	]);
+	$formwriter->begin_form();
+
 	if(empty($page_vars['optionvals'])){
 		echo '<p>You are currently not subscribed to any newsletters.</p>';
 	}
 	else{
 
-		echo $formwriter->checkboxList("Check the box to subscribe:", 'new_list_subscribes', "ctrlHolder", $page_vars['optionvals'], $page_vars['checkedvals'], $page_vars['disabledvals'], $page_vars['readonlyvals']);	
+		$formwriter->checkboxList('new_list_subscribes', 'Check the box to subscribe:', [
+			'options' => $page_vars['optionvals'],
+			'checked' => $page_vars['checkedvals']
+		]);
 
-		echo $formwriter->hiddeninput('zone', 'optional');
-		echo $formwriter->new_form_button('Submit', 'th-btn');
+		$formwriter->hiddeninput('zone', '', ['value' => 'optional']);
+		$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
 	}
-	echo $formwriter->end_form();
+	$formwriter->end_form();
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array());

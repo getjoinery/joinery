@@ -46,9 +46,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	
 	echo '<p>You are about to delete this device. </p>';
 
-	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Confirm Delete', 'th-btn');
-	echo $formwriter->end_buttons();
+	echo $formwriter->submitbutton('submit', 'Confirm Delete', ['class' => 'btn btn-primary']);
 	echo $formwriter->end_form(true);	
 
 	echo PublicPage::EndPage();

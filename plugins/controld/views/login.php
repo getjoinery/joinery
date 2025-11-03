@@ -48,7 +48,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$validation_rules = array();
 		$validation_rules['email']['required']['value'] = 'true';
 		$validation_rules['password']['required']['value'] = 'true';
-		echo $formwriter->set_validate($validation_rules);	
 		echo $formwriter->begin_form('form1', 'POST', '/login');
 	?>
       <div class="mb-4">
@@ -66,7 +65,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
       </div>
       <div class="mt-6">
 	  <?php
-			echo $formwriter->new_form_button('Log In', 'th_btn');		
+			echo $formwriter->submitbutton('submit', 'Log In', ['class' => 'btn btn-primary']);		
 	
 	  ?>
       </div>

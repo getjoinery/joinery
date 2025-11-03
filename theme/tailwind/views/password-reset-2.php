@@ -81,7 +81,6 @@
 					$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
 					$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
 					$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-					echo $formwriter->set_validate($validation_rules);
 					echo $formwriter->begin_form("", "post", "/password-reset-2", true);
 					echo $formwriter->hiddeninput('act_code',$page_vars['act_code']);
 					?>

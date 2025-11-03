@@ -131,7 +131,7 @@ Contact Area
 						if($page_vars['coupon_error']){
 							echo '<p>'.$page_vars['coupon_error'].'</p>';
 						}
-						echo $formwriter->new_form_button('Add', 'secondary', 'standard', 'th-btn ms-3');
+						echo $formwriter->submitbutton('submit', 'Add', ['class' => 'btn btn-primary']);
 						echo $formwriter->end_form();
 						echo '</div>';
 
@@ -168,9 +168,7 @@ Contact Area
 							echo '<p>'.$cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'] . ' ('. $cart->billing_user['billing_email'].')</p>';
 							$formwriter = $page->getFormWriter('form_billing_user');
 							
-							//echo $formwriter->start_buttons();
 							echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary', '', 'th-btn');
-							//echo $formwriter->end_buttons();
 							echo '<br><br>';
 						}
 						else{
@@ -207,7 +205,6 @@ Contact Area
 							}
 							
 
-							echo $formwriter->set_validate($validation_rules);									
 
 							/*
 							$optionvals = array();
@@ -236,10 +233,8 @@ Contact Area
 								echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "", "left", NULL, 1, "");
 							}
 							echo '</div>';
-							echo $formwriter->start_buttons();
 							//echo $formwriter->new_button('Cancel', 'secondary');
-							echo $formwriter->new_form_button('Submit Billing User', 'primary', '', 'th-btn');
-							echo $formwriter->end_buttons();
+							echo $formwriter->submitbutton('submit', 'Submit Billing User', ['class' => 'btn btn-primary']);
 							echo $formwriter->end_form();
 							echo '<br><br>';
 								

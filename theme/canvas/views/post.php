@@ -131,7 +131,9 @@ $page_vars = $page_vars->data;
 						<div class="card-body p-4">
 							<?php
 							$settings = Globalvars::get_instance();
-							$formwriter = $page->getFormWriter('form1');
+							$formwriter = $page->getFormWriter('form1', 'v2', [
+								'action' => $_SERVER['REQUEST_URI']
+							]);
 							$validation_rules = array();
 							$validation_rules['cmt']['required']['value'] = 'true';
 							$validation_rules['cmt']['minlength']['value'] = 20;
@@ -139,9 +141,8 @@ $page_vars = $page_vars->data;
 							$validation_rules['name']['required']['value'] = 'true';
 							$validation_rules['name']['minlength']['value'] = 2;
 							$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-							echo $formwriter->set_validate($validation_rules);
 
-							echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
+							$formwriter->begin_form();
 							?>
 
 							<div class="row g-3">
@@ -171,7 +172,7 @@ $page_vars = $page_vars->data;
 								
 								<div class="col-12">
 									<div class="d-flex justify-content-end">
-										<?php echo $formwriter->new_form_button('Post Comment', 'btn btn-primary'); ?>
+										<?php echo $formwriter->submitbutton('submit', 'Post Comment', ['class' => 'btn btn-primary']); ?>
 									</div>
 								</div>
 							</div>
@@ -247,7 +248,6 @@ $page_vars = $page_vars->data;
 											$validation_rules['name']['required']['value'] = 'true';
 											$validation_rules['name']['minlength']['value'] = 2;
 											$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
-											echo $formwriter->set_validate($validation_rules);
 
 											echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
 											echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
@@ -280,7 +280,7 @@ $page_vars = $page_vars->data;
 												
 												<div class="col-12">
 													<div class="d-flex justify-content-end">
-														<?php echo $formwriter->new_form_button('Reply', 'btn btn-primary btn-sm'); ?>
+														<?php echo $formwriter->submitbutton('submit', 'Reply', ['class' => 'btn btn-primary']); ?>
 													</div>
 												</div>
 											</div>

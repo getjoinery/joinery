@@ -40,8 +40,10 @@ $page_vars = $page_vars->data;
 					<div class="card shadow-sm rounded-4 border-0">
 						<div class="card-body p-4 p-lg-5">
 							<?php
-							$formwriter = $page->getFormWriter();
-							echo $formwriter->begin_form('form1', 'POST', '/survey', true);
+							$formwriter = $page->getFormWriter('form1', 'v2', [
+								'action' => '/survey'
+							]);
+							$formwriter->begin_form();
 
 							if($invalid_messages): ?>
 								<div class="alert alert-danger rounded-4 mb-4" role="alert">
@@ -79,7 +81,6 @@ $page_vars = $page_vars->data;
 								
 							<?php endforeach;
 
-							echo $formwriter->set_validate($validation_rules);
 							?>
 							
 							<div class="d-grid">

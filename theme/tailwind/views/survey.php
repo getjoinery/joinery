@@ -49,8 +49,7 @@
 		echo $question->output_question($formwriter,$answer_fill);
 	}
 
-	echo $formwriter->set_validate($validation_rules);
-	echo $formwriter->new_form_button('Submit');	
+	echo $formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
 	echo $formwriter->end_form();
   
 	echo PublicPage::EndPanel();

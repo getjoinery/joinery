@@ -80,7 +80,6 @@
 						$validation_rules = array();
 						$validation_rules['email']['required']['value'] = 'true';
 						$validation_rules['password']['required']['value'] = 'true';
-						echo $formwriter->set_validate($validation_rules);
 						echo $formwriter->begin_form("", "post", "/password-reset-1", true);
 
 						?>

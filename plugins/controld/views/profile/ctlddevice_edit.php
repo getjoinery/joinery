@@ -29,18 +29,14 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		$name = $device->get_readable_name();
 	}
 
-	$formwriter = $page->getFormWriter();
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/profile/ctlddevice_edit'
+	]);
 
-	$validation_rules = array();
-	$validation_rules['device_name']['required']['value'] = 'true';
-	$validation_rules['device_type']['required']['value'] = 'true';	
-	/*
-	$validation_rules['cmt_body']['required']['value'] = 'true';	
-	$validation_rules['"products_list[]"']['required']['value'] = 'true';	
-	$validation_rules['single_checkbox']['required']['value'] = 'true';*/
-	echo $formwriter->set_validate($validation_rules);	
+	// Note: FormWriter v2 handles validation differently - validation rules applied per-field
+	// $validation_rules are no longer needed with set_validate()
 
-	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctlddevice_edit');
+	$formwriter->begin_form();
 	if($device->key){
 		?>
                         <div class="job-content">
@@ -51,18 +47,21 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
                             </div>
                         </div>
 	<?php
-	
-		echo $formwriter->hiddeninput('device_id', $device->key);
+
+		$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
 	}
-	
+
 	if($device->get('cdd_device_name')){
 		$name = $device->get_readable_name();
 	}
 	else{
 		$name = '';
-	}	
-	
-	echo $formwriter->textinput('Device name', 'device_name', NULL, 100, $name, '', 255, '');	
+	}
+
+	$formwriter->textinput('device_name', 'Device name', [
+		'value' => $name,
+		'maxlength' => 255
+	]);
 
 	if(!$device->get('cdd_device_type')){
 		$optionvals = [
@@ -71,46 +70,28 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			'Linux Computer' => 'desktop-linux',
 			"Apple phone or Ipad" => 'mobile-ios',
 			"Android phone or tablet" => 'mobile-android',
-			//6 => 'browser-chrome',
-			//7 => 'browser-firefox',
-			//8 => 'browser-edge',
-			//9 => 'browser-brave',
-			//10 => 'browser-other',
-			//11 => 'tv-apple',
-			//12 => 'tv-android',
-			//13 => 'tv-firetv',
-			//14 => 'tv-samsung',
-			//15 => 'tv',
-			//16 => 'router-asus',
-			//17 => 'router-ddwrt',
-			//18 => 'router-firewalla',
-			//19 => 'router-freshtomato',
-			//20 => 'router-glinet',
-			//21 => 'router-openwrt',
-			//22 => 'router-opnsense',
-			//23 => 'router-pfsense',
-			//24 => 'router-synology',
-			//25 => 'router-ubiquiti',
-			//26 => 'router-windows',
-			//27 => 'router-linux',
-			//28 => 'router',
 		];
-		//$optionvals = array("Apple phone or Ipad"=>0, "Android phone or tablet"=>1, 'Windows Computer'=>3, 'Mac Computer'=>4, 'Other type'=>5);
-		echo $formwriter->dropinput("Device type", "device_type", "", $optionvals, NULL, '', TRUE);
-	}	
+		$formwriter->dropinput('device_type', 'Device type', [
+			'options' => $optionvals
+		]);
+	}
 
 	if($device->are_filters_editable()){
 		$optionvals = array(0=>"Only on Sundays", 1=>"Anytime");
-		echo $formwriter->dropinput("I want to be able to edit my blocked sites", "cdd_allow_device_edits", '', $optionvals, $device->get('cdd_allow_device_edits'), '', TRUE);
+		$formwriter->dropinput('cdd_allow_device_edits', 'I want to be able to edit my blocked sites', [
+			'options' => $optionvals,
+			'value' => $device->get('cdd_allow_device_edits')
+		]);
 	}
-	
-	$optionvals = Address::get_timezone_drop_array();
-	echo $formwriter->dropinput("Time zone for scheduling", "cdd_timezone", "ctrlHolder", $optionvals, $device->get('cdd_timezone'), '', FALSE);
 
-	echo $formwriter->start_buttons('form-btn col-6');
-	echo $formwriter->new_form_button('Submit', 'th-btn');
-	echo $formwriter->end_buttons();
-	echo $formwriter->end_form(true);	
+	$optionvals = Address::get_timezone_drop_array();
+	$formwriter->dropinput('cdd_timezone', 'Time zone for scheduling', [
+		'options' => $optionvals,
+		'value' => $device->get('cdd_timezone')
+	]);
+
+	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->end_form(true);	
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

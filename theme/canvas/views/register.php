@@ -18,8 +18,8 @@ $page_vars = $page_vars->data;
 	$page->public_header($hoptions,NULL);
 
 	$extra = '';
-	if(isset($_GET['m'])){ 
-		$extra = '?m='.htmlspecialchars($_GET['m']); 
+	if(isset($_GET['m'])){
+		$extra = '?m='.htmlspecialchars($_GET['m']);
 	}
 	$options['subtitle'] = '<a href="/login'.$extra.'">Already a member? Log in</a>';
 	echo PublicPage::BeginPage('Register', $options);
@@ -32,7 +32,10 @@ $page_vars = $page_vars->data;
 
 	$settings = Globalvars::get_instance();
 	$nickname_display = $settings->get_setting('nickname_display_as');
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', 'v2', [
+		'action' => '/register',
+		'class' => 'row mb-0'
+	]);
 
 	$validation_rules = array();
 	$validation_rules['usr_first_name']['required']['value'] = 'true';
@@ -48,17 +51,16 @@ $page_vars = $page_vars->data;
 	$validation_rules['usr_email']['required']['value'] = 'true';
 	$validation_rules['usr_email']['email']['value'] = 'true';
 	$validation_rules['usr_email']['maxlength']['value'] = 64;
-	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";	
+	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";
 	$validation_rules['usr_email']['remote']['message'] = "'This email already exists.'";
 	$validation_rules['password']['required']['value'] = 'true';
-	$validation_rules['password']['minlength']['value'] = 5;	
+	$validation_rules['password']['minlength']['value'] = 5;
 	$validation_rules['password']['minlength']['message'] = "'Password must be at least {0} characters'";
-	$validation_rules['privacy']['required']['value'] = 'true';	
+	$validation_rules['privacy']['required']['value'] = 'true';
 	if($nickname_display){
 		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
 	}
 	$validation_rules = $formwriter->antispam_question_validate($validation_rules);
-	echo $formwriter->set_validate($validation_rules);
 ?>
 
 <!-- Content
@@ -82,34 +84,52 @@ $page_vars = $page_vars->data;
 						<div class="card-body" style="padding: 40px;">
 							<h3>Register for an Account</h3>
 							<?php
-							echo $formwriter->begin_form("form1", "post", "/register", TRUE, 'class="row mb-0"');
-							echo $formwriter->hiddeninput("prevformname", "register");
+							$formwriter->begin_form();
+							$formwriter->hiddeninput("prevformname", "register");
 							?>
 								<div class="col-md-6 form-group">
 									<label for="usr_first_name">First Name:</label>
-									<?php echo $formwriter->textinput("", "usr_first_name", 'form-control', 20, @$form_fields->usr_first_name , "",32, ""); ?>
+									<?php $formwriter->textinput("usr_first_name", "", [
+										'value' => @$form_fields->usr_first_name,
+										'maxlength' => 32,
+										'class' => 'form-control'
+									]); ?>
 								</div>
 
 								<div class="col-md-6 form-group">
 									<label for="usr_last_name">Last Name:</label>
-									<?php echo $formwriter->textinput("", "usr_last_name", 'form-control', 20, @$form_fields->usr_last_name, "" , 32, ""); ?>
+									<?php $formwriter->textinput("usr_last_name", "", [
+										'value' => @$form_fields->usr_last_name,
+										'maxlength' => 32,
+										'class' => 'form-control'
+									]); ?>
 								</div>
-								
+
 								<?php if($nickname_display){ ?>
 								<div class="col-12 form-group">
 									<label for="usr_nickname"><?php echo htmlspecialchars($nickname_display); ?>:</label>
-									<?php echo $formwriter->textinput("", "usr_nickname", 'form-control', 20, @$form_fields->usr_nickname, "" , 32, ""); ?>
+									<?php $formwriter->textinput("usr_nickname", "", [
+										'value' => @$form_fields->usr_nickname,
+										'maxlength' => 32,
+										'class' => 'form-control'
+									]); ?>
 								</div>
 								<?php } ?>
-								
+
 								<div class="col-12 form-group">
 									<label for="usr_email">Email Address:</label>
-									<?php echo $formwriter->textinput("", "usr_email", 'form-control', 20, '', "" , 64, ""); ?>
+									<?php $formwriter->textinput("usr_email", "", [
+										'maxlength' => 64,
+										'class' => 'form-control'
+									]); ?>
 								</div>
 
 								<div class="col-12 form-group">
 									<label for="password">Choose Password:</label>
-									<?php echo $formwriter->passwordinput("", "password", 'form-control', 20, "" , "", 255,""); ?>
+									<?php $formwriter->passwordinput("password", "", [
+										'maxlength' => 255,
+										'class' => 'form-control'
+									]); ?>
 								</div>
 
 								<div class="col-12 form-group">
@@ -117,38 +137,52 @@ $page_vars = $page_vars->data;
 									<?php
 									$optionvals = Address::get_timezone_drop_array();
 									$default_timezone = $settings->get_setting('default_timezone');
-									echo $formwriter->dropinput("", "usr_timezone", 'form-control', $optionvals, $default_timezone, '', FALSE);
+									$formwriter->dropinput("usr_timezone", "", [
+										'options' => $optionvals,
+										'value' => $default_timezone,
+										'class' => 'form-control'
+									]);
 									?>
 								</div>
 
 								<!-- Anti-spam Question -->
 								<div class="col-12 form-group">
-									<?php echo $formwriter->antispam_question_input(); ?>
+									<?php $formwriter->antispam_question_input(); ?>
 								</div>
 
 								<!-- Checkboxes -->
 								<div class="col-12 form-group">
-									<?php echo $formwriter->checkboxinput("I have read and agree to the <a href='/privacy' target='_blank'>privacy policy</a>", "privacy", "form-check-input", "normal", NULL, "yes", ''); ?>
+									<?php $formwriter->checkboxinput("privacy", "I have read and agree to the <a href='/privacy' target='_blank'>privacy policy</a>", [
+										'value' => 'yes',
+										'class' => 'form-check-input'
+									]); ?>
 								</div>
 								<div class="col-12 form-group">
-									<?php echo $formwriter->checkboxinput("Please add me to the mailing list", "newsletter", "form-check-input", "normal", NULL, "yes", ''); ?>
+									<?php $formwriter->checkboxinput("newsletter", "Please add me to the mailing list", [
+										'value' => 'yes',
+										'class' => 'form-check-input'
+									]); ?>
 								</div>
 								<div class="col-12 form-group">
-									<?php echo $formwriter->checkboxinput("Keep me logged in", "setcookie", "form-check-input", "normal", 'yes', "yes", ''); ?>
+									<?php $formwriter->checkboxinput("setcookie", "Keep me logged in", [
+										'value' => 'yes',
+										'checked' => true,
+										'class' => 'form-check-input'
+									]); ?>
 								</div>
 
 								<!-- Security fields -->
-								<?php 
-								echo $formwriter->honeypot_hidden_input();
-								echo $formwriter->captcha_hidden_input();
+								<?php
+								$formwriter->honeypot_hidden_input();
+								$formwriter->captcha_hidden_input();
 								?>
 
 								<!-- Submit Button -->
 								<div class="col-12 form-group">
-									<?php echo $formwriter->new_form_button('Register Now', 'button button-3d button-black m-0', 'full'); ?>
+									<?php $formwriter->submitbutton('submit', 'Register Now', ['class' => 'btn btn-primary']); ?>
 								</div>
 
-							<?php echo $formwriter->end_form(true); ?>
+							<?php $formwriter->end_form(true); ?>
 
 							<div class="w-100"></div>
 

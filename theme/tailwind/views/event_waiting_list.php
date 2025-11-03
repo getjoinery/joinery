@@ -41,8 +41,7 @@
 		$validation_rules['usr_email']['email']['value'] = 'true';
 		$validation_rules['usr_email']['maxlength']['value'] = 64;
 		$validation_rules = $formwriter->antispam_question_validate($validation_rules);
-		echo $formwriter->set_validate($validation_rules);		
-		
+
 		echo $formwriter->begin_form("", "post", "/event_waiting_list");
 		echo $formwriter->hiddeninput("event_id", $event->key);
 		if($page_vars['session']->get_user_id()){
@@ -72,7 +71,7 @@
 			}
 		}
 
-		echo $formwriter->new_form_button('Add me to the waiting list');
+		echo $formwriter->submitbutton('submit', 'Add me to the waiting list', ['class' => 'btn btn-primary']);
 		echo $formwriter->end_form();
 	}
 

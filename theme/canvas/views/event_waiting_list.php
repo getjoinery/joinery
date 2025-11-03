@@ -60,7 +60,9 @@ $page_vars = $page_vars->data;
 							<div class="card-body p-4 p-lg-5">
 								<?php
 								$settings = Globalvars::get_instance();
-								$formwriter = $page->getFormWriter('form1');
+								$formwriter = $page->getFormWriter('form1', 'v2', [
+									'action' => '/event_waiting_list'
+								]);
 								$validation_rules = array();
 								$validation_rules['usr_first_name']['required']['value'] = 'true';
 								$validation_rules['usr_first_name']['minlength']['value'] = 1;
@@ -74,10 +76,9 @@ $page_vars = $page_vars->data;
 								$validation_rules['usr_email']['email']['value'] = 'true';
 								$validation_rules['usr_email']['maxlength']['value'] = 64;
 								$validation_rules = $formwriter->antispam_question_validate($validation_rules);
-								echo $formwriter->set_validate($validation_rules);		
-								
-								echo $formwriter->begin_form("", "post", "/event_waiting_list");
-								echo '<input type="hidden" name="event_id" value="'. $event->key .'" />';
+
+								$formwriter->begin_form();
+								$formwriter->hiddeninput('event_id', $event->key);
 								?>
 
 								<?php if($page_vars['session']->get_user_id()): ?>
