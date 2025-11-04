@@ -387,43 +387,46 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
         $has_errors = isset($this->errors[$name]);
 
-        echo '<div class="form-group">';
-        echo '<div class="form-check">';
+        $html = '';
+        $html .= '<div class="form-group">';
+        $html .= '<div class="form-check">';
 
-        echo '<input type="checkbox"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="form-check-input' . ($has_errors ? ' is-invalid' : '') . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="checkbox"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="form-check-input' . ($has_errors ? ' is-invalid' : '') . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         if ($checked) {
-            echo ' checked';
+            $html .= ' checked';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
+        $html .= '>';
 
         if ($label) {
-            echo '<label class="form-check-label" for="' . htmlspecialchars($id) . '">';
-            echo htmlspecialchars($label);
-            echo '</label>';
+            $html .= '<label class="form-check-label" for="' . htmlspecialchars($id) . '">';
+            $html .= htmlspecialchars($label);
+            $html .= '</label>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
 
         // Check for visibility rules or custom scripts in options
         if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
@@ -446,56 +449,59 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
         $has_errors = isset($this->errors[$name]);
 
-        echo '<div class="form-group">';
+        $html = '';
+        $html .= '<div class="form-group">';
 
         // Group label
         if ($label) {
-            echo '<label>' . htmlspecialchars($label) . '</label>';
+            $html .= '<label>' . htmlspecialchars($label) . '</label>';
         }
 
         // Wrap radio buttons in errorplacement div for proper error positioning
-        echo '<div class="errorplacement">';
+        $html .= '<div class="errorplacement">';
 
         // Output each radio option
         foreach ($radio_options as $opt_value => $opt_label) {
             $id = $name . '_' . $opt_value;
 
-            echo '<div class="form-check">';
-            echo '<input type="radio"';
-            echo ' name="' . htmlspecialchars($name) . '"';
-            echo ' id="' . htmlspecialchars($id) . '"';
-            echo ' class="form-check-input' . ($has_errors ? ' is-invalid' : '') . '"';
-            echo ' value="' . htmlspecialchars($opt_value) . '"';
+            $html .= '<div class="form-check">';
+            $html .= '<input type="radio"';
+            $html .= ' name="' . htmlspecialchars($name) . '"';
+            $html .= ' id="' . htmlspecialchars($id) . '"';
+            $html .= ' class="form-check-input' . ($has_errors ? ' is-invalid' : '') . '"';
+            $html .= ' value="' . htmlspecialchars($opt_value) . '"';
 
             if ((string)$value === (string)$opt_value) {
-                echo ' checked';
+                $html .= ' checked';
             }
             if (!empty($options['disabled'])) {
-                echo ' disabled';
+                $html .= ' disabled';
             }
 
-            echo '>';
+            $html .= '>';
 
-            echo '<label class="form-check-label" for="' . htmlspecialchars($id) . '">';
-            echo htmlspecialchars($opt_label);
-            echo '</label>';
+            $html .= '<label class="form-check-label" for="' . htmlspecialchars($id) . '">';
+            $html .= htmlspecialchars($opt_label);
+            $html .= '</label>';
 
-            echo '</div>';
+            $html .= '</div>';
         }
 
-        echo '</div>'; // End errorplacement
+        $html .= '</div>'; // End errorplacement
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
     }
 
     /**
@@ -515,44 +521,47 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        echo '<div class="form-group">';
+        $html = '';
+        $html .= '<div class="form-group">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<input type="date"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
+        $html .= '<input type="date"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
 
         if (!empty($options['min'])) {
-            echo ' min="' . htmlspecialchars($options['min']) . '"';
+            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
         }
         if (!empty($options['max'])) {
-            echo ' max="' . htmlspecialchars($options['max']) . '"';
+            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
         }
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
+        $html .= '>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
     }
 
     /**
@@ -576,171 +585,95 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $input_class .= ' is-invalid';
         }
 
-        // Parse value - handles both "HH:MM" (24-hour) and "g:i a" (12-hour) formats
-        $hour = '';
-        $minute = '';
-        $ampm = 'AM';
+        // Use centralized time parsing helper
+        $time_components = $this->parseTimeValue($value);
+        $hour = $time_components['hour'];
+        $minute = $time_components['minute'];
+        $ampm = $time_components['ampm'];
 
-        if ($value) {
-            // Check if value contains AM/PM (e.g., "3:15 PM" from datetimeinput)
-            if (stripos($value, 'am') !== false || stripos($value, 'pm') !== false) {
-                // Extract AM/PM first
-                if (stripos($value, 'pm') !== false) {
-                    $ampm = 'PM';
-                    $value = str_ireplace('pm', '', $value);
-                } else {
-                    $ampm = 'AM';
-                    $value = str_ireplace('am', '', $value);
-                }
-                $value = trim($value);
-            }
-
-            // Now parse hour and minute
-            if (strpos($value, ':') !== false) {
-                list($h, $m) = explode(':', $value);
-                $h = intval(trim($h));
-                $m = intval(trim($m));
-
-                // If we extracted AM/PM, the hour is already in 12-hour format
-                if ($ampm === 'PM' && $h !== 12) {
-                    // Will display as-is, conversion happens on submit
-                } elseif ($ampm === 'AM' && $h === 12) {
-                    // Keep as 12
-                } elseif ($h >= 12 && (stripos($value, 'am') === false && stripos($value, 'pm') === false)) {
-                    // If no AM/PM was in original value, convert from 24-hour
-                    if ($h >= 12) {
-                        $ampm = 'PM';
-                        if ($h > 12) $h -= 12;
-                    } else {
-                        $ampm = 'AM';
-                        if ($h == 0) $h = 12;
-                    }
-                }
-
-                $hour = str_pad($h, 2, '0', STR_PAD_LEFT);
-                $minute = str_pad($m, 2, '0', STR_PAD_LEFT);
-            }
-        }
-
-        echo '<div class="form-group">';
+        $html = '';
+        $html .= '<div class="form-group">';
 
         if ($label) {
-            echo '<label>' . htmlspecialchars($label) . '</label>';
+            $html .= '<label>' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<div class="row g-2">';
+        $html .= '<div class="row g-2">';
 
         // Hour input
-        echo '<div class="col-auto">';
-        echo '<input type="number"';
-        echo ' id="' . htmlspecialchars($hour_id) . '"';
-        echo ' name="' . htmlspecialchars($id . '_hour') . '"';
-        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
-        echo ' min="1" max="12"';
-        echo ' placeholder="HH"';
-        echo ' value="' . htmlspecialchars($hour) . '"';
-        if (!empty($options['readonly'])) echo ' readonly';
-        if (!empty($options['disabled'])) echo ' disabled';
-        echo '>';
-        echo '</div>';
+        $html .= '<div class="col-auto">';
+        $html .= '<input type="number"';
+        $html .= ' id="' . htmlspecialchars($hour_id) . '"';
+        $html .= ' name="' . htmlspecialchars($id . '_hour') . '"';
+        $html .= ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
+        $html .= ' min="1" max="12"';
+        $html .= ' placeholder="HH"';
+        $html .= ' value="' . htmlspecialchars($hour) . '"';
+        if (!empty($options['readonly'])) $html .= ' readonly';
+        if (!empty($options['disabled'])) $html .= ' disabled';
+        $html .= '>';
+        $html .= '</div>';
 
         // Colon separator
-        echo '<div class="col-auto" style="display: flex; align-items: center;">';
-        echo '<strong>:</strong>';
-        echo '</div>';
+        $html .= '<div class="col-auto" style="display: flex; align-items: center;">';
+        $html .= '<strong>:</strong>';
+        $html .= '</div>';
 
         // Minute input
-        echo '<div class="col-auto">';
-        echo '<input type="number"';
-        echo ' id="' . htmlspecialchars($minute_id) . '"';
-        echo ' name="' . htmlspecialchars($id . '_minute') . '"';
-        echo ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
-        echo ' min="0" max="59"';
-        echo ' placeholder="MM"';
-        echo ' value="' . htmlspecialchars($minute) . '"';
-        if (!empty($options['readonly'])) echo ' readonly';
-        if (!empty($options['disabled'])) echo ' disabled';
-        echo '>';
-        echo '</div>';
+        $html .= '<div class="col-auto">';
+        $html .= '<input type="number"';
+        $html .= ' id="' . htmlspecialchars($minute_id) . '"';
+        $html .= ' name="' . htmlspecialchars($id . '_minute') . '"';
+        $html .= ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
+        $html .= ' min="0" max="59"';
+        $html .= ' placeholder="MM"';
+        $html .= ' value="' . htmlspecialchars($minute) . '"';
+        if (!empty($options['readonly'])) $html .= ' readonly';
+        if (!empty($options['disabled'])) $html .= ' disabled';
+        $html .= '>';
+        $html .= '</div>';
 
         // AM/PM selector
-        echo '<div class="col-auto">';
-        echo '<select';
-        echo ' id="' . htmlspecialchars($ampm_id) . '"';
-        echo ' name="' . htmlspecialchars($id . '_ampm') . '"';
-        echo ' class="form-select"';
-        if (!empty($options['readonly'])) echo ' disabled';
-        if (!empty($options['disabled'])) echo ' disabled';
-        echo '>';
-        echo '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
-        echo '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
-        echo '</select>';
-        echo '</div>';
+        $html .= '<div class="col-auto">';
+        $html .= '<select';
+        $html .= ' id="' . htmlspecialchars($ampm_id) . '"';
+        $html .= ' name="' . htmlspecialchars($id . '_ampm') . '"';
+        $html .= ' class="form-select"';
+        if (!empty($options['readonly'])) $html .= ' disabled';
+        if (!empty($options['disabled'])) $html .= ' disabled';
+        $html .= '>';
+        $html .= '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
+        $html .= '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
+        $html .= '</select>';
+        $html .= '</div>';
 
         // Hidden field to store the actual time value
-        echo '<input type="hidden"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' value="' . htmlspecialchars($value) . '"';
-        echo '>';
+        $html .= '<input type="hidden"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= '>';
 
-        echo '</div>';
+        $html .= '</div>';
 
         if ($has_errors) {
-            echo '<div class="invalid-feedback d-block">';
+            $html .= '<div class="invalid-feedback d-block">';
             foreach ($this->errors[$name] as $error) {
-                echo htmlspecialchars($error) . '<br>';
+                $html .= htmlspecialchars($error) . '<br>';
             }
-            echo '</div>';
+            $html .= '</div>';
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
 
-        // JavaScript to sync the hidden field with user input
-        static $time_input_js_loaded = false;
-        if (!$time_input_js_loaded) {
-            echo '<script type="text/javascript">
-            function updateTimeInput(hourId, minuteId, ampmId, hiddenId) {
-                var hour = document.getElementById(hourId).value;
-                var minute = document.getElementById(minuteId).value;
-                var ampm = document.getElementById(ampmId).value;
+        $this->handleOutput($name, $html);
 
-                if (hour && minute) {
-                    var h = parseInt(hour);
-                    if (ampm === "PM" && h !== 12) h += 12;
-                    if (ampm === "AM" && h === 12) h = 0;
-
-                    var timeValue = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
-                    document.getElementById(hiddenId).value = timeValue;
-                }
-            }
-
-            document.addEventListener("DOMContentLoaded", function() {
-                var timeInputs = document.querySelectorAll("[data-time-hour]");
-                timeInputs.forEach(function(el) {
-                    var hourId = el.getAttribute("data-time-hour");
-                    var minuteId = el.getAttribute("data-time-minute");
-                    var ampmId = el.getAttribute("data-time-ampm");
-                    var hiddenId = el.getAttribute("data-time-hidden");
-
-                    document.getElementById(hourId).addEventListener("change", function() {
-                        updateTimeInput(hourId, minuteId, ampmId, hiddenId);
-                    });
-                    document.getElementById(minuteId).addEventListener("change", function() {
-                        updateTimeInput(hourId, minuteId, ampmId, hiddenId);
-                    });
-                    document.getElementById(ampmId).addEventListener("change", function() {
-                        updateTimeInput(hourId, minuteId, ampmId, hiddenId);
-                    });
-                });
-            });
-            </script>';
-            $time_input_js_loaded = true;
-        }
+        // Output shared JavaScript for time inputs
+        $this->outputTimeInputJavaScript();
 
         // Add data attributes to trigger the sync
         echo '<div data-time-hour="' . htmlspecialchars($hour_id) . '"';
@@ -772,14 +705,21 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             list($date_value, $time_value) = explode(' ', $date_value, 2);
         }
 
-        echo '<div class="form-group">';
+        // Use helper to parse time value
+        $time_components = $this->parseTimeValue($time_value);
+        $hour = $time_components['hour'];
+        $minute = $time_components['minute'];
+        $ampm = $time_components['ampm'];
+
+        $html = '';
+        $html .= '<div class="form-group">';
 
         if ($label) {
-            echo '<label>' . htmlspecialchars($label) . '</label>';
+            $html .= '<label>' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<div class="row">';
-        echo '<div class="col-md-6">';
+        $html .= '<div class="row">';
+        $html .= '<div class="col-md-6">';
 
         // Date input
         $date_class = $class;
@@ -787,24 +727,24 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $date_class .= ' is-invalid';
         }
 
-        echo '<input type="date"';
-        echo ' name="' . htmlspecialchars($date_name) . '"';
-        echo ' id="' . htmlspecialchars($date_id) . '"';
-        echo ' class="' . htmlspecialchars($date_class) . '"';
-        echo ' value="' . htmlspecialchars($date_value) . '"';
+        $html .= '<input type="date"';
+        $html .= ' name="' . htmlspecialchars($date_name) . '"';
+        $html .= ' id="' . htmlspecialchars($date_id) . '"';
+        $html .= ' class="' . htmlspecialchars($date_class) . '"';
+        $html .= ' value="' . htmlspecialchars($date_value) . '"';
         if (!empty($options['readonly'])) {
-            echo ' readonly';
+            $html .= ' readonly';
         }
-        echo '>';
+        $html .= '>';
 
         if (isset($this->errors[$date_name])) {
             foreach ($this->errors[$date_name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        echo '</div>';
-        echo '<div class="col-md-6">';
+        $html .= '</div>';
+        $html .= '<div class="col-md-6">';
 
         // Time input - use same AM/PM format as outputTimeInput
         $time_class = $class;
@@ -812,84 +752,68 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $time_class .= ' is-invalid';
         }
 
-        $hour = '';
-        $minute = '';
-        $ampm = 'AM';
-
-        if ($time_value) {
-            list($h, $m) = explode(':', $time_value);
-            $h = intval($h);
-            if ($h >= 12) {
-                $ampm = 'PM';
-                if ($h > 12) $h -= 12;
-            } else {
-                $ampm = 'AM';
-                if ($h == 0) $h = 12;
-            }
-            $hour = str_pad($h, 2, '0', STR_PAD_LEFT);
-            $minute = str_pad($m, 2, '0', STR_PAD_LEFT);
-        }
-
         $time_hour_id = $time_id . '_hour';
         $time_minute_id = $time_id . '_minute';
         $time_ampm_id = $time_id . '_ampm';
 
-        echo '<div class="row g-2">';
-        echo '<div class="col-auto">';
-        echo '<input type="number"';
-        echo ' id="' . htmlspecialchars($time_hour_id) . '"';
-        echo ' name="' . htmlspecialchars($time_name . '_hour') . '"';
-        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
-        echo ' min="1" max="12" placeholder="HH"';
-        echo ' value="' . htmlspecialchars($hour) . '"';
-        if (!empty($options['readonly'])) echo ' readonly';
-        echo '>';
-        echo '</div>';
-        echo '<div class="col-auto" style="display: flex; align-items: center;"><strong>:</strong></div>';
-        echo '<div class="col-auto">';
-        echo '<input type="number"';
-        echo ' id="' . htmlspecialchars($time_minute_id) . '"';
-        echo ' name="' . htmlspecialchars($time_name . '_minute') . '"';
-        echo ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
-        echo ' min="0" max="59" placeholder="MM"';
-        echo ' value="' . htmlspecialchars($minute) . '"';
-        if (!empty($options['readonly'])) echo ' readonly';
-        echo '>';
-        echo '</div>';
-        echo '<div class="col-auto">';
-        echo '<select';
-        echo ' id="' . htmlspecialchars($time_ampm_id) . '"';
-        echo ' name="' . htmlspecialchars($time_name . '_ampm') . '"';
-        echo ' class="form-select"';
-        if (!empty($options['readonly'])) echo ' disabled';
-        echo '>';
-        echo '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
-        echo '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
-        echo '</select>';
-        echo '</div>';
-        echo '</div>';
+        $html .= '<div class="row g-2">';
+        $html .= '<div class="col-auto">';
+        $html .= '<input type="number"';
+        $html .= ' id="' . htmlspecialchars($time_hour_id) . '"';
+        $html .= ' name="' . htmlspecialchars($time_name . '_hour') . '"';
+        $html .= ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
+        $html .= ' min="1" max="12" placeholder="HH"';
+        $html .= ' value="' . htmlspecialchars($hour) . '"';
+        if (!empty($options['readonly'])) $html .= ' readonly';
+        $html .= '>';
+        $html .= '</div>';
+        $html .= '<div class="col-auto" style="display: flex; align-items: center;"><strong>:</strong></div>';
+        $html .= '<div class="col-auto">';
+        $html .= '<input type="number"';
+        $html .= ' id="' . htmlspecialchars($time_minute_id) . '"';
+        $html .= ' name="' . htmlspecialchars($time_name . '_minute') . '"';
+        $html .= ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
+        $html .= ' min="0" max="59" placeholder="MM"';
+        $html .= ' value="' . htmlspecialchars($minute) . '"';
+        if (!empty($options['readonly'])) $html .= ' readonly';
+        $html .= '>';
+        $html .= '</div>';
+        $html .= '<div class="col-auto">';
+        $html .= '<select';
+        $html .= ' id="' . htmlspecialchars($time_ampm_id) . '"';
+        $html .= ' name="' . htmlspecialchars($time_name . '_ampm') . '"';
+        $html .= ' class="form-select"';
+        if (!empty($options['readonly'])) $html .= ' disabled';
+        $html .= '>';
+        $html .= '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
+        $html .= '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
+        $html .= '</select>';
+        $html .= '</div>';
+        $html .= '</div>';
 
-        echo '<input type="hidden"';
-        echo ' id="' . htmlspecialchars($time_id) . '"';
-        echo ' value="' . htmlspecialchars($time_value) . '"';
-        echo '>';
+        $html .= '<input type="hidden"';
+        $html .= ' id="' . htmlspecialchars($time_id) . '"';
+        $html .= ' value="' . htmlspecialchars($time_value) . '"';
+        $html .= '>';
 
         if (isset($this->errors[$time_name])) {
-            echo '<div class="invalid-feedback d-block">';
+            $html .= '<div class="invalid-feedback d-block">';
             foreach ($this->errors[$time_name] as $error) {
-                echo htmlspecialchars($error) . '<br>';
+                $html .= htmlspecialchars($error) . '<br>';
             }
-            echo '</div>';
+            $html .= '</div>';
         }
 
-        echo '</div>';
-        echo '</div>';
+        $html .= '</div>';
+        $html .= '</div>';
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
     }
 
     /**
@@ -908,40 +832,43 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        echo '<div class="form-group">';
+        $html = '';
+        $html .= '<div class="form-group">';
 
         if ($label) {
-            echo '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
         }
 
-        echo '<input type="file"';
-        echo ' name="' . htmlspecialchars($name) . '"';
-        echo ' id="' . htmlspecialchars($id) . '"';
-        echo ' class="' . htmlspecialchars($class) . '"';
+        $html .= '<input type="file"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
 
         if (!empty($options['accept'])) {
-            echo ' accept="' . htmlspecialchars($options['accept']) . '"';
+            $html .= ' accept="' . htmlspecialchars($options['accept']) . '"';
         }
         if (!empty($options['multiple'])) {
-            echo ' multiple';
+            $html .= ' multiple';
         }
         if (!empty($options['disabled'])) {
-            echo ' disabled';
+            $html .= ' disabled';
         }
 
-        echo '>';
+        $html .= '>';
 
         if ($has_errors) {
             foreach ($this->errors[$name] as $error) {
-                echo '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
         if (!empty($options['helptext'])) {
-            echo '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
     }
 
     /**
@@ -1008,7 +935,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param string $label Field label
      * @param array $options Field options (rows, value, placeholder, htmlmode, etc)
      */
-    public function textbox($name, $label, $options = []) {
+    public function textbox($name, $label = '', $options = []) {
         $rows = $options['rows'] ?? 5;
         $cols = $options['cols'] ?? 80;
         $value = $options['value'] ?? ($this->values[$name] ?? '');
@@ -1244,9 +1171,10 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             throw new DisplayableUserException('Invalid checkbox list type.');
         }
 
-        echo '<div id="' . htmlspecialchars($id) . '_container" class="mb-3 errorplacement">';
+        $html = '';
+        $html .= '<div id="' . htmlspecialchars($id) . '_container" class="mb-3 errorplacement">';
         if ($label) {
-            echo '<label class="form-label">' . htmlspecialchars($label) . '</label>';
+            $html .= '<label class="form-label">' . htmlspecialchars($label) . '</label>';
         }
 
         // Standard convention: $optionvals is [id => label]
@@ -1259,20 +1187,154 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             // Readonly means it cannot be changed but is submitted
             if (in_array($key, $readonly)) {
                 if (in_array($key, $checked)) {
-                    echo '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" />';
+                    $html .= '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" />';
                 }
-                echo '<div class="form-check">';
-                echo '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
-                echo '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
-                echo '</div>';
+                $html .= '<div class="form-check">';
+                $html .= '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
+                $html .= '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
+                $html .= '</div>';
             } else {
-                echo '<div class="form-check">';
-                echo '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
-                echo '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
-                echo '</div>';
+                $html .= '<div class="form-check">';
+                $html .= '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
+                $html .= '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
+                $html .= '</div>';
             }
         }
 
-        echo '</div>';
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
+    }
+
+    /**
+     * Output a textarea field
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    protected function outputTextarea($name, $label, $options) {
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $class = $options['class'] ?? 'form-control';
+        $id = $options['id'] ?? $name;
+        $rows = $options['rows'] ?? 5;
+        $cols = $options['cols'] ?? 80;
+
+        $has_errors = isset($this->errors[$name]);
+        if ($has_errors) {
+            $class .= ' is-invalid';
+        }
+
+        $html = '';
+        $html .= '<div class="form-group">';
+
+        if ($label) {
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        }
+
+        $html .= '<textarea';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' rows="' . intval($rows) . '"';
+        $html .= ' cols="' . intval($cols) . '"';
+
+        if (!empty($options['readonly'])) {
+            $html .= ' readonly';
+        }
+        if (!empty($options['disabled'])) {
+            $html .= ' disabled';
+        }
+
+        $html .= '>';
+        $html .= htmlspecialchars($value);
+        $html .= '</textarea>';
+
+        if ($has_errors) {
+            foreach ($this->errors[$name] as $error) {
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        if (!empty($options['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        }
+
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
+    }
+
+    /**
+     * Output a textbox (rich text editor) field
+     * Implementation for abstract method
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    protected function outputTextbox($name, $label, $options) {
+        // The public textbox() method handles rich text editor logic
+        // This protected method is called from the public wrapper
+        // Delegate to the actual implementation
+        $this->textbox($name, $label, $options);
+    }
+
+    /**
+     * Output an image input (selection) field
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    protected function outputImageInput($name, $label, $options) {
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $class = $options['class'] ?? 'form-control';
+        $id = $options['id'] ?? $name;
+
+        $has_errors = isset($this->errors[$name]);
+        if ($has_errors) {
+            $class .= ' is-invalid';
+        }
+
+        $html = '';
+        $html .= '<div class="form-group">';
+
+        if ($label) {
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        }
+
+        // Image input as hidden field with preview
+        $html .= '<input type="hidden"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="image-input-hidden"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= '>';
+
+        // Display preview if value exists
+        if ($value) {
+            $html .= '<div class="mt-2">';
+            $html .= '<img src="' . htmlspecialchars($value) . '" alt="Preview" style="max-width: 200px; max-height: 200px;" class="img-thumbnail">';
+            $html .= '</div>';
+        }
+
+        // Image selection button (placeholder)
+        $html .= '<div class="mt-2">';
+        $html .= '<button type="button" class="btn btn-secondary btn-sm" onclick="alert(\'Image selection not implemented\')">';
+        $html .= 'Select Image';
+        $html .= '</button>';
+        $html .= '</div>';
+
+        if ($has_errors) {
+            foreach ($this->errors[$name] as $error) {
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        if (!empty($options['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        }
+
+        $html .= '</div>';
+
+        $this->handleOutput($name, $html);
     }
 }
