@@ -966,6 +966,42 @@ abstract class FormWriterV2Base {
     }
 
     /**
+     * Create a rich text editor field (textbox)
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    public function textbox($name, $label = '', $options = []) {
+        $this->registerField($name, 'textbox', $label, $options);
+        $this->outputTextbox($name, $label, $options);
+    }
+
+    /**
+     * Create an image input/selection field
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    public function imageinput($name, $label = '', $options = []) {
+        $this->registerField($name, 'image', $label, $options);
+        $this->outputImageInput($name, $label, $options);
+    }
+
+    /**
+     * Create a textarea field
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    public function textarea($name, $label = '', $options = []) {
+        $this->registerField($name, 'textarea', $label, $options);
+        $this->outputTextarea($name, $label, $options);
+    }
+
+    /**
      * Register a field for validation tracking
      *
      * @param string $name Field name
@@ -1391,6 +1427,263 @@ abstract class FormWriterV2Base {
         });';
     }
 
+    // ===== SHARED JAVASCRIPT OUTPUT METHODS =====
+    // These methods extract JavaScript that was previously duplicated across theme implementations
+
+    /**
+     * Output shared JavaScript for time input fields
+     * Handles the updateTimeInput function and DOMContentLoaded event listener
+     * Used by both FormWriterV2Bootstrap and FormWriterV2Tailwind
+     */
+    protected function outputTimeInputJavaScript() {
+        static $time_input_js_loaded = false;
+        if (!$time_input_js_loaded) {
+            echo '<script type="text/javascript">
+function updateTimeInput(hourId, minuteId, ampmId, hiddenId) {
+    var hour = document.getElementById(hourId).value;
+    var minute = document.getElementById(minuteId).value;
+    var ampm = document.getElementById(ampmId).value;
+
+    if (hour && minute) {
+        var h = parseInt(hour);
+        if (ampm === "PM" && h !== 12) h += 12;
+        if (ampm === "AM" && h === 12) h = 0;
+
+        var timeValue = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
+        document.getElementById(hiddenId).value = timeValue;
+    }
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    var timeInputs = document.querySelectorAll("[data-time-hour]");
+    timeInputs.forEach(function(el) {
+        var hourId = el.getAttribute("data-time-hour");
+        var minuteId = el.getAttribute("data-time-minute");
+        var ampmId = el.getAttribute("data-time-ampm");
+        var hiddenId = el.getAttribute("data-time-hidden");
+
+        document.getElementById(hourId).addEventListener("change", function() {
+            updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+        });
+        document.getElementById(minuteId).addEventListener("change", function() {
+            updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+        });
+        document.getElementById(ampmId).addEventListener("change", function() {
+            updateTimeInput(hourId, minuteId, ampmId, hiddenId);
+        });
+    });
+});
+</script>';
+            $time_input_js_loaded = true;
+        }
+    }
+
+    /**
+     * Output shared JavaScript for AJAX search select functionality
+     * Contains AjaxSearchSelect class definition used by both theme implementations
+     */
+    protected function outputAjaxSearchSelectJavaScript() {
+        static $ajax_search_select_js_loaded = false;
+        if (!$ajax_search_select_js_loaded) {
+            echo '<script type="text/javascript">
+class AjaxSearchSelect {
+    constructor(selectId, searchEndpoint, minChars = 2) {
+        this.selectId = selectId;
+        this.searchEndpoint = searchEndpoint;
+        this.minChars = minChars;
+        this.selectElement = document.getElementById(selectId);
+        this.init();
+    }
+
+    init() {
+        if (!this.selectElement) return;
+
+        const self = this;
+        const input = this.selectElement.querySelector(".search-input");
+        const resultsDiv = this.selectElement.querySelector(".search-results");
+        const selectedDiv = this.selectElement.querySelector(".selected-items");
+        const hiddenInput = this.selectElement.querySelector(".search-hidden-value");
+
+        if (!input) return;
+
+        input.addEventListener("input", (e) => {
+            const query = e.target.value.trim();
+
+            if (query.length < this.minChars) {
+                resultsDiv.innerHTML = "";
+                return;
+            }
+
+            fetch(this.searchEndpoint + "?q=" + encodeURIComponent(query))
+                .then(response => response.json())
+                .then(data => {
+                    resultsDiv.innerHTML = "";
+
+                    if (!data.results || data.results.length === 0) {
+                        resultsDiv.innerHTML = "<div class=\"no-results\">No results found</div>";
+                        return;
+                    }
+
+                    data.results.forEach(item => {
+                        const div = document.createElement("div");
+                        div.className = "result-item";
+                        div.textContent = item.label;
+                        div.addEventListener("click", () => {
+                            self.selectItem(item.value, item.label, input, selectedDiv, hiddenInput);
+                        });
+                        resultsDiv.appendChild(div);
+                    });
+                })
+                .catch(error => console.error("Search error:", error));
+        });
+    }
+
+    selectItem(value, label, input, selectedDiv, hiddenInput) {
+        input.value = label;
+        hiddenInput.value = value;
+
+        const tag = document.createElement("span");
+        tag.className = "selected-tag";
+        tag.textContent = label + " ";
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "remove-tag";
+        removeBtn.textContent = "×";
+        removeBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            tag.remove();
+            input.value = "";
+            hiddenInput.value = "";
+        });
+
+        tag.appendChild(removeBtn);
+        selectedDiv.appendChild(tag);
+    }
+}
+</script>';
+            $ajax_search_select_js_loaded = true;
+        }
+    }
+
+    // ===== TIME HANDLING HELPER METHODS =====
+    // These methods centralize time parsing and conversion logic previously duplicated in concrete classes
+
+    /**
+     * Parse time value from various formats into components
+     * Handles both 24-hour database format and 12-hour display format with AM/PM
+     * This consolidates the duplicated parsing logic from both concrete implementations
+     * @param string $value Time in any supported format (HH:MM, HH:MM:SS, or H:MM AM/PM)
+     * @return array ['hour' => string, 'minute' => string, 'ampm' => string]
+     */
+    protected function parseTimeValue($value) {
+        $hour = '';
+        $minute = '';
+        $ampm = 'AM';
+
+        if (!$value) {
+            return ['hour' => $hour, 'minute' => $minute, 'ampm' => $ampm];
+        }
+
+        // Check if value contains AM/PM (e.g., "3:15 PM" from datetimeinput)
+        if (stripos($value, 'am') !== false || stripos($value, 'pm') !== false) {
+            // Extract AM/PM first
+            if (stripos($value, 'pm') !== false) {
+                $ampm = 'PM';
+                $value = str_ireplace('pm', '', $value);
+            } else {
+                $ampm = 'AM';
+                $value = str_ireplace('am', '', $value);
+            }
+            $value = trim($value);
+        }
+
+        // Parse hour and minute from remaining value
+        if (strpos($value, ':') !== false) {
+            list($h, $m) = explode(':', $value);
+            $h = intval(trim($h));
+            $m = intval(trim($m));
+
+            // If we extracted AM/PM, the hour is already in 12-hour format
+            if ($ampm === 'PM' && $h !== 12) {
+                // Keep as is, conversion happens on submit
+            } elseif ($ampm === 'AM' && $h === 12) {
+                // Keep as 12
+            } elseif ($h >= 12 && (stripos($value, 'am') === false && stripos($value, 'pm') === false)) {
+                // If no AM/PM was in original value, convert from 24-hour to 12-hour
+                if ($h >= 12) {
+                    $ampm = 'PM';
+                    if ($h > 12) $h -= 12;
+                } else {
+                    $ampm = 'AM';
+                    if ($h == 0) $h = 12;
+                }
+            }
+
+            $hour = str_pad($h, 2, '0', STR_PAD_LEFT);
+            $minute = str_pad($m, 2, '0', STR_PAD_LEFT);
+        }
+
+        return ['hour' => $hour, 'minute' => $minute, 'ampm' => $ampm];
+    }
+
+    /**
+     * Convert 12-hour time components to 24-hour database format
+     * @param string $hour Hour (1-12)
+     * @param string $minute Minute (00-59)
+     * @param string $ampm AM or PM
+     * @return string Time in HH:MM format suitable for database storage
+     */
+    protected function convertTimeToDatabase($hour, $minute, $ampm) {
+        if (empty($hour) || empty($minute)) {
+            return '';
+        }
+
+        $hour24 = (int)$hour;
+
+        if ($ampm === 'PM' && $hour24 !== 12) {
+            $hour24 += 12;
+        } elseif ($ampm === 'AM' && $hour24 === 12) {
+            $hour24 = 0;
+        }
+
+        return str_pad($hour24, 2, '0', STR_PAD_LEFT) . ':' .
+               str_pad($minute, 2, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Format time for display
+     * @param string $value Time in database format (HH:MM)
+     * @param string $format Output format ('12hour' or '24hour')
+     * @return string Formatted time
+     */
+    protected function formatTimeForDisplay($value, $format = '12hour') {
+        if (empty($value)) {
+            return '';
+        }
+
+        if ($format === '24hour') {
+            return $value;
+        }
+
+        $components = $this->parseTimeValue($value);
+        return $components['hour'] . ':' . $components['minute'] . ' ' . $components['ampm'];
+    }
+
+    /**
+     * Handle output of HTML for a form field
+     * Supports both immediate output and deferred output mode
+     * @param string $field_name The name of the field
+     * @param string $html The HTML to output
+     */
+    protected function handleOutput($field_name, $html) {
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$field_name] = $html;
+        } else {
+            echo $html;
+        }
+    }
+
     // Abstract methods for theme-specific HTML generation
     // Each theme implementation must provide these methods
 
@@ -1406,6 +1699,9 @@ abstract class FormWriterV2Base {
     abstract protected function outputFileInput($name, $label, $options);
     abstract protected function outputHiddenInput($name, $options);
     abstract protected function outputSubmitButton($name, $label, $options);
+    abstract protected function outputTextbox($name, $label, $options);
+    abstract protected function outputImageInput($name, $label, $options);
+    abstract protected function outputTextarea($name, $label, $options);
 
     // ===== NEW FIELD VISIBILITY & CUSTOM SCRIPT METHODS =====
 
@@ -1674,7 +1970,6 @@ abstract class FormWriterV2Base {
      * @return string HTML/JavaScript output for file upload interface
      */
     public function file_upload_full($getvars=NULL, $delete=FALSE, $checkall=FALSE){
-        require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
         ob_start();
         $getargs = '';
         if($getvars){
