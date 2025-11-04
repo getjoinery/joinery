@@ -5,7 +5,9 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.0.3
+ * @version 2.0.5
+ * @changelog 2.0.5 - Added public textbox() method with Trumbowyg rich text editor support (htmlmode option)
+ * @changelog 2.0.4 - Fixed placeholder to only show when field is empty (matches Bootstrap behavior)
  * @changelog 2.0.3 - Added inline flex layout for time and datetime inputs to display fields side-by-side
  * @changelog 2.0.2 - Changed fieldset/legend to div/label for radio and checkbox groups to match Bootstrap styling
  * @changelog 2.0.1 - Fixed outputRadioInput to iterate through options array and display all radio buttons
@@ -53,7 +55,8 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
 
-        if ($placeholder) {
+        // Only show placeholder if field is empty
+        if ($placeholder && !$value) {
             $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
@@ -998,19 +1001,180 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
     }
 
     /**
-     * Output a rich text editor (textbox)
+     * Public textbox method - handles both plain and rich text
      *
-     * For HTML5 implementation, this uses a plain textarea.
-     * Themes can enhance with JavaScript editors if needed.
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options (including 'htmlmode' => 'yes' for rich text)
+     */
+    public function textbox($name, $label = '', $options = []) {
+        $rows = $options['rows'] ?? 5;
+        $cols = $options['cols'] ?? 80;
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $placeholder = $options['placeholder'] ?? '';
+        $htmlmode = $options['htmlmode'] ?? 'no';
+        $class = $options['class'] ?? 'form-control';
+        $id = $options['id'] ?? $name;
+
+        $has_errors = isset($this->errors[$name]);
+        if ($has_errors) {
+            $class .= ' is-invalid';
+        }
+
+        if ($htmlmode === 'yes') {
+            // Load Trumbowyg CSS and dynamically load scripts after jQuery is ready
+            echo '<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">';
+            echo '<script type="text/javascript">
+            $(function() {
+                // Ensure jQuery is available in window scope for UMD modules
+                window.jQuery = $;
+                // Temporarily disable module detection to force browser global approach
+                var originalDefine = window.define;
+                var originalExports = window.exports;
+                delete window.define;
+                delete window.exports;
+
+                var scripts = [
+                    "/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js",
+                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js",
+                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js",
+                    "/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"
+                ];
+
+                // Load scripts sequentially using jQuery.getScript
+                function loadNextScript(index) {
+                    if (index >= scripts.length) {
+                        // All scripts loaded, restore module detection
+                        if (originalDefine) window.define = originalDefine;
+                        if (originalExports) window.exports = originalExports;
+
+                        if (typeof $.fn.trumbowyg === "function") {
+                            $("#' . htmlspecialchars($id) . '").trumbowyg({
+                                svgPath: "/assets/vendor/Trumbowyg-2-26/dist/ui/icons.svg",
+                                autogrow: false,
+                                autogrowOnEnter: false,
+                                btns: [
+                                    ["viewHTML"],
+                                    ["undo", "redo"],
+                                    ["formatting"],
+                                    ["strong", "em", "del"],
+                                    ["superscript", "subscript"],
+                                    ["link"],
+                                    ["insertImage"],
+                                    ["preformatted"],
+                                    ["justifyLeft", "justifyCenter", "justifyRight", "justifyFull"],
+                                    ["unorderedList", "orderedList"],
+                                    ["horizontalRule"],
+                                    ["removeformat"],
+                                    ["fullscreen"]
+                                ],
+                                semantic: {
+                                    "div": "div"
+                                },
+                                plugins: {
+                                    allowTagsFromPaste: {
+                                        allowedTags: ["p", "br", "blockquote", "b", "i", "strong", "em", "ul", "li", "ol", "a", "code", "pre", "h1", "h2", "h3", "h4", "h5", "embed", "table", "tr", "td", "th", "img", "video"]
+                                    }
+                                }
+                            });
+                        }
+                        return;
+                    }
+
+                    $.getScript(scripts[index])
+                        .done(function() {
+                            loadNextScript(index + 1);
+                        });
+                }
+
+                loadNextScript(0);
+            });
+            </script>';
+            echo '<style>
+            .trumbowyg-box,
+            .trumbowyg-editor,
+            .trumbowyg-textarea {
+                height: 500px;
+            }
+            .trumbowyg-box.trumbowyg-fullscreen,
+            .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-editor,
+            .trumbowyg-box.trumbowyg-fullscreen .trumbowyg-textarea {
+                height: 100%;
+            }
+            </style>';
+        }
+
+        // Output textarea
+        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
+
+        if ($label) {
+            $html .= '<label for="' . htmlspecialchars($id) . '" class="form-label">' . htmlspecialchars($label);
+            if (!empty($options['required'])) {
+                $html .= ' <span aria-label="required">*</span>';
+            }
+            $html .= '</label>';
+        }
+
+        $html .= '<textarea';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . ($htmlmode === 'yes' ? ' html_editable' : '') . '"';
+        $html .= ' rows="' . intval($rows) . '"';
+        $html .= ' cols="' . intval($cols) . '"';
+
+        // Only show placeholder if field is empty
+        if ($placeholder && !$value) {
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        }
+
+        if (!empty($options['readonly'])) {
+            $html .= ' readonly';
+        }
+        if (!empty($options['disabled'])) {
+            $html .= ' disabled';
+        }
+        if (!empty($options['required'])) {
+            $html .= ' required';
+        }
+
+        if ($has_errors) {
+            $html .= ' aria-invalid="true"';
+            $html .= ' aria-describedby="' . htmlspecialchars($name) . '_error"';
+        }
+
+        $html .= '>';
+        $html .= htmlspecialchars($value);
+        $html .= '</textarea>';
+
+        if ($has_errors) {
+            $html .= '<div id="' . htmlspecialchars($name) . '_error" class="form-error">';
+            $html .= '<ul class="error-list">';
+            foreach ($this->errors[$name] as $error) {
+                $html .= '<li>' . htmlspecialchars($error) . '</li>';
+            }
+            $html .= '</ul>';
+            $html .= '</div>';
+        }
+
+        if (!empty($options['helptext'])) {
+            $html .= '<small class="form-help">' . htmlspecialchars($options['helptext']) . '</small>';
+        }
+
+        $html .= '</div>';
+
+        echo $html;
+    }
+
+    /**
+     * Output a rich text editor (textbox) - protected method for abstract requirement
      *
      * @param string $name Field name
      * @param string $label Field label
      * @param array $options Field options
      */
     protected function outputTextbox($name, $label, $options) {
-        // For HTML5 version, delegate to textarea
-        // Themes can override to add rich text editor (Trumbowyg, etc.)
-        $this->outputTextarea($name, $label, $options);
+        // Delegate to public textbox method
+        $this->textbox($name, $label, $options);
     }
 
     /**
