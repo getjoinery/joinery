@@ -498,12 +498,12 @@ All themes should include a `theme.json` file for proper system integration:
     "joinery": ">=1.0.0"
   },
   "cssFramework": "bootstrap",
-  "formWriterBase": "FormWriterBootstrap",
+  "formWriterBase": "FormWriterV2Bootstrap",
   "publicPageBase": "PublicPageBase"
 }
 ```
 
-**Advanced theme.json with plugin support:**
+**Tailwind theme.json:**
 ```json
 {
   "name": "advanced-theme",
@@ -517,14 +517,33 @@ All themes should include a `theme.json` file for proper system integration:
     "joinery": ">=1.0.0"
   },
   "supports_plugins": ["controld", "items"],
-  "cssFramework": "uikit",
-  "formWriterBase": "FormWriterHTML5",
+  "cssFramework": "tailwind",
+  "formWriterBase": "FormWriterV2Tailwind",
   "publicPageBase": "PublicPageBase",
   "features": {
     "responsive": true,
     "dark_mode": true,
     "plugin_integration": true
   }
+}
+```
+
+**HTML5 framework-agnostic theme.json:**
+```json
+{
+  "name": "custom-theme",
+  "displayName": "Custom HTML5 Theme",
+  "version": "1.0.0",
+  "description": "Framework-agnostic theme with custom styling",
+  "author": "Developer",
+  "is_stock": false,
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "cssFramework": "html5",
+  "formWriterBase": "FormWriterV2HTML5",
+  "publicPageBase": "PublicPageBase"
 }
 ```
 
@@ -596,10 +615,10 @@ The `$page->getFormWriter()` method automatically:
 - Handles all the complexity internally
 
 #### FormWriter Framework Mapping
-- **Bootstrap themes**: Uses `FormWriterBootstrap`
-- **Tailwind themes**: Uses `FormWriterTailwind`  
-- **UIKit themes**: Uses `FormWriterUIKit`
-- **Custom themes**: Can provide their own `FormWriterPublic` class
+- **Bootstrap themes**: Uses `FormWriterV2Bootstrap`
+- **Tailwind themes**: Uses `FormWriterV2Tailwind`
+- **HTML5 themes**: Uses `FormWriterV2HTML5` (framework-agnostic)
+- **Custom themes**: Can extend `FormWriterV2Base` for custom implementations
 
 ### Example: ControlD Plugin Migration
 
@@ -628,33 +647,26 @@ $routes = [
 - Data models: `CtldAccount`, `CtldDevice`, etc.
 - Business logic: `ControlDHelper` class and logic files
 
-## Key Benefits of Hybrid Architecture
+## Hybrid Architecture
 
-### Clear Separation of Concerns
+### Separation of Concerns
 - **Plugins**: Backend logic, data, admin interfaces
 - **Themes**: User interface, routing, presentation
 - **Hybrid Integration**: Themes can access plugin functionality without coupling
 
-### Enhanced Flexibility
+### View Resolution
 - **View Resolution Chain**: Automatic fallback from theme → plugin → system views
 - **Framework Support**: Multiple CSS frameworks with proper implementations
 - **Plugin Integration**: Themes can include plugin routes without breaking separation
 - **Override Capability**: Themes can override any plugin view while maintaining fallbacks
 
-### Better Security
+### Security Model
 - Plugin code not directly accessible via web URLs
 - Admin interfaces protected by plugin admin discovery route
 - Clear separation between public and admin functionality
 - Theme-specific includes isolated from system includes
 
-### Improved Maintainability
-- Plugin updates don't affect user-facing routes
-- Theme changes don't break backend functionality
-- Easier testing and debugging with clear responsibilities
-- Framework-specific implementations prevent CSS conflicts
-- Accurate documentation through theme.json manifests
-
-### Performance Benefits
+### Performance
 - Static asset caching through RouteHelper
 - Reduced routing complexity with priority-based processing
 - Plugin code only loaded when needed
@@ -763,7 +775,7 @@ This shows detailed routing information in HTML comments.
 **CSS framework conflicts:**
 - Verify theme.json cssFramework matches actual implementation
 - Check PublicPage class extends proper base and implements getTableClasses()
-- Ensure FormWriterBase matches CSS framework requirements
+- Ensure FormWriter implementation (V2Bootstrap, V2Tailwind, or V2HTML5) matches CSS framework
 - Validate CSS classes match framework documentation
 
 **Assets not loading:**
@@ -785,27 +797,24 @@ This shows detailed routing information in HTML comments.
 The system supports multiple CSS frameworks through theme-specific implementations:
 
 **Bootstrap Themes:**
-- CSS Framework: `bootstrap`  
-- FormWriter Base: `FormWriterBootstrap`
+- CSS Framework: `bootstrap`
+- FormWriter Base: `FormWriterV2Bootstrap`
 - Table Classes: `table`, `table-striped`, `table-hover`
 - Container Classes: `container`, `container-fluid`
 
-**UIKit Themes:**
-- CSS Framework: `uikit`
-- FormWriter Base: `FormWriterHTML5` 
-- Table Classes: `uk-table`, `uk-table-striped`
-- Container Classes: `uk-container`
-
-**WordPress CSS Themes:**
-- CSS Framework: `wordpress`
-- FormWriter Base: `FormWriterHTML5`
-- Table Classes: `wp-list-table`, `widefat`, `fixed`, `striped`
-- Container Classes: `wrap`
-
 **Tailwind CSS Themes:**
 - CSS Framework: `tailwind`
-- FormWriter Base: `FormWriterHTML5`
+- FormWriter Base: `FormWriterV2Tailwind`
 - Utility-first approach with custom classes
+- Table Classes: Custom Tailwind utility classes
+- Container Classes: `container`, `mx-auto`
+
+**HTML5 Themes (Framework-Agnostic):**
+- CSS Framework: `html5` or `custom`
+- FormWriter Base: `FormWriterV2HTML5`
+- Pure semantic HTML5 markup
+- No framework-specific classes
+- Themes can apply any CSS styling
 
 ### Framework-Specific Implementations
 

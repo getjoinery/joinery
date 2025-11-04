@@ -55,23 +55,26 @@ $page->admin_header([
 ### Form Structure with FormWriter
 ```php
 <?php
-// Get FormWriter instance from the page object
-$formwriter = $page->getFormWriter('form_name');
+// Get FormWriter V2 instance from the page object
+$formwriter = $page->getFormWriter('form_name', 'v2', [
+    'model' => $object  // Auto-fills values and applies validation from model
+]);
 
-$validation_rules = array();
-$validation_rules['field_name']['required']['value'] = 'true';
-echo $formwriter->set_validate($validation_rules);
+$formwriter->begin_form();
 
-echo $formwriter->begin_form('form_name', 'POST', $_SERVER['PHP_SELF']);
-echo $formwriter->textinput('Label', 'field_name', 'form-control', 100, $default_value, 'placeholder', 255, 'help text');
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit Text', 'btn btn-primary');
-echo $formwriter->end_buttons();
-echo $formwriter->end_form();
+// Field with clean options array
+$formwriter->textinput('field_name', 'Label', [
+    'placeholder' => 'Enter value',
+    'helptext' => 'Help text here',
+    'maxlength' => 255
+]);
+
+$formwriter->submitbutton('submit', 'Submit Text');
+$formwriter->end_form();
 ?>
 ```
 
-**Note:** Admin pages use `$page->getFormWriter()` which automatically provides the Bootstrap FormWriter appropriate for admin interfaces.
+**Note:** Admin pages use `$page->getFormWriter('form_name', 'v2')` which automatically provides FormWriterV2Bootstrap for admin interfaces with automatic CSRF protection, validation, and value filling.
 
 ## Table-Based Admin Pages
 

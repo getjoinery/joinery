@@ -14,7 +14,7 @@ The FormWriter system provides a structured, consistent way to build forms in th
 6. [Field Visibility & Custom Scripts](#6-field-visibility--custom-scripts)
 7. [Validation Integration](#7-validation-integration)
 8. [Best Practices](#8-best-practices)
-9. [V1 vs V2](#9-v1-vs-v2)
+9. [Advanced Features](#9-advanced-features)
 
 ---
 
@@ -24,26 +24,21 @@ The FormWriter system provides a structured, consistent way to build forms in th
 
 FormWriter is a PHP class system that generates HTML forms with:
 - **Automatic CSRF protection** - Every form gets a security token
-- **Consistent styling** - Bootstrap, Tailwind, HTML5, or UIKit themes
+- **Consistent styling** - Bootstrap or Tailwind themes
 - **Validation integration** - Works seamlessly with JoineryValidator
+- **Auto-detection of validation** - Automatically applies model validation rules
+- **Auto-filling values** - Pass data once, all fields populate automatically
 - **Field visibility logic** - Show/hide fields dynamically with smooth transitions
 - **Accessibility features** - Proper labels, ARIA attributes, error messaging
 
-### Two Versions
+### Available Classes
 
-**FormWriter V1** (Original)
-- Classes: `FormWriterBootstrap`, `FormWriterHTML5`, `FormWriterUIKit`, `FormWriterTailwind`
-- Base class: `FormWriterBase`
-- Field method: `dropinput()`, `textinput()`, `textarea()`, etc.
-- Used in: Most existing code
+- **`FormWriterV2Bootstrap`** - Bootstrap 4/5 themed implementation
+- **`FormWriterV2Tailwind`** - Tailwind CSS themed implementation
+- **`FormWriterV2HTML5`** - Pure HTML5 with semantic markup (no CSS framework dependencies)
+- **Base class: `FormWriterV2Base`** - Abstract base with all core functionality
 
-**FormWriter V2** (Current)
-- Classes: `FormWriterV2Bootstrap`, `FormWriterV2Tailwind`
-- Base class: `FormWriterV2Base`
-- Field method: All fields use standardized `options` array
-- Used in: New development
-
-Both versions support all features including visibility rules and custom scripts.
+All features including visibility rules, custom scripts, CSRF protection, and validation work with all theme implementations.
 
 ---
 
@@ -55,16 +50,17 @@ Both versions support all features including visibility rules and custom scripts
 
 ```php
 // Get FormWriter instance (automatically selects correct theme)
-$formwriter = $page->getFormWriter('contact_form');
+$formwriter = $page->getFormWriter('contact_form', 'v2');
 
 // Start the form
 $formwriter->begin_form();
 
-// Add fields
+// Add fields with clean options array
 $formwriter->textinput('name', 'Your Name', ['required' => true]);
 $formwriter->textinput('email', 'Email Address', [
     'validation' => 'email',
-    'required' => true
+    'required' => true,
+    'placeholder' => 'user@example.com'
 ]);
 $formwriter->textarea('message', 'Message', [
     'rows' => 5,
@@ -81,9 +77,18 @@ $formwriter->end_form();
 **In logic files or other contexts:**
 
 ```php
-require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
+// Bootstrap theme
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+$formwriter = new FormWriterV2Bootstrap('my_form');
 
-$formwriter = new FormWriterBootstrap('my_form');
+// Tailwind theme
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Tailwind.php'));
+$formwriter = new FormWriterV2Tailwind('my_form');
+
+// HTML5 (framework-agnostic)
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+$formwriter = new FormWriterV2HTML5('my_form');
+
 $formwriter->begin_form();
 // ... add fields ...
 $formwriter->end_form();
@@ -92,20 +97,75 @@ $formwriter->end_form();
 ### Form Options
 
 ```php
-// V1: Pass options to constructor or begin_form()
-$formwriter = new FormWriterBootstrap('my_form', [
-    'action' => '/process',
-    'method' => 'POST',
-    'class' => 'custom-form'
-]);
-
-// V2: Pass options to constructor
+// Pass options to constructor
 $formwriter = new FormWriterV2Bootstrap('my_form', [
     'action' => '/process',
     'method' => 'POST',
-    'enctype' => 'multipart/form-data'  // For file uploads
+    'enctype' => 'multipart/form-data',  // For file uploads
+    'class' => 'custom-form'
 ]);
 ```
+
+### Auto-Filling Values
+
+FormWriter supports automatic value population:
+
+```php
+// Load model data
+$user = new User($user_id, TRUE);
+
+// Pass model directly - all fields auto-fill!
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $user
+]);
+
+$formwriter->begin_form();
+
+// No need to specify 'value' - auto-filled from model!
+$formwriter->textinput('usr_email', 'Email');
+$formwriter->textinput('usr_first_name', 'First Name');
+$formwriter->textinput('usr_last_name', 'Last Name');
+
+$formwriter->end_form();
+```
+
+**With value overrides:**
+
+```php
+// Pass both model AND specific value overrides
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $user,
+    'values' => [
+        'usr_email' => 'override@example.com'  // This overrides model value
+    ]
+]);
+```
+
+### Auto-Detection of Validation
+
+FormWriter automatically detects and applies validation rules from model `field_specifications`:
+
+```php
+// In /data/user_class.php
+public static $field_specifications = array(
+    'usr_email' => array(
+        'type' => 'varchar(255)',
+        'required' => true,
+        'unique' => true,
+        'validation' => array('email' => true)
+    )
+);
+
+// In your form - validation is automatic!
+$formwriter->textinput('usr_email', 'Email');
+// ↑ Automatically validates as required email from User::$field_specifications
+```
+
+**How it works:**
+1. FormWriter extracts field prefix (`usr_` from `usr_email`)
+2. Maps prefix to model class (`usr` → `User`)
+3. Loads `User::$field_specifications`
+4. Applies validation rules automatically
 
 ---
 
@@ -130,12 +190,18 @@ $formwriter->textinput('user_id', 'User ID', [
     'value' => '12345',
     'readonly' => true
 ]);
+
+// With prepend text (Bootstrap)
+$formwriter->textinput('loc_link', 'Link', [
+    'prepend' => $settings->get_setting('webDir').'/location/'
+]);
+// Shows as: [/location/][user types here]
 ```
 
 ### Password Inputs
 
 ```php
-// With strength meter (V2 only)
+// With strength meter
 $formwriter->passwordinput('password', 'Password', [
     'show_strength' => true,
     'required' => true,
@@ -151,29 +217,20 @@ $formwriter->passwordinput('password_confirm', 'Confirm Password', [
 ### Dropdown/Select
 
 ```php
-// V1 Style
-$formwriter->dropinput('country', 'Country', [
-    'United States' => 'us',
-    'Canada' => 'ca',
-    'United Kingdom' => 'uk'
-], [
-    'value' => 'us',  // Default selected
-    'required' => true
-]);
-
-// V2 Style - Same array format as V1!
+// Standard dropdown
 $formwriter->dropinput('country', 'Country', [
     'options' => [
         'United States' => 'us',
         'Canada' => 'ca',
         'United Kingdom' => 'uk'
     ],
-    'value' => 'us',
-    'empty_option' => '-- Select Country --'
+    'value' => 'us',  // Default selected
+    'empty_option' => '-- Select Country --',
+    'required' => true
 ]);
 ```
 
-**Note:** Both V1 and V2 use the same dropdown array format: `'Display Text' => 'actual_value'`
+**Note:** The dropdown format is: `'Display Text' => 'actual_value'`
 
 ### Textarea
 
@@ -198,14 +255,6 @@ $formwriter->checkboxinput('accept_terms', 'I accept the terms and conditions', 
 ### Radio Buttons
 
 ```php
-// V1
-$formwriter->radioinput('subscription', 'Subscription Plan', [
-    'free' => 'Free',
-    'basic' => 'Basic ($9.99/mo)',
-    'premium' => 'Premium ($19.99/mo)'
-]);
-
-// V2
 $formwriter->radioinput('subscription', 'Subscription Plan', [
     'options' => [
         'free' => 'Free',
@@ -218,19 +267,18 @@ $formwriter->radioinput('subscription', 'Subscription Plan', [
 
 ### Checkbox List
 
-Multiple checkboxes that submit as an array (use `name[]` in form submission):
+Multiple checkboxes that submit as an array:
 
 ```php
-// V2 Example: Newsletter subscriptions
-$formwriter->checkboxList('newsletter_subscriptions', 'Select Newsletters to Subscribe:', [
+$formwriter->checkboxList('newsletter_subscriptions', 'Select Newsletters:', [
     'options' => [
         1 => 'Weekly Updates',
         2 => 'Monthly Digest',
         3 => 'Special Announcements'
     ],
     'checked' => [1, 3],  // Pre-select these options
-    'disabled' => [],     // Disable specific options (user can't interact)
-    'readonly' => [2]     // Read-only (can't change, but submits current state as hidden input)
+    'disabled' => [],     // Disable specific options
+    'readonly' => [2]     // Read-only (disabled visually, submitted via hidden input)
 ]);
 ```
 
@@ -251,12 +299,6 @@ In PHP, access via:
 $_POST['newsletter_subscriptions']  // Array of checked values
 ```
 
-**Use Cases:**
-- Newsletter subscriptions
-- Multiple permissions checkboxes
-- Feature/module selections
-- Tag/category multi-select
-
 ### Date and Time Fields
 
 ```php
@@ -267,13 +309,13 @@ $formwriter->dateinput('start_date', 'Start Date', [
     'required' => true
 ]);
 
-// Time input (V2 - uses hour/minute/AM-PM dropdowns)
+// Time input (uses hour/minute/AM-PM dropdowns)
 $formwriter->timeinput('meeting_time', 'Meeting Time', [
     'required' => true,
     'helptext' => 'Select preferred meeting time'
 ]);
 
-// DateTime input (V2 - combines date picker with time dropdowns)
+// DateTime input (combines date picker with time dropdowns)
 $formwriter->datetimeinput('deadline', 'Deadline', [
     'required' => true
 ]);
@@ -281,7 +323,7 @@ $formwriter->datetimeinput('deadline', 'Deadline', [
 
 #### DateTime Input Format
 
-The `datetimeinput()` method accepts DateTime values in multiple formats for maximum compatibility:
+The `datetimeinput()` method accepts DateTime values in multiple formats:
 
 **Accepted input formats:**
 - **DateTime object** - Direct from database (preferred)
@@ -298,7 +340,7 @@ $coupon = new CouponCode($coupon_id, TRUE);
 
 // Pass to FormWriter - handles DateTime objects automatically
 $formwriter = $page->getFormWriter('form1', 'v2', [
-    'values' => $coupon->export_as_array()  // Returns DateTime objects for timestamp fields
+    'model' => $coupon  // DateTime objects in export_as_array() are auto-converted
 ]);
 
 $formwriter->begin_form();
@@ -311,7 +353,7 @@ $formwriter->end_form();
 ```
 
 **How it works:**
-1. Receives value from `values` array (DateTime object or string)
+1. Receives value from model (DateTime object or string)
 2. Uses PHP's DateTime class to parse the value
 3. Formats date as `Y-m-d` for the date picker
 4. Formats time as `H:i` (24-hour) for conversion to 12-hour dropdowns
@@ -409,17 +451,7 @@ $formwriter->hiddeninput('user_id', '', ['value' => $user_id]);
 
 Model Form Helpers are static methods in data model classes that render complete form field sets using FormWriter. They encapsulate field definitions, validation rules, and configuration within the model itself, following the DRY principle while maintaining MVC separation.
 
-### Why Use Model Form Helpers?
-
-**Benefits:**
-- ✅ **Single method call** replaces dozens of lines of field definitions
-- ✅ **Centralized field logic** - all form definitions in one place (the model)
-- ✅ **Reusable across pages** - admin, profile, public forms all use same method
-- ✅ **Easy to maintain** - update field definitions in one location
-- ✅ **No direct HTML output** - models don't echo, they provide methods
-- ✅ **MVC compliant** - models know their own structure
-
-### 4.1 Using Existing Model Form Helpers
+### Using Existing Model Form Helpers
 
 Models with form helpers provide static methods like `renderFormFields()`:
 
@@ -467,7 +499,7 @@ $formwriter->submitbutton('btn_submit', 'Submit');
 $formwriter->end_form();
 ```
 
-### 4.2 Available Model Form Helpers
+### Available Model Form Helpers
 
 **Address::renderFormFields()**
 
@@ -504,7 +536,7 @@ PhoneNumber::renderFormFields($formwriter, [
 - Country code dropdown
 - Phone number (required)
 
-### 4.3 Usage Patterns
+### Usage Patterns
 
 **Admin Page (Edit Mode):**
 ```php
@@ -548,11 +580,13 @@ PhoneNumber::renderFormFields($formwriter, [
 ]);
 ```
 
-### 4.4 Comparison: Before vs After
+### Code Efficiency
 
-**Before (Manual Field Definitions):**
+Using Model Form Helpers significantly reduces code and improves maintainability:
+
+**Manual field definitions:**
 ```php
-// 33 lines of field definitions
+// Manually defining multiple address fields requires ~33 lines
 $country_codes = Address::get_country_drop_array2();
 $formwriter->dropinput('usa_cco_country_code_id', 'Country', [
     'options' => $country_codes
@@ -564,12 +598,12 @@ $formwriter->textinput('usa_address1', 'Street Address', [
 $formwriter->textinput('usa_address2', 'Apt, Suite, etc. (optional)', [
     'maxlength' => 255
 ]);
-// ... more fields ...
+// ... 8 more fields ...
 ```
 
-**After (Model Form Helper):**
+**Using Model Form Helper:**
 ```php
-// 6 lines - single method call
+// Single method call - 6 lines total
 Address::renderFormFields($formwriter, [
     'required' => true,
     'include_country' => true,
@@ -578,13 +612,7 @@ Address::renderFormFields($formwriter, [
 ]);
 ```
 
-**Benefits:**
-- 80% less code
-- Consistent across all pages
-- Easy to update field definitions
-- No duplication between pages
-
-### 4.5 Architecture Principles
+### Architecture Principles
 
 Model Form Helpers follow these principles:
 
@@ -598,14 +626,14 @@ Model Form Helpers follow these principles:
 
 ## 5. Deferred Output Mode
 
-**V2 Feature:** Store form field HTML instead of echoing immediately. Essential for multiple forms in loops.
+Store form field HTML instead of echoing immediately. Essential for multiple forms in loops.
 
-### 5.1 When to Use
+### When to Use
 
 **Use deferred output:** Multiple forms in loops (inline action forms in listing pages)
 **Use immediate output (default):** Single forms in views
 
-### 5.2 Basic Usage
+### Basic Usage
 
 ```php
 // Enable deferred mode
@@ -622,7 +650,7 @@ $form->submitbutton('btn_delete', 'Delete');
 $html = $form->getFieldsHTML();
 ```
 
-### 5.3 Listing Page Example
+### Listing Page Example
 
 ```php
 foreach ($items as $item) {
@@ -642,17 +670,17 @@ foreach ($items as $item) {
 }
 ```
 
-### 5.4 Compatibility
+### Compatibility
 
-Works with all field types, validation, visibility rules, custom scripts, and both themes.
+Works with all field types, validation, visibility rules, custom scripts, and all theme implementations (Bootstrap, Tailwind, HTML5).
 
 ---
 
 ## 6. Field Visibility & Custom Scripts
 
-**New Feature (Added 2025-10-25):** FormWriter now supports dynamic field visibility with smooth fade transitions and custom JavaScript logic.
+**Feature:** FormWriter supports dynamic field visibility with smooth fade transitions and custom JavaScript logic.
 
-### 6.1 Level 1: Convenience Rules (Auto-Generated)
+### Level 1: Convenience Rules (Auto-Generated)
 
 **For simple show/hide based on select field values**, define rules and FormWriter generates JavaScript automatically:
 
@@ -689,22 +717,16 @@ $formwriter->dropinput('rating_scale', 'Rating Scale', [
 ]);
 ```
 
-**Features:**
+**Notes:**
 - Fields and their labels fade in/out smoothly (300ms CSS transition)
-- **Automatic container detection** - Just use field IDs in rules, the system automatically targets `field_id_container` if it exists, otherwise falls back to the field ID
+- **Automatic container detection** - Just use field IDs in rules, the system automatically targets `field_id_container` if it exists
 - Works on page load and when select value changes
 - No additional JavaScript needed
-- No need to specify `_container` suffix - it's automatic!
 
 **How Container Detection Works:**
-The visibility system automatically checks for `field_id_container` elements first. This is the standard FormWriter pattern where fields are wrapped in container divs. If a container exists, it's targeted (hiding both label and field). If not, the field itself is targeted. You just pass the field ID and let the system handle it:
+The visibility system automatically checks for `field_id_container` elements first. This is the standard FormWriter pattern where fields are wrapped in container divs.
 
-```javascript
-// Automatic logic (you don't write this - it happens behind the scenes)
-const el = document.getElementById(id + "_container") || document.getElementById(id);
-```
-
-### 6.2 Level 2: Field-Level Custom Scripts
+### Level 2: Field-Level Custom Scripts
 
 **For custom logic on a specific field**, provide the event handler body - FormWriter wraps it with `addEventListener`:
 
@@ -736,13 +758,13 @@ $formwriter->textinput('bulk_warning', 'Bulk orders require manager approval', [
 ]);
 ```
 
-**Features:**
+**Notes:**
 - `this` refers to the select element
 - Wrapped in `DOMContentLoaded` automatically
 - `change` event attached automatically
 - Full JavaScript access for complex logic
 
-### 6.3 Level 3: Form-Level Scripts
+### Level 3: Form-Level Scripts
 
 **For cross-field logic**, add raw JavaScript to run when the form loads:
 
@@ -787,16 +809,16 @@ $formwriter->addReadyScript('
 ');
 ```
 
-**Features:**
+**Notes:**
 - Multiple scripts can be added (they all run in order)
 - Wrapped in `DOMContentLoaded` automatically
 - Full control - no framework limitations
-- **Container auto-detection** - When hiding/showing fields, target the `field_id_container` divs (FormWriter's standard pattern) which hide both label and field together
+- **Container auto-detection** - When hiding/showing fields, target the `field_id_container` divs
 - Runs just before form closing tag
 
-**Pro Tip:** When hiding fields in form-level scripts, target `field_id_container` elements rather than field IDs directly. This hides the entire field wrapper (label + input) instead of just the input. FormWriter automatically wraps form fields in these containers, so they're always available to target.
+**Pro Tip:** When hiding fields in form-level scripts, target `field_id_container` elements rather than field IDs directly. This hides the entire field wrapper (label + input) instead of just the input.
 
-### 6.4 Fade Effects
+### Fade Effects
 
 All visibility changes include smooth fade transitions:
 
@@ -813,12 +835,6 @@ All visibility changes include smooth fade transitions:
   transition: opacity 0.3s ease-in;
 }
 ```
-
-**Benefits:**
-- Professional, smooth UX
-- No JavaScript animation loops
-- Works for all visibility rules automatically
-- Prevents interaction during fade with `pointer-events: none`
 
 ---
 
@@ -841,103 +857,9 @@ User Input → JavaScript Validation → Form Submission
          Model->save() → Database
 ```
 
-### 7.1 Basic Validation with set_validate()
+### Automatic Validation
 
-**Using V1 FormWriter:**
-
-```php
-$formwriter = new FormWriterBootstrap('contact_form');
-
-// Define validation rules
-$validation_rules = array();
-$validation_rules['name']['required']['value'] = 'true';
-$validation_rules['email']['required']['value'] = 'true';
-$validation_rules['email']['email']['value'] = 'true';
-$validation_rules['message']['required']['value'] = 'true';
-$validation_rules['message']['minlength']['value'] = '10';
-$validation_rules['message']['minlength']['message'] = '"Message must be at least 10 characters"';
-
-// Output validation script (generates JavaScript)
-echo $formwriter->set_validate($validation_rules);
-
-// Build the form
-$formwriter->begin_form();
-$formwriter->textinput('name', 'Name', ['required' => true]);
-$formwriter->textinput('email', 'Email', ['required' => true, 'validation' => 'email']);
-$formwriter->textarea('message', 'Message', ['required' => true, 'validation' => ['minlength' => 10]]);
-$formwriter->submitbutton('submit', 'Send');
-$formwriter->end_form();
-```
-
-**Using V2 FormWriter:**
-
-```php
-$formwriter = $page->getFormWriter('user_form');
-
-// Define validation rules
-$validation_rules = array();
-$validation_rules['usr_email']['required']['value'] = 'true';
-$validation_rules['usr_email']['email']['value'] = 'true';
-$validation_rules['usr_password']['required']['value'] = 'true';
-$validation_rules['usr_password']['minlength']['value'] = '8';
-
-// Output validation script
-echo $formwriter->set_validate($validation_rules);
-
-// Build form (V2 uses consistent options array)
-$formwriter->begin_form();
-$formwriter->textinput('usr_email', 'Email', [
-    'required' => true,
-    'validation' => 'email'
-]);
-$formwriter->passwordinput('usr_password', 'Password', [
-    'required' => true,
-    'validation' => ['minlength' => 8],
-    'show_strength' => true
-]);
-$formwriter->end_form();
-```
-
-### 7.2 Model-Aware Validation (V2 Feature)
-
-FormWriter V2 can automatically generate validation rules from model `field_specifications`:
-
-```php
-require_once(PathHelper::getIncludePath('data/user_class.php'));
-
-$user = new User($user_id ?? NULL, !empty($user_id));
-$formwriter = $page->getFormWriter('user_form');
-
-// Generate validation from model field_specifications
-$validation_rules = array();
-foreach (User::$field_specifications as $field_name => $spec) {
-    if (isset($spec['required']) || isset($spec['validation'])) {
-        $validation_rules[$field_name] = array();
-
-        // Add required rule
-        if (isset($spec['required']) && $spec['required']) {
-            $validation_rules[$field_name]['required']['value'] = 'true';
-        }
-
-        // Add other validation rules
-        if (isset($spec['validation'])) {
-            foreach ($spec['validation'] as $rule => $value) {
-                if ($rule !== 'messages') {
-                    if (is_bool($value)) {
-                        $validation_rules[$field_name][$rule]['value'] = $value ? 'true' : 'false';
-                    } else {
-                        $validation_rules[$field_name][$rule]['value'] = (string)$value;
-                    }
-                }
-            }
-        }
-    }
-}
-
-echo $formwriter->set_validate($validation_rules);
-```
-
-**Model field_specifications example:**
+FormWriter automatically generates validation rules from model `field_specifications`:
 
 ```php
 // In /data/user_class.php
@@ -949,113 +871,98 @@ public static $field_specifications = array(
         'validation' => array(
             'email' => true,
             'minlength' => 5,
-            'maxlength' => 255,
-            'messages' => array(
-                'email' => 'Email must be a valid email address',
-                'minlength' => 'Email must be at least 5 characters'
-            )
+            'maxlength' => 255
         )
-    ),
-    'usr_username' => array(
-        'type' => 'varchar(64)',
-        'required' => true,
-        'unique' => true,
-        'validation' => array(
-            'minlength' => 3,
-            'maxlength' => 64,
-            'pattern' => '/^[a-zA-Z0-9_\.]+$/',
-        )
-    ),
+    )
 );
+
+// In your form - NO validation setup needed!
+$formwriter = $page->getFormWriter('user_form', 'v2');
+$formwriter->begin_form();
+
+// Validation is AUTOMATIC from model specs!
+$formwriter->textinput('usr_email', 'Email');
+// ↑ Automatically validates as required, unique, email
+
+$formwriter->end_form();
 ```
 
-### 7.3 Available Validation Rules
+### Manual Validation Rules
 
-FormWriter supports all JoineryValidator rules:
+For fields without model specs, add validation manually:
+
+```php
+$formwriter->textinput('custom_field', 'Custom Field', [
+    'validation' => [
+        'required' => true,
+        'minlength' => 5,
+        'maxlength' => 100
+    ]
+]);
+
+// Or use shorthand for common types
+$formwriter->textinput('email', 'Email', [
+    'validation' => 'email',  // Shorthand
+    'required' => true
+]);
+```
+
+### Available Validation Rules
 
 | Rule | Usage | Example |
 |------|-------|---------|
-| `required` | Field must have value | `'required']['value'] = 'true'` |
-| `email` | Valid email format | `'email']['value'] = 'true'` |
-| `url` | Valid URL format | `'url']['value'] = 'true'` |
-| `number` | Numeric value only | `'number']['value'] = 'true'` |
-| `minlength` | Min character length | `'minlength']['value'] = '8'` |
-| `maxlength` | Max character length | `'maxlength']['value'] = '255'` |
-| `min` | Min numeric value | `'min']['value'] = '0'` |
-| `max` | Max numeric value | `'max']['value'] = '100'` |
-| `equalTo` | Must match field | `'equalTo']['value'] = '"#password"'` |
-| `pattern` | Regex match | `'pattern']['value'] = '"/^[A-Z0-9]+$/"'` |
-| `remote` | AJAX validation | `'remote']['value'] = '"/ajax/check_username"'` |
+| `required` | Field must have value | `'required' => true` |
+| `email` | Valid email format | `'validation' => 'email'` |
+| `url` | Valid URL format | `'validation' => 'url'` |
+| `phone` | Valid phone number | `'validation' => 'phone'` |
+| `number` | Numeric value only | `'validation' => 'number'` |
+| `minlength` | Min character length | `'minlength' => 8` |
+| `maxlength` | Max character length | `'maxlength' => 255` |
+| `min` | Min numeric value | `'min' => 0` |
+| `max` | Max numeric value | `'max' => 100` |
+| `equalTo` | Must match field | `'equalTo' => 'password'` |
+| `pattern` | Regex match | `'pattern' => '/^[A-Z0-9]+$/'` |
 
-### 7.4 Common Validation Patterns
+### Common Validation Patterns
 
 **Email Signup Form:**
 
 ```php
-$rules['email']['required']['value'] = 'true';
-$rules['email']['email']['value'] = 'true';
-$rules['password']['required']['value'] = 'true';
-$rules['password']['minlength']['value'] = '8';
-$rules['password_confirm']['required']['value'] = 'true';
-$rules['password_confirm']['equalTo']['value'] = '"#password"';  // Must match
-
-echo $formwriter->set_validate($rules);
+$formwriter->textinput('email', 'Email', [
+    'validation' => 'email',
+    'required' => true
+]);
+$formwriter->passwordinput('password', 'Password', [
+    'required' => true,
+    'validation' => ['minlength' => 8]
+]);
+$formwriter->passwordinput('password_confirm', 'Confirm Password', [
+    'required' => true,
+    'validation' => ['equalTo' => 'password']
+]);
 ```
 
 **Product Form with Price:**
 
 ```php
-$rules['product_name']['required']['value'] = 'true';
-$rules['product_name']['minlength']['value'] = '3';
-
-$rules['price']['required']['value'] = 'true';
-$rules['price']['number']['value'] = 'true';
-$rules['price']['min']['value'] = '0.01';
-
-$rules['sku']['required']['value'] = 'true';
-$rules['sku']['pattern']['value'] = '"/^[A-Z0-9\-]+$/"';
-
-echo $formwriter->set_validate($rules);
+$formwriter->textinput('product_name', 'Product Name', [
+    'required' => true,
+    'validation' => ['minlength' => 3]
+]);
+$formwriter->textinput('price', 'Price', [
+    'required' => true,
+    'validation' => [
+        'number' => true,
+        'min' => 0.01
+    ]
+]);
+$formwriter->textinput('sku', 'SKU', [
+    'required' => true,
+    'validation' => ['pattern' => '/^[A-Z0-9\-]+$/']
+]);
 ```
 
-**Contact Form with Optional Phone:**
-
-```php
-$rules['name']['required']['value'] = 'true';
-$rules['email']['required']['value'] = 'true';
-$rules['email']['email']['value'] = 'true';
-$rules['message']['required']['value'] = 'true';
-$rules['message']['minlength']['value'] = '10';
-
-// Phone is optional but must be valid if provided
-$rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';
-
-echo $formwriter->set_validate($rules);
-```
-
-### 7.5 Custom Error Messages
-
-```php
-$validation_rules['email']['required']['value'] = 'true';
-$validation_rules['email']['required']['message'] = '"Please enter your email address"';
-$validation_rules['email']['email']['value'] = 'true';
-$validation_rules['email']['email']['message'] = '"Please enter a valid email address"';
-
-$validation_rules['password']['minlength']['value'] = '8';
-$validation_rules['password']['minlength']['message'] = '"Password must be at least 8 characters"';
-```
-
-### 7.6 Debug Mode
-
-Enable console logging during development:
-
-```php
-echo $formwriter->set_validate($validation_rules, NULL, true);  // true = debug mode
-```
-
-This logs validation initialization, rules, field validation attempts, and results.
-
-### 7.7 Server-Side Validation
+### Server-Side Validation
 
 **Always validate on the server - never trust client-side validation alone!**
 
@@ -1086,13 +993,7 @@ try {
 }
 ```
 
-**For complete validation system documentation**, including:
-- JoineryValidator JavaScript library details
-- Server-side model validation
-- Validation rule reference
-- Troubleshooting and performance tips
-
-See **[validation.md](validation.md)**
+**For complete validation system documentation**, see **[validation.md](validation.md)**
 
 ---
 
@@ -1150,317 +1051,148 @@ See **[validation.md](validation.md)**
 
 ---
 
-## 9. V1 vs V2
+## 9. Advanced Features
 
-### When to Use V1
+### CSRF Protection
 
-- Maintaining existing code
-- Quick forms without complex validation
-- All themes (Bootstrap, HTML5, UIKit, Tailwind)
-
-### When to Use V2
-
-- New development
-- **Automatic model validation** from field specifications
-- **Automatic form filling** from model data
-- Modern Bootstrap or Tailwind styling
-- Time picker widgets
-- Password strength meters
-- Input group prepend/append text
-
-### 9.1 V2 Automatic Features
-
-FormWriter V2 includes powerful automatic features that reduce boilerplate code:
-
-#### 9.1.1 Automatic Model Validation
-
-V2 automatically detects validation rules from model `field_specifications` based on field naming conventions:
+CSRF (Cross-Site Request Forgery) protection is automatic for all POST forms:
 
 ```php
-// In /data/locations_class.php
-public static $field_specifications = array(
-    'loc_name' => array('type'=>'varchar(255)', 'required'=>true),
-    'loc_link' => array('type'=>'varchar(255)', 'required'=>true),
-    'loc_address' => array('type'=>'varchar(255)'),
-);
-
-// In admin form - NO manual validation setup needed!
-$formwriter = $page->getFormWriter('form1', 'v2', ['debug' => true]);
-$formwriter->begin_form();
-
-// V2 auto-detects Location model from 'loc_' prefix and applies validation
-$formwriter->textinput('loc_name', 'Location name');  // ← Automatically required!
-$formwriter->textinput('loc_link', 'Link');           // ← Automatically required!
-$formwriter->textinput('loc_address', 'Address');     // ← Not required (no rule in model)
-
-$formwriter->end_form();
-```
-
-**How it works:**
-1. V2 extracts field prefix (`loc_` from `loc_name`)
-2. Maps prefix to model class (`loc` → `Location`)
-3. Loads `Location::$field_specifications`
-4. Applies validation rules automatically
-5. Outputs console debug info (when `debug => true`)
-
-**Console output:**
-```javascript
-=== FormWriterV2 DEBUG ===
-Form ID: form1
-🔍 Automatic Model Validation Detected:
-  ✓ loc_name → Model: Location {required: true}
-  ✓ loc_link → Model: Location {required: true}
-✓ Validation rules: {loc_name: {required: true}, loc_link: {required: true}}
-```
-
-**IMPORTANT:** Don't override model validation unless necessary:
-
-```php
-// ❌ BAD - Disables ALL validation including model-based
-$formwriter->textinput('loc_link', 'Link', [
-    'validation' => false  // Overrides model validation!
+// CSRF automatically enabled for POST forms
+$formwriter = new FormWriterV2Bootstrap('form', [
+    'method' => 'POST'  // CSRF token auto-generated!
 ]);
 
-// ✅ GOOD - Uses automatic model validation
-$formwriter->textinput('loc_link', 'Link');
+// Server-side validation in logic file
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
 
-// ✅ GOOD - Adds to model validation (doesn't replace it)
-$formwriter->textinput('loc_link', 'Link', [
-    'validation' => ['maxlength' => 100]  // Adds maxlength, keeps required from model
-]);
-```
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $formwriter = new FormWriterV2Bootstrap('form');
 
-#### 9.1.2 Automatic Form Filling
-
-V2 can auto-populate all fields from model data using the `model` option:
-
-```php
-// Load location model
-$location = new Location($location_id, TRUE);
-
-// Pass model directly to FormWriter - auto-fills all fields!
-$formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $location
-]);
-
-$formwriter->begin_form();
-
-// No need to specify 'value' for each field - auto-filled from model!
-$formwriter->textinput('loc_name', 'Location name');
-$formwriter->textinput('loc_address', 'Address');
-$formwriter->textinput('loc_website', 'Website');
-$formwriter->textinput('loc_link', 'Link');
-
-$formwriter->end_form();
-```
-
-**With field overrides:**
-```php
-// Pass model AND additional values that override specific fields
-$override_values = [];
-if($coupon->key){
-    // Transform timezone-sensitive fields (overrides model value)
-    $override_values['ccd_start_time'] = LibraryFunctions::convert_time(
-        $coupon->get('ccd_start_time'), 'UTC', $session->get_timezone(), 'Y-m-d H:i:s'
-    );
-} else {
-    // Set defaults for new records
-    $override_values['ccd_is_active'] = 1;
-}
-
-$formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $coupon,              // Auto-fills all model fields
-    'values' => $override_values     // Overrides specific fields (no conflicts!)
-]);
-```
-
-**Override behavior:**
-Values in the `values` array take precedence over model fields - no conflict detection needed:
-
-```php
-$formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $location,              // Has loc_name = "Old Name"
-    'values' => ['loc_name' => 'New Name']  // Overrides model value
-]);
-// Result: loc_name will be "New Name" (values override model)
-```
-
-**Benefits:**
-- ✅ Pass model directly - no need to call `export_as_array()`
-- ✅ Automatic value population from model
-- ✅ Simple override pattern - values take precedence
-- ✅ Perfect for timezone conversions and defaults
-- ✅ Works with all field types
-
-**Old way (manual):**
-```php
-$formwriter = $page->getFormWriter('form1', 'v2');
-$formwriter->textinput('loc_name', 'Location name', [
-    'value' => $location->get('loc_name')  // Repeat for every field!
-]);
-$formwriter->textinput('loc_address', 'Address', [
-    'value' => $location->get('loc_address')
-]);
-// ... etc
-```
-
-**New way (automatic):**
-```php
-$formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $location  // One option!
-]);
-$formwriter->textinput('loc_name', 'Location name');
-$formwriter->textinput('loc_address', 'Address');
-// ... etc - all auto-filled!
-```
-
-#### 9.1.3 Automatic Local Time Conversion
-
-V2 automatically converts UTC DateTime objects to the user's local timezone for display. This eliminates manual timezone conversion code in views.
-
-**How it works:**
-- Automatically converts any DateTime objects found in form values with UTC timezone
-- DateTime objects are created by `export_as_array()` with UTC timezone already set
-- Skips conversion if DateTime already has a non-UTC timezone
-- Converts from UTC to user's timezone to `Y-m-d H:i:s` format for display
-- Handles errors gracefully (leaves value unchanged if conversion fails)
-
-**Before (V1 - manual conversion):**
-```php
-// Must manually convert timezone in view
-$form_values = $location->export_as_array();
-if($location->get('loc_created_time')){
-    $form_values['loc_created_time'] = LibraryFunctions::convert_time(
-        $location->get('loc_created_time'),
-        'UTC',
-        $session->get_timezone(),
-        'Y-m-d H:i:s'
-    );
-}
-$formwriter = $page->getFormWriter('form1', 'v1');
-// Then pass $form_values manually to each field
-```
-
-**After (V2 - automatic conversion):**
-```php
-// Just pass model - any DateTime objects automatically converted!
-$formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $location  // DateTime objects from export_as_array() auto-converted
-]);
-```
-
-**How it works technically:**
-
-1. `export_as_array()` creates DateTime objects with UTC timezone:
-```php
-// In SystemBase::export_as_array():
-$out_array[$field_name] = new DateTime($this->get($field_name), new DateTimeZone('UTC'));
-```
-
-2. FormWriter V2 converts UTC DateTime objects to user's timezone:
-```php
-// In FormWriterV2Base::convertDateTimeFieldsToLocalTime():
-foreach ($this->values as $key => &$value) {
-    if ($value instanceof DateTime) {
-        // Only convert if timezone is UTC (skip if already in another timezone)
-        if ($value->getTimezone()->getName() === 'UTC') {
-            $value = LibraryFunctions::convert_time($value, 'UTC', $user_timezone, 'Y-m-d H:i:s');
-        }
+    if (!$formwriter->validateCSRF($_POST)) {
+        return LogicResult::error('Security token expired. Please refresh and try again.');
     }
+
+    // Continue processing...
 }
 ```
 
-**Overriding automatic conversion:**
-If you need to use a non-converted value, simply pass it in the `values` array (which overrides model values):
+**Features:**
+- Session-based storage
+- Per-form ID tokens
+- 2-hour default lifetime
+- One-time use tokens
+- Automatic cleanup of expired tokens
+
+### Automatic Local Time Conversion
+
+FormWriter automatically converts UTC DateTime objects to the user's local timezone for display:
 
 ```php
+// In view - DateTime objects auto-converted to user's timezone!
 $formwriter = $page->getFormWriter('form1', 'v2', [
-    'model' => $location,
-    'values' => ['loc_created_time' => '2024-01-01 00:00:00']  // This won't be converted
+    'model' => $event  // DateTime fields in model are auto-converted
 ]);
+
+$formwriter->begin_form();
+$formwriter->datetimeinput('evt_start_time', 'Event Start Time');
+$formwriter->end_form();
 ```
 
-**Benefits:**
-- ✅ Eliminates repetitive timezone conversion code
-- ✅ Works automatically - no configuration needed
-- ✅ Simple: converts any DateTime object found in values
-- ✅ Easy to override when needed (pass `values` array)
-- ✅ Handles errors gracefully
-- ✅ Clean design: timezone is part of the DateTime object itself
+**How it works:**
+1. `export_as_array()` creates DateTime objects with UTC timezone
+2. FormWriter detects DateTime objects in values
+3. Converts from UTC to user's timezone automatically
+4. Formats as `Y-m-d H:i:s` for display
 
-#### 9.1.4 Input Group Prepend Text (Bootstrap)
+### Input Group Prepend Text (Bootstrap)
 
-V2 Bootstrap supports prepending text to input fields using Bootstrap's input-group:
+Bootstrap theme supports prepending text to input fields:
 
 ```php
 // Show URL prefix before the input field
 $formwriter->textinput('loc_link', 'Link', [
     'prepend' => $settings->get_setting('webDir').'/location/'
 ]);
-
 // Shows as: [/location/][user types here]
 
 // Currency prefix
 $formwriter->textinput('price', 'Price', [
     'prepend' => '$'
 ]);
-
 // Shows as: [$][user types here]
-
-// Protocol prefix
-$formwriter->textinput('website', 'Website', [
-    'prepend' => 'https://'
-]);
-
-// Shows as: [https://][user types here]
 ```
 
-**Benefits:**
-- ✅ Cleaner than putting prefix in label
-- ✅ Visual indication of final format
-- ✅ User only types the variable part
-- ✅ Uses Bootstrap's native input-group styling
+### Debug Mode
 
-**Key Differences:**
+Enable console logging during development:
 
-| Feature | V1 | V2 |
-|---------|----|----|
-| Field options | Mixed parameters | Standardized `options` array |
-| Validation | Manual `set_validate()` | **Auto from model specs** |
-| Form filling | Manual per-field | **Auto from `values` option** |
-| Time picker | Basic input | Hour/minute dropdowns |
-| Password | Simple input | With strength meter |
-| Input groups | Manual HTML | **`prepend` option** |
-| Debug mode | Limited | **Console model detection** |
-| Themes | 4 (Bootstrap, HTML5, UIKit, Tailwind) | 2 (Bootstrap, Tailwind) |
-| Visibility rules | ✅ Supported | ✅ Supported |
-| Custom scripts | ✅ Supported | ✅ Supported |
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'debug' => true  // Logs validation detection to console
+]);
+```
 
-**For migration guidance**, see **[/specs/migrate_admin_forms_to_formwriter_v2.md](/specs/migrate_admin_forms_to_formwriter_v2.md)**
+**Console output:**
+```javascript
+=== FormWriterV2 DEBUG ===
+Form ID: form1
+🔍 Automatic Model Validation Detected:
+  ✓ usr_email → Model: User {required: true, email: true}
+  ✓ usr_username → Model: User {required: true, minlength: 3}
+✓ Validation rules applied
+```
+
+### Error Handling
+
+FormWriter stores validation errors internally:
+
+```php
+// In logic file
+if (!$formwriter->validate($_POST)) {
+    $errors = $formwriter->getErrors();
+    // Returns:
+    // [
+    //     'field_name' => ['Error message 1', 'Error message 2']
+    // ]
+
+    return LogicResult::error('Validation failed', ['errors' => $errors]);
+}
+```
+
+**Methods available:**
+- `hasErrors()` - Check if any errors exist
+- `getErrors()` - Get all errors
+- `getFieldErrors($field)` - Get errors for specific field
+- `setErrors($errors)` - Set errors manually
+- `addError($field, $message)` - Add single error
+- `clearErrors()` - Clear all errors
 
 ---
 
 ## Summary
 
 FormWriter provides:
-- ✅ Consistent, secure form generation
-- ✅ Automatic CSRF protection
-- ✅ Validation integration
-- ✅ Dynamic field visibility with smooth transitions
-- ✅ Custom JavaScript support at three levels
-- ✅ Theme-aware styling
-- ✅ Accessibility features
-- ✅ **Model Form Helpers** - Reusable form field sets from data models
+- Consistent, secure form generation
+- Automatic CSRF protection
+- Automatic validation from models
+- Automatic value filling
+- Automatic timezone conversion
+- Dynamic field visibility with smooth transitions
+- Custom JavaScript support at three levels
+- Theme-aware styling
+- Accessibility features
+- Model Form Helpers - Reusable form field sets from data models
 
 **Key Features:**
-- **Model Form Helpers** (NEW) - Static methods in models render complete form field sets (Address, PhoneNumber, etc.)
-- **V2 Automatic Features** - Model validation detection, form filling, timezone conversion
-- **Two Versions** - V1 for compatibility, V2 for modern development
-- **Complete Flexibility** - Visibility rules, custom scripts, validation patterns
+- **Clean API** - Options arrays for readable, maintainable code
+- **Auto-detection** - Minimal boilerplate code required
+- **Model Integration** - Works directly with model field specifications
+- **CSRF Protection** - Automatic for all POST forms
+- **Validation** - Single source of truth in model definitions
 
 **For more information:**
 - [Model Form Helpers](#4-model-form-helpers) - Encapsulated field definitions in models
 - [Validation System](validation.md) - Complete validation documentation
 - [Admin Pages](admin_pages.md) - Using FormWriter in admin interfaces
-- [Specification: Model Form Helpers](/specs/implemented/model_form_helpers.md) - Architecture and implementation details
-- Example forms: `/utils/forms_example_bootstrap.php`, `/utils/forms_example_bootstrapv2.php`
+- Example forms: `/utils/forms_example_bootstrapv2.php`

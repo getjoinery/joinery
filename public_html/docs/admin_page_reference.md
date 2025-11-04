@@ -569,25 +569,20 @@ function admin_user_edit_logic($get_vars, $post_vars) {
 <?php endif; ?>
 
 <?php
-$formwriter = $page->getFormWriter('form1');
+// Using FormWriter V2 - automatic validation and value filling
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $user  // Auto-fills all fields and applies validation from model
+]);
 
-$validation_rules = array();
-$validation_rules['usr_first_name']['required']['value'] = 'true';
-$validation_rules['usr_last_name']['required']['value'] = 'true';
-$validation_rules['usr_email']['required']['value'] = 'true';
-$validation_rules['usr_email']['email']['value'] = 'true';
+$formwriter->begin_form();
 
-echo $formwriter->set_validate($validation_rules);
-echo $formwriter->begin_form('form1', 'POST', $_SERVER['PHP_SELF'] . '?usr_user_id=' . $user->key);
+// Fields with usr_ prefix automatically get User model validation
+$formwriter->textinput('usr_first_name', 'First Name');
+$formwriter->textinput('usr_last_name', 'Last Name');
+$formwriter->textinput('usr_email', 'Email');
 
-echo $formwriter->textinput('First Name', 'usr_first_name', 'form-control', 100, $user->get('usr_first_name'));
-echo $formwriter->textinput('Last Name', 'usr_last_name', 'form-control', 100, $user->get('usr_last_name'));
-echo $formwriter->textinput('Email', 'usr_email', 'form-control', 100, $user->get('usr_email'));
-
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Save User', 'btn btn-primary');
-echo $formwriter->end_buttons();
-echo $formwriter->end_form();
+$formwriter->submitbutton('submit', 'Save User');
+$formwriter->end_form();
 ?>
 ```
 
@@ -765,21 +760,22 @@ $numrecords = $users->count();       // Counts loaded records (wasteful)
 ### 8. FormWriter Usage
 
 ```php
-// Get FormWriter from page object
-$formwriter = $page->getFormWriter('form1');
+// Get FormWriter V2 from page object
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $object  // Auto-fills values and applies validation
+]);
 
-// Set validation rules
-$validation_rules = array();
-$validation_rules['field_name']['required']['value'] = 'true';
-echo $formwriter->set_validate($validation_rules);
+// Build form with clean options array
+$formwriter->begin_form();
 
-// Build form
-echo $formwriter->begin_form('form1', 'POST', '/admin/admin_page');
-echo $formwriter->textinput('Label', 'field_name', 'form-control', 100, $default_value);
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Submit', 'btn btn-primary');
-echo $formwriter->end_buttons();
-echo $formwriter->end_form();
+// Field with automatic validation from model (if field name has model prefix)
+$formwriter->textinput('field_name', 'Label', [
+    'placeholder' => 'Enter value',
+    'helptext' => 'Help text here'
+]);
+
+$formwriter->submitbutton('submit', 'Submit');
+$formwriter->end_form();
 ```
 
 ## Troubleshooting
