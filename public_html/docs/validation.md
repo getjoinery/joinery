@@ -376,12 +376,12 @@ class Product extends SystemBase {
 
 ## 3. FormWriter Integration
 
-FormWriter provides a convenient interface for generating validation rules alongside form HTML. Both FormWriter V1 and V2 support the `set_validate()` method to automatically generate JoineryValidation JavaScript.
+FormWriter provides a convenient interface for generating validation rules alongside form HTML, with automatic validation detection from model `field_specifications`.
 
 ### Quick Example
 
 ```php
-$formwriter = new FormWriterBootstrap('contact_form');
+$formwriter = new FormWriterV2Bootstrap('contact_form');
 
 // Define validation rules
 $validation_rules = array();
@@ -399,10 +399,10 @@ $formwriter->passwordinput('password', 'Password', ['validation' => ['minlength'
 $formwriter->end_form();
 ```
 
-**FormWriter V2** adds model-aware validation - it can automatically extract validation rules from model `field_specifications` for seamless integration.
+FormWriter includes model-aware validation - it can automatically extract validation rules from model `field_specifications` for seamless integration.
 
 **For complete FormWriter validation documentation**, including:
-- V1 and V2 usage patterns
+- Usage patterns and examples
 - Model-aware validation
 - Common validation patterns
 - Custom error messages
