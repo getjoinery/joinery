@@ -655,8 +655,8 @@ class AdminPage{
 
 			echo '<div id="example1_filter" class="uk-align-right">';
 
-			require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-			$formwriter = new FormWriterBootstrap('search_form');
+			require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+			$formwriter = new FormWriterV2Bootstrap('search_form');
 
 			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
 			echo $pager->url_vars_as_hidden_input(array('searchterm'));

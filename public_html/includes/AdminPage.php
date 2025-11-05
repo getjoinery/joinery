@@ -15,45 +15,19 @@ class AdminPage extends PublicPageFalcon {
 
     /**
      * Get FormWriter instance for admin pages
-     * Supports both V1 (legacy) and V2 (modern) during migration
+     * Uses FormWriterV2Bootstrap (modern version)
      *
      * @param string $form_id Form identifier (default: 'form1')
-     * @param string $version 'v1' for legacy FormWriterBootstrap, 'v2' for FormWriterV2Bootstrap
      * @param array $form_options Additional form options (csrf, action, method, etc.)
-     * @return FormWriterBootstrap|FormWriterV2Bootstrap FormWriter instance
+     * @return FormWriterV2Bootstrap FormWriter instance
      *
      * Usage:
-     *   $formwriter = $page->getFormWriter('form1');                                    // V1 (default)
-     *   $formwriter = $page->getFormWriter('form1');                             // V2 (modern)
-     *   $formwriter = $page->getFormWriter('form1', ['csrf' => false]);          // V2 without CSRF
+     *   $formwriter = $page->getFormWriter('form1');
+     *   $formwriter = $page->getFormWriter('form1', ['csrf' => false]);
      */
-    public function getFormWriter($form_id = 'form1', $version = 'v1', $form_options = []) {
-        if ($version === 'v2') {
-            require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-
-            // Auto-detect form action from current request
-            $form_action = '/admin/dashboard';  // Safe default
-            if (!empty($_SERVER['REQUEST_URI'])) {
-                $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-                if (!empty($path)) {
-                    // Remove trailing .php if present (for direct access)
-                    $form_action = preg_replace('/\.php$/', '', $path);
-                }
-            }
-
-            // Merge defaults with provided options
-            $options = array_merge([
-                'action' => $form_action,
-                'method' => 'POST',
-                'csrf' => false  // Admin pages do NOT use CSRF protection
-            ], $form_options);
-
-            return new FormWriterV2Bootstrap($form_id, $options);
-        }
-
-        // Default to V1 for backward compatibility
-        require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-        return new FormWriterBootstrap($form_id);
+    public function getFormWriter($form_id = 'form1', $form_options = []) {
+        require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+        return new FormWriterV2Bootstrap($form_id, $form_options);
     }
 
 
