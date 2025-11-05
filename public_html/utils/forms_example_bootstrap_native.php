@@ -39,9 +39,9 @@ $page->public_header($hoptions, NULL);
 
 echo PublicPage::BeginPage('Complete Bootstrap Forms Test - All Field Types with Validation');
 
-// Use standard FormWriterBootstrap
-require_once(PathHelper::getIncludePath('/includes/FormWriterBootstrap.php'));
-$formwriter = new FormWriterBootstrap('form1');
+// Use standard FormWriterV2Bootstrap
+require_once(PathHelper::getIncludePath('/includes/FormWriterV2Bootstrap.php'));
+$formwriter = new FormWriterV2Bootstrap('form1');
 
 // ==============================================
 // COMPREHENSIVE VALIDATION RULES - ALL FIELDS

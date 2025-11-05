@@ -117,8 +117,8 @@ if (!$run_test) {
             <h5 class="mb-3">Run End-to-End Authentication Analysis</h5>
             
             <?php
-            require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-            $formwriter = new FormWriterBootstrap('email_test_form');
+            require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+            $formwriter = new FormWriterV2Bootstrap('email_test_form');
             
             // No validation rules - just plain form
             $form_html = $formwriter->begin_form('email_test_form', 'POST', '/utils/email_send_test');
