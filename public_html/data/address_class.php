@@ -314,7 +314,7 @@ private static function UcAddress($string) {
 
 		// Country dropdown
 		if ($opts['include_country']) {
-			$country_codes = self::get_country_drop_array2();
+			$country_codes = self::get_country_drop_array();
 			$formwriter->dropinput('usa_cco_country_code_id', 'Country', [
 				'options' => $country_codes,
 				'value' => $opts['model'] ? $opts['model']->get('usa_cco_country_code_id') : null
@@ -616,27 +616,7 @@ private static function UcAddress($string) {
 		}
 	}
 	
-	static function get_country_drop_array() {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$sql = "SELECT * FROM country WHERE TRUE";
-		try {
-			$q = $dblink->prepare($sql);
-			$success = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} catch(PDOException $e) {
-			$dbhelper->handle_query_error($e);
-		}
-
-		$optionvals = array();
-		while ($country = $q->fetch()) {
-			$optionvals[$country->country_code] = $country->country_name;
-		}
-		return $optionvals;
-	}
-	
-	static function get_country_drop_array2(){
+	static function get_country_drop_array(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
