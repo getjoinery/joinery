@@ -905,3 +905,19 @@
 		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('API Keys', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_api_keys', 4, 8, 0, '', 'api_keys');";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// Drop timezone table - dead table with no code references
+		$migration = array();
+		$migration['database_version'] = '0.67';
+		$migration['test'] = "SELECT count(1) as count FROM pg_tables WHERE tablename = 'timezone' AND schemaname = 'public'";
+		$migration['migration_sql'] = 'DROP TABLE IF EXISTS public.timezone CASCADE;';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Drop country table - consolidated into cco_country_codes
+		$migration = array();
+		$migration['database_version'] = '0.67';
+		$migration['test'] = "SELECT count(1) as count FROM pg_tables WHERE tablename = 'country' AND schemaname = 'public'";
+		$migration['migration_sql'] = 'DROP TABLE IF EXISTS public.country CASCADE;';
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
