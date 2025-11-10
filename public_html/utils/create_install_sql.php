@@ -431,37 +431,8 @@ if ($file_size === 0) {
 
 echo "   File created successfully (" . number_format($file_size) . " bytes)\n";
 
-// ============================================================================
-// COPY TO MAINTENANCE SCRIPTS FOR DISTRIBUTION (OPTIONAL)
-// ============================================================================
-
-$maintenance_scripts_dir = '/home/user1/joinery/joinery/maintenance scripts';
-if (is_dir($maintenance_scripts_dir) && is_writable($maintenance_scripts_dir)) {
-    // Always copy as uncompressed .sql for maintenance scripts
-    $maintenance_dest = $maintenance_scripts_dir . '/joinery-install-sql.sql';
-
-    if ($compress) {
-        // Need to decompress for maintenance scripts
-        $gunzip_cmd = sprintf(
-            'gunzip -c %s > %s',
-            escapeshellarg($final_output_path),
-            escapeshellarg($maintenance_dest)
-        );
-        exec($gunzip_cmd, $output, $exit_code);
-        if ($exit_code === 0) {
-            echo "   Copied uncompressed version to maintenance scripts\n";
-        } else {
-            echo "   WARNING: Could not decompress for maintenance scripts\n";
-        }
-    } else {
-        // Just copy the uncompressed file
-        if (copy($final_output_path, $maintenance_dest)) {
-            echo "   Copied to maintenance scripts for distribution\n";
-        } else {
-            echo "   WARNING: Could not copy to maintenance scripts\n";
-        }
-    }
-}
+// Note: No copy to maintenance scripts needed
+// publish_upgrade.php will pull directly from uploads directory
 
 // ============================================================================
 // REPORT SUCCESS
