@@ -177,7 +177,7 @@ exec($extract_cmd, $output, $exit_code);
 **Modifications needed:**
 - Remove the generic composer.json creation in /home/user1
 - Add conditional composer install when project files exist
-- Add fresh database installation support using joinery-install-sql.sql
+- Add fresh database installation support using joinery-install.sql
 
 **Remove this section:**
 ```bash
@@ -213,7 +213,7 @@ fi
 
 **Modifications needed for fresh installations:**
 - Detect if this is a fresh install (no existing database)
-- Use joinery-install-sql.sql for fresh database setup
+- Use joinery-install.sql for fresh database setup
 
 **Add database initialization logic:**
 ```bash
@@ -314,3 +314,231 @@ fi
    - Login with: admin@example.com / changeme123
    - Change password immediately
    - Configure site settings
+
+---
+
+## PHASE 2: Composer Dependency Management
+
+**Note:** Phase 2 should be implemented and tested after Phase 1 is complete and working.
+
+### Overview
+
+Standardize composer dependency management across all installation and upgrade scenarios, eliminating conflicts between different composer.json files and ensuring consistent dependency installation.
+
+### Current Problems
+
+1. **Conflicting composer.json files**:
+   - server_setup.sh creates a generic composer.json in `/home/user1/` with common dependencies
+   - Project has its own composer.json in `/var/www/html/{SITE}/public_html/`
+   - These don't match, causing confusion and potential version conflicts
+
+2. **Inconsistent composer handling**:
+   - new_account.sh has NO composer handling at all
+   - deploy.sh and upgrade.php use `composer_install_if_needed.php`
+   - server_setup.sh pre-installs generic dependencies
+
+3. **Shared vendor directory** (`/home/user1/vendor/`):
+   - All sites share the same vendor directory
+   - Potential version conflicts between sites
+   - Security consideration: all sites access same dependencies
+
+### Phase 2 Changes Required
+
+#### 1. server_setup.sh Modifications
+
+**Remove the generic composer.json creation** (lines 137-155) and replace with:
+
+```bash
+# Ensure Composer is installed globally
+log "Composer installed at /usr/local/bin/composer"
+
+# Create shared vendor directory structure but don't install anything yet
+mkdir -p /home/user1/vendor
+chown -R user1:user1 /home/user1
+chmod 755 /home/user1
+log "Shared vendor directory created at /home/user1/vendor/"
+
+# If project files already exist (from archive extraction), install dependencies
+if [ -n "$SITENAME" ] && [ -f "/var/www/html/$SITENAME/public_html/composer.json" ]; then
+    log "Project files detected - installing composer dependencies"
+    cd "/var/www/html/$SITENAME/public_html"
+
+    # Check if composer.json specifies custom vendor-dir
+    VENDOR_DIR=$(php -r "
+        \$json = json_decode(file_get_contents('composer.json'), true);
+        echo isset(\$json['config']['vendor-dir']) ? \$json['config']['vendor-dir'] : '';
+    ")
+
+    if [ -z "$VENDOR_DIR" ]; then
+        # Use default vendor location
+        COMPOSER_VENDOR_DIR=/home/user1/vendor COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+    else
+        # Use project-specified vendor directory
+        COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+    fi
+
+    # Fix permissions
+    chown -R user1:user1 /home/user1/vendor
+    chmod -R 755 /home/user1/vendor
+    log "Composer dependencies installed"
+else
+    log "No project files yet - composer dependencies will be installed after deployment"
+fi
+```
+
+#### 2. new_account.sh Modifications
+
+**Add archive extraction and composer installation** after database creation (around line 171):
+
+```bash
+# Check if joinery archive exists and extract it
+ARCHIVE_PATH="/home/user1/joinery/joinery/maintenance scripts/joinery.tar.gz"
+if [ -f "$ARCHIVE_PATH" ]; then
+    echo "Extracting Joinery platform files..."
+    tar -xzf "$ARCHIVE_PATH" -C "/var/www/html/$1/" --strip-components=0
+
+    # Install composer dependencies if composer.json exists
+    if [ -f "/var/www/html/$1/public_html/composer.json" ]; then
+        echo "Installing composer dependencies..."
+        cd "/var/www/html/$1/public_html"
+
+        # Ensure vendor-dir points to shared location
+        php -r "
+            \$path = 'composer.json';
+            \$json = json_decode(file_get_contents(\$path), true);
+            if (!isset(\$json['config'])) {
+                \$json['config'] = [];
+            }
+            \$json['config']['vendor-dir'] = '/home/user1/vendor';
+            file_put_contents(\$path, json_encode(\$json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        "
+
+        COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+
+        # Fix permissions
+        chown -R user1:user1 /home/user1/vendor
+        chmod -R 755 /home/user1/vendor
+        echo "Composer dependencies installed."
+    fi
+
+    # Update configuration (already handled by extraction)
+    echo "Platform files extracted and configured."
+else
+    echo "Warning: Joinery archive not found at $ARCHIVE_PATH"
+    echo "You will need to deploy the platform files manually."
+fi
+```
+
+#### 3. deploy.sh Modifications
+
+**Add composer.json vendor-dir verification** before running composer_install_if_needed.php:
+
+```bash
+# Ensure composer.json uses correct vendor directory
+if [ -f "/var/www/html/$TARGET_SITE/public_html/composer.json" ]; then
+    log "Checking composer configuration..."
+
+    # Update vendor-dir in composer.json if needed
+    php -r "
+        \$path = '/var/www/html/$TARGET_SITE/public_html/composer.json';
+        \$json = json_decode(file_get_contents(\$path), true);
+        if (!isset(\$json['config'])) {
+            \$json['config'] = [];
+        }
+        \$json['config']['vendor-dir'] = '/home/user1/vendor';
+        file_put_contents(\$path, json_encode(\$json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    "
+
+    log "Composer configuration updated"
+fi
+
+# Then continue with existing composer_install_if_needed.php call
+```
+
+#### 4. Project composer.json Modifications
+
+Ensure the project's composer.json in the archive includes the vendor-dir configuration:
+
+```json
+{
+    "name": "joinery/platform",
+    "description": "Joinery membership and event management platform",
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "mailgun/mailgun-php": "^3.2",
+        "kriswallsmith/buzz": "^1.2",
+        "nyholm/psr7": "^1.3",
+        "jhut89/mailchimp3php": "^3.2",
+        "verot/class.upload.php": "^2.1",
+        "stripe/stripe-php": "^10.16",
+        "phpmailer/phpmailer": "^6.10.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        },
+        "vendor-dir": "/home/user1/vendor"
+    }
+}
+```
+
+### Phase 2 Installation Flow
+
+1. **Fresh Server Setup**:
+   - `server_setup.sh` installs Composer globally
+   - Creates `/home/user1/vendor/` directory structure
+   - NO generic composer.json created
+   - If project files exist, runs composer install using project's composer.json
+
+2. **New Site Creation with Archive**:
+   - Extract archive to site directory
+   - Project's composer.json already configured with correct vendor-dir
+   - Run `composer install` using project's composer.json
+   - Database loaded from joinery-install.sql.gz
+   - All dependencies installed automatically
+
+3. **Deployment/Upgrade**:
+   - Extract new code
+   - Verify/update composer.json vendor-dir setting
+   - Run `composer_install_if_needed.php`
+   - Validates and installs/updates dependencies as needed
+
+### Benefits of Phase 2
+
+1. **Single Source of Truth**: Project's composer.json is the only dependency list
+2. **Consistent Installation**: Same process for new sites and upgrades
+3. **No Manual Steps**: Composer runs automatically in all workflows
+4. **Version Control**: composer.lock ensures exact version matching
+5. **Reduced Conflicts**: No competing composer.json files
+
+### Alternative Configuration (Optional)
+
+For **per-site isolated dependencies** instead of shared vendor directory, modify composer.json:
+
+```json
+{
+    "config": {
+        "vendor-dir": "../vendor"
+    }
+}
+```
+
+This places vendor at `/var/www/html/{SITE}/vendor/`, keeping dependencies isolated per site.
+
+### Phase 2 Testing Checklist
+
+1. Verify server_setup.sh no longer creates generic composer.json
+2. Test new_account.sh extracts archive and installs dependencies
+3. Confirm deploy.sh updates vendor-dir configuration
+4. Validate composer_install_if_needed.php works with new structure
+5. Test fresh install creates working site with all dependencies
+6. Test upgrade maintains correct dependencies
+7. Verify shared vendor directory has correct permissions
+
+### Phase 2 Notes
+
+- This phase ensures composer dependency management is consistent across all installation methods
+- The shared vendor directory approach saves disk space but requires all sites to use compatible package versions
+- Consider the alternative per-site vendor approach if version isolation is required
+- Always include composer.lock in the archive to ensure reproducible installations

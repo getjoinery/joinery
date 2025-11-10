@@ -607,6 +607,85 @@ This specification covers the required modifications to:
 
 These changes should be implemented first before proceeding with Docker deployment.
 
+## Composer Configuration for Docker
+
+### 1. Use Environment-Aware Vendor Directory
+
+To ensure compatibility between traditional deployments and Docker containers, update the project's `composer.json` to use a relative vendor directory path:
+
+```json
+{
+    "name": "joinery/platform",
+    "description": "Joinery membership and event management platform",
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "mailgun/mailgun-php": "^3.2",
+        "kriswallsmith/buzz": "^1.2",
+        "nyholm/psr7": "^1.3",
+        "jhut89/mailchimp3php": "^3.2",
+        "verot/class.upload.php": "^2.1",
+        "stripe/stripe-php": "^10.16",
+        "phpmailer/phpmailer": "^6.10.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        },
+        "vendor-dir": "../vendor"
+    }
+}
+```
+
+This places the vendor directory at `/var/www/html/SITENAME/vendor/`, which works in both:
+- **Traditional deployments**: Vendor directory outside public_html
+- **Docker containers**: Vendor directory at a predictable location
+- **Multiple sites**: Each site has its own isolated vendor directory
+
+### 2. Volume Mount for Vendor Directory (Optional)
+
+If you want to cache composer dependencies between container rebuilds or updates, add a vendor volume:
+
+```bash
+docker run -d \
+  --name SITENAME \
+  -p PORT:80 \
+  -v SITENAME_vendor:/var/www/html/SITENAME/vendor \
+  -v SITENAME_postgres:/var/lib/postgresql \
+  -v SITENAME_uploads:/var/www/html/SITENAME/uploads \
+  -v SITENAME_cache:/var/www/html/SITENAME/cache \
+  -v SITENAME_logs:/var/www/html/SITENAME/logs \
+  -v SITENAME_static:/var/www/html/SITENAME/static_files \
+  -v SITENAME_backups:/var/www/html/SITENAME/backups \
+  -v SITENAME_config:/var/www/html/SITENAME/config \
+  -v SITENAME_sessions:/var/lib/php/sessions \
+  joinery-SITENAME
+```
+
+**Benefits of vendor volume:**
+- Faster container rebuilds (dependencies cached)
+- Preserves exact package versions during updates
+- Reduces bandwidth usage for package downloads
+
+**Note:** This is optional. The default approach includes vendor in the container image, which ensures consistency.
+
+### 3. Database Setting for Composer Autoload
+
+The `composerAutoLoad` database setting needs to point to the correct vendor directory. In your `joinery-install.sql.gz` or migration scripts, ensure this setting uses the relative path:
+
+```sql
+-- Update or insert the composerAutoLoad setting
+INSERT INTO stg_settings (stg_name, stg_value, stg_create_time)
+VALUES ('composerAutoLoad', '../vendor/', NOW())
+ON CONFLICT (stg_name)
+DO UPDATE SET stg_value = '../vendor/';
+```
+
+This relative path works correctly in both Docker and traditional deployments because:
+- It's relative to the public_html directory
+- PathHelper will resolve it correctly
+- No hardcoded paths that break between environments
+
 ### Example: Real Installation
 If your site is called "integralzen":
 ```bash
@@ -625,6 +704,66 @@ ENV SITENAME=integralzen
 # Volume mounts would use:
 -v integralzen_uploads:/var/www/html/integralzen/uploads
 ```
+
+## Optional Improvement: Explicit Composer Installation in Dockerfile
+
+While the basic Dockerfile runs server_setup.sh which handles composer installation, you may want more explicit control over the composer installation process, especially after Phase 2 changes are implemented.
+
+### Enhanced Dockerfile with Explicit Composer Step
+
+This optional enhancement adds a dedicated composer installation step after server_setup.sh:
+
+```dockerfile
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV SITENAME=CHANGE_ME_TO_YOUR_SITENAME
+
+# Copy application and scripts
+COPY ${SITENAME}/ /var/www/html/${SITENAME}/
+COPY server_setup.sh /tmp/server_setup.sh
+
+ENV POSTGRES_PASSWORD=CHANGE_ME_TO_YOUR_PASSWORD
+
+# Run setup script
+RUN chmod +x /tmp/server_setup.sh && \
+    /tmp/server_setup.sh && \
+    rm /tmp/server_setup.sh
+
+# OPTIONAL: Explicit composer dependency installation
+# This ensures composer dependencies are installed even if
+# server_setup.sh doesn't handle it (useful after Phase 2)
+RUN if [ -f /var/www/html/${SITENAME}/public_html/composer.json ]; then \
+        cd /var/www/html/${SITENAME}/public_html && \
+        COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader && \
+        chown -R www-data:www-data /var/www/html/${SITENAME}/vendor && \
+        echo "Composer dependencies installed successfully"; \
+    else \
+        echo "No composer.json found, skipping dependency installation"; \
+    fi
+
+# Start services
+CMD service postgresql start && \
+    sleep 5 && \
+    su -c "psql -c \"ALTER USER postgres PASSWORD '$POSTGRES_PASSWORD';\"" postgres && \
+    su -c "psql -c \"CREATE DATABASE ${SITENAME} OWNER postgres;\"" postgres || true && \
+    php /var/www/html/${SITENAME}/public_html/utils/update_database.php && \
+    apache2ctl -D FOREGROUND
+```
+
+**Benefits of this approach:**
+- Guarantees composer dependencies are installed
+- Works regardless of server_setup.sh modifications
+- Clear visibility of composer installation in Docker build logs
+- Proper ownership set for vendor directory
+
+**When to use this:**
+- After implementing Phase 2 composer changes
+- When you want explicit control over composer installation
+- For debugging composer-related issues
+- When building production images
+
+**Note:** This is completely optional. The basic approach of letting server_setup.sh handle everything works fine, especially if you've implemented the Phase 2 changes that improve composer handling.
 
 ## Making Sites Accessible Without Port Numbers
 
