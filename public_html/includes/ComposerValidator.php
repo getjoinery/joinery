@@ -63,15 +63,46 @@ class ComposerValidator {
     
     /**
      * Check if autoload.php exists
+     * Checks both the database setting location AND the composer.json configured location
      */
     private function validateAutoloadExists() {
-        $autoloadPath = $this->composerPath . 'autoload.php';
-        if (!file_exists($autoloadPath)) {
-            $this->errors[] = "Composer autoload.php not found at: " . $autoloadPath;
-            $this->errors[] = "Run 'composer install' in the project directory";
-            return false;
+        $basePath = PathHelper::getBasePath();
+        $composerJsonPath = $basePath . '/composer.json';
+
+        // Determine expected vendor location from composer.json
+        $expectedVendorPath = null;
+        if (file_exists($composerJsonPath)) {
+            $composerJson = json_decode(file_get_contents($composerJsonPath), true);
+            if ($composerJson && isset($composerJson['config']['vendor-dir'])) {
+                $vendorDir = rtrim($composerJson['config']['vendor-dir'], '/');
+                if (substr($vendorDir, 0, 1) === '/') {
+                    // Absolute path
+                    $expectedVendorPath = $vendorDir . '/';
+                } else {
+                    // Relative path
+                    $expectedVendorPath = rtrim($basePath, '/') . '/' . $vendorDir . '/';
+                }
+            }
         }
-        return true;
+
+        // Check database setting location first
+        $autoloadPath = $this->composerPath . 'autoload.php';
+        if (file_exists($autoloadPath)) {
+            return true;
+        }
+
+        // If not found at database location, check composer.json location
+        if ($expectedVendorPath && file_exists($expectedVendorPath . 'autoload.php')) {
+            return true;
+        }
+
+        // Neither location has autoload.php
+        $this->errors[] = "Composer autoload.php not found at: " . $autoloadPath;
+        if ($expectedVendorPath && $expectedVendorPath !== $this->composerPath) {
+            $this->errors[] = "Also checked composer.json location: " . $expectedVendorPath . 'autoload.php';
+        }
+        $this->errors[] = "Run 'composer install' in the project directory";
+        return false;
     }
     
     /**
