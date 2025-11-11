@@ -923,9 +923,10 @@
 		$migrations[] = $migration;
 
 		// Update composerAutoLoad setting from /home/user1/vendor/ to ../vendor/ for per-site isolation
+		// DISABLED: This migration should be done manually before deployment
 		$migration = array();
 		$migration['database_version'] = '0.68';
-		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'composerAutoLoad' AND stg_value LIKE '/home/user1/vendor%'";
+		$migration['test'] = "SELECT 1 as count"; // Always returns 1, causing migration to skip
 		$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
