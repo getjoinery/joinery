@@ -270,6 +270,18 @@ class ComposerValidator {
         $changeInfo = $this->detectVendorDirChange();
 
         if ($changeInfo['changed']) {
+            // Check if vendor exists at the new location
+            if ($changeInfo['new_path'] && file_exists($changeInfo['new_path'] . 'autoload.php')) {
+                // Vendor exists at new location - this is OK, just a warning
+                // The migration will update the database setting
+                $this->warnings[] = "Vendor directory location mismatch (will be corrected by migration):";
+                $this->warnings[] = "  Database setting: " . $changeInfo['old_path'];
+                $this->warnings[] = "  composer.json config: " . $changeInfo['new_path'];
+                $this->warnings[] = "  Vendor exists at new location - OK to proceed";
+                return true;
+            }
+
+            // Mismatch AND vendor doesn't exist at new location - this is an error
             $this->errors[] = "Vendor directory mismatch detected:";
             $this->errors[] = "  Database setting: " . $changeInfo['old_path'];
             $this->errors[] = "  composer.json config: " . $changeInfo['new_path'];
