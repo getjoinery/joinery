@@ -117,29 +117,33 @@ The relative path `"../vendor"` places vendor at `/var/www/html/{SITE}/vendor/` 
 
 ### 2. ComposerValidator.php Enhancement
 
-**Add vendor directory consistency check** to detect mismatches between `composerAutoLoad` setting and `composer.json` config:
+**Add two new capabilities:**
+1. Vendor directory consistency check to detect mismatches
+2. Automatic cleanup of old vendor directories when location changes
+
+#### 2a. Add Vendor Directory Detection Method
 
 Add this method to `ComposerValidator` class:
 
 ```php
 /**
- * Check if composerAutoLoad setting matches vendor-dir in composer.json
- * Uses string normalization for performance (avoids expensive realpath() calls)
+ * Detect if vendor directory location has changed between composer.json and database setting
+ * @return array ['changed' => bool, 'old_path' => string|null, 'new_path' => string|null]
  */
-private function validateVendorDirConsistency() {
+private function detectVendorDirChange() {
     $basePath = PathHelper::getBasePath();
     $composerJsonPath = $basePath . '/composer.json';
 
     if (!file_exists($composerJsonPath)) {
-        return true; // Can't validate if file doesn't exist
+        return ['changed' => false, 'old_path' => null, 'new_path' => null];
     }
 
     $composerJson = json_decode(file_get_contents($composerJsonPath), true);
     if (!$composerJson || !isset($composerJson['config']['vendor-dir'])) {
-        return true; // No vendor-dir specified, will use default
+        return ['changed' => false, 'old_path' => null, 'new_path' => null];
     }
 
-    // Normalize vendor-dir path (handle ../ and trailing slashes)
+    // Get configured vendor dir from composer.json
     $configuredVendorDir = rtrim($composerJson['config']['vendor-dir'], '/');
     if (substr($configuredVendorDir, 0, 1) === '/') {
         // Absolute path - use as-is
@@ -149,14 +153,39 @@ private function validateVendorDirConsistency() {
         $expectedPath = rtrim($basePath, '/') . '/' . $configuredVendorDir . '/';
     }
 
-    // Normalize setting path (ensure trailing slash for comparison)
+    // Get current setting path
     $settingPath = rtrim($this->composerPath, '/') . '/';
 
+    // Detect change
     if ($expectedPath !== $settingPath) {
+        return [
+            'changed' => true,
+            'old_path' => $settingPath,
+            'new_path' => $expectedPath
+        ];
+    }
+
+    return ['changed' => false, 'old_path' => null, 'new_path' => null];
+}
+```
+
+#### 2b. Add Vendor Directory Consistency Validation
+
+Add this method to validate and report mismatches:
+
+```php
+/**
+ * Check if composerAutoLoad setting matches vendor-dir in composer.json
+ * Uses string normalization for performance (avoids expensive realpath() calls)
+ */
+private function validateVendorDirConsistency() {
+    $changeInfo = $this->detectVendorDirChange();
+
+    if ($changeInfo['changed']) {
         $this->errors[] = "Vendor directory mismatch detected:";
-        $this->errors[] = "  composer.json vendor-dir: " . $configuredVendorDir;
-        $this->errors[] = "  composerAutoLoad setting: " . $this->composerPath;
-        $this->errors[] = "  Update composerAutoLoad setting in admin panel to match composer.json configuration";
+        $this->errors[] = "  Database setting: " . $changeInfo['old_path'];
+        $this->errors[] = "  composer.json config: " . $changeInfo['new_path'];
+        $this->errors[] = "  Run 'composer install' to install to new location";
         return false;
     }
 
@@ -173,7 +202,143 @@ if (!$this->validateVendorDirConsistency()) {
 }
 ```
 
+#### 2c. Add Automatic Cleanup Logic
+
+Modify the `installIfNeeded()` method to clean up old vendor directories:
+
+```php
+public function installIfNeeded() {
+    // Detect vendor directory change BEFORE validation
+    $changeInfo = $this->detectVendorDirChange();
+
+    // Run validation first
+    if ($this->validate()) {
+        return true; // Already valid, no install needed
+    }
+
+    // Check if the errors are composer-install-fixable
+    $installFixableErrors = ['composer.lock not found', 'Missing required packages', 'Vendor directory mismatch'];
+    $canFix = false;
+
+    foreach ($this->errors as $error) {
+        foreach ($installFixableErrors as $fixableError) {
+            if (strpos($error, $fixableError) !== false) {
+                $canFix = true;
+                break 2;
+            }
+        }
+    }
+
+    if (!$canFix) {
+        return false; // Validation failed for reasons composer install won't fix
+    }
+
+    // Try to run composer install
+    $basePath = PathHelper::getBasePath();
+    $composerJsonPath = $basePath . '/composer.json';
+
+    if (!file_exists($composerJsonPath)) {
+        return false; // No composer.json to install from
+    }
+
+    // Change to project directory and run composer install
+    $originalDir = getcwd();
+    chdir($basePath);
+
+    $output = [];
+    $returnCode = 0;
+    exec('composer install --no-dev --optimize-autoloader --no-interaction 2>&1', $output, $returnCode);
+
+    chdir($originalDir);
+
+    if ($returnCode !== 0) {
+        $this->errors[] = "Composer install failed: " . implode("\n", $output);
+        return false;
+    }
+
+    // If vendor directory changed and install succeeded, clean up old directory
+    if ($changeInfo['changed'] && $changeInfo['old_path']) {
+        $this->cleanupOldVendorDirectory($changeInfo['old_path']);
+    }
+
+    // Clear previous validation results and re-validate
+    $this->errors = [];
+    $this->warnings = [];
+
+    return $this->validate();
+}
+```
+
+#### 2d. Add Cleanup Method
+
+Add this method to safely remove old vendor directories:
+
+```php
+/**
+ * Clean up old vendor directory after successful migration to new location
+ * @param string $oldPath Full path to old vendor directory
+ */
+private function cleanupOldVendorDirectory($oldPath) {
+    // Safety checks
+    $oldPath = rtrim($oldPath, '/');
+
+    // Must contain 'vendor' in path for safety
+    if (strpos($oldPath, 'vendor') === false) {
+        $this->warnings[] = "Skipping cleanup: path doesn't contain 'vendor': $oldPath";
+        return;
+    }
+
+    // Must not be root or system directory
+    $dangerousPaths = ['/', '/usr', '/var', '/etc', '/home', '/root'];
+    if (in_array($oldPath, $dangerousPaths)) {
+        $this->warnings[] = "Skipping cleanup: refusing to remove protected directory: $oldPath";
+        return;
+    }
+
+    // Directory must exist
+    if (!is_dir($oldPath)) {
+        return; // Nothing to clean up
+    }
+
+    // Try to remove the directory
+    try {
+        $this->recursiveRemoveDirectory($oldPath);
+        $this->warnings[] = "✓ Cleaned up old vendor directory: $oldPath";
+    } catch (Exception $e) {
+        $this->warnings[] = "Failed to clean up old vendor directory: " . $e->getMessage();
+    }
+}
+
+/**
+ * Recursively remove a directory and all its contents
+ * @param string $dir Directory path to remove
+ */
+private function recursiveRemoveDirectory($dir) {
+    if (!is_dir($dir)) {
+        return;
+    }
+
+    $items = scandir($dir);
+    foreach ($items as $item) {
+        if ($item == '.' || $item == '..') {
+            continue;
+        }
+
+        $path = $dir . '/' . $item;
+        if (is_dir($path)) {
+            $this->recursiveRemoveDirectory($path);
+        } else {
+            unlink($path);
+        }
+    }
+
+    rmdir($dir);
+}
+```
+
 **Performance note:** This validation uses string normalization instead of `realpath()` to avoid filesystem calls, keeping it lightweight.
+
+**Safety note:** The cleanup logic includes multiple safety checks to prevent accidental deletion of system directories.
 
 ### 3. server_setup.sh Modifications
 
@@ -523,10 +688,15 @@ With Phase 2's standardized `composer.json` (with `vendor-dir: ../vendor`), the 
 
 ## Summary of Phase 2 Changes
 
-**Code Changes (6 items):**
+**Code Changes (7 items):**
 1. ✏️ **Migration** - Add composerAutoLoad update migration to migrations.php
 2. ✏️ **composer.json** - Change `vendor-dir` from `/home/user1/vendor` to `../vendor`
-3. ✏️ **ComposerValidator.php** - Add validateVendorDirConsistency() method
+3. ✏️ **ComposerValidator.php** - Add vendor directory detection, validation, and automatic cleanup methods:
+   - `detectVendorDirChange()` - Detects vendor directory location changes
+   - `validateVendorDirConsistency()` - Validates setting matches composer.json
+   - `cleanupOldVendorDirectory()` - Automatically removes old vendor dirs after successful migration
+   - `recursiveRemoveDirectory()` - Safe recursive directory removal
+   - Modified `installIfNeeded()` - Triggers cleanup after successful install
 4. ✏️ **server_setup.sh** - Remove generic composer.json creation in /home/user1
 5. ✏️ **new_account.sh** - Add support for .gz compressed SQL files
 6. ✏️ **deploy.sh** - Add maintenance_scripts deployment to deploy_theme_plugin() function
@@ -538,6 +708,7 @@ With Phase 2's standardized `composer.json` (with `vendor-dir: ../vendor`), the 
 
 **Result:**
 - Each site gets isolated vendor directory at `/var/www/html/{SITE}/vendor/`
+- Old vendor directories automatically cleaned up during migration
 - Maintenance scripts stay version-matched with code
 - Database setting automatically updated via migration
 - Simple, consistent composer workflow across all scripts
