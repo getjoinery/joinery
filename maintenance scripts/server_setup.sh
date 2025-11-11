@@ -129,37 +129,8 @@ chmod +x /usr/local/bin/composer
 
 log "Composer installed. Version: $(COMPOSER_ALLOW_SUPERUSER=1 composer --version)"
 
-# Set up PHP dependencies for applications
-log "Setting up PHP dependencies in /home/user1..."
-mkdir -p /home/user1
-cd /home/user1
-
-# Create a composer.json with common dependencies for membership applications
-tee composer.json > /dev/null << 'EOF'
-{
-    "require": {
-        "mailgun/mailgun-php": "^3.2",
-        "kriswallsmith/buzz": "^1.2",
-        "nyholm/psr7": "^1.3",
-        "jhut89/mailchimp3php": "^3.2",
-        "verot/class.upload.php": "^2.1",
-        "tm/error-log-parser": "^1.2",
-        "stripe/stripe-php": "^10.16",
-		"phpmailer/phpmailer": "^6.10.0"
-    }
-}
-EOF
-
-# Install dependencies
-log "Installing PHP dependencies with Composer..."
-COMPOSER_ALLOW_SUPERUSER=1 composer install
-
-# Fix ownership and permissions for Apache access
-chown -R user1:user1 /home/user1
-chmod 755 /home/user1
-chmod -R 755 /home/user1/vendor
-
-log "PHP dependencies installed in /home/user1/vendor/ with proper permissions"
+# Composer dependencies will be managed per-site during deployment
+log "Composer installed and ready for per-site dependency management"
 
 # Install Apache
 log "Installing Apache web server..."

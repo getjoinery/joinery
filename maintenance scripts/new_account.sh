@@ -31,7 +31,16 @@ then
 fi
 
 # Set database restore file (default or user-specified)
-DATABASE_RESTORE_FILE="joinery-install-sql.sql"
+# Check for joinery-install.sql.gz from archive first, then fall back to legacy names
+if [ -f "joinery-install.sql.gz" ]; then
+	DATABASE_RESTORE_FILE="joinery-install.sql.gz"
+elif [ -f "joinery-install.sql" ]; then
+	DATABASE_RESTORE_FILE="joinery-install.sql"
+else
+	DATABASE_RESTORE_FILE="joinery-install-sql.sql"
+fi
+
+# Allow user override
 if [ "$4" != "" ]; then
 	DATABASE_RESTORE_FILE="$4"
 fi
@@ -162,12 +171,26 @@ fi
 # Load database restore file
 echo "Loading database from restore file '$DATABASE_RESTORE_FILE'..."
 echo "Enter PostgreSQL postgres user password:"
-if ! psql -U postgres -W -d "$1" -f "$DATABASE_RESTORE_FILE"; then
-	echo "ERROR: Failed to load database from restore file"
-	echo "Database '$1' was created but restore failed."
-	echo "You may need to manually restore or recreate the database."
+
+# Check if file is compressed
+if [[ "$DATABASE_RESTORE_FILE" == *.gz ]]; then
+	# Decompress and pipe to psql
+	if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -W -d "$1"; then
+		echo "ERROR: Failed to load database from compressed restore file"
+		echo "Database '$1' was created but restore failed."
+		echo "You may need to manually restore or recreate the database."
+	else
+		echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+	fi
 else
-	echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+	# Load uncompressed SQL file
+	if ! psql -U postgres -W -d "$1" -f "$DATABASE_RESTORE_FILE"; then
+		echo "ERROR: Failed to load database from restore file"
+		echo "Database '$1' was created but restore failed."
+		echo "You may need to manually restore or recreate the database."
+	else
+		echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+	fi
 fi
 
 VIRTUALHOST_FILE=/etc/apache2/sites-available/$1.conf

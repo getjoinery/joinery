@@ -474,9 +474,9 @@ deploy_theme_plugin() {
     if [[ -d "$plugins_stage_dir/plugins" ]]; then
         verbose_echo "Deploying stock plugins to staging directory..."
         mkdir -p "$staging_dir"
-        
+
         # Deploy stock plugins (status will be shown during merge operation)
-        
+
         mv "$plugins_stage_dir/plugins" "$staging_dir/plugins" || {
             echo "ERROR: Failed to move plugins to staging directory"
             return 1
@@ -487,23 +487,71 @@ deploy_theme_plugin() {
         return 1
     fi
 
+    # DEPLOY MAINTENANCE_SCRIPTS to /var/www/html/sitename/maintenance_scripts
+    verbose_echo "Setting up maintenance_scripts deployment to $site_root/maintenance_scripts..."
+    local maintenance_stage_dir="$site_root/maintenance_scripts_stage"
+    rm -rf "$maintenance_stage_dir"
+    mkdir -p "$maintenance_stage_dir"
+
+    # Clone repo for maintenance_scripts
+    verbose_echo "Cloning maintenance_scripts from: $THEME_PLUGIN_REPO_URL"
+    if [ "$VERBOSE" = true ]; then
+        git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$maintenance_stage_dir"
+    else
+        git clone --quiet --no-checkout "$THEME_PLUGIN_REPO_URL" "$maintenance_stage_dir" 2>/dev/null
+    fi
+    cd "$maintenance_stage_dir" || exit 1
+    git config core.sparseCheckout true
+    git sparse-checkout init --cone
+    git sparse-checkout set "maintenance scripts"
+    if [ "$VERBOSE" = true ]; then
+        git checkout main
+    else
+        git checkout --quiet main 2>/dev/null
+    fi
+    rm -rf .git
+    cd - > /dev/null
+
+    # Deploy maintenance_scripts directly to site root
+    if [[ -d "$maintenance_stage_dir/maintenance scripts" ]]; then
+        verbose_echo "Deploying maintenance scripts..."
+
+        # Remove old maintenance_scripts if exists
+        rm -rf "$site_root/maintenance_scripts"
+
+        # Move to site root (rename from "maintenance scripts" to "maintenance_scripts")
+        mv "$maintenance_stage_dir/maintenance scripts" "$site_root/maintenance_scripts" || {
+            echo "ERROR: Failed to deploy maintenance scripts"
+            return 1
+        }
+
+        # Make scripts executable
+        chmod +x "$site_root/maintenance_scripts"/*.sh 2>/dev/null || true
+
+        verbose_echo "Maintenance scripts deployed successfully"
+    else
+        echo "WARNING: No maintenance scripts directory found in joinery repository"
+        # Not a fatal error - deployment can continue without maintenance scripts
+    fi
+
     # Validate that directories were created successfully in staging
     if [[ ! -d "$staging_dir/theme" ]]; then
         echo "ERROR: Theme directory was not created successfully in staging directory"
         return 1
     fi
-    
+
     if [[ ! -d "$staging_dir/plugins" ]]; then
         echo "ERROR: Plugins directory was not created successfully in staging directory"
         return 1
     fi
 
     # Cleanup staging directories
-    verbose_echo "Cleaning up theme/plugin staging directories..."
+    verbose_echo "Cleaning up theme/plugin/maintenance staging directories..."
     rm -rf "$theme_stage_dir"
     rm -rf "$plugins_stage_dir"
-    
-    echo "Theme and plugin download from joinery repository complete."
+    rm -rf "$maintenance_stage_dir"
+
+    echo "Theme, plugin, and maintenance scripts download from joinery repository complete."
     return 0
 }
 
