@@ -1147,52 +1147,6 @@ else
     verbose_echo "✓ Plugin loading test passed ($files_checked files checked)"
 fi
 
-# MODEL TESTS ON STAGING
-verbose_echo "Running model tests on staging..."
-model_test_output=$(php -r "
-    \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html_stage';
-    chdir('/var/www/html/$TARGET_SITE/public_html_stage');
-
-    // Set output buffering to capture any output
-    ob_start();
-
-    // Include the model test runner
-    try {
-        include 'tests/models/run_all.php';
-        \$output = ob_get_contents();
-        ob_end_clean();
-
-        // Check for test failures in output
-        if (strpos(\$output, 'FAIL') !== false || strpos(\$output, 'ERROR') !== false) {
-            echo \"Model test output:\n\";
-            echo \$output;
-            echo \"\nModel tests failed - check output for details\";
-            exit(1);
-        }
-
-        echo 'Model tests completed successfully';
-    } catch (Exception \$e) {
-        ob_end_clean();
-        echo 'Model test error: ' . \$e->getMessage();
-        exit(1);
-    } catch (Error \$e) {
-        ob_end_clean();
-        echo 'Model test fatal error: ' . \$e->getMessage();
-        exit(1);
-    }
-" 2>&1)
-model_test_exit_code=$?
-
-if [ $model_test_exit_code -ne 0 ]; then
-    echo "Model test output:"
-    echo "$model_test_output"
-    handle_test_failure "Model tests failed in staging." "/var/www/html/$TARGET_SITE/public_html_stage"
-    if [ $? -eq 1 ]; then
-        exit 1
-    fi
-fi
-verbose_echo "✓ Model tests passed on staging"
-
 # APPLICATION BOOTSTRAP TEST ON STAGING (using DeploymentHelper)
 verbose_echo "Testing application bootstrap on staging..."
 bootstrap_output=$(php -r "
@@ -1373,6 +1327,95 @@ if [[ "$returnvalue" != 0 ]]; then
     echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
     echo "DEBUGGING: You can examine the staged files to understand what was deployed."
     exit 1
+fi
+
+# MODEL TESTS ON DEPLOYED CODE (after migrations and composer install)
+verbose_echo "Running model tests on deployed code..."
+model_test_output=$(php -r "
+    \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html';
+    chdir('/var/www/html/$TARGET_SITE/public_html');
+
+    // Set output buffering to capture any output
+    ob_start();
+
+    // Include the model test runner
+    try {
+        include 'tests/models/run_all.php';
+        \$output = ob_get_contents();
+        ob_end_clean();
+
+        // Check for test failures in output
+        if (strpos(\$output, 'FAIL') !== false || strpos(\$output, 'ERROR') !== false) {
+            echo \"Model test output:\n\";
+            echo \$output;
+            echo \"\nModel tests failed - check output for details\";
+            exit(1);
+        }
+
+        echo 'Model tests completed successfully';
+    } catch (Exception \$e) {
+        ob_end_clean();
+        echo 'Model test error: ' . \$e->getMessage();
+        exit(1);
+    } catch (Error \$e) {
+        ob_end_clean();
+        echo 'Model test fatal error: ' . \$e->getMessage();
+        exit(1);
+    }
+" 2>&1)
+model_test_exit_code=$?
+
+if [ $model_test_exit_code -ne 0 ]; then
+    echo ""
+    echo "========================================="
+    echo "MODEL TESTS FAILED"
+    echo "========================================="
+    echo "ERROR: Model tests failed on deployed code."
+    echo ""
+    echo "$model_test_output"
+    echo ""
+
+    # Check if rollback is disabled
+    if [ "$DISABLE_ROLLBACK" = true ]; then
+        echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
+        echo "Manual intervention required to fix model test failures."
+        exit 1
+    fi
+
+    # Attempt rollback using DeploymentHelper
+    if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
+        echo "Attempting to rollback to previous version..."
+        rollback_result=$(php -r "
+            require_once('/var/www/html/$TARGET_SITE/public_html/includes/PathHelper.php');
+            require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
+
+            \$result = DeploymentHelper::performRollback('/var/www/html/$TARGET_SITE');
+
+            if (!\$result['success']) {
+                echo 'ERROR:' . \$result['message'];
+                exit(1);
+            } else {
+                echo 'Rollback completed successfully';
+                exit(0);
+            }
+        " 2>&1)
+
+        if [ $? -ne 0 ]; then
+            echo "ERROR: Rollback failed. Manual intervention required."
+            echo "$rollback_result"
+            exit 1
+        else
+            echo "$rollback_result"
+            echo "Previous version has been restored."
+            exit 1
+        fi
+    else
+        echo "ERROR: No previous version available to rollback to."
+        echo "Keeping failed deployment in place for debugging."
+        exit 1
+    fi
+else
+    verbose_echo "✓ Model tests passed on deployed code"
 fi
 
 # PHP syntax validation and plugin loading tests now run on staging before deployment
