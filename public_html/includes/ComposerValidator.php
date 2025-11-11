@@ -21,27 +21,32 @@ class ComposerValidator {
     public function validate() {
         $this->errors = [];
         $this->warnings = [];
-        
+
         // Check 1: Composer path is configured
         if (!$this->validateComposerPathConfigured()) {
             return false;
         }
-        
+
         // Check 2: Autoload file exists
         if (!$this->validateAutoloadExists()) {
             return false;
         }
-        
+
         // Check 3: composer.json exists
         if (!$this->validateComposerJsonExists()) {
             return false;
         }
-        
+
         // Check 4: Required packages are installed
         if (!$this->validateRequiredPackages()) {
             return false;
         }
-        
+
+        // Check 5: Vendor directory consistency
+        if (!$this->validateVendorDirConsistency()) {
+            return false;
+        }
+
         return true;
     }
     
@@ -183,7 +188,67 @@ class ComposerValidator {
         
         return true;
     }
-    
+
+    /**
+     * Detect if vendor directory location has changed between composer.json and database setting
+     * @return array ['changed' => bool, 'old_path' => string|null, 'new_path' => string|null]
+     */
+    private function detectVendorDirChange() {
+        $basePath = PathHelper::getBasePath();
+        $composerJsonPath = $basePath . '/composer.json';
+
+        if (!file_exists($composerJsonPath)) {
+            return ['changed' => false, 'old_path' => null, 'new_path' => null];
+        }
+
+        $composerJson = json_decode(file_get_contents($composerJsonPath), true);
+        if (!$composerJson || !isset($composerJson['config']['vendor-dir'])) {
+            return ['changed' => false, 'old_path' => null, 'new_path' => null];
+        }
+
+        // Get configured vendor dir from composer.json
+        $configuredVendorDir = rtrim($composerJson['config']['vendor-dir'], '/');
+        if (substr($configuredVendorDir, 0, 1) === '/') {
+            // Absolute path - use as-is
+            $expectedPath = $configuredVendorDir . '/';
+        } else {
+            // Relative path - resolve relative to base path
+            $expectedPath = rtrim($basePath, '/') . '/' . $configuredVendorDir . '/';
+        }
+
+        // Get current setting path
+        $settingPath = rtrim($this->composerPath, '/') . '/';
+
+        // Detect change
+        if ($expectedPath !== $settingPath) {
+            return [
+                'changed' => true,
+                'old_path' => $settingPath,
+                'new_path' => $expectedPath
+            ];
+        }
+
+        return ['changed' => false, 'old_path' => null, 'new_path' => null];
+    }
+
+    /**
+     * Check if composerAutoLoad setting matches vendor-dir in composer.json
+     * Uses string normalization for performance (avoids expensive realpath() calls)
+     */
+    private function validateVendorDirConsistency() {
+        $changeInfo = $this->detectVendorDirChange();
+
+        if ($changeInfo['changed']) {
+            $this->errors[] = "Vendor directory mismatch detected:";
+            $this->errors[] = "  Database setting: " . $changeInfo['old_path'];
+            $this->errors[] = "  composer.json config: " . $changeInfo['new_path'];
+            $this->errors[] = "  Run 'composer install' to install to new location";
+            return false;
+        }
+
+        return true;
+    }
+
     /**
      * Get validation errors
      * @return array
@@ -205,15 +270,18 @@ class ComposerValidator {
      * @return bool True if install succeeded or wasn't needed, false if install failed
      */
     public function installIfNeeded() {
+        // Detect vendor directory change BEFORE validation
+        $changeInfo = $this->detectVendorDirChange();
+
         // Run validation first
         if ($this->validate()) {
             return true; // Already valid, no install needed
         }
-        
+
         // Check if the errors are composer-install-fixable
-        $installFixableErrors = ['composer.lock not found', 'Missing required packages'];
+        $installFixableErrors = ['composer.lock not found', 'Missing required packages', 'Vendor directory mismatch'];
         $canFix = false;
-        
+
         foreach ($this->errors as $error) {
             foreach ($installFixableErrors as $fixableError) {
                 if (strpos($error, $fixableError) !== false) {
@@ -222,38 +290,43 @@ class ComposerValidator {
                 }
             }
         }
-        
+
         if (!$canFix) {
             return false; // Validation failed for reasons composer install won't fix
         }
-        
+
         // Try to run composer install
         $basePath = PathHelper::getBasePath();
         $composerJsonPath = $basePath . '/composer.json';
-        
+
         if (!file_exists($composerJsonPath)) {
             return false; // No composer.json to install from
         }
-        
+
         // Change to project directory and run composer install
         $originalDir = getcwd();
         chdir($basePath);
-        
+
         $output = [];
         $returnCode = 0;
         exec('composer install --no-dev --optimize-autoloader --no-interaction 2>&1', $output, $returnCode);
-        
+
         chdir($originalDir);
-        
+
         if ($returnCode !== 0) {
             $this->errors[] = "Composer install failed: " . implode("\n", $output);
             return false;
         }
-        
+
+        // If vendor directory changed and install succeeded, clean up old directory
+        if ($changeInfo['changed'] && $changeInfo['old_path']) {
+            $this->cleanupOldVendorDirectory($changeInfo['old_path']);
+        }
+
         // Clear previous validation results and re-validate
         $this->errors = [];
         $this->warnings = [];
-        
+
         return $this->validate();
     }
     
@@ -263,26 +336,87 @@ class ComposerValidator {
      */
     public function getFormattedOutput() {
         $output = "";
-        
+
         if (!empty($this->errors)) {
             $output .= "\n\033[31mCOMPOSER ERRORS:\033[0m\n";
             foreach ($this->errors as $error) {
                 $output .= "  ✗ " . $error . "\n";
             }
         }
-        
+
         if (!empty($this->warnings)) {
             $output .= "\n\033[33mCOMPOSER WARNINGS:\033[0m\n";
             foreach ($this->warnings as $warning) {
                 $output .= "  ⚠ " . $warning . "\n";
             }
         }
-        
+
         if (empty($this->errors) && empty($this->warnings)) {
             $output .= "\n\033[32m✓ Composer validation passed\033[0m\n";
         }
-        
+
         return $output;
+    }
+
+    /**
+     * Clean up old vendor directory after successful migration to new location
+     * @param string $oldPath Full path to old vendor directory
+     */
+    private function cleanupOldVendorDirectory($oldPath) {
+        // Safety checks
+        $oldPath = rtrim($oldPath, '/');
+
+        // Must contain 'vendor' in path for safety
+        if (strpos($oldPath, 'vendor') === false) {
+            $this->warnings[] = "Skipping cleanup: path doesn't contain 'vendor': $oldPath";
+            return;
+        }
+
+        // Must not be root or system directory
+        $dangerousPaths = ['/', '/usr', '/var', '/etc', '/home', '/root'];
+        if (in_array($oldPath, $dangerousPaths)) {
+            $this->warnings[] = "Skipping cleanup: refusing to remove protected directory: $oldPath";
+            return;
+        }
+
+        // Directory must exist
+        if (!is_dir($oldPath)) {
+            return; // Nothing to clean up
+        }
+
+        // Try to remove the directory
+        try {
+            $this->recursiveRemoveDirectory($oldPath);
+            $this->warnings[] = "✓ Cleaned up old vendor directory: $oldPath";
+        } catch (Exception $e) {
+            $this->warnings[] = "Failed to clean up old vendor directory: " . $e->getMessage();
+        }
+    }
+
+    /**
+     * Recursively remove a directory and all its contents
+     * @param string $dir Directory path to remove
+     */
+    private function recursiveRemoveDirectory($dir) {
+        if (!is_dir($dir)) {
+            return;
+        }
+
+        $items = scandir($dir);
+        foreach ($items as $item) {
+            if ($item == '.' || $item == '..') {
+                continue;
+            }
+
+            $path = $dir . '/' . $item;
+            if (is_dir($path)) {
+                $this->recursiveRemoveDirectory($path);
+            } else {
+                unlink($path);
+            }
+        }
+
+        rmdir($dir);
     }
 }
 ?>
