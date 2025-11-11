@@ -1229,14 +1229,14 @@ returnvalue=$?
 
 if [[ "$returnvalue" != 0 ]]; then
     echo "ERROR: Composer dependency setup failed."
-    
+
     # Check if rollback is disabled
     if [ "$DISABLE_ROLLBACK" = true ]; then
         echo "ROLLBACK DISABLED: Keeping current deployment in place for debugging."
         echo "Manual intervention required to fix composer dependencies."
         exit 1
     fi
-    
+
     # Attempt rollback using DeploymentHelper
     if [[ -d /var/www/html/$TARGET_SITE/public_html_last ]] && [[ "$(ls -A /var/www/html/$TARGET_SITE/public_html_last 2>/dev/null)" ]]; then
         rollback_result=$(php -r "
