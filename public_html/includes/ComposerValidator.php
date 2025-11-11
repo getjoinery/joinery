@@ -270,9 +270,6 @@ class ComposerValidator {
      * @return bool True if install succeeded or wasn't needed, false if install failed
      */
     public function installIfNeeded() {
-        // Detect vendor directory change BEFORE validation
-        $changeInfo = $this->detectVendorDirChange();
-
         // Run validation first
         if ($this->validate()) {
             return true; // Already valid, no install needed
@@ -318,11 +315,6 @@ class ComposerValidator {
             return false;
         }
 
-        // If vendor directory changed and install succeeded, clean up old directory
-        if ($changeInfo['changed'] && $changeInfo['old_path']) {
-            $this->cleanupOldVendorDirectory($changeInfo['old_path']);
-        }
-
         // Clear previous validation results and re-validate
         $this->errors = [];
         $this->warnings = [];
@@ -358,65 +350,5 @@ class ComposerValidator {
         return $output;
     }
 
-    /**
-     * Clean up old vendor directory after successful migration to new location
-     * @param string $oldPath Full path to old vendor directory
-     */
-    private function cleanupOldVendorDirectory($oldPath) {
-        // Safety checks
-        $oldPath = rtrim($oldPath, '/');
-
-        // Must contain 'vendor' in path for safety
-        if (strpos($oldPath, 'vendor') === false) {
-            $this->warnings[] = "Skipping cleanup: path doesn't contain 'vendor': $oldPath";
-            return;
-        }
-
-        // Must not be root or system directory
-        $dangerousPaths = ['/', '/usr', '/var', '/etc', '/home', '/root'];
-        if (in_array($oldPath, $dangerousPaths)) {
-            $this->warnings[] = "Skipping cleanup: refusing to remove protected directory: $oldPath";
-            return;
-        }
-
-        // Directory must exist
-        if (!is_dir($oldPath)) {
-            return; // Nothing to clean up
-        }
-
-        // Try to remove the directory
-        try {
-            $this->recursiveRemoveDirectory($oldPath);
-            $this->warnings[] = "✓ Cleaned up old vendor directory: $oldPath";
-        } catch (Exception $e) {
-            $this->warnings[] = "Failed to clean up old vendor directory: " . $e->getMessage();
-        }
-    }
-
-    /**
-     * Recursively remove a directory and all its contents
-     * @param string $dir Directory path to remove
-     */
-    private function recursiveRemoveDirectory($dir) {
-        if (!is_dir($dir)) {
-            return;
-        }
-
-        $items = scandir($dir);
-        foreach ($items as $item) {
-            if ($item == '.' || $item == '..') {
-                continue;
-            }
-
-            $path = $dir . '/' . $item;
-            if (is_dir($path)) {
-                $this->recursiveRemoveDirectory($path);
-            } else {
-                unlink($path);
-            }
-        }
-
-        rmdir($dir);
-    }
 }
 ?>
