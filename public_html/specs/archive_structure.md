@@ -1,331 +1,17 @@
-# Specification: Archive Structure Changes
+# Specification: Archive Structure Changes - Phase 2
+
+**Note:** Phase 1 (tar.gz format, maintenance scripts inclusion, install SQL) has been completed and moved to `/specs/implemented/archive_structure_phase1.md`.
 
 ## Overview
 
-Modify publish_upgrade.php to include all necessary directories and files for complete deployment, including maintenance scripts and fresh install SQL.
+Standardize composer dependency management across all installation and upgrade scenarios by using a single, pre-configured `composer.json` with a relative vendor directory path. This eliminates conflicts and script complexity.
 
-## Current Structure
+**What Changed Since Phase 1:**
+- Phase 1 focused on archive format and structure (tar.gz, maintenance scripts, install SQL)
+- Phase 2 focuses on standardizing composer dependency management
+- Some sections from the original Phase 1 spec were adjusted during implementation (e.g., maintenance scripts location handling)
 
-Current upgrade archives only include:
-```
-archive.zip
-└── public_html/
-    ├── serve.php
-    ├── composer.json
-    └── ...
-```
-
-Missing critical directories like config/ and maintenance scripts.
-
-## Required New Structure
-
-New archives should include all necessary directories:
-```
-joinery.tar.gz
-├── public_html/
-│   ├── serve.php
-│   ├── composer.json
-│   └── ...
-├── config/
-│   └── Globalvars_site_default.php
-└── maintenance_scripts/
-    ├── server_setup.sh
-    ├── deploy.sh
-    ├── joinery-install.sql.gz
-    └── ...
-
-## Changes Required
-
-### 1. publish_upgrade.php
-
-**Modifications needed:**
-- Add config/ directory with default configuration template
-- Include maintenance scripts from `/home/user1/` in the archive
-- Include generated install SQL file from uploads
-- Create tar.gz format instead of zip for better compression and consistency
-
-**Files to include from /home/user1 (explicit include list):**
-```
-maintenance_scripts/
-├── server_setup.sh           # REQUIRED - main installation script
-├── deploy.sh                 # REQUIRED - deployment/update script
-├── joinery-install.sql       # REQUIRED - fresh install database SQL (or .sql.gz)
-├── backup_database.sh        # Database backup utility
-├── restore_database.sh       # Database restore utility
-├── restore_project.sh        # Complete project restore utility
-├── copy_database.sh          # Database copy utility
-├── new_account.sh            # Create new site/account
-├── remove_account.sh         # Remove site/account
-├── fix_permissions.sh        # Fix file permissions
-├── fix_postgres_auth.sh      # PostgreSQL auth fixes
-├── Globalvars_site_default.php # Default config template
-└── default_virtualhost.conf  # Apache VirtualHost template
-```
-
-**Note:** Only these specific files should be included. No other files from /home/user1 should be added to the archive.
-
-**Script must generate install SQL before creating archive:**
-```php
-// Generate fresh install SQL file (compressed by default)
-$version = $settings->get_setting('database_version') ?: '0.1';
-$create_sql_cmd = sprintf(
-    'php %s %s',
-    escapeshellarg('/var/www/html/SITENAME/public_html/utils/create_install_sql.php'),
-    escapeshellarg($version)
-);
-
-$output = [];
-$exit_code = 0;
-exec($create_sql_cmd, $output, $exit_code);
-
-if ($exit_code !== 0) {
-    die("ERROR: Failed to generate install SQL file:\n" . implode("\n", $output) . "\n");
-}
-
-// The generated file is in uploads with version number
-$sql_source = '/var/www/html/SITENAME/uploads/joinery-install-' . $version . '.sql.gz';
-
-if (!file_exists($sql_source)) {
-    die("ERROR: Generated SQL file not found at $sql_source\n");
-}
-
-echo "Generated install SQL file version $version (compressed)\n";
-
-// Note: The file will be added to archive directly from uploads
-// with simplified name during archive creation
-```
-
-**Script must check for required files:**
-```php
-// Check maintenance scripts exist
-$required_files = [
-    '/home/user1/joinery/joinery/maintenance scripts/server_setup.sh',
-    '/home/user1/joinery/joinery/maintenance scripts/deploy.sh'
-];
-
-// Also check that we have the generated SQL file
-$required_files[] = $sql_source; // The versioned file in uploads
-
-foreach ($required_files as $file) {
-    if (!file_exists($file)) {
-        die("ERROR: Required file $file not found. Cannot create archive.\n");
-    }
-}
-```
-
-**Implementation approach:**
-```php
-// When creating archive - no prefix needed
-
-// Add site files
-$archive->addFile('public_html/serve.php', $actual_file);
-$archive->addFile('config/Globalvars_site_default.php', $actual_file);
-
-// Add maintenance scripts from /home/user1
-$maintenance_files = [
-    'server_setup.sh',
-    'deploy.sh',
-    'backup_database.sh',
-    'restore_database.sh',
-    'restore_project.sh',
-    'copy_database.sh',
-    'new_account.sh',
-    'remove_account.sh',
-    'fix_permissions.sh',
-    'fix_postgres_auth.sh',
-    'Globalvars_site_default.php',
-    'default_virtualhost.conf'
-];
-
-$maintenance_dir = '/home/user1/joinery/joinery/maintenance scripts/';
-foreach ($maintenance_files as $file) {
-    if (file_exists($maintenance_dir . $file)) {
-        $archive->addFile(
-            'maintenance_scripts/' . $file,
-            $maintenance_dir . $file
-        );
-    }
-}
-
-// Add the install SQL file from uploads with simplified name
-// $sql_source was set earlier when generating the SQL
-$archive->addFile(
-    'maintenance_scripts/joinery-install.sql.gz',
-    $sql_source  // This is the versioned file from uploads
-);
-```
-
-### 2. upgrade.php
-
-**Modifications needed:**
-- Handle the new tar.gz format (currently uses zip)
-- Extract all directories properly including maintenance_scripts
-- No backward compatibility needed (nobody uses this publicly yet)
-
-**Implementation approach:**
-```php
-// Use tar command for extraction
-$extract_cmd = sprintf(
-    'tar -xzf %s -C /var/www/html/SITENAME/',
-    escapeshellarg($archive_path)
-);
-exec($extract_cmd, $output, $exit_code);
-```
-
-### 3. server_setup.sh
-
-**Modifications needed:**
-- Remove the generic composer.json creation in /home/user1
-- Add conditional composer install when project files exist
-- Add fresh database installation support using joinery-install.sql
-
-**Remove this section:**
-```bash
-# Create a composer.json with common dependencies for membership applications
-tee composer.json > /dev/null << 'EOF'
-{
-    "require": {
-        "stripe/stripe-php": "^10.0",
-        "phpmailer/phpmailer": "^6.0",
-        "monolog/monolog": "^3.0",
-        "mailchimp/marketing": "^3.0",
-        "guzzlehttp/guzzle": "^7.0"
-    }
-}
-EOF
-```
-
-**Add this section after Composer installation:**
-```bash
-# If project files exist (e.g., when extracted before server_setup.sh runs)
-# install composer dependencies now. Otherwise they'll be installed after deployment.
-if [ -n "$SITENAME" ] && [ -f "/var/www/html/$SITENAME/public_html/composer.json" ]; then
-    log "Project files detected - installing composer dependencies"
-    cd /var/www/html/$SITENAME/public_html
-    COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-    log "Composer dependencies installed"
-else
-    log "No project files yet - composer dependencies will be installed after deployment"
-fi
-```
-
-### 4. deploy.sh or new_account.sh
-
-**Modifications needed for fresh installations:**
-- Detect if this is a fresh install (no existing database)
-- Use joinery-install.sql for fresh database setup
-
-**Add database initialization logic:**
-```bash
-# Check if database exists
-DB_EXISTS=$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'")
-
-if [ "$DB_EXISTS" != "1" ]; then
-    log "Database $DB_NAME does not exist - performing fresh installation"
-
-    # Create the database
-    sudo -u postgres createdb -O postgres "$DB_NAME"
-
-    # Check for install SQL file (compressed or uncompressed)
-    INSTALL_SQL="/home/user1/joinery/joinery/maintenance scripts/joinery-install.sql.gz"
-    if [ ! -f "$INSTALL_SQL" ]; then
-        # Try uncompressed
-        INSTALL_SQL="/home/user1/joinery/joinery/maintenance scripts/joinery-install.sql"
-    fi
-    if [ ! -f "$INSTALL_SQL" ]; then
-        # Try alternate location (compressed)
-        INSTALL_SQL="/var/www/html/$SITENAME/maintenance_scripts/joinery-install.sql.gz"
-    fi
-    if [ ! -f "$INSTALL_SQL" ]; then
-        # Try alternate location (uncompressed)
-        INSTALL_SQL="/var/www/html/$SITENAME/maintenance_scripts/joinery-install.sql"
-    fi
-
-    if [ -f "$INSTALL_SQL" ]; then
-        log "Loading fresh install database schema and seed data..."
-
-        # Check if file is compressed
-        if [[ "$INSTALL_SQL" == *.gz ]]; then
-            gunzip -c "$INSTALL_SQL" | sudo -u postgres psql -d "$DB_NAME"
-        else
-            sudo -u postgres psql -d "$DB_NAME" -f "$INSTALL_SQL"
-        fi
-
-        if [ $? -eq 0 ]; then
-            log "Database initialized successfully"
-            log "Default admin credentials: admin@example.com / changeme123"
-        else
-            log "ERROR: Failed to initialize database"
-            exit 1
-        fi
-    else
-        log "ERROR: Install SQL file not found"
-        exit 1
-    fi
-else
-    log "Database $DB_NAME exists - running migrations only"
-    # Normal upgrade process
-fi
-```
-
-## Testing
-
-1. Run publish_upgrade.php to create an archive
-2. Verify archive structure:
-   ```bash
-   tar -tzf joinery.tar.gz | head -20
-   # Should show top-level directories: public_html/, config/, maintenance_scripts/, etc.
-
-   # Verify install SQL is included
-   tar -tzf joinery.tar.gz | grep joinery-install.sql
-   # Should show: maintenance_scripts/joinery-install.sql.gz
-   ```
-3. Test upgrade.php extracts correctly
-4. Test deployment works with new archive structure
-5. Test fresh installation creates database from joinery-install.sql.gz
-6. Verify default admin login works (admin@example.com / changeme123)
-
-## Notes
-
-- This change improves archive organization and deployment flexibility
-- Regular upgrade process remains unchanged
-- No backward compatibility needed as this is not publicly used yet
-- The install SQL file is generated fresh during each publish_upgrade to ensure it's always current
-
-## Complete Installation Flow
-
-1. **Publishing Phase** (on development server):
-   - Developer runs `publish_upgrade.php`
-   - Script generates fresh `joinery-install-{VERSION}.sql.gz` in `/uploads/`
-   - Script pulls SQL from uploads and adds to archive as `joinery-install.sql.gz`
-   - Script creates archive with all code + maintenance scripts + install SQL
-
-2. **Deployment Phase** (on target server):
-   - Extract archive
-   - Run `server_setup.sh` to configure system
-   - Run `deploy.sh` or `new_account.sh` which:
-     - Detects if database exists
-     - If not, creates database and loads `joinery-install.sql.gz`
-     - If yes, runs normal migrations
-   - System is ready with either fresh install or upgrade
-
-3. **First Login** (for fresh installs):
-   - Browse to site URL
-   - Login with: admin@example.com / changeme123
-   - Change password immediately
-   - Configure site settings
-
----
-
-## PHASE 2: Composer Dependency Management
-
-**Note:** Phase 2 should be implemented and tested after Phase 1 is complete and working.
-
-### Overview
-
-Standardize composer dependency management across all installation and upgrade scenarios, eliminating conflicts between different composer.json files and ensuring consistent dependency installation.
-
-### Current Problems
+## Current Problems
 
 1. **Conflicting composer.json files**:
    - server_setup.sh creates a generic composer.json in `/home/user1/` with common dependencies
@@ -337,128 +23,72 @@ Standardize composer dependency management across all installation and upgrade s
    - deploy.sh and upgrade.php use `composer_install_if_needed.php`
    - server_setup.sh pre-installs generic dependencies
 
-3. **Shared vendor directory** (`/home/user1/vendor/`):
-   - All sites share the same vendor directory
-   - Potential version conflicts between sites
-   - Security consideration: all sites access same dependencies
+3. **Script complexity**:
+   - Multiple scripts duplicate vendor-dir update logic
+   - File manipulation adds risk and complexity
+   - No unified dependency installation strategy
 
-### Phase 2 Changes Required
+## Design Decision: Per-Site Isolated Vendor Directory
 
-#### 1. server_setup.sh Modifications
-
-**Remove the generic composer.json creation** (lines 137-155) and replace with:
-
-```bash
-# Ensure Composer is installed globally
-log "Composer installed at /usr/local/bin/composer"
-
-# Create shared vendor directory structure but don't install anything yet
-mkdir -p /home/user1/vendor
-chown -R user1:user1 /home/user1
-chmod 755 /home/user1
-log "Shared vendor directory created at /home/user1/vendor/"
-
-# If project files already exist (from archive extraction), install dependencies
-if [ -n "$SITENAME" ] && [ -f "/var/www/html/$SITENAME/public_html/composer.json" ]; then
-    log "Project files detected - installing composer dependencies"
-    cd "/var/www/html/$SITENAME/public_html"
-
-    # Check if composer.json specifies custom vendor-dir
-    VENDOR_DIR=$(php -r "
-        \$json = json_decode(file_get_contents('composer.json'), true);
-        echo isset(\$json['config']['vendor-dir']) ? \$json['config']['vendor-dir'] : '';
-    ")
-
-    if [ -z "$VENDOR_DIR" ]; then
-        # Use default vendor location
-        COMPOSER_VENDOR_DIR=/home/user1/vendor COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-    else
-        # Use project-specified vendor directory
-        COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-    fi
-
-    # Fix permissions
-    chown -R user1:user1 /home/user1/vendor
-    chmod -R 755 /home/user1/vendor
-    log "Composer dependencies installed"
-else
-    log "No project files yet - composer dependencies will be installed after deployment"
-fi
+Based on Docker compatibility requirements, vendor dependencies are stored **beside public_html**:
+```
+/var/www/html/{SITE}/
+├── public_html/
+├── config/
+├── vendor/                 ← Isolated per site, easily mountable in Docker
+├── uploads/
+├── logs/
+├── static_files/
+├── cache/
+├── backups/
+└── maintenance_scripts/    ← Scripts deployed with site, version-matched
 ```
 
-#### 2. new_account.sh Modifications
+This approach provides:
+- **Isolation**: Each site has independent dependencies (no version conflicts)
+- **Docker compatible**: Clean volume mounts for containerized deployments
+- **Single archive**: Works in both traditional and Docker environments
+- **Simplified scripts**: No vendor-dir configuration needed during deployment
 
-**Add archive extraction and composer installation** after database creation (around line 171):
+## Phase 2 Changes Required
 
-```bash
-# Check if joinery archive exists and extract it
-ARCHIVE_PATH="/home/user1/joinery/joinery/maintenance scripts/joinery.tar.gz"
-if [ -f "$ARCHIVE_PATH" ]; then
-    echo "Extracting Joinery platform files..."
-    tar -xzf "$ARCHIVE_PATH" -C "/var/www/html/$1/" --strip-components=0
+### 0. Database Migration for composerAutoLoad Setting
 
-    # Install composer dependencies if composer.json exists
-    if [ -f "/var/www/html/$1/public_html/composer.json" ]; then
-        echo "Installing composer dependencies..."
-        cd "/var/www/html/$1/public_html"
+**Add migration to update composerAutoLoad setting from old to new path:**
 
-        # Ensure vendor-dir points to shared location
-        php -r "
-            \$path = 'composer.json';
-            \$json = json_decode(file_get_contents(\$path), true);
-            if (!isset(\$json['config'])) {
-                \$json['config'] = [];
-            }
-            \$json['config']['vendor-dir'] = '/home/user1/vendor';
-            file_put_contents(\$path, json_encode(\$json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-        "
+Add to `/public_html/migrations/migrations.php`:
 
-        COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-
-        # Fix permissions
-        chown -R user1:user1 /home/user1/vendor
-        chmod -R 755 /home/user1/vendor
-        echo "Composer dependencies installed."
-    fi
-
-    # Update configuration (already handled by extraction)
-    echo "Platform files extracted and configured."
-else
-    echo "Warning: Joinery archive not found at $ARCHIVE_PATH"
-    echo "You will need to deploy the platform files manually."
-fi
+```php
+$migration = array(); // Clear previous migration data
+$migration['database_version'] = '0.XX'; // Use next available version number
+$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'composerAutoLoad' AND stg_value LIKE '/home/user1/vendor%'";
+$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';";
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
 ```
 
-#### 3. deploy.sh Modifications
+**What this does:**
+- **Test:** Checks if composerAutoLoad is still pointing to old `/home/user1/vendor/` path
+- **Migration:** Updates it to `../vendor/` (relative path that resolves to `/var/www/html/{SITE}/vendor/`)
+- **When it runs:** Automatically during deploy.sh or upgrade.php when update_database.php is executed
 
-**Add composer.json vendor-dir verification** before running composer_install_if_needed.php:
+**Note:** Sites that already have the correct path won't be affected (test will return 0).
 
-```bash
-# Ensure composer.json uses correct vendor directory
-if [ -f "/var/www/html/$TARGET_SITE/public_html/composer.json" ]; then
-    log "Checking composer configuration..."
+### 1. Project composer.json Update
 
-    # Update vendor-dir in composer.json if needed
-    php -r "
-        \$path = '/var/www/html/$TARGET_SITE/public_html/composer.json';
-        \$json = json_decode(file_get_contents(\$path), true);
-        if (!isset(\$json['config'])) {
-            \$json['config'] = [];
-        }
-        \$json['config']['vendor-dir'] = '/home/user1/vendor';
-        file_put_contents(\$path, json_encode(\$json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-    "
+Update `/var/www/html/{SITE}/public_html/composer.json` to change vendor-dir from absolute to relative path:
 
-    log "Composer configuration updated"
-fi
-
-# Then continue with existing composer_install_if_needed.php call
+**Current:**
+```json
+"vendor-dir": "/home/user1/vendor"
 ```
 
-#### 4. Project composer.json Modifications
+**Change to:**
+```json
+"vendor-dir": "../vendor"
+```
 
-Ensure the project's composer.json in the archive includes the vendor-dir configuration:
-
+**Complete composer.json after change:**
 ```json
 {
     "name": "joinery/platform",
@@ -478,67 +108,436 @@ Ensure the project's composer.json in the archive includes the vendor-dir config
         "allow-plugins": {
             "php-http/discovery": true
         },
-        "vendor-dir": "/home/user1/vendor"
-    }
-}
-```
-
-### Phase 2 Installation Flow
-
-1. **Fresh Server Setup**:
-   - `server_setup.sh` installs Composer globally
-   - Creates `/home/user1/vendor/` directory structure
-   - NO generic composer.json created
-   - If project files exist, runs composer install using project's composer.json
-
-2. **New Site Creation with Archive**:
-   - Extract archive to site directory
-   - Project's composer.json already configured with correct vendor-dir
-   - Run `composer install` using project's composer.json
-   - Database loaded from joinery-install.sql.gz
-   - All dependencies installed automatically
-
-3. **Deployment/Upgrade**:
-   - Extract new code
-   - Verify/update composer.json vendor-dir setting
-   - Run `composer_install_if_needed.php`
-   - Validates and installs/updates dependencies as needed
-
-### Benefits of Phase 2
-
-1. **Single Source of Truth**: Project's composer.json is the only dependency list
-2. **Consistent Installation**: Same process for new sites and upgrades
-3. **No Manual Steps**: Composer runs automatically in all workflows
-4. **Version Control**: composer.lock ensures exact version matching
-5. **Reduced Conflicts**: No competing composer.json files
-
-### Alternative Configuration (Optional)
-
-For **per-site isolated dependencies** instead of shared vendor directory, modify composer.json:
-
-```json
-{
-    "config": {
         "vendor-dir": "../vendor"
     }
 }
 ```
 
-This places vendor at `/var/www/html/{SITE}/vendor/`, keeping dependencies isolated per site.
+The relative path `"../vendor"` places vendor at `/var/www/html/{SITE}/vendor/` (one level up from public_html).
 
-### Phase 2 Testing Checklist
+### 2. ComposerValidator.php Enhancement
 
-1. Verify server_setup.sh no longer creates generic composer.json
-2. Test new_account.sh extracts archive and installs dependencies
-3. Confirm deploy.sh updates vendor-dir configuration
-4. Validate composer_install_if_needed.php works with new structure
-5. Test fresh install creates working site with all dependencies
-6. Test upgrade maintains correct dependencies
-7. Verify shared vendor directory has correct permissions
+**Add vendor directory consistency check** to detect mismatches between `composerAutoLoad` setting and `composer.json` config:
 
-### Phase 2 Notes
+Add this method to `ComposerValidator` class:
 
-- This phase ensures composer dependency management is consistent across all installation methods
-- The shared vendor directory approach saves disk space but requires all sites to use compatible package versions
-- Consider the alternative per-site vendor approach if version isolation is required
-- Always include composer.lock in the archive to ensure reproducible installations
+```php
+/**
+ * Check if composerAutoLoad setting matches vendor-dir in composer.json
+ * Uses string normalization for performance (avoids expensive realpath() calls)
+ */
+private function validateVendorDirConsistency() {
+    $basePath = PathHelper::getBasePath();
+    $composerJsonPath = $basePath . '/composer.json';
+
+    if (!file_exists($composerJsonPath)) {
+        return true; // Can't validate if file doesn't exist
+    }
+
+    $composerJson = json_decode(file_get_contents($composerJsonPath), true);
+    if (!$composerJson || !isset($composerJson['config']['vendor-dir'])) {
+        return true; // No vendor-dir specified, will use default
+    }
+
+    // Normalize vendor-dir path (handle ../ and trailing slashes)
+    $configuredVendorDir = rtrim($composerJson['config']['vendor-dir'], '/');
+    if (substr($configuredVendorDir, 0, 1) === '/') {
+        // Absolute path - use as-is
+        $expectedPath = $configuredVendorDir . '/';
+    } else {
+        // Relative path - resolve relative to base path
+        $expectedPath = rtrim($basePath, '/') . '/' . $configuredVendorDir . '/';
+    }
+
+    // Normalize setting path (ensure trailing slash for comparison)
+    $settingPath = rtrim($this->composerPath, '/') . '/';
+
+    if ($expectedPath !== $settingPath) {
+        $this->errors[] = "Vendor directory mismatch detected:";
+        $this->errors[] = "  composer.json vendor-dir: " . $configuredVendorDir;
+        $this->errors[] = "  composerAutoLoad setting: " . $this->composerPath;
+        $this->errors[] = "  Update composerAutoLoad setting in admin panel to match composer.json configuration";
+        return false;
+    }
+
+    return true;
+}
+```
+
+Then add this call in the `validate()` method after the existing checks:
+
+```php
+// Check 5: Vendor directory consistency
+if (!$this->validateVendorDirConsistency()) {
+    return false;
+}
+```
+
+**Performance note:** This validation uses string normalization instead of `realpath()` to avoid filesystem calls, keeping it lightweight.
+
+### 3. server_setup.sh Modifications
+
+**Remove the generic composer.json creation** (lines 137-155) and add simple composer install:
+
+```bash
+# Ensure Composer is installed globally
+log "Composer installed at /usr/local/bin/composer"
+
+# If project files already exist (from archive extraction), install dependencies
+if [ -n "$SITENAME" ] && [ -f "/var/www/html/$SITENAME/public_html/composer.json" ]; then
+    log "Project files detected - installing composer dependencies"
+    cd "/var/www/html/$SITENAME/public_html"
+    COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+    chown -R www-data:www-data ../vendor
+    log "Composer dependencies installed"
+else
+    log "No project files yet - composer dependencies will be installed after deployment"
+fi
+```
+
+That's it! No vendor-dir manipulation, no environment variables, no complex logic.
+
+### 4. new_account.sh Modifications
+
+**Current Reality:** new_account.sh creates the site skeleton (directories, database, virtualhost) but does NOT deploy code. Code deployment always happens via deploy.sh afterwards.
+
+**Typical workflow:**
+```bash
+sudo ./new_account.sh sitename domain.com IP
+./deploy.sh sitename  # This installs composer dependencies
+```
+
+**No composer changes needed** - deploy.sh handles composer installation automatically via composer_install_if_needed.php.
+
+**However, Phase 1 added joinery-install.sql.gz to archives.** Update new_account.sh to use it if available:
+
+Change the database restore file default (around line 34):
+
+```bash
+# Set database restore file (default or user-specified)
+# Check for joinery-install.sql.gz from archive first
+if [ -f "joinery-install.sql.gz" ]; then
+    DATABASE_RESTORE_FILE="joinery-install.sql.gz"
+elif [ -f "joinery-install.sql" ]; then
+    DATABASE_RESTORE_FILE="joinery-install.sql"
+else
+    DATABASE_RESTORE_FILE="joinery-install-sql.sql"  # Legacy fallback
+fi
+
+# Allow user override
+if [ "$4" != "" ]; then
+    DATABASE_RESTORE_FILE="$4"
+fi
+```
+
+And update the restore logic (around line 165) to handle .gz files:
+
+```bash
+# Load database restore file
+echo "Loading database from restore file '$DATABASE_RESTORE_FILE'..."
+echo "Enter PostgreSQL postgres user password:"
+
+# Check if file is compressed
+if [[ "$DATABASE_RESTORE_FILE" == *.gz ]]; then
+    if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -W -d "$1"; then
+        echo "ERROR: Failed to load database from compressed restore file"
+        echo "Database '$1' was created but restore failed."
+        echo "You may need to manually restore or recreate the database."
+    else
+        echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+    fi
+else
+    if ! psql -U postgres -W -d "$1" -f "$DATABASE_RESTORE_FILE"; then
+        echo "ERROR: Failed to load database from restore file"
+        echo "Database '$1' was created but restore failed."
+        echo "You may need to manually restore or recreate the database."
+    else
+        echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+    fi
+fi
+```
+
+**Why this approach:**
+- new_account.sh stays focused on site skeleton creation
+- deploy.sh handles all code deployment and composer installation
+- Simpler, cleaner separation of concerns
+- No duplicate composer install logic
+
+### 5. upgrade.php Modifications
+
+**Ensure maintenance_scripts are extracted during web-based upgrades:**
+
+Since Phase 1 already handles tar.gz extraction, we just need to ensure it extracts ALL directories including maintenance_scripts:
+
+```php
+// In upgrade.php, the extraction already handles all directories
+// Just verify maintenance_scripts are included:
+
+// After extraction, verify critical directories exist
+$required_dirs = [
+    $stage_location . '/public_html',
+    $stage_location . '/maintenance_scripts'  // Ensure scripts are extracted
+];
+
+foreach ($required_dirs as $dir) {
+    if (!is_dir($dir)) {
+        echo "ERROR: Required directory missing after extraction: $dir<br>";
+        exit;
+    }
+}
+
+// Copy maintenance_scripts to site directory
+$source_scripts = $stage_location . '/maintenance_scripts';
+$dest_scripts = '/var/www/html/' . $sitename . '/maintenance_scripts';
+
+// Copy new scripts (overwriting old ones)
+if (is_dir($source_scripts)) {
+    recursiveCopy($source_scripts, $dest_scripts);
+    echo "Updated maintenance scripts<br>";
+}
+
+// Continue with normal upgrade process...
+```
+
+### 6. deploy.sh Modifications
+
+**Note:** deploy.sh pulls code directly from git, not from an archive.
+
+**Two changes needed:**
+
+**A. Add maintenance_scripts deployment:**
+
+Currently, deploy.sh only pulls `theme` and `plugins` from the joinery repository via the `deploy_theme_plugin()` function. We need to add maintenance_scripts to the same function.
+
+**Add this code at the end of the `deploy_theme_plugin()` function** (after the plugins deployment, before the cleanup section around line 490):
+
+```bash
+# DEPLOY MAINTENANCE_SCRIPTS to /var/www/html/sitename/maintenance_scripts (outside public_html)
+verbose_echo "Setting up maintenance_scripts deployment to $site_root/maintenance_scripts..."
+local maintenance_stage_dir="$site_root/maintenance_scripts_stage"
+rm -rf "$maintenance_stage_dir"
+mkdir -p "$maintenance_stage_dir"
+
+# Clone repo for maintenance_scripts
+verbose_echo "Cloning maintenance_scripts from: $THEME_PLUGIN_REPO_URL"
+if [ "$VERBOSE" = true ]; then
+    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$maintenance_stage_dir"
+else
+    git clone --quiet --no-checkout "$THEME_PLUGIN_REPO_URL" "$maintenance_stage_dir" 2>/dev/null
+fi
+cd "$maintenance_stage_dir" || exit 1
+git config core.sparseCheckout true
+git sparse-checkout init --cone
+git sparse-checkout set "maintenance scripts"
+if [ "$VERBOSE" = true ]; then
+    git checkout main
+else
+    git checkout --quiet main 2>/dev/null
+fi
+rm -rf .git
+cd - > /dev/null
+
+# Deploy maintenance_scripts directly to site root
+if [[ -d "$maintenance_stage_dir/maintenance scripts" ]]; then
+    verbose_echo "Deploying maintenance_scripts to $site_root/maintenance_scripts..."
+
+    # Remove old maintenance_scripts if exists
+    if [[ -d "$site_root/maintenance_scripts" ]]; then
+        rm -rf "$site_root/maintenance_scripts"
+    fi
+
+    # Move to site root (note: git has "maintenance scripts" with space, we deploy as maintenance_scripts with underscore)
+    mv "$maintenance_stage_dir/maintenance scripts" "$site_root/maintenance_scripts" || {
+        echo "ERROR: Failed to move maintenance_scripts to site root"
+        return 1
+    }
+
+    # Make scripts executable
+    chmod +x "$site_root/maintenance_scripts"/*.sh 2>/dev/null || true
+
+    verbose_echo "Maintenance scripts deployed successfully"
+else
+    echo "WARNING: No maintenance scripts directory found in joinery repository"
+fi
+
+# Cleanup staging directory
+rm -rf "$maintenance_stage_dir"
+
+echo "Maintenance scripts deployment complete."
+```
+
+**B. Keep using composer_install_if_needed.php** (no change needed at line 1225):
+
+The existing composer validation and installation via `composer_install_if_needed.php` should remain unchanged. This script:
+- Validates composer setup (checks autoload.php, composer.lock exist)
+- Only runs `composer install` when actually needed
+- Verifies required packages are installed
+- Provides detailed error messages
+
+With Phase 2's standardized `composer.json` (with `vendor-dir: ../vendor`), the script will automatically work correctly without modification.
+
+**Why this approach?**
+- Maintenance scripts need to be deployed with each deployment to stay version-matched with the code
+- The joinery repository already contains maintenance_scripts - we just need to pull them
+- `composer_install_if_needed.php` provides validation that simple bash commands can't match
+- No need to replace working, validated code
+
+## Phase 2 Installation Flow
+
+### Day 0 - Fresh Server Installation
+**Starting point:** You have the archive file (joinery-X-Y.tar.gz) from publish_upgrade.php
+
+1. Upload and extract archive to `/home/user1/joinery/joinery/`:
+   ```bash
+   cd /home/user1
+   mkdir -p joinery/joinery
+   cd joinery/joinery
+   tar -xzf joinery-X-Y.tar.gz
+   # Creates: maintenance scripts/ directory with tools
+   ```
+
+2. Run server_setup.sh for system configuration:
+   ```bash
+   cd "maintenance scripts"
+   sudo ./server_setup.sh
+   # This will:
+   # - Install Apache, PostgreSQL, PHP, Composer
+   # - Set up system dependencies
+   ```
+
+3. Create first site:
+   ```bash
+   # Still in maintenance scripts directory
+   sudo ./new_account.sh SITENAME domain.com SERVER_IP
+   # This will:
+   # - Create site directories at /var/www/html/SITENAME/
+   # - Create database and load joinery-install.sql.gz
+   # - Create Apache virtualhost
+   ```
+
+4. Deploy code to the site:
+   ```bash
+   ./deploy.sh SITENAME
+   # This will:
+   # - Pull code from git to /var/www/html/SITENAME/public_html/
+   # - Pull themes/plugins from joinery repo
+   # - Pull maintenance_scripts from joinery repo to /var/www/html/SITENAME/maintenance_scripts/
+   # - Run composer install (creates /var/www/html/SITENAME/vendor/ automatically)
+   # - Update database schema
+   ```
+
+5. For additional sites, repeat steps 3-4 with different sitename
+
+### Standard Installation Flows
+
+1. **Fresh Server Setup (via server_setup.sh)**:
+   - One-time system configuration
+   - Installs Apache, PostgreSQL, PHP, Composer globally
+   - Sets up system-level dependencies
+   - Does NOT deploy any sites
+
+2. **New Site Creation (via new_account.sh + deploy.sh)**:
+   - **new_account.sh:** Creates site skeleton (directories, database, virtualhost)
+   - **deploy.sh:** Deploys code from git
+   - Composer dependencies installed automatically during deploy
+   - Vendor directory created at `/var/www/html/{SITE}/vendor/` automatically
+   - maintenance_scripts deployed to `/var/www/html/{SITE}/maintenance_scripts/`
+
+3. **Code Updates (via deploy.sh)**:
+   - Pull latest code from git to `/var/www/html/{SITE}/public_html/`
+   - Pull latest themes/plugins from joinery repo
+   - Pull latest maintenance_scripts from joinery repo
+   - Run composer_install_if_needed.php (updates deps if needed)
+   - Run database migrations
+   - Vendor directory maintained at `/var/www/html/{SITE}/vendor/`
+
+## Benefits of Simplified Phase 2
+
+1. **Single Source of Truth**: `composer.json` in archive is pre-configured, never modified
+2. **No Script Complexity**: Each script just runs `composer install` - no file manipulation
+3. **Per-Site Isolation**: Each site has independent vendor directory
+4. **Docker Compatible**: Vendor directory easily mounted as a Docker volume
+5. **Reproducible Builds**: `composer.lock` ensures exact version matching
+6. **Maintainable**: Identical 3-line composer install logic in all scripts
+7. **Safe**: No file modifications during deployment
+8. **Works Everywhere**: Same approach for traditional servers and Docker containers
+
+## Phase 2 Testing Checklist
+
+1. **ComposerValidator enhancements:**
+   - Verify `validateVendorDirConsistency()` method added to ComposerValidator class
+   - Test validator detects mismatch when composerAutoLoad setting doesn't match composer.json vendor-dir
+   - Test validator passes when setting and composer.json are consistent
+   - Verify error messages are clear and actionable
+
+2. **composer.json configuration:**
+   - Verify `composer.json` has `"vendor-dir": "../vendor"`
+   - Verify `composer.lock` is included in archive
+
+3. **Script installation flow:**
+   - Test server_setup.sh installs dependencies correctly and copies maintenance_scripts
+   - Test new_account.sh extracts archive and installs dependencies
+   - Confirm deploy.sh updates maintenance_scripts and installs/updates dependencies
+   - Confirm upgrade.php updates maintenance_scripts during web upgrades
+   - Verify vendor directory created at `/var/www/html/{SITE}/vendor/`
+   - Verify maintenance_scripts at `/var/www/html/{SITE}/maintenance_scripts/`
+
+4. **Site functionality:**
+   - Test fresh install creates working site with all dependencies
+   - Test upgrade maintains correct dependencies
+   - Test all critical packages (PHPMailer, Stripe, Mailgun) are accessible
+
+5. **Docker compatibility:**
+   - Verify Docker volume mount works correctly for `../vendor`
+   - Test container can access vendor dependencies
+
+6. **Configuration validation:**
+   - After fresh install, verify composerAutoLoad setting is correct
+   - Test ComposerValidator catches any misconfigurations
+
+## Phase 2 Notes
+
+- **Key difference from complex proposal**: No file manipulation, no duplicate logic, single pre-configured composer.json
+- Each site has isolated vendor directory, preventing version conflicts between sites
+- The relative path `"../vendor"` works identically in Docker and traditional deployments
+- Remove the old generic `/home/user1/vendor/` and `/home/user1/composer.json` - they are no longer needed
+- Always include `composer.lock` in the archive to ensure reproducible installations
+- Three scripts, same simple pattern: `cd public_html && composer install --no-dev --optimize-autoloader`
+
+## Note on Maintenance Scripts Location
+
+**Current Phase 1 implementation:** Pulls maintenance scripts from `/home/user1/joinery/joinery/maintenance scripts/` when creating archives.
+
+**Phase 2 approach:** Scripts end up at `/var/www/html/{SITE}/maintenance_scripts/` after installation. This is fine - the archive structure remains the same, just the final deployed location is clarified in Phase 2.
+
+**No changes needed to Phase 1 implementation** - it already creates the correct archive structure with maintenance_scripts/ directory.
+
+## Important Database Setting Note
+
+**The `composerAutoLoad` database setting:** This setting is stored in the database and tells the application where to find the vendor autoload.php file.
+
+- **How it's updated:** Migration 0.XX automatically updates it from `/home/user1/vendor/` to `../vendor/`
+- **Expected value after Phase 2:** `../vendor/` (relative path that resolves to `/var/www/html/{SITE}/vendor/`)
+- **Validation:** ComposerValidator will detect if this setting doesn't match the composer.json vendor-dir configuration
+- **Fresh installs:** The migration ensures new sites get the correct value automatically
+
+## Summary of Phase 2 Changes
+
+**Code Changes (6 items):**
+1. ✏️ **Migration** - Add composerAutoLoad update migration to migrations.php
+2. ✏️ **composer.json** - Change `vendor-dir` from `/home/user1/vendor` to `../vendor`
+3. ✏️ **ComposerValidator.php** - Add validateVendorDirConsistency() method
+4. ✏️ **server_setup.sh** - Remove generic composer.json creation in /home/user1
+5. ✏️ **new_account.sh** - Add support for .gz compressed SQL files
+6. ✏️ **deploy.sh** - Add maintenance_scripts deployment to deploy_theme_plugin() function
+
+**No Changes Needed:**
+- ✅ **upgrade.php** - Already extracts maintenance_scripts from archive (Phase 1)
+- ✅ **composer_install_if_needed.php** - Works with new paths automatically
+- ✅ **publish_upgrade.php** - Already includes maintenance_scripts (Phase 1)
+
+**Result:**
+- Each site gets isolated vendor directory at `/var/www/html/{SITE}/vendor/`
+- Maintenance scripts stay version-matched with code
+- Database setting automatically updated via migration
+- Simple, consistent composer workflow across all scripts
