@@ -221,6 +221,29 @@ class ComposerValidator {
     }
 
     /**
+     * Normalize a path by resolving .. and . segments
+     * @param string $path The path to normalize
+     * @return string Normalized path
+     */
+    private function normalizePath($path) {
+        $parts = explode('/', $path);
+        $normalized = [];
+
+        foreach ($parts as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+            if ($part === '..') {
+                array_pop($normalized);
+            } else {
+                $normalized[] = $part;
+            }
+        }
+
+        return '/' . implode('/', $normalized) . '/';
+    }
+
+    /**
      * Detect if vendor directory location has changed between composer.json and database setting
      * @return array ['changed' => bool, 'old_path' => string|null, 'new_path' => string|null]
      */
@@ -237,7 +260,7 @@ class ComposerValidator {
             return ['changed' => false, 'old_path' => null, 'new_path' => null];
         }
 
-        // Get configured vendor dir from composer.json
+        // Get configured vendor dir from composer.json and normalize to absolute path
         $configuredVendorDir = rtrim($composerJson['config']['vendor-dir'], '/');
         if (substr($configuredVendorDir, 0, 1) === '/') {
             // Absolute path - use as-is
@@ -247,14 +270,29 @@ class ComposerValidator {
             $expectedPath = rtrim($basePath, '/') . '/' . $configuredVendorDir . '/';
         }
 
-        // Get current setting path
-        $settingPath = rtrim($this->composerPath, '/') . '/';
+        // Get current setting path and normalize to absolute path
+        $settingVendorDir = rtrim($this->composerPath, '/');
+        if (substr($settingVendorDir, 0, 1) === '/') {
+            // Absolute path - use as-is
+            $settingPath = $settingVendorDir . '/';
+        } else {
+            // Relative path - resolve relative to base path
+            $settingPath = rtrim($basePath, '/') . '/' . $settingVendorDir . '/';
+        }
+
+        // Normalize paths by resolving .. and removing double slashes
+        $expectedPath = preg_replace('#/+#', '/', $expectedPath); // Remove double slashes
+        $settingPath = preg_replace('#/+#', '/', $settingPath);
+
+        // Resolve .. in paths
+        $expectedPath = $this->normalizePath($expectedPath);
+        $settingPath = $this->normalizePath($settingPath);
 
         // Detect change
         if ($expectedPath !== $settingPath) {
             return [
                 'changed' => true,
-                'old_path' => $settingPath,
+                'old_path' => $this->composerPath, // Return original for display
                 'new_path' => $expectedPath
             ];
         }
