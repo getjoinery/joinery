@@ -16,6 +16,6 @@
         "allow-plugins": {
             "php-http/discovery": true
         },
-        "vendor-dir": "/home/user1/vendor"
+        "vendor-dir": "../vendor"
     }
 }
