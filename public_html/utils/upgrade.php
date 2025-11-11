@@ -343,16 +343,42 @@
 			}
 		}
 
-		//UNZIP THE FILE
-		$zip = new ZipArchive;
-		if ($zip->open($file_download_location)){
-		  $zip->extractTo($stage_location);
-		  $zip->close();
-		  echo 'Upgrade at '.$file_download_location. ' unzipped to '.$stage_location.'<br>';
+		// EXTRACT THE ARCHIVE (supports both tar.gz and legacy zip)
+		$file_ext = pathinfo($file_download_location, PATHINFO_EXTENSION);
+		$is_tar_gz = (strpos(basename($file_download_location), '.tar.gz') !== false);
+
+		if ($is_tar_gz) {
+			// Extract tar.gz archive
+			echo 'Extracting tar.gz archive...<br>';
+			$tar_cmd = sprintf(
+				'tar -xzf %s -C %s 2>&1',
+				escapeshellarg($file_download_location),
+				escapeshellarg($stage_location)
+			);
+			$tar_output = [];
+			$tar_exit = 0;
+			exec($tar_cmd, $tar_output, $tar_exit);
+
+			if ($tar_exit !== 0) {
+				echo 'Unable to extract tar.gz upgrade from '.$file_download_location.' <br>';
+				echo 'Error: ' . implode('<br>', $tar_output) . '<br>';
+				exit;
+			}
+			echo 'Upgrade at '.$file_download_location. ' extracted to '.$stage_location.'<br>';
 		}
 		else {
-		  echo 'Unable to unzip upgrade from '.$file_download_location.' <br>';
-		  exit;
+			// Extract legacy zip archive
+			echo 'Extracting legacy zip archive...<br>';
+			$zip = new ZipArchive;
+			if ($zip->open($file_download_location)){
+			  $zip->extractTo($stage_location);
+			  $zip->close();
+			  echo 'Upgrade at '.$file_download_location. ' unzipped to '.$stage_location.'<br>';
+			}
+			else {
+			  echo 'Unable to unzip upgrade from '.$file_download_location.' <br>';
+			  exit;
+			}
 		}
 
 		// ============================================
