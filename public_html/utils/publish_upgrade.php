@@ -40,8 +40,37 @@
 			exit;
 		}
 
-		$filename = 'current_upgrade'.$version_major.'-'.$version_minor.'.upg.zip';
-		
+		// Generate fresh install SQL file before creating archive
+		$version = $settings->get_setting('database_version') ?: '0.1';
+		echo "Generating install SQL file (version $version)...<br>";
+		flush();
+
+		$create_sql_cmd = sprintf(
+			'php %s %s',
+			escapeshellarg($full_site_dir . '/public_html/utils/create_install_sql.php'),
+			escapeshellarg($version)
+		);
+
+		$output = [];
+		$exit_code = 0;
+		exec($create_sql_cmd, $output, $exit_code);
+
+		if ($exit_code !== 0) {
+			die("ERROR: Failed to generate install SQL file:\n" . implode("\n", $output) . "\n");
+		}
+
+		// The generated file is in uploads with version number
+		$sql_source = $full_site_dir . '/uploads/joinery-install-' . $version . '.sql.gz';
+
+		if (!file_exists($sql_source)) {
+			die("ERROR: Generated SQL file not found at $sql_source\n");
+		}
+
+		echo "Generated install SQL file version $version (compressed)<br>";
+		flush();
+
+		$filename = 'joinery-'.$version_major.'-'.$version_minor.'.tar.gz';
+
 		$file_output_folder = $full_site_dir.'/static_files';
 		$file_output_location = $full_site_dir.'/static_files/'.$filename;
 
@@ -82,26 +111,112 @@
 		 
 		
 
-		$file = fopen($file_output_location, 'w') or die("can't open file");
-		fclose($file);
+		// Check that required maintenance script files exist
+		$required_files = [
+			'/home/user1/joinery/joinery/maintenance scripts/server_setup.sh',
+			'/home/user1/joinery/joinery/maintenance scripts/deploy.sh',
+			$sql_source
+		];
 
-		
-		$files_list = array();
-		$exclude_folder_names = array('.git', '.gitignore');
-		$files_list = getDirContents($full_site_dir.'/public_html', $exclude_folder_names);
-		
-		echo 'Creating zip: '.$file_output_location.'<br>';
-		$exclude_filenames = array('.git', '.gitignore');
-		$remove_relative_path = 'var/www/html/'.$site_template.'/';
-		$zip_result = create_zip($files_list, $file_output_location, $exclude_filenames, $remove_relative_path, true, $verbose);
+		foreach ($required_files as $file) {
+			if (!file_exists($file)) {
+				die("ERROR: Required file $file not found. Cannot create archive.\n");
+			}
+		}
 
-		if(!$zip_result) {
+		echo "All required files present<br>";
+		flush();
+
+		// Create temporary directory for archive staging
+		$temp_dir = sys_get_temp_dir() . '/joinery_archive_' . uniqid();
+		if (!mkdir($temp_dir, 0755, true)) {
+			die("ERROR: Failed to create temporary directory: $temp_dir\n");
+		}
+
+		echo "Creating archive structure in temporary directory...<br>";
+		flush();
+
+		// Create directory structure
+		mkdir($temp_dir . '/public_html', 0755, true);
+		mkdir($temp_dir . '/config', 0755, true);
+		mkdir($temp_dir . '/maintenance_scripts', 0755, true);
+
+		// Copy public_html files using rsync
+		$rsync_cmd = sprintf(
+			'rsync -av --exclude=.git --exclude=.gitignore %s %s 2>&1',
+			escapeshellarg($full_site_dir . '/public_html/'),
+			escapeshellarg($temp_dir . '/public_html/')
+		);
+		echo "Copying public_html files...<br>";
+		flush();
+		exec($rsync_cmd, $output, $exit_code);
+		if ($exit_code !== 0) {
+			// Clean up temp directory
+			exec('rm -rf ' . escapeshellarg($temp_dir));
+			die("ERROR: Failed to copy public_html files:\n" . implode("\n", $output) . "\n");
+		}
+
+		// Copy config file
+		$config_source = '/home/user1/joinery/joinery/maintenance scripts/Globalvars_site_default.php';
+		if (file_exists($config_source)) {
+			copy($config_source, $temp_dir . '/config/Globalvars_site_default.php');
+			echo "Copied config template<br>";
+			flush();
+		}
+
+		// Copy maintenance scripts
+		$maintenance_files = [
+			'server_setup.sh',
+			'deploy.sh',
+			'backup_database.sh',
+			'restore_database.sh',
+			'restore_project.sh',
+			'copy_database.sh',
+			'new_account.sh',
+			'remove_account.sh',
+			'fix_permissions.sh',
+			'fix_postgres_auth.sh',
+			'Globalvars_site_default.php',
+			'default_virtualhost.conf'
+		];
+
+		$maintenance_dir = '/home/user1/joinery/joinery/maintenance scripts/';
+		foreach ($maintenance_files as $file) {
+			if (file_exists($maintenance_dir . $file)) {
+				copy($maintenance_dir . $file, $temp_dir . '/maintenance_scripts/' . $file);
+				if ($verbose) {
+					echo "Copied maintenance script: $file<br>";
+				}
+			}
+		}
+		echo "Copied " . count($maintenance_files) . " maintenance script files<br>";
+		flush();
+
+		// Copy install SQL file with simplified name
+		copy($sql_source, $temp_dir . '/maintenance_scripts/joinery-install.sql.gz');
+		echo "Added install SQL file<br>";
+		flush();
+
+		// Create tar.gz archive
+		echo "Creating tar.gz archive: $file_output_location<br>";
+		flush();
+
+		$tar_cmd = sprintf(
+			'tar -czf %s -C %s . 2>&1',
+			escapeshellarg($file_output_location),
+			escapeshellarg($temp_dir)
+		);
+		exec($tar_cmd, $output, $exit_code);
+
+		// Clean up temp directory
+		exec('rm -rf ' . escapeshellarg($temp_dir));
+
+		if ($exit_code !== 0) {
 			// Clean up failed file
 			if(file_exists($file_output_location)) {
 				@unlink($file_output_location);
 			}
-			echo "Failed to create zip file<br>";
-			exit;
+			die("ERROR: Failed to create tar.gz archive:\n" . implode("\n", $output) . "\n");
 		}
 
 		if(!file_exists($file_output_location) || filesize($file_output_location) == 0){
@@ -109,7 +224,7 @@
 			if(file_exists($file_output_location)) {
 				@unlink($file_output_location);
 			}
-			echo "Failed to write the zip file: $file_output_location...aborting.<br>";
+			echo "Failed to write the archive file: $file_output_location...aborting.<br>";
 			exit;
 		}
 		
@@ -121,10 +236,19 @@
 		$upgrade->set('upg_release_notes', $_REQUEST['release_notes']);
 		$upgrade->prepare();
 		$upgrade->save();
-		
-		
+
+
 		//GET THE UPGRADE FILE
-		echo 'Exported: '. $file_output_location.'<br>';
+		$filesize_mb = round(filesize($file_output_location) / 1048576, 2);
+		echo '<br><strong>Archive created successfully!</strong><br>';
+		echo 'Location: '. $file_output_location.'<br>';
+		echo 'Size: ' . $filesize_mb . ' MB<br>';
+		echo 'Format: tar.gz<br>';
+		echo '<br>Archive contents include:<br>';
+		echo '- public_html/ (all application files)<br>';
+		echo '- config/ (default configuration template)<br>';
+		echo '- maintenance_scripts/ (deployment and setup scripts)<br>';
+		echo '- maintenance_scripts/joinery-install.sql.gz (fresh install database)<br>';
 
 	}
 	else{
@@ -152,11 +276,18 @@
 		foreach ($upgrades as $upgrade){
 			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 30);
 
-			// Check if zip file exists
-			$zip_filename = $upgrade->get('upg_name');
-			$zip_path = $full_site_dir.'/static_files/'.$zip_filename;
-			if (!file_exists($zip_path)) {
-				$version_string .= ' <span style="color: red; font-weight: bold;">[ZIP FILE MISSING]</span>';
+			// Check if archive file exists (supports both old .zip and new .tar.gz)
+			$archive_filename = $upgrade->get('upg_name');
+			$archive_path = $full_site_dir.'/static_files/'.$archive_filename;
+			if (!file_exists($archive_path)) {
+				$version_string .= ' <span style="color: red; font-weight: bold;">[ARCHIVE FILE MISSING]</span>';
+			} else {
+				// Show file format
+				if (strpos($archive_filename, '.tar.gz') !== false) {
+					$version_string .= ' <span style="color: green;">[tar.gz]</span>';
+				} else if (strpos($archive_filename, '.zip') !== false) {
+					$version_string .= ' <span style="color: blue;">[zip - legacy]</span>';
+				}
 			}
 
 			echo $version_string.'<br />';
@@ -193,15 +324,21 @@
 			$minor_version = 0;
 		}
 
-		
-		echo $formwriter->textinput('Major Version', 'version_major', NULL, 100, $major_version, '', 255, '');
-		echo $formwriter->textinput('Minor Version', 'version_minor', NULL, 100, $minor_version, '', 255, '');
-		echo $formwriter->textbox('Release notes', 'release_notes', 'ctrlHolder', 10, 80, NULL, '', 'no');
-		
-	 
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
+
+		echo $formwriter->textinput('version_major', 'Major Version', [
+			'value' => $major_version,
+			'validation' => ['required' => true]
+		]);
+		echo $formwriter->textinput('version_minor', 'Minor Version', [
+			'value' => $minor_version,
+			'validation' => ['required' => true]
+		]);
+		echo $formwriter->textbox('release_notes', 'Release notes', [
+			'validation' => ['required' => true]
+		]);
+
+
+		echo $formwriter->submitbutton('submit_button', 'Publish Upgrade');
 
 		echo $formwriter->end_form();
 
