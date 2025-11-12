@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 3.51 - Critical deployment and rollback fixes
+#version 3.52 - Model tests moved after migrations and composer install
 # MODIFIED: Added comprehensive PHP syntax validation during deployment
 # MODIFIED: Added plugin loading test with proper PathHelper context
 # MODIFIED: Added basic runtime bootstrap test
@@ -16,7 +16,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.51"
+DEPLOY_VERSION="3.52"
 
 # Helper function for verbose output
 verbose_echo() {
