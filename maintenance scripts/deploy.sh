@@ -142,14 +142,12 @@ cleanup_and_rollback() {
 # Set up trap to run cleanup on script exit
 trap cleanup_and_rollback EXIT
 
-GITHUB_USER="jeremytunnell"
-GITHUB_TOKEN="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"
-REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/Tunnell-Software/membership.git"
+GITHUB_USER="getjoinery"
+GITHUB_TOKEN="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"
+REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/getjoinery/joinery.git"
 
-# Theme/Plugin repository settings
-THEME_PLUGIN_USER="getjoinery"
-THEME_PLUGIN_TOKEN="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"
-THEME_PLUGIN_REPO_URL="https://${THEME_PLUGIN_USER}:${THEME_PLUGIN_TOKEN}@github.com/getjoinery/joinery.git"
+# Theme/Plugin repository is same as main repo now (single repository)
+THEME_PLUGIN_REPO_URL="$REPO_URL"
 
 # Function to fix permissions
 fix_permissions() {
@@ -919,15 +917,27 @@ fi
 # MOVE INTO THE CLONED DIRECTORY
 cd /var/www/html/$TARGET_SITE/public_html_stage || exit 1
 
-# PULL ONLY THE SPECIFIED FOLDERS
-verbose_echo "Pulling latest changes from main branch"
+# SPARSE CHECKOUT: Only extract public_html/ directory
+verbose_echo "Configuring sparse checkout for public_html directory"
+git config core.sparseCheckout true
+git sparse-checkout init --cone
+git sparse-checkout set public_html
+
+# CHECKOUT THE MAIN BRANCH
+verbose_echo "Checking out main branch"
 if [ "$VERBOSE" = true ]; then
-    git pull origin main
     git checkout main
 else
-    git pull --quiet origin main
     git checkout --quiet main
 fi
+
+# MOVE public_html CONTENTS TO ROOT OF STAGING DIRECTORY
+verbose_echo "Moving public_html contents to staging root"
+shopt -s dotglob
+mv public_html/* . 2>/dev/null || true
+rmdir public_html
+shopt -u dotglob
+
 rm -rf .git
 echo "✓ Repository cloned and updated to latest version"
 
