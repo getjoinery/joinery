@@ -2,15 +2,10 @@
 # Simple Local Development Deploy Script
 # Deploys main site code + themes + plugins to an empty directory
 
-# Repository settings
-GITHUB_USER="jeremytunnell"
-GITHUB_TOKEN="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"
-REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/Tunnell-Software/membership.git"
-
-# Theme/Plugin repository settings
-THEME_PLUGIN_USER="getjoinery"
-THEME_PLUGIN_TOKEN="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"
-THEME_PLUGIN_REPO_URL="https://${THEME_PLUGIN_USER}:${THEME_PLUGIN_TOKEN}@github.com/getjoinery/joinery.git"
+# Repository settings (single consolidated repository)
+GITHUB_USER="getjoinery"
+GITHUB_TOKEN="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"
+REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/getjoinery/joinery.git"
 
 # CONFIGURE YOUR PATHS HERE
 # Linux server paths (default)
@@ -211,12 +206,20 @@ echo "Deploying main site code..."
 
 # Clone main repository
 echo "Cloning main repository..."
-git clone --depth 1 "$REPO_URL" "$TEMP_DIR/main_repo"
+git clone --no-checkout "$REPO_URL" "$TEMP_DIR/main_repo"
+cd "$TEMP_DIR/main_repo"
 
-# Copy everything from the main repository root to target directory (INCLUDING .git)
+# Sparse checkout: only extract public_html/ directory
+echo "Extracting public_html directory..."
+git config core.sparseCheckout true
+git sparse-checkout init --cone
+git sparse-checkout set public_html
+git checkout main
+
+# Copy public_html contents to target directory
 echo "Copying main site files..."
-# Copy all files and directories from repo root, INCLUDING .git for the main repository
-find "$TEMP_DIR/main_repo" -maxdepth 1 -mindepth 1 -exec cp -r {} "$TARGET_DIR/" \;
+cp -r public_html/* "$TARGET_DIR/" 2>/dev/null || true
+cp -r public_html/.* "$TARGET_DIR/" 2>/dev/null || true
 echo "Main site deployment complete."
 
 echo "Deploying themes..."
@@ -229,23 +232,23 @@ if [[ "$USE_SYMLINKS" == true ]]; then
     echo "Symlink created: $TARGET_DIR/theme -> $THEMES_SOURCE_DIR"
     echo "Theme deployment complete (symlinked)."
 else
-    # Clone theme repository for themes
-    echo "Cloning theme repository..."
-    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$TEMP_DIR/theme_repo"
+    # Clone repository and extract theme from root
+    echo "Cloning repository for themes..."
+    git clone --no-checkout "$REPO_URL" "$TEMP_DIR/theme_repo"
     cd "$TEMP_DIR/theme_repo"
     git config core.sparseCheckout true
     git sparse-checkout init --cone
     git sparse-checkout set theme
     git checkout main
 
-    # Deploy themes
+    # Deploy themes to public_html/theme
     if [[ -d "theme" ]]; then
-        echo "Copying themes..."
+        echo "Copying themes to public_html/theme..."
         rm -rf "$TARGET_DIR/theme"
         cp -r "theme" "$TARGET_DIR/"
         echo "Theme deployment complete (copied)."
     else
-        echo "WARNING: No theme directory found in theme repository."
+        echo "WARNING: No theme directory found in repository."
     fi
 fi
 
@@ -259,24 +262,45 @@ if [[ "$USE_SYMLINKS" == true ]]; then
     echo "Symlink created: $TARGET_DIR/plugins -> $PLUGINS_SOURCE_DIR"
     echo "Plugin deployment complete (symlinked)."
 else
-    # Clone theme repository for plugins
-    echo "Cloning theme repository for plugins..."
-    git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$TEMP_DIR/plugin_repo"
+    # Clone repository and extract plugins from root
+    echo "Cloning repository for plugins..."
+    git clone --no-checkout "$REPO_URL" "$TEMP_DIR/plugin_repo"
     cd "$TEMP_DIR/plugin_repo"
     git config core.sparseCheckout true
     git sparse-checkout init --cone
     git sparse-checkout set plugins
     git checkout main
 
-    # Deploy plugins
+    # Deploy plugins to public_html/plugins
     if [[ -d "plugins" ]]; then
-        echo "Copying plugins..."
+        echo "Copying plugins to public_html/plugins..."
         rm -rf "$TARGET_DIR/plugins"
         cp -r "plugins" "$TARGET_DIR/"
         echo "Plugin deployment complete (copied)."
     else
-        echo "WARNING: No plugins directory found in theme repository."
+        echo "WARNING: No plugins directory found in repository."
     fi
+fi
+
+echo "Deploying maintenance scripts..."
+
+# Clone repository and extract maintenance scripts from root
+echo "Cloning repository for maintenance scripts..."
+git clone --no-checkout "$REPO_URL" "$TEMP_DIR/maintenance_repo"
+cd "$TEMP_DIR/maintenance_repo"
+git config core.sparseCheckout true
+git sparse-checkout init --cone
+git sparse-checkout set "maintenance scripts"
+git checkout main
+
+# Deploy maintenance scripts to target root
+if [[ -d "maintenance scripts" ]]; then
+    echo "Copying maintenance scripts..."
+    rm -rf "$TARGET_DIR/maintenance scripts"
+    cp -r "maintenance scripts" "$TARGET_DIR/"
+    echo "Maintenance scripts deployment complete."
+else
+    echo "WARNING: No maintenance scripts directory found in repository."
 fi
 
 echo "========================================="
@@ -285,20 +309,21 @@ echo "Site deployed to: $TARGET_DIR"
 echo ""
 echo "Directory structure:"
 echo "  $TARGET_DIR/"
-echo "  ├── [main site files with git]"
+echo "  ├── [public_html contents - application code]"
 if [[ "$USE_SYMLINKS" == true ]]; then
     echo "  ├── theme/ -> $THEMES_SOURCE_DIR (symlinked)"
-    echo "  └── plugins/ -> $PLUGINS_SOURCE_DIR (symlinked)"
+    echo "  ├── plugins/ -> $PLUGINS_SOURCE_DIR (symlinked)"
 else
-    echo "  ├── theme/ (copied from repository)"
-    echo "  └── plugins/ (copied from repository)"
+    echo "  ├── theme/ (copied from repository root)"
+    echo "  ├── plugins/ (copied from repository root)"
 fi
+echo "  └── maintenance scripts/ (deployment scripts)"
 echo ""
 if [[ "$USE_SYMLINKS" == true ]]; then
     echo "Theme changes can be made in working directory and committed from $THEMES_SOURCE_DIR"
     echo "Plugin changes can be made in working directory and committed from $PLUGINS_SOURCE_DIR"
 else
-    echo "To commit theme/plugin changes, copy them back to their respective repositories."
+    echo "To commit theme/plugin changes, copy them back to the repository."
 fi
-echo "Main site changes can be made in $TARGET_DIR and committed to main repository."
+echo "Main site changes can be made in $TARGET_DIR and committed to repository."
 echo "========================================"
