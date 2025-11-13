@@ -1,0 +1,263 @@
+<?php
+require_once(__DIR__ . '/../includes/PathHelper.php');
+
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+$settings = Globalvars::get_instance();
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
+require_once(PathHelper::getIncludePath('data/email_recipient_groups_class.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));	
+
+class EmailException extends SystemBaseException {}
+class EmailNotSentException extends EmailException {};
+
+class Email extends SystemBase {	public static $prefix = 'eml';
+	public static $tablename = 'eml_emails';
+	public static $pkey_column = 'eml_email_id';
+
+	protected static $foreign_key_actions = [
+		'eml_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+	];
+
+	const FORMAT_HTML = 1;
+	const FORMAT_PLAINTEXT = 2;
+	
+	const EMAIL_DELETED = 0;
+	const EMAIL_TEMP_CREATED = 2;
+	const EMAIL_CREATED = 3;
+	const EMAIL_QUEUED = 5;
+	const EMAIL_SENT = 10;
+	
+	const TYPE_TRANSACTIONAL = 1;
+	const TYPE_MARKETING = 2;
+
+	public $webdir = '';
+	public $cdn = '';
+
+		/**
+	 * Field specifications define database column properties and validation rules
+	 * 
+	 * Database schema properties (used by update_database):
+	 *   'type' => 'varchar(255)' | 'int4' | 'int8' | 'text' | 'timestamp' | 'bool' | etc.
+	 *   'is_nullable' => true/false - Whether NULL values are allowed
+	 *   'serial' => true/false - Auto-incrementing field
+	 * 
+	 * Validation and behavior properties (used by SystemBase):
+	 *   'required' => true/false - Field must have non-empty value on save
+	 *   'default' => mixed - Default value for new records (applied on INSERT only)
+	 *   'zero_on_create' => true/false - Set to 0 when creating if NULL (INSERT only)
+	 * 
+	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
+	 */
+	public static $field_specifications = array(
+	    'eml_email_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+	    'eml_description' => array('type'=>'varchar(255)'),
+	    'eml_usr_user_id' => array('type'=>'int4'),
+	    'eml_from_address' => array('type'=>'varchar(255)'),
+	    'eml_from_name' => array('type'=>'varchar(255)'),
+	    'eml_subject' => array('type'=>'varchar(255)'),
+	    'eml_preview_text' => array('type'=>'varchar(255)'),
+	    'eml_reply_to' => array('type'=>'varchar(255)'),
+	    'eml_message_html' => array('type'=>'text'),
+	    'eml_message_plain' => array('type'=>'text'),
+	    'eml_message_template_html' => array('type'=>'text'),
+	    'eml_message_template_plain' => array('type'=>'text'),
+	    'eml_sent_time' => array('type'=>'timestamp(6)'),
+	    'eml_status' => array('type'=>'int2'),
+	    'eml_scheduled_time' => array('type'=>'timestamp(6)'),
+	    'eml_type' => array('type'=>'int2'),
+	    'eml_delete_time' => array('type'=>'timestamp(6)'),
+	    'eml_ctt_contact_type_id' => array('type'=>'int4'),
+	    'eml_mlt_mailing_list_id' => array('type'=>'int4'),
+	);
+
+public function __construct($key, $load=FALSE) { 
+		parent::__construct($key, $load);
+
+		// Store a few things here for easy passthrough into the 
+		// email templates
+		// Note: webdir is now handled by LibraryFunctions::get_absolute_url() in EmailTemplate.php
+		//$settings = Globalvars::get_instance();
+		//$this->webdir = $settings->get_setting('webDir');
+	}
+
+	//THIS ADDS AN ENTRY TO THE RECIPIENT GROUPS TABLE WITH THE EVENT OR GROUP TO ADD
+	//THE OP FIELD TELLS THE MAILER WHETHER TO ADD THESE RECIPIENTS TO THE EMAIL OR SUBTRACT THEM WHEN IT'S TIME TO QUEUE THE EMAIL
+	function add_recipient_group($evt_event_id, $grp_group_id, $op='add'){
+		
+		//MAKE SURE THERE'S ONLY TWO OPERATIONS
+		if($op == 'remove'){
+			$op == 'remove';
+		}
+		else{
+			$op == 'add';
+		}
+		
+		$email_recipient_group = new EmailRecipientGroup(NULL);
+		$email_recipient_group->set('erg_eml_email_id', $this->key);
+		$email_recipient_group->set('erg_evt_event_id', $evt_event_id);
+		$email_recipient_group->set('erg_grp_group_id', $grp_group_id);
+		$email_recipient_group->set('erg_operation', $op);
+		
+		//DON'T ADD IT AGAIN IF IT'S ALREADY THERE
+		if(!$email_recipient_group->check_for_duplicate(array('erg_grp_group_id', 'erg_evt_event_id', 'erg_eml_email_id', 'erg_operation'))){
+			$email_recipient_group->prepare();
+			$email_recipient_group->save();
+		}
+		
+		return true;
+	}
+	
+	function get_recipient_groups($op=NULL){
+
+		$searches = array(
+			'email_id' => $this->key,
+		);
+		
+		//MAKE SURE THERE'S ONLY TWO OPERATIONS
+		if($op == 'remove' || $op == 'add'){
+			$searches['operation'] = $op;
+		}
+
+		$email_recipient_groups = new MultiEmailRecipientGroup($searches);
+		
+		$email_recipient_groups->load();
+		return $email_recipient_groups;
+		
+	}	
+
+	function authenticate_write($data) {
+		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
+			// If the user's ID doesn't match, we have to make
+			// sure they have admin access, otherwise denied.
+			if ($data['current_user_permission'] < 5) {
+				throw new SystemAuthenticationError(
+					'Current user does not have permission to edit this entry in '. static::$tablename);
+			}
+		}
+	}	
+
+	function get_status_text() {
+		if($this->get('eml_status') == Email::EMAIL_DELETED) {
+			return 'Deleted';
+		} else if($this->get('eml_status') == Email::EMAIL_TEMP_CREATED) {
+			return 'Temp Created';
+		} else if($this->get('eml_status') == Email::EMAIL_CREATED) {
+			return 'Created';
+		} else if($this->get('eml_status') == Email::EMAIL_QUEUED) {
+			return 'Queued';
+		} else if($this->get('eml_status') == Email::EMAIL_SENT) {
+			return 'Sent';
+		}
+	}
+	
+	function mark_all_recipients_sent(){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+		$sql = 'UPDATE erc_email_recipients SET erc_status='.EmailRecipient::EMAIL_SENT.' WHERE erc_eml_email_id=:erc_eml_email_id';
+		try{
+			$q = $dblink->prepare($sql);
+			$q->bindParam(':erc_eml_email_id', $this->key, PDO::PARAM_INT);
+			$count = $q->execute();
+			$q->setFetchMode(PDO::FETCH_OBJ);
+		}
+		catch(PDOException $e){
+			$dbhelper->handle_query_error($e);
+		}
+		
+		return true;		
+	}		
+
+	function get_user() { 
+		if (!array_key_exists('user', $this->cached_references)) { 
+			$user = new User($this->get('eml_usr_user_id'), TRUE);
+			$this->cached_references['user'] = $user;
+		} 
+		return $this->cached_references['user'];
+	}
+
+	function get_unsent_recipients() { 
+		return MultiEmailRecipient::GetUnsentRecipientsForEmail($this->key);
+	}
+
+	function get_tracking_code() { 
+		$medium = 'email';
+		$source = 'marketing';
+		$content = $this->key;
+		$campaign = 'sendtofriend';
+		return "utm_campaign=$campaign&utm_medium=$medium&utm_source=$source&utm_content=$content";
+	}
+
+	function preview($recipient=NULL, $format=self::FORMAT_HTML) { 
+		if (is_numeric($recipient)) { 
+			$recipient = new EmailRecipient($recipient, TRUE);
+		}
+		return $this->merge_recipient($recipient, $format);
+	}
+	
+	static function HtmlToText($temphtml) {
+		$tempplain = $temphtml;
+		$search = "/<style>.*<\/style>/smU";
+		$tempplain = preg_replace($search, "", $tempplain);
+		$tempplain = str_replace("<br>", "\n", $tempplain);
+		$tempplain = str_replace("<br />", "\n", $tempplain);
+		$tempplain = str_replace("</p>", "\n", $tempplain);
+		$tempplain = str_replace("<BR>", "\n", $tempplain);
+		$tempplain = str_replace("<BR />", "\n", $tempplain);
+		$tempplain = str_replace("</P>", "\n", $tempplain);
+		$tempplain = str_replace("&nbsp;", " ", $tempplain);
+		
+		$tempplain = str_replace("<h1>", "\n\n", $tempplain);
+		$tempplain = str_replace("<h2>", "\n\n", $tempplain);
+		$tempplain = str_replace("<h3>", "\n\n", $tempplain);
+		$tempplain = str_replace("<h4>", "\n\n", $tempplain);
+		$tempplain = str_replace("<li>", "*", $tempplain);
+		$tempplain = str_replace("</li>", "\n", $tempplain);
+		$tempplain = str_replace("</ul>", "\n\n", $tempplain);	
+		$tempplain = str_replace("\t", "", $tempplain);
+
+		$tempplain = preg_replace("/<a.*?href=\"(.*?)\".*?>(.*?)<\/a>/smi", "$2 ($1)", $tempplain);
+		
+		$tempplain = strip_tags($tempplain);
+	
+		return $tempplain;
+	}	
+	
+}
+
+class MultiEmail extends SystemMultiBase {
+	protected static $model_class = 'Email';
+
+	const SCHEDULED_PAST = 1;
+	const SCHEDULED_FUTURE = 2;
+
+	protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = [];
+
+        if (isset($this->options['user_id'])) {
+            $filters['eml_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
+        }
+
+        if (isset($this->options['status'])) {
+            $filters['eml_status'] = [$this->options['status'], PDO::PARAM_INT];
+        }
+        
+        if (isset($this->options['deleted'])) {
+            $filters['eml_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+        
+        if (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_PAST) {
+            $filters['eml_scheduled_time'] = "< NOW()";
+        } elseif (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_FUTURE) {
+            $filters['eml_scheduled_time'] = "> NOW()";
+        }
+
+        return $this->_get_resultsv2('eml_emails', $filters, $this->order_by, $only_count, $debug);
+    }
+
+}
+
+?>
