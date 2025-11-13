@@ -1,61 +1,39 @@
 #!/usr/bin/env bash
 # Simple Local Development Deploy Script
-# Deploys main site code + themes + plugins to an empty directory
+# Deploys public_html + themes + plugins + maintenance scripts from consolidated repository
 
 # Repository settings (single consolidated repository)
 GITHUB_USER="getjoinery"
 GITHUB_TOKEN="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"
 REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/getjoinery/joinery.git"
 
-# CONFIGURE YOUR PATHS HERE
-# Linux server paths (default)
-THEMES_SOURCE_DIR="/home/user1/joinery/joinery/theme"
-PLUGINS_SOURCE_DIR="/home/user1/joinery/joinery/plugins"
-
-# WSL/Windows paths (commented out - uncomment if deploying from WSL)
-# THEMES_SOURCE_DIR="/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/theme"
-# PLUGINS_SOURCE_DIR="/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery/plugins"
-
-# Default behavior settings
-USE_SYMLINKS=true  # Default to symlinks, use --nosymlink to copy instead
-
 # Function to show usage
 show_usage() {
     echo "Simple Local Development Deploy Script"
     echo ""
     echo "Usage:"
-    echo "  $0 [options] [target_directory]"
+    echo "  $0 [target_directory]"
     echo ""
     echo "Options:"
-    echo "  --nosymlink    Copy themes/plugins from repositories instead of symlinking"
     echo "  --help, -h     Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 /home/user/dev/mysite                    # Deploy with symlinks (default)"
-    echo "  $0 --nosymlink /home/user/dev/mysite        # Deploy with copies from repositories"
-    echo "  $0 \"/mnt/c/Users/user/Projects/testsite\"    # Deploy to Windows filesystem"
+    echo "  $0 /var/www/html/mysite"
+    echo "  $0 /home/user/dev/testsite"
     echo ""
-    echo "This script will:"
-    echo "  1. Deploy main site code to target directory"
-    echo "  2. Deploy themes (symlink by default, copy with --nosymlink)"
-    echo "  3. Deploy plugins (symlink by default, copy with --nosymlink)"
+    echo "This script will deploy from the consolidated joinery repository:"
+    echo "  1. public_html/ to target/public_html/"
+    echo "  2. theme/ to target/public_html/theme/"
+    echo "  3. plugins/ to target/public_html/plugins/"
+    echo "  4. maintenance scripts/ to target/maintenance scripts/"
     echo ""
-    echo "Configured paths:"
-    echo "  Themes source:  $THEMES_SOURCE_DIR"
-    echo "  Plugins source: $PLUGINS_SOURCE_DIR"
-    echo ""
-    echo "Note: Target directory must be empty or non-existent"
-    echo "Note: Update THEMES_SOURCE_DIR and PLUGINS_SOURCE_DIR variables at top of script"
+    echo "Note: Target directory must be empty or you will be prompted to clear it"
 }
 
 # Parse command line arguments
 TARGET_DIR=""
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --nosymlink)
-            USE_SYMLINKS=false
-            shift
-            ;;
         --help|-h)
             show_usage
             exit 0
@@ -170,23 +148,13 @@ fi
 echo "========================================="
 echo "LOCAL DEVELOPMENT DEPLOY"
 echo "Target directory: $TARGET_DIR"
-if [[ "$USE_SYMLINKS" == true ]]; then
-    echo "Mode: SYMLINK (default)"
-    echo "Themes source: $THEMES_SOURCE_DIR"
-    echo "Plugins source: $PLUGINS_SOURCE_DIR"
-else
-    echo "Mode: COPY (--nosymlink)"
-fi
+echo "Repository: getjoinery/joinery (consolidated)"
 echo "========================================="
 echo "This will deploy:"
-echo "1. Main site code to: $TARGET_DIR"
-if [[ "$USE_SYMLINKS" == true ]]; then
-    echo "2. Themes: symlink $TARGET_DIR/theme -> $THEMES_SOURCE_DIR"
-    echo "3. Plugins: symlink $TARGET_DIR/plugins -> $PLUGINS_SOURCE_DIR"
-else
-    echo "2. Themes to: $TARGET_DIR/theme (copied from repository)"
-    echo "3. Plugins to: $TARGET_DIR/plugins (copied from repository)"
-fi
+echo "1. public_html/ to: $TARGET_DIR/public_html/"
+echo "2. theme/ to: $TARGET_DIR/public_html/theme/"
+echo "3. plugins/ to: $TARGET_DIR/public_html/plugins/"
+echo "4. maintenance scripts/ to: $TARGET_DIR/maintenance scripts/"
 echo "========================================="
 read -p "Continue with deployment? (y/N): " -n 1 -r
 echo
@@ -202,7 +170,7 @@ mkdir -p "$TARGET_DIR"
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-echo "Deploying main site code..."
+echo "Deploying public_html..."
 
 # Clone main repository
 echo "Cloning main repository..."
@@ -216,70 +184,52 @@ git sparse-checkout init --cone
 git sparse-checkout set public_html
 git checkout main
 
-# Copy public_html contents to target directory
-echo "Copying main site files..."
-cp -r public_html/* "$TARGET_DIR/" 2>/dev/null || true
-cp -r public_html/.* "$TARGET_DIR/" 2>/dev/null || true
-echo "Main site deployment complete."
+# Copy public_html directory to target
+echo "Copying public_html directory..."
+rm -rf "$TARGET_DIR/public_html"
+cp -r public_html "$TARGET_DIR/"
+echo "public_html deployment complete."
 
 echo "Deploying themes..."
 
-if [[ "$USE_SYMLINKS" == true ]]; then
-    # Create symlink to configured themes directory
-    echo "Creating symlink to themes directory..."
-    rm -rf "$TARGET_DIR/theme"
-    ln -sf "$THEMES_SOURCE_DIR" "$TARGET_DIR/theme"
-    echo "Symlink created: $TARGET_DIR/theme -> $THEMES_SOURCE_DIR"
-    echo "Theme deployment complete (symlinked)."
-else
-    # Clone repository and extract theme from root
-    echo "Cloning repository for themes..."
-    git clone --no-checkout "$REPO_URL" "$TEMP_DIR/theme_repo"
-    cd "$TEMP_DIR/theme_repo"
-    git config core.sparseCheckout true
-    git sparse-checkout init --cone
-    git sparse-checkout set theme
-    git checkout main
+# Clone repository and extract theme from root
+echo "Cloning repository for themes..."
+git clone --no-checkout "$REPO_URL" "$TEMP_DIR/theme_repo"
+cd "$TEMP_DIR/theme_repo"
+git config core.sparseCheckout true
+git sparse-checkout init --cone
+git sparse-checkout set theme
+git checkout main
 
-    # Deploy themes to public_html/theme
-    if [[ -d "theme" ]]; then
-        echo "Copying themes to public_html/theme..."
-        rm -rf "$TARGET_DIR/theme"
-        cp -r "theme" "$TARGET_DIR/"
-        echo "Theme deployment complete (copied)."
-    else
-        echo "WARNING: No theme directory found in repository."
-    fi
+# Deploy themes to public_html/theme
+if [[ -d "theme" ]]; then
+    echo "Copying themes to public_html/theme..."
+    rm -rf "$TARGET_DIR/public_html/theme"
+    cp -r "theme" "$TARGET_DIR/public_html/"
+    echo "Theme deployment complete."
+else
+    echo "WARNING: No theme directory found in repository."
 fi
 
 echo "Deploying plugins..."
 
-if [[ "$USE_SYMLINKS" == true ]]; then
-    # Create symlink to configured plugins directory
-    echo "Creating symlink to plugins directory..."
-    rm -rf "$TARGET_DIR/plugins"
-    ln -sf "$PLUGINS_SOURCE_DIR" "$TARGET_DIR/plugins"
-    echo "Symlink created: $TARGET_DIR/plugins -> $PLUGINS_SOURCE_DIR"
-    echo "Plugin deployment complete (symlinked)."
-else
-    # Clone repository and extract plugins from root
-    echo "Cloning repository for plugins..."
-    git clone --no-checkout "$REPO_URL" "$TEMP_DIR/plugin_repo"
-    cd "$TEMP_DIR/plugin_repo"
-    git config core.sparseCheckout true
-    git sparse-checkout init --cone
-    git sparse-checkout set plugins
-    git checkout main
+# Clone repository and extract plugins from root
+echo "Cloning repository for plugins..."
+git clone --no-checkout "$REPO_URL" "$TEMP_DIR/plugin_repo"
+cd "$TEMP_DIR/plugin_repo"
+git config core.sparseCheckout true
+git sparse-checkout init --cone
+git sparse-checkout set plugins
+git checkout main
 
-    # Deploy plugins to public_html/plugins
-    if [[ -d "plugins" ]]; then
-        echo "Copying plugins to public_html/plugins..."
-        rm -rf "$TARGET_DIR/plugins"
-        cp -r "plugins" "$TARGET_DIR/"
-        echo "Plugin deployment complete (copied)."
-    else
-        echo "WARNING: No plugins directory found in repository."
-    fi
+# Deploy plugins to public_html/plugins
+if [[ -d "plugins" ]]; then
+    echo "Copying plugins to public_html/plugins..."
+    rm -rf "$TARGET_DIR/public_html/plugins"
+    cp -r "plugins" "$TARGET_DIR/public_html/"
+    echo "Plugin deployment complete."
+else
+    echo "WARNING: No plugins directory found in repository."
 fi
 
 echo "Deploying maintenance scripts..."
@@ -309,21 +259,12 @@ echo "Site deployed to: $TARGET_DIR"
 echo ""
 echo "Directory structure:"
 echo "  $TARGET_DIR/"
-echo "  ├── [public_html contents - application code]"
-if [[ "$USE_SYMLINKS" == true ]]; then
-    echo "  ├── theme/ -> $THEMES_SOURCE_DIR (symlinked)"
-    echo "  ├── plugins/ -> $PLUGINS_SOURCE_DIR (symlinked)"
-else
-    echo "  ├── theme/ (copied from repository root)"
-    echo "  ├── plugins/ (copied from repository root)"
-fi
-echo "  └── maintenance scripts/ (deployment scripts)"
+echo "  ├── public_html/"
+echo "  │   ├── adm/, ajax/, data/, includes/, etc."
+echo "  │   ├── theme/ (from repository root)"
+echo "  │   └── plugins/ (from repository root)"
+echo "  └── maintenance scripts/"
 echo ""
-if [[ "$USE_SYMLINKS" == true ]]; then
-    echo "Theme changes can be made in working directory and committed from $THEMES_SOURCE_DIR"
-    echo "Plugin changes can be made in working directory and committed from $PLUGINS_SOURCE_DIR"
-else
-    echo "To commit theme/plugin changes, copy them back to the repository."
-fi
-echo "Main site changes can be made in $TARGET_DIR and committed to repository."
+echo "All files deployed from consolidated getjoinery/joinery repository."
+echo "Make changes and commit to the repository to update."
 echo "========================================"
