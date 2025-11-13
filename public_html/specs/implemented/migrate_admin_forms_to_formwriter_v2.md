@@ -1,0 +1,1378 @@
+# Specification: Migrate Admin Forms to FormWriter V2
+
+**Status:** Complete ✅
+**Priority:** High
+**Date Created:** 2025-10-26
+**Last Updated:** 2025-11-01
+**Completion Date:** 2025-11-01
+**Related Specifications:**
+- `/docs/formwriter.md` - FormWriter V2 documentation
+- `/specs/remove_jquery_dependency.md` - jQuery removal (related but separate)
+
+---
+
+## 1. Overview
+
+### What is this migration?
+
+Migrate all admin form pages from FormWriter V1 (legacy) to FormWriter V2 (modern) to standardize on a single form framework.
+
+### Migration approach
+
+**Use enhanced getFormWriter() method with version parameter:**
+
+```php
+// V1 (default - backward compatible)
+$formwriter = $page->getFormWriter('form1');
+
+// V2 (new - for migrated pages)
+$formwriter = $page->getFormWriter('form1', 'v2');
+```
+
+**Key advantages:**
+- Single source of truth for FormWriter instantiation (AdminPage.php)
+- Consistent API across all admin pages
+- Auto-detection of form action from current request
+- Easy audit trail: grep for `'v2'` to find migrated pages
+- Minimal code changes per page
+
+---
+
+## 2. Implementation Phase 2: Individual Page Migration
+
+### 2.1 Admin Pages to Migrate
+
+**Total: 71 admin pages with forms**
+
+**Progress: 71/71 completed = 100% ✅ FINAL**
+
+### Summary
+
+All 71 admin form pages have been successfully migrated from FormWriter V1 to FormWriter V2:
+- 67 standard admin CRUD pages with automatic form filling
+- 2 special add/edit pages (phone and address) with logic file separation
+- 2 question pages (question and question_edit) with dynamic form generation
+
+**Related Work:**
+- See `/specs/migrate_plainform_to_formwriter_v2_phase2.md` for remaining PlainForm migration tasks in non-admin public pages
+
+#### Completed ✅ (Tested & Approved)
+- [x] `/adm/admin_location_edit.php` - ✅ **COMPLETED** (uses automatic form filling, prepend, model validation)
+- [x] `/adm/admin_coupon_code_edit.php` - ✅ **COMPLETED** (uses model option with field overrides, datetime processing, AJAX dropdown, require_one_group validation, visibility rules, checkboxList)
+- [x] `/adm/admin_api_key_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdowns, datetime fields with automatic timezone conversion)
+- [x] `/adm/admin_contact_type_edit.php` - ✅ **COMPLETED** (simple form with 3 textinput fields, uses logic file, automatic model validation)
+- [x] `/adm/admin_admin_menu_edit.php` - ✅ **COMPLETED** (textinput fields, dropdowns with MultiAdminMenu lookup, automatic model validation)
+- [x] `/adm/admin_analytics_activitybydate.php` - ✅ **COMPLETED** (filter form with textinput, checkbox, dropdown, no model binding)
+- [x] `/adm/admin_analytics_email_stats.php` - ✅ **COMPLETED** (filter form with two textinput fields)
+- [x] `/adm/admin_analytics_funnels.php` - ✅ **COMPLETED** (filter form with textinput and multiple dropdowns)
+- [x] `/adm/admin_analytics_stats.php` - ✅ **COMPLETED** (filter form with two textinput fields)
+- [x] `/adm/admin_analytics_users.php` - ✅ **COMPLETED** (filter form with textinput, checkbox)
+- [x] `/adm/admin_file_delete.php` - ✅ **COMPLETED** (simple confirmation delete form with hidden input and button)
+- [x] `/adm/admin_email_template_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_group_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_order_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_page_content_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_post_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_softdelete.php` - ✅ **COMPLETED** (confirmation delete form with two hidden inputs)
+- [x] `/adm/admin_users_permanent_delete.php` - ✅ **COMPLETED** (confirmation delete form with custom button styling)
+- [x] `/adm/admin_users_undelete.php` - ✅ **COMPLETED** (confirmation undelete form with two hidden inputs)
+- [x] `/adm/admin_comment_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdown, textarea, custom validation)
+- [x] `/adm/admin_comments.php` - ✅ **COMPLETED** (listing page with multiple inline action forms using deferred output feature)
+- [x] `/adm/admin_static_cache.php` - ✅ **COMPLETED** (multiple filter forms with textinput, hiddeninput, custom validation)
+- [x] `/adm/admin_url_edit.php` - ✅ **COMPLETED** (simple form with textinput, dropdown, hiddeninput, automatic model form filling)
+- [x] `/adm/admin_phone_verify.php` - ✅ **COMPLETED** (two forms with dropdowns, hiddeninput, custom form actions)
+- [x] `/adm/admin_group_edit.php` - ✅ **COMPLETED** (simple single-field form with validation)
+- [x] `/adm/admin_post_edit.php` - ✅ **COMPLETED** (two forms with textinput, textbox, multiple dropdowns, prepend, conditional fields)
+- [x] `/adm/admin_email_edit.php` - ✅ **COMPLETED** (logic-based form with 7 dropdowns, textinput, textbox)
+- [x] `/adm/admin_file_edit.php` - ✅ **COMPLETED** (form with 3 dropdowns and MultiGroup/MultiEvent lookups)
+- [x] `/adm/admin_video_edit.php` - ✅ **COMPLETED** (complex form with 3 dropdowns and conditional fields)
+- [x] `/adm/admin_public_menu_edit.php` - ✅ **COMPLETED** (form with dynamic page linking and parent menu selection)
+- [x] `/adm/admin_page_edit.php` - ✅ **COMPLETED** (two forms with textinput, textbox, dropdowns, prepend, content version loading with GET method)
+- [x] `/adm/admin_page_content_edit.php` - ✅ **COMPLETED** (two forms with textinput, dropdown, textbox, MultiPage lookup, content version loading with GET method)
+- [x] `/adm/admin_mailing_list_edit.php` - ✅ **TESTED & APPROVED** (V2 form with multiple dropdowns, optional integer fields, empty string to NULL conversion in logic layer)
+- [x] `/adm/admin_orders.php` - ✅ **TESTED & APPROVED** (listing page with date filter form)
+- [x] `/adm/admin_order_edit.php` - ✅ **TESTED & APPROVED** (V2 form with AJAX dropdown, timezone-corrected datetime override values)
+- [x] `/adm/admin_order_item_edit.php` - ✅ **TESTED & APPROVED** (complex edit form with AJAX dropdowns, conditional fields, FormWriter V2 edit_primary_key_value hidden field handling)
+- [x] `/adm/admin_order_refund.php` - ✅ **TESTED & APPROVED** (form with conditional display based on refund amount)
+- [x] `/adm/admin_stripe_orders.php` - ✅ **TESTED & APPROVED** (listing page with date filter form)
+- [x] `/adm/admin_yearly_report_donations.php` - ✅ **TESTED & APPROVED** (simple filter form with two date inputs)
+- [x] `/adm/admin_user.php` - ✅ **TESTED & APPROVED** (display page with two embedded V1 forms converted to deferred output)
+- [x] `/adm/admin_user_add.php` - ✅ **TESTED & APPROVED** (add form with custom validation rules and checkboxes)
+- [x] `/adm/admin_users_edit.php` - ✅ **TESTED & APPROVED** (edit form with checkboxList, conditional permission check)
+- [x] `/adm/admin_users_message.php` - ✅ **TESTED & APPROVED** (message form with textbox and conditional hidden inputs)
+- [x] `/adm/admin_users_password_edit.php` - ✅ **TESTED & APPROVED** (simple password change form)
+- [x] `/adm/admin_subscription_tier_edit.php` - ✅ **TESTED & APPROVED** (hybrid form - V2 for standard fields, raw HTML for dynamic features section from JSON config, fieldset for features grouping)
+- [x] `/adm/admin_shadow_session_edit.php` - ✅ **TESTED & APPROVED** (product detail form with simple textinput and textarea, logic file separation)
+
+- [x] `/adm/admin_survey.php` - ✅ **TESTED & APPROVED** (survey listing with inline remove forms using deferred output pattern, logic file separation)
+- [x] `/adm/admin_survey_edit.php` - ✅ **TESTED & APPROVED** (simple survey create/edit form with logic file separation)
+
+- [x] `/adm/admin_settings.php` - ✅ **TESTED & APPROVED** (100+ form fields, jQuery to plain JavaScript visibility functions, special migration spec)
+- [x] `/adm/admin_settings_email.php` - ✅ **TESTED & APPROVED** (email configuration with API validation, SMTP settings, template selection dropdowns)
+- [x] `/adm/admin_settings_payments.php` - ✅ **TESTED & APPROVED** (payment configuration with Stripe/PayPal API validation, webhook settings, custom validation rules)
+
+- [x] `/adm/admin_phone_edit.php` - ✅ **TESTED & APPROVED** (migrated to standard add/edit pattern with logic file, removed PlainForm() dependency)
+- [x] `/adm/admin_address_edit.php` - ✅ **TESTED & APPROVED** (migrated to standard add/edit pattern with logic file, removed PlainForm() dependency)
+- [x] `/adm/admin_question.php` - ✅ **TESTED & APPROVED** (migrated to FormWriter V2, dynamic form generation from Question class)
+- [x] `/adm/admin_question_edit.php` - ✅ **TESTED & APPROVED** (migrated to FormWriter V2, multiple forms with conditional visibility)
+
+---
+
+### 2.2 Migration Process for Each Page
+
+#### Step 0: Create Backup File
+
+Before migrating, create a backup with `_bak.php` extension: `cp admin_page.php admin_page_bak.php` (easier to compare than `.bak`)
+
+---
+
+#### Step 1: Admin Pages Disable CSRF by Default
+
+**Important:** All admin form pages have CSRF protection **DISABLED** by default.
+
+This is set in `AdminPage.getFormWriter()` for all V2 forms:
+```php
+'csrf' => false  // Admin pages do NOT use CSRF protection
+```
+
+---
+
+#### Step 1b: Standardized Add/Edit Pattern (CRITICAL)
+
+**This pattern MUST be used consistently across all add/edit forms. Deviations cause 50% of migration bugs.**
+
+##### View File Pattern (admin_page_edit.php)
+
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_page_edit_logic.php'));
+
+// ✅ CRITICAL: Call logic function with $_GET and $_POST
+$page_vars = process_logic(admin_page_edit_logic($_GET, $_POST));
+extract($page_vars);
+
+$page = new AdminPage();
+$page->admin_header([...]);
+$page->begin_box($pageoptions);
+
+// Prepare override values if needed (e.g., defaults, conditional fields)
+$override_values = [
+    'field_name' => $some_value  // Only override if needed
+];
+
+// ✅ CRITICAL: Create FormWriter with model and edit_primary_key_value
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $object,                          // Model for auto-fill
+    'edit_primary_key_value' => $object->key,    // Explicit edit key (NULL for new records)
+    'values' => $override_values                 // Override specific fields
+]);
+
+$formwriter->begin_form();
+// FormWriter automatically adds: <input type="hidden" name="edit_primary_key_value" value="...">
+
+// Add form fields (no manual 'value' needed - auto-filled from model)
+$formwriter->textinput('obj_name', 'Name');
+$formwriter->textbox('obj_description', 'Description');
+
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
+
+$page->end_box();
+$page->admin_footer();
+?>
+```
+
+##### Logic File Pattern (admin_page_edit_logic.php)
+
+```php
+<?php
+require_once(__DIR__ . '/../../includes/PathHelper.php');
+
+function admin_page_edit_logic($get_vars, $post_vars) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('data/pages_class.php'));
+
+    $session = SessionControl::get_instance();
+    $session->check_permission(5);
+
+    // ✅ CRITICAL: Check for edit_primary_key_value (form submission)
+    // Fallback to GET for initial page load
+    if (isset($post_vars['edit_primary_key_value'])) {
+        // Form submission with hidden field
+        $object = new Page($post_vars['edit_primary_key_value'], TRUE);
+    } elseif (isset($get_vars['obj_object_id'])) {
+        // Initial page load from URL parameter
+        $object = new Page($get_vars['obj_object_id'], TRUE);
+    } else {
+        // Creating new object
+        $object = new Page(NULL);
+    }
+
+    // ✅ CRITICAL: Check for POST submission (form submit)
+    if($post_vars){
+
+        // Add-only logic (runs only when creating new records)
+        if (!$object->key) {
+            $object->set('obj_created_by', $session->get_user_id());
+        }
+
+        // Define which fields can be edited
+        $editable_fields = array('obj_name', 'obj_description', 'obj_is_active');
+
+        // Set each field from POST data
+        foreach($editable_fields as $field) {
+            $object->set($field, $post_vars[$field]);
+        }
+
+        // Handle special fields (links, timestamps, etc.)
+        if(!$object->get('obj_link') || $_SESSION['permission'] == 10){
+            if($post_vars['obj_link']){
+                $object->set('obj_link', $object->create_url($post_vars['obj_link']));
+            }
+        }
+
+        // Prepare and save (prepare() does validation)
+        $object->prepare();
+        $object->save();
+        $object->load();  // Reload to get any DB-generated values
+
+        // ✅ CRITICAL: Redirect using primary key
+        // This ensures user sees the newly created object if it was an add
+        return LogicResult::redirect('/admin/admin_object?obj_object_id='.$object->key);
+    }
+
+    // Not a POST submission - just render the form
+    $page_vars = array(
+        'object' => $object,
+        'session' => $session,
+    );
+
+    return LogicResult::render($page_vars);
+}
+?>
+```
+
+##### Key Rules (Memorize These!)
+
+1. **View File - Pass edit_primary_key_value to FormWriter**
+   ```php
+   // ✅ CORRECT: Explicitly pass the key
+   $formwriter = $page->getFormWriter('form1', 'v2', [
+       'model' => $object,
+       'edit_primary_key_value' => $object->key  // NULL for add, ID for edit
+   ]);
+   // FormWriter automatically generates the hidden field
+   ```
+
+2. **Logic File - Check edit_primary_key_value (with GET fallback)**
+   ```php
+   // POST check first (form submission), fallback to GET (initial page load)
+   if (isset($post_vars['edit_primary_key_value'])) {
+       $object = new Page($post_vars['edit_primary_key_value'], TRUE);  // EDIT
+   } elseif (isset($get_vars['obj_object_id'])) {
+       $object = new Page($get_vars['obj_object_id'], TRUE);  // Initial load
+   } else {
+       $object = new Page(NULL);  // ADD
+   }
+   ```
+
+3. **Logic File - Process POST**
+   ```php
+   if($post_vars){
+       // Add-only logic - use $object->key check
+       if (!$object->key) {
+           $object->set('obj_created_by', $session->get_user_id());
+       }
+
+       // Common processing
+       $object->prepare();
+       $object->save();
+       // Always redirect using primary key (will be generated if new)
+       return LogicResult::redirect('/admin/admin_object?obj_object_id='.$object->key);
+   }
+   ```
+
+4. **Don't Do This** ❌
+   ```php
+   // ❌ WRONG - Manually adding hidden field in view
+   if($object->key){
+       $formwriter->hiddeninput('obj_object_id', ['value' => $object->key]);
+   }
+
+   // ❌ WRONG - Using action field
+   $formwriter->hiddeninput('action', ['value' => 'edit']);
+
+   // ❌ WRONG - Setting unnecessary $is_edit variable
+   $is_edit = isset($post_vars['edit_primary_key_value']);
+   if (!$is_edit) { ... }  // Use $object->key instead
+
+   // ❌ WRONG - Checking action value
+   if ($post_vars['action'] == 'edit') {
+       // Don't use action fields
+   }
+   ```
+
+##### Add vs Edit - How It Works
+
+The system uses the standardized `edit_primary_key_value` hidden field:
+
+| Scenario | Object Key | edit_primary_key_value | Logic Processing |
+|----------|------------|------------------------|------------------|
+| **Load NEW form** | NULL | Not passed to FormWriter | render display |
+| **Submit NEW form (add)** | NULL | Not in POST | save() creates new record |
+| **Load EDIT form** | 123 | Passed to FormWriter | render display |
+| **Submit EDIT form** | 123 | Included in POST | save() updates existing |
+
+**How the flow works:**
+- Initial page load: GET parameter loads the object
+- Form submission: POST with `edit_primary_key_value` hidden field loads the object
+- Save logic: Model's `save()` method automatically INSERTs (null key) or UPDATEs (non-null key)
+- Conditional logic: Use `$object->key` check when needed (no separate `$is_edit` variable needed)
+
+---
+
+#### Step 2: Analyze Current V1 Form
+
+Read the current admin page and identify:
+- [ ] All FormWriter method calls
+- [ ] Field types used (textinput, dropinput, textarea, etc.)
+- [ ] Visibility rules patterns
+- [ ] Custom scripts or event handlers
+- [ ] Validation rules
+
+#### Step 3: Update getFormWriter() Call
+
+```php
+// BEFORE (V1)
+$formwriter = $page->getFormWriter('form1');
+
+// AFTER (V2)
+$formwriter = $page->getFormWriter('form1', 'v2');
+```
+
+**That's the ONLY change to this line.**
+
+#### Step 4: Convert FormWriter Method Calls
+
+**Pattern: V1 → V2 conversion for each field type**
+
+##### TextInput Conversion
+```php
+// V1 SIGNATURE
+textinput($label, $fieldname, $class, $size, $value, $placeholder, $maxlength, $extra)
+echo $formwriter->textinput('Email', 'email', NULL, 100, $user->get('email'), '', 255, '');
+
+// V2 SIGNATURE
+textinput($fieldname, $label, [$options])
+$formwriter->textinput('email', 'Email', [
+    'value' => $user->get('email'),
+    'placeholder' => 'Enter email address',
+    'validation' => ['required' => true, 'email' => true]
+]);
+```
+
+##### DropInput (Dropdown/Select) Conversion
+```php
+// V1 SIGNATURE
+dropinput($label, $fieldname, $class, $options_array, $value, $extra, $required, $multiple, $ajax_endpoint)
+$optionvals = array("Active"=>1, "Inactive"=>0);
+echo $formwriter->dropinput("Status", "status", "ctrlHolder", $optionvals, $user->get('status'), '', FALSE);
+
+// V2 SIGNATURE
+dropinput($fieldname, $label, [$options])
+$formwriter->dropinput('status', 'Status', [
+    'options' => ['Active' => 1, 'Inactive' => 0],
+    'value' => $user->get('status')
+]);
+```
+
+##### Visibility Rules Update
+```php
+// V1 - Explicit _container suffix
+'visibility_rules' => [
+    'value1' => ['show' => ['field1_container', 'field2_container'], 'hide' => ['field3_container']]
+]
+
+// V2 - Auto-detection of _container (just use field IDs)
+'visibility_rules' => [
+    'value1' => ['show' => ['field1', 'field2'], 'hide' => ['field3']]
+]
+```
+
+##### TextArea Conversion
+```php
+// V1
+echo $formwriter->textarea('Description', 'description', 'ctrlHolder', $value, 5, 80, '', '');
+
+// V2
+$formwriter->textarea('description', 'Description', [
+    'value' => $value,
+    'rows' => 5,
+    'cols' => 80
+]);
+```
+
+##### CheckboxInput Conversion
+```php
+// V1
+echo $formwriter->checkboxinput('Accept terms', 'accept_terms', 'ctrlHolder', $checked, '', '');
+
+// V2
+$formwriter->checkboxinput('accept_terms', 'Accept terms', [
+    'checked' => $checked,
+    'validation' => ['required' => true]
+]);
+```
+
+##### CheckboxList Conversion
+```php
+// V1
+echo $formwriter->checkboxList('Options', 'options', 'ctrlHolder', $options_array, $checked_values, $disabled_values, $readonly_values);
+
+// V2
+$formwriter->checkboxList('options', 'Options', [
+    'options' => $options_array,
+    'checked' => $checked_values
+]);
+```
+
+##### DateTime Conversion
+
+**V2 Provides Automatic Timezone Conversion in Both Directions**
+
+###### In the View File (admin_page_edit.php)
+
+On form display, FormWriter V2 automatically converts UTC datetimes to user's local timezone:
+
+```php
+// V1
+echo $formwriter->datetimeinput('Start Time', 'start_time', 'ctrlHolder', $value, '', '', '');
+
+// V2 - AUTOMATIC DISPLAY CONVERSION (UTC → User's Timezone)
+$event = new Event($event_id, TRUE);
+
+// Create FormWriter with model - automatic form filling + automatic timezone conversion
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $event  // That's it! DateTime fields automatically convert UTC → user's timezone
+]);
+
+$formwriter->datetimeinput('evt_start_time', 'Start Time');
+```
+
+**How display works automatically:**
+- `$event->export_as_array()` creates DateTime objects with UTC timezone set
+- FormWriter V2 constructor detects DateTime objects with UTC timezone
+- Automatically converts to user's local timezone using `LibraryFunctions::convert_time()`
+- User sees times in their local timezone
+
+###### In the Logic File (admin_page_edit_logic.php)
+
+On form submission, the logic file must use `FormWriterV2Base::process_datetimeinput()` to convert user's local time back to UTC:
+
+```php
+<?php
+require_once(__DIR__ . '/../../includes/PathHelper.php');
+
+function admin_event_edit_logic($get_vars, $post_vars) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));  // ← REQUIRED
+    require_once(PathHelper::getIncludePath('data/events_class.php'));
+
+    // ... permission checks, object loading ...
+
+    if($post_vars){
+        // ✅ CRITICAL: Use FormWriterV2Base::process_datetimeinput() to convert timezone
+        // This converts user's local time → UTC for database storage
+        $start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_start_time', true);
+        if($start_time !== NULL){
+            $event->set('evt_start_time', $start_time);
+        }
+
+        $end_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_end_time', true);
+        if($end_time !== NULL){
+            $event->set('evt_end_time', $end_time);
+        }
+
+        // ... handle other fields ...
+
+        $event->prepare();
+        $event->save();
+        return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
+    }
+
+    // ... render form ...
+}
+?>
+```
+
+**How submission works:**
+
+1. FormWriter V2 sends datetime as three POST fields:
+   - `evt_start_time_dateinput` - The date (YYYY-MM-DD)
+   - `evt_start_time_timeinput_hour` - The hour
+   - `evt_start_time_timeinput_minute` - The minute
+   - `evt_start_time_timeinput_ampm` - AM/PM indicator
+
+2. `FormWriterV2Base::process_datetimeinput()` does:
+   - Combines the date/time/ampm fields into a datetime string
+   - Converts from user's local timezone to UTC (if second parameter is `true`)
+   - Returns UTC-formatted datetime string ready for database storage
+   - Returns NULL if any field is missing
+
+3. Set the converted value on your object:
+   ```php
+   if($start_time !== NULL){
+       $event->set('evt_start_time', $start_time);
+   }
+   ```
+
+**Method signature:**
+```php
+FormWriterV2Base::process_datetimeinput($post_vars, $field_name, $to_utc = true)
+// Returns: UTC datetime string or NULL
+```
+
+**Parameters:**
+- `$post_vars` - The $_POST array
+- `$field_name` - Base field name (e.g., 'evt_start_time') - method automatically looks for `_dateinput`, `_timeinput_*` suffixes
+- `$to_utc` - If true, converts from user's timezone to UTC; if false, returns as-is
+
+**Complete datetime field flow example:**
+
+```php
+// VIEW FILE (automatic)
+$formwriter = $page->getFormWriter('form1', 'v2', ['model' => $event]);
+$formwriter->datetimeinput('evt_start_time', 'Event start time');
+// User sees: Oct 27, 2025 2:30 PM (their timezone)
+
+// LOGIC FILE (must process in submit handler)
+if($post_vars){
+    $start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_start_time', true);
+    if($start_time !== NULL){
+        $event->set('evt_start_time', $start_time);  // Stored as UTC in database
+    }
+    $event->save();
+}
+```
+
+**Override automatic conversion if needed:**
+
+If you want to pass a pre-converted or custom datetime value, use the `values` option in the view:
+
+```php
+$override_values = [
+    'evt_start_time' => '2025-10-27 14:30:00'  // Raw string - skips conversion
+];
+
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $event,
+    'values' => $override_values  // Values override model
+]);
+```
+
+**Important Notes:**
+- ✅ Always use `FormWriterV2Base::process_datetimeinput()` in logic files for datetime fields
+- ✅ Always pass `true` as the third parameter to convert to UTC
+- ✅ Check for NULL return value before setting (user may have cleared the field)
+- ✅ Require FormWriterV2Base.php in your logic file
+- ❌ Don't manually parse the `_dateinput`, `_timeinput_*` POST fields - use the helper method
+- DateTime conversion only applies to DateTime objects with UTC timezone in view files
+- If you pass a non-UTC DateTime or raw string in values, conversion is skipped
+- All date/time conversions use the user's session timezone from `SessionControl::get_timezone()`
+
+##### HiddenInput Conversion
+```php
+// V1
+echo $formwriter->hiddeninput('user_id', $user_id);
+
+// V2
+$formwriter->hiddeninput('user_id', ['value' => $user_id]);
+```
+
+##### RadioInput Conversion
+```php
+// V1
+echo $formwriter->radioinput('Plan', 'subscription', 'ctrlHolder', $options_array, $value, '');
+
+// V2
+$formwriter->radioinput('subscription', 'Plan', [
+    'options' => $options_array,
+    'value' => $value
+]);
+```
+
+##### FileInput Conversion
+```php
+// V1
+echo $formwriter->fileinput('Upload Document', 'document', 'ctrlHolder', $accept, '', '');
+
+// V2
+$formwriter->fileinput('document', 'Upload Document', [
+    'accept' => $accept
+]);
+```
+
+#### Step 5: Update Form Begin/End Calls
+
+```php
+// V1
+echo $formwriter->begin_form('form', 'POST', '/admin/admin_page');
+
+// V2 (no parameters needed - action auto-detected)
+echo $formwriter->begin_form();
+```
+
+#### Step 6: Validation Handling (V1 vs V2)
+
+**V1 Validation:**
+- Uses `set_validate()` method with validation rules array
+- Applies validation rules defined in PHP
+
+**V2 Validation:**
+
+✅ **Automatic model-based validation (recommended):**
+- Extracts validation rules from model's `$field_specifications`
+- Validation happens automatically based on model definition
+- No manual validation setup needed
+
+✅ **Custom validation on individual fields:**
+```php
+// Add custom validation to a single field
+$formwriter->textinput('email', 'Email Address', [
+    'validation' => [
+        'required' => true,
+        'email' => true,
+        'custom' => [
+            'rule' => 'email_not_taken',
+            'message' => 'This email is already registered'
+        ]
+    ]
+]);
+```
+
+✅ **AJAX validation (dynamic dropdown with search):**
+```php
+// AJAX endpoint returns options as user types
+$formwriter->dropinput('affiliate_user_id', 'Affiliate User', [
+    'options' => $initial_options,  // Pre-loaded current selection
+    'ajaxendpoint' => '/ajax/user_search_ajax?includeone=1',
+    'empty_option' => '-- Type 3+ characters to search users --'
+]);
+```
+
+✅ **Custom validation groups (require at least one field from group):**
+```php
+$formwriter->textinput('amount_discount', 'Amount Discount', [
+    'validation' => [
+        'require_one_group' => [
+            'value' => 'discount_fields',
+            'message' => 'Please enter either an amount or percent discount'
+        ]
+    ]
+]);
+
+$formwriter->textinput('percent_discount', 'Percent Discount', [
+    'validation' => [
+        'require_one_group' => [
+            'value' => 'discount_fields',
+            'message' => 'Please enter either an amount or percent discount'
+        ]
+    ]
+]);
+```
+
+**Action:**
+- ❌ Remove all `set_validate()` calls (method doesn't exist in V2)
+- ✅ Define custom validation in field options using `'validation'` key
+- ✅ Use `'ajaxendpoint'` for dynamic AJAX dropdowns
+- ✅ Use `'require_one_group'` for group-based validation rules
+
+#### Step 7: Button Methods (V1 vs V2)
+
+**V1 Button Methods:**
+```php
+echo $formwriter->start_buttons();
+echo $formwriter->new_form_button('Submit');
+echo $formwriter->end_buttons();
+```
+
+**V2 Button Method:**
+```php
+$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn-primary']);
+```
+
+**Key differences:**
+- ❌ V1's `start_buttons()`, `end_buttons()`, `new_form_button()` do NOT exist in V2
+- ✅ Use V2's `submitbutton($name, $label, $options)` instead
+- ✅ V2 handles button styling automatically
+
+#### Step 8: Automatic Form Filling (V2 Feature - Zero Code Required!)
+
+V2 supports fully automatic form filling from model data with zero manual setup:
+
+**Old way (manual value assignment):**
+```php
+$formwriter = $page->getFormWriter('form1', 'v2');
+$formwriter->begin_form();
+
+$formwriter->textinput('loc_name', 'Location name', [
+    'value' => $location->get('loc_name')  // Repeat for every field!
+]);
+$formwriter->textinput('loc_address', 'Address', [
+    'value' => $location->get('loc_address')
+]);
+$formwriter->textinput('loc_website', 'Website', [
+    'value' => $location->get('loc_website')
+]);
+```
+
+**New way (FULLY AUTOMATIC):**
+```php
+// Pass model directly - ALL fields auto-fill automatically!
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $location  // That's it!
+]);
+$formwriter->begin_form();
+
+// No 'value' needed - auto-filled from model!
+$formwriter->textinput('loc_name', 'Location name');
+$formwriter->textinput('loc_address', 'Address');
+$formwriter->textinput('loc_website', 'Website');
+```
+
+**Override specific fields if needed:**
+```php
+// Use values option to override specific model fields
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $location,
+    'values' => [
+        'loc_name' => 'Custom title',           // Override model value
+        'loc_description' => 'Custom content'   // Override model value
+    ]
+]);
+```
+
+**How it works:**
+1. FormWriter calls `$model->export_as_array()` automatically
+2. All database fields are extracted and available for form filling
+3. Each field automatically gets its value from the model
+4. DateTime fields automatically convert from UTC to user's timezone
+5. Use `values` option to override specific fields if needed
+
+#### Step 9: Input Group Prepend (V2 Feature - Optional)
+
+V2 Bootstrap supports prepending text to input fields (e.g., URL prefixes, currency symbols):
+
+**Old way (prefix in label):**
+```php
+$formwriter->textinput('loc_link', 'Link: '.$settings->get_setting('webDir').'/location/', [
+    'value' => $location->get('loc_link')
+]);
+// Label shows: "Link: https://example.com/location/"
+// User types full slug in empty field
+```
+
+**New way (prepend option):**
+```php
+$formwriter->textinput('loc_link', 'Link', [
+    'prepend' => $settings->get_setting('webDir').'/location/'
+]);
+// Label shows: "Link"
+// Input shows: [https://example.com/location/][user types here]
+```
+
+**Common uses:**
+```php
+// URL prefix
+$formwriter->textinput('url_slug', 'URL', [
+    'prepend' => $base_url . '/'
+]);
+
+// Currency
+$formwriter->textinput('price', 'Price', [
+    'prepend' => '$'
+]);
+
+// Protocol
+$formwriter->textinput('website', 'Website', [
+    'prepend' => 'https://'
+]);
+```
+
+#### Step 10: Debug Mode (Optional - Off by Default)
+
+Debug mode is **OFF by default**. Enable it only when troubleshooting validation issues by setting `'debug' => true` in FormWriter options. Always ensure it's disabled in production code.
+
+#### Step 11: Deferred Output Mode (For Multiple Forms in Loops)
+
+**Use when:** Building multiple forms in loops (e.g., inline action forms in listing pages).
+
+**Basic usage:**
+```php
+// Enable deferred mode
+$form = $page->getFormWriter('delete_' . $item->id, 'v2', [
+    'deferred_output' => true  // Store HTML instead of echoing
+]);
+
+$form->hiddeninput('item_id', ['value' => $item->id]);
+$form->submitbutton('btn_delete', 'Delete');
+
+// Get HTML as string
+$html = $form->getFieldsHTML();
+```
+
+**Listing page example:**
+```php
+foreach ($items as $item) {
+    $row = [];
+    // ... add columns ...
+
+    $form = $page->getFormWriter('delete_' . $item->id, 'v2', [
+        'deferred_output' => true,
+        'action' => '/admin/process'
+    ]);
+
+    $form->hiddeninput('item_id', ['value' => $item->id]);
+    $form->submitbutton('btn_delete', 'Delete');
+
+    $row['action'] = $form->getFieldsHTML();
+    array_push($rowvalues, $row);
+}
+```
+
+**Key points:**
+- ✅ Use `'deferred_output' => true` in constructor
+- ✅ Call `getFieldsHTML()` to get accumulated HTML
+- ✅ Works with all field types and features
+- ✅ Fully backward compatible
+
+#### Step 12: No Changes Needed For
+
+- ✅ Business logic (getting values, loading data, etc.)
+- ✅ `end_form()` - compatible
+- ✅ `begin_form()` - compatible (different parameters)
+
+---
+
+## 3. Detailed Conversion Example: admin_location_edit.php
+
+### Before (V1)
+```php
+$location = new Location($location_id, TRUE);
+$formwriter = $page->getFormWriter('form1');
+
+echo $formwriter->begin_form('form', 'POST', '/admin/admin_location_edit');
+
+if($location->key){
+    echo $formwriter->hiddeninput('loc_location_id', $location->key);
+    echo $formwriter->hiddeninput('action', 'edit');
+}
+
+echo $formwriter->textinput('Location name', 'loc_name', NULL, 100, $location->get('loc_name'), '', 255, '');
+
+echo $formwriter->textinput('Location street address', 'loc_address', NULL, 100, $location->get('loc_address'), '', 255, '');
+
+echo $formwriter->textinput('Location website', 'loc_website', NULL, 100, $location->get('loc_website'), '', 255, '');
+
+if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
+    echo $formwriter->textinput('Link (optional): '.$settings->get_setting('webDir').'/location/', 'loc_link', NULL, 100, $location->get('loc_link'), '', 255, '');
+}
+
+$optionvals = array("No"=>0, "Yes"=>1);
+echo $formwriter->dropinput("Published", "loc_is_published", "ctrlHolder", $optionvals, $location->get('loc_is_published'), '', FALSE);
+
+echo $formwriter->textinput('Short description', 'loc_short_description', NULL, 100, $location->get('loc_short_description'), '', 255, '');
+
+echo $formwriter->textbox('Description', 'loc_description', 'ctrlHolder', $location->get('loc_description'), 5, 80, '', 'yes');
+
+echo $formwriter->start_buttons();
+echo $formwriter->new_form_button('Submit');
+echo $formwriter->end_buttons();
+
+echo $formwriter->end_form();
+```
+
+### After (V2 - Using All New Features)
+```php
+$location = new Location($location_id, TRUE);
+
+// Prepare form values - use automatic form filling from Location model
+$form_values = $location->export_as_array();
+// Override with content version values if loaded
+$form_values['loc_name'] = $title;
+$form_values['loc_description'] = $content;
+
+// Editing an existing location - use automatic form filling
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'debug' => true,        // Enable during migration to verify model validation
+    'values' => $form_values  // Auto-fill all fields!
+]);
+
+// Note: Validation is auto-detected from Location model - no set_validate() needed
+
+echo $formwriter->begin_form();
+
+if($location->key){
+    $formwriter->hiddeninput('loc_location_id', ['value' => $location->key]);
+    $formwriter->hiddeninput('action', ['value' => 'edit']);
+}
+
+// No 'value' needed - auto-filled from export_as_array()!
+$formwriter->textinput('loc_name', 'Location name');
+
+$formwriter->textinput('loc_address', 'Location street address');
+
+$formwriter->textinput('loc_website', 'Location website');
+
+if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
+    // Use 'prepend' option for clean URL prefix display
+    $formwriter->textinput('loc_link', 'Link (optional)', [
+        'prepend' => $settings->get_setting('webDir').'/location/'
+    ]);
+}
+
+$formwriter->dropinput('loc_is_published', 'Published', [
+    'options' => ['No' => 0, 'Yes' => 1]
+]);
+
+$formwriter->textinput('loc_short_description', 'Short description');
+
+$formwriter->textbox('loc_description', 'Description', [
+    'htmlmode' => 'yes'
+]);
+
+$formwriter->submitbutton('btn_submit', 'Submit');
+
+echo $formwriter->end_form();
+```
+
+### Key differences highlighted:
+- ✅ **Lines 4-7: Prepare form values with `export_as_array()` and override specific fields**
+- ✅ **Line 10: Add `'v2'` parameter to getFormWriter()**
+- ✅ **Line 11: Add `'debug' => true` to see model validation detection in console**
+- ✅ **Line 12: Add `'values'` option for automatic form filling**
+- ✅ **Line 16: Remove all parameters from `begin_form()`**
+- ✅ **Lines 19-20: Hidden inputs use options array**
+- ✅ **Lines 23-38: No `'value'` option needed on most fields - auto-filled from model!**
+- ✅ **Lines 31-33: Use `'prepend'` option for URL prefix instead of putting it in label**
+- ✅ Methods no longer echo (no `echo` keyword before field methods)
+- ✅ First two parameters swapped: `fieldname` comes before `label`
+- ✅ All options in single array parameter
+- ✅ **Line 43: Use `submitbutton()` instead of V1's `start_buttons()/new_form_button()/end_buttons()`**
+
+### Console Output (with debug enabled):
+```javascript
+=== FormWriterV2 DEBUG ===
+Form ID: form1
+🔍 Automatic Model Validation Detected:
+  ✓ loc_name → Model: Location {required: true}
+  ✓ loc_link → Model: Location {required: true}
+✓ Validation rules: {loc_name: {required: true}, loc_link: {required: true}}
+```
+
+This shows that V2 automatically detected the Location model and applied validation rules from `Location::$field_specifications` without any manual `set_validate()` calls!
+
+---
+
+## 4. Testing Checklist
+
+For each migrated page:
+
+1. **PHP Syntax Validation**
+   ```bash
+   php -l /path/to/admin_page.php
+   ```
+
+2. **Method Existence Validation**
+   ```bash
+   php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/admin_page.php
+   ```
+
+3. **Manual Testing**
+   - Load the page in browser
+   - Create/edit record
+   - Verify form submission works
+   - Verify data saves correctly
+
+---
+
+## 5. Checklist for Each Page
+
+### Before Converting
+- [ ] Read through entire admin page to understand structure
+- [ ] Identify all FormWriter method calls
+- [ ] Note any special patterns or edge cases
+
+### During Conversion
+- [ ] Update `getFormWriter()` call to include `'v2'` parameter
+- [ ] Convert each FormWriter method to V2 signature
+- [ ] Update visibility rules to use field IDs only
+- [ ] Remove `echo` keywords before FormWriter calls (V2 echoes automatically)
+
+### After Conversion
+- [ ] Run `php -l /path/to/admin_page.php` for syntax check
+- [ ] Run `php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/admin_page.php`
+- [ ] Manually test in browser: load page, create/edit, submit
+- [ ] Verify data saves correctly
+- [ ] Commit changes
+
+---
+
+## 6. Common Patterns & Gotchas
+
+### Pattern 1: V1 methods that echo directly
+
+**V1:**
+```php
+echo $formwriter->textinput(...);
+echo $formwriter->dropinput(...);
+```
+
+**V2:**
+```php
+$formwriter->textinput(...);  // No echo needed - echoes internally
+$formwriter->dropinput(...);  // No echo needed
+```
+
+**Solution:** Remove `echo` keywords, V2 methods handle output directly.
+
+---
+
+### Pattern 2: Class parameter in V1
+
+**V1:**
+```php
+echo $formwriter->textinput('label', 'field', 'ctrlHolder', 100, $value, '', 255, '');
+                                           ↑
+                                      3rd parameter = class
+```
+
+**V2:**
+```php
+$formwriter->textinput('field', 'label', [
+    'value' => $value
+    // Classes handled by V2 FormWriter internally
+]);
+```
+
+**Solution:** Remove the class parameter, V2 handles CSS classes automatically.
+
+---
+
+### Pattern 3: Visibility rules with _container
+
+**V1:**
+```php
+'visibility_rules' => [
+    'value1' => ['show' => ['field1_container', 'field2_container'], ...]
+                                 ↑ explicit suffix
+]
+```
+
+**V2:**
+```php
+'visibility_rules' => [
+    'value1' => ['show' => ['field1', 'field2'], ...]
+                                ↑ just field ID
+]
+```
+
+**Solution:** Remove `_container` suffix from field IDs. V2 automatically detects and targets container divs.
+
+---
+
+### Pattern 4: begin_form() parameters
+
+**V1:**
+```php
+echo $formwriter->begin_form('form_id', 'POST', '/admin/page');
+```
+
+**V2:**
+```php
+echo $formwriter->begin_form();  // No parameters - auto-detected from REQUEST_URI
+```
+
+**Solution:** Remove all parameters from begin_form(). V2 auto-detects form action from current page.
+
+---
+
+### Pattern 5: Disabled/readonly attributes
+
+**V1:**
+```php
+echo $formwriter->textinput('label', 'field', ..., $value, '', 255, 'readonly');
+```
+
+**V2:**
+```php
+$formwriter->textinput('field', 'label', [
+    'value' => $value,
+    'readonly' => true
+]);
+```
+
+---
+
+### Pattern 6: Automatic form filling
+
+**V1:**
+```php
+$formwriter = $page->getFormWriter('form1');
+$formwriter->textinput('loc_name', 'Name', [
+    'value' => $location->get('loc_name')
+]);
+$formwriter->textinput('loc_address', 'Address', [
+    'value' => $location->get('loc_address')
+]);
+// ... repeat for every field
+```
+
+**V2:**
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'values' => $location->export_as_array()  // Auto-fill all fields!
+]);
+$formwriter->textinput('loc_name', 'Name');  // No value needed!
+$formwriter->textinput('loc_address', 'Address');  // Auto-filled!
+```
+
+**Solution:** Use `export_as_array()` for automatic form filling. Eliminates repetitive value assignments.
+
+---
+
+### Pattern 7: Input group prepend
+
+**V1:**
+```php
+$formwriter->textinput('loc_link', 'Link: /location/', [
+    'value' => $location->get('loc_link')
+]);
+// Prefix is in the label - cluttered
+```
+
+**V2:**
+```php
+$formwriter->textinput('loc_link', 'Link', [
+    'prepend' => '/location/'  // Shows INSIDE input field
+]);
+// Clean label, visual prefix in field
+```
+
+**Solution:** Use `prepend` option for URL prefixes, currency symbols, etc.
+
+---
+
+### Gotcha: Form action auto-detection
+
+**How V2 getFormWriter() detects form action:**
+1. Gets current REQUEST_URI from $_SERVER
+2. Parses URL to extract path component
+3. Removes trailing .php if present
+4. Uses as form action
+
+**Example:**
+- Request: `/admin/admin_user_edit.php?id=123`
+- Detected action: `/admin/admin_user_edit`
+- Form submission: POST to `/admin/admin_user_edit`
+
+**If auto-detection fails:**
+- Falls back to `/admin/dashboard` (safe default)
+- Manually pass action in second parameter if needed (future enhancement)
+
+---
+
+### Pattern 8: GET variable naming standardization
+
+**Important:** When migrating forms that use GET variables (especially in logic files), standardize abbreviated parameter names to full column names.
+
+**Problem - Abbreviated GET variables:**
+```php
+// V1 - uses abbreviated parameter 'p' for product_id
+if (isset($get_vars['p']) || isset($post_vars['p'])) {
+    $product_id = isset($post_vars['p']) ? $post_vars['p'] : $get_vars['p'];
+    $product = new Product($product_id, TRUE);
+}
+
+// In the view, edit link uses abbreviation:
+// '/admin/admin_product_edit?p=' . $product->key
+```
+
+**Issues this causes:**
+- Inconsistent naming across codebase (some pages use 'p', others use full names)
+- Hard to understand what 'p' means without context
+- Breaks form submission when view file uses different parameter name than logic expects
+- Makes code harder to maintain and audit
+
+**Solution - Use full column names:**
+```php
+// ✅ CORRECT - Uses full parameter name
+if (isset($get_vars['pro_product_id']) || isset($post_vars['pro_product_id'])) {
+    $product_id = isset($post_vars['pro_product_id']) ? $post_vars['pro_product_id'] : $get_vars['pro_product_id'];
+    $product = new Product($product_id, TRUE);
+}
+
+// In the view, edit link uses full name:
+// '/admin/admin_product_edit?pro_product_id=' . $product->key
+```
+
+**Conversion checklist:**
+- [ ] Check logic files for abbreviated GET parameter usage (look for `$_GET['x']`, `$get_vars['x']` where x is 1-2 chars)
+- [ ] Replace with full column name from database schema (e.g., `pro_product_id`, `usr_user_id`)
+- [ ] Update edit/action links in view files to match
+- [ ] Update view file forms to use matching parameter names in hidden inputs
+- [ ] Test form submission to ensure parameters are received by logic file
+
+**Common abbreviations to standardize:**
+- `'p'` → `'pro_product_id'` (product)
+- `'u'` → `'usr_user_id'` (user)
+- `'e'` → `'evt_event_id'` (event)
+- `'l'` → `'loc_location_id'` (location)
+- `'v'` → version IDs (check context - may need full name like `'prv_product_version_id'`)
+
+---
+
+### Gotcha: Disabling validation accidentally
+
+**Problem:**
+Setting `'validation' => false` **completely disables** all validation including automatic model validation:
+
+```php
+// ❌ WRONG - Disables ALL validation
+$formwriter->textinput('loc_link', 'Link', [
+    'validation' => false  // Overrides model validation!
+]);
+```
+
+**Why this is bad:**
+- Turns off automatic validation from model's `field_specifications`
+- Even if model says `'required' => true`, field won't be validated
+- Silent failure - no error, but validation doesn't work
+
+**Solution:**
+Only disable validation if you have a specific reason (e.g., backend auto-generates the value). Otherwise, trust the model validation or add to it:
+
+```php
+// ✅ GOOD - Uses automatic model validation
+$formwriter->textinput('loc_link', 'Link');
+
+// ✅ GOOD - Adds to model validation (doesn't replace it)
+$formwriter->textinput('loc_link', 'Link', [
+    'validation' => ['maxlength' => 100]  // Adds rule, keeps model's required:true
+]);
+
+// ⚠️ ONLY USE IF NEEDED - Explicitly disables validation
+$formwriter->textinput('auto_generated', 'Auto Field', [
+    'validation' => false  // Backend fills this, so don't validate
+]);
+```
+
+**How to verify:**
+Enable debug mode and check console:
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'debug' => true  // Shows which fields have model validation
+]);
+```
+
+Look for:
+```javascript
+🔍 Automatic Model Validation Detected:
+  ✓ loc_name → Model: Location {required: true}
+  ✓ loc_link → Model: Location {required: true}
+```
+
+If a field is missing from this list but should have validation, check for `'validation' => false`.
+
+---
+
+## 10. Future Enhancements
+
+After Phase 1 completion:
+
+1. **Remove V1 FormWriter entirely** (if no longer needed)
+   - Requires audit of any remaining V1 usage
+   - Would simplify codebase significantly
+
+2. **Remove deprecated V1 FormWriter classes** from includes/
+   - FormWriterBootstrap.php
+   - FormWriterHTML5.php
+   - FormWriterUIKit.php
+   - FormWriterTailwind.php
+
+3. **Improve form action detection** if edge cases emerge
+   - Add explicit action parameter if auto-detection insufficient
+   - Add action/method parameters to getFormWriter()
+
+4. **Standardize admin page structure** across all pages
+   - Consistent field ordering patterns
+   - Consistent validation approaches
+   - Template-based generation
+
+---
+
+## 11. Architectural Changes
+
+### Removal of PlainForm() Pattern
+
+**Date:** 2025-11-01
+
+During the migration, the `PlainForm()` pattern (used by `PhoneNumber::PlainForm()` and `Address::PlainForm()`) was removed in favor of the standard add/edit pattern used throughout the admin interface.
+
+**Before (PlainForm pattern):**
+```php
+// View file
+$formwriter = $page->getFormWriter('form1', 'v2');
+PhoneNumber::PlainForm($formwriter, $phone_number);
+
+// Model method
+public static function PlainForm($formwriter, $phone_number=NULL, $options=NULL) {
+    // Form fields defined in model
+}
+```
+
+**After (Standard pattern):**
+```php
+// View file (/adm/admin_phone_edit.php)
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $phone_number,
+    'edit_primary_key_value' => $phone_number->key
+]);
+$formwriter->textinput('phn_phone_number', 'Phone Number', [...]);
+
+// Logic file (/adm/logic/admin_phone_edit_logic.php)
+function admin_phone_edit_logic($get_vars, $post_vars) {
+    // Standard edit_primary_key_value pattern
+    // Follows same structure as admin_coupon_code_edit_logic.php
+}
+```
+
+**Benefits:**
+- Consistent architecture across all admin pages
+- Logic separation (view vs. business logic)
+- Standard edit_primary_key_value handling
+- Easier to maintain and understand
+- No special-case form methods in models
+
+**Files affected:**
+- `/adm/admin_phone_edit.php` - Converted to standard pattern
+- `/adm/logic/admin_phone_edit_logic.php` - Created
+- `/adm/admin_address_edit.php` - Converted to standard pattern
+- `/adm/logic/admin_address_edit_logic.php` - Created
+- `/data/phone_number_class.php` - Removed PlainForm() method
+- `/data/address_class.php` - Removed PlainForm() method
+
+**Note:** Profile pages (`/views/profile/phone_numbers_edit.php` and `/views/profile/address_edit.php`) still reference the old PlainForm() methods and will need to be updated separately to use their own logic files or inline form definitions.
+
+---
+
+## 12. Related Documentation
+
+- **[FormWriter Documentation](/docs/formwriter.md)** - Complete V1 and V2 API reference
+- **[Admin Pages Documentation](/docs/admin_pages.md)** - Admin page patterns and best practices
+- **[jQuery Removal Specification](/specs/remove_jquery_dependency.md)** - Related but separate initiative
+- **[CLAUDE.md](/CLAUDE.md)** - General system architecture and patterns
+
+---
+

@@ -1,0 +1,91 @@
+<?php
+
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('adm/logic/admin_product_version_edit_logic.php'));
+
+$page_vars = process_logic(admin_product_version_edit_logic($_GET, $_POST));
+extract($page_vars);
+
+$page = new AdminPage();
+$page->admin_header(
+array(
+	'menu-id'=> 'products-list',
+	'page_title' => 'Products Version Edit',
+	'readable_title' => 'Product Version Edit',
+	'breadcrumbs' => array(
+		'Products'=>'/admin/admin_products',
+		$breadcrumb => '',
+		'Product Version Edit'=>'',
+	),
+	'session' => $session,
+)
+);
+
+$page->begin_box($pageoptions);
+
+// FormWriter V2 with model and edit_primary_key_value
+$formwriter = $page->getFormWriter('form1', [
+	'model' => $product_version,
+	'edit_primary_key_value' => $product_version->key
+]);
+
+?>
+
+$formwriter->begin_form();
+
+$formwriter->textinput('version_name', 'Label', [
+	'validation' => ['required' => true, 'maxlength' => 255],
+	'value' => $product_version->get('prv_version_name')
+]);
+
+if(!$product_version->key){
+	// New version - show price fields
+	$formwriter->textinput('version_price', 'Price ('.$currency_symbol.')', [
+		'validation' => ['required' => true]
+	]);
+
+	$optionvals = array('single'=>"One price", 'user' => 'User Chooses', 'day'=>'Daily Subscription', 'week'=>'Weekly Subscription', 'month'=>'Monthly Subscription', 'year'=>'Yearly Subscription');
+	$formwriter->dropinput('prv_price_type', 'Pricing', [
+		'options' => $optionvals,
+		'validation' => ['required' => true],
+		'visibility_rules' => [
+			'single' => ['show' => [], 'hide' => ['prv_trial_period_days']],
+			'user' => ['show' => [], 'hide' => ['prv_trial_period_days']],
+			'day' => ['show' => ['prv_trial_period_days'], 'hide' => []],
+			'week' => ['show' => ['prv_trial_period_days'], 'hide' => []],
+			'month' => ['show' => ['prv_trial_period_days'], 'hide' => []],
+			'year' => ['show' => ['prv_trial_period_days'], 'hide' => []]
+		]
+	]);
+
+	$formwriter->textinput('prv_trial_period_days', 'Subscription trial period (days):', [
+		'value' => 0
+	]);
+}
+else{
+	// Existing version - show price as read-only
+	$formwriter->hiddeninput('version_price', ['value' => '']);
+	$formwriter->hiddeninput('prv_price_type', ['value' => '']);
+	$formwriter->hiddeninput('prv_trial_period_days', ['value' => '']);
+
+	echo '<div class="ctrlHolder"><p class="label">Current Price</p>';
+	echo '<div class="textInput"><strong>'.$currency_symbol . $product_version->get('prv_version_price') . ' / ' . $product_version->get('prv_price_type') . '</strong>';
+	echo '<br><em style="color: #666;">Price cannot be edited. To change pricing, create a new version and make this one inactive.</em></div></div>';
+}
+
+// Display priority - for pricing page
+if($settings->get_setting('pricing_page')){
+	$formwriter->textinput('prv_display_priority', 'Display Priority (0=private, >0=public, higher=preferred):', [
+		'value' => $product_version->get('prv_display_priority'),
+		'help_text' => 'Set to 0 to hide from public /pricing page. Higher values show first when multiple versions exist.'
+	]);
+}
+
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form();
+
+$page->end_box();
+
+$page->admin_footer();
+
+?>
