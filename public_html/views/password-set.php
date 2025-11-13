@@ -1,0 +1,57 @@
+<?php
+
+	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('password-set_logic.php', 'logic'));
+
+	$page_vars = process_logic(password_set_logic($_GET, $_POST));
+
+	$page = new PublicPage();
+	$hoptions=array(
+		'is_valid_page' => $is_valid_page,
+		'title'=>'Password Set',
+	);
+	$page->public_header($hoptions,NULL);
+
+	echo PublicPage::BeginPage('Set a Password');
+	echo PublicPage::BeginPanel();
+	if($message){
+		echo PublicPage::alert($page_vars['message_title'], $page_vars['message'], $page_vars['message_type']);
+	}
+	else{
+		$settings = Globalvars::get_instance();
+		$formwriter = $page->getFormWriter('form1');
+
+		$formwriter->begin_form([
+			'id' => 'form1',
+			'method' => 'POST',
+			'action' => '/password-set',
+			'ajax' => true
+		]);
+
+		$formwriter->passwordinput('usr_password', 'New Password', [
+			'maxlength' => 255,
+			'required' => true,
+			'minlength' => 5,
+			'help_text' => 'Must be at least 5 characters.'
+		]);
+
+		$formwriter->passwordinput('usr_password_again', 'Retype New Password', [
+			'maxlength' => 255,
+			'required' => true,
+			'data-msg-required' => 'You must enter your password twice to confirm',
+			'data-rule-equalTo' => '#usr_password',
+			'data-msg-equalTo' => 'Your password did not match the one you entered above'
+		]);
+
+		$formwriter->submitbutton('submit', 'Submit', [
+			'class' => 'btn btn-primary'
+		]);
+
+		$formwriter->end_form();
+	}
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
+	$page->public_footer(array('track'=>TRUE, 'formvalidate'=>TRUE));
+
+?>

@@ -1,0 +1,80 @@
+<?php
+	require_once(__DIR__ . '/../includes/PathHelper.php');
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getThemeFilePath('products_logic.php', 'logic'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
+
+	//OVERRIDE GET VARS
+	$_GET['numperpage'] = 100;
+	$_GET['sdirection'] = 'ASC';
+	$_GET['subscriptions'] = 'all';
+	$page_vars = products_logic($_GET, $_POST);
+	
+	$session = SessionControl::get_instance();
+	$session->check_permission(5);
+	
+	$page = new PublicPage();
+	$page->public_header(array(
+		'is_valid_page' => $is_valid_page,
+		'title' => 'Products'
+	));
+	echo PublicPage::BeginPage('Products');
+	echo PublicPage::BeginPanel();
+	
+	?>
+	<script language="javascript">
+	 $(document).ready(function() {	
+		$('input[name="full_name_first"]').val('Jeremy');
+		$('input[name="full_name_last"]').val('Test');
+		$('input[name="email"]').val('jeremy.tunnell@gmail.com');
+	});
+	</script>
+	<?php
+	
+	if(StripeHelper::isTestMode()){
+		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'.</div>';
+	}
+	
+	echo 'Checkout type:  '. $settings->get_setting('checkout_type').'<br>';
+	
+	if($settings->get_setting('use_paypal_checkout')){
+		echo 'Paypal checkout enabled'.'<br>'; 
+	}
+	else{
+		echo 'Paypal checkout disabled'.'<br>'; 
+	}
+
+	foreach ($page_vars['products'] as $product){ 
+		echo '<h1 style="margin-top: 40px;"><b>'.$product->get('pro_name').'</b></h1>'; 
+		if($product->get_url()){
+			echo '<a href="'.$product->get_url().'">Product link</a><br>';
+		}
+		if($product->get_readable_price()){
+			echo $product->get_readable_price();
+		}  
+
+		if($product->is_sold_out()){
+			echo 'sold out<br>';
+		}
+		else{
+			$settings = Globalvars::get_instance();
+			$formwriter = new FormWriter("product_form".$product->key);
+			echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
+			echo $formwriter->hiddeninput('product_id', $product->key);
+			if ($product->output_product_form($formwriter, $page_vars['user'], null)) {
+				echo $formwriter->new_form_button('Add to Cart', 'primary','full');
+			}
+			echo $formwriter->end_form(true);
+			$product->output_javascript($formwriter, NULL, "product_form".$product->key);
+	
+		}
+		echo '<hr>';
+	}
+	
+  
+	echo PublicPage::EndPanel();
+	echo PublicPage::EndPage();
+	$page->public_footer($foptions=array('track'=>TRUE));
+?>
+

@@ -1,0 +1,115 @@
+{
+  "payment_testing": {
+    "enabled": true,
+    "modes_to_test": ["stripe_regular", "stripe_checkout"],
+    "test_tokens": {
+      "success": "tok_visa",
+      "declined": "tok_chargeDeclined",
+      "insufficient_funds": "tok_insufficientFunds"
+    },
+    "billing_info": {
+      "first_name": "Jeremy",
+      "last_name": "Tunnell",
+      "email": "jeremy.tunnell@gmail.com"
+    }
+  },
+  "coupon_codes": [
+    {
+      "ccd_code": "test_15dollaroff",
+      "ccd_amount_discount": "15.00",
+      "ccd_percent_discount": "",
+      "ccd_start_time": "",
+      "ccd_end_time": "",
+      "ccd_is_active": "1",
+      "ccd_max_num_uses": "100",
+      "ccd_is_stackable": "0",
+      "ccd_usr_user_id_affiliate": "",
+      "ccd_applies_to": "0"
+    },
+    {
+      "ccd_code": "test_10pctoff",
+      "ccd_amount_discount": "",
+      "ccd_percent_discount": "10",
+      "ccd_start_time": "",
+      "ccd_end_time": "",
+      "ccd_is_active": "1",
+      "ccd_max_num_uses": "50",
+      "ccd_is_stackable": "0",
+      "ccd_usr_user_id_affiliate": "",
+      "ccd_applies_to": "0"
+    }
+  ],
+  "products": [
+
+    {
+      "pro_name": "Test Product 2", 
+      "pro_description": "Another test product with different settings",
+      "pro_short_description": "Test product 2",
+      "pro_is_active": "1",
+      "pro_max_purchase_count": "0",
+      "pro_max_cart_count": "0", 
+      "pro_expires": "0",
+      "pro_link": "test-product-2",
+      "pro_digital_link": "",
+      "pro_evt_event_id": "",
+      "pro_grp_group_id": "",
+      "pro_prg_product_group_id": "",
+      "pro_requirements": {
+        "1": "1",
+        "2": "2", 
+        "64": "64"
+      },
+      "additional_pro_requirements": {},
+      "product_scripts": [],
+      "pro_after_purchase_message": "Thank you for Test Product 2!",
+      "form_data": {
+        "full_name_first": "Jane",
+        "full_name_last": "Smith",
+        "email": "jane.smith@example.com",
+        "phn_phone_number": "555-123-4567"
+      },
+      "versions": [
+        {
+          "version_name": "One-time Purchase",
+          "version_price": "49.99",
+          "prv_price_type": "single",
+          "prv_trial_period_days": "0"
+        }
+      ]
+    },
+    {
+      "pro_name": "Test Product 3",
+      "pro_description": "A third test product for comprehensive testing",
+      "pro_short_description": "Test product 3",
+      "pro_is_active": "0",
+      "pro_max_purchase_count": "1",
+      "pro_max_cart_count": "1",
+      "pro_expires": "7", 
+      "pro_link": "test-product-3",
+      "pro_digital_link": "https://example.com/download3",
+      "pro_evt_event_id": "",
+      "pro_grp_group_id": "",
+      "pro_prg_product_group_id": "",
+      "pro_requirements": {
+        "1": "1",
+        "64": "64"
+      },
+      "additional_pro_requirements": {},
+      "product_scripts": [],
+      "pro_after_purchase_message": "",
+      "form_data": {
+        "full_name_first": "Test",
+        "full_name_last": "Customer",
+        "email": "test.customer@example.com"
+      },
+       "versions": [
+        {
+          "version_name": "One-time Purchase",
+          "version_price": "40.99",
+          "prv_price_type": "single",
+          "prv_trial_period_days": "0"
+        }
+      ]
+    }
+  ]
+}
