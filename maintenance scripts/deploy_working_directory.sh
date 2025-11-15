@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Simple Local Development Deploy Script
-# Clones the consolidated joinery repository directly to target directory
+#version 2.0 - Repository restructure: theme/plugins now in public_html/
+# MODIFIED v2.0: Removed theme/plugins from sparse checkout (now inside public_html/)
+# MODIFIED v2.0: Removed post-checkout file moving logic
+# MODIFIED v2.0: Simplified deployment - repository structure matches deployment
+
+# Deploy script version
+DEPLOY_VERSION="2.0"
 
 # Repository settings
 GITHUB_USER="getjoinery"
@@ -132,22 +137,13 @@ if [[ -d "$TARGET_DIR" ]]; then
         echo "Configuring sparse checkout..."
         git config core.sparseCheckout true
         git sparse-checkout init --cone
-        git sparse-checkout set public_html theme plugins "maintenance scripts" docs
+        git sparse-checkout set public_html "maintenance scripts" docs
 
         # Fetch and checkout
         echo "Fetching repository..."
         git fetch origin main
         echo "Checking out main branch..."
         git checkout main
-
-        # Move theme and plugins to proper location
-        echo "Setting up theme and plugins..."
-        if [[ -d theme && ! -d public_html/theme ]]; then
-            mv theme public_html/
-        fi
-        if [[ -d plugins && ! -d public_html/plugins ]]; then
-            mv plugins public_html/
-        fi
 
     else
         echo "Using existing empty directory: $TARGET_DIR"
@@ -163,22 +159,13 @@ if [[ -d "$TARGET_DIR" ]]; then
         echo "Configuring sparse checkout..."
         git config core.sparseCheckout true
         git sparse-checkout init --cone
-        git sparse-checkout set public_html theme plugins "maintenance scripts" docs
+        git sparse-checkout set public_html "maintenance scripts" docs
 
         # Fetch and checkout
         echo "Fetching repository..."
         git fetch origin main
         echo "Checking out main branch..."
         git checkout main
-
-        # Move theme and plugins to proper location
-        echo "Setting up theme and plugins..."
-        if [[ -d theme ]]; then
-            mv theme public_html/
-        fi
-        if [[ -d plugins ]]; then
-            mv plugins public_html/
-        fi
     fi
 else
     # Fresh install - directory doesn't exist
@@ -195,22 +182,13 @@ else
     echo "Configuring sparse checkout..."
     git config core.sparseCheckout true
     git sparse-checkout init --cone
-    git sparse-checkout set public_html theme plugins "maintenance scripts" docs
+    git sparse-checkout set public_html "maintenance scripts" docs
 
     # Fetch and checkout
     echo "Fetching repository..."
     git fetch origin main
     echo "Checking out main branch..."
     git checkout main
-
-    # Move theme and plugins to proper location
-    echo "Setting up theme and plugins..."
-    if [[ -d theme ]]; then
-        mv theme public_html/
-    fi
-    if [[ -d plugins ]]; then
-        mv plugins public_html/
-    fi
 fi
 
 echo ""
