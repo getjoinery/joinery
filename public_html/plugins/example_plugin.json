@@ -1,0 +1,38 @@
+{
+  "name": "stripe_payments",
+  "displayName": "Stripe Payment Gateway",
+  "version": "1.5.0",
+  "description": "Integrate Stripe payment processing for products and subscriptions",
+  "author": "Joinery Team",
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "adminMenu": [
+    {
+      "title": "Stripe Settings",
+      "url": "/adm/admin_stripe_settings.php",
+      "permission": 8,
+      "icon": "payment"
+    },
+    {
+      "title": "Payment History",
+      "url": "/adm/admin_stripe_history.php",
+      "permission": 5,
+      "icon": "history"
+    }
+  ],
+  "apiEndpoints": [
+    {
+      "path": "/api/stripe/webhook",
+      "method": "POST",
+      "description": "Stripe webhook endpoint"
+    },
+    {
+      "path": "/api/stripe/create-session",
+      "method": "POST",
+      "description": "Create checkout session"
+    }
+  ],
+  "provides": ["payment_gateway", "subscription_management"]
+}
