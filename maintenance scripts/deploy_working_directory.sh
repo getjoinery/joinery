@@ -87,21 +87,6 @@ if [[ "$TARGET_DIR" =~ ^[A-Za-z]: ]] || [[ "$TARGET_DIR" == *\\* ]]; then
     exit 1
 fi
 
-# Validate source directories if using symlinks
-if [[ "$USE_SYMLINKS" == true ]]; then
-    if [[ ! -d "$THEMES_SOURCE_DIR" ]]; then
-        echo "ERROR: Themes source directory '$THEMES_SOURCE_DIR' does not exist."
-        echo "Please update THEMES_SOURCE_DIR variable at top of script or use --nosymlink option."
-        exit 1
-    fi
-    
-    if [[ ! -d "$PLUGINS_SOURCE_DIR" ]]; then
-        echo "ERROR: Plugins source directory '$PLUGINS_SOURCE_DIR' does not exist."
-        echo "Please update PLUGINS_SOURCE_DIR variable at top of script or use --nosymlink option."
-        exit 1
-    fi
-fi
-
 # Check if target directory exists and validate it
 if [[ -d "$TARGET_DIR" ]]; then
     # Directory exists, check if it's empty
