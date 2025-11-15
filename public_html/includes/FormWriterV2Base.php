@@ -2583,4 +2583,79 @@ class AjaxSearchSelect {
             }
         }
     }
+
+    /**
+     * Generate anti-spam question input field
+     * @param string $type Optional type (e.g., 'blog')
+     * @return string HTML for anti-spam field or false if not configured
+     */
+    public function antispam_question_input($type=NULL){
+        $settings = Globalvars::get_instance();
+        if($type == 'blog'){
+            $correct_answer = $settings->get_setting('anti_spam_answer_comments');
+        }
+        else{
+            $correct_answer = $settings->get_setting('anti_spam_answer');
+        }
+
+        if($correct_answer){
+            $output = $this->textbox("antispam_question", "Type '".strtolower($correct_answer)."' into this field (to prove you are human)");
+            $output .= $this->hidden("antispam_question_answer", strtolower($correct_answer));
+            return $output;
+        }
+        else{
+            return false;
+        }
+    }
+
+    /**
+     * Add anti-spam validation rules
+     * @param array $validation_rules Existing validation rules
+     * @param string $type Optional type (e.g., 'blog')
+     * @return array Updated validation rules
+     */
+    public function antispam_question_validate($validation_rules, $type=NULL){
+        $settings = Globalvars::get_instance();
+        if($type == 'blog'){
+            $correct_answer = $settings->get_setting('anti_spam_answer_comments');
+        }
+        else{
+            $correct_answer = $settings->get_setting('anti_spam_answer');
+        }
+
+        if($correct_answer){
+            $validation_rules['antispam_question']['required']['value'] = 'true';
+            $validation_rules['antispam_question']['equalTo']['value'] = "'#antispam_question_answer'";
+            $validation_rules['antispam_question']['equalTo']['message'] = "'You must type the correct word here'";
+        }
+        return $validation_rules;
+    }
+
+    /**
+     * Check if anti-spam answer is correct
+     * @param array $postvars POST variables
+     * @param string $type Optional type (e.g., 'blog')
+     * @return boolean True if answer is correct or not configured
+     */
+    public static function antispam_question_check($postvars, $type=NULL){
+        $settings = Globalvars::get_instance();
+        if($type == 'blog'){
+            $correct_answer = $settings->get_setting('anti_spam_answer_comments');
+        }
+        else{
+            $correct_answer = $settings->get_setting('anti_spam_answer');
+        }
+
+        if($correct_answer){
+            if(strtolower($postvars['antispam_question']) == strtolower($correct_answer)){
+                return true;
+            }
+            else{
+                return false;
+            }
+        }
+        else{
+            return true;
+        }
+    }
 }
