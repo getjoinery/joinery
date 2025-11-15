@@ -89,8 +89,8 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/views/` - Base presentation templates
 - `/adm/` - Complete admin interface (currently uses Falcon theme)
 - `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterHTML5, LogicResult, etc.)
-- `/theme/` - Multi-theme system (falcon=Bootstrap, tailwind=legacy Tailwind CSS option) [symlinked]
-- `/plugins/` - Self-contained modules with own MVC structure [symlinked]
+- `/theme/` - Multi-theme system (falcon=Bootstrap, tailwind=legacy Tailwind CSS option)
+- `/plugins/` - Self-contained modules with own MVC structure
 - `/ajax/` - AJAX endpoints and webhook handlers
 - `/api/` - REST API with key-based authentication
 - `/utils/` - Maintenance scripts and development tools
@@ -99,6 +99,8 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/docs/` - Documentation and Claude-specific guidance
 - `/tests/` - Test suites (email, functional, integration, models)
 - `/home/user1/joinery/joinery/maintenance_scripts/` - Development and deployment scripts [separate git repo]
+
+**Repository Structure Note:** In the GitHub repository (getjoinery/joinery), theme/ and plugins/ are located inside public_html/. The paths above reflect the deployed structure where public_html/ is the web root.
 
 ### Routing & Theme System
 

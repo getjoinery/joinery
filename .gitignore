@@ -18,6 +18,13 @@ Globalvars_site.php
 # Claude settings (local development)
 .claude/
 
+# Data directories (not tracked in git)
+/backups/
+/logs/
+/static_files/
+/uploads/
+/docs/api_documentation.md
+
 # REMOVED these lines since theme/plugins are now tracked in repo:
 # /theme
 # /plugins
