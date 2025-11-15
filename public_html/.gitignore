@@ -6,8 +6,6 @@ composer.phar
 # composer.lock
 
 Globalvars_site.php
-/theme
-/plugins
 .claude/
 *.bak
 /cache
