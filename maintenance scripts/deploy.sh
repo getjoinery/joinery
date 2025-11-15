@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-#version 3.51 - Critical deployment and rollback fixes
+#version 3.7 - Repository restructure: theme/plugins now in public_html/
+# MODIFIED v3.7: Theme and plugins now in public_html/ in repository (not root)
+# MODIFIED v3.7: Removed separate theme/plugin sparse checkout (now part of public_html checkout)
+# MODIFIED v3.7: Renamed deploy_theme_plugin() to deploy_maintenance_scripts()
+# MODIFIED v3.7: Simplified deployment - repository structure matches deployment structure
 # MODIFIED: Added comprehensive PHP syntax validation during deployment
 # MODIFIED: Added plugin loading test with proper PathHelper context
 # MODIFIED: Added basic runtime bootstrap test
@@ -16,7 +20,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.51"
+DEPLOY_VERSION="3.7"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -393,97 +397,13 @@ EOF
     return 0
 }
 
-# Function to deploy themes and plugins from external repository to directories outside public_html
-deploy_theme_plugin() {
+# Function to deploy maintenance scripts from repository
+# NOTE: Themes and plugins are now in public_html/ in repository and come automatically with main checkout
+deploy_maintenance_scripts() {
     local target_site="$1"
     local site_root="/var/www/html/$target_site"
-    local staging_dir="$site_root/public_html_stage"
-    
-    echo "Downloading themes and plugins from joinery repository to $target_site..."
-    
-    # DEPLOY THEMES to /var/www/html/sitename/theme (outside public_html)
-    verbose_echo "Setting up theme deployment to $site_root/theme..."
-    local theme_stage_dir="$site_root/theme_stage"
-    rm -rf "$theme_stage_dir"
-    mkdir -p "$theme_stage_dir"
-    
-    # Clone repo for themes
-    verbose_echo "Cloning themes from: $THEME_PLUGIN_REPO_URL"
-    if [ "$VERBOSE" = true ]; then
-        git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$theme_stage_dir"
-    else
-        git clone --quiet --no-checkout "$THEME_PLUGIN_REPO_URL" "$theme_stage_dir" 2>/dev/null
-    fi
-    cd "$theme_stage_dir" || exit 1
-    git config core.sparseCheckout true
-    git sparse-checkout init --cone
-    git sparse-checkout set theme
-    if [ "$VERBOSE" = true ]; then
-        git checkout main
-    else
-        git checkout --quiet main 2>/dev/null
-    fi
-    rm -rf .git
-    cd - > /dev/null
 
-    # DEPLOY PLUGINS to /var/www/html/sitename/plugins (outside public_html)
-    verbose_echo "Setting up plugin deployment to $site_root/plugins..."
-    local plugins_stage_dir="$site_root/plugins_stage"
-    rm -rf "$plugins_stage_dir"
-    mkdir -p "$plugins_stage_dir"
-    
-    # Clone repo for plugins
-    verbose_echo "Cloning plugins from: $THEME_PLUGIN_REPO_URL"
-    if [ "$VERBOSE" = true ]; then
-        git clone --no-checkout "$THEME_PLUGIN_REPO_URL" "$plugins_stage_dir"
-    else
-        git clone --quiet --no-checkout "$THEME_PLUGIN_REPO_URL" "$plugins_stage_dir" 2>/dev/null
-    fi
-    cd "$plugins_stage_dir" || exit 1
-    git config core.sparseCheckout true
-    git sparse-checkout init --cone
-    git sparse-checkout set plugins
-    if [ "$VERBOSE" = true ]; then
-        git checkout main
-    else
-        git checkout --quiet main 2>/dev/null
-    fi
-    rm -rf .git
-    cd - > /dev/null
-
-    # Deploy themes directly to public_html_stage
-    if [[ -d "$theme_stage_dir/theme" ]]; then
-        verbose_echo "Deploying stock themes to staging directory..."
-        mkdir -p "$staging_dir"
-        
-        # Deploy stock themes (status will be shown during merge operation)
-        
-        mv "$theme_stage_dir/theme" "$staging_dir/theme" || {
-            echo "ERROR: Failed to move themes to staging directory"
-            return 1
-        }
-        verbose_echo "Stock themes deployed successfully to staging directory"
-    else
-        echo "ERROR: No theme directory found in joinery repository - deployment cannot continue"
-        return 1
-    fi
-
-    # Deploy plugins directly to public_html_stage
-    if [[ -d "$plugins_stage_dir/plugins" ]]; then
-        verbose_echo "Deploying stock plugins to staging directory..."
-        mkdir -p "$staging_dir"
-
-        # Deploy stock plugins (status will be shown during merge operation)
-
-        mv "$plugins_stage_dir/plugins" "$staging_dir/plugins" || {
-            echo "ERROR: Failed to move plugins to staging directory"
-            return 1
-        }
-        verbose_echo "Stock plugins deployed successfully to staging directory"
-    else
-        echo "ERROR: No plugins directory found in joinery repository - deployment cannot continue"
-        return 1
-    fi
+    echo "Downloading maintenance scripts from joinery repository to $target_site..."
 
     # DEPLOY MAINTENANCE_SCRIPTS to /var/www/html/sitename/maintenance_scripts
     verbose_echo "Setting up maintenance_scripts deployment to $site_root/maintenance_scripts..."
@@ -532,24 +452,11 @@ deploy_theme_plugin() {
         # Not a fatal error - deployment can continue without maintenance scripts
     fi
 
-    # Validate that directories were created successfully in staging
-    if [[ ! -d "$staging_dir/theme" ]]; then
-        echo "ERROR: Theme directory was not created successfully in staging directory"
-        return 1
-    fi
-
-    if [[ ! -d "$staging_dir/plugins" ]]; then
-        echo "ERROR: Plugins directory was not created successfully in staging directory"
-        return 1
-    fi
-
-    # Cleanup staging directories
-    verbose_echo "Cleaning up theme/plugin/maintenance staging directories..."
-    rm -rf "$theme_stage_dir"
-    rm -rf "$plugins_stage_dir"
+    # Cleanup staging directory
+    verbose_echo "Cleaning up maintenance staging directory..."
     rm -rf "$maintenance_stage_dir"
 
-    echo "Theme, plugin, and maintenance scripts download from joinery repository complete."
+    echo "Maintenance scripts download from joinery repository complete."
     return 0
 }
 
@@ -1019,9 +926,10 @@ else
     verbose_echo "No existing deployment to backup (fresh install)"
 fi
 
-# DOWNLOAD THEMES AND PLUGINS FROM JOINERY REPOSITORY
-if ! deploy_theme_plugin "$TARGET_SITE"; then
-    echo "ERROR: Theme/plugin download failed. Aborting deployment."
+# DOWNLOAD MAINTENANCE SCRIPTS FROM JOINERY REPOSITORY
+# Note: Themes and plugins are now included in public_html/ sparse checkout above
+if ! deploy_maintenance_scripts "$TARGET_SITE"; then
+    echo "ERROR: Maintenance scripts download failed. Aborting deployment."
     exit 1
 fi
 
