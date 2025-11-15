@@ -120,23 +120,27 @@ if [[ -d "$TARGET_DIR" ]]; then
             echo "Deploy cancelled."
             exit 0
         fi
-        echo "Clearing target directory..."
+        echo "Clearing target directory (preserving config, cache, logs, backups, static_files)..."
         # Preserve .claude symlink during cleanup
         if [[ -L "$TARGET_DIR/.claude" ]]; then
             echo "Preserving .claude symlink..."
             CLAUDE_LINK_TARGET=$(readlink "$TARGET_DIR/.claude")
         fi
 
-        rm -rf "$TARGET_DIR"/*
-        # Remove hidden files but preserve . and ..
-        find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -name ".*" ! -name "." ! -name ".." -exec rm -rf {} +
+        # Only remove public_html and maintenance scripts (what we're deploying)
+        # Preserve: config, cache, logs, backups, static_files, docs
+        rm -rf "$TARGET_DIR/public_html"
+        rm -rf "$TARGET_DIR/maintenance scripts"
+
+        # Remove .claude if it exists (we'll restore it)
+        rm -f "$TARGET_DIR/.claude"
 
         # Restore .claude symlink if it existed
         if [[ -n "$CLAUDE_LINK_TARGET" ]]; then
             echo "Restoring .claude symlink to $CLAUDE_LINK_TARGET..."
             ln -sf "$CLAUDE_LINK_TARGET" "$TARGET_DIR/.claude"
         fi
-        echo "Directory cleared."
+        echo "Directory cleared (config, cache, logs, backups, static_files preserved)."
     else
         echo "Using existing empty directory: $TARGET_DIR"
     fi
