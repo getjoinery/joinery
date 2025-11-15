@@ -22,9 +22,9 @@ show_usage() {
     echo "  $0 /home/user/dev/testsite"
     echo ""
     echo "This script clones the joinery repository to the target directory."
-    echo "The target directory becomes a git repository that can be updated with 'git pull'."
+    echo "Uses sparse checkout to only pull application code, preserving data directories."
     echo ""
-    echo "Preserved directories (not tracked by git):"
+    echo "Preserved directories (not in git):"
     echo "  - config/      (contains Globalvars_site.php)"
     echo "  - cache/       (runtime cache)"
     echo "  - logs/        (application logs)"
@@ -98,7 +98,7 @@ if [[ -d "$TARGET_DIR" ]]; then
         exit 0
     fi
 
-    # Directory exists but isn't a git repo - need to handle existing files
+    # Directory exists but isn't a git repo
     if [[ "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]]; then
         echo "Target directory '$TARGET_DIR' exists and is not empty."
         echo ""
@@ -109,10 +109,9 @@ if [[ -d "$TARGET_DIR" ]]; then
         fi
         echo ""
         echo "This deployment will:"
-        echo "  - Clone the git repository to this directory"
-        echo "  - Preserve these directories (they're in .gitignore):"
-        echo "    config/, cache/, logs/, backups/, static_files/, uploads/"
-        echo "  - Replace everything else with fresh repository files"
+        echo "  - Initialize as git repository with sparse checkout"
+        echo "  - Pull only: public_html/, theme/, plugins/, maintenance scripts/, docs/"
+        echo "  - Preserve existing: config/, cache/, logs/, backups/, static_files/, uploads/"
         echo ""
         read -p "Proceed with deployment? (y/N): " -n 1 -r
         echo
@@ -121,63 +120,97 @@ if [[ -d "$TARGET_DIR" ]]; then
             exit 0
         fi
 
-        # Back up preserved directories
-        echo "Backing up preserved directories..."
-        TEMP_BACKUP=$(mktemp -d)
-        trap "rm -rf $TEMP_BACKUP" EXIT
-
-        for dir in config cache logs backups static_files uploads docs; do
-            if [[ -d "$TARGET_DIR/$dir" ]]; then
-                echo "  Backing up $dir/..."
-                cp -r "$TARGET_DIR/$dir" "$TEMP_BACKUP/"
-            fi
-        done
-
-        # Preserve .claude symlink
-        if [[ -L "$TARGET_DIR/.claude" ]]; then
-            CLAUDE_LINK_TARGET=$(readlink "$TARGET_DIR/.claude")
-        fi
-
-        # Remove everything in target directory
-        echo "Removing existing files..."
-        rm -rf "$TARGET_DIR"/*
-        rm -rf "$TARGET_DIR"/.??*  # Remove hidden files/dirs
-
-        # Clone repository
-        echo "Cloning repository..."
-        git clone "$REPO_URL" "$TARGET_DIR"
         cd "$TARGET_DIR"
+
+        # Initialize git repository
+        echo "Initializing git repository..."
+        git init
+        git config --global --add safe.directory "$TARGET_DIR"
+        git remote add origin "$REPO_URL"
+
+        # Configure sparse checkout
+        echo "Configuring sparse checkout..."
+        git config core.sparseCheckout true
+        git sparse-checkout init --cone
+        git sparse-checkout set public_html theme plugins "maintenance scripts" docs
+
+        # Fetch and checkout
+        echo "Fetching repository..."
+        git fetch origin main
+        echo "Checking out main branch..."
         git checkout main
 
-        # Restore preserved directories
-        echo "Restoring preserved directories..."
-        for dir in config cache logs backups static_files uploads docs; do
-            if [[ -d "$TEMP_BACKUP/$dir" ]]; then
-                echo "  Restoring $dir/..."
-                cp -r "$TEMP_BACKUP/$dir" "$TARGET_DIR/"
-            fi
-        done
-
-        # Restore .claude symlink
-        if [[ -n "$CLAUDE_LINK_TARGET" ]]; then
-            echo "Restoring .claude symlink..."
-            ln -sf "$CLAUDE_LINK_TARGET" "$TARGET_DIR/.claude"
+        # Move theme and plugins to proper location
+        echo "Setting up theme and plugins..."
+        if [[ -d theme && ! -d public_html/theme ]]; then
+            mv theme public_html/
+        fi
+        if [[ -d plugins && ! -d public_html/plugins ]]; then
+            mv plugins public_html/
         fi
 
     else
         echo "Using existing empty directory: $TARGET_DIR"
-        echo "Cloning repository..."
-        git clone "$REPO_URL" "$TARGET_DIR"
         cd "$TARGET_DIR"
+
+        # Initialize git repository
+        echo "Initializing git repository..."
+        git init
+        git config --global --add safe.directory "$TARGET_DIR"
+        git remote add origin "$REPO_URL"
+
+        # Configure sparse checkout
+        echo "Configuring sparse checkout..."
+        git config core.sparseCheckout true
+        git sparse-checkout init --cone
+        git sparse-checkout set public_html theme plugins "maintenance scripts" docs
+
+        # Fetch and checkout
+        echo "Fetching repository..."
+        git fetch origin main
+        echo "Checking out main branch..."
         git checkout main
+
+        # Move theme and plugins to proper location
+        echo "Setting up theme and plugins..."
+        if [[ -d theme ]]; then
+            mv theme public_html/
+        fi
+        if [[ -d plugins ]]; then
+            mv plugins public_html/
+        fi
     fi
 else
     # Fresh install - directory doesn't exist
     echo "Creating directory: $TARGET_DIR"
-    echo "Cloning repository..."
-    git clone "$REPO_URL" "$TARGET_DIR"
+    mkdir -p "$TARGET_DIR"
     cd "$TARGET_DIR"
+
+    # Initialize git repository
+    echo "Initializing git repository..."
+    git init
+    git remote add origin "$REPO_URL"
+
+    # Configure sparse checkout
+    echo "Configuring sparse checkout..."
+    git config core.sparseCheckout true
+    git sparse-checkout init --cone
+    git sparse-checkout set public_html theme plugins "maintenance scripts" docs
+
+    # Fetch and checkout
+    echo "Fetching repository..."
+    git fetch origin main
+    echo "Checking out main branch..."
     git checkout main
+
+    # Move theme and plugins to proper location
+    echo "Setting up theme and plugins..."
+    if [[ -d theme ]]; then
+        mv theme public_html/
+    fi
+    if [[ -d plugins ]]; then
+        mv plugins public_html/
+    fi
 fi
 
 echo ""
@@ -187,13 +220,13 @@ echo "Site deployed to: $TARGET_DIR"
 echo ""
 echo "Directory structure:"
 echo "  $TARGET_DIR/"
-echo "  ├── .git/              (git repository)"
+echo "  ├── .git/              (git repository - sparse checkout)"
 echo "  ├── public_html/       (application code)"
 echo "  │   ├── theme/         (themes)"
 echo "  │   └── plugins/       (plugins)"
 echo "  ├── maintenance scripts/"
 echo "  ├── docs/"
-echo "  └── [preserved dirs]/  (config, cache, logs, etc.)"
+echo "  └── [preserved dirs]/  (config, cache, logs, etc. - not tracked)"
 echo ""
 echo "To update this site in the future:"
 echo "  cd $TARGET_DIR && git pull"
