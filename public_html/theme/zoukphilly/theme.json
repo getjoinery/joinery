@@ -1,0 +1,15 @@
+{
+  "name": "zoukphilly",
+  "display_name": "Zouk Philly Theme",
+  "version": "1.0.0",
+  "description": "Custom theme for Zouk Philly",
+  "author": "Joinery Team",
+  "is_stock": true,
+  "requires": {
+    "php": ">=7.4",
+    "joinery": ">=1.0.0"
+  },
+  "cssFramework": "tailwind",
+  "formWriterBase": "FormWriterTailwind",
+  "publicPageBase": "PublicPageFalcon"
+}
