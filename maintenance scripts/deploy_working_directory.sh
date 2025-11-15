@@ -91,7 +91,7 @@ fi
 if [[ -d "$TARGET_DIR" ]]; then
     # Directory exists, check if it's empty
     if [[ "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]]; then
-        echo "WARNING: Target directory '$TARGET_DIR' exists and is not empty."
+        echo "Target directory '$TARGET_DIR' exists and is not empty."
         echo ""
         echo "Contents:"
         ls -la "$TARGET_DIR" | head -10
@@ -99,13 +99,17 @@ if [[ -d "$TARGET_DIR" ]]; then
             echo "... (and more files)"
         fi
         echo ""
-        read -p "Clear this directory and proceed with deployment? (y/N): " -n 1 -r
+        echo "This deployment will:"
+        echo "  - REPLACE: public_html/ and maintenance scripts/"
+        echo "  - PRESERVE: config/, cache/, logs/, backups/, static_files/, docs/, .claude"
+        echo ""
+        read -p "Proceed with deployment? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             echo "Deploy cancelled."
             exit 0
         fi
-        echo "Clearing target directory (preserving config, cache, logs, backups, static_files)..."
+        echo "Removing public_html/ and maintenance scripts/ (preserving config/, cache/, logs/, backups/, static_files/, docs/)..."
         # Preserve .claude symlink during cleanup
         if [[ -L "$TARGET_DIR/.claude" ]]; then
             echo "Preserving .claude symlink..."
