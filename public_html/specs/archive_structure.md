@@ -671,7 +671,7 @@ With Phase 2's standardized `composer.json` (with `vendor-dir: ../vendor`), the 
 
 ## Note on Maintenance Scripts Location
 
-**Current Phase 1 implementation:** Pulls maintenance scripts from `/home/user1/joinery/joinery/maintenance scripts/` when creating archives.
+**Current Phase 1 implementation:** Pulls maintenance scripts from `/home/user1/joinery/joinery/maintenance_scripts/` when creating archives.
 
 **Phase 2 approach:** Scripts end up at `/var/www/html/{SITE}/maintenance_scripts/` after installation. This is fine - the archive structure remains the same, just the final deployed location is clarified in Phase 2.
 

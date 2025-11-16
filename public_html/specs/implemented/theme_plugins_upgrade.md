@@ -15,7 +15,7 @@
 
 ## Phase 1: Deploy Script & Manifests
 
-**Deploy Script Location:** `/home/user1/joinery/joinery/maintenance scripts/deploy.sh`
+**Deploy Script Location:** `/home/user1/joinery/joinery/maintenance_scripts/deploy.sh`
 
 ### 1.1 Manifest Files
 
@@ -225,7 +225,7 @@ The deploy script creates `public_html_stage` at line ~562-569:
 **✅ COMPLETED on August 29, 2024:**
 
 ### Files Modified:
-- **deploy.sh** - `/home/user1/joinery/joinery/maintenance scripts/deploy.sh`
+- **deploy.sh** - `/home/user1/joinery/joinery/maintenance_scripts/deploy.sh`
   - **Backup created:** `deploy.sh.bak` in same directory
   - **Lines reduced:** From 799 lines to 675 lines (removed 181 lines of old functions, added 57 lines of new logic)
 

@@ -574,7 +574,7 @@ find ~/ -name "server_setup.sh" -type f
 
 # Common patterns:
 # - Might have spaces: "maintenance scripts/server_setup.sh"
-# - Might be nested: "joinery/joinery/maintenance scripts/server_setup.sh"
+# - Might be nested: "joinery/joinery/maintenance_scripts/server_setup.sh"
 # - Might be flat: "server_setup.sh" directly in ~/
 ```
 

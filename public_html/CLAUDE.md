@@ -98,7 +98,7 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/specs/` - Feature specifications (active and implemented)
 - `/docs/` - Documentation and Claude-specific guidance
 - `/tests/` - Test suites (email, functional, integration, models)
-- `/home/user1/joinery/joinery/maintenance_scripts/` - Development and deployment scripts [separate git repo]
+- `/var/www/html/joinerytest/maintenance_scripts/` - Development and deployment scripts
 
 **Repository Structure Note:** In the GitHub repository (getjoinery/joinery), theme/ and plugins/ are located inside public_html/. The paths above reflect the deployed structure where public_html/ is the web root.
 
@@ -432,7 +432,7 @@ $session->check_permission(5); // Requires permission level 5 (admin minimum)
 - `/tests/models/` - Data model CRUD operations and validation
 
 ### Deployment Scripts
-Located in `/home/user1/joinery/joinery/maintenance_scripts/`
+Located in `/var/www/html/joinerytest/maintenance_scripts/`
 
 ## Development Workflow
 
@@ -521,7 +521,7 @@ $migrations[] = $migration;
 
 2. **Method Existence Validation**: Run the method existence test on all PHP files created or modified:
    ```bash
-   php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/modified/file.php
+   php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" /path/to/modified/file.php
    ```
    - Investigate any missing methods flagged by the script
    - Only report task completion after all flags are investigated and resolved
@@ -534,7 +534,7 @@ $migrations[] = $migration;
 php -l filename.php
 
 # Method Existence Validation
-php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/file.php
+php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" /path/to/file.php
 
 # Check error logs
 tail /var/www/html/joinerytest/logs/error.log

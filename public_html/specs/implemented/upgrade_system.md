@@ -7,7 +7,7 @@ This document analyzes the differences between the two upgrade mechanisms (`depl
 
 ### deploy.sh (Full-Featured Deployment System)
 
-**Location:** `/home/user1/joinery/joinery/maintenance scripts/deploy.sh`
+**Location:** `/home/user1/joinery/joinery/maintenance_scripts/deploy.sh`
 
 **Key Features:**
 - **Pre-deployment Validation**
