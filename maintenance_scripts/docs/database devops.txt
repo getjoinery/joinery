@@ -1,0 +1,7 @@
+#export
+pg_dump -U postgres -W integral_membership > live.pgsql
+
+#create and import
+createdb -T template0 integral_membership -U postgres
+psql -U postgres -W -d integral_membership -f live.pgsql
+
