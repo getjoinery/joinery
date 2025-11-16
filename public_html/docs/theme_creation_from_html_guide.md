@@ -5,9 +5,8 @@ This guide provides specific instructions for creating a new Joinery theme from 
 ## Prerequisites
 
 1. **Verify the HTML template location** - Usually in `/home/user1/` directories
-2. **Check which themes exist** - Look in BOTH locations:
+2. **Check which themes exist** - Themes are located in:
    - `/var/www/html/joinerytest/public_html/theme/` (active deployment)
-   - `/home/user1/joinery/joinery/theme/` (development repository)
 
 ## Critical Understanding Points
 
@@ -41,7 +40,7 @@ Available FormWriter base classes to inherit from:
 ### Step 1: Create Theme Directory Structure
 
 ```bash
-# Create in the PUBLIC_HTML location (NOT in /home/user1/joinery/)
+# Create in the PUBLIC_HTML location
 mkdir -p /var/www/html/joinerytest/public_html/theme/THEMENAME/{assets/{css,js,images,fonts},includes,views}
 ```
 

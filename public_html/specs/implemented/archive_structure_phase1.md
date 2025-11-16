@@ -100,11 +100,11 @@ echo "Generated install SQL file version $version (compressed)\n";
 ```php
 // Note: The actual location of maintenance scripts may vary
 // They could be in:
-// - /home/user1/joinery/joinery/maintenance scripts/  (current location)
+// - /home/user1/joinery/joinery/maintenance_scripts/  (current location)
 // - /var/www/html/SITENAME/maintenance_scripts/  (if already deployed)
 // - A configurable location
 
-$maintenance_source = '/home/user1/joinery/joinery/maintenance scripts/'; // Configure as needed
+$maintenance_source = '/home/user1/joinery/joinery/maintenance_scripts/'; // Configure as needed
 
 // Check maintenance scripts exist
 $required_files = [
@@ -236,10 +236,10 @@ if [ "$DB_EXISTS" != "1" ]; then
     sudo -u postgres createdb -O postgres "$DB_NAME"
 
     # Check for install SQL file (compressed or uncompressed)
-    INSTALL_SQL="/home/user1/joinery/joinery/maintenance scripts/joinery-install.sql.gz"
+    INSTALL_SQL="/home/user1/joinery/joinery/maintenance_scripts/joinery-install.sql.gz"
     if [ ! -f "$INSTALL_SQL" ]; then
         # Try uncompressed
-        INSTALL_SQL="/home/user1/joinery/joinery/maintenance scripts/joinery-install.sql"
+        INSTALL_SQL="/home/user1/joinery/joinery/maintenance_scripts/joinery-install.sql"
     fi
     if [ ! -f "$INSTALL_SQL" ]; then
         # Try alternate location (compressed)

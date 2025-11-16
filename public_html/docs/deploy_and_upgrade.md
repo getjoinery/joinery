@@ -16,7 +16,7 @@ All three use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared
 
 ### deploy.sh
 
-**Location:** `/home/user1/joinery/joinery/maintenance scripts/deploy.sh`
+**Location:** `/var/www/html/joinerytest/maintenance_scripts/deploy.sh`
 
 ```bash
 # Basic deployment

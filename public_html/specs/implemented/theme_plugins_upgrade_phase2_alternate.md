@@ -1692,7 +1692,7 @@ $plugin_manager->runPendingMigrations($plugin_name);
 - `/adm/admin_plugins.php` - Already addressed in our spec  
 - `/ajax/plugin_*.php` - Any AJAX handlers for plugin operations
 - `/utils/plugin_*.php` - Any utility scripts
-- Deployment scripts in `/maintenance scripts/`
+- Deployment scripts in `/maintenance_scripts/`
 
 ### Cleanup of Unused PluginHelper Static Methods
 

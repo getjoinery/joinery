@@ -113,8 +113,8 @@
 
 		// Check that required maintenance script files exist
 		$required_files = [
-			'/home/user1/joinery/joinery/maintenance scripts/server_setup.sh',
-			'/home/user1/joinery/joinery/maintenance scripts/deploy.sh',
+			'/var/www/html/joinerytest/maintenance_scripts/server_setup.sh',
+			'/var/www/html/joinerytest/maintenance_scripts/deploy.sh',
 			$sql_source
 		];
 
@@ -157,7 +157,7 @@
 		}
 
 		// Copy config file
-		$config_source = '/home/user1/joinery/joinery/maintenance scripts/Globalvars_site_default.php';
+		$config_source = '/var/www/html/joinerytest/maintenance_scripts/Globalvars_site_default.php';
 		if (file_exists($config_source)) {
 			copy($config_source, $temp_dir . '/config/Globalvars_site_default.php');
 			echo "Copied config template<br>";
@@ -180,7 +180,7 @@
 			'default_virtualhost.conf'
 		];
 
-		$maintenance_dir = '/home/user1/joinery/joinery/maintenance scripts/';
+		$maintenance_dir = '/var/www/html/joinerytest/maintenance_scripts/';
 		foreach ($maintenance_files as $file) {
 			if (file_exists($maintenance_dir . $file)) {
 				copy($maintenance_dir . $file, $temp_dir . '/maintenance_scripts/' . $file);

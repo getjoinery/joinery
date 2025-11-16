@@ -14,7 +14,7 @@ Create a PHP script that generates a fresh install SQL file (`joinery-install-sq
 
 ## Current State
 
-- Existing install SQL file: `/home/user1/joinery/joinery/maintenance scripts/joinery-install-sql.sql`
+- Existing install SQL file: `/home/user1/joinery/joinery/maintenance_scripts/joinery-install-sql.sql`
 - File is outdated (6.3MB, last updated Aug 25 13:16)
 - Used by `new_account.sh` for fresh installations
 - Contains full schema + seed data for ~68 tables
@@ -458,7 +458,7 @@ if (!empty($files)) {
     // Get the most recent file
     usort($files, function($a, $b) { return filemtime($b) - filemtime($a); });
     $source_file = $files[0];
-    $dest_file = '/home/user1/joinery/joinery/maintenance scripts/joinery-install-sql.sql';
+    $dest_file = '/home/user1/joinery/joinery/maintenance_scripts/joinery-install-sql.sql';
 
     if (substr($source_file, -3) === '.gz') {
         // Decompress for distribution

@@ -986,7 +986,7 @@ For each migrated page:
 
 2. **Method Existence Validation**
    ```bash
-   php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/admin_page.php
+   php "/home/user1/joinery/joinery/maintenance_scripts/method_existence_test.php" /path/to/admin_page.php
    ```
 
 3. **Manual Testing**
@@ -1012,7 +1012,7 @@ For each migrated page:
 
 ### After Conversion
 - [ ] Run `php -l /path/to/admin_page.php` for syntax check
-- [ ] Run `php "/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php" /path/to/admin_page.php`
+- [ ] Run `php "/home/user1/joinery/joinery/maintenance_scripts/method_existence_test.php" /path/to/admin_page.php`
 - [ ] Manually test in browser: load page, create/edit, submit
 - [ ] Verify data saves correctly
 - [ ] Commit changes
