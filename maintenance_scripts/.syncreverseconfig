@@ -1,0 +1,32 @@
+# .syncconfig - Default sync configuration
+# Place this file in your project directory or home directory (~/.syncconfig)
+
+# Default local directory to sync from
+#DEFAULT_LOCAL_DIR="/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery-working/"
+
+# Default remote server hostname or IP
+DEFAULT_REMOTE_HOST=69.164.209.253
+
+# Default remote directory path
+#DEFAULT_REMOTE_DIR=/var/www/html/joinerytest/public_html
+
+# Default SSH username (optional - defaults to current user)
+DEFAULT_SSH_USER=user1
+
+# Default SSH port (optional - defaults to 22)
+DEFAULT_SSH_PORT=22
+
+# Sync behavior
+DEFAULT_SYNC_INTERVAL=5
+
+# Follow symlinks
+DEFAULT_FOLLOW_SYMLINKS=false
+
+DEFAULT_DELETE_BEHAVIOR="skip"  # Default to skip deletions (options: skip, ask)
+
+# Comments start with # and empty lines are ignored
+# Values can be quoted or unquoted:
+DEFAULT_LOCAL_DIR_1=/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery
+DEFAULT_REMOTE_DIR_1=/home/user1/joinery/joinery
+DEFAULT_LOCAL_DIR_2=/mnt/c/Users/jerem/Proton Drive/jeremy.tunnell/My files/joinery/joinery-working
+DEFAULT_REMOTE_DIR_2=/var/www/html/joinerytest/public_html

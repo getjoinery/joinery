@@ -1,0 +1,33 @@
+# This is a comment - ignored
+# One pattern per line
+
+# Exclude specific files
+#secret.txt
+#config.local.json
+Globalvars_site.php
+
+# Exclude file patterns with wildcards
+*.log
+*.tmp
+*.bak
+
+# Exclude directories (trailing slash recommended)
+#temp/
+#cache/
+uploads/
+theme_old/
+plugins_old/
+
+# Exclude patterns anywhere in the tree
+#**/coverage/
+#**/*.test.js
+
+# Mix of different types
+#.env*
+#build/
+#dist/
+#*.pyc
+#__pycache__/
+
+# More comments
+# Empty lines are ignored too

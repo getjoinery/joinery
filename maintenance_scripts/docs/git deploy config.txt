@@ -1,0 +1,21 @@
+
+mkdir /var/www/html/jeremytunnell/public_html_stage
+cd /var/www/html/jeremytunnell/public_html_stage
+git init
+git remote add origin https://github.com/Tunnell-Software/membership.git
+git pull origin main
+mv /var/www/html/jeremytunnell/public_html /var/www/html/jeremytunnell/public_html_last
+mv /var/www/html/jeremytunnell/public_html_stage /var/www/html/jeremytunnell/public_html
+
+#revert
+mv /var/www/html/jeremytunnell/public_html /var/www/html/jeremytunnell/public_html_stage 
+mv /var/www/html/jeremytunnell/public_html_last /var/www/html/jeremytunnell/public_html
+
+mkdir /var/www/html/integralzen/public_html_stage
+git pull origin main
+mv /var/www/html/integralzen/public_html /var/www/html/integralzen/public_html_last
+mv /var/www/html/integralzen/public_html_stage /var/www/html/integralzen/public_html
+
+#revert
+mv /var/www/html/integralzen/public_html /var/www/html/integralzen/public_html_stage 
+mv /var/www/html/integralzen/public_html_last /var/www/html/integralzen/public_html
