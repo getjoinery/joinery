@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-#version 2.0 - Repository restructure: theme/plugins now in public_html/
+#version 2.1 - Directory rename: "maintenance scripts" → "maintenance_scripts"
+# MODIFIED v2.1: Renamed "maintenance scripts" to "maintenance_scripts" (underscore instead of space)
+# MODIFIED v2.1: Updated git sparse-checkout to use "maintenance_scripts"
+# MODIFIED v2.1: Updated all path references and documentation to use underscore notation
 # MODIFIED v2.0: Removed theme/plugins from sparse checkout (now inside public_html/)
 # MODIFIED v2.0: Removed post-checkout file moving logic
 # MODIFIED v2.0: Simplified deployment - repository structure matches deployment
 
 # Deploy script version
-DEPLOY_VERSION="2.0"
+DEPLOY_VERSION="2.1"
 
 # Repository settings
 GITHUB_USER="getjoinery"
@@ -115,7 +118,7 @@ if [[ -d "$TARGET_DIR" ]]; then
         echo ""
         echo "This deployment will:"
         echo "  - Initialize as git repository with sparse checkout"
-        echo "  - Pull only: public_html/, theme/, plugins/, maintenance scripts/, docs/"
+        echo "  - Pull only: public_html/, theme/, plugins/, maintenance_scripts/, docs/"
         echo "  - Preserve existing: config/, cache/, logs/, backups/, static_files/, uploads/"
         echo ""
         read -p "Proceed with deployment? (y/N): " -n 1 -r
@@ -137,7 +140,7 @@ if [[ -d "$TARGET_DIR" ]]; then
         echo "Configuring sparse checkout..."
         git config core.sparseCheckout true
         git sparse-checkout init --cone
-        git sparse-checkout set public_html "maintenance scripts" docs
+        git sparse-checkout set public_html "maintenance_scripts" docs
 
         # Fetch and checkout
         echo "Fetching repository..."
@@ -159,7 +162,7 @@ if [[ -d "$TARGET_DIR" ]]; then
         echo "Configuring sparse checkout..."
         git config core.sparseCheckout true
         git sparse-checkout init --cone
-        git sparse-checkout set public_html "maintenance scripts" docs
+        git sparse-checkout set public_html "maintenance_scripts" docs
 
         # Fetch and checkout
         echo "Fetching repository..."
@@ -182,7 +185,7 @@ else
     echo "Configuring sparse checkout..."
     git config core.sparseCheckout true
     git sparse-checkout init --cone
-    git sparse-checkout set public_html "maintenance scripts" docs
+    git sparse-checkout set public_html "maintenance_scripts" docs
 
     # Fetch and checkout
     echo "Fetching repository..."
@@ -202,7 +205,7 @@ echo "  ├── .git/              (git repository - sparse checkout)"
 echo "  ├── public_html/       (application code)"
 echo "  │   ├── theme/         (themes)"
 echo "  │   └── plugins/       (plugins)"
-echo "  ├── maintenance scripts/"
+echo "  ├── maintenance_scripts/"
 echo "  ├── docs/"
 echo "  └── [preserved dirs]/  (config, cache, logs, etc. - not tracked)"
 echo ""

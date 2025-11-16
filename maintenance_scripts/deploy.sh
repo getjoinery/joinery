@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-#version 3.7 - Repository restructure: theme/plugins now in public_html/
+#version 3.8 - Directory rename: "maintenance scripts" → "maintenance_scripts"
+# MODIFIED v3.8: Renamed "maintenance scripts" to "maintenance_scripts" (underscore instead of space)
+# MODIFIED v3.8: Updated git sparse-checkout to use "maintenance_scripts"
+# MODIFIED v3.8: Updated all path references to use underscore notation
 # MODIFIED v3.7: Theme and plugins now in public_html/ in repository (not root)
 # MODIFIED v3.7: Removed separate theme/plugin sparse checkout (now part of public_html checkout)
 # MODIFIED v3.7: Renamed deploy_theme_plugin() to deploy_maintenance_scripts()
@@ -20,7 +23,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.7"
+DEPLOY_VERSION="3.8"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -421,7 +424,7 @@ deploy_maintenance_scripts() {
     cd "$maintenance_stage_dir" || exit 1
     git config core.sparseCheckout true
     git sparse-checkout init --cone
-    git sparse-checkout set "maintenance scripts"
+    git sparse-checkout set "maintenance_scripts"
     if [ "$VERBOSE" = true ]; then
         git checkout main
     else
@@ -431,14 +434,14 @@ deploy_maintenance_scripts() {
     cd - > /dev/null
 
     # Deploy maintenance_scripts directly to site root
-    if [[ -d "$maintenance_stage_dir/maintenance scripts" ]]; then
+    if [[ -d "$maintenance_stage_dir/maintenance_scripts" ]]; then
         verbose_echo "Deploying maintenance scripts..."
 
         # Remove old maintenance_scripts if exists
         rm -rf "$site_root/maintenance_scripts"
 
-        # Move to site root (rename from "maintenance scripts" to "maintenance_scripts")
-        mv "$maintenance_stage_dir/maintenance scripts" "$site_root/maintenance_scripts" || {
+        # Move to site root
+        mv "$maintenance_stage_dir/maintenance_scripts" "$site_root/maintenance_scripts" || {
             echo "ERROR: Failed to deploy maintenance scripts"
             return 1
         }
