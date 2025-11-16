@@ -125,9 +125,7 @@ $page_vars = $page_vars->data;
 					$formwriter->captcha_hidden_input('blog');
 				}
 
-				$formwriter->start_buttons();
 				$formwriter->submitbutton('submit', 'Comment', ['class' => 'btn btn-primary']);
-				$formwriter->end_buttons();
 				$formwriter->end_form();
 			}
 		}
