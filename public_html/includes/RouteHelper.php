@@ -275,7 +275,7 @@ class RouteHelper {
         
         return $path;
     }
-    
+
     /**
      * Match route pattern against request path and return route configuration
      * 
