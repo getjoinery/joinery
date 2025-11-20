@@ -1,0 +1,26 @@
+/* Joinery Custom Styles for Phillyzouk Theme */
+
+/* Fix logo visibility on dark navbar background - increased specificity */
+.navbar-area .main-nav .navbar-brand img,
+.navbar-area .mobile-nav .logo img,
+.nav-area .navbar-brand img,
+.nav-area .mobile-nav img {
+    filter: brightness(0) invert(1) !important;
+}
+
+/* Ensure footer logo stays normal (light background) */
+.footer-top-area img {
+    filter: none !important;
+}
+
+/* Site name logo styling when no logo image is set */
+.site-name-logo {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-decoration: none;
+}
+
+.navbar-brand .site-name-logo {
+    display: inline-block;
+}

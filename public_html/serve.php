@@ -206,7 +206,7 @@ $routes = [
             }
             
             // RouteHelper automatically sets $is_valid_page = true when a route matches
-            
+
             if(file_exists($template_file)){
                 require_once($template_file);
             } else if(file_exists($base_file)){

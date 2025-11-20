@@ -1,0 +1,10 @@
+{
+    "name": "phillyzouk",
+    "display_name": "Phillyzouk Modern Blog",
+    "version": "1.0.0",
+    "description": "Modern and responsive blog & magazine theme",
+    "author": "Joinery Team",
+    "cssFramework": "bootstrap",
+    "formWriterBase": "FormWriterBootstrap",
+    "publicPageBase": "PublicPageBase"
+}
