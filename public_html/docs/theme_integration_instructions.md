@@ -776,13 +776,29 @@ If the source template includes blog listing and single post pages, integrate th
 ### Step 1: Identify Blog Pages in Source Template
 
 Look for these HTML files in the source template:
-- Blog listing pages: `blog.html`, `full-width-blog.html`, `left-sidebar.html`, `right-sidebar.html`
+- Blog listing pages: `blog.html`, `full-width-blog.html`, `author.html`, `category.html`
 - Single post pages: `post.html`, `post-style-*.html`, `blog-single.html`, `article.html`
+- Note: `left-sidebar.html` and `right-sidebar.html` are usually single post pages with sidebars, NOT blog listings
 
 ```bash
 # Find blog-related pages
-find /path/to/source/template/ -name "*.html" | grep -iE "blog|post|article"
+find /path/to/source/template/ -name "*.html" | grep -iE "blog|post|article|author"
 ```
+
+**CRITICAL: If multiple blog listing styles are found, ALWAYS ask the user which style to use before implementing.**
+
+Common blog listing styles:
+- **Full-width grid**: 3-4 column grid with vertical blog cards (e.g., `full-width-blog.html`)
+- **Sidebar layout**: 8-column content + 4-column sidebar with horizontal blog cards (e.g., `author.html`)
+- **List layout**: Single column with large horizontal cards
+- **Masonry layout**: Variable height cards in grid
+
+Example question to ask:
+> "I found multiple blog listing styles in the template:
+> 1. `full-width-blog.html` - Full-width 3-column grid with vertical cards
+> 2. `author.html` - 8-column content + 4-column sidebar with horizontal cards
+>
+> Which layout would you like to use for the blog listing page?"
 
 ### Step 2: Review Core Blog Files
 
@@ -1034,9 +1050,12 @@ When adding blog pages to a theme:
 - [ ] Read core `/views/post.php` for structure reference
 - [ ] Create `theme/[themename]/views/blog.php` with theme HTML
 - [ ] Create `theme/[themename]/views/post.php` with theme HTML
+- [ ] **CRITICAL: Set file permissions to 644** (`chmod 644 theme/[themename]/views/*.php`)
 - [ ] Replace static blog items with `foreach ($page_vars['posts'] as $post)` loop
 - [ ] Replace static post content with `$post->get()` methods
 - [ ] Update all asset paths to `/theme/[themename]/assets/`
+- [ ] Validate PHP syntax with `php -l` on both files
+- [ ] Run method existence test on both files
 - [ ] Test blog listing at `/blog` URL
 - [ ] Test single post at `/post/[slug]` URL
 - [ ] Verify pagination works (if implemented)
