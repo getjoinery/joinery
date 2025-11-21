@@ -769,6 +769,318 @@ When integrating settings into a new theme:
 - [ ] **Check logo visibility on footer background** (light logo on light bg = invisible)
 - [ ] Add CSS filters if needed to ensure logo visibility
 
+## Integrating Blog and Post Pages
+
+If the source template includes blog listing and single post pages, integrate them into the theme.
+
+### Step 1: Identify Blog Pages in Source Template
+
+Look for these HTML files in the source template:
+- Blog listing pages: `blog.html`, `full-width-blog.html`, `left-sidebar.html`, `right-sidebar.html`
+- Single post pages: `post.html`, `post-style-*.html`, `blog-single.html`, `article.html`
+
+```bash
+# Find blog-related pages
+find /path/to/source/template/ -name "*.html" | grep -iE "blog|post|article"
+```
+
+### Step 2: Review Core Blog Files
+
+Joinery provides two core blog view files as references:
+
+**`/views/blog.php`** - Blog listing page structure:
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
+
+$page_vars = blog_logic($_GET, $_POST);
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
+
+$page = new PublicPage();
+$page->public_header(array(
+    'is_valid_page' => $is_valid_page,
+    'title' => $page_vars['title']
+));
+
+// Loop through $page_vars['posts'] and display blog listing
+
+$page->public_footer();
+?>
+```
+
+**`/views/post.php`** - Single post page structure:
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('post_logic.php', 'logic'));
+
+$page_vars = post_logic($_GET, $_POST, $post);
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
+$post = $page_vars['post'];
+
+$page = new PublicPage();
+$page->public_header(array(
+    'is_valid_page' => $is_valid_page,
+    'title' => $post->get('pst_title')
+));
+
+// Display single post content using $post object
+
+$page->public_footer();
+?>
+```
+
+### Step 3: Create Theme Blog Listing Page
+
+Create `theme/[themename]/views/blog.php`:
+
+1. **Start with core structure from `/views/blog.php`**
+2. **Extract HTML from source template** (e.g., `full-width-blog.html`)
+3. **Replace static blog items with PHP loop**
+
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
+
+$page_vars = blog_logic($_GET, $_POST);
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
+
+$page = new PublicPage();
+$page->public_header(array(
+    'is_valid_page' => $is_valid_page,
+    'title' => $page_vars['title']
+));
+?>
+
+<!-- Extract blog listing HTML from source template -->
+<section class="blog-area">
+    <div class="container">
+        <div class="row">
+            <?php
+            if (!$page_vars['posts']) {
+                echo '<p>No posts found.</p>';
+            } else {
+                foreach ($page_vars['posts'] as $post) {
+                    $author = new User($post->get('pst_usr_user_id'), TRUE);
+                    $post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
+                    ?>
+
+                    <!-- Blog post card from source template -->
+                    <div class="col-lg-4 col-md-6">
+                        <div class="blog-card">
+                            <div class="blog-image">
+                                <a href="<?php echo $post->get_url(); ?>">
+                                    <img src="https://via.placeholder.com/400x300"
+                                         alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
+                                </a>
+                            </div>
+                            <div class="blog-content">
+                                <h3>
+                                    <a href="<?php echo $post->get_url(); ?>">
+                                        <?php echo htmlspecialchars($post->get('pst_title')); ?>
+                                    </a>
+                                </h3>
+                                <div class="blog-meta">
+                                    <span><?php echo date('F j, Y', strtotime($post->get('pst_published_time'))); ?></span>
+                                    <span>By <?php echo htmlspecialchars($author->display_name()); ?></span>
+                                </div>
+                                <p><?php echo htmlspecialchars(substr(strip_tags($post->get('pst_body')), 0, 150)) . '...'; ?></p>
+                                <a href="<?php echo $post->get_url(); ?>" class="read-more">Read More</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <?php
+                }
+            }
+            ?>
+        </div>
+    </div>
+</section>
+
+<?php
+$page->public_footer();
+?>
+```
+
+### Step 4: Create Theme Single Post Page
+
+Create `theme/[themename]/views/post.php`:
+
+1. **Start with core structure from `/views/post.php`**
+2. **Extract HTML from source template** (e.g., `post-style-one.html`)
+3. **Replace static content with dynamic post data**
+
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('post_logic.php', 'logic'));
+
+$page_vars = post_logic($_GET, $_POST, $post);
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
+$post = $page_vars['post'];
+
+$page = new PublicPage();
+$page->public_header(array(
+    'is_valid_page' => $is_valid_page,
+    'title' => $post->get('pst_title')
+));
+?>
+
+<!-- Extract single post HTML from source template -->
+<article class="post-single">
+    <div class="container">
+        <div class="post-header">
+            <h1><?php echo htmlspecialchars($post->get('pst_title')); ?></h1>
+
+            <div class="post-meta">
+                <span class="author">
+                    By <?php echo htmlspecialchars($page_vars['author']->display_name()); ?>
+                </span>
+                <span class="date">
+                    <?php echo date('F j, Y', strtotime($post->get('pst_published_time'))); ?>
+                </span>
+            </div>
+
+            <!-- Tags -->
+            <div class="post-tags">
+                <?php foreach ($page_vars['tags'] as $tag): ?>
+                    <a href="/blog/tag/<?php echo urlencode($tag); ?>" class="tag">
+                        <?php echo htmlspecialchars($tag); ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <div class="post-content">
+            <?php echo $post->get('pst_body'); ?>
+        </div>
+
+        <?php if ($page_vars['settings']->get_setting('blog_footer_text')): ?>
+        <div class="post-footer">
+            <?php echo $page_vars['settings']->get_setting('blog_footer_text'); ?>
+        </div>
+        <?php endif; ?>
+    </div>
+</article>
+
+<?php
+$page->public_footer();
+?>
+```
+
+### Available Blog Variables
+
+**In `blog.php` (from `blog_logic()`):**
+- `$page_vars['posts']` - Array of Post objects
+- `$page_vars['title']` - Page title
+- `$page_vars['tag']` - Current tag filter (if any)
+- `$page_vars['settings']` - Globalvars instance
+
+**In `post.php` (from `post_logic()`):**
+- `$page_vars['post']` - Post object (also available as `$post`)
+- `$page_vars['author']` - User object for post author
+- `$page_vars['tags']` - Array of tag names for this post
+- `$page_vars['settings']` - Globalvars instance
+
+### Post Object Methods
+
+```php
+// Post data
+$post->get('pst_title')          // Post title
+$post->get('pst_body')           // Post content (HTML)
+$post->get('pst_published_time') // Published timestamp
+$post->get('pst_usr_user_id')    // Author user ID
+$post->get_url()                 // Post URL (/post/slug)
+
+// Author data
+$author = new User($post->get('pst_usr_user_id'), TRUE);
+$author->display_name()          // Author display name
+$author->get('usr_email')        // Author email
+
+// Tags
+$post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
+```
+
+### Blog Integration Checklist
+
+When adding blog pages to a theme:
+
+- [ ] Check if source template has blog listing page(s)
+- [ ] Check if source template has single post page(s)
+- [ ] Read core `/views/blog.php` for structure reference
+- [ ] Read core `/views/post.php` for structure reference
+- [ ] Create `theme/[themename]/views/blog.php` with theme HTML
+- [ ] Create `theme/[themename]/views/post.php` with theme HTML
+- [ ] Replace static blog items with `foreach ($page_vars['posts'] as $post)` loop
+- [ ] Replace static post content with `$post->get()` methods
+- [ ] Update all asset paths to `/theme/[themename]/assets/`
+- [ ] Test blog listing at `/blog` URL
+- [ ] Test single post at `/post/[slug]` URL
+- [ ] Verify pagination works (if implemented)
+- [ ] Verify tag filtering works at `/blog/tag/[tagname]`
+
+### Common Blog Patterns
+
+**Excerpt generation:**
+```php
+<?php echo htmlspecialchars(substr(strip_tags($post->get('pst_body')), 0, 150)) . '...'; ?>
+```
+
+**Date formatting:**
+```php
+<?php echo date('F j, Y', strtotime($post->get('pst_published_time'))); ?>
+```
+
+**Tag links:**
+```php
+<?php foreach ($page_vars['tags'] as $tag): ?>
+    <a href="/blog/tag/<?php echo urlencode($tag); ?>">
+        <?php echo htmlspecialchars($tag); ?>
+    </a>
+<?php endforeach; ?>
+```
+
+**Author display:**
+```php
+<?php
+$author = new User($post->get('pst_usr_user_id'), TRUE);
+echo htmlspecialchars($author->display_name());
+?>
+```
+
+### Note on Blog Routes
+
+Blog and post pages are already configured in `/serve.php`:
+```php
+'/blog/*' => function(...) // Handles /blog and /blog/tag/[tagname]
+'/post/{slug}' => ['model' => 'Post', ...] // Handles /post/[slug]
+```
+
+No routing changes needed - just create the view files.
+
 ## Lessons Learned from Phillyzouk Implementation
 
 ### What Went Wrong Initially
