@@ -1157,6 +1157,10 @@ For most themes, the default utility pages styled with your theme's CSS framewor
 3. **Use theme's exact structure:** Don't simplify or "improve" the HTML
 4. **Test with browser console open:** Catch 404s and JS errors immediately
 
+## Canonical URLs (SEO)
+
+The system automatically adds canonical URL tags to all public pages. It uses your `webDir` setting as configured and strips pagination parameters (`offset`, `page`, `page_offset`, `p`). No additional configuration needed. See the implementation in `PublicPageBase::get_canonical_url()` (includes/PublicPageBase.php:429-459).
+
 ## Final Tips
 
 1. Start with a simple layout first (homepage only)
