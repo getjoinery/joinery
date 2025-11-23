@@ -57,6 +57,8 @@ class PublicPage extends PublicPageBase {
         <link rel="icon" type="image/png" href="/theme/phillyzouk/assets/images/favicon.png">
 
         <title><?php echo htmlspecialchars($title); ?></title>
+
+        <?php $this->global_includes_top($options); ?>
     </head>
     <body>
 

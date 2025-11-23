@@ -109,27 +109,27 @@ $page->public_header($hoptions);
                         <ul class="pagination">
                             <?php if($page_vars['pager']->is_valid_page('-1')): ?>
                                 <li class="page-item">
-                                    <a class="page-link page-links" href="?<?php echo $page_vars['pager']->get_param_string('-1'); ?>">
+                                    <a class="page-link page-links" href="<?php echo $page_vars['pager']->get_url('-1'); ?>">
                                         <i class='bx bx-chevrons-left'></i>
                                     </a>
                                 </li>
                             <?php endif; ?>
 
                             <?php
-                            $current_page = $page_vars['pager']->get_param();
-                            $total_pages = ceil($page_vars['pager']->num_records() / $page_vars['pager']->get_limit());
+                            $current_page = $page_vars['pager']->current_page();
+                            $total_pages = ceil($page_vars['pager']->num_records() / $page_vars['pager']->num_per_page());
 
                             for($i = 1; $i <= $total_pages && $i <= 5; $i++):
                                 $active = ($i == $current_page) ? 'active' : '';
                                 ?>
                                 <li class="page-item <?php echo $active; ?>">
-                                    <a class="page-link" href="?<?php echo $page_vars['pager']->get_param_string($i); ?>"><?php echo $i; ?></a>
+                                    <a class="page-link" href="<?php echo $page_vars['pager']->get_url($i); ?>"><?php echo $i; ?></a>
                                 </li>
                             <?php endfor; ?>
 
                             <?php if($page_vars['pager']->is_valid_page('+1')): ?>
                                 <li class="page-item">
-                                    <a class="page-link" href="?<?php echo $page_vars['pager']->get_param_string('+1'); ?>">
+                                    <a class="page-link" href="<?php echo $page_vars['pager']->get_url('+1'); ?>">
                                         <i class='bx bx-chevrons-right'></i>
                                     </a>
                                 </li>
