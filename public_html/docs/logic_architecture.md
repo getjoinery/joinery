@@ -394,6 +394,103 @@ The theme version will be loaded when using:
 require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 ```
 
+### Best Practice: Extending Base Logic Without Modifying Core
+
+Instead of completely replacing core logic, themes can create focused logic files that provide **additional data** to core views. This approach:
+- Keeps core logic untouched
+- Allows multiple themes to coexist with different data needs
+- Makes maintenance easier
+- Follows single responsibility principle
+
+**Example: Homepage with Dynamic Content**
+
+Base core logic typically handles general page preparation. A theme-specific logic can extend this with custom data:
+
+```php
+// /theme/phillyzouk/logic/index_logic.php
+<?php
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
+
+function index_logic($get_vars, $post_vars) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('data/posts_class.php'));
+    require_once(PathHelper::getIncludePath('data/events_class.php'));
+
+    $page_vars = array();
+
+    // Load recent blog posts (4 posts for homepage)
+    $recent_posts = new MultiPost(
+        array('published' => TRUE, 'deleted' => false),
+        array('pst_published_time' => 'DESC'),
+        4, 0
+    );
+    $recent_posts->load();
+    $page_vars['recent_posts'] = $recent_posts;
+
+    // Load upcoming events (6 events for sidebar)
+    $upcoming_events = new MultiEvent(
+        array('deleted' => false, 'after_date' => date('Y-m-d H:i:s')),
+        array('evt_start_time' => 'ASC'),
+        6, 0
+    );
+    $upcoming_events->load();
+    $page_vars['upcoming_events'] = $upcoming_events;
+
+    return LogicResult::render($page_vars);
+}
+?>
+```
+
+**Using the Theme Logic in Views**
+
+```php
+// /theme/phillyzouk/views/index.php
+<?php
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
+
+$page_vars = index_logic($_GET, $_POST);
+// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
+
+$page = new PublicPage();
+$page->public_header(array(
+    'title' => 'Home',
+    'showheader' => true
+));
+?>
+
+<!-- Use $page_vars['recent_posts'] and $page_vars['upcoming_events'] in template -->
+<?php foreach ($page_vars['recent_posts'] as $post): ?>
+    <!-- Render post -->
+<?php endforeach; ?>
+```
+
+**Key Advantages of This Pattern**
+
+1. **No Core Modification** - Base logic files remain unchanged
+2. **Theme-Specific Data** - Each theme can load different data sets
+3. **Clear Separation** - Logic layer stays independent from view layer
+4. **Easy Debugging** - Can inspect `$page_vars` to see what data is available
+5. **Reusable** - Other themes can use similar patterns for their needs
+
+**File Permissions Note**
+
+When creating theme logic files, ensure proper permissions:
+```bash
+# Directory: readable and executable by web server
+chmod 755 /theme/themename/logic/
+
+# Files: readable by web server
+chmod 644 /theme/themename/logic/*.php
+```
+
+Failure to set proper permissions will result in "File not found" errors even though the file exists.
+
 ## Common Issues and Solutions
 
 ### Issue: "Cannot use object of type LogicResult as array"

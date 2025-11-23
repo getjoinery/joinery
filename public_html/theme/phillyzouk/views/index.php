@@ -1,5 +1,14 @@
 <?php
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
+
+$page_vars = index_logic($_GET, $_POST);
+// Handle LogicResult return format
+if ($page_vars->redirect) {
+    LibraryFunctions::redirect($page_vars->redirect);
+    exit();
+}
+$page_vars = $page_vars->data;
 
 $page = new PublicPage();
 $page->public_header(array(
@@ -172,166 +181,93 @@ End Main Blog List Area -->
         <div class="row">
             <div class="col-lg-8">
                 <div class="row">
-                    <div class="col-lg-6 col-md-6">
-                        <div class="single-featured">
-                            <a href="#" class="blog-img">
-                                <img src="/theme/phillyzouk/assets/images/home-three/business/1.jpg" alt="Image">
-                                <span>News</span>
-                            </a>
-                            <div class="featured-content">
-                                <ul>
-                                    <li>
-                                        <a href="#" class="admin">
-                                            <i class="bx bx-user"></i>
-                                            Admin By Jhona Walker
+                    <?php
+                    if ($page_vars['recent_posts']->count() > 0) {
+                        $count = 0;
+                        foreach ($page_vars['recent_posts'] as $post) {
+                            if ($count >= 4) break;
+                            $author = new User($post->get('pst_usr_user_id'), TRUE);
+                            $post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
+                            $tag_name = !empty($post_tags) ? $post_tags[0] : 'News';
+                            ?>
+                            <div class="col-lg-6 col-md-6">
+                                <div class="single-featured">
+                                    <a href="<?php echo $post->get_url(); ?>" class="blog-img">
+                                        <?php if ($post->get('pst_image_link')): ?>
+                                            <img src="<?php echo htmlspecialchars($post->get('pst_image_link')); ?>" alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
+                                        <?php else: ?>
+                                            <img src="https://via.placeholder.com/400x300/f8f9fa/6c757d?text=Blog+Post" alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
+                                        <?php endif; ?>
+                                    </a>
+                                    <div class="featured-content">
+                                        <ul>
+                                            <li>
+                                                <a href="#" class="admin">
+                                                    <i class="bx bx-user"></i>
+                                                    <?php echo htmlspecialchars($author->display_name()); ?>
+                                                </a>
+                                            </li>
+                                            <li>
+                                                <i class="bx bx-calendar"></i>
+                                                <?php echo date('d M Y', strtotime($post->get('pst_published_time'))); ?>
+                                            </li>
+                                        </ul>
+                                        <a href="<?php echo $post->get_url(); ?>">
+                                            <h3><?php echo htmlspecialchars($post->get('pst_title')); ?></h3>
                                         </a>
-                                    </li>
-                                    <li>
-                                        <i class="bx bx-calendar"></i>
-                                        25 Mar 2024
-                                    </li>
-                                </ul>
-                                <a href="#">
-                                    <h3>The Supreme Art of War is to Subdue the Enemy Without Fighting</h3>
-                                </a>
-                                <p>Lorem ipsum dolor sit amet consectetur adipisicing elit. Facere laboriosam eveniet debitis tenetur.</p>
-                                <a href="#" class="read-more">Read More</a>
+                                        <p><?php
+                                            if($post->get('pst_short_description')){
+                                                echo htmlspecialchars($post->get('pst_short_description'));
+                                            } else {
+                                                echo htmlspecialchars(substr(strip_tags($post->get('pst_body')),0,150)) . '...';
+                                            }
+                                        ?></p>
+                                        <a href="<?php echo $post->get_url(); ?>" class="read-more">Read More</a>
+                                    </div>
+                                </div>
                             </div>
+                            <?php
+                            $count++;
+                        }
+                    } else {
+                        ?>
+                        <div class="col-lg-12">
+                            <p>No blog posts published yet.</p>
                         </div>
-                    </div>
-
-                    <div class="col-lg-6 col-md-6">
-                        <div class="single-featured">
-                            <a href="#" class="blog-img">
-                                <img src="/theme/phillyzouk/assets/images/home-three/business/2.jpg" alt="Image">
-                                <span>News</span>
-                            </a>
-                            <div class="featured-content">
-                                <ul>
-                                    <li>
-                                        <a href="#" class="admin">
-                                            <i class="bx bx-user"></i>
-                                            Admin By Kilva Walker
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <i class="bx bx-calendar"></i>
-                                        26 Mar 2024
-                                    </li>
-                                </ul>
-                                <a href="#">
-                                    <h3>No Fixed Abode: Quitting Home Ownership</h3>
-                                </a>
-                                <p>Lorem ipsum dolor sit amet consectetur adipisicing elit. Facere laboriosam eveniet debitis tenetur.</p>
-                                <a href="#" class="read-more">Read More</a>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="col-lg-6 col-md-6">
-                        <div class="single-featured">
-                            <a href="#" class="blog-img">
-                                <img src="/theme/phillyzouk/assets/images/home-three/business/3.jpg" alt="Image">
-                                <span>Business</span>
-                            </a>
-                            <div class="featured-content">
-                                <ul>
-                                    <li>
-                                        <a href="#" class="admin">
-                                            <i class="bx bx-user"></i>
-                                            Admin By Jexk Walker
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <i class="bx bx-calendar"></i>
-                                        27 Mar 2024
-                                    </li>
-                                </ul>
-                                <a href="#">
-                                    <h3>Developing Self-Control Through The Wonders of Intermittent Fasting</h3>
-                                </a>
-                                <p>Lorem ipsum dolor sit amet consectetur adipisicing elit. Facere laboriosam eveniet debitis tenetur.</p>
-                                <a href="#" class="read-more">Read More</a>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="col-lg-6 col-md-6">
-                        <div class="single-featured">
-                            <a href="#" class="blog-img">
-                                <img src="/theme/phillyzouk/assets/images/home-three/business/4.jpg" alt="Image">
-                                <span>Economy</span>
-                            </a>
-                            <div class="featured-content">
-                                <ul>
-                                    <li>
-                                        <a href="#" class="admin">
-                                            <i class="bx bx-user"></i>
-                                            Admin By Anna Dew
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <i class="bx bx-calendar"></i>
-                                        28 Mar 2024
-                                    </li>
-                                </ul>
-                                <a href="#">
-                                    <h3>The 4 convolution's Neural Network Models That Can Classify</h3>
-                                </a>
-                                <p>Lorem ipsum dolor sit amet consectetur adipisicing elit. Facere laboriosam eveniet debitis tenetur.</p>
-                                <a href="#" class="read-more">Read More</a>
-                            </div>
-                        </div>
-                    </div>
+                        <?php
+                    }
+                    ?>
                 </div>
             </div>
 
             <div class="col-lg-4">
                 <div class="right-blog-editor-wrap-three">
-                    <div class="right-blog-editor media align-items-center">
-                        <a href="#">
-                            <img src="/theme/phillyzouk/assets/images/home-three/business/7.jpg" alt="Image">
-                        </a>
-                        <div class="right-blog-content">
-                            <a href="#">
-                                <h3>Advantage & Disadvantages of having Matchbook</h3>
-                            </a>
-                            <span>
-                                <i class="bx bx-calendar"></i>
-                                25 Mar 2024
-                            </span>
-                        </div>
-                    </div>
-
-                    <div class="right-blog-editor media align-items-center">
-                        <a href="#">
-                            <img src="/theme/phillyzouk/assets/images/home-three/business/8.jpg" alt="Image">
-                        </a>
-                        <div class="right-blog-content">
-                            <a href="#">
-                                <h3>The Scariest Moment is Always Just Before You</h3>
-                            </a>
-                            <span>
-                                <i class="bx bx-calendar"></i>
-                                26 Mar 2024
-                            </span>
-                        </div>
-                    </div>
-
-                    <div class="right-blog-editor media align-items-center">
-                        <a href="#">
-                            <img src="/theme/phillyzouk/assets/images/home-three/business/9.jpg" alt="Image">
-                        </a>
-                        <div class="right-blog-content">
-                            <a href="#">
-                                <h3>The Expert's Guide To Surviving long Haul Flights</h3>
-                            </a>
-                            <span>
-                                <i class="bx bx-calendar"></i>
-                                27 Mar 2024
-                            </span>
-                        </div>
-                    </div>
+                    <h3 style="margin-bottom: 20px;">Upcoming Events</h3>
+                    <?php
+                    if ($page_vars['upcoming_events']->count() > 0) {
+                        foreach ($page_vars['upcoming_events'] as $event) {
+                            ?>
+                            <div style="margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #eee;">
+                                <a href="<?php echo $event->get_url(); ?>">
+                                    <h4 style="margin-bottom: 10px; margin-top: 0;"><?php echo htmlspecialchars($event->get('evt_name')); ?></h4>
+                                </a>
+                                <span style="display: block; font-size: 14px; color: #666; margin-bottom: 5px;">
+                                    <i class="bx bx-calendar"></i>
+                                    <?php echo date('M d, Y', strtotime($event->get('evt_start_time'))); ?>
+                                </span>
+                                <span style="display: block; font-size: 14px; color: #666;">
+                                    <i class="bx bx-time"></i>
+                                    <?php echo date('g:i A', strtotime($event->get('evt_start_time'))); ?>
+                                </span>
+                            </div>
+                            <?php
+                        }
+                    } else {
+                        ?>
+                        <p>No upcoming events scheduled.</p>
+                        <?php
+                    }
+                    ?>
                 </div>
             </div>
         </div>
