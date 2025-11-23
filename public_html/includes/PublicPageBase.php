@@ -420,18 +420,57 @@ abstract class PublicPageBase {
 		
 	}
 	
+	/**
+	 * Generate canonical URL for SEO
+	 * Strips pagination parameters and uses configured domain
+	 *
+	 * @return string Canonical URL
+	 */
+	private function get_canonical_url() {
+		$settings = Globalvars::get_instance();
+
+		// Get current path without query string
+		$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+		// Define parameters to strip (these don't create unique content)
+		$strip_params = ['offset', 'page', 'page_offset', 'p', '__route'];
+
+		// Get all query parameters except those to strip
+		$filtered_params = [];
+		foreach ($_GET as $key => $value) {
+			if (!in_array($key, $strip_params)) {
+				$filtered_params[$key] = $value;
+			}
+		}
+
+		// Get domain from webDir setting (contains domain only, e.g. 'example.com')
+		$webDir = $settings->get_setting('webDir');
+		$canonical_domain = 'https://' . $webDir;
+
+		// Build canonical URL
+		$canonical = $canonical_domain . $path;
+
+		// Add back non-pagination query parameters if any
+		if (!empty($filtered_params)) {
+			$canonical .= '?' . http_build_query($filtered_params);
+		}
+
+		return $canonical;
+	}
+
 	public function global_includes_top($options=array()){
 		$settings = Globalvars::get_instance();
 
-		
-		
+		// Output canonical tag for SEO
+		echo '<link rel="canonical" href="' . htmlspecialchars($this->get_canonical_url(), ENT_QUOTES, 'UTF-8') . '">' . "\n";
+
 		//CHECK TO SEE IF WE PASSED IN A PREVIEW IMAGE
 		if(isset($options['preview_image_url']) && $options['preview_image_url']){
 			//IF NO INCREMENT IS PROVIDED, USE 1
 			if(!isset($options['preview_image_increment'])){
 				!$options['preview_image_increment'] = 1;
 			}
-			echo '<meta property="og:image" content="'.$options['preview_image_url'].'?'.$options['preview_image_increment'].'" />';			
+			echo '<meta property="og:image" content="'.$options['preview_image_url'].'?'.$options['preview_image_increment'].'" />';
 		}
 		else{
 			//IF NOT, USE THE DEFAULT ONE
@@ -440,7 +479,7 @@ abstract class PublicPageBase {
 				echo '<meta property="og:image" content="'.$settings->get_setting('preview_image').'?'.$settings->get_setting('preview_image_increment').'" />';
 			}
 		}
-		
+
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
 		}
