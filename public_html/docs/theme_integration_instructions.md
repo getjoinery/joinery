@@ -1100,6 +1100,39 @@ Blog and post pages are already configured in `/serve.php`:
 
 No routing changes needed - just create the view files.
 
+## Utility Pages (Login, 404, etc.)
+
+**Important:** You do NOT need to create theme-specific versions of utility pages. These pages will automatically inherit the base PublicPageBase styles from your theme's `PublicPage.php` file.
+
+The following pages already have implementations in the core system and will use your theme's header/footer/styling automatically:
+- Login/Sign-in pages (`/login`, `/signup`)
+- Logout (`/logout`)
+- 404 error page (page not found)
+- Password recovery (`/recover-password`)
+- Coming soon page
+- Privacy policy, Terms & conditions, etc.
+- **Shopping cart pages** (`/cart`, `/checkout`) - Uses reference cart page designs by default
+
+**Why?** These utility pages use a different routing pattern in `/serve.php` that doesn't look for theme-specific view files. They render using the core views with your theme's CSS and header/footer, which is usually sufficient.
+
+### Cart Pages (Default Behavior)
+
+By default, shopping cart pages (`/cart`, `/checkout`) will use the reference cart page implementations in the core system. These pages are styled with your theme's CSS framework and use your theme's header/footer.
+
+**When to create custom cart versions:** Only create `theme/[themename]/views/` versions of cart pages if:
+- You need a completely different cart layout or checkout flow
+- The default cart styling doesn't match your theme's design requirements
+- You want to customize the shopping experience significantly
+
+For most themes, using the default cart pages with your theme's styling is recommended to maintain consistency with the Joinery platform's e-commerce functionality.
+
+**When to create custom versions of other utility pages:** Only create `theme/[themename]/views/` versions if:
+- You need completely different HTML structure than the default
+- The default styling doesn't match your theme's design
+- You want to customize the layout significantly
+
+For most themes, the default utility pages styled with your theme's CSS framework are perfectly adequate.
+
 ## Lessons Learned from Phillyzouk Implementation
 
 ### What Went Wrong Initially
