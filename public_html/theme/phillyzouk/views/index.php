@@ -64,7 +64,44 @@ $page->public_header(array(
 </section>
 <!-- End Banner Area -->
 
-<!-- Start Main Blog List Area -->
+<!-- Start About Info Area -->
+<section class="contact-info-area pt-100 pb-70">
+	<div class="container">
+		<div class="row">
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-heart"></i>
+					<h3>Our Passion</h3>
+					<p>We are dedicated to celebrating the art of dance and bringing our community together through movement and music.</p>
+				</div>
+			</div>
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-group"></i>
+					<h3>Community</h3>
+					<p>Join dancers of all levels in a welcoming environment where everyone can express themselves and grow together.</p>
+				</div>
+			</div>
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-music"></i>
+					<h3>Styles</h3>
+					<p>We offer classes in various dance styles including Latin, Ballroom, Contemporary, and more for all skill levels.</p>
+				</div>
+			</div>
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-calendar-event"></i>
+					<h3>Events</h3>
+					<p>Participate in our performances, workshops, and social events throughout the year celebrating dance culture.</p>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+<!-- End About Info Area -->
+
+<!-- Start Main Blog List Area - COMMENTED OUT
 <section class="blog-list-area-three pb-100">
     <div class="container">
         <div class="blog-list-wrap mt-minus-100">
@@ -123,7 +160,7 @@ $page->public_header(array(
         </div>
     </div>
 </section>
-<!-- End Main Blog List Area -->
+End Main Blog List Area -->
 
 <!-- Start Latest Project Area -->
 <section class="latest-project-area pb-70">
