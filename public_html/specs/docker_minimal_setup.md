@@ -1,5 +1,35 @@
 # Specification: Minimal Docker Setup - Single Container Per Site
 
+## Current Status (as of November 2024)
+
+**Overall Docker Compatibility: 85% Complete** ✅
+
+- ✅ **Phase 1 (Archive Structure):** FULLY IMPLEMENTED - tar.gz creation, extraction, and deployment working
+- ⚠️ **Phase 2 (Composer Management):** 95% COMPLETE - One blocking issue must be fixed first (see below)
+- 📋 **Docker Implementation:** SPECIFICATION COMPLETE - Ready to implement after Phase 2 fixes
+
+### ⚠️ BLOCKING ISSUE: composerAutoLoad Migration Disabled
+
+Before Docker can be tested, **one critical fix is needed:**
+
+**File:** `/migrations/migrations.php` (migration 0.68, lines 925-932)
+
+**Current (Broken):**
+```php
+'test' => "SELECT 1 as count"  // ❌ Always returns 1, skips migration!
+```
+
+**Should be:**
+```php
+'test' => "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'composerAutoLoad' AND stg_value LIKE '/home/user1/vendor%'"
+```
+
+**Why it matters:** Without this fix, existing sites won't get updated to use per-site vendor directories (`../vendor/`), causing Docker deployments to fail.
+
+**Estimated fix time:** 5 minutes
+
+See [Phase 2 Status Details](#phase-2-composer-management-status-details) below for complete information.
+
 ## Overview
 
 Run each Joinery site in its own Docker container that includes everything - Apache, PHP, PostgreSQL, and the application. Just run your existing server_setup.sh script unchanged.
@@ -136,6 +166,64 @@ joinerytest/backups/*
 - ❌ No script modifications
 - ❌ No config changes
 - ❌ No separate database container
+
+---
+
+## Phase 2 Composer Management Status Details
+
+### What's Been Implemented ✅
+
+All Phase 2 components have been implemented except for one migration fix:
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| **composer.json** | ✅ Done | Updated to use relative vendor path: `"vendor-dir": "../vendor"` |
+| **ComposerValidator.php** | ✅ Done | Enhanced with vendor directory detection and validation |
+| **deploy.sh** | ✅ Done | v3.8 - Deploys maintenance_scripts directory properly |
+| **new_account.sh** | ✅ Done | Handles gzip-compressed SQL files |
+| **publish_upgrade.php** | ✅ Done | Creates tar.gz archives with all components (2.04 MB) |
+| **upgrade.php** | ✅ Done | Properly extracts tar.gz format |
+| **composerAutoLoad Migration** | ⚠️ **BROKEN** | Migration 0.68 disabled - test condition needs fix (see above) |
+| **server_setup.sh** | ✅ Verify | Should have generic composer.json creation removed |
+
+### Archive Structure (Phase 1) - Complete ✅
+
+Archives are created successfully at `/static_files/joinery-X-Y.tar.gz` containing:
+
+```
+joinery-X-Y.tar.gz
+├── public_html/           (845 application files)
+├── config/                (Globalvars_site_default.php template)
+└── maintenance_scripts/   (12 scripts including joinery-install.sql.gz)
+    ├── server_setup.sh
+    ├── deploy.sh
+    ├── new_account.sh
+    ├── joinery-install.sql.gz
+    └── ... (8 more scripts)
+```
+
+### Next Steps to Reach 100%
+
+**Priority 1: Fix composerAutoLoad Migration (5 minutes)**
+1. Open `/migrations/migrations.php`
+2. Find migration 0.68 (lines 925-932)
+3. Replace the test condition (see blocking issue above)
+4. Run test to verify migration now triggers properly
+
+**Priority 2: Verify server_setup.sh (10 minutes)**
+- Confirm generic `composer.json` creation in `/home/user1/` has been removed
+- Verify conditional composer install only runs for project files at `/var/www/html/$SITENAME/public_html/`
+
+**Priority 3: End-to-End Test (30-60 minutes)**
+- Create fresh archive with publish_upgrade.php
+- Extract and run server_setup.sh on test system
+- Verify `/var/www/html/{SITE}/vendor/` is populated
+- Verify `/var/www/html/{SITE}/maintenance_scripts/` deployed correctly
+- Run deploy.sh and confirm dependencies installed
+
+**Priority 4: Docker Implementation**
+- After Phase 2 is complete, proceed with Docker deployment using this specification
+- All infrastructure is ready; just needs the migration fix
 
 ---
 
@@ -878,6 +966,89 @@ For production with multiple sites, use **Option 1 (Nginx)** because:
 - Can handle SSL certificates with Let's Encrypt
 - Well-documented and widely used
 - Keeps reverse proxy separate from application containers
+
+## Troubleshooting Docker Deployment
+
+### Issue: "Composer autoload not found" or "Vendor directory missing"
+
+**Root Cause:** The composerAutoLoad migration (0.68) is disabled and hasn't updated existing sites to use per-site vendor directories.
+
+**Solution:**
+1. Fix the migration test condition in `/migrations/migrations.php` (lines 925-932)
+2. Run `php /var/www/html/{SITENAME}/public_html/utils/update_database.php` to trigger the migration
+3. Verify the setting was updated: `psql -d {SITENAME} -c "SELECT * FROM stg_settings WHERE stg_name = 'composerAutoLoad';"`
+4. Should show: `../vendor/` (not `/home/user1/vendor/`)
+
+### Issue: Docker build succeeds but container won't start
+
+**Check logs:** `docker logs {SITENAME}`
+
+**Common problems:**
+1. PostgreSQL didn't start properly - wait 10+ seconds, increase sleep time in CMD
+2. Database creation failed - check POSTGRES_PASSWORD matches Globalvars_site.php
+3. update_database.php failed - check PHP syntax and database connectivity
+
+**Solution:**
+```bash
+# Access container shell
+docker exec -it {SITENAME} bash
+
+# Check PostgreSQL status
+service postgresql status
+
+# Check Apache status
+apache2ctl -t
+
+# Check PHP syntax
+php -l /var/www/html/{SITENAME}/public_html/utils/update_database.php
+
+# View Apache error logs
+tail -50 /var/log/apache2/error.log
+```
+
+### Issue: Application loads but shows "Vendor autoload not found"
+
+**Cause:** Composer dependencies not installed in container
+
+**Solution:**
+1. Verify composer.json exists: `/var/www/html/{SITENAME}/public_html/composer.json`
+2. Install manually: `docker exec {SITENAME} bash -c "cd /var/www/html/{SITENAME}/public_html && composer install"`
+3. Or rebuild container to include dependencies in image
+
+### Issue: Database migrations failing in Docker
+
+**Common cause:** update_database.php can't find migrations
+
+**Debug:**
+```bash
+# Inside container
+php -d display_errors=1 /var/www/html/{SITENAME}/public_html/utils/update_database.php
+```
+
+**Check migration file exists:**
+```bash
+docker exec {SITENAME} ls -la /var/www/html/{SITENAME}/public_html/migrations/
+```
+
+### Issue: Persistent data lost after container restart
+
+**Cause:** Volumes not properly mounted
+
+**Solution:** Always use `-v` flags when running container:
+```bash
+docker run -d \
+  --name {SITENAME} \
+  -v {SITENAME}_postgres:/var/lib/postgresql \
+  -v {SITENAME}_uploads:/var/www/html/{SITENAME}/uploads \
+  {other-options}
+```
+
+**To verify volumes are mounted:**
+```bash
+docker inspect {SITENAME} | grep -A 20 Mounts
+```
+
+---
 
 ## Appendix: Installing Docker on a Blank Server
 

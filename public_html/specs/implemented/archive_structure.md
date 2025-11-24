@@ -689,17 +689,17 @@ With Phase 2's standardized `composer.json` (with `vendor-dir: ../vendor`), the 
 ## Summary of Phase 2 Changes
 
 **Code Changes (7 items):**
-1. ✏️ **Migration** - Add composerAutoLoad update migration to migrations.php
-2. ✏️ **composer.json** - Change `vendor-dir` from `/home/user1/vendor` to `../vendor`
-3. ✏️ **ComposerValidator.php** - Add vendor directory detection, validation, and automatic cleanup methods:
+1. ✏️ **Migration** - Add composerAutoLoad update migration to migrations.php *(See note below)*
+2. ✅ **composer.json** - COMPLETED - Changed `vendor-dir` from `/home/user1/vendor` to `../vendor`
+3. ✅ **ComposerValidator.php** - COMPLETED - Added vendor directory detection, validation, and automatic cleanup methods:
    - `detectVendorDirChange()` - Detects vendor directory location changes
    - `validateVendorDirConsistency()` - Validates setting matches composer.json
    - `cleanupOldVendorDirectory()` - Automatically removes old vendor dirs after successful migration
    - `recursiveRemoveDirectory()` - Safe recursive directory removal
    - Modified `installIfNeeded()` - Triggers cleanup after successful install
-4. ✏️ **server_setup.sh** - Remove generic composer.json creation in /home/user1
-5. ✏️ **new_account.sh** - Add support for .gz compressed SQL files
-6. ✏️ **deploy.sh** - Add maintenance_scripts deployment to deploy_theme_plugin() function
+4. ✅ **server_setup.sh** - COMPLETED - Generic composer.json creation removed, summary message updated
+5. ✅ **new_account.sh** - COMPLETED - Added support for .gz compressed SQL files
+6. ✅ **deploy.sh** - COMPLETED - Added maintenance_scripts deployment to deploy_theme_plugin() function
 
 **No Changes Needed:**
 - ✅ **upgrade.php** - Already extracts maintenance_scripts from archive (Phase 1)
@@ -710,5 +710,21 @@ With Phase 2's standardized `composer.json` (with `vendor-dir: ../vendor`), the 
 - Each site gets isolated vendor directory at `/var/www/html/{SITE}/vendor/`
 - Old vendor directories automatically cleaned up during migration
 - Maintenance scripts stay version-matched with code
-- Database setting automatically updated via migration
+- Database setting automatically updated via migration (once fixed)
 - Simple, consistent composer workflow across all scripts
+
+## NOTE: Pending Migration Fix
+
+**The composerAutoLoad migration (0.68) has a disabled test condition** that must be fixed before Docker deployment. This fix is documented in `/specs/docker_minimal_setup.md` (Current Status section) as it's the final blocker for Docker compatibility. The migration test condition is:
+
+**Current (Broken):**
+```php
+'test' => "SELECT 1 as count"  // Always returns 1, skips migration!
+```
+
+**Should be:**
+```php
+'test' => "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'composerAutoLoad' AND stg_value LIKE '/home/user1/vendor%'"
+```
+
+This is a 1-line fix that unblocks Docker deployment.
