@@ -60,6 +60,9 @@ class MethodExistenceTest {
             'start_buttons' => 'Method does not exist in FormWriter V2 - use submitbutton() instead',
             'end_buttons' => 'Method does not exist in FormWriter V2 - use submitbutton() instead',
             'new_form_button' => 'Method does not exist in FormWriter V2 - use submitbutton() instead',
+            'Pager::get_param_string' => 'Method does not exist - use Pager::get_url() instead',
+            'Pager::get_param' => 'Method does not exist - use Pager::current_page() instead',
+            'Pager::get_limit' => 'Method does not exist - use Pager::num_per_page() instead',
         ],
         // Static call blacklist - class::method patterns that are wrong
         'static' => [
