@@ -19,6 +19,20 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **CRITICAL:** NEVER commit to git unless explicitly directed to by the user. File changes are allowed, but git commits require explicit user permission.
 
+## File Permissions
+
+This is a development server. When creating new files, set liberal permissions to avoid access issues:
+
+```bash
+# After creating new PHP files, set permissions to 666
+chmod 666 /path/to/new/file.php
+
+# After creating new directories, set permissions to 777
+chmod 777 /path/to/new/directory
+```
+
+This ensures the web server and all users can read/write files without permission errors.
+
 ## CRITICAL: File Include Rules
 
 **⚠️ NEVER REQUIRE PathHelper, Globalvars, or SessionControl - THEY ARE ALWAYS AVAILABLE! ⚠️**
