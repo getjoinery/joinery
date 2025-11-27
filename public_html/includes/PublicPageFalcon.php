@@ -498,7 +498,7 @@ class PublicPageFalcon extends PublicPageBase {
 
 	<link rel="stylesheet" type="text/css" id="stylesheet" href="<?php echo PathHelper::getThemeFilePath('simplebar.min.css', 'assets/vendors/simplebar', 'web', 'falcon'); ?>">
 	<link rel="stylesheet" type="text/css" id="style-default" href="<?php echo PathHelper::getThemeFilePath('theme.css', 'assets/css', 'web', 'falcon'); ?>">
-	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo PathHelper::getThemeFilePath('user_exceptions.css', 'assets/css', 'web', 'falcon'); ?>">
+	<link rel="stylesheet" type="text/css" id="user-style-default" href="<?php echo PathHelper::getThemeFilePath('user_exceptions.css', 'assets/css', 'web', 'falcon'); ?>?v=<?php echo time(); ?>">
 	
 	
 
@@ -671,12 +671,8 @@ class PublicPageFalcon extends PublicPageBase {
 	<script src="/assets/js/joinery-validate.js"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('popper.min.js', 'assets/vendors/popper', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('bootstrap.min.js', 'assets/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('anchor.min.js', 'assets/vendors/anchorjs', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('is.min.js', 'assets/vendors/is', 'web', 'falcon'); ?>"></script>
-    <script src="<?php echo PathHelper::getThemeFilePath('all.min.js', 'assets/vendors/fontawesome', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('lodash.min.js', 'assets/vendors/lodash', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('list.min.js', 'assets/vendors/list.js', 'web', 'falcon'); ?>"></script>
-	<script src="<?php echo PathHelper::getThemeFilePath('theme.js', 'assets/js', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('all.min.js', 'assets/vendors/fontawesome', 'web', 'falcon'); ?>"></script>
+	<script src="<?php echo PathHelper::getThemeFilePath('theme-admin.js', 'assets/js', 'web', 'falcon'); ?>"></script>
 	
 
 
