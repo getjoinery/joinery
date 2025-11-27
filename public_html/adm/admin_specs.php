@@ -59,6 +59,7 @@ $page->admin_header(
             'Specifications' => '',
         ),
         'session' => $session,
+        'no_page_card' => true,
     )
 );
 
