@@ -145,18 +145,20 @@ $page->admin_header(
 <?php if ($error): ?>
     <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
 <?php else: ?>
-    <div class="spec-content">
-        <style>
-            .spec-content pre { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 4px; overflow-x: auto; }
-            .spec-content code { background: #e8e8e8; color: #333; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }
-            .spec-content pre code { background: none; color: #f8f8f2; padding: 0; }
-            .spec-content h1, .spec-content h2, .spec-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
-            .spec-content h1 { border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
-            .spec-content h2 { border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
-            .spec-content table { margin: 1em 0; }
-            .spec-content ul, .spec-content ol { margin: 0.5em 0; padding-left: 2em; }
-        </style>
-        <?php echo render_markdown($content); ?>
+    <div class="card">
+        <div class="card-body spec-content">
+            <style>
+                .spec-content pre { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 4px; overflow-x: auto; }
+                .spec-content code { background: #e8e8e8; color: #333; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }
+                .spec-content pre code { background: none; color: #f8f8f2; padding: 0; }
+                .spec-content h1, .spec-content h2, .spec-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
+                .spec-content h1 { border-bottom: 1px solid #ddd; padding-bottom: 0.3em; }
+                .spec-content h2 { border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
+                .spec-content table { margin: 1em 0; }
+                .spec-content ul, .spec-content ol { margin: 0.5em 0; padding-left: 2em; }
+            </style>
+            <?php echo render_markdown($content); ?>
+        </div>
     </div>
 <?php endif; ?>
 
