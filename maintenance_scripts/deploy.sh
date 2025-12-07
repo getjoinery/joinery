@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 3.8 - Directory rename: "maintenance scripts" → "maintenance_scripts"
+#version 3.9 - Added --fast option to skip slower tests
 # MODIFIED v3.8: Renamed "maintenance scripts" to "maintenance_scripts" (underscore instead of space)
 # MODIFIED v3.8: Updated git sparse-checkout to use "maintenance_scripts"
 # MODIFIED v3.8: Updated all path references to use underscore notation
@@ -23,7 +23,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.8"
+DEPLOY_VERSION="3.9"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -468,6 +468,7 @@ show_usage() {
     echo "Usage:"
     echo "  $0 [site_name]                    # Full deploy to live site"
     echo "  $0 [site_name] --test             # Full deploy to test site (site_name_test)"
+    echo "  $0 [site_name] --fast             # Fast deploy (skips plugin/bootstrap/model tests)"
     echo "  $0 [site_name] --fix-permissions  # Fix permissions only (no deployment)"
     echo "  $0 [site_name] --rollback [dir]   # Manual rollback to last backup or specified directory"
     echo "  $0 [site_name] --norollback       # Disable rollback on deployment failure"
@@ -476,12 +477,14 @@ show_usage() {
     echo "Examples:"
     echo "  $0 getjoinery                     # Full deploy to getjoinery (live)"
     echo "  $0 getjoinery --test              # Full deploy to getjoinery_test"
+    echo "  $0 getjoinery --fast              # Fast deploy (PHP syntax check only)"
     echo "  $0 getjoinery --fix-permissions   # Fix permissions on getjoinery"
     echo "  $0 getjoinery --rollback          # Rollback to public_html_last"
     echo "  $0 getjoinery --rollback public_html_failed_20240907_143000  # Rollback to specific failed deployment"
     echo "  $0 getjoinery --test --norollback # Full deploy to test site without rollback"
     echo ""
     echo "Note: Permission fixes work best when run with sudo"
+    echo "      --fast skips plugin loading, bootstrap, and model tests (keeps PHP syntax validation)"
     echo "Test site will be available at: https://test.[domain].com"
 }
 
@@ -499,6 +502,7 @@ IS_MANUAL_ROLLBACK=false
 DISABLE_ROLLBACK=false
 ROLLBACK_SOURCE_DIR=""
 VERBOSE=false
+FAST_MODE=false
 
 # Parse arguments with better handling for rollback directory parameter
 i=1
@@ -529,6 +533,9 @@ while [ $i -le $# ]; do
         --verbose|-v)
             VERBOSE=true
             ;;
+        --fast)
+            FAST_MODE=true
+            ;;
     esac
     i=$((i + 1))
 done
@@ -553,6 +560,11 @@ fi
 # Add rollback status to deploy type if disabled
 if [ "$DISABLE_ROLLBACK" = true ]; then
     DEPLOY_TYPE="$DEPLOY_TYPE - ROLLBACK DISABLED"
+fi
+
+# Add fast mode status to deploy type
+if [ "$FAST_MODE" = true ]; then
+    DEPLOY_TYPE="$DEPLOY_TYPE - FAST MODE"
 fi
 
 # SAFETY CHECK: Ensure live site exists (needed for both live and test deploys)
@@ -1010,6 +1022,9 @@ else
 fi
 
 # PLUGIN LOADING TEST ON STAGING (using DeploymentHelper)
+if [ "$FAST_MODE" = true ]; then
+    echo "⚡ Fast mode: Skipping plugin loading test"
+else
 verbose_echo "Testing plugin class file loading on staging..."
 plugin_test_output=$(php -r "
     require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
@@ -1067,8 +1082,12 @@ else
     files_checked=$(echo "$plugin_test_output" | grep "^SUCCESS:" | cut -d: -f2)
     verbose_echo "✓ Plugin loading test passed ($files_checked files checked)"
 fi
+fi  # End of FAST_MODE check for plugin loading test
 
 # APPLICATION BOOTSTRAP TEST ON STAGING (using DeploymentHelper)
+if [ "$FAST_MODE" = true ]; then
+    echo "⚡ Fast mode: Skipping bootstrap test"
+else
 verbose_echo "Testing application bootstrap on staging..."
 bootstrap_output=$(php -r "
     require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
@@ -1116,6 +1135,7 @@ if [ $bootstrap_exit_code -ne 0 ]; then
 else
     verbose_echo "✓ Application bootstrap test passed on staging"
 fi
+fi  # End of FAST_MODE check for bootstrap test
 
 echo "✓ All pre-deployment tests passed on staging"
 
@@ -1251,6 +1271,9 @@ if [[ "$returnvalue" != 0 ]]; then
 fi
 
 # MODEL TESTS ON DEPLOYED CODE (after migrations and composer install)
+if [ "$FAST_MODE" = true ]; then
+    echo "⚡ Fast mode: Skipping model tests"
+else
 verbose_echo "Running model tests on deployed code..."
 model_test_output=$(php -r "
     \$_SERVER['DOCUMENT_ROOT'] = '/var/www/html/$TARGET_SITE/public_html';
@@ -1338,6 +1361,7 @@ if [ $model_test_exit_code -ne 0 ]; then
 else
     verbose_echo "✓ Model tests passed on deployed code"
 fi
+fi  # End of FAST_MODE check for model tests
 
 # PHP syntax validation and plugin loading tests now run on staging before deployment
 
