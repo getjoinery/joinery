@@ -11,13 +11,28 @@
 // PathHelper is guaranteed to be loaded by serve.php - no need to require it here
 
 class RouteHelper {
-    
+
     private static $current_plugin = null;
-    
+
+    // ========================================
+    // MATCH-ONLY MODE (for route testing)
+    // ========================================
+
+    /**
+     * When true, processRoutes returns match info instead of executing
+     * Used by utils/route_debug.php to test routes
+     */
+    public static $match_only_mode = false;
+
+    /**
+     * Stores the match result when in match_only_mode
+     */
+    public static $match_only_result = null;
+
     // ========================================
     // ROUTE DEBUGGING CONFIGURATION
     // ========================================
-    
+
     /**
      * Enable/disable route debugging
      * Set to true to enable comprehensive route debugging logs
@@ -948,10 +963,9 @@ class RouteHelper {
      *
      * @param array $routes Route configuration array
      * @param string $request_path The request path from $_REQUEST['path']
-     * @param bool $match_only If true, return match info instead of executing the route
-     * @return void|array Exits on successful route match, or returns match info if $match_only is true
+     * @return void Exits on successful route match, or stores result in $match_only_result if $match_only_mode is true
      */
-    public static function processRoutes($routes, $request_path, $match_only = false) {
+    public static function processRoutes($routes, $request_path) {
 
         // Auto-enable debugging if requested via URL parameter or header
         $debug_enabled = self::autoEnableDebug();
@@ -1041,8 +1055,8 @@ class RouteHelper {
         error_log("Checking static routes first (before loading dependencies)...");
         if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
             error_log("Static route matched: " . var_export($route, true));
-            if ($match_only) {
-                return [
+            if (self::$match_only_mode) {
+                self::$match_only_result = [
                     'matched' => true,
                     'type' => 'static',
                     'pattern' => $route['pattern'] ?? $full_path,
@@ -1050,6 +1064,7 @@ class RouteHelper {
                     'source' => 'main',
                     'params' => $params
                 ];
+                return;
             }
             error_log("Calling handleStaticRoute (without dependencies)...");
             if (self::handleStaticRoute($route, $params, null)) {
@@ -1279,8 +1294,8 @@ class RouteHelper {
                         'handler_type' => gettype($handler)
                     ]);
 
-                    if ($match_only) {
-                        return [
+                    if (self::$match_only_mode) {
+                        self::$match_only_result = [
                             'matched' => true,
                             'type' => 'custom',
                             'pattern' => $pattern,
@@ -1288,6 +1303,7 @@ class RouteHelper {
                             'source' => 'main',
                             'params' => $params
                         ];
+                        return;
                     }
 
                     if ($handler($params, $settings, $session, $template_directory)) {
@@ -1322,8 +1338,8 @@ class RouteHelper {
         
         // 5. Check dynamic routes (unified content + simple)
         if ($route = self::matchRoute($full_path, $routes['dynamic'] ?? [])) {
-            if ($match_only) {
-                return [
+            if (self::$match_only_mode) {
+                self::$match_only_result = [
                     'matched' => true,
                     'type' => 'dynamic',
                     'pattern' => $route['pattern'] ?? $full_path,
@@ -1331,6 +1347,7 @@ class RouteHelper {
                     'source' => isset($route['plugin_specify']) ? 'plugin:' . $route['plugin_specify'] : 'main',
                     'params' => $params
                 ];
+                return;
             }
             if (self::handleDynamicRoute($route, $params, $template_directory)) {
                 // Save cache before exiting
@@ -1362,8 +1379,8 @@ class RouteHelper {
         // Store debug info for 404 page
         $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
 
-        if ($match_only && $view_full_path) {
-            return [
+        if (self::$match_only_mode && $view_full_path) {
+            self::$match_only_result = [
                 'matched' => true,
                 'type' => 'view_fallback',
                 'pattern' => $view_file,
@@ -1371,6 +1388,7 @@ class RouteHelper {
                 'source' => 'fallback',
                 'params' => $params
             ];
+            return;
         }
 
         $GLOBALS['route_debug_info'] = [
@@ -1418,8 +1436,8 @@ class RouteHelper {
         // This ensures caching works even when exit() is called during route handling
 
         // 8. Final fallback - 404
-        if ($match_only) {
-            return [
+        if (self::$match_only_mode) {
+            self::$match_only_result = [
                 'matched' => false,
                 'type' => null,
                 'pattern' => null,
@@ -1427,6 +1445,7 @@ class RouteHelper {
                 'source' => null,
                 'params' => $params
             ];
+            return;
         }
         self::show404('No matching route found', ['path' => $request_path]);
     }
