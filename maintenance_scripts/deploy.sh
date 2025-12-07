@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 3.9 - Added --fast option to skip slower tests
+#version 3.10 - Added deployment hash display at end of deployment
 # MODIFIED v3.8: Renamed "maintenance scripts" to "maintenance_scripts" (underscore instead of space)
 # MODIFIED v3.8: Updated git sparse-checkout to use "maintenance_scripts"
 # MODIFIED v3.8: Updated all path references to use underscore notation
@@ -23,13 +23,19 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.9"
+DEPLOY_VERSION="3.10"
 
 # Helper function for verbose output
 verbose_echo() {
     if [ "$VERBOSE" = true ]; then
         echo "$@"
     fi
+}
+
+# Calculate deployment hash for comparing sites
+calculate_deployment_hash() {
+    local site_path="$1"
+    find "$site_path" -type f \( -name "*.php" -o -name "*.js" -o -name "*.css" \) -print0 2>/dev/null | sort -z | xargs -0 cat 2>/dev/null | md5sum | cut -d' ' -f1
 }
 
 # Simple JSON value extractor (no jq dependency)
@@ -1396,6 +1402,16 @@ if [[ $failed_dirs_count -eq 0 ]]; then
 else
     verbose_echo "Removed $failed_dirs_count failed deployment directories"
 fi
+
+# Calculate and display deployment hash
+DEPLOY_HASH=$(calculate_deployment_hash "/var/www/html/$TARGET_SITE/public_html")
+echo ""
+echo "========================================="
+echo "DEPLOYMENT HASH: $DEPLOY_HASH"
+echo "========================================="
+echo "Use this hash to verify sites are in sync."
+echo "Compare with other sites using:"
+echo "  find /var/www/html/SITENAME/public_html -type f \\( -name '*.php' -o -name '*.js' -o -name '*.css' \\) -print0 | sort -z | xargs -0 cat | md5sum"
 
 # DEPLOYMENT COMPLETED SUCCESSFULLY
 DEPLOYMENT_SUCCESS=true
