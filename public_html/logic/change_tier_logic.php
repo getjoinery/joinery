@@ -192,6 +192,7 @@ function change_tier_logic($get, $post) {
                     $new_order_item->set('odi_pro_product_id', $product->key);
                     $new_order_item->set('odi_prv_product_version_id', $product_version->key);
                     $new_order_item->set('odi_price', $product_version->get('prv_version_price'));
+                    $new_order_item->set('odi_status', OrderItem::STATUS_PAID);
                     $new_order_item->set('odi_is_subscription', true);
                     $new_order_item->set('odi_stripe_subscription_id', $subscription_id);
                     $new_order_item->set('odi_subscription_status', 'active');
@@ -304,6 +305,7 @@ function change_tier_logic($get, $post) {
                     $new_order_item->set('odi_pro_product_id', $product->key);
                     $new_order_item->set('odi_prv_product_version_id', $product_version->key);
                     $new_order_item->set('odi_price', $product_version->get('prv_version_price'));
+                    $new_order_item->set('odi_status', OrderItem::STATUS_PAID);
                     $new_order_item->set('odi_is_subscription', true);
                     $new_order_item->set('odi_stripe_subscription_id', $subscription_id);
                     $new_order_item->set('odi_subscription_status', 'active');

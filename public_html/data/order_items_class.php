@@ -67,6 +67,7 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	    'odi_stripe_foreign_invoice_id' => array('type'=>'varchar(64)'),
 	    'odi_subscription_status' => array('type'=>'varchar(64)'),
 	    'odi_subscription_period_end' => array('type'=>'timestamp(6)'),
+	    'odi_subscription_cancel_at_period_end' => array('type'=>'bool', 'default'=>false),
 	);
 
 function get_order() {
