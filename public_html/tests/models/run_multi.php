@@ -21,6 +21,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/TestDatabaseHelper.php'));
 
 // SAFETY: Set hard time limit for test execution (15 seconds)
 set_time_limit(15);
@@ -44,6 +45,9 @@ foreach($classes as $class) {
 }
 
 echo '<h2>Multi Class Testing</h2>';
+
+// Check if test database is in sync with live
+TestDatabaseHelper::checkAndWarn();
 
 // Show which database is being used
 try {
