@@ -1,8 +1,9 @@
 <?php
 
 function ctldfilters_edit_logic($get_vars, $post_vars){
-	
+
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	require_once(PathHelper::getIncludePath('plugins/controld/includes/ControlDHelper.php'));
 
