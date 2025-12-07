@@ -153,13 +153,30 @@ $routes = [
             $plugin = $params[2] ?? '';
             $admin_page = $params[4] ?? 'index';
             $admin_file = "plugins/{$plugin}/admin/{$admin_page}.php";
-            
+
             // Debug: will show in route debug logs when enabled
             error_log("Plugin admin route: plugin={$plugin}, admin_page={$admin_page}, file={$admin_file}, exists=" . (file_exists($admin_file) ? 'yes' : 'no'));
-            
+
             if (file_exists($admin_file)) {
                 $is_valid_page = true;
                 require_once($admin_file);
+                return true;
+            }
+            return false;
+        },
+
+        // Plugin tests discovery (requires superadmin)
+        '/plugins/{plugin}/tests/*' => function($params, $settings, $session, $template_directory) {
+            // Require superadmin permission for tests (level 10)
+            $session->check_permission(10);
+
+            $plugin = $params[2] ?? '';
+            $test_page = $params[4] ?? 'run';
+            $test_file = "plugins/{$plugin}/tests/{$test_page}.php";
+
+            if (file_exists($test_file)) {
+                $is_valid_page = true;
+                require_once($test_file);
                 return true;
             }
             return false;
