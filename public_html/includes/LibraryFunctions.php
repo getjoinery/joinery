@@ -1393,7 +1393,7 @@ class LibraryFunctions {
 		else{
 			// Find the primary key column for this table by checking the model classes
 			$pkey_column = null;
-			$classes = LibraryFunctions::discover_model_classes(['require_tablename' => true]);
+			$classes = LibraryFunctions::discover_model_classes(['require_tablename' => true, 'include_plugins' => true]);
 			foreach ($classes as $class) {
 				if ($class::$tablename === $tablename && isset($class::$pkey_column)) {
 					$pkey_column = $class::$pkey_column;
