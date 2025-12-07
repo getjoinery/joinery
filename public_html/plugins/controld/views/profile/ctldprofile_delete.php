@@ -1,11 +1,11 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('ctldprofile_delete_logic.php', 'logic', 'system', null, 'controld'));
 
-	$page_vars = ctldprofile_delete_logic($_GET, $_POST);
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('ctldprofile_delete_logic.php', 'logic', 'system', null, 'controld'));
+
+$page_vars = process_logic(ctldprofile_delete_logic($_GET, $_POST));
 	$profile = $page_vars['profile'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();

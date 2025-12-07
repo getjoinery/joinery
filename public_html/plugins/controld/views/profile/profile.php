@@ -5,7 +5,7 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic', 'system', null, 'controld'));
 
-	$page_vars = profile_logic($_GET, $_POST);
+	$page_vars = process_logic(profile_logic($_GET, $_POST));
 	$tier = $page_vars['tier'];
 	$active_subscription =  $page_vars['active_subscription'];
 	

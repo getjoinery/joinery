@@ -1,13 +1,13 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('ctldfilters_edit_logic.php', 'logic', 'system', null, 'controld'));
+require_once(PathHelper::getThemeFilePath('ctldfilters_edit_logic.php', 'logic', 'system', null, 'controld'));
 
-	$page_vars = ctldfilters_edit_logic($_GET, $_POST);
-	$profile_choice = $page_vars['profile_choice'];
+$page_vars = process_logic(ctldfilters_edit_logic($_GET, $_POST));
+$profile_choice = $page_vars['profile_choice'];
 	$profile =  $page_vars['profile'];
 	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];

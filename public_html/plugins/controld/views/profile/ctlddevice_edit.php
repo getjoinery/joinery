@@ -1,11 +1,11 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('ctlddevice_edit_logic.php', 'logic', 'system', null, 'controld'));
 
-	$page_vars = ctlddevice_edit_logic($_GET, $_POST);
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('ctlddevice_edit_logic.php', 'logic', 'system', null, 'controld'));
+
+$page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
 	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$num_devices =  $page_vars['num_devices'];

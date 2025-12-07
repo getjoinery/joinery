@@ -1,11 +1,11 @@
 <?php
-	
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('ctlddevice_delete_logic.php', 'logic', 'system', null, 'controld'));
 
-	$page_vars = ctlddevice_delete_logic($_GET, $_POST);
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('ctlddevice_delete_logic.php', 'logic', 'system', null, 'controld'));
+
+$page_vars = process_logic(ctlddevice_delete_logic($_GET, $_POST));
 	$device = $page_vars['device'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
