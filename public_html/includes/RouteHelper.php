@@ -945,12 +945,13 @@ class RouteHelper {
      * 6. View directory fallback (automatic theme-aware view lookup)
      * 7. Plugin routes (backward compatibility)
      * 8. 404 fallback
-     * 
+     *
      * @param array $routes Route configuration array
      * @param string $request_path The request path from $_REQUEST['path']
-     * @return void Exits on successful route match or redirect
+     * @param bool $match_only If true, return match info instead of executing the route
+     * @return void|array Exits on successful route match, or returns match info if $match_only is true
      */
-    public static function processRoutes($routes, $request_path) {
+    public static function processRoutes($routes, $request_path, $match_only = false) {
 
         // Auto-enable debugging if requested via URL parameter or header
         $debug_enabled = self::autoEnableDebug();
@@ -1040,6 +1041,16 @@ class RouteHelper {
         error_log("Checking static routes first (before loading dependencies)...");
         if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
             error_log("Static route matched: " . var_export($route, true));
+            if ($match_only) {
+                return [
+                    'matched' => true,
+                    'type' => 'static',
+                    'pattern' => $route['pattern'] ?? $full_path,
+                    'config' => $route,
+                    'source' => 'main',
+                    'params' => $params
+                ];
+            }
             error_log("Calling handleStaticRoute (without dependencies)...");
             if (self::handleStaticRoute($route, $params, null)) {
                 error_log("Static route handled successfully - exiting");
@@ -1267,7 +1278,18 @@ class RouteHelper {
                         'params_passed_to_handler' => $params,
                         'handler_type' => gettype($handler)
                     ]);
-                    
+
+                    if ($match_only) {
+                        return [
+                            'matched' => true,
+                            'type' => 'custom',
+                            'pattern' => $pattern,
+                            'config' => '[Closure]',
+                            'source' => 'main',
+                            'params' => $params
+                        ];
+                    }
+
                     if ($handler($params, $settings, $session, $template_directory)) {
                         error_log("Custom route handler succeeded - exiting");
                         self::debugLog('handler_execution', "Handler succeeded, exiting");
@@ -1300,6 +1322,16 @@ class RouteHelper {
         
         // 5. Check dynamic routes (unified content + simple)
         if ($route = self::matchRoute($full_path, $routes['dynamic'] ?? [])) {
+            if ($match_only) {
+                return [
+                    'matched' => true,
+                    'type' => 'dynamic',
+                    'pattern' => $route['pattern'] ?? $full_path,
+                    'config' => $route,
+                    'source' => isset($route['plugin_specify']) ? 'plugin:' . $route['plugin_specify'] : 'main',
+                    'params' => $params
+                ];
+            }
             if (self::handleDynamicRoute($route, $params, $template_directory)) {
                 // Save cache before exiting
                 if ($cache_buffer_started && $cache_result === false) {
@@ -1329,6 +1361,17 @@ class RouteHelper {
 
         // Store debug info for 404 page
         $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
+
+        if ($match_only && $view_full_path) {
+            return [
+                'matched' => true,
+                'type' => 'view_fallback',
+                'pattern' => $view_file,
+                'config' => ['view' => $view_file],
+                'source' => 'fallback',
+                'params' => $params
+            ];
+        }
 
         $GLOBALS['route_debug_info'] = [
             'requested_path' => $request_path,
@@ -1375,6 +1418,16 @@ class RouteHelper {
         // This ensures caching works even when exit() is called during route handling
 
         // 8. Final fallback - 404
+        if ($match_only) {
+            return [
+                'matched' => false,
+                'type' => null,
+                'pattern' => null,
+                'config' => null,
+                'source' => null,
+                'params' => $params
+            ];
+        }
         self::show404('No matching route found', ['path' => $request_path]);
     }
     

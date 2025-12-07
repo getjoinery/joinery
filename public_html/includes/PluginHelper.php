@@ -228,14 +228,14 @@ class PluginHelper extends ComponentBase {
             
             if ($existing) {
                 // Update existing record
-                $sql = "UPDATE plg_plugins SET plg_active = 1, plg_activated_date = NOW() WHERE plg_name = ?";
+                $sql = "UPDATE plg_plugins SET plg_active = 1, plg_activated_time = NOW() WHERE plg_name = ?";
                 $q = $dblink->prepare($sql);
                 $q->execute([$this->name]);
             } else {
                 // Insert new record
-                $sql = "INSERT INTO plg_plugins (plg_name, plg_active, plg_activated_date, plg_version) VALUES (?, 1, NOW(), ?)";
+                $sql = "INSERT INTO plg_plugins (plg_name, plg_active, plg_activated_time) VALUES (?, 1, NOW())";
                 $q = $dblink->prepare($sql);
-                $q->execute([$this->name, $this->getVersion()]);
+                $q->execute([$this->name]);
             }
         } catch (PDOException $e) {
             // Table doesn't exist yet (likely during initial database setup)
