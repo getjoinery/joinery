@@ -7,6 +7,15 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page_vars = password_edit_logic($_GET, $_POST);
 
+	// Handle LogicResult return format
+	if ($page_vars instanceof LogicResult) {
+		if ($page_vars->redirect) {
+			LibraryFunctions::redirect($page_vars->redirect);
+			exit();
+		}
+		$page_vars = $page_vars->data;
+	}
+
 	$tab_menus = array(
 		'My Profile' => '/profile',
 		'Edit Account' => '/profile/account_edit',

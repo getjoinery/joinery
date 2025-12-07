@@ -6,6 +6,16 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic', 'system', null, 'controld'));	
 
 	$page_vars = contact_preferences_logic($_GET, $_POST);
+
+	// Handle LogicResult return format
+	if ($page_vars instanceof LogicResult) {
+		if ($page_vars->redirect) {
+			LibraryFunctions::redirect($page_vars->redirect);
+			exit();
+		}
+		$page_vars = $page_vars->data;
+	}
+
 	$messages = $page_vars['messages'];
 
 	$tab_menus = array(
