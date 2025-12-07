@@ -4,7 +4,7 @@
  *
  * This script comprehensively tests the subscription tier system:
  * - Model layer (tier assignment, features, tracking)
- * - Business logic layer (change_subscription_logic.php)
+ * - Business logic layer (change_tier_logic.php)
  * - All setting combinations for upgrades, downgrades, cancellations, reactivations
  * - Stripe price ID syncing
  *
@@ -27,7 +27,7 @@ require_once(PathHelper::getIncludePath('/data/products_class.php'));
 require_once(PathHelper::getIncludePath('/data/product_versions_class.php'));
 require_once(PathHelper::getIncludePath('/data/order_items_class.php'));
 require_once(PathHelper::getIncludePath('/data/orders_class.php'));
-require_once(PathHelper::getIncludePath('/logic/change_subscription_logic.php'));
+require_once(PathHelper::getIncludePath('/logic/change_tier_logic.php'));
 
 class SubscriptionTierTester {
     private $settings;
@@ -93,11 +93,17 @@ class SubscriptionTierTester {
         $multi_tiers->load();
 
         foreach ($multi_tiers as $tier) {
-            $this->tiers[$tier->get('sbt_tier_level')] = [
+            $level = $tier->get('sbt_tier_level');
+            // Skip duplicate levels - keep first one found
+            if (isset($this->tiers[$level])) {
+                echo "<p class='text-warning'>⚠️ Skipping duplicate tier at level {$level}: {$tier->get('sbt_name')} (ID: {$tier->key})</p>";
+                continue;
+            }
+            $this->tiers[$level] = [
                 'id' => $tier->key,
                 'name' => $tier->get('sbt_name'),
                 'display_name' => $tier->get('sbt_display_name'),
-                'level' => $tier->get('sbt_tier_level'),
+                'level' => $level,
                 'object' => $tier
             ];
         }
@@ -319,17 +325,29 @@ class SubscriptionTierTester {
         $test_level = $levels[0];
         $tier = $this->tiers[$test_level];
 
+        echo "<p>Debug: Assigning user {$this->test_user_id} to tier {$tier['id']} ({$tier['name']}) at level {$test_level}</p>";
+
         try {
             $tier_obj = new SubscriptionTier($tier['id'], TRUE);
-            $tier_obj->addUser($this->test_user_id, 'manual', 'test', null, 1);
+            $group_id = $tier_obj->get('sbt_grp_group_id');
+            echo "<p>Debug: Tier loaded, group_id = {$group_id}</p>";
 
-            $current_tier = SubscriptionTier::GetUserTier($this->test_user_id);
+            $result = $tier_obj->addUser($this->test_user_id, 'manual', 'test', null, 1);
+            echo "<p>Debug: addUser returned: " . ($result ? 'true' : 'false') . "</p>";
 
-            if ($current_tier && $current_tier->key == $tier['id']) {
-                echo "<p class='text-success'>✓ User successfully assigned to tier</p>";
+            // Verify by checking group membership directly
+            // (GetUserTier removes tier if no active subscription, so we check the group instead)
+            $membership = new MultiGroupMember([
+                'grm_grp_group_id' => $group_id,
+                'grm_foreign_key_id' => $this->test_user_id
+            ]);
+            $membership->load();
+
+            if ($membership->count() > 0) {
+                echo "<p class='text-success'>✓ User successfully assigned to tier (verified via group membership)</p>";
                 return true;
             } else {
-                $message = "Assignment failed";
+                $message = "Assignment failed - user not found in tier group {$group_id}";
                 echo "<p class='text-danger'>✗ {$message}</p>";
                 $this->recordFailure('Basic Tier Assignment', $message);
                 return false;
@@ -363,7 +381,7 @@ class SubscriptionTierTester {
         // Verify user is still on high tier
         $current_tier = SubscriptionTier::GetUserTier($this->test_user_id);
 
-        if ($current_tier->key == $high_tier->key) {
+        if ($current_tier && $current_tier->key == $high_tier->key) {
             echo "<p class='text-success'>✓ Downgrade via purchase correctly blocked</p>";
             return true;
         } else {
@@ -614,6 +632,7 @@ class SubscriptionTierTester {
             $order_item->set('odi_pro_product_id', $product->key);
             $order_item->set('odi_prv_product_version_id', $product_version->key);
             $order_item->set('odi_price', $product_version->get('prv_version_price'));
+            $order_item->set('odi_status', OrderItem::STATUS_PAID);  // Required for is_active_subscription filter
             $order_item->set('odi_is_subscription', true);
             $order_item->set('odi_stripe_subscription_id', $subscription->id);
             $order_item->set('odi_subscription_status', $subscription->status);
@@ -647,7 +666,7 @@ class SubscriptionTierTester {
      * Test upgrade through logic file with real Stripe
      */
     private function testLogicFileUpgrade() {
-        echo "<h4>Test: Upgrade via change_subscription_logic() with Stripe</h4>";
+        echo "<h4>Test: Upgrade via change_tier_logic() with Stripe</h4>";
 
         $levels = array_keys($this->tiers);
         if (count($levels) < 2) {
@@ -690,10 +709,10 @@ class SubscriptionTierTester {
             'product_id' => $this->tier_products[$levels[1]]
         ];
 
-        echo "<p style='margin-left:20px'>Debug: Calling change_subscription_logic with action=upgrade, product_id=" . $this->tier_products[$levels[1]] . "</p>";
+        echo "<p style='margin-left:20px'>Debug: Calling change_tier_logic with action=upgrade, product_id=" . $this->tier_products[$levels[1]] . "</p>";
 
         try {
-            $result = change_subscription_logic([], $post);
+            $result = change_tier_logic([], $post);
 
             // Debug: Check what logic returned
             if ($result->error) {
@@ -736,7 +755,7 @@ class SubscriptionTierTester {
      */
     private function testLogicFileDowngrade($immediate = true) {
         $timing = $immediate ? 'immediate' : 'end_of_period';
-        echo "<h4>Test: Downgrade via change_subscription_logic() ({$timing})</h4>";
+        echo "<h4>Test: Downgrade via change_tier_logic() ({$timing})</h4>";
 
         // Enable downgrades
         $this->applySettings([
@@ -763,7 +782,7 @@ class SubscriptionTierTester {
         ];
 
         try {
-            $result = change_subscription_logic([], $post);
+            $result = change_tier_logic([], $post);
 
             if ($immediate) {
                 // Check if user is now on lower tier
@@ -805,7 +824,7 @@ class SubscriptionTierTester {
      */
     private function testLogicFileCancellation($immediate = true) {
         $timing = $immediate ? 'immediate' : 'end_of_period';
-        echo "<h4>Test: Cancellation via change_subscription_logic() ({$timing})</h4>";
+        echo "<h4>Test: Cancellation via change_tier_logic() ({$timing})</h4>";
 
         // Enable cancellation
         $this->applySettings([
@@ -817,7 +836,7 @@ class SubscriptionTierTester {
         $post = ['action' => 'cancel'];
 
         try {
-            $result = change_subscription_logic([], $post);
+            $result = change_tier_logic([], $post);
 
             if ($immediate) {
                 // User should be removed from tier
@@ -858,7 +877,7 @@ class SubscriptionTierTester {
      * Test reactivation through logic file
      */
     private function testLogicFileReactivation() {
-        echo "<h4>Test: Reactivation via change_subscription_logic()</h4>";
+        echo "<h4>Test: Reactivation via change_tier_logic()</h4>";
 
         // Enable reactivation
         $this->applySettings([
@@ -876,7 +895,7 @@ class SubscriptionTierTester {
         $cancel_post = ['action' => 'cancel'];
 
         try {
-            $cancel_result = change_subscription_logic([], $cancel_post);
+            $cancel_result = change_tier_logic([], $cancel_post);
 
             // Debug: Check what the logic returned
             if (isset($cancel_result->data['error_message'])) {
@@ -932,7 +951,7 @@ class SubscriptionTierTester {
             echo "<p style='margin-left:20px'>Step 2: Reactivating subscription...</p>";
             $reactivate_post = ['action' => 'reactivate'];
 
-            $reactivate_result = change_subscription_logic([], $reactivate_post);
+            $reactivate_result = change_tier_logic([], $reactivate_post);
 
             // Check for success message
             if (isset($reactivate_result->data['success_message'])) {
@@ -1017,7 +1036,7 @@ class SubscriptionTierTester {
                 'product_id' => $this->tier_products[$levels[2]]  // Use tier 3 instead of tier 2
             ];
 
-            $result = change_subscription_logic([], $post);
+            $result = change_tier_logic([], $post);
 
             if (isset($result->data['error_message'])) {
                 $message = "Upgrade failed: " . $result->data['error_message'];
@@ -1320,7 +1339,7 @@ class SubscriptionTierTester {
         echo "<li>✓ Minimum tier level checking</li>";
         echo "<li>✓ Change tracking</li>";
         echo "<li>✓ Stripe price ID auto-sync (with real Stripe API)</li>";
-        echo "<li>✓ Upgrade via change_subscription_logic (with Stripe)</li>";
+        echo "<li>✓ Upgrade via change_tier_logic (with Stripe)</li>";
         echo "<li>✓ Proration on upgrade (with Stripe invoice analysis)</li>";
         echo "<li>✓ Downgrade immediate (with Stripe)</li>";
         echo "<li>✓ Cancellation immediate (with Stripe)</li>";
@@ -1329,7 +1348,7 @@ class SubscriptionTierTester {
         echo "<p><strong>What was tested:</strong></p>";
         echo "<ul>";
         echo "<li>✓ Model layer (SubscriptionTier, MultiSubscriptionTier)</li>";
-        echo "<li>✓ Business logic layer (change_subscription_logic.php)</li>";
+        echo "<li>✓ Business logic layer (change_tier_logic.php)</li>";
         echo "<li>✓ Stripe API integration (real test mode calls)</li>";
         echo "<li>✓ Price ID auto-generation and storage</li>";
         echo "<li>✓ Subscription creation, upgrade, downgrade, cancellation, reactivation</li>";
