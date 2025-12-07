@@ -1411,7 +1411,7 @@ echo "DEPLOYMENT HASH: $DEPLOY_HASH"
 echo "========================================="
 echo "Use this hash to verify sites are in sync."
 echo "Compare with other sites using:"
-echo "  find /var/www/html/SITENAME/public_html -type f \\( -name '*.php' -o -name '*.js' -o -name '*.css' \\) -print0 | sort -z | xargs -0 cat | md5sum"
+echo "  find /var/www/html/$TARGET_SITE/public_html -type f \\( -name '*.php' -o -name '*.js' -o -name '*.css' \\) -print0 | sort -z | xargs -0 cat | md5sum"
 
 # DEPLOYMENT COMPLETED SUCCESSFULLY
 DEPLOYMENT_SUCCESS=true
