@@ -1,0 +1,916 @@
+# Page Component System Specification
+
+## Overview
+
+A flexible, database-driven component system that allows administrators to compose pages from a library of pre-built, configurable components. This system **extends the existing Component and PageContent tables** rather than creating new ones, maintaining backward compatibility while adding powerful new capabilities.
+
+## Goals
+
+1. **Reduce custom development** - Clients can build unique pages without code changes
+2. **Maintain theme compatibility** - Component templates are theme-overridable
+3. **Form-based editing** - No WYSIWYG; structured forms like existing admin pages
+4. **Developer extensibility** - Easy to add new component types
+5. **Performance** - Efficient rendering with minimal database queries
+6. **Backward compatibility** - Existing PageContent placeholder system continues to work
+7. **Build on existing tables** - Extend `com_components` and `pac_page_contents`
+
+## Non-Goals
+
+1. WYSIWYG or drag-and-drop visual editing in a live preview
+2. Replacing the existing Page/PageContent placeholder system (this complements it)
+3. Full CMS functionality (this is specifically for component-based layouts)
+
+---
+
+## Data Architecture
+
+### Extending `com_components` (Component Type Library)
+
+The existing `com_components` table will store component type definitions. Current structure is minimal and empty, so we add fields for the component system.
+
+**New fields to add:**
+
+```sql
+-- Component type metadata
+com_type_key VARCHAR(64) UNIQUE      -- 'hero_slider', 'feature_grid', etc.
+com_description TEXT                  -- 'Full-width image slider with text overlays'
+com_category VARCHAR(64)              -- 'hero', 'content', 'media', 'dynamic', 'conversion'
+com_icon VARCHAR(64)                  -- 'bx-image' for admin UI
+
+-- Configuration
+com_template_file VARCHAR(255)        -- 'components/hero_slider.php' (replaces com_script_filename usage)
+com_config_fields TEXT                -- Comma-separated list of field names for admin form (e.g., 'heading,subheading,background_image,cta_text,cta_link')
+com_logic_function VARCHAR(255)       -- 'hero_slider_component_logic' if dynamic data needed
+
+-- Status
+com_is_active BOOLEAN DEFAULT TRUE    -- Can be disabled system-wide
+```
+
+**Updated field_specifications for Component class:**
+
+```php
+public static $field_specifications = array(
+    'com_component_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+    'com_type_key' => array('type'=>'varchar(64)', 'unique'=>true),
+    'com_title' => array('type'=>'varchar(255)', 'required'=>true),
+    'com_description' => array('type'=>'text'),
+    'com_category' => array('type'=>'varchar(64)'),
+    'com_icon' => array('type'=>'varchar(64)'),
+    'com_template_file' => array('type'=>'varchar(255)'),
+    'com_config_fields' => array('type'=>'text'),  // Comma-separated field names
+    'com_logic_function' => array('type'=>'varchar(255)'),
+    'com_is_active' => array('type'=>'bool', 'default'=>true),
+    'com_requires_plugin' => array('type'=>'varchar(64)'),
+    'com_order' => array('type'=>'int2'),
+    'com_published_time' => array('type'=>'timestamp(6)'),
+    'com_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+    'com_script_filename' => array('type'=>'varchar(255)'), // Legacy, keep for compatibility
+    'com_delete_time' => array('type'=>'timestamp(6)'),
+);
+```
+
+### Extending `pac_page_contents` (Component Instances)
+
+The existing `pac_page_contents` table will store component instances. We add fields for component configuration while preserving backward compatibility with the placeholder system.
+
+**New fields to add:**
+
+```sql
+-- Component configuration
+pac_config JSON                       -- Instance-specific configuration (extends pac_body for components)
+```
+
+**Updated field_specifications for PageContent class:**
+
+```php
+public static $field_specifications = array(
+    'pac_page_content_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+    'pac_pag_page_id' => array('type'=>'int4'),
+    'pac_com_component_id' => array('type'=>'int4'),
+    'pac_location_name' => array('type'=>'varchar(255)', 'required'=>true, 'unique'=>true),  // Component slug (must be unique)
+    'pac_title' => array('type'=>'varchar(255)'),
+    'pac_link' => array('type'=>'varchar(255)'),  // Keep for placeholder system
+    'pac_usr_user_id' => array('type'=>'int4'),
+    'pac_body' => array('type'=>'text'),  // Keep for placeholder system / legacy
+    'pac_config' => array('type'=>'json'),  // NEW: component configuration
+    'pac_order' => array('type'=>'int2'),
+    'pac_is_published' => array('type'=>'bool', 'default'=>false),
+    'pac_published_time' => array('type'=>'timestamp(6)'),
+    'pac_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+    'pac_script_filename' => array('type'=>'varchar(255)'),  // Legacy
+    'pac_delete_time' => array('type'=>'timestamp(6)'),
+);
+
+public static $json_vars = array('pac_config');
+```
+
+**Component Identification:** Components are identified by their `pac_location_name` (slug). Templates explicitly request components by slug, e.g., `ComponentRenderer::render('homepage-hero')`.
+
+---
+
+## Backward Compatibility
+
+### Existing Placeholder System
+
+The current system where `*!**slug**!*` placeholders in page body are replaced with PageContent body **continues to work unchanged**. This is handled by `Page::get_filled_content()` which:
+1. Loads PageContents linked to the page via `pac_pag_page_id`
+2. Replaces `*!**pac_link**!*` with `pac_body`
+
+**This system is preserved** - PageContents with `pac_link` set and no `pac_com_component_id` use the old behavior.
+
+### Component System (New)
+
+PageContents with `pac_com_component_id` set are treated as components:
+1. They render via the Component's template file
+2. Configuration comes from `pac_config`
+3. Components are identified by their slug (`pac_location_name`) and rendered explicitly by templates
+
+### Detection Logic
+
+```php
+// In PageContent class
+public function is_component() {
+    return !empty($this->get('pac_com_component_id'));
+}
+
+// In rendering logic - template explicitly requests component by slug
+echo ComponentRenderer::render('homepage-hero');
+echo ComponentRenderer::render('homepage-features');
+```
+
+---
+
+## Component Configuration
+
+Component configuration uses a key-value approach with support for repeating field groups:
+
+1. **Component templates use variables** like `$config['heading']`, `$config['features']`
+2. **Admin form generates inputs** based on `com_config_fields`
+3. **`pac_config` stores JSON** with simple values and arrays
+
+### Field Name Syntax
+
+| Syntax | Meaning | Admin UI |
+|--------|---------|----------|
+| `heading` | Simple field | Single textarea |
+| `features[].title` | Repeating field | Grouped rows with Add/Remove |
+
+### Example: Simple Component
+
+**Component type:**
+```
+com_type_key: 'hero_static'
+com_config_fields: 'heading,subheading,background_image,cta_text,cta_link'
+```
+
+**Admin form:**
+```
+Heading:          [____________________]
+Subheading:       [____________________]
+Background Image: [____________________]
+CTA Text:         [____________________]
+CTA Link:         [____________________]
+```
+
+**Stored config:**
+```json
+{
+  "heading": "Welcome to Our Site",
+  "subheading": "We help you succeed",
+  "background_image": "/images/hero-bg.jpg",
+  "cta_text": "Get Started",
+  "cta_link": "/signup"
+}
+```
+
+### Example: Repeating Fields Component
+
+**Component type:**
+```
+com_type_key: 'feature_grid'
+com_config_fields: 'heading,subheading,features[].icon,features[].title,features[].description'
+```
+
+**Admin form:**
+```
+Heading:    [____________________]
+Subheading: [____________________]
+
+Features:                              [+ Add Feature]
+┌─────────────────────────────────────────────────────┐
+│ Icon: [________]  Title: [________________________] │
+│ Description: [__________________________________]   │
+│                                           [Remove]  │
+├─────────────────────────────────────────────────────┤
+│ Icon: [________]  Title: [________________________] │
+│ Description: [__________________________________]   │
+│                                           [Remove]  │
+└─────────────────────────────────────────────────────┘
+```
+
+**Stored config:**
+```json
+{
+  "heading": "Why Choose Us",
+  "subheading": "Everything you need to succeed",
+  "features": [
+    {"icon": "rocket", "title": "Fast", "description": "Lightning quick performance"},
+    {"icon": "lock", "title": "Secure", "description": "Bank-grade encryption"}
+  ]
+}
+```
+
+**Template usage:**
+```php
+<?php foreach ($component_config['features'] as $feature): ?>
+    <div class="feature">
+        <i class="<?php echo htmlspecialchars($feature['icon']); ?>"></i>
+        <h3><?php echo htmlspecialchars($feature['title']); ?></h3>
+        <p><?php echo htmlspecialchars($feature['description']); ?></p>
+    </div>
+<?php endforeach; ?>
+```
+
+### Repeater Field Parsing
+
+The admin form parses `com_config_fields` to detect repeating groups:
+
+```php
+/**
+ * Parse config fields into simple fields and repeater groups
+ *
+ * Input: 'heading,subheading,features[].icon,features[].title'
+ * Output: [
+ *   'simple' => ['heading', 'subheading'],
+ *   'repeaters' => [
+ *     'features' => ['icon', 'title']
+ *   ]
+ * ]
+ */
+function parse_config_fields($config_fields) {
+    $fields = array_map('trim', explode(',', $config_fields));
+    $simple = array();
+    $repeaters = array();
+
+    foreach ($fields as $field) {
+        if (preg_match('/^(\w+)\[\]\.(\w+)$/', $field, $matches)) {
+            $group = $matches[1];
+            $subfield = $matches[2];
+            if (!isset($repeaters[$group])) {
+                $repeaters[$group] = array();
+            }
+            $repeaters[$group][] = $subfield;
+        } else {
+            $simple[] = $field;
+        }
+    }
+
+    return array('simple' => $simple, 'repeaters' => $repeaters);
+}
+```
+
+### Future Enhancement
+
+A typed field schema system (select dropdowns, image pickers, date pickers) can be added later if needed. For MVP, all fields are textareas.
+
+---
+
+## Component Categories
+
+Components are organized into categories for easier discovery:
+
+| Category | Description | Examples |
+|----------|-------------|----------|
+| `hero` | Full-width top sections | Hero Slider, Hero Static, Video Hero |
+| `content` | Text and mixed content | Text Block, Text + Image, Accordion, Tabs |
+| `features` | Feature/benefit displays | Feature Grid, Icon List, Comparison Table |
+| `media` | Image and video focused | Image Gallery, Video Embed, Carousel |
+| `testimonials` | Social proof | Testimonial Slider, Review Grid, Logo Wall |
+| `dynamic` | Database-driven content | Recent Posts, Upcoming Events, Product Grid |
+| `conversion` | CTAs and lead capture | CTA Banner, Newsletter Signup, Pricing Table |
+| `layout` | Structural elements | Spacer, Divider, Container |
+| `custom` | Freeform | Custom HTML, Embed Code |
+
+---
+
+## Component Library
+
+### Phase 1: Existing Code to Wrap (MVP)
+
+These components already exist as view code and can be extracted into configurable components:
+
+| Component Type Key | Source Location | Description |
+|-------------------|-----------------|-------------|
+| `hero_slider` | `/views/index.php` (swiper_wrapper section) | Full-width slider with multiple slides, title, description, background |
+| `feature_grid` | `/views/index.php` (feature-box sections) | Grid of icon + title + description items (12+ instances) |
+| `cta_banner` | `/views/index.php` (promo-full section) | Full-width promotional call to action |
+| `event_grid` | `/views/events.php` | Portfolio-style event cards with filtering, dates, instructors |
+| `product_grid` | `/views/products.php` | Shop-style product cards with images, descriptions, hover effects |
+| `pricing_table` | `/views/pricing.php` | Pricing cards with plan name, price, features list, CTA |
+| `recent_posts` | `/views/index.php` (posts-sm sidebar) | Recent blog post entries with thumbnails |
+| `video_section` | `/views/index.php` (video.php container) | Video embed section with poster/background |
+| `page_title` | `/views/events.php`, `/views/event.php` | Page title with subtitle and breadcrumb navigation |
+| `breadcrumbs` | Multiple views | Navigation breadcrumb trail |
+| `alert` | `PublicPage::alert()` | Bootstrap alert messages |
+| `tab_menu` | `PublicPage::tab_menu()` | Tab navigation for content sections |
+
+**Implementation approach:** Extract the HTML/CSS patterns from existing views into component templates, make key values configurable.
+
+### Phase 2: New Components to Build
+
+These are commonly needed but don't currently exist in the codebase:
+
+| Component Type Key | Category | Description |
+|-------------------|----------|-------------|
+| `hero_static` | hero | Single hero with heading, text, background, CTA (simpler than slider) |
+| `text_block` | content | Heading + rich text content |
+| `text_with_image` | content | Text alongside image (left or right layout) |
+| `testimonial_slider` | testimonials | Rotating customer testimonials |
+| `testimonial_grid` | testimonials | Grid of testimonial cards |
+| `image_gallery` | media | Grid of images with lightbox |
+| `accordion` | content | Collapsible FAQ-style content |
+| `tabs` | content | Tabbed content sections |
+| `stats_counter` | features | Animated number counters |
+| `logo_wall` | testimonials | Grid of partner/client logos |
+| `team_grid` | content | Team member cards |
+| `contact_info` | content | Address, phone, email display |
+| `map_embed` | media | Google Maps embed |
+| `spacer` | layout | Vertical spacing |
+| `divider` | layout | Horizontal line with optional text/icon |
+| `custom_html` | custom | Raw HTML for advanced users |
+
+---
+
+## File Structure
+
+```
+/data/
+├── components_class.php          # Extended with new fields
+└── page_contents_class.php       # Extended with new fields
+
+/includes/
+└── ComponentRenderer.php         # NEW: Renders components with data
+
+/logic/components/                # NEW: Component-specific logic functions (for dynamic components)
+├── recent_posts_logic.php
+└── upcoming_events_logic.php
+
+/views/components/                # NEW: Component templates
+├── hero_static.php
+├── text_block.php
+├── feature_grid.php
+├── cta_banner.php
+└── custom_html.php
+
+/theme/{theme}/views/components/  # Theme overrides
+└── hero_static.php
+
+/adm/
+├── admin_component_types.php     # NEW: List all component types (superadmin)
+├── admin_component_type_edit.php # NEW: Edit component type definition
+├── admin_components.php          # NEW: List all component instances
+└── admin_component_edit.php      # NEW: Edit component instance config
+```
+
+---
+
+## Core Classes
+
+### Component (Extended Data Model)
+
+```php
+class Component extends SystemBase {
+    public static $prefix = 'com';
+    public static $tablename = 'com_components';
+    public static $pkey_column = 'com_component_id';
+
+    public static $field_specifications = array(
+        'com_component_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+        'com_type_key' => array('type'=>'varchar(64)', 'unique'=>true),
+        'com_title' => array('type'=>'varchar(255)', 'required'=>true),
+        'com_description' => array('type'=>'text'),
+        'com_category' => array('type'=>'varchar(64)'),
+        'com_icon' => array('type'=>'varchar(64)'),
+        'com_template_file' => array('type'=>'varchar(255)'),
+        'com_config_fields' => array('type'=>'text'),  // Comma-separated field names
+        'com_logic_function' => array('type'=>'varchar(255)'),
+        'com_is_active' => array('type'=>'bool', 'default'=>true),
+        'com_order' => array('type'=>'int2'),
+        'com_published_time' => array('type'=>'timestamp(6)'),
+        'com_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+        'com_script_filename' => array('type'=>'varchar(255)'),
+        'com_delete_time' => array('type'=>'timestamp(6)'),
+    );
+
+    /**
+     * Get config field names as array
+     */
+    public function get_config_field_names() {
+        $fields = $this->get('com_config_fields');
+        if (empty($fields)) {
+            return array();
+        }
+        return array_map('trim', explode(',', $fields));
+    }
+
+    /**
+     * Check if component type is available
+     */
+    public function is_available() {
+        return $this->get('com_is_active');
+    }
+
+    /**
+     * Get by type key
+     */
+    public static function get_by_type_key($type_key) {
+        return static::GetByColumn('com_type_key', $type_key);
+    }
+}
+
+class MultiComponent extends SystemMultiBase {
+    protected static $model_class = 'Component';
+
+    protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = array();
+
+        if (isset($this->options['category'])) {
+            $filters['com_category'] = array($this->options['category'], PDO::PARAM_STR);
+        }
+
+        if (isset($this->options['active'])) {
+            $filters['com_is_active'] = $this->options['active'] ? "= TRUE" : "= FALSE";
+        }
+
+        if (isset($this->options['deleted'])) {
+            $filters['com_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+
+        if (isset($this->options['has_type_key'])) {
+            $filters['com_type_key'] = "IS NOT NULL";
+        }
+
+        return $this->_get_resultsv2('com_components', $filters, $this->order_by, $only_count, $debug);
+    }
+}
+```
+
+### PageContent (Extended Data Model)
+
+```php
+class PageContent extends SystemBase {
+    public static $prefix = 'pac';
+    public static $tablename = 'pac_page_contents';
+    public static $pkey_column = 'pac_page_content_id';
+
+    public static $field_specifications = array(
+        'pac_page_content_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+        'pac_pag_page_id' => array('type'=>'int4'),
+        'pac_com_component_id' => array('type'=>'int4'),
+        'pac_location_name' => array('type'=>'varchar(255)', 'required'=>true, 'unique'=>true),  // Component slug (must be unique)
+        'pac_title' => array('type'=>'varchar(255)'),
+        'pac_link' => array('type'=>'varchar(255)'),
+        'pac_usr_user_id' => array('type'=>'int4'),
+        'pac_body' => array('type'=>'text'),
+        'pac_config' => array('type'=>'json'),
+        'pac_order' => array('type'=>'int2', 'default'=>0),
+        'pac_is_published' => array('type'=>'bool', 'default'=>false),
+        'pac_published_time' => array('type'=>'timestamp(6)'),
+        'pac_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+        'pac_script_filename' => array('type'=>'varchar(255)'),
+        'pac_delete_time' => array('type'=>'timestamp(6)'),
+    );
+
+    public static $json_vars = array('pac_config');
+
+    /**
+     * Get component by slug (location_name)
+     */
+    public static function get_by_slug($slug) {
+        return static::GetByColumn('pac_location_name', $slug);
+    }
+
+    /**
+     * Check if this is a component (has component type) vs legacy content
+     */
+    public function is_component() {
+        return !empty($this->get('pac_com_component_id'));
+    }
+
+    /**
+     * Get the component type definition
+     */
+    public function get_component_type() {
+        if (!$this->is_component()) {
+            return null;
+        }
+        return new Component($this->get('pac_com_component_id'), true);
+    }
+
+    /**
+     * Get config as array
+     */
+    public function get_config() {
+        $config = $this->get('pac_config');
+        if (is_string($config)) {
+            return json_decode($config, true) ?: array();
+        }
+        return $config ?: array();
+    }
+
+    /**
+     * Check if component is published
+     */
+    public function is_visible() {
+        return $this->get('pac_is_published');
+    }
+
+    /**
+     * Legacy: Get content for placeholder system
+     */
+    public function get_content() {
+        if ($this->get('pac_published_time') && !$this->get('pac_delete_time')) {
+            return $this->get('pac_body');
+        }
+        return '';
+    }
+
+    // ... existing methods preserved ...
+}
+
+class MultiPageContent extends SystemMultiBase {
+    protected static $model_class = 'PageContent';
+
+    protected function getMultiResults($only_count = false, $debug = false) {
+        $filters = array();
+
+        if (isset($this->options['user_id'])) {
+            $filters['pac_usr_user_id'] = array($this->options['user_id'], PDO::PARAM_INT);
+        }
+
+        if (isset($this->options['page_id'])) {
+            $filters['pac_pag_page_id'] = array($this->options['page_id'], PDO::PARAM_INT);
+        }
+
+        // Filter by component type
+        if (isset($this->options['component_id'])) {
+            $filters['pac_com_component_id'] = array($this->options['component_id'], PDO::PARAM_INT);
+        }
+
+        // Filter for components only (has component type)
+        if (isset($this->options['components_only']) && $this->options['components_only']) {
+            $filters['pac_com_component_id'] = "IS NOT NULL";
+        }
+
+        // Filter by slug
+        if (isset($this->options['slug'])) {
+            $filters['pac_location_name'] = array($this->options['slug'], PDO::PARAM_STR);
+        }
+
+        if (isset($this->options['link'])) {
+            $filters['pac_link'] = array($this->options['link'], PDO::PARAM_STR);
+        }
+
+        if (isset($this->options['has_link'])) {
+            $filters['pac_link'] = "LENGTH(pac_link) > 0";
+        }
+
+        if (isset($this->options['deleted'])) {
+            $filters['pac_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+        }
+
+        if (isset($this->options['published'])) {
+            $filters['pac_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
+        }
+
+        return $this->_get_resultsv2('pac_page_contents', $filters, $this->order_by, $only_count, $debug);
+    }
+}
+```
+
+### ComponentRenderer
+
+```php
+<?php
+/**
+ * ComponentRenderer - Renders page components by slug
+ *
+ * /includes/ComponentRenderer.php
+ */
+
+class ComponentRenderer {
+
+    /**
+     * Render a component by its slug
+     *
+     * @param string $slug The component's slug (pac_location_name)
+     * @return string Rendered HTML
+     */
+    public static function render($slug) {
+        require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
+
+        $component_instance = PageContent::get_by_slug($slug);
+
+        if (!$component_instance || !$component_instance->is_component()) {
+            return '';
+        }
+
+        if (!$component_instance->is_visible()) {
+            return '';
+        }
+
+        return self::render_component($component_instance);
+    }
+
+    /**
+     * Render a single component instance
+     *
+     * @param PageContent $component_instance The component instance
+     * @return string Rendered HTML
+     */
+    public static function render_component($component_instance) {
+        $component_type = $component_instance->get_component_type();
+
+        if (!$component_type || !$component_type->is_available()) {
+            return '';
+        }
+
+        $config = $component_instance->get_config();
+        $data = array();
+
+        // Load dynamic data if needed
+        $logic_function = $component_type->get('com_logic_function');
+        if ($logic_function) {
+            $data = self::load_component_data($logic_function, $config);
+        }
+
+        // Render template
+        $template_file = $component_type->get('com_template_file');
+        if (!$template_file) {
+            return '';
+        }
+
+        ob_start();
+
+        // Make variables available to template
+        $component_config = $config;
+        $component_data = $data;
+        $component = $component_instance;
+        $component_type_record = $component_type;
+
+        // Use theme-aware path resolution
+        $template_path = PathHelper::getThemeFilePath($template_file, 'views');
+        if (file_exists($template_path)) {
+            require($template_path);
+        }
+
+        return ob_get_clean();
+    }
+
+    /**
+     * Load dynamic data for a component
+     */
+    protected static function load_component_data($logic_function, $config) {
+        $logic_file = 'logic/components/' . $logic_function . '.php';
+        $full_path = PathHelper::getIncludePath($logic_file);
+
+        if (file_exists($full_path)) {
+            require_once($full_path);
+            if (function_exists($logic_function)) {
+                return call_user_func($logic_function, $config);
+            }
+        }
+
+        return array();
+    }
+}
+```
+
+---
+
+## Admin Interface
+
+### Component Type Management (`/adm/admin_component_types.php`)
+
+List all component types (the library of available components):
+- Filter by category
+- Search by name/type_key
+- Quick toggle active/inactive
+- Edit component type
+
+**Access level:** Superadmin (10) - component types are system-level definitions
+
+### Component Type Edit (`/adm/admin_component_type_edit.php`)
+
+Edit form for a component type definition:
+- Type Key (`com_type_key`) - unique identifier like 'hero_static', 'feature_grid'
+- Title (`com_title`) - display name like "Hero Static", "Feature Grid"
+- Description (`com_description`) - explains what this component does
+- Category (`com_category`) - dropdown: hero, content, features, media, etc.
+- Icon (`com_icon`) - icon class for admin UI
+- Template File (`com_template_file`) - path like 'components/hero_static.php'
+- Config Fields (`com_config_fields`) - comma-separated field names
+- Logic Function (`com_logic_function`) - optional, for dynamic components
+- Active checkbox (`com_is_active`)
+
+**Validation:**
+- Type key must be unique and URL-safe (lowercase, underscores)
+- Template file must exist in views/components/ or theme override location
+
+### Component Instance Management (`/adm/admin_components.php`)
+
+List all component instances in the system:
+- Filter by component type
+- Search by slug
+- Quick toggle published/unpublished
+- Edit component instance
+
+**Access level:** Admin (5)
+
+### Component Instance Edit (`/adm/admin_component_edit.php`)
+
+Edit form for a component instance:
+- Slug (`pac_location_name`) - unique identifier for rendering (validated unique)
+- Admin title (`pac_title`) - for admin display only
+- Component type (select from available component types)
+- Published checkbox
+- Config fields - one textarea per field defined in `com_config_fields`
+
+**Validation:**
+- Slug must be unique across all component instances
+
+---
+
+## Integration Points
+
+### Homepage Integration
+
+```php
+// /views/index.php (updated)
+<?php
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+
+$session = SessionControl::get_instance();
+$settings = Globalvars::get_instance();
+
+$page = new PublicPage();
+$page->public_header(array(
+    'title' => $settings->get_setting('site_name'),
+    'showheader' => true
+));
+
+// Render components by slug - template explicitly chooses which components to show
+echo ComponentRenderer::render('homepage-hero');
+echo ComponentRenderer::render('homepage-features');
+echo ComponentRenderer::render('homepage-testimonials');
+echo ComponentRenderer::render('homepage-cta');
+
+$page->public_footer();
+?>
+```
+
+### Page Integration
+
+```php
+// /views/page.php - components can supplement page content
+<?php
+// ... existing page loading code ...
+
+// Render specific components by slug
+echo ComponentRenderer::render('page-sidebar-cta');
+
+// Existing page content (placeholder system still works)
+echo $page_record->get_filled_content();
+?>
+```
+
+---
+
+## Component Template Example
+
+### Hero Static (`/views/components/hero_static.php`)
+
+```php
+<?php
+/**
+ * Hero Static Component
+ *
+ * Available variables:
+ *   $component_config - Configuration array from pac_config
+ *   $component_data - Dynamic data (empty for static components)
+ *   $component - PageContent object (the instance)
+ *   $component_type_record - Component object (the type definition)
+ */
+
+$heading = $component_config['heading'] ?? '';
+$subheading = $component_config['subheading'] ?? '';
+$background_image = $component_config['background_image'] ?? '';
+$cta_text = $component_config['cta_text'] ?? '';
+$cta_link = $component_config['cta_link'] ?? '';
+?>
+
+<section class="hero-static py-5" style="<?php if ($background_image): ?>background-image: url(<?php echo htmlspecialchars($background_image); ?>); background-size: cover;<?php endif; ?>">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8 text-center">
+                <?php if ($heading): ?>
+                    <h1 class="mb-3"><?php echo htmlspecialchars($heading); ?></h1>
+                <?php endif; ?>
+
+                <?php if ($subheading): ?>
+                    <p class="lead mb-4"><?php echo htmlspecialchars($subheading); ?></p>
+                <?php endif; ?>
+
+                <?php if ($cta_text && $cta_link): ?>
+                    <a href="<?php echo htmlspecialchars($cta_link); ?>" class="btn btn-primary btn-lg">
+                        <?php echo htmlspecialchars($cta_text); ?>
+                    </a>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</section>
+```
+
+**Component type record:**
+```
+com_type_key: 'hero_static'
+com_title: 'Hero Static'
+com_config_fields: 'heading,subheading,background_image,cta_text,cta_link'
+com_template_file: 'components/hero_static.php'
+```
+
+---
+
+## Migration Notes
+
+### Existing PageContent Records
+
+The 4 existing PageContent records use the placeholder system (no `pac_com_component_id`). They will continue to work unchanged - the component system only affects records with a component type link.
+
+### No Data Migration Required
+
+Since we're extending tables rather than replacing them:
+- Existing data is preserved
+- New fields have sensible defaults
+- Old code paths continue to work
+
+---
+
+## Security Considerations
+
+1. **Config validation** - Validate all config values before saving
+2. **HTML sanitization** - Custom HTML component should use HTML Purifier or existing sanitization
+3. **File paths** - Template files must be within allowed directories
+4. **Permission checks** - Component management requires admin access (level 5+)
+5. **XSS prevention** - All output uses htmlspecialchars() by default
+6. **SQL injection** - All queries use prepared statements via SystemBase
+
+---
+
+## Performance Considerations
+
+1. **Eager loading** - Load all components for a page in single query
+2. **Component type caching** - Cache component type definitions (they change rarely)
+3. **Minimal queries** - Component logic functions should be efficient
+4. **Template caching** - Could add template caching in future if needed
+
+---
+
+## Future Enhancements
+
+1. **Component previews** - Live preview in admin while editing
+2. **Component templates** - Save configured components as reusable starting points
+3. **A/B testing** - Show different components to different user segments
+4. **Analytics** - Track which components users interact with
+5. **Import/export** - Export page component configurations as JSON
+6. **Versioning** - Track changes to component configurations over time
+7. **Global components** - Components that appear on multiple pages (header/footer supplements)
+8. **Nested components** - Container components that hold other components (Phase 3+)
+
+---
+
+## Implementation Phases
+
+### Phase 1: Foundation (MVP)
+- [ ] Extend Component class with new fields (`com_type_key`, `com_config_fields`, `com_template_file`, etc.)
+- [ ] Extend PageContent class with new fields (`pac_config`, `pac_is_published`) with unique constraint on slug
+- [ ] Create ComponentRenderer class
+- [ ] Create admin for component types (`admin_component_types.php`, `admin_component_type_edit.php`)
+- [ ] Create admin for component instances with repeater UI (`admin_components.php`, `admin_component_edit.php`)
+  - Simple fields render as textareas
+  - `fieldname[].subfield` syntax renders as repeater with Add/Remove
+- [ ] Extract 3 existing patterns as components (`cta_banner`, `feature_grid`, `page_title`)
+- [ ] Integrate with homepage (`views/index.php`)
+
+### Phase 2: More Components
+- [ ] Extract remaining existing patterns (`hero_slider`, `event_grid`, `product_grid`, etc.)
+- [ ] Add component logic function system for dynamic data
+- [ ] Build new static components (`hero_static`, `text_block`, `text_with_image`)
+
+### Phase 3: Enhanced Admin (Future)
+- [ ] Typed field schema system (select dropdowns, image pickers, repeaters)
+- [ ] Visibility settings (logged in/out, dates)
+- [ ] Component previews
+
