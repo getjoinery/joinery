@@ -59,11 +59,11 @@ $profile_choice = $page_vars['profile_choice'];
 	<?php
 
 	if($device){
-		echo $formwriter->hiddeninput('device_id', $device->key);
+		$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
 	}
-	
-	echo $formwriter->hiddeninput('action', 'edit');
-	echo $formwriter->hiddeninput('profile_choice', $profile_choice);
+
+	$formwriter->hiddeninput('action', '', ['value' => 'edit']);
+	$formwriter->hiddeninput('profile_choice', '', ['value' => $profile_choice]);
 	
 	//ONLY ALLOW EDITS IF IT IS EDIT DAY OR IF USER IS NEW
 	if($device->are_filters_editable()){

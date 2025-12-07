@@ -32,8 +32,8 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 		$formwriter = $page->getFormWriter('product_form');
 		echo $formwriter->begin_form("", "POST", "/product"); 
 
-		echo $formwriter->hiddeninput('product_id', $product_id);
-		echo $formwriter->hiddeninput('product_key', $form_key);
+		$formwriter->hiddeninput('product_id', '', ['value' => $product_id]);
+		$formwriter->hiddeninput('product_key', '', ['value' => $form_key]);
 
 		foreach($page_vars['display_data'] as $key => $value) {
 		}
@@ -94,7 +94,7 @@ Career Area
 					// Post back to the same product URL (with slug)
 					$product_url = '/product/' . $product->get('pro_link');
 					echo $formwriter->begin_form("product-quantity", "POST", $product_url, true); 
-					echo $formwriter->hiddeninput('product_id', $product_id);
+					$formwriter->hiddeninput('product_id', '', ['value' => $product_id]);
 
 					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 

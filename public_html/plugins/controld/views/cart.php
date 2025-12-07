@@ -114,7 +114,7 @@ Contact Area
 							foreach($page_vars['all_coupons'] as $coupon){
 								$formwriter = $page->getFormWriter('form_test_coupon');
 								echo $formwriter->begin_form("mt-6", "get", '/cart');
-								echo $formwriter->hiddeninput('coupon_code',$coupon->get('ccd_code'));
+								$formwriter->hiddeninput('coupon_code', '', ['value' => $coupon->get('ccd_code')]);
 								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary', '', 'th-btn');
 								echo $formwriter->end_form();
 							}

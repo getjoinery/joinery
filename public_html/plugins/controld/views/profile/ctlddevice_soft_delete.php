@@ -42,7 +42,7 @@ $page_vars = process_logic(ctlddevice_soft_delete_logic($_GET, $_POST));
                         </div>
 	<?php
 
-	echo $formwriter->hiddeninput('device_id', $device->key);
+	$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
 	
 	echo '<p>You are about to delete this device. </p>';
 

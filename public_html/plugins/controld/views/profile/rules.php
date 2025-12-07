@@ -73,8 +73,8 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 			$validation_rules['cdr_rule_hostname']['required']['value'] = 'true';
 			$validation_rules['cdr_rule_action']['required']['value'] = 'true';	
 			echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/rules', true);
-			echo $formwriter->hiddeninput('device_id', $device->key);
-			echo $formwriter->hiddeninput('profile_choice', $profile_choice);
+			$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
+			$formwriter->hiddeninput('profile_choice', '', ['value' => $profile_choice]);
 			echo '<tr><td>';
 			echo $formwriter->textinput('Add Site', 'cdr_rule_hostname', NULL, 100, '', '', 255, '');	
 

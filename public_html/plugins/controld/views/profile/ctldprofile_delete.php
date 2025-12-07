@@ -39,7 +39,7 @@ $page_vars = process_logic(ctldprofile_delete_logic($_GET, $_POST));
                         </div>
 	<?php
 
-	echo $formwriter->hiddeninput('profile_id', $profile->key);
+	$formwriter->hiddeninput('profile_id', '', ['value' => $profile->key]);
 	
 	echo '<p>You are about to delete this scheduled profile. After your scheduled profile is deleted, your default profile will always be active.</p>';
 
