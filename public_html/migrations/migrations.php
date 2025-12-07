@@ -930,3 +930,11 @@
 		$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// Add Test Database menu item under System
+		$migration = array();
+		$migration['database_version'] = '0.69';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'test-database'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('Test Database', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_test_database', 5, 10, 0, '', 'test-database');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
