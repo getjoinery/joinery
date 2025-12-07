@@ -127,26 +127,12 @@ class SubscriptionTier extends SystemBase {
 
     /**
      * Get current subscription tier for a user
-     * Automatically validates subscription status and removes tier if expired
+     *
+     * Returns the user's tier based on group membership. Does NOT automatically
+     * remove tiers - that should be handled by Stripe webhooks when subscriptions
+     * are cancelled. This allows for manual tier assignments without subscriptions.
      */
     public static function GetUserTier($user_id) {
-        // Check for active subscription
-        require_once(PathHelper::getIncludePath('data/order_items_class.php'));
-        $subscriptions = new MultiOrderItem(
-            array('user_id' => $user_id, 'is_active_subscription' => true)
-        );
-        $subscriptions->load();
-
-        $has_active_subscription = false;
-        if ($subscriptions->count() > 0) {
-            foreach ($subscriptions as $subscription) {
-                if ($subscription->check_subscription_status()) {
-                    $has_active_subscription = true;
-                    break;
-                }
-            }
-        }
-
         // Get all subscription tier groups the user belongs to
         $user_groups = new MultiGroupMember(['grm_foreign_key_id' => $user_id]);
         $user_groups->load();
@@ -167,8 +153,37 @@ class SubscriptionTier extends SystemBase {
             }
         }
 
-        // If user has tier but no active subscription, remove it
-        if ($current_tier && !$has_active_subscription) {
+        return $current_tier;
+    }
+
+    /**
+     * Check if user has an active subscription (separate from tier check)
+     */
+    public static function userHasActiveSubscription($user_id) {
+        require_once(PathHelper::getIncludePath('data/order_items_class.php'));
+        $subscriptions = new MultiOrderItem(
+            array('user_id' => $user_id, 'is_active_subscription' => true)
+        );
+        $subscriptions->load();
+
+        if ($subscriptions->count() > 0) {
+            foreach ($subscriptions as $subscription) {
+                if ($subscription->check_subscription_status()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Remove tier from user due to subscription expiration
+     * Called from Stripe webhook when subscription is cancelled/expired
+     */
+    public static function handleSubscriptionExpired($user_id) {
+        $current_tier = self::GetUserTier($user_id);
+        if ($current_tier) {
+            $old_tier_level = $current_tier->get('sbt_tier_level');
             self::removeUserFromAllTiers($user_id);
 
             ChangeTracking::logChange(
@@ -176,18 +191,13 @@ class SubscriptionTier extends SystemBase {
                 null,
                 $user_id,
                 'tier_removed',
-                $current_tier->get('sbt_tier_level'),
+                $old_tier_level,
                 null,
                 'subscription_expired'
             );
 
-            // Clear cache
             self::clearUserCache($user_id);
-
-            return null;
         }
-
-        return $current_tier;
     }
 
     /**
