@@ -124,32 +124,26 @@ class PluginHelper extends ComponentBase {
      * Check if plugin is currently active
      */
     public function isActive() {
-        // Check database for plugin activation status
         $settings = Globalvars::get_instance();
-        
-        // First check individual plugin setting
-        $pluginActive = $settings->get_setting("plugin_{$this->name}_active", true, true);
-        if ($pluginActive !== null) {
-            return (bool)$pluginActive;
+
+        // If this plugin is the active theme provider, it's always active
+        $theme_template = $settings->get_setting('theme_template');
+        $active_plugin = $settings->get_setting('active_theme_plugin');
+        if ($theme_template === 'plugin' && $active_plugin === $this->name) {
+            return true;
         }
-        
-        // Check active_plugins array
-        $activePlugins = $settings->get_setting('active_plugins', true, true);
-        if (is_array($activePlugins)) {
-            return in_array($this->name, $activePlugins);
-        }
-        
-        // Check if plugin has activation record in database
+
+        // Check plg_plugins table for activation status
         // SAFETY: Handle case where plg_plugins table doesn't exist yet (during initial setup/migrations)
         try {
             $dbconnector = DbConnector::get_instance();
             $dblink = $dbconnector->get_db_link();
-            
+
             $sql = "SELECT COUNT(*) as count FROM plg_plugins WHERE plg_name = ? AND plg_active = 1";
             $q = $dblink->prepare($sql);
             $q->execute([$this->name]);
             $result = $q->fetch(PDO::FETCH_ASSOC);
-            
+
             return ($result['count'] > 0);
         } catch (PDOException $e) {
             // Table doesn't exist yet (likely during initial database setup)
@@ -247,10 +241,6 @@ class PluginHelper extends ComponentBase {
             // Table doesn't exist yet (likely during initial database setup)
             // Skip database update during migration phase - plugin will be activated later
         }
-        
-        // Clear any cached plugin states
-        $settings = Globalvars::get_instance();
-        $settings->set_setting("plugin_{$this->name}_active", 1);
 
         // Register deletion rules for this plugin's models only
         require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
@@ -295,10 +285,6 @@ class PluginHelper extends ComponentBase {
             // Table doesn't exist yet (likely during initial database setup)
             // Skip database update during migration phase
         }
-        
-        // Clear cached plugin state
-        $settings = Globalvars::get_instance();
-        $settings->set_setting("plugin_{$this->name}_active", 0);
 
         // Remove deletion rules for this plugin's models
         $this->removePluginDeletionRules();
