@@ -48,9 +48,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['optionvals'] = $mailing_lists->get_dropdown_array();
 	//REMOVE ALL OF THE PRIVATE AND UNLISTED LISTS THE USER IS NOT SUBSCRIBED TO
 	foreach($page_vars['optionvals'] as $key=>$value){
-		$mailing_list = new MailingList($value, TRUE);
+		$mailing_list = new MailingList($key, TRUE);
 		if($mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PUBLIC_UNLISTED){
-			if(!in_array($value, $user_subscribed_list)){
+			if(!in_array($key, $user_subscribed_list)){
 				unset($page_vars['optionvals'][$key]);
 			}
 		}
