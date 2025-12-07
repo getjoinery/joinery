@@ -20,6 +20,32 @@ $settings = Globalvars::get_instance();
 // Get test URL from form
 $test_url = $_POST['test_url'] ?? $_GET['test_url'] ?? '';
 
+// If testing a URL, run it through actual route processing
+$match_result = null;
+if ($test_url) {
+    // Normalize URL
+    $normalized_url = $test_url;
+    if ($normalized_url[0] !== '/') {
+        $normalized_url = '/' . $normalized_url;
+    }
+
+    // Enable match-only mode
+    RouteHelper::$match_only_mode = true;
+    RouteHelper::$match_only_result = null;
+
+    // Override the request path that serve.php will use
+    $_REQUEST['__route'] = ltrim($normalized_url, '/');
+
+    // Include serve.php - it will call processRoutes which will store result instead of executing
+    include(PathHelper::getIncludePath('serve.php'));
+
+    // Get the result
+    $match_result = RouteHelper::$match_only_result;
+
+    // Reset for safety
+    RouteHelper::$match_only_mode = false;
+}
+
 ?>
 <!DOCTYPE html>
 <html>
@@ -56,45 +82,13 @@ $test_url = $_POST['test_url'] ?? $_GET['test_url'] ?? '';
     </form>
 </div>
 
-<?php if ($test_url): ?>
+<?php if ($match_result !== null): ?>
 <div class="section">
     <h2>Route Match Results for: <?= htmlspecialchars($test_url) ?></h2>
-    <?php
-    // Normalize the test URL
-    $normalized_url = $test_url;
-    if ($normalized_url[0] !== '/') {
-        $normalized_url = '/' . $normalized_url;
-    }
-
-    // Load main routes from serve.php (without executing processRoutes)
-    // We need to extract just the $routes array
-    $serve_file = PathHelper::getIncludePath('serve.php');
-    $serve_content = file_get_contents($serve_file);
-
-    // Extract the routes array by finding it in the file
-    // This is a bit hacky but avoids executing the file
-    preg_match('/\$routes\s*=\s*\[/s', $serve_content, $matches, PREG_OFFSET_CAPTURE);
-    if ($matches) {
-        // The routes are defined, load them by including a wrapper
-        ob_start();
-        $routes = [];
-
-        // Create temp file that just defines routes without calling processRoutes
-        $temp_content = preg_replace('/RouteHelper::processRoutes\s*\([^;]+;/', '// processRoutes disabled', $serve_content);
-        $temp_file = sys_get_temp_dir() . '/route_debug_serve_' . md5($serve_content) . '.php';
-        file_put_contents($temp_file, $temp_content);
-
-        // Capture any output and discard
-        include($temp_file);
-        ob_end_clean();
-
-        // Now use the actual route processing with match_only mode
-        $match_result = RouteHelper::processRoutes($routes, ltrim($normalized_url, '/'), true);
-
-        echo "<h3>Match Result (using actual route processing):</h3>";
-        echo "<table>";
-        echo "<tr><th>Property</th><th>Value</th></tr>";
-
+    <p class="info">Using actual route processing logic</p>
+    <table>
+        <tr><th>Property</th><th>Value</th></tr>
+        <?php
         $matched_class = $match_result['matched'] ? 'ok' : 'error';
         echo "<tr><td>Matched</td><td class='$matched_class'>" . ($match_result['matched'] ? 'Yes' : 'No') . "</td></tr>";
         echo "<tr><td>Type</td><td class='info'>" . htmlspecialchars($match_result['type'] ?? 'none') . "</td></tr>";
@@ -111,14 +105,8 @@ $test_url = $_POST['test_url'] ?? $_GET['test_url'] ?? '';
         if (!empty($match_result['params'])) {
             echo "<tr><td>Params</td><td><pre>" . htmlspecialchars(print_r($match_result['params'], true)) . "</pre></td></tr>";
         }
-        echo "</table>";
-
-        // Clean up temp file
-        @unlink($temp_file);
-    } else {
-        echo "<p class='error'>Could not parse serve.php routes</p>";
-    }
-    ?>
+        ?>
+    </table>
 </div>
 <?php endif; ?>
 
