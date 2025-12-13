@@ -41,7 +41,8 @@
 		}
 
 		// Generate fresh install SQL file before creating archive
-		$version = $settings->get_setting('database_version') ?: '0.1';
+		// Use form-provided version consistently for both archive and SQL filenames
+		$version = $version_major . '.' . $version_minor;
 		echo "Generating install SQL file (version $version)...<br>";
 		flush();
 

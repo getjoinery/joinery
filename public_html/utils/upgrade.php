@@ -688,7 +688,6 @@
 		echo $formwriter->begin_form("form", "post", "/utils/upgrade");
 
 		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';
-		echo 'Database Version: '.$settings->get_setting('database_version').'<br>';
 
 		echo '<fieldset><h4>Confirm Upgrade</h4>';
 			echo '<div class="fields full">';
