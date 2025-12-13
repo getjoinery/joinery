@@ -38,7 +38,7 @@ com_category VARCHAR(64)              -- 'hero', 'content', 'media', 'dynamic', 
 com_icon VARCHAR(64)                  -- 'bx-image' for admin UI
 
 -- Configuration
-com_template_file VARCHAR(255)        -- 'components/hero_slider.php' (replaces com_script_filename usage)
+com_template_file VARCHAR(255)        -- 'hero_slider.php' (filename only, rendered from views/components/)
 com_config_fields TEXT                -- Comma-separated list of field names for admin form (e.g., 'heading,subheading,background_image,cta_text,cta_link')
 com_logic_function VARCHAR(255)       -- 'hero_slider_component_logic' if dynamic data needed
 
@@ -87,9 +87,9 @@ public static $field_specifications = array(
     'pac_page_content_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
     'pac_pag_page_id' => array('type'=>'int4'),
     'pac_com_component_id' => array('type'=>'int4'),
-    'pac_location_name' => array('type'=>'varchar(255)', 'required'=>true, 'unique'=>true),  // Component slug (must be unique)
+    'pac_location_name' => array('type'=>'varchar(255)', 'required'=>true, 'unique'=>true),  // Component slug
     'pac_title' => array('type'=>'varchar(255)'),
-    'pac_link' => array('type'=>'varchar(255)'),  // Keep for placeholder system
+    'pac_link' => array('type'=>'varchar(255)'),  // Optional, used by placeholder system
     'pac_usr_user_id' => array('type'=>'int4'),
     'pac_body' => array('type'=>'text'),  // Keep for placeholder system / legacy
     'pac_config' => array('type'=>'json'),  // NEW: component configuration
@@ -105,6 +105,8 @@ public static $json_vars = array('pac_config');
 ```
 
 **Component Identification:** Components are identified by their `pac_location_name` (slug). Templates explicitly request components by slug, e.g., `ComponentRenderer::render('homepage-hero')`.
+
+**Slug Uniqueness:** Enforced via standard unique constraint on `pac_location_name`. Existing records with empty slugs will be populated with unique values during implementation.
 
 ---
 
@@ -343,6 +345,8 @@ These are commonly needed but don't currently exist in the codebase:
 
 ## File Structure
 
+**Template File Convention:** Component templates are stored in `views/components/` and referenced by filename only (e.g., `'hero_static.php'`). This follows `PathHelper::getThemeFilePath()` conventions where the subdirectory is a separate parameter. The theme override chain is: `theme/{theme}/views/components/` → `plugins/{plugin}/views/components/` → `views/components/`.
+
 ```
 /data/
 ├── components_class.php          # Extended with new fields
@@ -467,9 +471,9 @@ class PageContent extends SystemBase {
         'pac_page_content_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'pac_pag_page_id' => array('type'=>'int4'),
         'pac_com_component_id' => array('type'=>'int4'),
-        'pac_location_name' => array('type'=>'varchar(255)', 'required'=>true, 'unique'=>true),  // Component slug (must be unique)
+        'pac_location_name' => array('type'=>'varchar(255)', 'required'=>true, 'unique'=>true),  // Component slug
         'pac_title' => array('type'=>'varchar(255)'),
-        'pac_link' => array('type'=>'varchar(255)'),
+        'pac_link' => array('type'=>'varchar(255)'),  // Optional, used by placeholder system
         'pac_usr_user_id' => array('type'=>'int4'),
         'pac_body' => array('type'=>'text'),
         'pac_config' => array('type'=>'json'),
@@ -482,6 +486,7 @@ class PageContent extends SystemBase {
     );
 
     public static $json_vars = array('pac_config');
+
 
     /**
      * Get component by slug (location_name)
@@ -535,7 +540,31 @@ class PageContent extends SystemBase {
         return '';
     }
 
-    // ... existing methods preserved ...
+    /**
+     * Override save() to update validation logic
+     */
+    public function save($debug = false) {
+        // Only check for duplicate pac_link if it's not empty (legacy placeholder system)
+        $pac_link = $this->get('pac_link');
+        if (!empty($pac_link) && $this->check_for_duplicate('pac_link')) {
+            throw new SystemAuthenticationError('This page link is a duplicate.');
+        }
+
+        if ($this->key) {
+            // Save old version in content_version table
+            ContentVersion::NewVersion(
+                ContentVersion::TYPE_PAGE_CONTENT,
+                $this->key,
+                $this->get('pac_body'),
+                $this->get('pac_title'),
+                $this->get('pac_title')
+            );
+        }
+
+        parent::save($debug);
+    }
+
+    // ... existing methods preserved (get_filled_content, authenticate_write) ...
 }
 
 class MultiPageContent extends SystemMultiBase {
@@ -601,38 +630,61 @@ class MultiPageContent extends SystemMultiBase {
 class ComponentRenderer {
 
     /**
+     * Output debug message as HTML comment
+     * Uses Globalvars debug_mode setting to determine visibility
+     */
+    protected static function debug_output($message, $slug = '') {
+        $settings = Globalvars::get_instance();
+        if (!$settings->get_setting('debug_mode')) {
+            return '';
+        }
+        $slug_info = $slug ? " (slug: {$slug})" : '';
+        return "<!-- ComponentRenderer{$slug_info}: {$message} -->\n";
+    }
+
+    /**
      * Render a component by its slug
      *
      * @param string $slug The component's slug (pac_location_name)
-     * @return string Rendered HTML
+     * @return string Rendered HTML (includes debug comments for admins on errors)
      */
     public static function render($slug) {
         require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
         $component_instance = PageContent::get_by_slug($slug);
 
-        if (!$component_instance || !$component_instance->is_component()) {
-            return '';
+        if (!$component_instance) {
+            return self::debug_output("Component not found", $slug);
+        }
+
+        if (!$component_instance->is_component()) {
+            return self::debug_output("Record exists but is not a component (no pac_com_component_id)", $slug);
         }
 
         if (!$component_instance->is_visible()) {
-            return '';
+            return self::debug_output("Component exists but is not published", $slug);
         }
 
-        return self::render_component($component_instance);
+        return self::render_component($component_instance, $slug);
     }
 
     /**
      * Render a single component instance
      *
      * @param PageContent $component_instance The component instance
+     * @param string $slug For debug output
      * @return string Rendered HTML
      */
-    public static function render_component($component_instance) {
+    public static function render_component($component_instance, $slug = '') {
         $component_type = $component_instance->get_component_type();
 
-        if (!$component_type || !$component_type->is_available()) {
-            return '';
+        if (!$component_type) {
+            return self::debug_output("Component type not found (pac_com_component_id may reference deleted type)", $slug);
+        }
+
+        if (!$component_type->is_available()) {
+            $type_key = $component_type->get('com_type_key');
+            return self::debug_output("Component type '{$type_key}' is inactive", $slug);
         }
 
         $config = $component_instance->get_config();
@@ -641,13 +693,25 @@ class ComponentRenderer {
         // Load dynamic data if needed
         $logic_function = $component_type->get('com_logic_function');
         if ($logic_function) {
-            $data = self::load_component_data($logic_function, $config);
+            try {
+                $data = self::load_component_data($logic_function, $config, $slug);
+            } catch (Exception $e) {
+                return self::debug_output("Logic function '{$logic_function}' threw exception: " . $e->getMessage(), $slug);
+            }
         }
 
         // Render template
         $template_file = $component_type->get('com_template_file');
         if (!$template_file) {
-            return '';
+            return self::debug_output("Component type has no template file configured", $slug);
+        }
+
+        // Use theme-aware path resolution
+        // Template files are stored as filename only (e.g., 'hero_static.php')
+        // and always located in views/components/ subdirectory
+        $template_path = PathHelper::getThemeFilePath($template_file, 'views/components');
+        if (!file_exists($template_path)) {
+            return self::debug_output("Template file not found: {$template_file} (resolved to: {$template_path})", $slug);
         }
 
         ob_start();
@@ -658,10 +722,11 @@ class ComponentRenderer {
         $component = $component_instance;
         $component_type_record = $component_type;
 
-        // Use theme-aware path resolution
-        $template_path = PathHelper::getThemeFilePath($template_file, 'views');
-        if (file_exists($template_path)) {
+        try {
             require($template_path);
+        } catch (Exception $e) {
+            ob_end_clean();
+            return self::debug_output("Template threw exception: " . $e->getMessage(), $slug);
         }
 
         return ob_get_clean();
@@ -669,19 +734,30 @@ class ComponentRenderer {
 
     /**
      * Load dynamic data for a component
+     *
+     * @param string $logic_function Function name to call
+     * @param array $config Component configuration
+     * @param string $slug For debug output
+     * @return array Data for the template
      */
-    protected static function load_component_data($logic_function, $config) {
+    protected static function load_component_data($logic_function, $config, $slug = '') {
         $logic_file = 'logic/components/' . $logic_function . '.php';
         $full_path = PathHelper::getIncludePath($logic_file);
 
-        if (file_exists($full_path)) {
-            require_once($full_path);
-            if (function_exists($logic_function)) {
-                return call_user_func($logic_function, $config);
-            }
+        if (!file_exists($full_path)) {
+            // Return empty but log debug - not a fatal error
+            error_log("ComponentRenderer: Logic file not found: {$logic_file}");
+            return array();
         }
 
-        return array();
+        require_once($full_path);
+
+        if (!function_exists($logic_function)) {
+            error_log("ComponentRenderer: Logic function '{$logic_function}' not defined in {$logic_file}");
+            return array();
+        }
+
+        return call_user_func($logic_function, $config);
     }
 }
 ```
@@ -689,6 +765,24 @@ class ComponentRenderer {
 ---
 
 ## Admin Interface
+
+### Admin Menu Integration
+
+Component management pages appear under the existing **Pages** menu as a new submenu:
+
+```
+Pages
+├── All Pages
+├── Add New Page
+├── Page Contents (existing)
+├── ─────────────
+├── Components          → admin_components.php (list component instances)
+└── Component Types     → admin_component_types.php (superadmin only)
+```
+
+**Menu configuration** (in admin menu system):
+- "Components" - visible to Admin (5+)
+- "Component Types" - visible to Superadmin (10) only
 
 ### Component Type Management (`/adm/admin_component_types.php`)
 
@@ -708,7 +802,7 @@ Edit form for a component type definition:
 - Description (`com_description`) - explains what this component does
 - Category (`com_category`) - dropdown: hero, content, features, media, etc.
 - Icon (`com_icon`) - icon class for admin UI
-- Template File (`com_template_file`) - path like 'components/hero_static.php'
+- Template File (`com_template_file`) - filename only like 'hero_static.php' (templates live in `views/components/`)
 - Config Fields (`com_config_fields`) - comma-separated field names
 - Logic Function (`com_logic_function`) - optional, for dynamic components
 - Active checkbox (`com_is_active`)
@@ -838,7 +932,7 @@ $cta_link = $component_config['cta_link'] ?? '';
 com_type_key: 'hero_static'
 com_title: 'Hero Static'
 com_config_fields: 'heading,subheading,background_image,cta_text,cta_link'
-com_template_file: 'components/hero_static.php'
+com_template_file: 'hero_static.php'
 ```
 
 ---
@@ -849,12 +943,69 @@ com_template_file: 'components/hero_static.php'
 
 The 4 existing PageContent records use the placeholder system (no `pac_com_component_id`). They will continue to work unchanged - the component system only affects records with a component type link.
 
-### No Data Migration Required
+### Data Migration Required
+
+Before the unique constraint can be added to `pac_location_name`, existing records with empty slugs must be populated:
+
+| ID | Current pac_location_name | New pac_location_name |
+|----|---------------------------|----------------------|
+| 1  | "Front Page Banner" | `front-page-banner` |
+| 2  | "Front Page Left" | `front-page-left` |
+| 3  | "Front Page Right" | `front-page-right` |
+| 23 | "test content" | `test-content` |
+
+**Migration SQL:**
+```sql
+UPDATE pac_page_contents SET pac_location_name = 'front-page-banner' WHERE pac_page_content_id = 1;
+UPDATE pac_page_contents SET pac_location_name = 'front-page-left' WHERE pac_page_content_id = 2;
+UPDATE pac_page_contents SET pac_location_name = 'front-page-right' WHERE pac_page_content_id = 3;
+UPDATE pac_page_contents SET pac_location_name = 'test-content' WHERE pac_page_content_id = 23;
+```
+
+### Backward Compatibility
 
 Since we're extending tables rather than replacing them:
-- Existing data is preserved
+- Existing data is preserved (after slug migration)
 - New fields have sensible defaults
 - Old code paths continue to work
+
+### Component Type Seeding
+
+Component types are seeded from definitions in themes and plugins. See **`/specs/page_block_system_block_definitions.md`** for the complete field schema definitions.
+
+**Seeding approach:**
+1. Component type definitions live in theme/plugin directories as PHP files
+2. A seeder script scans for definition files and inserts/updates `com_components` records
+3. Each definition specifies: `type_key`, `title`, `description`, `category`, `template_file`, `config_fields`, `logic_function` (if dynamic)
+
+**Definition file locations:**
+```
+/views/components/definitions/          # Core component definitions
+/theme/{theme}/components/definitions/  # Theme-specific components
+/plugins/{plugin}/components/definitions/ # Plugin-provided components
+```
+
+**Example definition file** (`/views/components/definitions/hero_static.php`):
+```php
+<?php
+return [
+    'type_key' => 'hero_static',
+    'title' => 'Hero Static',
+    'description' => 'Single hero section with heading, subheading, background, and CTA',
+    'category' => 'hero',
+    'icon' => 'bx-image',
+    'template_file' => 'hero_static.php',  // Filename only, lives in views/components/
+    'config_fields' => 'heading,subheading,alignment,background_type,background_color,background_image,text_color,height,cta_text,cta_link',
+    'logic_function' => null,
+    'requires_plugin' => null,
+];
+```
+
+**Seeder script** (`/utils/seed_component_types.php`):
+- Scans definition directories
+- For each definition file, creates or updates the `com_components` record
+- Matches on `com_type_key` for updates
+- Can be run manually or as part of deployment
 
 ---
 
