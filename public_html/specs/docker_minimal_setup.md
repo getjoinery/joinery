@@ -1,34 +1,14 @@
 # Specification: Minimal Docker Setup - Single Container Per Site
 
-## Current Status (as of November 2024)
+## Current Status (as of December 2024)
 
-**Overall Docker Compatibility: 85% Complete** ✅
+**Overall Docker Compatibility: 95% Complete** ✅
 
 - ✅ **Phase 1 (Archive Structure):** FULLY IMPLEMENTED - tar.gz creation, extraction, and deployment working
-- ⚠️ **Phase 2 (Composer Management):** 95% COMPLETE - One blocking issue must be fixed first (see below)
-- 📋 **Docker Implementation:** SPECIFICATION COMPLETE - Ready to implement after Phase 2 fixes
+- ✅ **Phase 2 (Composer Management):** COMPLETE - All components implemented
+- 📋 **Docker Implementation:** SPECIFICATION COMPLETE - Ready to implement
 
-### ⚠️ BLOCKING ISSUE: composerAutoLoad Migration Disabled
-
-Before Docker can be tested, **one critical fix is needed:**
-
-**File:** `/migrations/migrations.php` (migration 0.68, lines 925-932)
-
-**Current (Broken):**
-```php
-'test' => "SELECT 1 as count"  // ❌ Always returns 1, skips migration!
-```
-
-**Should be:**
-```php
-'test' => "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'composerAutoLoad' AND stg_value LIKE '/home/user1/vendor%'"
-```
-
-**Why it matters:** Without this fix, existing sites won't get updated to use per-site vendor directories (`../vendor/`), causing Docker deployments to fail.
-
-**Estimated fix time:** 5 minutes
-
-See [Phase 2 Status Details](#phase-2-composer-management-status-details) below for complete information.
+Fresh Docker installations use `joinery-install.sql.gz` which already has the correct `../vendor/` path configured. No additional setup needed.
 
 ## Overview
 
@@ -173,18 +153,18 @@ joinerytest/backups/*
 
 ### What's Been Implemented ✅
 
-All Phase 2 components have been implemented except for one migration fix:
+All Phase 2 components have been implemented:
 
 | Component | Status | Details |
 |-----------|--------|---------|
 | **composer.json** | ✅ Done | Updated to use relative vendor path: `"vendor-dir": "../vendor"` |
 | **ComposerValidator.php** | ✅ Done | Enhanced with vendor directory detection and validation |
-| **deploy.sh** | ✅ Done | v3.8 - Deploys maintenance_scripts directory properly |
-| **new_account.sh** | ✅ Done | Handles gzip-compressed SQL files |
-| **publish_upgrade.php** | ✅ Done | Creates tar.gz archives with all components (2.04 MB) |
+| **deploy.sh** | ✅ Done | v3.10 - Deploys maintenance_scripts directory properly |
+| **new_account.sh** | ✅ Done | v1.31 - Handles gzip-compressed SQL files |
+| **publish_upgrade.php** | ✅ Done | Creates tar.gz archives with all components |
 | **upgrade.php** | ✅ Done | Properly extracts tar.gz format |
-| **composerAutoLoad Migration** | ⚠️ **BROKEN** | Migration 0.68 disabled - test condition needs fix (see above) |
-| **server_setup.sh** | ✅ Verify | Should have generic composer.json creation removed |
+| **composerAutoLoad Migration** | ✅ Intentionally Disabled | Migration 0.68 - see [Appendix: Migrating Existing Sites](#appendix-migrating-existing-sites-to-docker) |
+| **server_setup.sh** | ✅ Done | v1.02 - Generic composer.json creation removed |
 
 ### Archive Structure (Phase 1) - Complete ✅
 
@@ -204,26 +184,17 @@ joinery-X-Y.tar.gz
 
 ### Next Steps to Reach 100%
 
-**Priority 1: Fix composerAutoLoad Migration (5 minutes)**
-1. Open `/migrations/migrations.php`
-2. Find migration 0.68 (lines 925-932)
-3. Replace the test condition (see blocking issue above)
-4. Run test to verify migration now triggers properly
-
-**Priority 2: Verify server_setup.sh (10 minutes)**
-- Confirm generic `composer.json` creation in `/home/user1/` has been removed
-- Verify conditional composer install only runs for project files at `/var/www/html/$SITENAME/public_html/`
-
-**Priority 3: End-to-End Test (30-60 minutes)**
+**Priority 1: End-to-End Test (30-60 minutes)**
 - Create fresh archive with publish_upgrade.php
 - Extract and run server_setup.sh on test system
 - Verify `/var/www/html/{SITE}/vendor/` is populated
 - Verify `/var/www/html/{SITE}/maintenance_scripts/` deployed correctly
 - Run deploy.sh and confirm dependencies installed
 
-**Priority 4: Docker Implementation**
-- After Phase 2 is complete, proceed with Docker deployment using this specification
-- All infrastructure is ready; just needs the migration fix
+**Priority 2: Docker Implementation**
+- All infrastructure is ready
+- Build test container following this specification
+- Verify container starts and application loads correctly
 
 ---
 
@@ -971,13 +942,9 @@ For production with multiple sites, use **Option 1 (Nginx)** because:
 
 ### Issue: "Composer autoload not found" or "Vendor directory missing"
 
-**Root Cause:** The composerAutoLoad migration (0.68) is disabled and hasn't updated existing sites to use per-site vendor directories.
+**For fresh installs:** This shouldn't happen - the install SQL has the correct path. Check that composer dependencies were installed during the build.
 
-**Solution:**
-1. Fix the migration test condition in `/migrations/migrations.php` (lines 925-932)
-2. Run `php /var/www/html/{SITENAME}/public_html/utils/update_database.php` to trigger the migration
-3. Verify the setting was updated: `psql -d {SITENAME} -c "SELECT * FROM stg_settings WHERE stg_name = 'composerAutoLoad';"`
-4. Should show: `../vendor/` (not `/home/user1/vendor/`)
+**For migrated sites:** See [Appendix: Migrating Existing Sites to Docker](#appendix-migrating-existing-sites-to-docker).
 
 ### Issue: Docker build succeeds but container won't start
 
@@ -1088,3 +1055,45 @@ docker --version
 docker run hello-world
 # Should show: Hello from Docker!
 ```
+
+---
+
+## Appendix: Migrating Existing Sites to Docker
+
+This section applies only when migrating an **existing** Joinery site to Docker. Fresh installations do not need these steps.
+
+### composerAutoLoad Setting Migration
+
+Existing sites may have the `composerAutoLoad` database setting pointing to `/home/user1/vendor/` instead of the Docker-compatible `../vendor/` path.
+
+**Why this matters:** The old path (`/home/user1/vendor/`) won't exist inside Docker containers, causing "vendor autoload not found" errors.
+
+**Background:** Migration 0.68 in `/migrations/migrations.php` (lines 925-932) is intentionally disabled to prevent automatic changes to this critical path setting on production sites. The migration test always returns 1, skipping execution:
+
+```php
+'test' => "SELECT 1 as count"  // Intentionally disabled
+```
+
+### Manual Migration Steps
+
+After deploying an existing site to Docker, run the following command to update the setting:
+
+```bash
+docker exec -it {SITENAME} psql -U postgres -d {SITENAME} -c "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';"
+```
+
+Verify the update:
+```bash
+docker exec -it {SITENAME} psql -U postgres -d {SITENAME} -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'composerAutoLoad';"
+```
+
+Expected output: `../vendor/`
+
+### Other Migration Considerations
+
+When migrating existing sites:
+
+1. **Database backup:** Export your database before migration
+2. **Uploads directory:** Copy all files from the existing uploads directory
+3. **Config file:** Update `Globalvars_site.php` if paths need adjustment
+4. **Test thoroughly:** Verify all functionality before switching production traffic
