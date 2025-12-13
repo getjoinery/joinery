@@ -631,11 +631,11 @@ class ComponentRenderer {
 
     /**
      * Output debug message as HTML comment
-     * Uses Globalvars debug_mode setting to determine visibility
+     * Uses Globalvars 'debug' setting to determine visibility
      */
     protected static function debug_output($message, $slug = '') {
         $settings = Globalvars::get_instance();
-        if (!$settings->get_setting('debug_mode')) {
+        if (!$settings->get_setting('debug')) {
             return '';
         }
         $slug_info = $slug ? " (slug: {$slug})" : '';
