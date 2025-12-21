@@ -39,7 +39,7 @@ com_icon VARCHAR(64)                  -- 'bx-image' for admin UI
 
 -- Configuration
 com_template_file VARCHAR(255)        -- 'hero_slider.php' (filename only, rendered from views/components/)
-com_config_fields TEXT                -- Comma-separated list of field names for admin form (e.g., 'heading,subheading,background_image,cta_text,cta_link')
+com_config_schema JSON                -- Field definitions for admin form (see Config Schema Format section)
 com_logic_function VARCHAR(255)       -- 'hero_slider_component_logic' if dynamic data needed
 
 -- Status
@@ -57,7 +57,7 @@ public static $field_specifications = array(
     'com_category' => array('type'=>'varchar(64)'),
     'com_icon' => array('type'=>'varchar(64)'),
     'com_template_file' => array('type'=>'varchar(255)'),
-    'com_config_fields' => array('type'=>'text'),  // Comma-separated field names
+    'com_config_schema' => array('type'=>'json'),  // Field definitions for admin form
     'com_logic_function' => array('type'=>'varchar(255)'),
     'com_is_active' => array('type'=>'bool', 'default'=>true),
     'com_requires_plugin' => array('type'=>'varchar(64)'),
@@ -93,7 +93,7 @@ public static $field_specifications = array(
     'pac_usr_user_id' => array('type'=>'int4'),
     'pac_body' => array('type'=>'text'),  // Keep for placeholder system / legacy
     'pac_config' => array('type'=>'json'),  // NEW: component configuration
-    'pac_order' => array('type'=>'int2'),
+    'pac_order' => array('type'=>'int2'),  // Render order within a page (used by get_filled_content)
     'pac_is_published' => array('type'=>'bool', 'default'=>false),
     'pac_published_time' => array('type'=>'timestamp(6)'),
     'pac_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -144,37 +144,75 @@ echo ComponentRenderer::render('homepage-features');
 
 ## Component Configuration
 
-Component configuration uses a key-value approach with support for repeating field groups:
+Component configuration uses a JSON schema approach that defines field structure for the admin form:
 
 1. **Component templates use variables** like `$config['heading']`, `$config['features']`
-2. **Admin form generates inputs** based on `com_config_fields`
-3. **`pac_config` stores JSON** with simple values and arrays
+2. **Admin form generates inputs** based on `com_config_schema` (JSON)
+3. **`pac_config` stores JSON** with the actual values
 
-### Field Name Syntax
+### Config Schema Format
 
-| Syntax | Meaning | Admin UI |
-|--------|---------|----------|
-| `heading` | Simple field | Single textarea |
-| `features[].title` | Repeating field | Grouped rows with Add/Remove |
+The `com_config_schema` field stores a JSON object defining the fields:
+
+```json
+{
+  "fields": [
+    {"name": "fieldname", "label": "Display Label", "type": "text"},
+    {"name": "fieldname", "label": "Display Label", "type": "textarea"},
+    {"name": "fieldname", "label": "Display Label", "type": "repeater", "fields": [...]}
+  ]
+}
+```
+
+**Field Properties:**
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `name` | Yes | Field key used in templates (e.g., `heading`) |
+| `label` | Yes | Display label in admin form (e.g., `"Heading"`) |
+| `type` | No | Field type: `text`, `textarea`, `repeater` (default: `text`) |
+| `help` | No | Help text shown below the field |
+| `fields` | For repeater | Array of sub-fields for repeater type |
+
+**MVP Field Types:**
+- `text` - Single-line text input (default)
+- `textarea` - Multi-line text input
+- `repeater` - Repeating group of fields with Add/Remove UI
+
+**Future Field Types (Phase 2+):**
+- `image` - Image picker integration
+- `select` - Dropdown with predefined options
+- `checkbox` - Boolean toggle
+- `number` - Numeric input
+- `html` - Rich text editor
 
 ### Example: Simple Component
 
-**Component type:**
-```
-com_type_key: 'hero_static'
-com_config_fields: 'heading,subheading,background_image,cta_text,cta_link'
+**Component type schema:**
+```json
+{
+  "fields": [
+    {"name": "heading", "label": "Heading", "type": "text"},
+    {"name": "subheading", "label": "Subheading", "type": "textarea"},
+    {"name": "background_image", "label": "Background Image", "type": "text", "help": "Path to image file, e.g. /images/hero.jpg"},
+    {"name": "cta_text", "label": "Button Text", "type": "text"},
+    {"name": "cta_link", "label": "Button Link", "type": "text"}
+  ]
+}
 ```
 
-**Admin form:**
+**Admin form rendered:**
 ```
 Heading:          [____________________]
 Subheading:       [____________________]
+                  [                    ]
 Background Image: [____________________]
-CTA Text:         [____________________]
-CTA Link:         [____________________]
+                  Path to image file, e.g. /images/hero.jpg
+Button Text:      [____________________]
+Button Link:      [____________________]
 ```
 
-**Stored config:**
+**Stored instance config (`pac_config`):**
 ```json
 {
   "heading": "Welcome to Our Site",
@@ -185,15 +223,29 @@ CTA Link:         [____________________]
 }
 ```
 
-### Example: Repeating Fields Component
+### Example: Repeater Fields Component
 
-**Component type:**
-```
-com_type_key: 'feature_grid'
-com_config_fields: 'heading,subheading,features[].icon,features[].title,features[].description'
+**Component type schema:**
+```json
+{
+  "fields": [
+    {"name": "heading", "label": "Heading", "type": "text"},
+    {"name": "subheading", "label": "Subheading", "type": "textarea"},
+    {
+      "name": "features",
+      "label": "Features",
+      "type": "repeater",
+      "fields": [
+        {"name": "icon", "label": "Icon", "type": "text"},
+        {"name": "title", "label": "Title", "type": "text"},
+        {"name": "description", "label": "Description", "type": "textarea"}
+      ]
+    }
+  ]
+}
 ```
 
-**Admin form:**
+**Admin form rendered:**
 ```
 Heading:    [____________________]
 Subheading: [____________________]
@@ -210,7 +262,7 @@ Features:                              [+ Add Feature]
 └─────────────────────────────────────────────────────┘
 ```
 
-**Stored config:**
+**Stored instance config (`pac_config`):**
 ```json
 {
   "heading": "Why Choose Us",
@@ -233,47 +285,50 @@ Features:                              [+ Add Feature]
 <?php endforeach; ?>
 ```
 
-### Repeater Field Parsing
-
-The admin form parses `com_config_fields` to detect repeating groups:
+### Schema Helper Functions
 
 ```php
 /**
- * Parse config fields into simple fields and repeater groups
- *
- * Input: 'heading,subheading,features[].icon,features[].title'
- * Output: [
- *   'simple' => ['heading', 'subheading'],
- *   'repeaters' => [
- *     'features' => ['icon', 'title']
- *   ]
- * ]
+ * Get config schema as parsed array
+ * Returns the fields array from the schema, or empty array if invalid
  */
-function parse_config_fields($config_fields) {
-    $fields = array_map('trim', explode(',', $config_fields));
-    $simple = array();
-    $repeaters = array();
+public function get_config_schema() {
+    $schema = $this->get('com_config_schema');
+    if (is_string($schema)) {
+        $schema = json_decode($schema, true);
+    }
+    if (!is_array($schema) || !isset($schema['fields'])) {
+        return array();
+    }
+    return $schema['fields'];
+}
 
-    foreach ($fields as $field) {
-        if (preg_match('/^(\w+)\[\]\.(\w+)$/', $field, $matches)) {
-            $group = $matches[1];
-            $subfield = $matches[2];
-            if (!isset($repeaters[$group])) {
-                $repeaters[$group] = array();
-            }
-            $repeaters[$group][] = $subfield;
-        } else {
-            $simple[] = $field;
+/**
+ * Get simple field names (non-repeater) for quick access
+ */
+public function get_simple_field_names() {
+    $names = array();
+    foreach ($this->get_config_schema() as $field) {
+        if (($field['type'] ?? 'text') !== 'repeater') {
+            $names[] = $field['name'];
         }
     }
+    return $names;
+}
 
-    return array('simple' => $simple, 'repeaters' => $repeaters);
+/**
+ * Get repeater field definitions
+ */
+public function get_repeater_fields() {
+    $repeaters = array();
+    foreach ($this->get_config_schema() as $field) {
+        if (($field['type'] ?? 'text') === 'repeater') {
+            $repeaters[$field['name']] = $field;
+        }
+    }
+    return $repeaters;
 }
 ```
-
-### Future Enhancement
-
-A typed field schema system (select dropdowns, image pickers, date pickers) can be added later if needed. For MVP, all fields are textareas.
 
 ---
 
@@ -396,7 +451,7 @@ class Component extends SystemBase {
         'com_category' => array('type'=>'varchar(64)'),
         'com_icon' => array('type'=>'varchar(64)'),
         'com_template_file' => array('type'=>'varchar(255)'),
-        'com_config_fields' => array('type'=>'text'),  // Comma-separated field names
+        'com_config_schema' => array('type'=>'json'),  // Field definitions for admin form
         'com_logic_function' => array('type'=>'varchar(255)'),
         'com_is_active' => array('type'=>'bool', 'default'=>true),
         'com_order' => array('type'=>'int2'),
@@ -406,15 +461,47 @@ class Component extends SystemBase {
         'com_delete_time' => array('type'=>'timestamp(6)'),
     );
 
+    public static $json_vars = array('com_config_schema');
+
     /**
-     * Get config field names as array
+     * Get config schema as parsed array
+     * Returns the fields array from the schema, or empty array if invalid
      */
-    public function get_config_field_names() {
-        $fields = $this->get('com_config_fields');
-        if (empty($fields)) {
+    public function get_config_schema() {
+        $schema = $this->get('com_config_schema');
+        if (is_string($schema)) {
+            $schema = json_decode($schema, true);
+        }
+        if (!is_array($schema) || !isset($schema['fields'])) {
             return array();
         }
-        return array_map('trim', explode(',', $fields));
+        return $schema['fields'];
+    }
+
+    /**
+     * Get simple field names (non-repeater) for quick access
+     */
+    public function get_simple_field_names() {
+        $names = array();
+        foreach ($this->get_config_schema() as $field) {
+            if (($field['type'] ?? 'text') !== 'repeater') {
+                $names[] = $field['name'];
+            }
+        }
+        return $names;
+    }
+
+    /**
+     * Get repeater field definitions
+     */
+    public function get_repeater_fields() {
+        $repeaters = array();
+        foreach ($this->get_config_schema() as $field) {
+            if (($field['type'] ?? 'text') === 'repeater') {
+                $repeaters[$field['name']] = $field;
+            }
+        }
+        return $repeaters;
     }
 
     /**
@@ -477,7 +564,7 @@ class PageContent extends SystemBase {
         'pac_usr_user_id' => array('type'=>'int4'),
         'pac_body' => array('type'=>'text'),
         'pac_config' => array('type'=>'json'),
-        'pac_order' => array('type'=>'int2', 'default'=>0),
+        'pac_order' => array('type'=>'int2', 'default'=>0),  // Render order within a page (used by get_filled_content)
         'pac_is_published' => array('type'=>'bool', 'default'=>false),
         'pac_published_time' => array('type'=>'timestamp(6)'),
         'pac_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -803,7 +890,7 @@ Edit form for a component type definition:
 - Category (`com_category`) - dropdown: hero, content, features, media, etc.
 - Icon (`com_icon`) - icon class for admin UI
 - Template File (`com_template_file`) - filename only like 'hero_static.php' (templates live in `views/components/`)
-- Config Fields (`com_config_fields`) - comma-separated field names
+- Config Schema (`com_config_schema`) - JSON field definitions (see Config Schema Format)
 - Logic Function (`com_logic_function`) - optional, for dynamic components
 - Active checkbox (`com_is_active`)
 
@@ -828,7 +915,7 @@ Edit form for a component instance:
 - Admin title (`pac_title`) - for admin display only
 - Component type (select from available component types)
 - Published checkbox
-- Config fields - one textarea per field defined in `com_config_fields`
+- Config fields - dynamically generated from `com_config_schema` (text inputs, textareas, repeaters)
 
 **Validation:**
 - Slug must be unique across all component instances
@@ -837,24 +924,78 @@ Edit form for a component instance:
 
 ## Integration Points
 
-### Homepage Integration
+### Two Rendering Approaches
+
+The component system supports two complementary approaches:
+
+| Approach | Method | Use Case |
+|----------|--------|----------|
+| **Explicit** | `ComponentRenderer::render('slug')` | Developer controls layout in view file |
+| **Automatic** | `$page->get_filled_content()` | No-code page building; components auto-render |
+
+**Key distinction:**
+- Components with `pac_pag_page_id` set → auto-rendered by `get_filled_content()`
+- Components called by slug → work regardless of page assignment
+- Both approaches can be mixed in the same view
+
+### Automatic Rendering via `Page::get_filled_content()`
+
+The existing `get_filled_content()` method is extended to automatically render components assigned to the page. **Components fully replace page body content** - they don't mix.
+
+**Rendering logic:**
+- **Has components?** → Render components only (ordered by `pac_order`)
+- **No components?** → Fall back to traditional page body (`pag_body`) with placeholder substitution
+- **Need custom HTML in a component page?** → Use a `custom_html` component type
 
 ```php
-// /views/index.php (updated)
+// In Page class (extended)
+public function get_filled_content() {
+    require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+
+    // Check for components assigned to this page
+    $components = new MultiPageContent(
+        ['page_id' => $this->key, 'components_only' => true, 'published' => true, 'deleted' => false],
+        ['pac_order' => 'ASC']
+    );
+
+    if ($components->count_all() > 0) {
+        // Has components - render them, ignore page body
+        $output = '';
+        $components->load();
+        foreach ($components as $component) {
+            $output .= ComponentRenderer::render_component($component);
+        }
+        return $output;
+    }
+
+    // No components - fall back to traditional page body + placeholders
+    return $this->get_body_content();
+}
+
+/**
+ * Get page body with placeholder substitution (extracted from original get_filled_content)
+ */
+protected function get_body_content() {
+    // ... existing placeholder logic moved here ...
+}
+```
+
+**Result:** Templates that already call `$page->get_filled_content()` automatically gain component support with zero changes. Pages transition cleanly from body-based to component-based content.
+
+### Explicit Rendering via `ComponentRenderer::render()`
+
+For custom layouts, developers can explicitly render components by slug:
+
+```php
+// /views/index.php - developer-controlled layout
 <?php
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
 
-$session = SessionControl::get_instance();
-$settings = Globalvars::get_instance();
-
 $page = new PublicPage();
-$page->public_header(array(
-    'title' => $settings->get_setting('site_name'),
-    'showheader' => true
-));
+$page->public_header(array('title' => $settings->get_setting('site_name')));
 
-// Render components by slug - template explicitly chooses which components to show
+// Explicit component calls - developer controls order and placement
 echo ComponentRenderer::render('homepage-hero');
 echo ComponentRenderer::render('homepage-features');
 echo ComponentRenderer::render('homepage-testimonials');
@@ -864,20 +1005,34 @@ $page->public_footer();
 ?>
 ```
 
-### Page Integration
+### Mixed Approach
+
+Views can combine explicit components with automatic page content:
 
 ```php
-// /views/page.php - components can supplement page content
+// /views/page.php - mixed approach
 <?php
-// ... existing page loading code ...
+// Explicit component at top
+echo ComponentRenderer::render('site-wide-announcement');
 
-// Render specific components by slug
-echo ComponentRenderer::render('page-sidebar-cta');
-
-// Existing page content (placeholder system still works)
+// Automatic: renders page-assigned components + body content
 echo $page_record->get_filled_content();
+
+// Explicit component at bottom
+echo ComponentRenderer::render('footer-cta');
 ?>
 ```
+
+### No-Code Page Building (Future)
+
+With automatic rendering, admins can build pages without view files:
+
+1. Create a Page record (e.g., "About Us" with link `/about`)
+2. Assign components to the page via admin UI (setting `pac_pag_page_id`)
+3. Set `pac_order` to control component order
+4. Page renders automatically via `get_filled_content()` - no PHP required
+
+The routing system serves the page, calls `get_filled_content()`, and components render in order.
 
 ---
 
@@ -931,7 +1086,13 @@ $cta_link = $component_config['cta_link'] ?? '';
 ```
 com_type_key: 'hero_static'
 com_title: 'Hero Static'
-com_config_fields: 'heading,subheading,background_image,cta_text,cta_link'
+com_config_schema: {"fields": [
+  {"name": "heading", "label": "Heading", "type": "text"},
+  {"name": "subheading", "label": "Subheading", "type": "textarea"},
+  {"name": "background_image", "label": "Background Image", "type": "text"},
+  {"name": "cta_text", "label": "Button Text", "type": "text"},
+  {"name": "cta_link", "label": "Button Link", "type": "text"}
+]}
 com_template_file: 'hero_static.php'
 ```
 
@@ -995,7 +1156,15 @@ return [
     'category' => 'hero',
     'icon' => 'bx-image',
     'template_file' => 'hero_static.php',  // Filename only, lives in views/components/
-    'config_fields' => 'heading,subheading,alignment,background_type,background_color,background_image,text_color,height,cta_text,cta_link',
+    'config_schema' => [
+        'fields' => [
+            ['name' => 'heading', 'label' => 'Heading', 'type' => 'text'],
+            ['name' => 'subheading', 'label' => 'Subheading', 'type' => 'textarea'],
+            ['name' => 'background_image', 'label' => 'Background Image', 'type' => 'text', 'help' => 'Path to image file'],
+            ['name' => 'cta_text', 'label' => 'Button Text', 'type' => 'text'],
+            ['name' => 'cta_link', 'label' => 'Button Link', 'type' => 'text'],
+        ]
+    ],
     'logic_function' => null,
     'requires_plugin' => null,
 ];
@@ -1031,29 +1200,45 @@ return [
 
 ## Future Enhancements
 
-1. **Component previews** - Live preview in admin while editing
-2. **Component templates** - Save configured components as reusable starting points
-3. **A/B testing** - Show different components to different user segments
-4. **Analytics** - Track which components users interact with
-5. **Import/export** - Export page component configurations as JSON
-6. **Versioning** - Track changes to component configurations over time
-7. **Global components** - Components that appear on multiple pages (header/footer supplements)
-8. **Nested components** - Container components that hold other components (Phase 3+)
+1. **No-code page builder** - Full admin UI for building pages from components without view files (foundation already in place via `get_filled_content()` integration)
+2. **Component previews** - Live preview in admin while editing
+3. **Component templates** - Save configured components as reusable starting points
+4. **A/B testing** - Show different components to different user segments
+5. **Analytics** - Track which components users interact with
+6. **Import/export** - Export page component configurations as JSON
+7. **Versioning** - Track changes to component configurations over time
+8. **Shared components** - Components rendered on multiple pages via explicit slug calls (already supported)
+9. **Nested components** - Container components that hold other components (Phase 3+)
 
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Foundation (MVP)
-- [ ] Extend Component class with new fields (`com_type_key`, `com_config_fields`, `com_template_file`, etc.)
+- [ ] Extend Component class with new fields (`com_type_key`, `com_config_schema`, `com_template_file`, etc.)
 - [ ] Extend PageContent class with new fields (`pac_config`, `pac_is_published`) with unique constraint on slug
-- [ ] Create ComponentRenderer class
+- [ ] Create ComponentRenderer class with `render($slug)` and `render_component($instance)` methods
+- [ ] Extend `Page::get_filled_content()` to auto-render page-assigned components (enables future no-code page building)
 - [ ] Create admin for component types (`admin_component_types.php`, `admin_component_type_edit.php`)
 - [ ] Create admin for component instances with repeater UI (`admin_components.php`, `admin_component_edit.php`)
-  - Simple fields render as textareas
-  - `fieldname[].subfield` syntax renders as repeater with Add/Remove
+  - Fields render based on `type` in schema: `text` (input), `textarea`, `repeater`
+  - Repeater fields render as grouped rows with Add/Remove buttons
+  - Page assignment dropdown (optional `pac_pag_page_id`) for automatic rendering
+  - Order field (`pac_order`) for controlling render sequence
 - [ ] Extract 3 existing patterns as components (`cta_banner`, `feature_grid`, `page_title`)
-- [ ] Integrate with homepage (`views/index.php`)
+- [ ] Create `custom_html` component (essential escape hatch for freeform content in component-based pages)
+- [ ] Integrate with homepage (`views/index.php`) using explicit `ComponentRenderer::render()` calls
+
+### Pre-Completion: Documentation Required
+
+Before moving this spec to `/specs/implemented/`, the following documentation must be created:
+
+- [ ] Update `/docs/plugin_developer_guide.md` with component creation instructions
+- [ ] Document `ComponentRenderer` class usage and methods
+- [ ] Document `com_config_schema` JSON format with examples
+- [ ] Document the two rendering approaches (explicit vs automatic)
+- [ ] Document `Page::get_filled_content()` behavior (components replace body)
+- [ ] Add component development section to `CLAUDE.md` if needed
 
 ### Phase 2: More Components
 - [ ] Extract remaining existing patterns (`hero_slider`, `event_grid`, `product_grid`, etc.)
