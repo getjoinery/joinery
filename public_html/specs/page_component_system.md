@@ -157,7 +157,7 @@ The `com_config_schema` field stores a JSON object defining the fields:
 ```json
 {
   "fields": [
-    {"name": "fieldname", "label": "Display Label", "type": "text"},
+    {"name": "fieldname", "label": "Display Label", "type": "textinput"},
     {"name": "fieldname", "label": "Display Label", "type": "textarea"},
     {"name": "fieldname", "label": "Display Label", "type": "repeater", "fields": [...]}
   ]
@@ -170,21 +170,343 @@ The `com_config_schema` field stores a JSON object defining the fields:
 |----------|----------|-------------|
 | `name` | Yes | Field key used in templates (e.g., `heading`) |
 | `label` | Yes | Display label in admin form (e.g., `"Heading"`) |
-| `type` | No | Field type: `text`, `textarea`, `repeater` (default: `text`) |
+| `type` | No | FormWriter method name: `textinput`, `textarea`, `dropinput`, `repeater`, etc. (default: `textinput`) |
 | `help` | No | Help text shown below the field |
 | `fields` | For repeater | Array of sub-fields for repeater type |
 
-**MVP Field Types:**
-- `text` - Single-line text input (default)
-- `textarea` - Multi-line text input
-- `repeater` - Repeating group of fields with Add/Remove UI
+**Field Types:**
 
-**Future Field Types (Phase 2+):**
-- `image` - Image picker integration
-- `select` - Dropdown with predefined options
-- `checkbox` - Boolean toggle
-- `number` - Numeric input
-- `html` - Rich text editor
+Schema uses FormWriter method names directly - no translation map needed:
+
+| Schema `type` Value | Description |
+|---------------------|-------------|
+| `textinput` | Single-line text input (default) |
+| `passwordinput` | Password input |
+| `textarea` | Multi-line text input |
+| `textbox` | Multi-line text input (alias) |
+| `checkboxinput` | Boolean toggle |
+| `radioinput` | Radio button group |
+| `checkboxList` | Multiple checkbox options |
+| `dropinput` | Dropdown with predefined options |
+| `dateinput` | Date picker |
+| `timeinput` | Time picker |
+| `datetimeinput` | Date and time picker |
+| `fileinput` | File upload |
+| `imageinput` | Image upload/selection |
+| `hiddeninput` | Hidden field |
+| `repeater` | Repeating group of fields with Add/Remove UI |
+
+**Admin form for component type editing** - when selecting field types, show friendly labels:
+
+```php
+// Field type dropdown options for component type admin
+$field_type_options = [
+    'textinput' => 'Text Input (single line)',
+    'passwordinput' => 'Password Input',
+    'textarea' => 'Text Area (multi-line)',
+    'textbox' => 'Text Box (multi-line)',
+    'checkboxinput' => 'Checkbox (yes/no)',
+    'radioinput' => 'Radio Buttons',
+    'checkboxList' => 'Checkbox List (multiple)',
+    'dropinput' => 'Dropdown Select',
+    'dateinput' => 'Date Picker',
+    'timeinput' => 'Time Picker',
+    'datetimeinput' => 'Date & Time Picker',
+    'fileinput' => 'File Upload',
+    'imageinput' => 'Image Upload',
+    'hiddeninput' => 'Hidden Field',
+    'repeater' => 'Repeater (grouped fields)',
+];
+```
+
+**Rendering component config form** - direct method call, no map:
+
+```php
+foreach ($schema['fields'] as $field) {
+    $method = $field['type'] ?? 'textinput';
+    $options = $field['options'] ?? [];
+    $options['value'] = $config[$field['name']] ?? '';
+
+    if ($method === 'repeater') {
+        $options['fields'] = $field['fields'];
+        $options['add_label'] = '+ Add ' . $field['label'];
+    }
+
+    $formwriter->$method($field['name'], $field['label'], $options);
+}
+```
+
+This leverages existing FormWriter infrastructure directly - schema types match method names exactly.
+
+### Repeater Field Implementation
+
+Repeaters allow multiple grouped entries (e.g., a list of features, team members, slides).
+
+**Schema definition:**
+```json
+{
+  "name": "features",
+  "label": "Features",
+  "type": "repeater",
+  "fields": [
+    {"name": "icon", "label": "Icon", "type": "textinput"},
+    {"name": "title", "label": "Title", "type": "textinput"},
+    {"name": "description", "label": "Description", "type": "textarea"}
+  ]
+}
+```
+
+**Stored config (`pac_config`):**
+```json
+{
+  "features": [
+    {"icon": "rocket", "title": "Fast", "description": "Lightning quick"},
+    {"icon": "lock", "title": "Secure", "description": "Bank-grade encryption"}
+  ]
+}
+```
+
+**HTML form structure:**
+```html
+<div class="repeater" data-name="features">
+  <label>Features</label>
+
+  <div class="repeater-items">
+    <!-- Row 0 -->
+    <div class="repeater-row" data-index="0">
+      <input type="text" name="features[0][icon]" value="rocket">
+      <input type="text" name="features[0][title]" value="Fast">
+      <textarea name="features[0][description]">Lightning quick</textarea>
+      <button type="button" class="repeater-remove">Remove</button>
+    </div>
+
+    <!-- Row 1 -->
+    <div class="repeater-row" data-index="1">
+      <input type="text" name="features[1][icon]" value="lock">
+      <input type="text" name="features[1][title]" value="Secure">
+      <textarea name="features[1][description]">Bank-grade encryption</textarea>
+      <button type="button" class="repeater-remove">Remove</button>
+    </div>
+  </div>
+
+  <button type="button" class="repeater-add">+ Add Feature</button>
+</div>
+```
+
+**JavaScript behavior:**
+- **Add button**: Clone template row, increment indices, append to list
+- **Remove button**: Remove the row, reindex remaining rows
+- **Template row**: Hidden row with index placeholder `__INDEX__` for cloning
+
+**PHP processing (on form submit):**
+```php
+// $_POST['features'] = [
+//   0 => ['icon' => 'rocket', 'title' => 'Fast', 'description' => 'Lightning quick'],
+//   1 => ['icon' => 'lock', 'title' => 'Secure', 'description' => 'Bank-grade encryption']
+// ]
+
+// Reindex to ensure sequential keys and store as JSON
+$config['features'] = array_values($_POST['features'] ?? []);
+```
+
+**Implementation approach:**
+
+Add a `repeater()` method to FormWriter that handles the complete repeater UI. This keeps all form rendering in FormWriter and maintains consistency.
+
+**Methods overview:**
+
+| Method | Purpose |
+|--------|---------|
+| `repeater()` | Main entry point. Renders the complete repeater: label, existing rows, add button, and hidden template for JS cloning |
+| `repeater_row()` | Renders a single row with all sub-fields and a remove button. Called once per existing item, plus once for the JS template |
+
+**How it works:**
+
+1. `repeater()` creates the container with `data-name` attribute for JavaScript targeting
+2. It loops through existing items and calls `repeater_row()` for each
+3. It outputs an "Add" button that JavaScript will attach a click handler to
+4. It outputs a `<template>` containing an empty row with `__INDEX__` placeholder - JavaScript clones this and replaces `__INDEX__` with the next index when adding rows
+5. `repeater_row()` loops through sub-fields and calls the appropriate FormWriter method for each (text, select, etc.)
+6. Field names use array syntax: `features[0][title]`, `features[1][title]` - PHP automatically parses these into nested arrays on POST
+
+```php
+// In FormWriterV2Base.php
+
+/**
+ * Render a repeater field for the Page Component System.
+ *
+ * A repeater allows users to add/remove multiple grouped entries (e.g., a list of
+ * features, team members, or slides). Each row contains the same set of sub-fields
+ * defined in the schema.
+ *
+ * The output includes:
+ * - A container with existing rows
+ * - An "Add" button for adding new rows via JavaScript
+ * - A hidden <template> element that JavaScript clones when adding rows
+ *
+ * Field names use array syntax (e.g., features[0][title]) which PHP automatically
+ * parses into nested arrays on form submission.
+ *
+ * @param string $name    The field name (becomes array key in pac_config)
+ * @param string $label   Display label shown above the repeater
+ * @param array  $options {
+ *     @type array  $value     Existing data array (e.g., [['title'=>'...'], ['title'=>'...']])
+ *     @type array  $fields    Sub-field definitions from com_config_schema
+ *     @type string $add_label Button text (default: '+ Add Item')
+ * }
+ * @return void
+ *
+ * @see Page Component System spec: /specs/page_component_system.md
+ */
+public function repeater($name, $label = '', $options = []) {
+    $items = $options['value'] ?? [];
+    $subfields = $options['fields'] ?? [];
+    $add_label = $options['add_label'] ?? '+ Add Item';
+
+    // Repeater container - data-name used by JavaScript for targeting
+    $this->output .= '<div class="repeater mb-3" data-name="' . $this->escape($name) . '">';
+    $this->output .= '<label class="form-label">' . $this->escape($label) . '</label>';
+    $this->output .= '<div class="repeater-items">';
+
+    // Render existing rows from saved data
+    foreach ($items as $index => $item) {
+        $this->repeater_row($name, $index, $subfields, $item);
+    }
+
+    $this->output .= '</div>';
+
+    // Add button - JavaScript attaches click handler
+    $this->output .= '<button type="button" class="repeater-add btn btn-secondary btn-sm mt-2">';
+    $this->output .= $this->escape($add_label) . '</button>';
+
+    // Hidden template for JavaScript cloning - __INDEX__ replaced with actual index
+    $this->output .= '<template class="repeater-template">';
+    $this->repeater_row($name, '__INDEX__', $subfields, []);
+    $this->output .= '</template>';
+
+    $this->output .= '</div>';
+}
+
+/**
+ * Render a single row within a repeater field.
+ *
+ * Each row contains all sub-fields defined in the schema plus a remove button.
+ * Called by repeater() for each existing item and once for the JS template.
+ *
+ * @param string     $name      Parent repeater field name
+ * @param int|string $index     Row index (integer for real rows, '__INDEX__' for template)
+ * @param array      $subfields Sub-field definitions from schema (type uses FormWriter method names)
+ * @param array      $values    Current values for this row (empty for template)
+ * @return void
+ *
+ * @see Page Component System spec: /specs/page_component_system.md
+ */
+protected function repeater_row($name, $index, $subfields, $values) {
+    $this->output .= '<div class="repeater-row card card-body mb-2" data-index="' . $index . '">';
+    $this->output .= '<div class="row align-items-end">';
+
+    // Render each sub-field - type is the FormWriter method name directly
+    foreach ($subfields as $subfield) {
+        $field_name = $name . '[' . $index . '][' . $subfield['name'] . ']';
+        $field_value = $values[$subfield['name']] ?? '';
+        $method = $subfield['type'] ?? 'textinput';
+
+        $this->output .= '<div class="col">';
+        $this->$method($field_name, $subfield['label'], [
+            'value' => $field_value,
+            'options' => $subfield['options'] ?? []
+        ]);
+        $this->output .= '</div>';
+    }
+
+    // Remove button - JavaScript attaches click handler via event delegation
+    $this->output .= '<div class="col-auto">';
+    $this->output .= '<button type="button" class="repeater-remove btn btn-outline-danger btn-sm">Remove</button>';
+    $this->output .= '</div>';
+
+    $this->output .= '</div></div>';
+}
+```
+
+**Usage in component admin:**
+```php
+foreach ($schema['fields'] as $field) {
+    $method = $formwriter->get_field_method($field['type'] ?? 'text');
+    $options = $field['options'] ?? [];
+    $options['value'] = $config[$field['name']] ?? '';
+
+    if ($field['type'] === 'repeater') {
+        $options['fields'] = $field['fields'];
+        $options['add_label'] = '+ Add ' . $field['label'];
+    }
+
+    $formwriter->$method($field['name'], $field['label'], $options);
+}
+```
+
+This keeps all form rendering within FormWriter, matching the pattern used by other field types.
+
+**JavaScript for repeater behavior:**
+
+```javascript
+// Repeater add/remove functionality (include in admin footer or component admin JS)
+document.addEventListener('DOMContentLoaded', function() {
+
+    // Add row
+    document.querySelectorAll('.repeater-add').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const repeater = this.closest('.repeater');
+            const template = repeater.querySelector('.repeater-template');
+            const items = repeater.querySelector('.repeater-items');
+            const nextIndex = items.querySelectorAll('.repeater-row').length;
+
+            // Clone template and replace __INDEX__ with actual index
+            const newRow = template.content.cloneNode(true);
+            const html = newRow.querySelector('.repeater-row').outerHTML.replace(/__INDEX__/g, nextIndex);
+
+            items.insertAdjacentHTML('beforeend', html);
+        });
+    });
+
+    // Remove row (delegated for dynamically added rows)
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('repeater-remove')) {
+            e.target.closest('.repeater-row').remove();
+        }
+    });
+
+});
+```
+
+**Data flow summary:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ EDIT PAGE LOAD                                                  │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Load PageContent from DB                                     │
+│ 2. Get pac_config JSON: {"features": [{...}, {...}]}            │
+│ 3. Get component type's com_config_schema                       │
+│ 4. For each schema field, call FormWriter method                │
+│ 5. repeater() renders rows from pac_config['features']          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ USER INTERACTION                                                │
+├─────────────────────────────────────────────────────────────────┤
+│ - Add button: JS clones template, appends new row               │
+│ - Remove button: JS removes row from DOM                        │
+│ - Edit fields: User modifies input values                       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ FORM SUBMIT                                                     │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. PHP receives: $_POST['features'][0]['title'], etc.           │
+│ 2. array_values() reindexes to ensure sequential keys           │
+│ 3. json_encode() and save to pac_config                         │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### Example: Simple Component
 
@@ -192,11 +514,11 @@ The `com_config_schema` field stores a JSON object defining the fields:
 ```json
 {
   "fields": [
-    {"name": "heading", "label": "Heading", "type": "text"},
+    {"name": "heading", "label": "Heading", "type": "textinput"},
     {"name": "subheading", "label": "Subheading", "type": "textarea"},
-    {"name": "background_image", "label": "Background Image", "type": "text", "help": "Path to image file, e.g. /images/hero.jpg"},
-    {"name": "cta_text", "label": "Button Text", "type": "text"},
-    {"name": "cta_link", "label": "Button Link", "type": "text"}
+    {"name": "background_image", "label": "Background Image", "type": "textinput", "help": "Path to image file, e.g. /images/hero.jpg"},
+    {"name": "cta_text", "label": "Button Text", "type": "textinput"},
+    {"name": "cta_link", "label": "Button Link", "type": "textinput"}
   ]
 }
 ```
@@ -229,15 +551,15 @@ Button Link:      [____________________]
 ```json
 {
   "fields": [
-    {"name": "heading", "label": "Heading", "type": "text"},
+    {"name": "heading", "label": "Heading", "type": "textinput"},
     {"name": "subheading", "label": "Subheading", "type": "textarea"},
     {
       "name": "features",
       "label": "Features",
       "type": "repeater",
       "fields": [
-        {"name": "icon", "label": "Icon", "type": "text"},
-        {"name": "title", "label": "Title", "type": "text"},
+        {"name": "icon", "label": "Icon", "type": "textinput"},
+        {"name": "title", "label": "Title", "type": "textinput"},
         {"name": "description", "label": "Description", "type": "textarea"}
       ]
     }
@@ -1087,11 +1409,11 @@ $cta_link = $component_config['cta_link'] ?? '';
 com_type_key: 'hero_static'
 com_title: 'Hero Static'
 com_config_schema: {"fields": [
-  {"name": "heading", "label": "Heading", "type": "text"},
+  {"name": "heading", "label": "Heading", "type": "textinput"},
   {"name": "subheading", "label": "Subheading", "type": "textarea"},
-  {"name": "background_image", "label": "Background Image", "type": "text"},
-  {"name": "cta_text", "label": "Button Text", "type": "text"},
-  {"name": "cta_link", "label": "Button Link", "type": "text"}
+  {"name": "background_image", "label": "Background Image", "type": "textinput"},
+  {"name": "cta_text", "label": "Button Text", "type": "textinput"},
+  {"name": "cta_link", "label": "Button Link", "type": "textinput"}
 ]}
 com_template_file: 'hero_static.php'
 ```
@@ -1158,11 +1480,11 @@ return [
     'template_file' => 'hero_static.php',  // Filename only, lives in views/components/
     'config_schema' => [
         'fields' => [
-            ['name' => 'heading', 'label' => 'Heading', 'type' => 'text'],
+            ['name' => 'heading', 'label' => 'Heading', 'type' => 'textinput'],
             ['name' => 'subheading', 'label' => 'Subheading', 'type' => 'textarea'],
-            ['name' => 'background_image', 'label' => 'Background Image', 'type' => 'text', 'help' => 'Path to image file'],
-            ['name' => 'cta_text', 'label' => 'Button Text', 'type' => 'text'],
-            ['name' => 'cta_link', 'label' => 'Button Link', 'type' => 'text'],
+            ['name' => 'background_image', 'label' => 'Background Image', 'type' => 'textinput', 'help' => 'Path to image file'],
+            ['name' => 'cta_text', 'label' => 'Button Text', 'type' => 'textinput'],
+            ['name' => 'cta_link', 'label' => 'Button Link', 'type' => 'textinput'],
         ]
     ],
     'logic_function' => null,
@@ -1220,9 +1542,9 @@ return [
 - [ ] Create ComponentRenderer class with `render($slug)` and `render_component($instance)` methods
 - [ ] Extend `Page::get_filled_content()` to auto-render page-assigned components (enables future no-code page building)
 - [ ] Create admin for component types (`admin_component_types.php`, `admin_component_type_edit.php`)
-- [ ] Create admin for component instances with repeater UI (`admin_components.php`, `admin_component_edit.php`)
-  - Fields render based on `type` in schema: `text` (input), `textarea`, `repeater`
-  - Repeater fields render as grouped rows with Add/Remove buttons
+- [ ] Create admin for component instances (`admin_components.php`, `admin_component_edit.php`)
+  - Leverage FormWriter for all standard field types (text, textarea, select, checkbox, date, image, etc.)
+  - Custom repeater rendering for grouped fields with Add/Remove buttons
   - Page assignment dropdown (optional `pac_pag_page_id`) for automatic rendering
   - Order field (`pac_order`) for controlling render sequence
 - [ ] Extract 3 existing patterns as components (`cta_banner`, `feature_grid`, `page_title`)
