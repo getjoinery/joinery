@@ -167,14 +167,14 @@ class Example extends SystemBase
         'exm_created' => array(
             'type' => 'timestamp',         // Supported: timestamp (without time zone)
             'is_nullable' => false,
-            'default' => 'CURRENT_TIMESTAMP'
+            'default' => 'now()'
             // Automatically detected as timestamp field
         ),
         'exm_updated' => array(
             'type' => 'timestamp with time zone', // Supported: timestamp with time zone
             'is_nullable' => false,
-            'default' => 'CURRENT_TIMESTAMP'
-            // Automatically detected as timestamp field  
+            'default' => 'now()'
+            // Automatically detected as timestamp field
         ),
         'exm_delete_time' => array(
             'type' => 'timestamp with time zone',

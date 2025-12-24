@@ -2658,4 +2658,160 @@ class AjaxSearchSelect {
             return true;
         }
     }
+
+    /**
+     * Render a repeater field for the Page Component System.
+     *
+     * A repeater allows users to add/remove multiple grouped entries (e.g., a list of
+     * features, team members, or slides). Each row contains the same set of sub-fields
+     * defined in the schema.
+     *
+     * The output includes:
+     * - A container with existing rows
+     * - An "Add" button for adding new rows via JavaScript
+     * - A hidden <template> element that JavaScript clones when adding rows
+     *
+     * Field names use array syntax (e.g., features[0][title]) which PHP automatically
+     * parses into nested arrays on form submission.
+     *
+     * @param string $name    The field name (becomes array key in pac_config)
+     * @param string $label   Display label shown above the repeater
+     * @param array  $options {
+     *     @type array  $value     Existing data array (e.g., [['title'=>'...'], ['title'=>'...']])
+     *     @type array  $fields    Sub-field definitions from com_config_schema
+     *     @type string $add_label Button text (default: '+ Add Item')
+     * }
+     * @return void
+     *
+     * @see Page Component System spec: /specs/page_component_system.md
+     */
+    public function repeater($name, $label = '', $options = []) {
+        $items = $options['value'] ?? [];
+        $subfields = $options['fields'] ?? [];
+        $add_label = $options['add_label'] ?? '+ Add Item';
+
+        // Ensure items is an array
+        if (!is_array($items)) {
+            $items = [];
+        }
+
+        // Repeater container - data-name used by JavaScript for targeting
+        echo '<div class="repeater mb-4" data-name="' . htmlspecialchars($name) . '">';
+        echo '<label class="form-label fw-bold">' . htmlspecialchars($label) . '</label>';
+
+        // Help text if provided
+        if (!empty($options['help'])) {
+            echo '<div class="form-text text-muted mb-2">' . htmlspecialchars($options['help']) . '</div>';
+        }
+
+        echo '<div class="repeater-items">';
+
+        // Render existing rows from saved data
+        foreach ($items as $index => $item) {
+            $this->repeater_row($name, $index, $subfields, $item);
+        }
+
+        echo '</div>';
+
+        // Add button - JavaScript attaches click handler
+        echo '<button type="button" class="repeater-add btn btn-secondary btn-sm mt-2">';
+        echo htmlspecialchars($add_label);
+        echo '</button>';
+
+        // Hidden template for JavaScript cloning - __INDEX__ replaced with actual index
+        echo '<template class="repeater-template">';
+        $this->repeater_row($name, '__INDEX__', $subfields, []);
+        echo '</template>';
+
+        echo '</div>';
+    }
+
+    /**
+     * Render a single row within a repeater field.
+     *
+     * Each row contains all sub-fields defined in the schema plus a remove button.
+     * Called by repeater() for each existing item and once for the JS template.
+     *
+     * @param string     $name      Parent repeater field name
+     * @param int|string $index     Row index (integer for real rows, '__INDEX__' for template)
+     * @param array      $subfields Sub-field definitions from schema (type uses FormWriter method names)
+     * @param array      $values    Current values for this row (empty for template)
+     * @return void
+     *
+     * @see Page Component System spec: /specs/page_component_system.md
+     */
+    protected function repeater_row($name, $index, $subfields, $values) {
+        echo '<div class="repeater-row card card-body mb-2" data-index="' . htmlspecialchars($index) . '">';
+        echo '<div class="row align-items-end">';
+
+        // Render each sub-field - type is the FormWriter method name directly
+        foreach ($subfields as $subfield) {
+            $field_name = $name . '[' . $index . '][' . $subfield['name'] . ']';
+            $field_value = $values[$subfield['name']] ?? '';
+            $method = $subfield['type'] ?? 'textinput';
+
+            // Calculate column width based on number of fields
+            $col_class = 'col-md';
+            if (count($subfields) <= 2) {
+                $col_class = 'col-md-5';
+            } elseif (count($subfields) == 3) {
+                $col_class = 'col-md-3';
+            } elseif (count($subfields) >= 4) {
+                $col_class = 'col-md';
+            }
+
+            echo '<div class="' . $col_class . '">';
+
+            // Build options for the sub-field
+            $field_options = [
+                'value' => $field_value,
+                'model' => false,  // Disable auto-detection for repeater fields
+                'validation' => false  // Disable validation for individual repeater items
+            ];
+
+            // Merge in any options from the schema
+            if (isset($subfield['options'])) {
+                $field_options = array_merge($field_options, $subfield['options']);
+            }
+
+            // Handle dropinput options
+            if ($method === 'dropinput' && isset($subfield['options'])) {
+                $field_options['options'] = $subfield['options'];
+            }
+
+            // Call the appropriate FormWriter method
+            if (method_exists($this, $method)) {
+                $this->$method($field_name, $subfield['label'] ?? '', $field_options);
+            } else {
+                // Fallback to textinput if method doesn't exist
+                $this->textinput($field_name, $subfield['label'] ?? '', $field_options);
+            }
+
+            echo '</div>';
+        }
+
+        // Remove button - JavaScript attaches click handler via event delegation
+        echo '<div class="col-auto">';
+        echo '<button type="button" class="repeater-remove btn btn-outline-danger btn-sm mb-3">Remove</button>';
+        echo '</div>';
+
+        echo '</div></div>';
+    }
+
+    /**
+     * Process repeater data from POST for saving
+     *
+     * Reindexes array to ensure sequential keys and handles empty arrays.
+     * Use this when processing form submission for components.
+     *
+     * @param array $post_data The $_POST data for a repeater field
+     * @return array Reindexed array suitable for JSON encoding
+     */
+    public static function process_repeater_data($post_data) {
+        if (!is_array($post_data)) {
+            return [];
+        }
+        // Reindex to ensure sequential keys
+        return array_values($post_data);
+    }
 }
