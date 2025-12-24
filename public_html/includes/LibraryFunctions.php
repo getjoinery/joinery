@@ -1311,6 +1311,13 @@ class LibraryFunctions {
 						$dbhelper->bind_value(":$column_name", FALSE, PDO::PARAM_BOOL);
 					}
 				}
+				else if($column_meta[$column_name]['data_type'] == 'json' || $column_meta[$column_name]['data_type'] == 'jsonb'){
+					// JSON columns - auto-encode arrays/objects
+					if (is_array($column_val) || is_object($column_val)) {
+						$column_val = json_encode($column_val);
+					}
+					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_STR);
+				}
 				else{
 					//$q->bindValue(":$column_name", $column_val, PDO::PARAM_STR);
 					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_STR);

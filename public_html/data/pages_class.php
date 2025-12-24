@@ -44,43 +44,77 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	    'pag_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-function get_filled_content(){
+/**
+	 * Get page content with component rendering support
+	 *
+	 * If the page has components assigned (pac_pag_page_id), renders them in order.
+	 * Otherwise falls back to traditional page body with placeholder substitution.
+	 *
+	 * @see /specs/page_component_system.md
+	 * @return string Rendered content
+	 */
+	function get_filled_content() {
+		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
-		//LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
-		if($this->get('pag_script_filename')){
+		// Check for components assigned to this page
+		$components = new MultiPageContent(
+			['page_id' => $this->key, 'components_only' => true, 'published' => true, 'deleted' => false],
+			['pac_order' => 'ASC']
+		);
+
+		if ($components->count_all() > 0) {
+			// Has components - render them, ignore page body
+			require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+			$output = '';
+			$components->load();
+			foreach ($components as $component) {
+				$output .= ComponentRenderer::render_component($component);
+			}
+			return $output;
+		}
+
+		// No components - fall back to traditional page body + placeholders
+		return $this->get_body_content();
+	}
+
+	/**
+	 * Get page body with placeholder substitution (extracted from original get_filled_content)
+	 *
+	 * This is the legacy content system where *!**slug**!* placeholders in pag_body
+	 * are replaced with pac_body from PageContent records.
+	 *
+	 * @return string Processed content
+	 */
+	protected function get_body_content() {
+		// LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
+		if ($this->get('pag_script_filename')) {
 			// Include the logic file using ThemeHelper
 			require_once(PathHelper::getThemeFilePath($this->get('pag_script_filename'), 'logic'));
 
 			$content_out = $this->get('pag_body');
-			
-			foreach($replace_values as $var=>$val){
-				$content_out = str_replace('{{'.$var.'}}', $val, $content_out);
-			}
 
-		}
-		else{
+			if (isset($replace_values) && is_array($replace_values)) {
+				foreach ($replace_values as $var => $val) {
+					$content_out = str_replace('{{' . $var . '}}', $val, $content_out);
+				}
+			}
+		} else {
 			$content_out = $this->get('pag_body');
 		}
-		
-		//LOOK FOR PAGE CONTENTS AND REPLACE
-		
+
+		// LOOK FOR PAGE CONTENTS AND REPLACE
 		$search_criteria = array();
 		$search_criteria['page_id'] = $this->key;
-		$page_contents = new MultiPageContent(
-			$search_criteria,
-			//array($sort=>$sdirection),
-			//$numperpage,
-			//$offset
-			);	
-		$numrecords = $page_contents->count_all();	
-		$page_contents->load();		
+		$page_contents = new MultiPageContent($search_criteria);
+		$numrecords = $page_contents->count_all();
+		$page_contents->load();
 
-		foreach($page_contents as $page_content){
-			if($temp_content = $page_content->get_content()){
-				$content_out = str_replace('*!**'.$page_content->get('pac_link').'**!*', $temp_content, $content_out);
+		foreach ($page_contents as $page_content) {
+			if ($temp_content = $page_content->get_content()) {
+				$content_out = str_replace('*!**' . $page_content->get('pac_link') . '**!*', $temp_content, $content_out);
 			}
-		}		
-		
+		}
+
 		return $content_out;
 	}
 	

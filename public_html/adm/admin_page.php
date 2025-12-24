@@ -7,6 +7,7 @@
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
 	require_once(PathHelper::getIncludePath('/data/pages_class.php'));
 	require_once(PathHelper::getIncludePath('/data/page_contents_class.php'));
+	require_once(PathHelper::getIncludePath('/data/components_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -27,6 +28,14 @@
 	$numrecords = $page_contents->count_all();
 	$page_contents->load();
 
+	// Load components for this page
+	$page_components = new MultiPageContent(
+		array('page_id' => $page->key, 'components_only' => true, 'deleted' => false),
+		array('pac_order' => 'ASC', 'pac_title' => 'ASC')
+	);
+	$num_components = $page_components->count_all();
+	$page_components->load();
+
 	if($_REQUEST['action'] == 'delete'){
 		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page->soft_delete();
@@ -39,6 +48,13 @@
 		$page->undelete();
 
 		header("Location: /admin/admin_pages");
+		exit();
+	}
+	else if($_REQUEST['action'] == 'delete_component'){
+		$component = new PageContent($_POST['pac_page_content_id'], TRUE);
+		$component->soft_delete();
+
+		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
 	}
 
@@ -175,6 +191,60 @@
 		$paget->disprow($rowvalues);
 	}
 	$paget->endtable($pager);
+
+	// Components Table
+	$comp_headers = array("Component", "Type", "Order", "Status", "Actions");
+	$comp_altlinks = array('Add Component' => '/admin/admin_component_edit?pag_page_id='.$page->key);
+	$comp_table_options = array(
+		'altlinks' => $comp_altlinks,
+		'title' => 'Components (' . $num_components . ')',
+		'card' => true
+	);
+	$paget->tableheader($comp_headers, $comp_table_options, NULL);
+
+	foreach ($page_components as $component) {
+		$rowvalues = array();
+
+		// Component title
+		$title = $component->get('pac_title') ?: '(untitled)';
+		$title_display = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '">' . htmlspecialchars($title) . '</a>';
+		array_push($rowvalues, $title_display);
+
+		// Component type
+		$comp_type = $component->get_component_type();
+		if ($comp_type) {
+			array_push($rowvalues, htmlspecialchars($comp_type->get('com_title')));
+		} else {
+			array_push($rowvalues, '<span class="text-muted">Unknown</span>');
+		}
+
+		// Order
+		array_push($rowvalues, $component->get('pac_order') ?: 0);
+
+		// Status
+		if ($component->get('pac_is_published')) {
+			array_push($rowvalues, '<span class="badge bg-success">Published</span>');
+		} else {
+			array_push($rowvalues, '<span class="badge bg-secondary">Draft</span>');
+		}
+
+		// Actions
+		$actions = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '" class="btn btn-sm btn-outline-primary me-1">Edit</a>';
+		$actions .= '<form method="POST" style="display:inline" onsubmit="return confirm(\'Are you sure you want to delete this component?\');">';
+		$actions .= '<input type="hidden" name="action" value="delete_component">';
+		$actions .= '<input type="hidden" name="pac_page_content_id" value="' . $component->key . '">';
+		$actions .= '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
+		$actions .= '</form>';
+		array_push($rowvalues, $actions);
+
+		$paget->disprow($rowvalues);
+	}
+
+	if ($num_components == 0) {
+		echo '<tr><td colspan="5" class="text-center text-muted py-3">No components on this page. <a href="/admin/admin_component_edit?pag_page_id=' . $page->key . '">Add one</a></td></tr>';
+	}
+
+	$paget->endtable(NULL);
 	?>
 
 	<!-- Page Preview Card (Full Width) -->
