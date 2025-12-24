@@ -273,33 +273,5 @@ $formwriter->end_form();
 
 $page->end_box();
 
-// Include repeater JavaScript
-echo '<script>
-document.addEventListener("DOMContentLoaded", function() {
-    // Add row
-    document.querySelectorAll(".repeater-add").forEach(function(btn) {
-        btn.addEventListener("click", function() {
-            var repeater = this.closest(".repeater");
-            var template = repeater.querySelector(".repeater-template");
-            var items = repeater.querySelector(".repeater-items");
-            var nextIndex = items.querySelectorAll(".repeater-row").length;
-
-            // Clone template and replace __INDEX__ with actual index
-            var clone = template.content.cloneNode(true);
-            var html = clone.querySelector(".repeater-row").outerHTML.replace(/__INDEX__/g, nextIndex);
-
-            items.insertAdjacentHTML("beforeend", html);
-        });
-    });
-
-    // Remove row (delegated for dynamically added rows)
-    document.addEventListener("click", function(e) {
-        if (e.target.classList.contains("repeater-remove")) {
-            e.target.closest(".repeater-row").remove();
-        }
-    });
-});
-</script>';
-
 $page->admin_footer();
 ?>
