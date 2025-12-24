@@ -570,8 +570,14 @@ abstract class SystemBase {
 		}
 		foreach(static::$field_specifications as $field_name => $spec) {
 			if ($this->is_timestamp_field($field_name) && $this->get($field_name)) {
+				$value = $this->get($field_name);
+				// Skip SQL function defaults like 'now()' - these aren't parseable dates
+				if (is_string($value) && preg_match('/^\w+\(\)$/', $value)) {
+					$out_array[$field_name] = null;
+					continue;
+				}
 				// Create DateTime object with UTC timezone (database values are in UTC)
-				$out_array[$field_name] = new DateTime($this->get($field_name), new DateTimeZone('UTC'));
+				$out_array[$field_name] = new DateTime($value, new DateTimeZone('UTC'));
 			}
 		}
 		$out_array['key'] = $this->key;

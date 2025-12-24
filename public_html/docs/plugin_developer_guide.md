@@ -169,7 +169,7 @@ class MyData extends SystemBase {
         'mdt_id' => ['required' => true, 'type' => 'int'],
         'mdt_name' => ['required' => true, 'type' => 'varchar', 'length' => 255],
         'mdt_description' => ['type' => 'text'],
-        'mdt_created' => ['type' => 'timestamp', 'default' => 'CURRENT_TIMESTAMP']
+        'mdt_created' => ['type' => 'timestamp', 'default' => 'now()']
     ];
 
     // Define foreign key behavior (optional - defaults to cascade)
