@@ -2724,6 +2724,47 @@ class AjaxSearchSelect {
         echo '</template>';
 
         echo '</div>';
+
+        // Output repeater JavaScript (once per page)
+        $this->outputRepeaterJavaScript();
+    }
+
+    /**
+     * Output shared JavaScript for repeater field functionality
+     * Handles add/remove row operations via event delegation
+     */
+    protected function outputRepeaterJavaScript() {
+        static $repeater_js_loaded = false;
+        if (!$repeater_js_loaded) {
+            echo '<script type="text/javascript">
+document.addEventListener("DOMContentLoaded", function() {
+    // Add row - delegated to handle dynamically added repeaters
+    document.addEventListener("click", function(e) {
+        if (e.target.classList.contains("repeater-add")) {
+            var repeater = e.target.closest(".repeater");
+            var template = repeater.querySelector(".repeater-template");
+            var items = repeater.querySelector(".repeater-items");
+            var nextIndex = items.querySelectorAll(".repeater-row").length;
+
+            // Clone template and replace __INDEX__ with actual index
+            var clone = template.content.cloneNode(true);
+            var row = clone.querySelector(".repeater-row");
+            var html = row.outerHTML.replace(/__INDEX__/g, nextIndex);
+
+            items.insertAdjacentHTML("beforeend", html);
+        }
+    });
+
+    // Remove row - delegated for dynamically added rows
+    document.addEventListener("click", function(e) {
+        if (e.target.classList.contains("repeater-remove")) {
+            e.target.closest(".repeater-row").remove();
+        }
+    });
+});
+</script>';
+            $repeater_js_loaded = true;
+        }
     }
 
     /**
