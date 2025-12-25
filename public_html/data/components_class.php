@@ -6,7 +6,7 @@
  * Each component type has a template file, config schema, and optional logic function.
  *
  * @see /specs/page_component_system.md
- * @version 1.0.0
+ * @version 1.1.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -51,6 +51,7 @@ class Component extends SystemBase {
 		'com_logic_function' => array('type'=>'varchar(255)'),
 		'com_is_active' => array('type'=>'bool', 'default'=>true),
 		'com_requires_plugin' => array('type'=>'varchar(64)'),
+		'com_css_framework' => array('type'=>'varchar(32)'),
 		'com_order' => array('type'=>'int2'),
 		'com_published_time' => array('type'=>'timestamp(6)'),
 		'com_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -202,6 +203,10 @@ class MultiComponent extends SystemMultiBase {
 
 		if (isset($this->options['requires_plugin'])) {
 			$filters['com_requires_plugin'] = array($this->options['requires_plugin'], PDO::PARAM_STR);
+		}
+
+		if (isset($this->options['css_framework'])) {
+			$filters['com_css_framework'] = array($this->options['css_framework'], PDO::PARAM_STR);
 		}
 
 		return $this->_get_resultsv2('com_components', $filters, $this->order_by, $only_count, $debug);

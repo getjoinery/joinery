@@ -1,0 +1,21 @@
+{
+  "title": "Hero Static",
+  "description": "Single hero section with heading, subheading, background, and CTA",
+  "category": "hero",
+  "icon": "bx bx-image",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "heading", "label": "Heading", "type": "textinput"},
+      {"name": "subheading", "label": "Subheading", "type": "textarea"},
+      {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "options": {"left": "Left", "center": "Center", "right": "Right"}},
+      {"name": "background_image", "label": "Background Image", "type": "textinput", "help": "Path to image file, e.g., /images/hero.jpg"},
+      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color, e.g., #f8f9fa"},
+      {"name": "text_color", "label": "Text Color", "type": "textinput", "help": "Hex color, e.g., #212529"},
+      {"name": "height", "label": "Section Height", "type": "dropinput", "options": {"small": "Small", "medium": "Medium", "large": "Large", "fullscreen": "Full Screen"}},
+      {"name": "cta_text", "label": "Button Text", "type": "textinput"},
+      {"name": "cta_link", "label": "Button Link", "type": "textinput"},
+      {"name": "cta_style", "label": "Button Style", "type": "dropinput", "options": {"primary": "Primary", "secondary": "Secondary", "outline-primary": "Outline", "light": "Light"}}
+    ]
+  }
+}
