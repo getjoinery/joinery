@@ -129,6 +129,7 @@ Component types are the library of available components. Managed by superadmins 
 | `com_logic_function` | varchar(255) | Optional logic function name |
 | `com_is_active` | bool | Whether type is available |
 | `com_requires_plugin` | varchar(64) | Required plugin name |
+| `com_css_framework` | varchar(32) | Required CSS framework (e.g., `bootstrap`) |
 | `com_order` | int2 | Sort order |
 
 ### Categories
@@ -149,6 +150,48 @@ Built-in categories (from `Component::get_categories()`):
 
 ### Creating a Component Type
 
+**Method 1: JSON Definition Files (Recommended)**
+
+Create a JSON file paired with the PHP template:
+
+```
+/views/components/hero_static.json    # Definition file
+/views/components/hero_static.php     # Template file
+```
+
+The JSON file defines the component metadata and config schema:
+
+```json
+{
+  "title": "Hero Static",
+  "description": "Single hero section with heading, subheading, background, and CTA",
+  "category": "hero",
+  "icon": "bx bx-image",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "heading", "label": "Heading", "type": "textinput"},
+      {"name": "subheading", "label": "Subheading", "type": "textarea"}
+    ]
+  }
+}
+```
+
+**JSON fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `title` | Yes | Display name |
+| `description` | No | Description for admins |
+| `category` | No | Grouping category (see categories table above) |
+| `icon` | No | CSS icon class (e.g., `bx bx-image`) |
+| `css_framework` | No | Required framework: `bootstrap`, `tailwind`, or omit for universal |
+| `config_schema` | No | Field definitions object |
+
+Component types are automatically discovered during theme sync operations.
+
+**Method 2: Admin Interface**
+
 1. Go to `/admin/admin_component_types`
 2. Click "Add Component Type"
 3. Fill in:
@@ -157,6 +200,18 @@ Built-in categories (from `Component::get_categories()`):
    - **Template File** - Filename in `views/components/`
    - **Config Schema** - JSON defining editable fields
 4. Save and activate
+
+### CSS Framework Compatibility
+
+Components can specify framework requirements:
+
+| `css_framework` Value | Behavior |
+|-----------------------|----------|
+| `bootstrap` | Only active when Bootstrap theme is used |
+| `tailwind` | Only active when Tailwind theme is used |
+| (omitted/null) | Universal - works with any theme |
+
+When a theme is activated, components incompatible with its framework are deactivated. Components become active again if a compatible theme is activated.
 
 ---
 

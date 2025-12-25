@@ -1,0 +1,21 @@
+{
+  "title": "CTA Banner",
+  "description": "Full-width call-to-action banner",
+  "category": "conversion",
+  "icon": "bx bx-bullseye",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "heading", "label": "Heading", "type": "textinput"},
+      {"name": "subheading", "label": "Supporting Text", "type": "textarea"},
+      {"name": "cta_text", "label": "Button Text", "type": "textinput"},
+      {"name": "cta_link", "label": "Button Link", "type": "textinput"},
+      {"name": "background_type", "label": "Background", "type": "dropinput", "options": {"color": "Solid Color", "gradient": "Gradient", "image": "Image"}},
+      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color (for solid background)"},
+      {"name": "gradient_start", "label": "Gradient Start", "type": "textinput", "help": "Hex color, e.g., #667eea"},
+      {"name": "gradient_end", "label": "Gradient End", "type": "textinput", "help": "Hex color, e.g., #764ba2"},
+      {"name": "background_image", "label": "Background Image", "type": "textinput", "help": "Path to image file"},
+      {"name": "text_color", "label": "Text Color", "type": "textinput", "help": "Hex color, e.g., #ffffff"}
+    ]
+  }
+}

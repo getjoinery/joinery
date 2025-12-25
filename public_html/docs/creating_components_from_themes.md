@@ -136,6 +136,40 @@ $align_class = 'text-' . $alignment;
 
 ### Step 5: Register the Component Type
 
+**Option A: JSON Definition File (Recommended)**
+
+Create a JSON file alongside your template:
+
+**File:** `/views/components/hero_simple.json`
+```json
+{
+  "title": "Simple Hero",
+  "description": "Extracted from theme landing page.",
+  "category": "hero",
+  "icon": "bx bx-image",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "heading", "label": "Heading", "type": "textinput", "help": "Main headline text"},
+      {"name": "subheading", "label": "Subheading", "type": "textarea"},
+      {"name": "button_text", "label": "Button Text", "type": "textinput"},
+      {"name": "button_url", "label": "Button URL", "type": "textinput"},
+      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color code, e.g., #007bff"},
+      {
+        "name": "alignment",
+        "label": "Text Alignment",
+        "type": "dropinput",
+        "options": {"left": "Left", "center": "Center", "right": "Right"}
+      }
+    ]
+  }
+}
+```
+
+The component type is automatically discovered during theme sync.
+
+**Option B: Admin Interface**
+
 1. Go to `/admin/admin_component_types` (requires superadmin)
 2. Click **Add Component Type**
 3. Fill in:
@@ -377,6 +411,69 @@ Component templates follow the standard theme override:
 2. `/views/components/{template}.php` (fallback)
 
 This allows themes to customize component appearance without modifying base templates.
+
+---
+
+## Theme-Specific Components
+
+Themes can include their own exclusive components that only work with that theme.
+
+### File Location
+
+```
+/theme/{theme_name}/views/components/theme_hero.json
+/theme/{theme_name}/views/components/theme_hero.php
+```
+
+### JSON Definition for Theme Components
+
+```json
+{
+  "title": "Theme Hero",
+  "description": "Hero section specific to this theme",
+  "category": "hero",
+  "icon": "bx bx-star",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "heading", "label": "Heading", "type": "textinput"}
+    ]
+  }
+}
+```
+
+### CSS Framework Compatibility
+
+The `css_framework` field controls when a component is available:
+
+| Value | Behavior |
+|-------|----------|
+| `"bootstrap"` | Only active when a Bootstrap theme is used |
+| `"tailwind"` | Only active when a Tailwind theme is used |
+| (omitted) | Universal - works with any theme |
+
+**Example scenarios:**
+
+1. **Base Bootstrap component** - Use `"css_framework": "bootstrap"` in `/views/components/`
+2. **Theme-specific component** - Put in theme folder with matching `css_framework`
+3. **Universal component** - Omit `css_framework` (e.g., Custom HTML)
+
+### Automatic Sync Behavior
+
+Component types are synchronized automatically when:
+
+- A theme is synced (via admin interface)
+- A theme is activated
+- A theme ZIP is uploaded and installed
+
+During sync:
+- New components are created as active (if framework matches)
+- Existing components are updated with new metadata
+- Components without matching templates are deactivated
+- Components incompatible with the active theme's framework are deactivated
+- Deleted component types are restored if their JSON file still exists
+
+**Note:** The filesystem is the source of truth. If you delete a component type in the admin interface but the JSON file still exists, the next sync will restore it. To permanently remove a component type, delete the JSON file.
 
 ---
 

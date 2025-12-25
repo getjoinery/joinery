@@ -13,6 +13,12 @@
 	$session->check_permission(5);
 	$session->set_return();
 
+	// Require page ID - redirect to list if not provided
+	if (empty($_GET['pag_page_id'])) {
+		header("Location: /admin/admin_pages");
+		exit();
+	}
+
 	$page = new Page($_GET['pag_page_id'], TRUE);
 
 	$search_criteria = array();
