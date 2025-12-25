@@ -443,6 +443,81 @@ $formwriter = new FormWriterV2Bootstrap('upload_form', [
 $formwriter->hiddeninput('user_id', '', ['value' => $user_id]);
 ```
 
+### Repeater Fields
+
+Repeater fields allow users to add multiple sets of related fields dynamically. Used primarily by the Page Component System for configurable content blocks.
+
+```php
+// Basic repeater with subfields
+$formwriter->repeater('features', 'Features List', [
+    'value' => [
+        ['title' => 'Feature 1', 'description' => 'First feature'],
+        ['title' => 'Feature 2', 'description' => 'Second feature']
+    ],
+    'fields' => [
+        ['name' => 'title', 'label' => 'Title', 'type' => 'textinput'],
+        ['name' => 'description', 'label' => 'Description', 'type' => 'textarea']
+    ],
+    'add_label' => '+ Add Feature',
+    'help' => 'Add as many features as needed'
+]);
+```
+
+**Options:**
+- `value` - Array of existing data rows (each row is an associative array)
+- `fields` - Array of subfield definitions with `name`, `label`, and `type`
+- `add_label` - Button text for adding rows (default: '+ Add Item')
+- `help` - Help text displayed below the label
+
+**Subfield Types:**
+Any FormWriter field type can be used: `textinput`, `textarea`, `dropinput`, `checkboxinput`, etc.
+
+```php
+// Repeater with dropdown subfield
+$formwriter->repeater('links', 'Navigation Links', [
+    'fields' => [
+        ['name' => 'label', 'label' => 'Link Text', 'type' => 'textinput'],
+        ['name' => 'url', 'label' => 'URL', 'type' => 'textinput'],
+        [
+            'name' => 'target',
+            'label' => 'Open In',
+            'type' => 'dropinput',
+            'options' => ['_self' => 'Same Window', '_blank' => 'New Window']
+        ]
+    ]
+]);
+```
+
+**Processing Repeater Data:**
+
+Use the static helper method to process repeater submissions:
+
+```php
+// In logic file or form processing
+require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
+
+if ($_POST) {
+    // Process repeater data - cleans up array structure
+    $features = FormWriterV2Base::process_repeater_data($_POST['features']);
+
+    // $features is now a clean indexed array:
+    // [
+    //     ['title' => 'Feature 1', 'description' => 'First feature'],
+    //     ['title' => 'Feature 2', 'description' => 'Second feature']
+    // ]
+
+    $model->set('config', json_encode(['features' => $features]));
+}
+```
+
+**JavaScript:**
+Repeater JavaScript is automatically included when you use a repeater field. It handles:
+- Adding new rows (clones template, replaces index placeholders)
+- Removing rows (via delegated click handler)
+- Works with dynamically added repeaters
+
+**See Also:** [Component System Documentation](component_system.md) for using repeaters in component configuration.
+
 ---
 
 ## 4. Model Form Helpers
