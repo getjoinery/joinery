@@ -522,6 +522,42 @@ $migrations[] = $migration;
 
 ## Development Environment
 
+### Test Site
+**URL:** `https://joinerytest.site`
+
+This is the live test server where changes can be verified in a browser.
+
+### Browser Testing (MCP)
+A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
+
+**Common browser commands:**
+```
+# Navigate to a page
+mcp__browser__browser_navigate with url: "https://joinerytest.site/path"
+
+# Get page snapshot (accessibility tree - preferred for understanding page structure)
+mcp__browser__browser_snapshot
+
+# Take a screenshot (for visual verification)
+mcp__browser__browser_take_screenshot
+
+# Click an element (use ref from snapshot)
+mcp__browser__browser_click with element: "description" and ref: "e123"
+```
+
+**When to use the browser:**
+- Verifying component rendering and layouts
+- Debugging CSS/styling issues
+- Testing form interactions
+- Checking responsive behavior
+- Validating theme changes
+
+**Workflow:**
+1. Make code changes
+2. Navigate to the relevant page: `https://joinerytest.site/path`
+3. Use `browser_snapshot` to see page structure
+4. Use `browser_take_screenshot` if visual verification needed
+
 ### Local Development Setup
 **Available Locally:**
 - PHP Runtime for syntax checking (`php -l filename.php`)
