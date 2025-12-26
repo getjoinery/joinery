@@ -8,7 +8,7 @@ A development utility that renders component types with auto-generated placehold
 
 1. **Rapid Testing**: Test component templates immediately after creation
 2. **Placeholder Generation**: Auto-generate realistic placeholder data based on config schema
-3. **Visual Validation**: Display rendered components for visual verification
+3. **Visual Validation**: Display rendered components within the active theme for accurate preview
 4. **Error Detection**: Surface template errors clearly during development
 5. **Foundation for Theme Extraction**: Enable automated workflows for extracting components from HTML themes
 
@@ -20,11 +20,23 @@ A development utility that renders component types with auto-generated placehold
 
 Accessible at: `/utils/component_preview` (no authentication required)
 
+## URL Parameters
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `type` | Filter to single component type | `?type=hero_static` |
+| `category` | Filter by category | `?category=hero` |
+| `theme` | Override active theme | `?theme=falcon` |
+| `config` | Show config JSON data | `?config` |
+| `paths` | Show template file paths | `?paths` |
+
+Parameters can be combined: `?type=hero_static&theme=falcon&config&paths`
+
 ## Features
 
-### 1. Component Type Selection
+### 1. Component Type Filtering
 
-- **All Components View**: Render all active component types sequentially
+- **All Components View**: Render all active component types sequentially (default)
 - **Single Component View**: Render one component type via `?type=hero_static`
 - **Category Filter**: Show components by category via `?category=hero`
 
@@ -33,11 +45,11 @@ Accessible at: `/utils/component_preview` (no authentication required)
 Override the active theme for preview purposes:
 
 ```
-/utils/component_preview?theme=flavor
-/utils/component_preview?type=hero_static&theme=flavor
+/utils/component_preview?theme=falcon
+/utils/component_preview?type=hero_static&theme=falcon
 ```
 
-**Implementation Note**: `PathHelper::getThemeFilePath()` already supports a `$theme_name` parameter (4th argument). We just need to pass it through from ComponentRenderer.
+Uses `PathHelper::getThemeFilePath()` with the 4th parameter for theme override.
 
 This allows:
 - Testing how components render in different themes
@@ -46,174 +58,123 @@ This allows:
 
 ### 3. Placeholder Data Generation
 
-Auto-generate placeholder content based on `config_schema` field types:
+Auto-generates placeholder content based on `config_schema` field types with smart detection for common field name patterns:
 
 | Field Type | Placeholder Strategy |
 |------------|---------------------|
-| `textinput` | Lorem ipsum phrase (3-8 words) |
+| `textinput` | Context-aware based on field name (see below) |
 | `textarea` | Lorem ipsum paragraph (2-3 sentences) |
 | `checkboxinput` | Random true/false |
-| `dropinput` | First option from options array |
+| `dropinput` | First option key from options array |
 | `repeater` | 3 items with nested placeholders |
 | `numberinput` | Random number 1-100 |
-| `fileinput` | Placeholder image URL |
+| `fileinput` | Placeholder image URL (800x400) |
+
+**Smart textinput detection:**
+- Fields containing `url` or `link`: Returns `#`
+- Fields containing `color`: Returns `#007bff`
+- Fields containing `icon`: Returns random Boxicon class (e.g., `bx bx-check`)
+- Fields containing `button` + `text`: Returns `Learn More`
+- Fields containing `heading` or `title`: Returns lorem phrase (4-8 words)
+- Default: Lorem phrase (3-6 words)
+
+**Repeater variety:** Titles become "Feature 1", "Feature 2", etc. Icons cycle through available icons.
 
 ### 4. Display Format
 
-For each component:
+Components render within the active theme (or overridden theme) using `PublicPage` for accurate preview. Each component shows:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Component: Hero Static                                  │
-│ Type Key: hero_static                                   │
-│ Category: hero | Framework: bootstrap                   │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│   [Rendered Component Output]                           │
-│                                                         │
-├─────────────────────────────────────────────────────────┤
-│ ▼ Config Data (expandable)                              │
-│ {                                                       │
-│   "heading": "Lorem ipsum dolor sit",                   │
-│   "subheading": "Consectetur adipiscing elit...",       │
-│   ...                                                   │
-│ }                                                       │
-├─────────────────────────────────────────────────────────┤
-│ ▼ Template Path                                         │
-│ /views/components/hero_static.php                       │
-└─────────────────────────────────────────────────────────┘
-```
+- **Card header**: Component title, type key, category, and CSS framework
+- **Solo button**: Link to view just that component
+- **Config data** (optional): Expandable JSON of placeholder data
+- **Template path** (optional): Full file path to the template
+- **Rendered output**: Full component rendering in dashed border container
 
-### 5. Error Handling
+### 5. Filter Bar
+
+Uses FormWriter for themed form elements:
+- Component Type dropdown (all types listed)
+- Category dropdown (auto-populated from active components)
+- Theme dropdown (lists all installed themes)
+- Show Config checkbox
+- Show Paths checkbox
+- Apply button and Reset link
+
+### 6. Error Handling
 
 If a component fails to render:
-
-- Display error message prominently
-- Show stack trace (in development mode)
-- Continue rendering other components
-- Log error to system log
-
-### 6. Custom Data Override
-
-Allow POST of custom JSON data to test specific configurations:
-
-```
-POST /utils/component_preview?type=hero_static
-Content-Type: application/json
-
-{
-  "heading": "Custom Heading",
-  "subheading": "Custom subheading text"
-}
-```
+- Displays error message prominently in red card body
+- Shows specific error (template not found, render exception, etc.)
+- Continues rendering other components
+- Does not break the page
 
 ## Implementation
 
-**Fully self-contained** - no modifications to existing code. The utility renders component types directly using `PathHelper::getThemeFilePath()`.
+**Fully self-contained** - single file, no modifications to existing code.
 
 ### Core Class: ComponentPreviewer
 
-Located within `/utils/component_preview.php` (no separate class file needed).
+Located within `/utils/component_preview.php`.
 
 ```php
 class ComponentPreviewer {
-
     /**
-     * Generate placeholder data for a component type
+     * Generate placeholder data for a component type based on its config schema
      * @param Component $componentType
      * @return array
      */
     public function generatePlaceholderData($componentType);
 
     /**
-     * Generate placeholder for a single field
+     * Generate placeholder value for a single field based on its type
+     * Includes smart detection for common field name patterns
      * @param array $field Field definition from config_schema
      * @return mixed
      */
     public function generateFieldPlaceholder($field);
 
     /**
-     * Render a component type with placeholder data
-     *
-     * Renders directly via PathHelper::getThemeFilePath() - does NOT use
-     * ComponentRenderer (which is designed for component instances, not types).
-     *
+     * Render a component type with provided data
+     * Uses PathHelper::getThemeFilePath() directly with optional theme override
      * @param Component $componentType
-     * @param array $data Placeholder data
+     * @param array $data Config data for the template
      * @param string|null $theme_override Theme name to use instead of active theme
-     * @return array ['html' => string, 'error' => string|null]
+     * @return array ['html' => string, 'error' => string|null, 'template_path' => string]
      */
-    public function renderComponent($componentType, $data, $theme_override = null) {
-        $template_file = $componentType->get('com_template_file');
-
-        // Direct call to PathHelper with optional theme override (4th param)
-        $template_path = PathHelper::getThemeFilePath(
-            $template_file,
-            'views/components',
-            'system',
-            $theme_override
-        );
-
-        // ... render logic
-    }
+    public function renderComponent($componentType, $data, $theme_override = null);
 
     /**
      * Get all active component types, optionally filtered
-     * @param array $filters ['category' => 'hero', 'framework' => 'bootstrap']
-     * @return array
+     * @param array $filters ['type' => 'hero_static', 'category' => 'hero']
+     * @return array Array of Component objects
      */
     public function getComponentTypes($filters = []);
+
+    /**
+     * Get list of available themes
+     * @return array Theme names
+     */
+    public function getAvailableThemes();
+
+    /**
+     * Get unique categories from active components
+     * @return array Category names
+     */
+    public function getCategories();
 }
 ```
 
-### Placeholder Data Examples
+### Technical Notes
 
-**textinput:**
-```php
-"Lorem ipsum dolor sit amet"
-```
+**Theme wrapper**: Uses `PublicPage` from the target theme with `public_header()`/`public_footer()` for accurate theme preview.
 
-**textarea:**
-```php
-"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore."
-```
+**z-index handling**: Filter bar has `position: relative; z-index: 100` to stay above `stretched-link` overlays from rendered components. Component preview containers have `position: relative` to contain stretched-link effects.
 
-**repeater (features example):**
-```php
-[
-    ["icon" => "bx bx-check", "title" => "Feature One", "description" => "Lorem ipsum..."],
-    ["icon" => "bx bx-star", "title" => "Feature Two", "description" => "Dolor sit amet..."],
-    ["icon" => "bx bx-heart", "title" => "Feature Three", "description" => "Consectetur..."]
-]
-```
+**Empty parameter handling**: Empty string theme parameter (`?theme=`) is converted to `null` to use active theme.
 
-**dropinput:**
-```php
-// First key from options array
-"center"  // from {"left": "Left", "center": "Center", "right": "Right"}
-```
+**Schema parsing**: `com_config_schema` is stored as JSON string in database; parsed with `json_decode()`.
 
-## UI/UX
-
-### Page Layout
-
-1. **Header**: Title, filter controls, "Test All" / "Clear" buttons
-2. **Sidebar** (optional): List of component types with quick-jump
-3. **Main Area**: Rendered components in cards
-
-### Controls
-
-- Dropdown: Select component type (or "All")
-- Dropdown: Filter by category
-- Dropdown: Theme override (lists installed themes)
-- Checkbox: Show config data
-- Checkbox: Show template paths
-- Button: Regenerate placeholders
-- Button: Copy component HTML
-
-### Styling
-
-Use existing admin theme (Falcon/Bootstrap) for consistency.
+**Template variables**: Templates receive `$component_config`, `$component_data` (empty array), and `$component_slug` matching ComponentRenderer conventions.
 
 ## Use Cases
 
@@ -221,7 +182,7 @@ Use existing admin theme (Falcon/Bootstrap) for consistency.
 
 ```
 1. Create hero_custom.json and hero_custom.php
-2. Run theme sync (or it syncs automatically)
+2. Run database update (or it syncs automatically)
 3. Visit /utils/component_preview?type=hero_custom
 4. Verify rendering
 5. Adjust template, refresh, repeat
@@ -230,53 +191,63 @@ Use existing admin theme (Falcon/Bootstrap) for consistency.
 ### 2. Testing All Components After Theme Change
 
 ```
-1. Switch theme in admin
-2. Visit /utils/component_preview
-3. Scroll through all components
-4. Identify any broken rendering
+1. Visit /utils/component_preview?theme=newtheme
+2. Scroll through all components
+3. Identify any broken rendering
+4. Fix theme overrides as needed
 ```
 
-### 3. Theme Extraction Workflow (Future)
+### 3. Theme Extraction Workflow
 
 ```
 1. Analyze HTML theme section
-2. Create JSON definition
+2. Create JSON definition with config_schema
 3. Create PHP template
-4. Test immediately in preview utility
-5. Iterate until correct
-6. Proceed to next section
+4. Test immediately at /utils/component_preview?type=new_component
+5. Check with config flag to verify placeholder data
+6. Iterate until correct
+7. Proceed to next section
+```
+
+### 4. Debugging Component Issues
+
+```
+1. Visit /utils/component_preview?type=problem_component&config&paths
+2. Review the generated config data
+3. Verify template path is correct
+4. Check for error messages
 ```
 
 ## Security
 
 - No authentication required (development utility, no sensitive data)
-- Validate POST JSON data
-- Escape all output in metadata display
-- Consider hiding full file paths in production mode (optional)
+- All output properly escaped with `htmlspecialchars()`
+- Template paths only shown with explicit `?paths` parameter
 
 ## Dependencies
 
-- Component, MultiComponent (existing) - to load component types
-- PathHelper (existing) - for template path resolution with theme override
-- No modifications to any existing files
+- `Component`, `MultiComponent` - Load component types from database
+- `PathHelper` - Template path resolution with theme override support
+- `PublicPage` - Theme wrapper for accurate preview
+- `FormWriter` - Themed form elements
+- `Globalvars` - Active theme detection
+
+No modifications to any existing files.
 
 ## Future Enhancements
 
-1. **Side-by-Side Comparison**: Show original HTML next to rendered component
-2. **JSON Editor**: Edit config in-page with live preview
-3. **Screenshot Capture**: Auto-generate component thumbnails
-4. **Template Diff**: Compare base vs theme-overridden templates
-5. **Export/Import**: Share placeholder configurations
+1. **Custom Data Override**: POST JSON to test specific configurations
+2. **Side-by-Side Comparison**: Show original HTML next to rendered component
+3. **JSON Editor**: Edit config in-page with live preview
+4. **Screenshot Capture**: Auto-generate component thumbnails
+5. **Template Diff**: Compare base vs theme-overridden templates
 
-## Success Criteria
+## Version History
 
-1. Can render any active component type with placeholder data
-2. Errors are caught and displayed without breaking page
-3. Placeholder data looks realistic for each field type
-4. Admin can test components without touching database
-5. Full render cycle takes < 2 seconds for all components
+- **1.1.0** - Added FormWriter for themed form elements, z-index fixes for stretched-link overlays
+- **1.0.0** - Initial implementation
 
 ## Related Documentation
 
-- [Component System Documentation](/docs/component_system.md)
-- [Creating Components from Themes](/docs/creating_components_from_themes.md)
+- [Page Component System Spec](/specs/implemented/page_component_system.md)
+- [Component Type Discovery](/specs/implemented/component_type_discovery.md)
