@@ -14,6 +14,29 @@ Many themes include pre-built sections (hero areas, feature grids, testimonials,
 
 ---
 
+## Development Tools
+
+### Theme Source Files
+
+Raw HTML theme files are available at `/theme-sources/` for reference:
+- Browse at: `https://[yoursite]/theme-sources/`
+- Contains: canvas, falcon, linka, sassa themes
+- Use these to identify sections to extract
+
+### Component Preview Utility
+
+Test components instantly without database setup:
+```
+/utils/component_preview              - All components
+/utils/component_preview?type=hero    - Single component
+/utils/component_preview?theme=falcon - Test in different theme
+/utils/component_preview?config       - Show generated config data
+```
+
+This utility auto-generates placeholder data based on your config schema, letting you iterate quickly on templates.
+
+---
+
 ## Step-by-Step Process
 
 ### Step 1: Identify the Section
@@ -479,20 +502,22 @@ During sync:
 
 ## Checklist: Converting a Theme Section
 
-- [ ] Identify the HTML section to convert
+- [ ] Identify the HTML section to convert (browse `/theme-sources/` for reference)
 - [ ] List all configurable elements
-- [ ] Create JSON config schema
-- [ ] Create template file in `/views/components/`
-- [ ] Add component type via admin
-- [ ] Test with sample content
+- [ ] Create JSON definition file in `/views/components/`
+- [ ] Create PHP template file in `/views/components/`
+- [ ] Test immediately with `/utils/component_preview?type=your_component`
 - [ ] Verify output escaping
-- [ ] Test with empty/missing values
+- [ ] Test with empty/missing values (use `?config` to see generated data)
 - [ ] Create logic function if dynamic data needed
+- [ ] Test in different themes with `?theme=` parameter
 
 ---
 
 ## See Also
 
 - [Component System Documentation](/docs/component_system.md)
+- [Component Preview Utility](/specs/implemented/component_preview_utility.md)
 - [Component Type Library](/specs/component_type_library.md)
+- [Theme Integration Instructions](/docs/theme_integration_instructions.md)
 - [FormWriter - Repeater Fields](/docs/formwriter.md#repeater-fields)
