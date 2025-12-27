@@ -9,6 +9,27 @@ Before starting, ensure you have:
 2. Write permissions in the `/theme/` directory
 3. Access to maintenance scripts for validation
 
+## Development Resources
+
+### Theme Source Files
+
+Raw HTML theme templates are available for reference at `/theme-sources/`:
+- **URL:** `https://[yoursite]/theme-sources/`
+- **Available themes:** canvas, falcon, linka, sassa
+- Browse rendered HTML pages and view source structure
+
+### Component Preview Utility
+
+After creating components, test them instantly without database setup:
+```
+/utils/component_preview              - All components
+/utils/component_preview?type=hero    - Single component type
+/utils/component_preview?theme=falcon - Override theme for testing
+/utils/component_preview?config&paths - Show config data and file paths
+```
+
+See [Creating Components from Themes](/docs/creating_components_from_themes.md) for component extraction workflow.
+
 ## Step-by-Step Integration Process
 
 ### Step 1: Analyze Source Template
@@ -1171,3 +1192,10 @@ The system automatically adds canonical URL tags to all public pages. It uses yo
 6. When in doubt, check how phillyzouk did it: `/theme/phillyzouk/`
 
 This guide should enable successful theme integration following the proven Phillyzouk pattern.
+
+## See Also
+
+- [Creating Components from Themes](/docs/creating_components_from_themes.md) - Extract theme sections into reusable components
+- [Component Preview Utility](/specs/implemented/component_preview_utility.md) - Test components with placeholder data
+- [Component System Documentation](/docs/component_system.md) - Full component system reference
+- [Plugin Developer Guide](/docs/plugin_developer_guide.md) - Themes, plugins, and routing details
