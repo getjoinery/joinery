@@ -1,0 +1,21 @@
+{
+  "title": "Linka Featured Card",
+  "description": "Featured blog/article card with image, category badge, date, and excerpt",
+  "category": "cards",
+  "icon": "bx bx-news",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "image", "label": "Image URL", "type": "textinput"},
+      {"name": "category", "label": "Category Label", "type": "textinput"},
+      {"name": "category_link", "label": "Category Link", "type": "textinput"},
+      {"name": "author", "label": "Author Name", "type": "textinput"},
+      {"name": "date", "label": "Date", "type": "textinput"},
+      {"name": "title", "label": "Title", "type": "textinput"},
+      {"name": "excerpt", "label": "Excerpt", "type": "textarea"},
+      {"name": "link", "label": "Read More Link", "type": "textinput"},
+      {"name": "show_author", "label": "Show Author", "type": "checkboxinput"},
+      {"name": "show_excerpt", "label": "Show Excerpt", "type": "checkboxinput"}
+    ]
+  }
+}

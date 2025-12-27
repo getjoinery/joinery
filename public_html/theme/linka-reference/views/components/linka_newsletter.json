@@ -1,0 +1,17 @@
+{
+  "title": "Linka Newsletter",
+  "description": "Newsletter subscription form with email input",
+  "category": "forms",
+  "icon": "bx bx-envelope",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "title", "label": "Title", "type": "textinput"},
+      {"name": "subtitle", "label": "Subtitle/Description", "type": "textarea"},
+      {"name": "form_action", "label": "Form Action URL", "type": "textinput"},
+      {"name": "button_text", "label": "Button Text", "type": "textinput"},
+      {"name": "placeholder", "label": "Email Placeholder", "type": "textinput"},
+      {"name": "background_color", "label": "Background Color", "type": "textinput"}
+    ]
+  }
+}

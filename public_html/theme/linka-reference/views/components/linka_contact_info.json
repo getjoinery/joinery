@@ -1,0 +1,25 @@
+{
+  "title": "Linka Contact Info",
+  "description": "Contact information cards with icons - email, phone, location, live chat",
+  "category": "contact",
+  "icon": "bx bx-phone-call",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {
+        "name": "items",
+        "label": "Contact Items",
+        "type": "repeater",
+        "fields": [
+          {"name": "icon", "label": "Icon Class", "type": "textinput", "help": "BoxIcon class (e.g., bx bx-envelope)"},
+          {"name": "title", "label": "Title", "type": "textinput"},
+          {"name": "line1", "label": "Line 1", "type": "textinput"},
+          {"name": "line1_link", "label": "Line 1 Link", "type": "textinput"},
+          {"name": "line2", "label": "Line 2 (optional)", "type": "textinput"},
+          {"name": "line2_link", "label": "Line 2 Link", "type": "textinput"}
+        ]
+      },
+      {"name": "columns", "label": "Columns", "type": "dropinput", "options": {"2": "2 Columns", "3": "3 Columns", "4": "4 Columns"}}
+    ]
+  }
+}

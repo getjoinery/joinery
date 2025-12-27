@@ -1,0 +1,17 @@
+{
+  "title": "Linka Contact Form",
+  "description": "Contact form with name, email, phone, subject, and message fields",
+  "category": "forms",
+  "icon": "bx bx-message-detail",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "title", "label": "Form Title", "type": "textinput"},
+      {"name": "form_action", "label": "Form Action URL", "type": "textinput", "help": "Leave empty for default"},
+      {"name": "show_phone", "label": "Show Phone Field", "type": "checkboxinput"},
+      {"name": "show_subject", "label": "Show Subject Field", "type": "checkboxinput"},
+      {"name": "button_text", "label": "Button Text", "type": "textinput"},
+      {"name": "success_message", "label": "Success Message", "type": "textinput"}
+    ]
+  }
+}

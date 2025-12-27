@@ -1,0 +1,23 @@
+{
+  "title": "Linka Page Title",
+  "description": "Linka-styled page title area with breadcrumb navigation and overlay background",
+  "category": "layout",
+  "icon": "bx bx-heading",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "title", "label": "Title", "type": "textinput"},
+      {"name": "background_class", "label": "Background Class", "type": "dropinput", "options": {"bg-9": "Style 1", "bg-12": "Style 2", "bg-1": "Style 3", "bg-2": "Style 4"}, "help": "Linka background styles"},
+      {"name": "background_image", "label": "Background Image URL", "type": "textinput", "help": "Custom background image (overrides class)"},
+      {
+        "name": "breadcrumbs",
+        "label": "Breadcrumb Items",
+        "type": "repeater",
+        "fields": [
+          {"name": "text", "label": "Text", "type": "textinput"},
+          {"name": "link", "label": "Link", "type": "textinput"}
+        ]
+      }
+    ]
+  }
+}

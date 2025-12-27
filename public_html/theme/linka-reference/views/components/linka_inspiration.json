@@ -1,0 +1,25 @@
+{
+  "title": "Linka Inspiration",
+  "description": "Inspiration section with staggered card layout",
+  "category": "blog",
+  "icon": "bx bx-bulb",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "section_title", "label": "Section Title", "type": "textinput"},
+      {
+        "name": "cards",
+        "label": "Inspiration Cards",
+        "type": "repeater",
+        "fields": [
+          {"name": "image", "label": "Image URL", "type": "textinput"},
+          {"name": "category", "label": "Category Label", "type": "textinput"},
+          {"name": "title", "label": "Title", "type": "textinput"},
+          {"name": "date", "label": "Date", "type": "textinput"},
+          {"name": "link", "label": "Link", "type": "textinput"},
+          {"name": "offset", "label": "Offset (staggered)", "type": "checkboxinput", "help": "Offset this card up for staggered look"}
+        ]
+      }
+    ]
+  }
+}
