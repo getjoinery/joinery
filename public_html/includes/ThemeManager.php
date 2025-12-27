@@ -271,8 +271,8 @@ class ThemeManager extends AbstractExtensionManager {
 
             if ($existing) {
                 $changed = false;
-                $fields = array('title', 'description', 'category', 'icon', 'template_file',
-                               'logic_function', 'requires_plugin', 'css_framework', 'order');
+                $fields = array('title', 'description', 'category', 'template_file',
+                               'logic_function', 'requires_plugin', 'css_framework');
 
                 foreach ($fields as $field) {
                     $db_value = $existing->get('com_' . $field);
@@ -315,13 +315,11 @@ class ThemeManager extends AbstractExtensionManager {
                 $component->set('com_title', $def['title']);
                 $component->set('com_description', $def['description']);
                 $component->set('com_category', $def['category']);
-                $component->set('com_icon', $def['icon']);
                 $component->set('com_template_file', $def['template_file']);
                 $component->set('com_config_schema', $def['config_schema']);
                 $component->set('com_logic_function', $def['logic_function']);
                 $component->set('com_requires_plugin', $def['requires_plugin']);
                 $component->set('com_css_framework', $def['css_framework']);
-                $component->set('com_order', $def['order']);
                 $component->set('com_is_active', true);
                 $component->save();
                 $summary['created']++;
@@ -425,13 +423,11 @@ class ThemeManager extends AbstractExtensionManager {
                 'title' => $metadata['title'],
                 'description' => $metadata['description'] ?? null,
                 'category' => $metadata['category'] ?? 'custom',
-                'icon' => $metadata['icon'] ?? 'bx bx-cube',
                 'template_file' => $relative_template_file,
                 'config_schema' => $metadata['config_schema'],
                 'logic_function' => $metadata['logic_function'] ?? null,
                 'requires_plugin' => $metadata['requires_plugin'] ?? null,
                 'css_framework' => $component_framework,
-                'order' => $metadata['order'] ?? 100,
             );
         }
 

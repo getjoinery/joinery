@@ -16,32 +16,17 @@ $session = SessionControl::get_instance();
 $session->check_permission(10); // Superadmin only
 $session->set_return();
 
-// Handle delete action
-if (isset($_POST['action']) && $_POST['action'] == 'delete') {
-	$component = new Component($_POST['com_component_id'], TRUE);
-	$component->soft_delete();
-	header("Location: /admin/admin_component_types");
-	exit();
-}
-
-// Get filter parameters
-$filter = isset($_GET['filter']) ? $_GET['filter'] : 'active';
-$searchterm = isset($_GET['searchterm']) ? trim($_GET['searchterm']) : '';
-
 // Pagination
 $numperpage = 25;
 $offset = isset($_GET['offset']) ? intval($_GET['offset']) : 0;
 
-// Build search options
-$search_options = array('deleted' => false);
-if ($filter === 'active') {
-	$search_options['active'] = true;
-}
+// Only show active, non-deleted component types
+$search_options = array('deleted' => false, 'active' => true);
 
 // Load components
 $components = new MultiComponent(
 	$search_options,
-	array('com_category' => 'ASC', 'com_order' => 'ASC', 'com_title' => 'ASC'),
+	array('com_category' => 'ASC', 'com_title' => 'ASC'),
 	$numperpage,
 	$offset
 );
@@ -64,11 +49,10 @@ $page->admin_header(array(
 ));
 
 // Table
-$headers = array("Title", "Category", "Theme", "Active", "Actions");
-$altlinks = array('Add Component Type' => '/admin/admin_component_type_edit');
+$headers = array("Title", "Category", "Theme");
+$altlinks = array();
 $pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage, 'offset' => $offset));
 $table_options = array(
-	'filteroptions' => array("Active" => "active", "All Types" => "all"),
 	'altlinks' => $altlinks,
 	'title' => 'Component Types',
 	'search_on' => TRUE
@@ -78,11 +62,10 @@ $page->tableheader($headers, $table_options, $pager);
 foreach ($components as $component) {
 	$rowvalues = array();
 
-	// Title with icon
-	$icon = $component->get('com_icon');
+	// Title (linked to detail view)
 	$title = $component->get('com_title');
-	$icon_html = $icon ? '<i class="' . htmlspecialchars($icon) . ' me-1"></i> ' : '';
-	array_push($rowvalues, $icon_html . htmlspecialchars($title));
+	$title_link = '<a href="/admin/admin_component_type_edit?com_component_id=' . $component->key . '">' . htmlspecialchars($title) . '</a>';
+	array_push($rowvalues, $title_link);
 
 	// Category
 	$category = $component->get('com_category');
@@ -104,24 +87,6 @@ foreach ($components as $component) {
 		$theme_display = '<span class="badge bg-secondary">All</span>';
 	}
 	array_push($rowvalues, $theme_display);
-
-	// Active status
-	$is_active = $component->get('com_is_active');
-	$status_badge = $is_active
-		? '<span class="badge bg-success">Active</span>'
-		: '<span class="badge bg-secondary">Inactive</span>';
-	array_push($rowvalues, $status_badge);
-
-	// Actions
-	$edit_link = '<a href="/admin/admin_component_type_edit?com_component_id=' . $component->key . '" class="btn btn-sm btn-outline-primary me-1">Edit</a>';
-
-	$delete_form = '<form method="POST" style="display:inline" onsubmit="return confirm(\'Are you sure you want to delete this component type?\');">';
-	$delete_form .= '<input type="hidden" name="action" value="delete">';
-	$delete_form .= '<input type="hidden" name="com_component_id" value="' . $component->key . '">';
-	$delete_form .= '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
-	$delete_form .= '</form>';
-
-	array_push($rowvalues, $edit_link . $delete_form);
 
 	$page->disprow($rowvalues);
 }
