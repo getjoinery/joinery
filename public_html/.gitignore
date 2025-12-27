@@ -7,5 +7,6 @@ composer.phar
 
 Globalvars_site.php
 .claude/
+.playwright-mcp/
 *.bak
 /cache
