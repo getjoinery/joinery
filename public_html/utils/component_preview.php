@@ -256,7 +256,7 @@ class ComponentPreviewer {
             $options['category'] = $filters['category'];
         }
 
-        $components = new MultiComponent($options, ['com_category' => 'ASC', 'com_order' => 'ASC', 'com_title' => 'ASC']);
+        $components = new MultiComponent($options, ['com_category' => 'ASC', 'com_title' => 'ASC']);
         $components->load();
 
         $result = [];
