@@ -253,12 +253,12 @@ class ThemeManager extends AbstractExtensionManager {
 
         // Scan base /views/components/ first
         $base_path = PathHelper::getIncludePath('views/components');
-        $discovered = $this->scanComponentDirectory($base_path, $discovered, $theme_framework);
+        $discovered = $this->scanComponentDirectory($base_path, $discovered, $theme_framework, 'views/components');
 
         // Then scan active theme (overrides base)
         if ($active_theme) {
             $theme_path = PathHelper::getIncludePath("theme/{$active_theme}/views/components");
-            $discovered = $this->scanComponentDirectory($theme_path, $discovered, $theme_framework);
+            $discovered = $this->scanComponentDirectory($theme_path, $discovered, $theme_framework, "theme/{$active_theme}/views/components");
         }
 
         // Sync to database
@@ -342,7 +342,13 @@ class ThemeManager extends AbstractExtensionManager {
 
             // Check if template exists
             $template = $type->get('com_template_file');
-            $template_path = PathHelper::getThemeFilePath($template, 'views/components');
+            if (strpos($template, '/') !== false) {
+                // Full relative path
+                $template_path = PathHelper::getIncludePath($template);
+            } else {
+                // Filename only (legacy)
+                $template_path = PathHelper::getThemeFilePath($template, 'views/components');
+            }
 
             $should_deactivate = false;
 
@@ -369,12 +375,13 @@ class ThemeManager extends AbstractExtensionManager {
     /**
      * Scan a directory for component JSON files
      *
-     * @param string $directory Path to scan
+     * @param string $directory Absolute path to scan
      * @param array $discovered Already discovered components (to merge/override)
      * @param string|null $theme_framework Active theme's CSS framework
+     * @param string $relative_path Relative path prefix for template_file (e.g., 'views/components' or 'theme/linka/views/components')
      * @return array Updated discovered components array
      */
-    protected function scanComponentDirectory($directory, $discovered, $theme_framework = null) {
+    protected function scanComponentDirectory($directory, $discovered, $theme_framework = null, $relative_path = 'views/components') {
         if (!is_dir($directory)) {
             return $discovered;
         }
@@ -409,6 +416,9 @@ class ThemeManager extends AbstractExtensionManager {
                 continue;
             }
 
+            // Build the relative template path (e.g., 'theme/linka-reference/views/components/linka_featured_grid.php')
+            $relative_template_file = $relative_path . '/' . $type_key . '.php';
+
             // Theme definitions override base (since we process base first)
             $discovered[$type_key] = array(
                 'type_key' => $type_key,
@@ -416,7 +426,7 @@ class ThemeManager extends AbstractExtensionManager {
                 'description' => $metadata['description'] ?? null,
                 'category' => $metadata['category'] ?? 'custom',
                 'icon' => $metadata['icon'] ?? 'bx bx-cube',
-                'template_file' => $type_key . '.php',
+                'template_file' => $relative_template_file,
                 'config_schema' => $metadata['config_schema'],
                 'logic_function' => $metadata['logic_function'] ?? null,
                 'requires_plugin' => $metadata['requires_plugin'] ?? null,

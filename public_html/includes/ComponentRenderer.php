@@ -113,9 +113,16 @@ class ComponentRenderer {
 		}
 
 		// Use theme-aware path resolution
-		// Template files are stored as filename only (e.g., 'hero_static.php')
-		// and always located in views/components/ subdirectory
-		$template_path = PathHelper::getThemeFilePath($template_file, 'views/components');
+		// Template files can be stored as:
+		// - Full relative path: 'theme/linka-reference/views/components/component.php' or 'views/components/component.php'
+		// - Filename only (legacy): 'component.php'
+		if (strpos($template_file, '/') !== false) {
+			// Full relative path - use directly
+			$template_path = PathHelper::getIncludePath($template_file);
+		} else {
+			// Filename only - look in views/components with theme override support
+			$template_path = PathHelper::getThemeFilePath($template_file, 'views/components');
+		}
 		if (!file_exists($template_path)) {
 			return self::debug_output("Template file not found: {$template_file} (resolved to: {$template_path})", $slug);
 		}
