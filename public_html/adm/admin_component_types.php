@@ -64,7 +64,7 @@ $page->admin_header(array(
 ));
 
 // Table
-$headers = array("Type Key", "Title", "Category", "Template", "Active", "Actions");
+$headers = array("Title", "Category", "Theme", "Active", "Actions");
 $altlinks = array('Add Component Type' => '/admin/admin_component_type_edit');
 $pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage, 'offset' => $offset));
 $table_options = array(
@@ -78,10 +78,6 @@ $page->tableheader($headers, $table_options, $pager);
 foreach ($components as $component) {
 	$rowvalues = array();
 
-	// Type Key
-	$type_key = $component->get('com_type_key');
-	array_push($rowvalues, '<code>' . htmlspecialchars($type_key ?: '(none)') . '</code>');
-
 	// Title with icon
 	$icon = $component->get('com_icon');
 	$title = $component->get('com_title');
@@ -93,9 +89,21 @@ foreach ($components as $component) {
 	$category_label = isset($categories[$category]) ? $categories[$category] : $category;
 	array_push($rowvalues, htmlspecialchars($category_label ?: '-'));
 
-	// Template
+	// Theme/Compatibility (derived from template path and css_framework)
 	$template = $component->get('com_template_file');
-	array_push($rowvalues, '<code>' . htmlspecialchars($template ?: '(none)') . '</code>');
+	$css_framework = $component->get('com_css_framework');
+
+	if ($template && preg_match('#^theme/([^/]+)/#', $template, $matches)) {
+		// Theme-specific component
+		$theme_display = '<span class="badge bg-info">' . htmlspecialchars($matches[1]) . '</span>';
+	} elseif ($css_framework) {
+		// Framework-specific
+		$theme_display = '<span class="badge bg-primary">' . htmlspecialchars(ucfirst($css_framework)) . '</span>';
+	} else {
+		// Plain HTML - works with all themes
+		$theme_display = '<span class="badge bg-secondary">All</span>';
+	}
+	array_push($rowvalues, $theme_display);
 
 	// Active status
 	$is_active = $component->get('com_is_active');
