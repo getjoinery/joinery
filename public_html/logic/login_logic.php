@@ -107,7 +107,19 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
-		// Here we know the user/password was good
+		// Check IP restriction (if configured for this user)
+		$client_ip = $_SERVER['REMOTE_ADDR'];
+		if (!$user->is_ip_allowed($client_ip)) {
+			if ($ajax) {
+				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
+				throw new AuthenticationException('Login from this IP address is not permitted for this account.');
+			} else {
+				header("Location: /login?retry=1&e=" . rawurlencode($email) . "&ip_blocked=1");
+				exit;
+			}
+		}
+
+		// Here we know the user/password was good and IP is allowed
 		$session = SessionControl::get_instance();
 		$page_vars['session'] = $session;
 		$settings = Globalvars::get_instance();
@@ -170,7 +182,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 	if(isset($get_vars['retry'])){
-		$message = new DisplayMessage('Your username or password was incorrect.  Please try again below, or sign up if you don\'t have an account.  If you forgot your password, <a href="/password-reset-1">click here</a> and we\'ll send you a new one.', 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
+		if(isset($get_vars['ip_blocked'])){
+			$message = new DisplayMessage('Login from your IP address is not permitted for this account. Please contact an administrator if you believe this is an error.', 'Login blocked', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
+		} else {
+			$message = new DisplayMessage('Your username or password was incorrect.  Please try again below, or sign up if you don\'t have an account.  If you forgot your password, <a href="/password-reset-1">click here</a> and we\'ll send you a new one.', 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
+		}
 		$session->save_message($message);
 	}
 

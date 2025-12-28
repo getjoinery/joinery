@@ -527,6 +527,10 @@ $migrations[] = $migration;
 
 This is the live test server where changes can be verified in a browser.
 
+**Admin Login (Permission 10):**
+- Email: `jeremy.tunnell+claude@gmail.com`
+- Password: `sKU^1cK1pVJCNAv`
+
 ### Browser Testing (MCP)
 A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
 
