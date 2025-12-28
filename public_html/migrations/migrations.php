@@ -1011,3 +1011,35 @@
 		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_icon = 'cog' WHERE amu_menudisplay = 'System' AND amu_icon = 'settings';";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// Convert Pages menu to dropdown parent (clear defaultpage)
+		$migration = array();
+		$migration['database_version'] = '73';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'pages' AND (amu_defaultpage = '' OR amu_defaultpage IS NULL)";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_defaultpage = '' WHERE amu_slug = 'pages';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add Pages list menu item under Pages
+		$migration = array();
+		$migration['database_version'] = '73';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'pages-list'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug, amu_setting_activate) VALUES ('Pages list', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'pages'), 'admin_pages', 1, 5, 0, '', 'pages-list', 'page_contents_active');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add Page Components menu item under Pages
+		$migration = array();
+		$migration['database_version'] = '73';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'page-components'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug, amu_setting_activate) VALUES ('Page Components', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'pages'), 'admin_components', 2, 5, 0, '', 'page-components', 'page_contents_active');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add Components menu item under System
+		$migration = array();
+		$migration['database_version'] = '73';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system-components'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('Components', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_component_types', 6, 9, 0, 'puzzle-piece', 'system-components');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;

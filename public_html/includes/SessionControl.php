@@ -81,6 +81,76 @@ class SessionControl{
 		return !isset($_SESSION['send_emails']) || $_SESSION['send_emails'];
 	}
 
+	/**
+	 * Set a cookie with modern security attributes
+	 * Compatible with PHP 7.3+ (uses options array for SameSite support)
+	 *
+	 * @param string $name Cookie name
+	 * @param string $value Cookie value
+	 * @param int $expires Expiration timestamp
+	 * @param bool $httponly Whether cookie is HTTP only (default true)
+	 * @param string $samesite SameSite attribute: 'Strict', 'Lax', or 'None' (default 'Lax')
+	 * @return bool Success
+	 */
+	private function set_secure_cookie($name, $value, $expires, $httponly = true, $samesite = 'Lax') {
+		$secure = $this->is_secure_connection();
+
+		// SameSite=None requires Secure flag
+		if ($samesite === 'None' && !$secure) {
+			$samesite = 'Lax';
+		}
+
+		// PHP 7.3+ supports options array with samesite
+		if (version_compare(PHP_VERSION, '7.3.0', '>=')) {
+			return setcookie($name, $value, [
+				'expires' => $expires,
+				'path' => '/',
+				'domain' => '',
+				'secure' => $secure,
+				'httponly' => $httponly,
+				'samesite' => $samesite
+			]);
+		}
+
+		// Fallback for PHP < 7.3 (no SameSite support)
+		return setcookie($name, $value, $expires, '/', '', $secure, $httponly);
+	}
+
+	/**
+	 * Delete a cookie by setting expiration in the past
+	 *
+	 * @param string $name Cookie name
+	 * @return bool Success
+	 */
+	private function delete_cookie($name) {
+		return $this->set_secure_cookie($name, '', time() - 3600, true, 'Lax');
+	}
+
+	/**
+	 * Determine if current connection is secure (HTTPS)
+	 *
+	 * @return bool
+	 */
+	private function is_secure_connection() {
+		// Direct HTTPS
+		if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+			return true;
+		}
+		// Behind load balancer/proxy
+		if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+			return true;
+		}
+		// Forwarded header (RFC 7239)
+		if (!empty($_SERVER['HTTP_FORWARDED']) && preg_match('/proto=https/i', $_SERVER['HTTP_FORWARDED'])) {
+			return true;
+		}
+		// Common port check
+		if (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443) {
+			return true;
+		}
+		return false;
+	}
+
 	public function save_user_to_cookie() {
 		/*
 		//MAXIMUM SECURITY
@@ -110,17 +180,14 @@ class SessionControl{
 		if ($this->get_user_id()) {
 			// This remember me cookie lasts for 365 days
 			$expire_time = time() + (365 * 24 * 60 * 60);
-			setcookie(
-				'tt',
-				implode(';',
-					array(
-						LibraryFunctions::Encode($this->get_user_id(), 'user_id'),
-						LibraryFunctions::Encode($expire_time, 'expiration_date'),
-						sha1(
-							$this->get_user_id() . $expire_time .
-							'Ifz4lU5Bmwmbi17f2W4CW1I3XKrJmrWmc19bDAUBMNqyPVDEBfvBLUHQqxCk261')
-						)),
-				$expire_time);
+			$cookie_value = implode(';', array(
+				LibraryFunctions::Encode($this->get_user_id(), 'user_id'),
+				LibraryFunctions::Encode($expire_time, 'expiration_date'),
+				sha1(
+					$this->get_user_id() . $expire_time .
+					'Ifz4lU5Bmwmbi17f2W4CW1I3XKrJmrWmc19bDAUBMNqyPVDEBfvBLUHQqxCk261')
+			));
+			$this->set_secure_cookie('tt', $cookie_value, $expire_time);
 		}		
 	}
 
@@ -403,7 +470,7 @@ class SessionControl{
 				if ($user === FALSE || $ip_segment === FALSE || $expire_time === FALSE || $check_hash != $hash || $expire_time < time() || $ip_segment != $first_segment) {
 					// If the user, ip segment, expire time or hash are invalid, or the cookie has expired, delete it
 					// Also, if the user is signing in with a different first segment of their IP, also kill it
-					setcookie('tt', '', time() - 3600);
+					$this->delete_cookie('tt');
 					return FALSE;
 				}
 
@@ -413,7 +480,7 @@ class SessionControl{
 					$user_obj = new User($user, TRUE);
 				} catch (UserException $e) {
 					// Invalid user
-					setcookie('tt', '', time() - 3600);
+					$this->delete_cookie('tt');
 					return FALSE;
 				} catch (Exception $e) {
 					// Because any other exceptions will perpetuate out from here and try to regain
@@ -431,7 +498,7 @@ class SessionControl{
 					LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
 					return TRUE;
 				} else {
-					setcookie('tt', '', time() - 3600);
+					$this->delete_cookie('tt');
 					return FALSE;
 				}
 			}
@@ -447,7 +514,7 @@ class SessionControl{
 
 				if ($user === FALSE  || $expire_time === FALSE || $check_hash != $hash || $expire_time < time()) {
 					// If the user, expire time or hash are invalid, or the cookie has expired, delete it
-					setcookie('tt', '', time() - 3600);
+					$this->delete_cookie('tt');
 					return FALSE;
 				}
 
@@ -457,7 +524,7 @@ class SessionControl{
 					$user_obj = new User($user, TRUE);
 				} catch (UserException $e) {
 					// Invalid user
-					setcookie('tt', '', time() - 3600);
+					$this->delete_cookie('tt');
 					return FALSE;
 				} catch (Exception $e) {
 					// Because any other exceptions will perpetuate out from here and try to regain
@@ -475,13 +542,13 @@ class SessionControl{
 					LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
 					return TRUE;
 				} else {
-					setcookie('tt', '', time() - 3600);
+					$this->delete_cookie('tt');
 					return FALSE;
 				}				
 			}
 			else{				
 				// Cookie is invalid, delete it!
-				setcookie('tt', '', time() - 3600);
+				$this->delete_cookie('tt');
 				return FALSE;
 			}
 		}
@@ -503,11 +570,11 @@ class SessionControl{
 		$_SESSION = array();
 
 		if (isset($_COOKIE[session_name()])) {
-			setcookie(session_name(), '', time()-42000, '/');
+			$this->delete_cookie(session_name());
 		}
 
 		// Kill the remember me cookie
-		setcookie('tt', '', time() - 3600);
+		$this->delete_cookie('tt');
 
 		session_destroy();
 		session_write_close();
