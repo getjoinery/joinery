@@ -203,6 +203,16 @@ class PublicPage extends PublicPageBase {
             }
             ?>
         </nav>
+
+        <!-- CRITICAL: User menu (login/logout/profile) - ALWAYS include in header -->
+        <div class="user-menu">
+            <?php if ($session->is_logged_in()): ?>
+                <a href="/profile">Profile</a>
+                <a href="/logout">Logout</a>
+            <?php else: ?>
+                <a href="/login">Login</a>
+            <?php endif; ?>
+        </div>
         <?php
     }
 
@@ -395,6 +405,7 @@ Before declaring theme complete:
 - [ ] PublicPage.php extends PublicPageBase
 - [ ] PublicPage implements getTableClasses() method
 - [ ] public_header() uses get_menu_data() for navigation
+- [ ] **public_header() includes user menu (login/logout/profile links)**
 - [ ] public_footer() uses Globalvars for site info
 - [ ] index.php uses actual HTML from source (not placeholders)
 - [ ] All image paths updated to `/theme/[name]/assets/images/`
@@ -434,6 +445,7 @@ tail -f /var/www/html/joinerytest/logs/error.log
 5. **Always use absolute paths** for assets (/theme/name/assets/...)
 6. **Always validate PHP syntax** before testing in browser
 7. **Always check error logs** when debugging issues
+8. **Always include user menu (login/logout/profile)** in the header's utility/option area
 
 ## Footer Structure Pattern
 
@@ -548,6 +560,73 @@ foreach ($menus as $menu) {
     // $menu['submenu'] - Array of submenu items (same structure)
 }
 ```
+
+### User Menu (Login/Logout/Profile) - CRITICAL
+
+**Every theme MUST include a user menu in the header.** This provides login access for non-authenticated users and profile/logout links for authenticated users.
+
+**Where to place:** In the header's "utility" or "options" area, typically in the top-right corner near the search icon or phone number.
+
+**Required pattern:**
+```php
+<div class="user-menu">
+    <?php if ($session->is_logged_in()): ?>
+        <a href="/profile" class="user-link">
+            <i class="bx bx-user"></i>
+            <span>Profile</span>
+        </a>
+        <a href="/logout" class="user-link">
+            <i class="bx bx-log-out"></i>
+            <span>Logout</span>
+        </a>
+    <?php else: ?>
+        <a href="/login" class="user-link">
+            <i class="bx bx-log-in"></i>
+            <span>Login</span>
+        </a>
+    <?php endif; ?>
+</div>
+```
+
+**Styling example (add to joinery-custom.css):**
+```css
+/* User menu (login/logout/profile) styling */
+.user-menu {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-right: 15px;
+}
+
+.user-menu .user-link {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: #ffffff;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+.user-menu .user-link:hover {
+    color: #0d6efd;
+}
+
+.user-menu .user-link i {
+    font-size: 18px;
+}
+
+/* Mobile user menu adjustments */
+@media (max-width: 991px) {
+    .user-menu {
+        margin-right: 0;
+        margin-bottom: 15px;
+    }
+}
+```
+
+**DO NOT** use the header utility area for social media "Follow" links - those belong in the footer. The header utility area should be reserved for user authentication and account access.
 
 ### Settings That Do NOT Exist by Default
 
