@@ -140,61 +140,22 @@ class PublicPage extends PublicPageBase {
                                     </div>
                                     <?php endif; ?>
 
-                                    <div class="follow">
-                                        <span>Follow</span>
-                                        <i class="bx bx-chevron-down"></i>
-
-                                        <ul>
-                                            <?php if ($settings->get_setting('social_facebook_link')): ?>
-                                            <li>
-                                                <a href="<?php echo htmlspecialchars($settings->get_setting('social_facebook_link')); ?>" target="_blank">
-                                                    <i class="bx bxl-facebook"></i>
-                                                </a>
-                                            </li>
-                                            <?php endif; ?>
-                                            <?php if ($settings->get_setting('social_twitter_link')): ?>
-                                            <li>
-                                                <a href="<?php echo htmlspecialchars($settings->get_setting('social_twitter_link')); ?>" target="_blank">
-                                                    <i class="bx bxl-twitter"></i>
-                                                </a>
-                                            </li>
-                                            <?php endif; ?>
-                                            <?php if ($settings->get_setting('social_instagram_link')): ?>
-                                            <li>
-                                                <a href="<?php echo htmlspecialchars($settings->get_setting('social_instagram_link')); ?>" target="_blank">
-                                                    <i class="bx bxl-instagram"></i>
-                                                </a>
-                                            </li>
-                                            <?php endif; ?>
-                                            <?php if ($settings->get_setting('social_youtube_link')): ?>
-                                            <li>
-                                                <a href="<?php echo htmlspecialchars($settings->get_setting('social_youtube_link')); ?>" target="_blank">
-                                                    <i class="bx bxl-youtube"></i>
-                                                </a>
-                                            </li>
-                                            <?php endif; ?>
-                                            <?php if ($settings->get_setting('social_linkedin_link')): ?>
-                                            <li>
-                                                <a href="<?php echo htmlspecialchars($settings->get_setting('social_linkedin_link')); ?>" target="_blank">
-                                                    <i class="bx bxl-linkedin"></i>
-                                                </a>
-                                            </li>
-                                            <?php endif; ?>
-                                        </ul>
-                                    </div>
-
-                                    <div class="option-item">
-                                        <i class="search-btn bx bx-search"></i>
-                                        <i class="close-btn bx bx-x"></i>
-
-                                        <div class="search-overlay search-popup">
-                                            <div class='search-box'>
-                                                <form class="search-form" action="/search" method="get">
-                                                    <input class="search-input" name="q" placeholder="Search" type="text">
-                                                    <button class="search-button" type="submit"><i class="bx bx-search"></i></button>
-                                                </form>
-                                            </div>
-                                        </div>
+                                    <div class="user-menu">
+                                        <?php if ($session->is_logged_in()): ?>
+                                            <a href="/profile" class="user-link">
+                                                <i class="bx bx-user"></i>
+                                                <span>Profile</span>
+                                            </a>
+                                            <a href="/logout" class="user-link">
+                                                <i class="bx bx-log-out"></i>
+                                                <span>Logout</span>
+                                            </a>
+                                        <?php else: ?>
+                                            <a href="/login" class="user-link">
+                                                <i class="bx bx-log-in"></i>
+                                                <span>Login</span>
+                                            </a>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                                 <!-- End Other Option -->
