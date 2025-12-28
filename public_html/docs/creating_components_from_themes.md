@@ -159,8 +159,6 @@ $align_class = 'text-' . $alignment;
 
 ### Step 5: Register the Component Type
 
-**Option A: JSON Definition File (Recommended)**
-
 Create a JSON file alongside your template:
 
 **File:** `/views/components/hero_simple.json`
@@ -169,7 +167,6 @@ Create a JSON file alongside your template:
   "title": "Simple Hero",
   "description": "Extracted from theme landing page.",
   "category": "hero",
-  "icon": "bx bx-image",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [
@@ -189,20 +186,7 @@ Create a JSON file alongside your template:
 }
 ```
 
-The component type is automatically discovered during theme sync.
-
-**Option B: Admin Interface**
-
-1. Go to `/admin/admin_component_types` (requires superadmin)
-2. Click **Add Component Type**
-3. Fill in:
-   - **Type Key**: `hero_simple`
-   - **Title**: "Simple Hero"
-   - **Category**: Hero Sections
-   - **Template File**: `hero_simple.php`
-   - **Config Schema**: Paste your JSON
-   - **Active**: Yes
-4. Save
+The component type is automatically discovered during theme sync. JSON files are the single source of truth - component types cannot be created via the admin interface.
 
 ### Step 6: Create a Component Instance
 
@@ -455,7 +439,6 @@ Themes can include their own exclusive components that only work with that theme
   "title": "Theme Hero",
   "description": "Hero section specific to this theme",
   "category": "hero",
-  "icon": "bx bx-star",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

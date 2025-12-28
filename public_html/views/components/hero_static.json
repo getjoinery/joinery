@@ -2,7 +2,6 @@
   "title": "Hero Static",
   "description": "Single hero section with heading, subheading, background, and CTA",
   "category": "hero",
-  "icon": "bx bx-image",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

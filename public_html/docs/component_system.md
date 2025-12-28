@@ -123,14 +123,12 @@ Component types are the library of available components. Managed by superadmins 
 | `com_title` | varchar(255) | Display name |
 | `com_description` | text | Description for admins |
 | `com_category` | varchar(64) | Grouping category |
-| `com_icon` | varchar(64) | CSS icon class |
-| `com_template_file` | varchar(255) | Template filename |
+| `com_template_file` | varchar(255) | Template path (relative) |
 | `com_config_schema` | json | Field definitions |
 | `com_logic_function` | varchar(255) | Optional logic function name |
 | `com_is_active` | bool | Whether type is available |
 | `com_requires_plugin` | varchar(64) | Required plugin name |
 | `com_css_framework` | varchar(32) | Required CSS framework (e.g., `bootstrap`) |
-| `com_order` | int2 | Sort order |
 
 ### Categories
 
@@ -166,7 +164,6 @@ The JSON file defines the component metadata and config schema:
   "title": "Hero Static",
   "description": "Single hero section with heading, subheading, background, and CTA",
   "category": "hero",
-  "icon": "bx bx-image",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [
@@ -184,22 +181,10 @@ The JSON file defines the component metadata and config schema:
 | `title` | Yes | Display name |
 | `description` | No | Description for admins |
 | `category` | No | Grouping category (see categories table above) |
-| `icon` | No | CSS icon class (e.g., `bx bx-image`) |
 | `css_framework` | No | Required framework: `bootstrap`, `tailwind`, or omit for universal |
-| `config_schema` | No | Field definitions object |
+| `config_schema` | Yes | Field definitions object |
 
-Component types are automatically discovered during theme sync operations.
-
-**Method 2: Admin Interface**
-
-1. Go to `/admin/admin_component_types`
-2. Click "Add Component Type"
-3. Fill in:
-   - **Type Key** - Unique identifier (lowercase, underscores)
-   - **Title** - Human-readable name
-   - **Template File** - Filename in `views/components/`
-   - **Config Schema** - JSON defining editable fields
-4. Save and activate
+Component types are automatically discovered during theme sync operations. The JSON file is the single source of truth - component types cannot be created or edited via the admin interface.
 
 ### CSS Framework Compatibility
 
@@ -605,12 +590,13 @@ The config schema is a JSON object defining the admin form fields for a componen
 
 **URL:** `/admin/admin_component_types`
 
-- List all component types
-- Filter by active/all
-- Add, edit, delete component types
-- Edit config schema JSON
+- List all active component types (read-only)
+- View component type details
+- Component types are defined by JSON files and synced automatically
 
 **Permission Level:** 10 (Superadmin)
+
+**Note:** Component types cannot be created, edited, or deleted via the admin interface. The JSON definition files are the single source of truth. To add or modify component types, edit the JSON files in `/views/components/` or `/theme/{theme}/views/components/`.
 
 ### Component Instances (Admin)
 
