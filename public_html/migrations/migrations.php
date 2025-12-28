@@ -959,3 +959,55 @@
 		$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'db_migration_version';";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// =============================================================================
+		// Fix admin menu icons to use valid Font Awesome 5 names
+		// =============================================================================
+
+		// Fix Emails icon: mail -> envelope
+		$migration = array();
+		$migration['database_version'] = '72';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_menudisplay = 'Emails' AND amu_icon = 'envelope'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_icon = 'envelope' WHERE amu_menudisplay = 'Emails' AND amu_icon = 'mail';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix Products icon: nut -> box
+		$migration = array();
+		$migration['database_version'] = '72';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_menudisplay = 'Products' AND amu_icon = 'box'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_icon = 'box' WHERE amu_menudisplay = 'Products' AND amu_icon = 'nut';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix Orders icon: cart -> shopping-cart
+		$migration = array();
+		$migration['database_version'] = '72';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_menudisplay = 'Orders' AND amu_icon = 'shopping-cart'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_icon = 'shopping-cart' WHERE amu_menudisplay = 'Orders' AND amu_icon = 'cart';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix Videos icon: video-camera -> video
+		$migration = array();
+		$migration['database_version'] = '72';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_menudisplay = 'Videos' AND amu_icon = 'video'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_icon = 'video' WHERE amu_menudisplay = 'Videos' AND amu_icon = 'video-camera';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix Pages icon: file-text -> file-alt
+		$migration = array();
+		$migration['database_version'] = '72';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_menudisplay = 'Pages' AND amu_icon = 'file-alt'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_icon = 'file-alt' WHERE amu_menudisplay = 'Pages' AND amu_icon = 'file-text';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix System icon: settings -> cog
+		$migration = array();
+		$migration['database_version'] = '72';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_menudisplay = 'System' AND amu_icon = 'cog'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_icon = 'cog' WHERE amu_menudisplay = 'System' AND amu_icon = 'settings';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
