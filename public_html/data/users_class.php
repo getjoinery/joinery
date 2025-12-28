@@ -563,6 +563,7 @@ private static function UcName($string) {
 
 	/**
 	 * Check if the given IP address is allowed to login for this user
+	 * Supports exact IPs, CIDR notation (e.g., 104.23.253.0/24), and wildcards (e.g., 104.23.*)
 	 *
 	 * @param string $ip The IP address to check
 	 * @return bool True if allowed (empty whitelist = allow all), false if blocked
@@ -585,8 +586,67 @@ private static function UcName($string) {
 			return true;
 		}
 
-		// Check if the IP is in the allowed list
-		return in_array($ip, $allowed_ips);
+		// Check each allowed entry
+		foreach ($allowed_ips as $allowed) {
+			// Exact match
+			if ($ip === $allowed) {
+				return true;
+			}
+
+			// CIDR notation (e.g., 192.168.1.0/24)
+			if (strpos($allowed, '/') !== false) {
+				if (self::ip_in_cidr($ip, $allowed)) {
+					return true;
+				}
+			}
+
+			// Wildcard match (e.g., 104.23.* or 104.23.253.*)
+			if (strpos($allowed, '*') !== false) {
+				$pattern = '/^' . str_replace(['.', '*'], ['\.', '.*'], $allowed) . '$/';
+				if (preg_match($pattern, $ip)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if an IP is within a CIDR range
+	 *
+	 * @param string $ip The IP to check
+	 * @param string $cidr The CIDR range (e.g., 192.168.1.0/24)
+	 * @return bool True if IP is in range
+	 */
+	private static function ip_in_cidr($ip, $cidr) {
+		list($subnet, $mask) = explode('/', $cidr);
+
+		// Handle IPv6
+		if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+			// Simple prefix match for IPv6
+			$ip_bin = inet_pton($ip);
+			$subnet_bin = inet_pton($subnet);
+			if ($ip_bin === false || $subnet_bin === false) {
+				return false;
+			}
+			$mask = intval($mask);
+			for ($i = 0; $i < $mask / 8; $i++) {
+				if ($ip_bin[$i] !== $subnet_bin[$i]) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		// IPv4
+		$ip_long = ip2long($ip);
+		$subnet_long = ip2long($subnet);
+		if ($ip_long === false || $subnet_long === false) {
+			return false;
+		}
+		$mask = ~((1 << (32 - intval($mask))) - 1);
+		return ($ip_long & $mask) === ($subnet_long & $mask);
 	}
 	
 	function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
