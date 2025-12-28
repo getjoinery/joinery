@@ -61,6 +61,21 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 			$user->set('usr_permission', $post_vars['usr_permission']);
 		}
 
+		// Handle allowed IPs - convert newline-separated list to JSON array
+		if (isset($post_vars['usr_allowed_ips'])) {
+			$allowed_ips_input = trim($post_vars['usr_allowed_ips']);
+			if (empty($allowed_ips_input)) {
+				$user->set('usr_allowed_ips', null);
+			} else {
+				// Split by newlines, commas, or spaces, then clean up
+				$ips = preg_split('/[\r\n,\s]+/', $allowed_ips_input, -1, PREG_SPLIT_NO_EMPTY);
+				$ips = array_map('trim', $ips);
+				$ips = array_filter($ips); // Remove empty entries
+				$ips = array_values($ips); // Re-index array
+				$user->set('usr_allowed_ips', json_encode($ips));
+			}
+		}
+
 		$user->prepare();
 		$user->save();
 

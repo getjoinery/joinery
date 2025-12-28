@@ -74,6 +74,21 @@ if($_SESSION['permission'] == 10){
 
 $formwriter->textinput('usr_calendly_uri', 'Calendly User URI (for calendly integration)');
 
+// IP restriction field - convert JSON array to newline-separated list for display
+$allowed_ips_raw = $user->get('usr_allowed_ips');
+$allowed_ips_display = '';
+if (!empty($allowed_ips_raw)) {
+	$allowed_ips_array = is_string($allowed_ips_raw) ? json_decode($allowed_ips_raw, true) : $allowed_ips_raw;
+	if (is_array($allowed_ips_array)) {
+		$allowed_ips_display = implode("\n", $allowed_ips_array);
+	}
+}
+$formwriter->textarea('usr_allowed_ips', 'Allowed Login IPs', [
+	'value' => $allowed_ips_display,
+	'rows' => 4,
+	'helptext' => 'One IP per line or comma-separated. Leave blank to allow login from any IP.'
+]);
+
 $formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
 
 $formwriter->submitbutton('submit_button', 'Submit');

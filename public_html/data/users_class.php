@@ -72,6 +72,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_password_recovery_disabled' => array('type'=>'bool'),
 	    'usr_calendly_uri' => array('type'=>'varchar(255)'),
 	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
+	    'usr_allowed_ips' => array('type'=>'jsonb'),
 	);
 
 private static function UcName($string) {
@@ -547,7 +548,7 @@ private static function UcName($string) {
 
 	function check_password($password) {
 		$password = trim($password);
-		
+
 		//USE THE NEW VERSION FIRST, IF THAT FAILS TRY THE OLD VERSION
 		if(password_verify($password, trim($this->get('usr_password')))){
 			return true;
@@ -556,8 +557,36 @@ private static function UcName($string) {
 			$settings = Globalvars::get_instance();
 			require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 			$hasher = new PasswordHash(8, TRUE);
-			return $hasher->CheckPassword($password, trim($this->get('usr_password')));			
+			return $hasher->CheckPassword($password, trim($this->get('usr_password')));
 		}
+	}
+
+	/**
+	 * Check if the given IP address is allowed to login for this user
+	 *
+	 * @param string $ip The IP address to check
+	 * @return bool True if allowed (empty whitelist = allow all), false if blocked
+	 */
+	function is_ip_allowed($ip) {
+		$allowed_ips = $this->get('usr_allowed_ips');
+
+		// If no whitelist is set, allow all IPs
+		if (empty($allowed_ips)) {
+			return true;
+		}
+
+		// Decode JSON if it's a string
+		if (is_string($allowed_ips)) {
+			$allowed_ips = json_decode($allowed_ips, true);
+		}
+
+		// If decoding failed or empty array, allow all
+		if (!is_array($allowed_ips) || empty($allowed_ips)) {
+			return true;
+		}
+
+		// Check if the IP is in the allowed list
+		return in_array($ip, $allowed_ips);
 	}
 	
 	function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
