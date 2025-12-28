@@ -353,10 +353,10 @@ class PublicPageFalcon extends PublicPageBase {
 											echo '</ul>';
 										}
 										else{
-												echo '<!-- parent pages--><a class="nav-link " href="'.$menu_info['defaultpage'].'" role="button" data-bs-toggle="collapse" aria-expanded="false" aria-controls="'.$menu_info['display'].'">
+												echo '<!-- parent pages with no subs - currentmain --><a class="nav-link active" href="'.$menu_info['defaultpage'].'">
 												<div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-'.$menu_info['icon'].'"></span></span><span class="nav-link-text ps-1">'.$menu_info['display'].'</span>
 												</div>
-											  </a>';	
+											  </a>';
 										}
 									}
 									else{
