@@ -112,9 +112,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if (!$user->is_ip_allowed($client_ip)) {
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
-				throw new AuthenticationException('Login from this IP address is not permitted for this account.');
+				throw new AuthenticationException('Login from this IP address (' . $client_ip . ') is not permitted for this account.');
 			} else {
-				header("Location: /login?retry=1&e=" . rawurlencode($email) . "&ip_blocked=1");
+				header("Location: /login?retry=1&e=" . rawurlencode($email) . "&ip_blocked=1&ip=" . rawurlencode($client_ip));
 				exit;
 			}
 		}
@@ -183,7 +183,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	if(isset($get_vars['retry'])){
 		if(isset($get_vars['ip_blocked'])){
-			$message = new DisplayMessage('Login from your IP address is not permitted for this account. Please contact an administrator if you believe this is an error.', 'Login blocked', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
+			$blocked_ip = isset($get_vars['ip']) ? htmlspecialchars($get_vars['ip']) : 'unknown';
+			$message = new DisplayMessage('Login from your IP address (' . $blocked_ip . ') is not permitted for this account. Please contact an administrator if you believe this is an error.', 'Login blocked', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
 		} else {
 			$message = new DisplayMessage('Your username or password was incorrect.  Please try again below, or sign up if you don\'t have an account.  If you forgot your password, <a href="/password-reset-1">click here</a> and we\'ll send you a new one.', 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
 		}
