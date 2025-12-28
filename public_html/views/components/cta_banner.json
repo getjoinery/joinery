@@ -2,7 +2,6 @@
   "title": "CTA Banner",
   "description": "Full-width call-to-action banner",
   "category": "conversion",
-  "icon": "bx bx-bullseye",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

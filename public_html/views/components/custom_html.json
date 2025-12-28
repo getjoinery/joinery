@@ -2,7 +2,6 @@
   "title": "Custom HTML",
   "description": "Raw HTML for advanced users",
   "category": "custom",
-  "icon": "bx bx-code-alt",
   "config_schema": {
     "fields": [
       {"name": "html", "label": "HTML Code", "type": "textarea", "help": "Enter custom HTML. Be careful with scripts and styles."},
