@@ -2,7 +2,6 @@
   "title": "Linka Newsletter",
   "description": "Newsletter subscription form with email input",
   "category": "forms",
-  "icon": "bx bx-envelope",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

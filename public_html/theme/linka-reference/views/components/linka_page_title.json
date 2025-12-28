@@ -2,7 +2,6 @@
   "title": "Linka Page Title",
   "description": "Linka-styled page title area with breadcrumb navigation and overlay background",
   "category": "layout",
-  "icon": "bx bx-heading",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

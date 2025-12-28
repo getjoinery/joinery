@@ -2,7 +2,6 @@
   "title": "Linka Featured Card",
   "description": "Featured blog/article card with image, category badge, date, and excerpt",
   "category": "cards",
-  "icon": "bx bx-news",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

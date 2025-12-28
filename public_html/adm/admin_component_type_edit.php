@@ -80,19 +80,6 @@ display_field('Logic Function', $component->get('com_logic_function'), true);
 display_field('Requires Plugin', $component->get('com_requires_plugin'), true);
 display_field('CSS Framework', $component->get('com_css_framework'), true);
 
-// Status
-$is_active = $component->get('com_is_active');
-echo '<div class="mb-3">';
-echo '<label class="form-label text-muted small mb-0">Status</label>';
-echo '<div>';
-if ($is_active) {
-	echo '<span class="badge bg-success">Active</span>';
-} else {
-	echo '<span class="badge bg-secondary">Inactive</span>';
-}
-echo '</div>';
-echo '</div>';
-
 echo '</div><div class="col-md-4">';
 
 // Config Schema

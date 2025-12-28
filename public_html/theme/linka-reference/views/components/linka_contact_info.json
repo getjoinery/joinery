@@ -2,7 +2,6 @@
   "title": "Linka Contact Info",
   "description": "Contact information cards with icons - email, phone, location, live chat",
   "category": "contact",
-  "icon": "bx bx-phone-call",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

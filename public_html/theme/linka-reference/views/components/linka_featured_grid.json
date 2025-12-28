@@ -2,7 +2,6 @@
   "title": "Linka Featured Grid",
   "description": "Grid of featured articles with section title",
   "category": "blog",
-  "icon": "bx bx-grid-alt",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [

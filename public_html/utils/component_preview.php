@@ -202,19 +202,27 @@ class ComponentPreviewer {
             return $result;
         }
 
-        try {
-            // Direct call to PathHelper with optional theme override (4th param)
-            $template_path = PathHelper::getThemeFilePath(
-                $template_file,
-                'views/components',
-                'system',
-                $theme_override
-            );
-            $result['template_path'] = $template_path;
-        } catch (Exception $e) {
-            $result['error'] = 'Template resolution failed: ' . $e->getMessage();
-            return $result;
+        // Handle both full relative paths and filename-only (legacy)
+        // Full path: 'theme/linka-reference/views/components/component.php' or 'views/components/component.php'
+        // Filename only: 'component.php'
+        if (strpos($template_file, '/') !== false) {
+            // Full relative path - use directly
+            $template_path = PathHelper::getIncludePath($template_file);
+        } else {
+            // Filename only - look in views/components with theme override support
+            try {
+                $template_path = PathHelper::getThemeFilePath(
+                    $template_file,
+                    'views/components',
+                    'system',
+                    $theme_override
+                );
+            } catch (Exception $e) {
+                $result['error'] = 'Template resolution failed: ' . $e->getMessage();
+                return $result;
+            }
         }
+        $result['template_path'] = $template_path;
 
         if (!file_exists($template_path)) {
             $result['error'] = 'Template file not found: ' . $template_file;
