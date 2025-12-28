@@ -88,6 +88,15 @@ $page_vars = $page_vars->data;
 									</div>
 
 									<div class="col-12 form-group">
+										<?php
+										$formwriter->checkboxinput('setcookie', 'Remember me', [
+											'checked' => true,
+											'value' => 'yes'
+										]);
+										?>
+									</div>
+
+									<div class="col-12 form-group">
 										<div class="d-flex justify-content-between">
 											<?php
 											$formwriter->submitbutton('login-form-submit', 'Login', [
