@@ -226,7 +226,10 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
         // Default empty option
         if (!empty($options['empty_option'])) {
-            $html .= '<option value="">' . htmlspecialchars($options['empty_option']) . '</option>';
+            // If empty_option is boolean true, show "Select..." as default text
+            // If it's a string, use that string as the label
+            $empty_label = ($options['empty_option'] === true) ? 'Select...' : $options['empty_option'];
+            $html .= '<option value="">' . htmlspecialchars($empty_label) . '</option>';
         }
 
         // Output options - Standard convention: [id => label]

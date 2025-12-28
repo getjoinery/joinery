@@ -422,7 +422,7 @@
 		// Add directory themes only
 		foreach($directory_themes as $theme_name => $theme_helper) {
 			$display_name = $theme_helper->get('display_name', $theme_name);
-			$optionvals[$display_name] = $theme_name;  // Fixed: display_name as key, theme_name as value
+			$optionvals[$theme_name] = $display_name;  // FormWriter format: [value => label]
 		}
 
 		$formwriter->dropinput('theme_template', 'Active theme', [
@@ -438,11 +438,11 @@
 		$current_plugin = $settings->get_setting('active_theme_plugin');
 
 		// Build options array for FormWriter
-		$plugin_options = array('-- Select Plugin --' => '');
+		$plugin_options = array('' => '-- Select Plugin --');
 		foreach ($available_plugins as $plugin_name => $plugin_helper) {
 			// PluginHelper::getAvailablePlugins returns array of PluginHelper instances
 			$display_name = $plugin_helper->getPluginName();
-			$plugin_options[$display_name] = $plugin_name;
+			$plugin_options[$plugin_name] = $display_name;  // FormWriter format: [value => label]
 		}
 
 		// Wrap in a div that JavaScript can show/hide
@@ -1181,7 +1181,11 @@
 		NULL);  //OFFSET
 	$pages->load();
 	$optionvals = $pages->get_dropdown_array_link();
-	$optionvals['Blog homepage'] = '/blog';
+	// Prepend "Page - " to each page label for clarity
+	foreach ($optionvals as $url => $label) {
+		$optionvals[$url] = 'Page - ' . $label;
+	}
+	$optionvals['/blog'] = 'Blog homepage';
 	$formwriter->dropinput('alternate_homepage', 'Alternate page to use as homepage (optional)', [
 		'options' => $optionvals,
 		'value' => $settings->get_setting('alternate_homepage'),
