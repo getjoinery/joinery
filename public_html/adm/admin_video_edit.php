@@ -155,7 +155,7 @@
 		NULL);  //OFFSET
 	$groups->load();
 
-	$optionvals1['All'] = NULL;
+	$optionvals1[''] = 'All';  // FormWriter format: [value => label]
 	$optionvals2 = $groups->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
 	$formwriter->dropinput("vid_grp_group_id", "Group can access", [
@@ -169,7 +169,7 @@
 		NULL);  //OFFSET
 	$events->load();
 
-	$optionvals['All'] = NULL;
+	$optionvals1[''] = 'All';  // FormWriter format: [value => label]
 	$optionvals2 = $events->get_dropdown_array();
 	$optionvals = array_merge($optionvals1, $optionvals2);
 	$formwriter->dropinput("vid_evt_event_id", "Event can access", [

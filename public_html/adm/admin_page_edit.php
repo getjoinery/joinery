@@ -121,11 +121,52 @@
 	}
 
 	$formwriter->dropinput('pag_is_published', 'Published', [
-		'options' => ['No' => 0, 'Yes' => 1]
+		'options' => [1 => 'Yes', 0 => 'No']
 	]);
 
+	// Determine if we should show the content editor (if content exists) or component system (default)
+	$has_content = !empty(trim($content ?? ''));
+	$content_mode = $has_content ? 'editor' : 'components';
+
+	// Build component info message
+	$component_info = '<i class="fas fa-puzzle-piece me-2"></i> This page will use the component system. ';
+	if($page->key) {
+		$component_info .= '<a href="/admin/admin_page_contents?pag_page_id=' . $page->key . '">Manage components &rarr;</a>';
+	} else {
+		$component_info .= '<em>Save the page first to add components.</em>';
+	}
+
+	$formwriter->dropinput('content_mode', 'Content Source', [
+		'options' => ['components' => 'Use component system', 'editor' => 'Enter content here'],
+		'value' => $content_mode,
+		'visibility_rules' => [
+			'components' => [
+				'show' => ['component_info'],
+				'hide' => ['pag_body']
+			],
+			'editor' => [
+				'show' => ['pag_body'],
+				'hide' => ['component_info']
+			]
+		]
+	]);
+
+	// Component info message - using container ID pattern for visibility_rules
+	?>
+	<div id="component_info_container" class="mb-3">
+		<div class="alert alert-info mb-0">
+			<i class="fas fa-puzzle-piece me-2"></i> This page will use the component system.
+			<?php if($page->key): ?>
+				<a href="/admin/admin_page_contents?pag_page_id=<?php echo $page->key; ?>">Manage components &rarr;</a>
+			<?php else: ?>
+				<em>Save the page first to add components.</em>
+			<?php endif; ?>
+		</div>
+	</div>
+	<?php
+
 	$formwriter->textbox('pag_body', 'Content', [
-		'validation' => ['required' => true, 'minlength' => 10],
+		'validation' => ['required' => false],
 		'htmlmode' => 'yes'
 	]);
 
