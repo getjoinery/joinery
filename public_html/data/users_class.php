@@ -250,9 +250,7 @@ private static function UcName($string) {
 				$password = NULL;
 			}
 			
-			if(!$send_emails = $data['send_emails']){
-				$send_emails = true;
-			}
+			$send_emails = array_key_exists('send_emails', $data) ? $data['send_emails'] : true;
 
 			//PREVENT DUPLICATES
 			if($user = User::GetByEmail($email)){
