@@ -406,6 +406,7 @@ Before declaring theme complete:
 - [ ] PublicPage implements getTableClasses() method
 - [ ] public_header() uses get_menu_data() for navigation
 - [ ] **public_header() includes user menu (login/logout/profile links)**
+- [ ] **public_header() includes shopping cart icon with item count**
 - [ ] public_footer() uses Globalvars for site info
 - [ ] index.php uses actual HTML from source (not placeholders)
 - [ ] All image paths updated to `/theme/[name]/assets/images/`
@@ -446,6 +447,7 @@ tail -f /var/www/html/joinerytest/logs/error.log
 6. **Always validate PHP syntax** before testing in browser
 7. **Always check error logs** when debugging issues
 8. **Always include user menu (login/logout/profile)** in the header's utility/option area
+9. **Always include shopping cart icon** in the header's utility/option area (uses get_menu_data() cart data)
 
 ## Footer Structure Pattern
 
@@ -627,6 +629,77 @@ foreach ($menus as $menu) {
 ```
 
 **DO NOT** use the header utility area for social media "Follow" links - those belong in the footer. The header utility area should be reserved for user authentication and account access.
+
+### Shopping Cart Icon - CRITICAL
+
+**Every theme MUST include a shopping cart icon in the header.** This provides easy access to the cart for users shopping on the site.
+
+**Where to place:** In the header's "utility" or "options" area, typically near the user menu links. Place it between the phone number (if present) and the user menu.
+
+**Data source:** Use `get_menu_data()` which provides cart data automatically:
+```php
+$menu_data = $this->get_menu_data();
+$cart_data = isset($menu_data['cart']) ? $menu_data['cart'] : array('count' => 0, 'link' => '/cart');
+// Available fields:
+// $cart_data['count'] - Number of items in cart
+// $cart_data['link'] - Link to cart page (/cart)
+// $cart_data['has_items'] - Boolean, true if cart has items
+```
+
+**Required pattern:**
+```php
+<?php
+// Get cart data from menu_data (already retrieved earlier in header)
+$cart_data = isset($menu_data['cart']) ? $menu_data['cart'] : array('count' => 0, 'link' => '/cart');
+?>
+<div class="cart">
+    <a href="<?php echo htmlspecialchars($cart_data['link']); ?>">
+        <i class="bx bx-cart"></i>
+        <?php if ($cart_data['count'] > 0): ?>
+        <span class="cart-count"><?php echo intval($cart_data['count']); ?></span>
+        <?php endif; ?>
+    </a>
+</div>
+```
+
+**CSS considerations:** Most themes include cart styles. Check for existing `.cart` or `.cart-count` classes in the theme's CSS (e.g., `.navbar-area .others-option .cart`). If not present, add styles to `joinery-custom.css`:
+
+```css
+/* Cart icon styling */
+.others-option .cart {
+    display: inline-block;
+    color: #ffffff;
+    margin-left: 20px;
+    position: relative;
+}
+
+.others-option .cart a {
+    color: #ffffff;
+}
+
+.others-option .cart a i {
+    font-size: 20px;
+}
+
+.others-option .cart a:hover {
+    color: #0d6efd;
+}
+
+.others-option .cart .cart-count {
+    position: absolute;
+    top: -8px;
+    left: 11px;
+    color: #d80650;
+    background-color: #ffffff;
+    width: 15px;
+    height: 15px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: bold;
+}
+```
 
 ### Settings That Do NOT Exist by Default
 
@@ -859,6 +932,8 @@ When integrating settings into a new theme:
 - [ ] Replace site name in logo alt text
 - [ ] Replace site description in footer
 - [ ] Add dynamic menu system (replace hardcoded nav)
+- [ ] **Add shopping cart icon with item count badge**
+- [ ] **Add user menu (login/logout/profile links)**
 - [ ] Replace static social media links with conditional rendering
 - [ ] Replace static contact info with settings + fallbacks
 - [ ] Replace static copyright with dynamic year + site name
