@@ -240,8 +240,8 @@ public static function get_by_name($name) {
 				}
 				catch(Exception $e)
 				{
-					echo 'Caught exception: ',  $e->getMessage(), '\n';
-				}	
+					error_log('File thumbnail generation failed: ' . $e->getMessage());
+				}
 			}
 
 			//LARGE THUMBNAIL SIZE
@@ -272,8 +272,8 @@ public static function get_by_name($name) {
 				}
 				catch(Exception $e)
 				{
-					echo 'Caught exception: ',  $e->getMessage(), '\n';
-				}	
+					error_log('File lthumbnail generation failed: ' . $e->getMessage());
+				}
 			}
 
 			//SMALL SIZE
@@ -288,10 +288,10 @@ public static function get_by_name($name) {
 				}
 				catch(Exception $e)
 				{
-					echo 'Caught exception: ',  $e->getMessage(), '\n';
-				}	
-			}				
-			
+					error_log('File small thumbnail generation failed: ' . $e->getMessage());
+				}
+			}
+
 			//MEDIUM SIZE
 			if($size == 'all' || $size == 'medium'){
 				try
@@ -304,9 +304,9 @@ public static function get_by_name($name) {
 				}
 				catch(Exception $e)
 				{
-					echo 'Caught exception: ',  $e->getMessage(), '\n';
+					error_log('File medium thumbnail generation failed: ' . $e->getMessage());
 				}
-			}				
+			}
 
 			//LARGE SIZE
 			if($size == 'all' || $size == 'large'){
@@ -320,15 +320,15 @@ public static function get_by_name($name) {
 				}
 				catch(Exception $e)
 				{
-					echo 'Caught exception: ',  $e->getMessage(), '\n';
-				}	
-			}				
+					error_log('File large thumbnail generation failed: ' . $e->getMessage());
+				}
+			}
 		}
 		else{
 			return false;
 		}
 	}
-	
+
 	function get_event_sessions(){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
