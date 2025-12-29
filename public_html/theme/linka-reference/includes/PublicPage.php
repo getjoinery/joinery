@@ -4,7 +4,7 @@
  *
  * Provides header and footer rendering for the Linka theme.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -140,7 +140,17 @@ class PublicPage extends PublicPageBase {
                                     </div>
                                     <?php endif; ?>
 
+                                    <?php
+                                    // Get cart data from menu_data
+                                    $cart_data = isset($menu_data['cart']) ? $menu_data['cart'] : array('count' => 0, 'link' => '/cart');
+                                    ?>
                                     <div class="user-menu">
+                                        <a href="<?php echo htmlspecialchars($cart_data['link']); ?>" class="user-link cart-link">
+                                            <i class="bx bx-cart"></i>
+                                            <?php if ($cart_data['count'] > 0): ?>
+                                            <span class="cart-count"><?php echo intval($cart_data['count']); ?></span>
+                                            <?php endif; ?>
+                                        </a>
                                         <?php if ($session->is_logged_in()): ?>
                                             <a href="/profile" class="user-link">
                                                 <i class="bx bx-user"></i>

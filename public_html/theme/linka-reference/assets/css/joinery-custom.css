@@ -1,7 +1,7 @@
 /**
  * Joinery Custom Styles for Linka Reference Theme
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 /* Fix logo visibility on dark navbar background */
@@ -105,12 +105,31 @@
     color: #fff;
 }
 
-/* User menu (login/logout/profile) styling */
+/* User menu (login/logout/profile and cart) styling */
 .user-menu {
     display: flex;
     align-items: center;
     gap: 15px;
-    margin-right: 15px;
+}
+
+/* Cart link with badge positioning */
+.user-menu .cart-link {
+    position: relative;
+}
+
+.user-menu .cart-link .cart-count {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background-color: #d80650;
+    color: #ffffff;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: bold;
 }
 
 .user-menu .user-link {
