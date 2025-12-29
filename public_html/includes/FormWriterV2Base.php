@@ -2673,9 +2673,11 @@ class AjaxSearchSelect {
             <div style="font-size: 48px; color: #999; margin-bottom: 10px;">☁️</div>
             <h3 style="color: #666; margin: 10px 0;">Drop files here or click to browse</h3>
             <p style="color: #999; margin: 10px 0;">Maximum file size: <?php echo $max_size_display; ?> | Allowed types: <?php echo strtoupper(str_replace(',', ', ', $allowed_extensions)); ?></p>
-            <input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" style="display: none;">
             <div style="margin-top: 10px;">
-                <?php echo $this->multi_upload_button('browse', 'browse-btn', '📁 Browse Files'); ?>
+                <label class="button primary" style="cursor: pointer; display: inline-block; position: relative; overflow: hidden;">
+                    📁 Browse Files
+                    <input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
+                </label>
             </div>
         </div>
 
@@ -2718,9 +2720,10 @@ class AjaxSearchSelect {
         </form>
         <?php endif; ?>
         <script>
-        $(function() {
+        (function() {
             'use strict';
 
+            function initFileUploader() {
             let selectedFiles = [];
 
             // Get allowed file extensions from server setting
@@ -2729,15 +2732,15 @@ class AjaxSearchSelect {
             const maxFileSize = <?php echo $max_size; ?>; // Maximum file size in bytes
 
             // DOM elements
-            const $dropZone = $('#file-drop-zone');
-            const $fileInput = $('#file-input');
-            const $browseBtn = $('#browse-btn');
-            const $uploadAllBtn = $('#upload-all-btn');
-            const $clearAllBtn = $('#clear-all-btn');
-            const $filesList = $('#files-list');
-            const $noFilesMessage = $('#no-files-message');
-            const $overallProgress = $('#overall-progress');
-            const $progressBar = $('#overall-progress-bar');
+            const dropZone = document.getElementById('file-drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const browseBtn = document.getElementById('browse-btn');
+            const uploadAllBtn = document.getElementById('upload-all-btn');
+            const clearAllBtn = document.getElementById('clear-all-btn');
+            const filesList = document.getElementById('files-list');
+            const noFilesMessage = document.getElementById('no-files-message');
+            const overallProgress = document.getElementById('overall-progress');
+            const progressBar = document.getElementById('overall-progress-bar');
 
             // File size formatter
             function formatFileSize(bytes) {
@@ -2804,10 +2807,10 @@ class AjaxSearchSelect {
 
             // Render a file row in the table
             function renderFileRow(fileObj) {
-                $noFilesMessage.hide();
+                noFilesMessage.style.display = 'none';
 
                 const fileIcon = getFileIcon(fileObj.file.name);
-                const $row = $(`
+                const rowHTML = `
                     <tr data-file-id="${fileObj.id}" class="file-row" style="border-bottom: 1px solid #eee;">
                         <td style="padding: 10px;">
                             <div style="display: flex; align-items: center;">
@@ -2828,28 +2831,28 @@ class AjaxSearchSelect {
                             </button>
                         </td>
                     </tr>
-                `);
+                `;
 
-                $filesList.append($row);
+                filesList.insertAdjacentHTML('beforeend', rowHTML);
             }
 
             // Update UI state
             function updateUI() {
                 const hasFiles = selectedFiles.length > 0;
-                const pendingFiles = selectedFiles.filter(f => f.status === 'pending').length;
+                const pendingFilesCount = selectedFiles.filter(f => f.status === 'pending').length;
 
-                $uploadAllBtn.prop('disabled', pendingFiles === 0);
-                $clearAllBtn.prop('disabled', !hasFiles);
+                uploadAllBtn.disabled = pendingFilesCount === 0;
+                clearAllBtn.disabled = !hasFiles;
 
                 if (!hasFiles) {
-                    $noFilesMessage.show();
+                    noFilesMessage.style.display = '';
                 }
 
                 // Update button text with count
-                if (pendingFiles > 0) {
-                    $uploadAllBtn.html(`⬆️ Upload All (${pendingFiles})`);
+                if (pendingFilesCount > 0) {
+                    uploadAllBtn.innerHTML = `⬆️ Upload All (${pendingFilesCount})`;
                 } else {
-                    $uploadAllBtn.html('⬆️ Upload All');
+                    uploadAllBtn.innerHTML = '⬆️ Upload All';
                 }
             }
 
@@ -2869,22 +2872,25 @@ class AjaxSearchSelect {
                     formData.append('files[]', fileObj.file);
 
                     // Add any additional form data
-                    $('#hidden-form-data input').each(function() {
-                        formData.append($(this).attr('name'), $(this).val());
-                    });
+                    const hiddenForm = document.getElementById('hidden-form-data');
+                    if (hiddenForm) {
+                        hiddenForm.querySelectorAll('input').forEach(function(input) {
+                            formData.append(input.name, input.value);
+                        });
+                    }
 
-                    const $row = $(`.file-row[data-file-id="${fileObj.id}"]`);
-                    const $status = $row.find('.file-status');
-                    const $actions = $row.find('.file-actions');
+                    const row = document.querySelector(`.file-row[data-file-id="${fileObj.id}"]`);
+                    const statusCell = row.querySelector('.file-status');
+                    const actionsCell = row.querySelector('.file-actions');
 
                     // Update UI to uploading state
-                    $status.html('<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading...</span>');
-                    $actions.html(`
+                    statusCell.innerHTML = '<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading...</span>';
+                    actionsCell.innerHTML = `
                         <div style="display: flex; align-items: center;">
                             <progress value="0" max="100" style="width: 60px; height: 20px; margin-right: 8px;">0%</progress>
                             <span style="color: #666; font-size: 12px;">0%</span>
                         </div>
-                    `);
+                    `;
 
                     // Create XMLHttpRequest for progress tracking
                     const xhr = new XMLHttpRequest();
@@ -2892,9 +2898,16 @@ class AjaxSearchSelect {
                     xhr.upload.addEventListener('progress', function(e) {
                         if (e.lengthComputable) {
                             const progress = Math.round((e.loaded / e.total) * 100);
-                            $actions.find('progress').val(progress).text(progress + '%');
-                            $actions.find('span').text(progress + '%');
-                            $status.html(`<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading ${progress}%</span>`);
+                            const progressEl = actionsCell.querySelector('progress');
+                            const spanEl = actionsCell.querySelector('span');
+                            if (progressEl) {
+                                progressEl.value = progress;
+                                progressEl.textContent = progress + '%';
+                            }
+                            if (spanEl) {
+                                spanEl.textContent = progress + '%';
+                            }
+                            statusCell.innerHTML = `<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading ${progress}%</span>`;
                         }
                     });
 
@@ -2907,31 +2920,31 @@ class AjaxSearchSelect {
                                     console.log('Upload response file object:', file); // Debug log
                                     if (file.url) {
                                         // Success
-                                        $status.html('<span style="padding: 2px 8px; background: #28a745; color: white; border-radius: 3px; font-size: 12px;">✓ Upload successful</span>');
-                                        $actions.html(`
+                                        statusCell.innerHTML = '<span style="padding: 2px 8px; background: #28a745; color: white; border-radius: 3px; font-size: 12px;">✓ Upload successful</span>';
+                                        actionsCell.innerHTML = `
                                             <a href="${file.url}" target="_blank" class="button small success" title="Download file" style="padding: 4px 8px; font-size: 12px; text-decoration: none;">
                                                 ⬇️
                                             </a>
                                             <button type="button" class="button small danger remove-file-btn" title="Remove from list" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
                                                 ❌
                                             </button>
-                                        `);
+                                        `;
 
                                         // Make filename clickable if we have a file ID
                                         console.log('Checking for file_id:', file.file_id); // Debug log
                                         if (file.file_id) {
-                                            const $nameElement = $row.find('.file-name');
-                                            const fileName = $nameElement.text();
+                                            const nameElement = row.querySelector('.file-name');
+                                            const fileName = nameElement.textContent;
                                             const fileIcon = getFileIcon(fileName);
 
                                             console.log('Making filename clickable:', fileName, 'with ID:', file.file_id); // Debug log
 
-                                            $nameElement.parent().html(`
+                                            nameElement.parentElement.innerHTML = `
                                                 <div style="display: flex; align-items: center;">
                                                     <span style="margin-right: 8px; font-size: 20px;">${fileIcon}</span>
                                                     <a href="/admin/admin_file?fil_file_id=${file.file_id}" style="color: #0066cc; text-decoration: none;">${fileName}</a>
                                                 </div>
-                                            `);
+                                            `;
                                         } else {
                                             console.log('No file_id found in response'); // Debug log
                                         }
@@ -2962,19 +2975,19 @@ class AjaxSearchSelect {
                     xhr.send(formData);
                 }).catch(error => {
                     // Handle error
-                    const $row = $(`.file-row[data-file-id="${fileObj.id}"]`);
-                    const $status = $row.find('.file-status');
-                    const $actions = $row.find('.file-actions');
+                    const row = document.querySelector(`.file-row[data-file-id="${fileObj.id}"]`);
+                    const statusCell = row.querySelector('.file-status');
+                    const actionsCell = row.querySelector('.file-actions');
 
-                    $status.html(`<span style="padding: 2px 8px; background: #dc3545; color: white; border-radius: 3px; font-size: 12px;">⚠️ Error</span>`);
-                    $actions.html(`
+                    statusCell.innerHTML = `<span style="padding: 2px 8px; background: #dc3545; color: white; border-radius: 3px; font-size: 12px;">⚠️ Error</span>`;
+                    actionsCell.innerHTML = `
                         <button type="button" class="button small upload-single-btn" title="Retry upload" style="padding: 4px 8px; font-size: 12px;">
                             🔄
                         </button>
                         <button type="button" class="button small danger remove-file-btn" title="Remove this file" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
                             ❌
                         </button>
-                    `);
+                    `;
                     fileObj.status = 'error';
                     showToast(`Upload failed: ${fileObj.file.name} - ${error.message}`, 'error');
                     throw error;
@@ -2982,13 +2995,11 @@ class AjaxSearchSelect {
             }
 
             // Event Handlers
-            $browseBtn.on('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                $fileInput[0].click(); // Use native click instead of jQuery
-            });
+            console.log('File uploader initialized, attaching event listeners...');
+            // Note: Browse button is now a <label for="file-input"> which natively triggers the file input
+            // No JavaScript handler needed for the browse button
 
-            $fileInput.on('change', function() {
+            fileInput.addEventListener('change', function() {
                 if (this.files.length > 0) {
                     addFiles(this.files);
                     this.value = ''; // Reset input
@@ -2996,43 +3007,41 @@ class AjaxSearchSelect {
             });
 
             // Drag and drop styling
-            $dropZone.on('dragover dragenter', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                $(this).css({'border-color': '#007bff', 'background-color': '#e7f3ff'});
+            ['dragover', 'dragenter'].forEach(function(eventName) {
+                dropZone.addEventListener(eventName, function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.style.borderColor = '#007bff';
+                    this.style.backgroundColor = '#e7f3ff';
+                });
             });
 
-            $dropZone.on('dragleave', function(e) {
+            dropZone.addEventListener('dragleave', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                $(this).css({'border-color': '#ccc', 'background-color': '#f9f9f9'});
+                this.style.borderColor = '#ccc';
+                this.style.backgroundColor = '#f9f9f9';
             });
 
-            $dropZone.on('drop', function(e) {
+            dropZone.addEventListener('drop', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                $(this).css({'border-color': '#ccc', 'background-color': '#f9f9f9'});
+                this.style.borderColor = '#ccc';
+                this.style.backgroundColor = '#f9f9f9';
 
-                const files = e.originalEvent.dataTransfer.files;
+                const files = e.dataTransfer.files;
                 if (files.length > 0) {
                     addFiles(files);
                 }
             });
 
-            // Hover effect
-            $dropZone.on('mouseenter', function() {
-                $(this).css('background-color', '#e7f3ff');
-            }).on('mouseleave', function() {
-                $(this).css('background-color', '#f9f9f9');
-            });
-
             // Upload all files
-            $uploadAllBtn.on('click', async function() {
+            uploadAllBtn.addEventListener('click', async function() {
                 const pendingFiles = selectedFiles.filter(f => f.status === 'pending');
                 if (pendingFiles.length === 0) return;
 
-                $overallProgress.show();
-                $uploadAllBtn.prop('disabled', true);
+                overallProgress.style.display = 'flex';
+                uploadAllBtn.disabled = true;
 
                 let completed = 0;
                 const total = pendingFiles.length;
@@ -3042,68 +3051,89 @@ class AjaxSearchSelect {
                         await uploadFile(fileObj);
                         completed++;
                         const progress = Math.round((completed / total) * 100);
-                        $progressBar.val(progress);
+                        progressBar.value = progress;
                     } catch (error) {
                         console.error('Upload failed:', error);
                         completed++; // Count errors as completed for progress
                         const progress = Math.round((completed / total) * 100);
-                        $progressBar.val(progress);
+                        progressBar.value = progress;
                     }
                 }
 
-                setTimeout(() => {
-                    $overallProgress.hide();
-                    $progressBar.val(0);
+                setTimeout(function() {
+                    overallProgress.style.display = 'none';
+                    progressBar.value = 0;
                     updateUI();
                 }, 1000);
             });
 
             // Clear all files
-            $clearAllBtn.on('click', function() {
+            clearAllBtn.addEventListener('click', function() {
                 if (confirm('Are you sure you want to clear all files?')) {
                     selectedFiles = [];
-                    $filesList.find('.file-row').remove();
+                    filesList.querySelectorAll('.file-row').forEach(function(row) {
+                        row.remove();
+                    });
                     updateUI();
                 }
             });
 
             // Event delegation for dynamic buttons
-            $filesList.on('click', '.upload-single-btn', function() {
-                const fileId = $(this).closest('.file-row').data('file-id');
-                const fileObj = selectedFiles.find(f => f.id === fileId);
-                if (fileObj && (fileObj.status === 'pending' || fileObj.status === 'error')) {
-                    uploadFile(fileObj).then(() => {
+            filesList.addEventListener('click', function(e) {
+                const uploadBtn = e.target.closest('.upload-single-btn');
+                const removeBtn = e.target.closest('.remove-file-btn');
+
+                if (uploadBtn) {
+                    const row = uploadBtn.closest('.file-row');
+                    const fileId = row.dataset.fileId;
+                    const fileObj = selectedFiles.find(f => f.id === fileId);
+                    if (fileObj && (fileObj.status === 'pending' || fileObj.status === 'error')) {
+                        uploadFile(fileObj).then(function() {
+                            updateUI();
+                        }).catch(function() {
+                            updateUI();
+                        });
+                    }
+                }
+
+                if (removeBtn) {
+                    const row = removeBtn.closest('.file-row');
+                    const fileId = row.dataset.fileId;
+
+                    // Remove from array
+                    selectedFiles = selectedFiles.filter(f => f.id !== fileId);
+
+                    // Remove from DOM with fade animation
+                    row.style.transition = 'opacity 0.3s';
+                    row.style.opacity = '0';
+                    setTimeout(function() {
+                        row.remove();
                         updateUI();
-                    }).catch(() => {
-                        updateUI();
-                    });
+                    }, 300);
                 }
             });
 
-            $filesList.on('click', '.remove-file-btn', function() {
-                const $row = $(this).closest('.file-row');
-                const fileId = $row.data('file-id');
-
-                // Remove from array
-                selectedFiles = selectedFiles.filter(f => f.id !== fileId);
-
-                // Remove from DOM with animation
-                $row.fadeOut(300, function() {
-                    $(this).remove();
-                    updateUI();
-                });
-            });
-
-            // Click to browse anywhere in drop zone (except on buttons)
-            $dropZone.on('click', function(e) {
-                // Only trigger if clicking directly on the drop zone, not on child elements
-                if (e.target === this) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    $fileInput[0].click(); // Use native click
+            // Click to browse anywhere in drop zone (except on the file input label area)
+            dropZone.addEventListener('click', function(e) {
+                // Don't interfere with the file input or its label container
+                if (e.target.closest('label') || e.target.closest('button') || e.target.id === 'file-input') {
+                    return; // Let native behavior handle it
                 }
+                // For clicks on the drop zone itself or text elements, trigger file input
+                fileInput.click();
             });
-        });
+            } // end initFileUploader
+
+            // Run immediately if DOM is already ready, otherwise wait for DOMContentLoaded
+            console.log('File uploader script loaded, readyState:', document.readyState);
+            if (document.readyState === 'loading') {
+                console.log('DOM still loading, waiting for DOMContentLoaded...');
+                document.addEventListener('DOMContentLoaded', initFileUploader);
+            } else {
+                console.log('DOM already ready, initializing immediately...');
+                initFileUploader();
+            }
+        })();
         </script>
 
         <style>
