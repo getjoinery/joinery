@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.1.0
+ * @version 2.2.1
+ * @changelog 2.2.0 - Added imageselector() method for visual image picker with modal
  * @changelog 2.1.0 - Added automatic edit_primary_key_value hidden field support
  */
 
@@ -987,6 +988,673 @@ abstract class FormWriterV2Base {
     public function imageinput($name, $label = '', $options = []) {
         $this->registerField($name, 'image', $label, $options);
         $this->outputImageInput($name, $label, $options);
+    }
+
+    /**
+     * Create an image selector field with modal picker
+     *
+     * Complete implementation in base class - works for all themes out of the box.
+     * Themes can override this method entirely if completely different markup is needed.
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options:
+     *
+     *   Core Options:
+     *   - value: Current image URL
+     *   - help: Help text
+     *   - required: Boolean
+     *   - placeholder: Placeholder text for search (default: 'Search images...')
+     *   - ajax_endpoint: Custom endpoint URL (default: '/ajax/image_list_ajax')
+     *   - page_size: Images per AJAX load (default: 20)
+     *
+     *   Styling Options (all optional - sensible defaults provided):
+     *   - button_class: CSS class for select button (default: 'btn btn-outline-secondary btn-sm')
+     *   - button_text: Button label (default: 'Select Image')
+     *   - grid_columns: Number of columns in image grid (default: 5)
+     *   - thumbnail_width: Thumbnail display width in px (default: 80)
+     *   - preview_width: Preview image width in px (default: 80)
+     *   - primary_color: Selection highlight color (default: '#0d6efd')
+     *   - border_radius: Border radius for thumbnails (default: '4px')
+     */
+    public function imageselector($name, $label = '', $options = []) {
+        $this->registerField($name, 'imageselector', $label, $options);
+
+        // Extract options with defaults
+        $value = $options['value'] ?? '';
+        $help = $options['help'] ?? '';
+        $id = $options['id'] ?? preg_replace('/[^a-zA-Z0-9_]/', '_', $name);
+        $ajaxEndpoint = $options['ajax_endpoint'] ?? '/ajax/image_list_ajax';
+        $pageSize = $options['page_size'] ?? 20;
+        $placeholder = $options['placeholder'] ?? 'Search images...';
+
+        // Styling options with sensible defaults
+        $buttonClass = $options['button_class'] ?? 'btn btn-outline-secondary btn-sm';
+        $buttonText = $options['button_text'] ?? 'Select Image';
+        $gridColumns = $options['grid_columns'] ?? 5;
+        $thumbnailWidth = $options['thumbnail_width'] ?? 80;
+        $previewWidth = $options['preview_width'] ?? 80;
+        $primaryColor = $options['primary_color'] ?? '#0d6efd';
+        $borderRadius = $options['border_radius'] ?? '4px';
+
+        $uniqueId = 'imgselector_' . $id . '_' . uniqid();
+
+        // Output field wrapper
+        echo '<div class="mb-3 imageselector-wrapper" id="' . htmlspecialchars($uniqueId) . '" ';
+        echo 'data-endpoint="' . htmlspecialchars($ajaxEndpoint) . '" ';
+        echo 'data-pagesize="' . intval($pageSize) . '" ';
+        echo 'data-fieldname="' . htmlspecialchars($name) . '" ';
+        echo 'data-fieldid="' . htmlspecialchars($id) . '"';
+        echo ' style="--is-primary-color:' . htmlspecialchars($primaryColor) . ';';
+        echo '--is-grid-columns:' . intval($gridColumns) . ';';
+        echo '--is-thumbnail-width:' . intval($thumbnailWidth) . 'px;';
+        echo '--is-preview-width:' . intval($previewWidth) . 'px;';
+        echo '--is-border-radius:' . htmlspecialchars($borderRadius) . ';">';
+
+        // Label
+        if ($label) {
+            echo '<label class="form-label">' . htmlspecialchars($label) . '</label>';
+        }
+
+        // Hidden input for URL value
+        echo '<input type="hidden" name="' . htmlspecialchars($name) . '" ';
+        echo 'id="' . htmlspecialchars($id) . '" ';
+        echo 'class="imageselector-value" ';
+        echo 'value="' . htmlspecialchars($value) . '">';
+
+        // Preview and button container
+        echo '<div class="d-flex align-items-center gap-2 imageselector-controls">';
+
+        // Preview area
+        echo '<div class="imageselector-preview">';
+        if ($value) {
+            echo '<img src="' . htmlspecialchars($value) . '" alt="Selected image">';
+        } else {
+            echo '<div class="imageselector-no-preview"><i class="bx bx-image" style="font-size:24px;color:#ccc;"></i></div>';
+        }
+        echo '</div>';
+
+        // Select button
+        echo '<button type="button" class="imageselector-open ' . htmlspecialchars($buttonClass) . '">';
+        echo htmlspecialchars($buttonText);
+        echo '</button>';
+
+        // Clear button
+        echo '<button type="button" class="imageselector-clear btn btn-outline-danger btn-sm" ';
+        if (!$value) {
+            echo 'style="display:none;" ';
+        }
+        echo 'title="Clear selection">&times;</button>';
+
+        // Current filename display
+        if ($value) {
+            $filename = basename($value);
+            echo '<small class="imageselector-filename text-muted">' . htmlspecialchars($filename) . '</small>';
+        } else {
+            echo '<small class="imageselector-filename text-muted"></small>';
+        }
+
+        echo '</div>'; // end controls container
+
+        // Help text
+        if ($help) {
+            echo '<div class="form-text">' . htmlspecialchars($help) . '</div>';
+        }
+
+        echo '</div>'; // end wrapper
+
+        // Output CSS and JS assets (once per page)
+        $this->outputImageSelectorAssets($placeholder);
+    }
+
+    /**
+     * Output CSS and JavaScript for image selector functionality
+     * Called once per page regardless of number of image selector fields
+     */
+    protected function outputImageSelectorAssets($placeholder) {
+        static $assets_loaded = false;
+        if ($assets_loaded) return;
+        $assets_loaded = true;
+
+        // Inline CSS
+        echo '<style>
+.imageselector-wrapper {
+    --is-primary-color: #0d6efd;
+    --is-grid-columns: 5;
+    --is-thumbnail-width: 80px;
+    --is-preview-width: 80px;
+    --is-border-radius: 4px;
+}
+.imageselector-preview {
+    width: var(--is-preview-width);
+    height: var(--is-preview-width);
+    border: 1px solid #dee2e6;
+    border-radius: var(--is-border-radius);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8f9fa;
+    flex-shrink: 0;
+}
+.imageselector-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: cover;
+}
+.imageselector-no-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+.imageselector-filename {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Modal styles */
+.imageselector-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+}
+.imageselector-modal.active {
+    display: flex;
+}
+.imageselector-modal-content {
+    background: #fff;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 800px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+.imageselector-modal-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #dee2e6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.imageselector-modal-header h5 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+.imageselector-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #666;
+    line-height: 1;
+}
+.imageselector-modal-close:hover {
+    color: #000;
+}
+.imageselector-search {
+    padding: 15px 20px;
+    border-bottom: 1px solid #dee2e6;
+}
+.imageselector-search input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.imageselector-search input:focus {
+    outline: none;
+    border-color: var(--is-primary-color);
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+}
+.imageselector-grid-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+}
+.imageselector-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--is-grid-columns), 1fr);
+    gap: 10px;
+}
+.imageselector-item {
+    aspect-ratio: 1;
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: var(--is-border-radius);
+    overflow: hidden;
+    background: #f8f9fa;
+    transition: border-color 0.15s, transform 0.15s;
+}
+.imageselector-item:hover {
+    border-color: #adb5bd;
+    transform: scale(1.02);
+}
+.imageselector-item.selected {
+    border-color: var(--is-primary-color);
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.25);
+}
+.imageselector-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.is-placeholder-icon {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #adb5bd;
+    background: #f8f9fa;
+    gap: 8px;
+}
+.is-placeholder-icon svg {
+    opacity: 0.5;
+}
+.is-placeholder-icon span {
+    font-size: 10px;
+    text-align: center;
+    opacity: 0.7;
+}
+.imageselector-loading {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+}
+.imageselector-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+}
+.imageselector-load-more {
+    text-align: center;
+    padding: 15px;
+}
+.imageselector-modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid #dee2e6;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .imageselector-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .imageselector-modal-content {
+        width: 95%;
+        max-height: 90vh;
+    }
+}
+</style>';
+
+        // Inline JavaScript
+        echo '<script>
+(function() {
+    "use strict";
+
+    // Image Selector Manager
+    window.ImageSelectorManager = {
+        modal: null,
+        activeWrapper: null,
+        images: [],
+        offset: 0,
+        hasMore: true,
+        loading: false,
+        searchTimeout: null,
+        selectedUrl: null,
+
+        init: function() {
+            this.createModal();
+            this.bindEvents();
+        },
+
+        createModal: function() {
+            if (document.getElementById("imageselector-modal")) return;
+
+            var modal = document.createElement("div");
+            modal.id = "imageselector-modal";
+            modal.className = "imageselector-modal";
+            modal.innerHTML = \'<div class="imageselector-modal-content">\' +
+                \'<div class="imageselector-modal-header">\' +
+                    \'<h5>Select Image</h5>\' +
+                    \'<button type="button" class="imageselector-modal-close">&times;</button>\' +
+                \'</div>\' +
+                \'<div class="imageselector-search">\' +
+                    \'<input type="text" placeholder="' . htmlspecialchars($placeholder) . '" class="imageselector-search-input">\' +
+                \'</div>\' +
+                \'<div class="imageselector-grid-container">\' +
+                    \'<div class="imageselector-grid"></div>\' +
+                    \'<div class="imageselector-loading" style="display:none;">Loading...</div>\' +
+                    \'<div class="imageselector-empty" style="display:none;">No images found</div>\' +
+                    \'<div class="imageselector-load-more" style="display:none;">\' +
+                        \'<button type="button" class="btn btn-outline-secondary btn-sm">Load More</button>\' +
+                    \'</div>\' +
+                \'</div>\' +
+                \'<div class="imageselector-modal-footer">\' +
+                    \'<button type="button" class="btn btn-secondary imageselector-cancel">Cancel</button>\' +
+                    \'<button type="button" class="btn btn-primary imageselector-confirm" disabled>Select</button>\' +
+                \'</div>\' +
+            \'</div>\';
+            document.body.appendChild(modal);
+            this.modal = modal;
+
+            // Apply CSS variables from active wrapper when opening
+            var gridContainer = modal.querySelector(".imageselector-grid-container");
+            gridContainer.addEventListener("scroll", this.handleScroll.bind(this));
+        },
+
+        bindEvents: function() {
+            var self = this;
+
+            // Delegate click events for open buttons
+            document.addEventListener("click", function(e) {
+                // Open button
+                if (e.target.classList.contains("imageselector-open")) {
+                    var wrapper = e.target.closest(".imageselector-wrapper");
+                    if (wrapper) self.open(wrapper);
+                }
+                // Clear button
+                if (e.target.classList.contains("imageselector-clear")) {
+                    var wrapper = e.target.closest(".imageselector-wrapper");
+                    if (wrapper) self.clear(wrapper);
+                }
+            });
+
+            // Modal events (delegated)
+            document.addEventListener("click", function(e) {
+                // Close button
+                if (e.target.classList.contains("imageselector-modal-close")) {
+                    self.close();
+                }
+                // Cancel button
+                if (e.target.classList.contains("imageselector-cancel")) {
+                    self.close();
+                }
+                // Confirm button
+                if (e.target.classList.contains("imageselector-confirm")) {
+                    self.confirm();
+                }
+                // Image item click
+                if (e.target.closest(".imageselector-item")) {
+                    self.selectImage(e.target.closest(".imageselector-item"));
+                }
+                // Load more button
+                if (e.target.closest(".imageselector-load-more button")) {
+                    self.loadMore();
+                }
+                // Close on backdrop click
+                if (e.target.classList.contains("imageselector-modal")) {
+                    self.close();
+                }
+            });
+
+            // Search input
+            document.addEventListener("input", function(e) {
+                if (e.target.classList.contains("imageselector-search-input")) {
+                    clearTimeout(self.searchTimeout);
+                    self.searchTimeout = setTimeout(function() {
+                        self.search(e.target.value);
+                    }, 300);
+                }
+            });
+
+            // Escape key closes modal
+            document.addEventListener("keydown", function(e) {
+                if (e.key === "Escape" && self.modal && self.modal.classList.contains("active")) {
+                    self.close();
+                }
+            });
+        },
+
+        open: function(wrapper) {
+            this.activeWrapper = wrapper;
+            this.selectedUrl = null;
+            this.offset = 0;
+            this.hasMore = true;
+            this.images = [];
+
+            // Copy CSS variables from wrapper to modal
+            var style = getComputedStyle(wrapper);
+            this.modal.style.setProperty("--is-primary-color", style.getPropertyValue("--is-primary-color"));
+            this.modal.style.setProperty("--is-grid-columns", style.getPropertyValue("--is-grid-columns"));
+            this.modal.style.setProperty("--is-border-radius", style.getPropertyValue("--is-border-radius"));
+
+            // Reset modal state
+            this.modal.querySelector(".imageselector-search-input").value = "";
+            this.modal.querySelector(".imageselector-grid").innerHTML = "";
+            this.modal.querySelector(".imageselector-confirm").disabled = true;
+
+            // Show modal
+            this.modal.classList.add("active");
+            document.body.style.overflow = "hidden";
+
+            // Load first batch
+            this.loadImages();
+        },
+
+        close: function() {
+            this.modal.classList.remove("active");
+            document.body.style.overflow = "";
+            this.activeWrapper = null;
+        },
+
+        loadImages: function(append) {
+            if (this.loading) return;
+            this.loading = true;
+
+            var self = this;
+            var wrapper = this.activeWrapper;
+            var endpoint = wrapper.dataset.endpoint;
+            var pageSize = parseInt(wrapper.dataset.pagesize) || 20;
+            var searchValue = this.modal.querySelector(".imageselector-search-input").value;
+
+            var url = endpoint + "?limit=" + pageSize + "&offset=" + this.offset;
+            if (searchValue) {
+                url += "&q=" + encodeURIComponent(searchValue);
+            }
+
+            // Show loading
+            this.modal.querySelector(".imageselector-loading").style.display = "block";
+            this.modal.querySelector(".imageselector-empty").style.display = "none";
+            this.modal.querySelector(".imageselector-load-more").style.display = "none";
+
+            fetch(url)
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    self.loading = false;
+                    self.modal.querySelector(".imageselector-loading").style.display = "none";
+
+                    if (data.error) {
+                        self.modal.querySelector(".imageselector-empty").textContent = data.error;
+                        self.modal.querySelector(".imageselector-empty").style.display = "block";
+                        return;
+                    }
+
+                    self.hasMore = data.hasMore;
+
+                    if (!append) {
+                        self.images = data.images;
+                        self.modal.querySelector(".imageselector-grid").innerHTML = "";
+                    } else {
+                        self.images = self.images.concat(data.images);
+                    }
+
+                    if (self.images.length === 0) {
+                        self.modal.querySelector(".imageselector-empty").style.display = "block";
+                        return;
+                    }
+
+                    self.renderImages(data.images);
+
+                    if (self.hasMore) {
+                        self.modal.querySelector(".imageselector-load-more").style.display = "block";
+                    }
+                })
+                .catch(function(err) {
+                    self.loading = false;
+                    self.modal.querySelector(".imageselector-loading").style.display = "none";
+                    self.modal.querySelector(".imageselector-empty").textContent = "Error loading images";
+                    self.modal.querySelector(".imageselector-empty").style.display = "block";
+                    console.error("ImageSelector error:", err);
+                });
+        },
+
+        renderImages: function(images) {
+            var grid = this.modal.querySelector(".imageselector-grid");
+            var currentValue = this.activeWrapper.querySelector(".imageselector-value").value;
+
+            images.forEach(function(img) {
+                var item = document.createElement("div");
+                item.className = "imageselector-item";
+                item.dataset.url = img.url;
+                item.dataset.filename = img.filename;
+                item.title = img.title || img.filename;
+
+                // Check if this is the currently selected image
+                if (img.url === currentValue) {
+                    item.classList.add("selected");
+                    this.selectedUrl = img.url;
+                    this.modal.querySelector(".imageselector-confirm").disabled = false;
+                }
+
+                var imgEl = document.createElement("img");
+                imgEl.src = img.thumbnail;
+                imgEl.alt = img.title || img.filename;
+                imgEl.loading = "lazy";
+                imgEl.dataset.fallback = img.url;
+                imgEl.dataset.fallbackAttempted = "false";
+                // Fallback to standard URL if thumbnail fails, then show placeholder if both fail
+                imgEl.onerror = function() {
+                    if (this.dataset.fallbackAttempted === "false" && this.dataset.fallback && this.src !== this.dataset.fallback) {
+                        // First failure: try the standard URL
+                        this.dataset.fallbackAttempted = "true";
+                        this.src = this.dataset.fallback;
+                    } else {
+                        // Both thumbnail and standard URL failed - show placeholder
+                        this.style.display = "none";
+                        var placeholder = document.createElement("div");
+                        placeholder.className = "is-placeholder-icon";
+                        placeholder.innerHTML = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\" ry=\"2\"/><circle cx=\"8.5\" cy=\"8.5\" r=\"1.5\"/><polyline points=\"21 15 16 10 5 21\"/></svg><span>Image unavailable</span>";
+                        this.parentNode.appendChild(placeholder);
+                    }
+                };
+
+                item.appendChild(imgEl);
+                grid.appendChild(item);
+            }, this);
+        },
+
+        selectImage: function(item) {
+            // Remove selection from all
+            this.modal.querySelectorAll(".imageselector-item.selected").forEach(function(el) {
+                el.classList.remove("selected");
+            });
+
+            // Select this one
+            item.classList.add("selected");
+            this.selectedUrl = item.dataset.url;
+
+            // Enable confirm button
+            this.modal.querySelector(".imageselector-confirm").disabled = false;
+        },
+
+        confirm: function() {
+            if (!this.selectedUrl || !this.activeWrapper) return;
+
+            var wrapper = this.activeWrapper;
+            var valueInput = wrapper.querySelector(".imageselector-value");
+            var preview = wrapper.querySelector(".imageselector-preview");
+            var clearBtn = wrapper.querySelector(".imageselector-clear");
+            var filenameEl = wrapper.querySelector(".imageselector-filename");
+
+            // Update value
+            valueInput.value = this.selectedUrl;
+
+            // Update preview
+            preview.innerHTML = \'<img src="\' + this.selectedUrl + \'" alt="Selected image">\';
+
+            // Show clear button
+            clearBtn.style.display = "";
+
+            // Update filename
+            var filename = this.selectedUrl.split("/").pop();
+            filenameEl.textContent = filename;
+
+            // Trigger change event
+            valueInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+            this.close();
+        },
+
+        clear: function(wrapper) {
+            var valueInput = wrapper.querySelector(".imageselector-value");
+            var preview = wrapper.querySelector(".imageselector-preview");
+            var clearBtn = wrapper.querySelector(".imageselector-clear");
+            var filenameEl = wrapper.querySelector(".imageselector-filename");
+
+            // Clear value
+            valueInput.value = "";
+
+            // Reset preview
+            preview.innerHTML = \'<div class="imageselector-no-preview"><i class="bx bx-image" style="font-size:24px;color:#ccc;"></i></div>\';
+
+            // Hide clear button
+            clearBtn.style.display = "none";
+
+            // Clear filename
+            filenameEl.textContent = "";
+
+            // Trigger change event
+            valueInput.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+
+        search: function(query) {
+            this.offset = 0;
+            this.hasMore = true;
+            this.loadImages(false);
+        },
+
+        loadMore: function() {
+            if (!this.hasMore || this.loading) return;
+            var pageSize = parseInt(this.activeWrapper.dataset.pagesize) || 20;
+            this.offset += pageSize;
+            this.loadImages(true);
+        },
+
+        handleScroll: function(e) {
+            var container = e.target;
+            // Auto-load more when near bottom
+            if (this.hasMore && !this.loading) {
+                if (container.scrollHeight - container.scrollTop - container.clientHeight < 100) {
+                    this.loadMore();
+                }
+            }
+        }
+    };
+
+    // Initialize when DOM is ready
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function() {
+            ImageSelectorManager.init();
+        });
+    } else {
+        ImageSelectorManager.init();
+    }
+})();
+</script>';
     }
 
     /**
