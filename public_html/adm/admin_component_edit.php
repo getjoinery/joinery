@@ -223,6 +223,17 @@ if ($current_type_id) {
 				$formwriter->checkboxinput($field_name, $field_label, $field_options);
 			} elseif ($field_type === 'textarea' || $field_type === 'textbox') {
 				$formwriter->textarea($field_name, $field_label, $field_options);
+			} elseif ($field_type === 'imageselector') {
+				// Pass through any imageselector-specific options from schema
+				$imageselector_options = ['button_text', 'button_class', 'grid_columns',
+					'thumbnail_width', 'preview_width', 'primary_color', 'border_radius',
+					'ajax_endpoint', 'page_size', 'placeholder'];
+				foreach ($imageselector_options as $opt) {
+					if (isset($field[$opt])) {
+						$field_options[$opt] = $field[$opt];
+					}
+				}
+				$formwriter->imageselector($field_name, $field_label, $field_options);
 			} elseif (method_exists($formwriter, $field_type)) {
 				$formwriter->$field_type($field_name, $field_label, $field_options);
 			} else {
