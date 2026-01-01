@@ -64,7 +64,7 @@ foreach ($components as $component) {
 
 	// Title (linked to detail view)
 	$title = $component->get('com_title');
-	$title_link = '<a href="/admin/admin_component_type_edit?com_component_id=' . $component->key . '">' . htmlspecialchars($title) . '</a>';
+	$title_link = '<a href="/admin/admin_component_type?com_component_id=' . $component->key . '">' . htmlspecialchars($title) . '</a>';
 	array_push($rowvalues, $title_link);
 
 	// Category

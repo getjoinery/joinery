@@ -204,8 +204,9 @@ if ($current_type_id) {
 			$field_type = $field['type'] ?? 'textinput';
 			$field_help = $field['help'] ?? '';
 
+			$field_default = $field['default'] ?? '';
 			$field_options = [
-				'value' => $current_config[$field_name] ?? '',
+				'value' => $current_config[$field_name] ?? $field_default,
 				'help' => $field_help,
 				'model' => false,
 				'validation' => false

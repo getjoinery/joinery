@@ -470,10 +470,57 @@ The config schema is a JSON object defining the admin form fields for a componen
             "name": "field_name",
             "label": "Field Label",
             "type": "textinput",
-            "help": "Optional help text"
+            "help": "Optional help text",
+            "default": "Default value"
         }
     ]
 }
+```
+
+### Field Properties
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `name` | Yes | Unique field identifier (lowercase_snake_case) |
+| `label` | Yes | Display label in admin form |
+| `type` | Yes | Field type (see table below) |
+| `help` | No | Help text shown below field |
+| `default` | No | Default value for new component instances |
+| `options` | For dropinput/radioinput | Key-value pairs for selection fields |
+| `fields` | For repeater | Nested field definitions |
+
+### Default Values
+
+The `default` property pre-populates fields when creating new component instances in the admin interface. This improves the admin experience by showing sensible starting values.
+
+```json
+{
+  "fields": [
+    {"name": "columns", "label": "Columns", "type": "dropinput", "default": "3",
+     "options": {"2": "2 Columns", "3": "3 Columns", "4": "4 Columns"}},
+    {"name": "alignment", "label": "Alignment", "type": "dropinput", "default": "center",
+     "options": {"left": "Left", "center": "Center", "right": "Right"}},
+    {"name": "show_button", "label": "Show Button", "type": "checkboxinput", "default": true}
+  ]
+}
+```
+
+**Important:** Default values are applied in the admin form when creating new components. They are NOT applied at render time - templates should still use `??` fallbacks for robustness.
+
+### Accessing Defaults Programmatically
+
+For testing and utility scripts, the `Component` class provides a method to extract defaults:
+
+```php
+$component_type = new Component($type_id, TRUE);
+
+// Get only fields that have defaults defined
+$defaults = $component_type->get_default_config();
+// Returns: ['columns' => '3', 'alignment' => 'center', 'show_button' => true]
+
+// Get all fields (empty values for fields without defaults)
+$all_fields = $component_type->get_default_config(true);
+// Returns: ['columns' => '3', 'alignment' => 'center', 'show_button' => true, 'heading' => '', 'features' => []]
 ```
 
 ### Available Field Types

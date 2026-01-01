@@ -35,6 +35,27 @@ Test components instantly without database setup:
 
 This utility auto-generates placeholder data based on your config schema, letting you iterate quickly on templates.
 
+### Programmatic Default Access
+
+For utility scripts and automated testing, you can access schema defaults programmatically:
+
+```php
+require_once(PathHelper::getIncludePath('data/components_class.php'));
+
+$component_type = new Component($type_id, TRUE);
+
+// Get only fields with defaults defined
+$defaults = $component_type->get_default_config();
+
+// Get all fields (empty values for those without defaults)
+$all_fields = $component_type->get_default_config(true);
+```
+
+This is useful for:
+- Testing component templates with realistic data
+- Pre-populating component instances in migration scripts
+- Validating that all required fields have sensible defaults
+
 ---
 
 ## Step-by-Step Process
@@ -69,7 +90,7 @@ List what admins should be able to change:
 
 ### Step 3: Create the Config Schema
 
-Build the JSON schema for the component type:
+Build the JSON schema for the component type. Use the `default` property to pre-populate sensible values when admins create new instances:
 
 ```json
 {
@@ -78,7 +99,8 @@ Build the JSON schema for the component type:
       "name": "heading",
       "label": "Heading",
       "type": "textinput",
-      "help": "Main headline text"
+      "help": "Main headline text",
+      "default": "Welcome to Our Site"
     },
     {
       "name": "subheading",
@@ -89,23 +111,27 @@ Build the JSON schema for the component type:
     {
       "name": "button_text",
       "label": "Button Text",
-      "type": "textinput"
+      "type": "textinput",
+      "default": "Get Started"
     },
     {
       "name": "button_url",
       "label": "Button URL",
-      "type": "textinput"
+      "type": "textinput",
+      "default": "#"
     },
     {
       "name": "background_color",
       "label": "Background Color",
       "type": "textinput",
-      "help": "Hex color code, e.g., #007bff"
+      "help": "Hex color code, e.g., #007bff",
+      "default": "#007bff"
     },
     {
       "name": "alignment",
       "label": "Text Alignment",
       "type": "dropinput",
+      "default": "center",
       "options": {
         "left": "Left",
         "center": "Center",
@@ -115,6 +141,8 @@ Build the JSON schema for the component type:
   ]
 }
 ```
+
+**Tip:** Use `default` values that match what the original theme HTML showed. This makes the component preview realistic immediately.
 
 ### Step 4: Create the Template File
 
@@ -170,15 +198,16 @@ Create a JSON file alongside your template:
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [
-      {"name": "heading", "label": "Heading", "type": "textinput", "help": "Main headline text"},
+      {"name": "heading", "label": "Heading", "type": "textinput", "help": "Main headline text", "default": "Welcome to Our Site"},
       {"name": "subheading", "label": "Subheading", "type": "textarea"},
-      {"name": "button_text", "label": "Button Text", "type": "textinput"},
-      {"name": "button_url", "label": "Button URL", "type": "textinput"},
-      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color code, e.g., #007bff"},
+      {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Get Started"},
+      {"name": "button_url", "label": "Button URL", "type": "textinput", "default": "#"},
+      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color code, e.g., #007bff", "default": "#007bff"},
       {
         "name": "alignment",
         "label": "Text Alignment",
         "type": "dropinput",
+        "default": "center",
         "options": {"left": "Left", "center": "Center", "right": "Right"}
       }
     ]
@@ -271,7 +300,15 @@ Components attached to a page render automatically when using `ComponentRenderer
    }
    ```
 
-4. **Group related fields logically** in the schema order
+4. **Set defaults for common values:**
+   ```json
+   {"name": "columns", "type": "dropinput", "default": "3", "options": {...}}
+   ```
+   - Use defaults that match the original theme's appearance
+   - Especially useful for dropdowns and checkboxes
+   - Makes the admin form more intuitive when creating new components
+
+5. **Group related fields logically** in the schema order
 
 ---
 
@@ -314,11 +351,14 @@ For sections with multiple items (features, testimonials, etc.):
       "name": "columns",
       "label": "Columns",
       "type": "dropinput",
+      "default": "3",
       "options": {"2": "2", "3": "3", "4": "4"}
     }
   ]
 }
 ```
+
+**Note:** Repeater fields don't support defaults for their nested content, but the parent repeater will start empty. Defaults work well for simple fields like the `columns` dropdown above.
 
 **Template:**
 ```php
@@ -488,6 +528,7 @@ During sync:
 - [ ] Identify the HTML section to convert (browse `/theme-sources/` for reference)
 - [ ] List all configurable elements
 - [ ] Create JSON definition file in `/views/components/`
+- [ ] Add `default` values for dropdowns, checkboxes, and common text fields
 - [ ] Create PHP template file in `/views/components/`
 - [ ] Test immediately with `/utils/component_preview?type=your_component`
 - [ ] Verify output escaping
