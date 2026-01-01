@@ -14,6 +14,88 @@ Many themes include pre-built sections (hero areas, feature grids, testimonials,
 
 ---
 
+## IMPORTANT: Presentation-Only Components
+
+**Components must be presentation-only.** Do NOT create components that require backend functionality to work properly.
+
+### Components to SKIP
+
+Do not create components for:
+
+- **Contact forms** - Require form submission handlers, email sending, validation
+- **Comment forms** - Require database storage, moderation systems
+- **Search forms** - Require search indexing and results handling
+- **Login/registration forms** - Require authentication systems
+- **E-commerce forms** (add to cart, checkout) - Require payment processing
+- **File upload forms** - Require server-side file handling
+- **Any form that submits data** - Unless it links to an existing handler
+
+### Newsletter Components - Special Case
+
+Newsletter/subscription sections are common in themes. Instead of embedding a form that requires a subscription handler, **convert these to call-to-action links** that point to the existing list signup page:
+
+**Original theme HTML (with embedded form):**
+```html
+<section class="newsletter-area">
+    <h3>Subscribe to Newsletter</h3>
+    <form action="/subscribe" method="POST">
+        <input type="email" name="email" placeholder="Enter email">
+        <button type="submit">Subscribe</button>
+    </form>
+</section>
+```
+
+**Convert to presentation-only (with link):**
+```php
+<?php
+$title = $component_config['title'] ?? 'Subscribe to Newsletter';
+$signup_url = $component_config['signup_url'] ?? '/list/newsletter';
+$button_text = $component_config['button_text'] ?? 'Subscribe Now';
+?>
+
+<section class="newsletter-area">
+    <h3><?php echo htmlspecialchars($title); ?></h3>
+    <a href="<?php echo htmlspecialchars($signup_url); ?>" class="btn btn-primary">
+        <?php echo htmlspecialchars($button_text); ?>
+    </a>
+</section>
+```
+
+**JSON schema for newsletter CTA:**
+```json
+{
+  "fields": [
+    {"name": "title", "label": "Title", "type": "textinput", "default": "Subscribe to Newsletter"},
+    {"name": "signup_url", "label": "Signup Page URL", "type": "textinput", "help": "URL to mailing list signup page (e.g., /list/newsletter)", "default": "/list/newsletter"},
+    {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Subscribe Now"}
+  ]
+}
+```
+
+The existing `/list/{slug}` page handles all subscription logic including:
+- User registration (for new visitors)
+- Email validation
+- Anti-spam protection
+- Subscribe/unsubscribe functionality
+
+### Safe Component Types
+
+These are generally safe to create as presentation-only:
+
+- **Hero sections** - Static text, images, and CTA links
+- **Feature grids** - Icon + text cards
+- **Testimonials** - Quote displays
+- **Team/staff sections** - Photo + bio cards
+- **Pricing tables** - Static pricing displays with CTA links
+- **FAQ accordions** - Static Q&A content
+- **Gallery sections** - Image displays
+- **Contact info** - Address, phone, email display (not forms)
+- **Social links** - Icon links to social profiles
+- **Page titles/breadcrumbs** - Navigation displays
+- **Call-to-action sections** - Text + link buttons
+
+---
+
 ## Development Tools
 
 ### Theme Source Files
@@ -570,6 +652,7 @@ During sync:
 ## Checklist: Converting a Theme Section
 
 - [ ] Identify the HTML section to convert (browse `/theme-sources/` for reference)
+- [ ] **Verify it's presentation-only** (no forms requiring backend handlers - see "Components to SKIP" above)
 - [ ] List all configurable elements
 - [ ] Create JSON definition file in `/views/components/`
 - [ ] **Add `default` values for EVERY field matching the reference HTML exactly**
