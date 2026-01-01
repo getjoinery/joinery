@@ -6,7 +6,7 @@
  * Each component type has a template file, config schema, and optional logic function.
  *
  * @see /specs/page_component_system.md
- * @version 1.1.0
+ * @version 1.2.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -107,6 +107,37 @@ class Component extends SystemBase {
 	}
 
 	/**
+	 * Get default config values from schema
+	 *
+	 * Returns an array with field names as keys and their default values.
+	 * Useful for pre-populating new component instances and for testing.
+	 *
+	 * @param bool $include_empty Include fields without defaults (as empty string)
+	 * @return array Associative array of field_name => default_value
+	 */
+	public function get_default_config($include_empty = false) {
+		$defaults = array();
+		foreach ($this->get_config_schema() as $field) {
+			$field_name = $field['name'];
+			$field_type = $field['type'] ?? 'textinput';
+
+			if (isset($field['default'])) {
+				$defaults[$field_name] = $field['default'];
+			} elseif ($include_empty) {
+				// Provide type-appropriate empty values
+				if ($field_type === 'repeater') {
+					$defaults[$field_name] = array();
+				} elseif ($field_type === 'checkboxinput') {
+					$defaults[$field_name] = false;
+				} else {
+					$defaults[$field_name] = '';
+				}
+			}
+		}
+		return $defaults;
+	}
+
+	/**
 	 * Check if component type is available (active and not deleted)
 	 *
 	 * @return bool True if component is available for use
@@ -167,6 +198,7 @@ class Component extends SystemBase {
 			'datetimeinput' => 'Date & Time Picker',
 			'fileinput' => 'File Upload',
 			'imageinput' => 'Image Upload',
+			'imageselector' => 'Image Selector (picker)',
 			'hiddeninput' => 'Hidden Field',
 			'repeater' => 'Repeater (grouped fields)',
 		);

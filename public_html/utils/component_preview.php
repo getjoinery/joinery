@@ -11,7 +11,7 @@
  *   /utils/component_preview?category=hero - Filter by category
  *   /utils/component_preview?theme=flavor - Override active theme
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 require_once(PathHelper::getIncludePath('data/components_class.php'));
@@ -35,6 +35,8 @@ class ComponentPreviewer {
 
     /**
      * Generate placeholder data for a component type based on its config schema
+     *
+     * Uses schema defaults where defined, falls back to generated placeholder values.
      *
      * @param Component $componentType
      * @return array
@@ -61,12 +63,19 @@ class ComponentPreviewer {
     /**
      * Generate placeholder value for a single field based on its type
      *
+     * Uses schema default if defined, otherwise generates contextual placeholder.
+     *
      * @param array $field Field definition from config_schema
      * @return mixed
      */
     public function generateFieldPlaceholder($field) {
         $type = $field['type'] ?? 'textinput';
         $name = $field['name'] ?? '';
+
+        // Use schema default if defined
+        if (isset($field['default']) && $field['default'] !== '') {
+            return $field['default'];
+        }
 
         switch ($type) {
             case 'textinput':
@@ -93,10 +102,10 @@ class ComponentPreviewer {
                 return $this->generateLoremParagraph(2, 3);
 
             case 'checkboxinput':
-                return (bool) rand(0, 1);
+                return true; // Default to checked for preview visibility
 
             case 'dropinput':
-                // Return first option key
+                // Return first option key as fallback
                 if (!empty($field['options']) && is_array($field['options'])) {
                     $keys = array_keys($field['options']);
                     return $keys[0] ?? '';
