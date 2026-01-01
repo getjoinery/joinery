@@ -12,8 +12,12 @@
  *   /utils/component_preview?category=hero - Filter by category
  *   /utils/component_preview?theme=flavor - Override active theme
  *
- * @version 1.4.0
+ * @version 1.5.0
  */
+
+// Require login with minimum admin level (5)
+$session = SessionControl::get_instance();
+$session->check_permission(5);
 
 // Note: No database classes required - this utility works directly from JSON files
 
