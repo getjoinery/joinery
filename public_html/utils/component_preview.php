@@ -12,7 +12,7 @@
  *   /utils/component_preview?category=hero - Filter by category
  *   /utils/component_preview?theme=flavor - Override active theme
  *
- * @version 1.3.1
+ * @version 1.4.0
  */
 
 // Note: No database classes required - this utility works directly from JSON files
@@ -295,7 +295,7 @@ class ComponentPreviewer {
      * - /views/components/*.json (base components)
      * - /theme/{active_theme}/views/components/*.json (theme components)
      *
-     * @param array $filters ['type' => 'hero_static', 'category' => 'hero', 'theme' => 'linka-reference', 'theme_only' => true]
+     * @param array $filters ['type' => 'hero_static', 'category' => 'hero', 'theme' => 'linka-reference', 'theme_only' => true, 'all_themes' => false]
      * @return array Array of component definition arrays
      */
     public function getComponentTypes($filters = []) {
@@ -303,6 +303,7 @@ class ComponentPreviewer {
         $settings = Globalvars::get_instance();
         $active_theme = $filters['theme'] ?? $settings->get_setting('theme_template');
         $theme_only = !empty($filters['theme_only']);
+        $all_themes = !empty($filters['all_themes']);
 
         // Scan base components directory (unless theme_only is set)
         if (!$theme_only) {
@@ -310,8 +311,22 @@ class ComponentPreviewer {
             $components = array_merge($components, $this->scanComponentDirectory($base_dir, null));
         }
 
-        // Scan active theme's components directory
-        if ($active_theme) {
+        // Scan theme(s) components directory
+        if ($all_themes) {
+            // Scan ALL themes
+            $theme_base_dir = PathHelper::getIncludePath('theme');
+            if (is_dir($theme_base_dir)) {
+                $theme_dirs = scandir($theme_base_dir);
+                foreach ($theme_dirs as $theme_name) {
+                    if ($theme_name === '.' || $theme_name === '..') continue;
+                    $theme_dir = $theme_base_dir . '/' . $theme_name . '/views/components';
+                    if (is_dir($theme_dir)) {
+                        $components = array_merge($components, $this->scanComponentDirectory($theme_dir, $theme_name));
+                    }
+                }
+            }
+        } elseif ($active_theme) {
+            // Scan only the specified/active theme
             $theme_dir = PathHelper::getIncludePath('theme/' . $active_theme . '/views/components');
             $components = array_merge($components, $this->scanComponentDirectory($theme_dir, $active_theme));
         }
@@ -450,7 +465,9 @@ $previewer = new ComponentPreviewer();
 // Get filter parameters (convert empty strings to appropriate defaults)
 $type_filter = $_GET['type'] ?? '';
 $category_filter = $_GET['category'] ?? '';
-$theme_override = !empty($_GET['theme']) ? $_GET['theme'] : null;
+$theme_param = $_GET['theme'] ?? '';
+$show_all_themes = ($theme_param === 'all');
+$theme_override = (!empty($theme_param) && $theme_param !== 'all') ? $theme_param : null;
 $show_config = isset($_GET['config']);
 $show_paths = isset($_GET['paths']);
 $theme_only = isset($_GET['theme_only']) || !isset($_GET['all']); // Default to theme-only
@@ -463,14 +480,15 @@ $categories = $previewer->getCategories($theme_override);
 $filters = ['theme' => $theme_override];
 if ($type_filter) $filters['type'] = $type_filter;
 if ($category_filter) $filters['category'] = $category_filter;
-if ($theme_only) $filters['theme_only'] = true;
+if ($theme_only && !$show_all_themes) $filters['theme_only'] = true;
+if ($show_all_themes) $filters['all_themes'] = true;
 
 $component_types = $previewer->getComponentTypes($filters);
 
 // Get current theme for display
 $settings = Globalvars::get_instance();
 $active_theme = $settings->get_setting('theme_template');
-$display_theme = $theme_override ?: $active_theme;
+$display_theme = $show_all_themes ? 'All Themes' : ($theme_override ?: $active_theme);
 
 // Load PublicPage from the appropriate theme
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes', 'system', $theme_override));
@@ -484,7 +502,10 @@ $page->public_header(array(
 
 // Build dropdown options for FormWriter (format: value => label)
 $type_options = ['' => 'All Types'];
-$all_types = $previewer->getComponentTypes(['theme' => $theme_override, 'theme_only' => $theme_only]);
+$type_filters = ['theme' => $theme_override];
+if ($theme_only && !$show_all_themes) $type_filters['theme_only'] = true;
+if ($show_all_themes) $type_filters['all_themes'] = true;
+$all_types = $previewer->getComponentTypes($type_filters);
 foreach ($all_types as $ct) {
     $type_options[$ct['type_key']] = $ct['title'];
 }
@@ -494,7 +515,10 @@ foreach ($categories as $cat) {
     $category_options[$cat] = ucfirst($cat);
 }
 
-$theme_options = ['' => 'Active (' . $active_theme . ')'];
+$theme_options = [
+    '' => 'Active (' . $active_theme . ')',
+    'all' => 'All Themes'
+];
 foreach ($themes as $theme) {
     $theme_options[$theme] = $theme;
 }
@@ -544,7 +568,7 @@ $formwriter = $page->getFormWriter('filter_form', [
                 <div class="col-md-2">
                     <?php $formwriter->dropinput('theme', 'Theme', [
                         'options' => $theme_options,
-                        'value' => $theme_override
+                        'value' => $theme_param
                     ]); ?>
                 </div>
 
@@ -604,6 +628,7 @@ $formwriter = $page->getFormWriter('filter_form', [
                             <?php if ($framework): ?>
                                 | Framework: <?php echo htmlspecialchars($framework); ?>
                             <?php endif; ?>
+                            | Theme: <?php echo htmlspecialchars($componentType['theme'] ?: 'base'); ?>
                         </small>
                     </div>
                     <a href="?type=<?php echo urlencode($type_key); ?><?php echo $theme_override ? '&theme=' . urlencode($theme_override) : ''; ?>"
