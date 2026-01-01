@@ -90,7 +90,25 @@ List what admins should be able to change:
 
 ### Step 3: Create the Config Schema
 
-Build the JSON schema for the component type. Use the `default` property to pre-populate sensible values when admins create new instances:
+Build the JSON schema for the component type. **CRITICAL: Add `default` values that exactly match the original theme HTML.** This ensures:
+- The component preview utility shows the component exactly as it appears in the reference
+- Admins see realistic starting values when creating new instances
+- The component is immediately usable without configuration
+
+**Extract defaults directly from the reference HTML:**
+
+```html
+<!-- Original theme HTML -->
+<section class="hero-section bg-primary text-white py-5">
+    <div class="container text-center">
+        <h1>Welcome to Our Site</h1>
+        <p class="lead">We help businesses grow with innovative solutions.</p>
+        <a href="/contact" class="btn btn-light btn-lg">Get Started</a>
+    </div>
+</section>
+```
+
+**JSON schema with defaults matching the reference:**
 
 ```json
 {
@@ -106,7 +124,8 @@ Build the JSON schema for the component type. Use the `default` property to pre-
       "name": "subheading",
       "label": "Subheading",
       "type": "textarea",
-      "help": "Supporting text below headline"
+      "help": "Supporting text below headline",
+      "default": "We help businesses grow with innovative solutions."
     },
     {
       "name": "button_text",
@@ -118,7 +137,7 @@ Build the JSON schema for the component type. Use the `default` property to pre-
       "name": "button_url",
       "label": "Button URL",
       "type": "textinput",
-      "default": "#"
+      "default": "/contact"
     },
     {
       "name": "background_color",
@@ -142,7 +161,27 @@ Build the JSON schema for the component type. Use the `default` property to pre-
 }
 ```
 
-**Tip:** Use `default` values that match what the original theme HTML showed. This makes the component preview realistic immediately.
+**Rule: Every field should have a default that makes the component render identically to the reference HTML.** This includes:
+- Text content (headings, paragraphs, button labels)
+- Colors (background, text, accents)
+- Layout options (alignment, columns, spacing)
+- Image URLs (see Image Defaults below)
+
+**Image Defaults - IMPORTANT:**
+- Use the **exact same image paths** from the reference HTML files
+- Link directly to theme assets - do NOT copy or move images
+- Image paths should be relative to document root: `/theme/themename/assets/img/...`
+- Check the original HTML to find the correct image path
+
+Example from reference HTML:
+```html
+<img src="assets/img/home-one/main-blog-img/1.jpg" alt="...">
+```
+
+Becomes this default in JSON (with full theme path):
+```json
+{"name": "image", "type": "textinput", "default": "/theme/linka-reference/assets/images/home-one/main-blog-img/1.jpg"}
+```
 
 ### Step 4: Create the Template File
 
@@ -199,9 +238,9 @@ Create a JSON file alongside your template:
   "config_schema": {
     "fields": [
       {"name": "heading", "label": "Heading", "type": "textinput", "help": "Main headline text", "default": "Welcome to Our Site"},
-      {"name": "subheading", "label": "Subheading", "type": "textarea"},
+      {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "We help businesses grow with innovative solutions."},
       {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Get Started"},
-      {"name": "button_url", "label": "Button URL", "type": "textinput", "default": "#"},
+      {"name": "button_url", "label": "Button URL", "type": "textinput", "default": "/contact"},
       {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color code, e.g., #007bff", "default": "#007bff"},
       {
         "name": "alignment",
@@ -214,6 +253,8 @@ Create a JSON file alongside your template:
   }
 }
 ```
+
+**Note:** Every field has a default that matches the original theme HTML exactly. The component preview will now render identically to the reference.
 
 The component type is automatically discovered during theme sync. JSON files are the single source of truth - component types cannot be created via the admin interface.
 
@@ -300,13 +341,16 @@ Components attached to a page render automatically when using `ComponentRenderer
    }
    ```
 
-4. **Set defaults for common values:**
+4. **Set defaults for ALL fields to match reference HTML:**
    ```json
-   {"name": "columns", "type": "dropinput", "default": "3", "options": {...}}
+   {"name": "heading", "type": "textinput", "default": "The City of London Wants to Have It"},
+   {"name": "columns", "type": "dropinput", "default": "3", "options": {...}},
+   {"name": "background_color", "type": "textinput", "default": "#1a1a2e"}
    ```
-   - Use defaults that match the original theme's appearance
-   - Especially useful for dropdowns and checkboxes
-   - Makes the admin form more intuitive when creating new components
+   - **REQUIRED:** Every field must have a default that matches the original theme
+   - Extract exact text, colors, and values from the reference HTML
+   - The component preview must render identically to the theme source
+   - For images, use actual theme asset paths: `/theme/themename/assets/img/...`
 
 5. **Group related fields logically** in the schema order
 
@@ -528,9 +572,10 @@ During sync:
 - [ ] Identify the HTML section to convert (browse `/theme-sources/` for reference)
 - [ ] List all configurable elements
 - [ ] Create JSON definition file in `/views/components/`
-- [ ] Add `default` values for dropdowns, checkboxes, and common text fields
+- [ ] **Add `default` values for EVERY field matching the reference HTML exactly**
 - [ ] Create PHP template file in `/views/components/`
-- [ ] Test immediately with `/utils/component_preview?type=your_component`
+- [ ] Test with `/utils/component_preview?type=your_component`
+- [ ] **Verify preview looks identical to reference HTML** (compare side-by-side)
 - [ ] Verify output escaping
 - [ ] Test with empty/missing values (use `?config` to see generated data)
 - [ ] Create logic function if dynamic data needed

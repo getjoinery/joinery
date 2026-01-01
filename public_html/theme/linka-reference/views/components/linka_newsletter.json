@@ -5,12 +5,12 @@
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [
-      {"name": "title", "label": "Title", "type": "textinput"},
-      {"name": "subtitle", "label": "Subtitle/Description", "type": "textarea"},
-      {"name": "form_action", "label": "Form Action URL", "type": "textinput"},
-      {"name": "button_text", "label": "Button Text", "type": "textinput"},
-      {"name": "placeholder", "label": "Email Placeholder", "type": "textinput"},
-      {"name": "background_color", "label": "Background Color", "type": "textinput"}
+      {"name": "title", "label": "Title", "type": "textinput", "default": "Subscribe to Our Newsletter"},
+      {"name": "subtitle", "label": "Subtitle/Description", "type": "textarea", "default": "Stay updated with the latest news and exclusive content. We won't spam you!"},
+      {"name": "form_action", "label": "Form Action URL", "type": "textinput", "default": ""},
+      {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Subscribe"},
+      {"name": "placeholder", "label": "Email Placeholder", "type": "textinput", "default": "Enter your email address"},
+      {"name": "background_color", "label": "Background Color", "type": "textinput", "default": "#f8f9fa"}
     ]
   }
 }

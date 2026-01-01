@@ -32,26 +32,9 @@
     margin-bottom: 15px;
 }
 
-/* Page title area default background */
+/* Page title area - light background to match reference theme */
 .page-title-area {
-    background-color: #1a1a1a;
-    padding: 80px 0;
-    position: relative;
-}
-
-.page-title-area::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-}
-
-.page-title-content {
-    position: relative;
-    z-index: 1;
+    background-color: #f8f9fa;
 }
 
 /* Form styling improvements */

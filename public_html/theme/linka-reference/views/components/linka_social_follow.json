@@ -10,10 +10,10 @@
         "label": "Social Networks",
         "type": "repeater",
         "fields": [
-          {"name": "name", "label": "Network Name", "type": "textinput"},
-          {"name": "count", "label": "Count Text", "type": "textinput", "help": "e.g., 532k Like, 500k Followers"},
-          {"name": "icon", "label": "Icon Class", "type": "textinput", "help": "e.g., bx bxl-facebook"},
-          {"name": "link", "label": "Profile Link", "type": "textinput"}
+          {"name": "name", "label": "Network Name", "type": "textinput", "default": "Facebook"},
+          {"name": "count", "label": "Count Text", "type": "textinput", "help": "e.g., 532k Like, 500k Followers", "default": "532k Like"},
+          {"name": "icon", "label": "Icon Class", "type": "textinput", "help": "e.g., bx bxl-facebook", "default": "bx bxl-facebook"},
+          {"name": "link", "label": "Profile Link", "type": "textinput", "default": "#"}
         ]
       }
     ]

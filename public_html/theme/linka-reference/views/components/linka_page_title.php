@@ -24,7 +24,7 @@ if (!empty($background_image)) {
 }
 ?>
 
-<div class="page-title-area <?php echo htmlspecialchars($background_class); ?>" <?php echo $bg_style ? 'style="' . $bg_style . '"' : ''; ?>>
+<div class="page-title-area" <?php echo $bg_style ? 'style="' . $bg_style . '"' : ''; ?>>
     <div class="container">
         <div class="page-title-content">
             <?php if ($title): ?>
