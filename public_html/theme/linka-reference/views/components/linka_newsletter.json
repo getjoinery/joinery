@@ -1,16 +1,15 @@
 {
   "title": "Linka Newsletter",
-  "description": "Newsletter subscription form with email input",
-  "category": "forms",
+  "description": "Newsletter call-to-action that links to the list signup page",
+  "category": "conversion",
   "css_framework": "bootstrap",
   "config_schema": {
     "fields": [
       {"name": "title", "label": "Title", "type": "textinput", "default": "Subscribe to Our Newsletter"},
       {"name": "subtitle", "label": "Subtitle/Description", "type": "textarea", "default": "Stay updated with the latest news and exclusive content. We won't spam you!"},
-      {"name": "form_action", "label": "Form Action URL", "type": "textinput", "default": ""},
-      {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Subscribe"},
-      {"name": "placeholder", "label": "Email Placeholder", "type": "textinput", "default": "Enter your email address"},
-      {"name": "background_color", "label": "Background Color", "type": "textinput", "default": "#f8f9fa"}
+      {"name": "signup_url", "label": "Signup Page URL", "type": "textinput", "help": "URL to the mailing list signup page (e.g., /list/newsletter)", "default": "/list/newsletter"},
+      {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Subscribe Now"},
+      {"name": "background_color", "label": "Background Color", "type": "textinput", "default": "#1a1a1a"}
     ]
   }
 }

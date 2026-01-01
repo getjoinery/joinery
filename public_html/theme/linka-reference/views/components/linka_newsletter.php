@@ -2,7 +2,11 @@
 /**
  * Linka Newsletter Component
  *
- * Newsletter subscription form with email input.
+ * Newsletter call-to-action that links to the list signup page.
+ * This is a presentation-only component - actual signup is handled
+ * by the existing /list/{slug} page.
+ *
+ * @version 1.1.0
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -14,9 +18,8 @@
 
 $title = $component_config['title'] ?? 'Subscribe to Newsletter';
 $subtitle = $component_config['subtitle'] ?? 'Get the latest updates and news delivered to your inbox.';
-$form_action = $component_config['form_action'] ?? '/ajax/newsletter';
-$button_text = $component_config['button_text'] ?? 'Subscribe';
-$placeholder = $component_config['placeholder'] ?? 'Enter Your Email';
+$signup_url = $component_config['signup_url'] ?? '/list/newsletter';
+$button_text = $component_config['button_text'] ?? 'Subscribe Now';
 $background_color = $component_config['background_color'] ?? '#1a1a1a';
 ?>
 
@@ -33,15 +36,10 @@ $background_color = $component_config['background_color'] ?? '#1a1a1a';
                     <?php endif; ?>
                 </div>
             </div>
-            <div class="col-lg-6">
-                <form class="newsletter-form" action="<?php echo htmlspecialchars($form_action); ?>" method="POST">
-                    <div class="input-group">
-                        <input type="email" name="email" class="form-control" placeholder="<?php echo htmlspecialchars($placeholder); ?>" required>
-                        <button class="default-btn" type="submit">
-                            <?php echo htmlspecialchars($button_text); ?>
-                        </button>
-                    </div>
-                </form>
+            <div class="col-lg-6 text-lg-end">
+                <a href="<?php echo htmlspecialchars($signup_url); ?>" class="default-btn">
+                    <?php echo htmlspecialchars($button_text); ?>
+                </a>
             </div>
         </div>
     </div>
