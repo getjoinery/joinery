@@ -3,7 +3,8 @@
  * Component Preview Utility
  *
  * Renders component types with auto-generated placeholder data for rapid testing
- * and validation without database setup. Displays within the active theme.
+ * and validation WITHOUT database access. Reads JSON definitions directly from
+ * filesystem for true isolation and pre-sync testing.
  *
  * Usage:
  *   /utils/component_preview              - All components
@@ -11,10 +12,10 @@
  *   /utils/component_preview?category=hero - Filter by category
  *   /utils/component_preview?theme=flavor - Override active theme
  *
- * @version 1.2.0
+ * @version 1.3.1
  */
 
-require_once(PathHelper::getIncludePath('data/components_class.php'));
+// Note: No database classes required - this utility works directly from JSON files
 
 /**
  * ComponentPreviewer - Generates placeholder data and renders component types
@@ -38,12 +39,11 @@ class ComponentPreviewer {
      *
      * Uses schema defaults where defined, falls back to generated placeholder values.
      *
-     * @param Component $componentType
+     * @param array $componentType Component definition array from JSON
      * @return array
      */
     public function generatePlaceholderData($componentType) {
-        $schema = $componentType->get('com_config_schema');
-        $schema = is_string($schema) ? json_decode($schema, true) : $schema;
+        $schema = $componentType['config_schema'] ?? [];
 
         if (empty($schema) || empty($schema['fields'])) {
             return [];
@@ -72,8 +72,8 @@ class ComponentPreviewer {
         $type = $field['type'] ?? 'textinput';
         $name = $field['name'] ?? '';
 
-        // Use schema default if defined
-        if (isset($field['default']) && $field['default'] !== '') {
+        // Use schema default if defined (including empty string - that's intentional!)
+        if (array_key_exists('default', $field)) {
             return $field['default'];
         }
 
@@ -82,6 +82,10 @@ class ComponentPreviewer {
                 // Check for common field name patterns
                 if (stripos($name, 'url') !== false || stripos($name, 'link') !== false) {
                     return '#';
+                }
+                if (stripos($name, 'image') !== false || stripos($name, 'photo') !== false || stripos($name, 'thumbnail') !== false) {
+                    // Image fields - use local theme image
+                    return '/theme/linka-reference/assets/images/1.jpg';
                 }
                 if (stripos($name, 'color') !== false) {
                     return '#007bff';
@@ -115,15 +119,39 @@ class ComponentPreviewer {
             case 'repeater':
                 return $this->generateRepeaterPlaceholder($field, 3);
 
+            case 'group':
+                return $this->generateGroupPlaceholder($field);
+
             case 'numberinput':
                 return rand(1, 100);
 
             case 'fileinput':
-                return 'https://via.placeholder.com/800x400?text=Placeholder+Image';
+                // Use an existing theme image as placeholder instead of external service
+                return '/theme/linka-reference/assets/images/1.jpg';
 
             default:
                 return $this->generateLoremPhrase(2, 4);
         }
+    }
+
+    /**
+     * Generate placeholder data for a group field (single nested object)
+     *
+     * @param array $field Group field definition
+     * @return array
+     */
+    private function generateGroupPlaceholder($field) {
+        $data = [];
+        $subfields = $field['fields'] ?? [];
+
+        foreach ($subfields as $subfield) {
+            $name = $subfield['name'] ?? '';
+            if ($name) {
+                $data[$name] = $this->generateFieldPlaceholder($subfield);
+            }
+        }
+
+        return $data;
     }
 
     /**
@@ -193,13 +221,13 @@ class ComponentPreviewer {
     /**
      * Render a component type with provided data
      *
-     * @param Component $componentType
+     * @param array $componentType Component definition array from JSON
      * @param array $data Config data for the template
      * @param string|null $theme_override Theme name to use instead of active theme
      * @return array ['html' => string, 'error' => string|null, 'template_path' => string]
      */
     public function renderComponent($componentType, $data, $theme_override = null) {
-        $template_file = $componentType->get('com_template_file');
+        $template_file = $componentType['template_file'] ?? '';
         $result = [
             'html' => '',
             'error' => null,
@@ -244,7 +272,7 @@ class ComponentPreviewer {
         // Make variables available to template (matching ComponentRenderer conventions)
         $component_config = $data;
         $component_data = [];  // No dynamic data in preview
-        $component_slug = 'preview-' . $componentType->get('com_type_key');
+        $component_slug = 'preview-' . $componentType['type_key'];
 
         try {
             require($template_path);
@@ -261,33 +289,116 @@ class ComponentPreviewer {
     }
 
     /**
-     * Get all active component types, optionally filtered
+     * Get all component types by scanning JSON files directly (no database)
      *
-     * @param array $filters ['type' => 'hero_static', 'category' => 'hero']
-     * @return array Array of Component objects
+     * Scans:
+     * - /views/components/*.json (base components)
+     * - /theme/{active_theme}/views/components/*.json (theme components)
+     *
+     * @param array $filters ['type' => 'hero_static', 'category' => 'hero', 'theme' => 'linka-reference', 'theme_only' => true]
+     * @return array Array of component definition arrays
      */
     public function getComponentTypes($filters = []) {
-        $options = ['active' => true, 'deleted' => false];
+        $components = [];
+        $settings = Globalvars::get_instance();
+        $active_theme = $filters['theme'] ?? $settings->get_setting('theme_template');
+        $theme_only = !empty($filters['theme_only']);
 
-        if (!empty($filters['category'])) {
-            $options['category'] = $filters['category'];
+        // Scan base components directory (unless theme_only is set)
+        if (!$theme_only) {
+            $base_dir = PathHelper::getIncludePath('views/components');
+            $components = array_merge($components, $this->scanComponentDirectory($base_dir, null));
         }
 
-        $components = new MultiComponent($options, ['com_category' => 'ASC', 'com_title' => 'ASC']);
-        $components->load();
+        // Scan active theme's components directory
+        if ($active_theme) {
+            $theme_dir = PathHelper::getIncludePath('theme/' . $active_theme . '/views/components');
+            $components = array_merge($components, $this->scanComponentDirectory($theme_dir, $active_theme));
+        }
 
+        // Apply filters
         $result = [];
         foreach ($components as $component) {
             // Filter by specific type if requested
             if (!empty($filters['type'])) {
-                if ($component->get('com_type_key') !== $filters['type']) {
+                if ($component['type_key'] !== $filters['type']) {
                     continue;
                 }
             }
+
+            // Filter by category if requested
+            if (!empty($filters['category'])) {
+                if (($component['category'] ?? '') !== $filters['category']) {
+                    continue;
+                }
+            }
+
             $result[] = $component;
         }
 
+        // Sort by category then title
+        usort($result, function($a, $b) {
+            $cat_cmp = strcmp($a['category'] ?? '', $b['category'] ?? '');
+            if ($cat_cmp !== 0) return $cat_cmp;
+            return strcmp($a['title'] ?? '', $b['title'] ?? '');
+        });
+
         return $result;
+    }
+
+    /**
+     * Scan a directory for component JSON definitions
+     *
+     * @param string $dir Directory path to scan
+     * @param string|null $theme_name Theme name (null for base components)
+     * @return array Array of component definitions
+     */
+    private function scanComponentDirectory($dir, $theme_name = null) {
+        $components = [];
+
+        if (!is_dir($dir)) {
+            return $components;
+        }
+
+        $json_files = glob($dir . '/*.json');
+        foreach ($json_files as $json_file) {
+            $json_content = file_get_contents($json_file);
+            $definition = json_decode($json_content, true);
+
+            if (!$definition) {
+                continue; // Skip invalid JSON
+            }
+
+            // Derive type_key from filename (e.g., hero_static.json -> hero_static)
+            $type_key = basename($json_file, '.json');
+
+            // Look for matching PHP template
+            $template_php = str_replace('.json', '.php', $json_file);
+            if (!file_exists($template_php)) {
+                continue; // Skip JSON files without matching PHP template
+            }
+
+            // Build template file path relative to document root
+            if ($theme_name) {
+                $template_file = 'theme/' . $theme_name . '/views/components/' . $type_key . '.php';
+            } else {
+                $template_file = 'views/components/' . $type_key . '.php';
+            }
+
+            $components[] = [
+                'type_key' => $type_key,
+                'title' => $definition['title'] ?? ucwords(str_replace('_', ' ', $type_key)),
+                'description' => $definition['description'] ?? '',
+                'category' => $definition['category'] ?? 'uncategorized',
+                'css_framework' => $definition['css_framework'] ?? '',
+                'config_schema' => $definition['config_schema'] ?? [],
+                'template_file' => $template_file,
+                'theme' => $theme_name,
+                'json_path' => $json_file
+            ];
+        }
+
+        return $components;
     }
 
     /**
@@ -313,17 +424,17 @@ class ComponentPreviewer {
     }
 
     /**
-     * Get unique categories from active components
+     * Get unique categories from component JSON files (no database)
      *
+     * @param string|null $theme_override Theme to scan (null = active theme)
      * @return array Category names
      */
-    public function getCategories() {
-        $components = new MultiComponent(['active' => true, 'deleted' => false], []);
-        $components->load();
+    public function getCategories($theme_override = null) {
+        $components = $this->getComponentTypes(['theme' => $theme_override]);
 
         $categories = [];
         foreach ($components as $component) {
-            $cat = $component->get('com_category');
+            $cat = $component['category'] ?? '';
             if ($cat && !in_array($cat, $categories)) {
                 $categories[] = $cat;
             }
@@ -342,15 +453,17 @@ $category_filter = $_GET['category'] ?? '';
 $theme_override = !empty($_GET['theme']) ? $_GET['theme'] : null;
 $show_config = isset($_GET['config']);
 $show_paths = isset($_GET['paths']);
+$theme_only = isset($_GET['theme_only']) || !isset($_GET['all']); // Default to theme-only
 
 // Get available data for filters
 $themes = $previewer->getAvailableThemes();
-$categories = $previewer->getCategories();
+$categories = $previewer->getCategories($theme_override);
 
 // Get components to preview
-$filters = [];
+$filters = ['theme' => $theme_override];
 if ($type_filter) $filters['type'] = $type_filter;
 if ($category_filter) $filters['category'] = $category_filter;
+if ($theme_only) $filters['theme_only'] = true;
 
 $component_types = $previewer->getComponentTypes($filters);
 
@@ -371,9 +484,9 @@ $page->public_header(array(
 
 // Build dropdown options for FormWriter (format: value => label)
 $type_options = ['' => 'All Types'];
-$all_types = $previewer->getComponentTypes([]);
+$all_types = $previewer->getComponentTypes(['theme' => $theme_override, 'theme_only' => $theme_only]);
 foreach ($all_types as $ct) {
-    $type_options[$ct->get('com_type_key')] = $ct->get('com_title');
+    $type_options[$ct['type_key']] = $ct['title'];
 }
 
 $category_options = ['' => 'All'];
@@ -437,6 +550,9 @@ $formwriter = $page->getFormWriter('filter_form', [
 
                 <div class="col-md-2">
                     <?php
+                    $formwriter->checkboxinput('all', 'Include Base', [
+                        'checked' => !$theme_only
+                    ]);
                     $formwriter->checkboxinput('config', 'Show Config', [
                         'checked' => $show_config
                     ]);
@@ -461,23 +577,30 @@ $formwriter = $page->getFormWriter('filter_form', [
             No component types found matching your filters.
         </div>
     <?php else: ?>
-        <p class="text-muted mb-4">Showing <?php echo count($component_types); ?> component type(s)</p>
+        <p class="text-muted mb-4">
+            Showing <?php echo count($component_types); ?> component type(s)
+            <?php if ($theme_only): ?>
+                <span class="badge bg-primary ms-2">Theme only</span>
+            <?php else: ?>
+                <span class="badge bg-secondary ms-2">Including base components</span>
+            <?php endif; ?>
+        </p>
 
         <?php foreach ($component_types as $componentType):
-            $type_key = $componentType->get('com_type_key');
+            $type_key = $componentType['type_key'];
             $placeholder_data = $previewer->generatePlaceholderData($componentType);
             $render_result = $previewer->renderComponent($componentType, $placeholder_data, $theme_override);
-            $framework = $componentType->get('com_css_framework');
+            $framework = $componentType['css_framework'] ?? '';
         ?>
             <div class="card mb-4" id="component-<?php echo htmlspecialchars($type_key); ?>">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div>
                         <h5 class="mb-0">
-                            <?php echo htmlspecialchars($componentType->get('com_title')); ?>
+                            <?php echo htmlspecialchars($componentType['title']); ?>
                             <small class="text-muted ms-2"><?php echo htmlspecialchars($type_key); ?></small>
                         </h5>
                         <small class="text-muted">
-                            Category: <?php echo htmlspecialchars($componentType->get('com_category') ?: 'none'); ?>
+                            Category: <?php echo htmlspecialchars($componentType['category'] ?: 'none'); ?>
                             <?php if ($framework): ?>
                                 | Framework: <?php echo htmlspecialchars($framework); ?>
                             <?php endif; ?>
