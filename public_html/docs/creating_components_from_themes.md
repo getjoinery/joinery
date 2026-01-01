@@ -109,13 +109,20 @@ Raw HTML theme files are available at `/theme-sources/` for reference:
 
 Test components instantly without database setup:
 ```
-/utils/component_preview              - All components
+/utils/component_preview              - All components for current theme
 /utils/component_preview?type=hero    - Single component
-/utils/component_preview?theme=falcon - Test in different theme
+/utils/component_preview?theme=falcon - Test in specific theme
+/utils/component_preview?theme=all    - View ALL components across ALL themes
 /utils/component_preview?config       - Show generated config data
+/utils/component_preview?paths        - Show template file paths
 ```
 
-This utility auto-generates placeholder data based on your config schema, letting you iterate quickly on templates.
+**Note:** Requires admin login (permission level 5+).
+
+This utility auto-generates placeholder data based on your config schema, letting you iterate quickly on templates. Each component card shows:
+- Category and CSS Framework
+- Theme name (which theme the component belongs to)
+- "Solo" button to view just that component
 
 ### Programmatic Default Access
 
@@ -339,6 +346,17 @@ Create a JSON file alongside your template:
 **Note:** Every field has a default that matches the original theme HTML exactly. The component preview will now render identically to the reference.
 
 The component type is automatically discovered during theme sync. JSON files are the single source of truth - component types cannot be created via the admin interface.
+
+### Step 5b: Set File Permissions (Development Servers)
+
+**IMPORTANT:** On development servers, newly created files may have restrictive permissions that prevent the web server from reading them. After creating component files, ensure proper permissions:
+
+```bash
+chmod 666 /path/to/theme/views/components/your_component.php
+chmod 666 /path/to/theme/views/components/your_component.json
+```
+
+If the component preview shows "Template file not found" but the file exists, this is almost always a permissions issue.
 
 ### Step 6: Create a Component Instance
 
@@ -654,9 +672,10 @@ During sync:
 - [ ] Identify the HTML section to convert (browse `/theme-sources/` for reference)
 - [ ] **Verify it's presentation-only** (no forms requiring backend handlers - see "Components to SKIP" above)
 - [ ] List all configurable elements
-- [ ] Create JSON definition file in `/views/components/`
+- [ ] Create JSON definition file in `/views/components/` or `/theme/{theme}/views/components/`
 - [ ] **Add `default` values for EVERY field matching the reference HTML exactly**
-- [ ] Create PHP template file in `/views/components/`
+- [ ] Create PHP template file in same directory
+- [ ] **Set file permissions** (`chmod 666`) if on development server
 - [ ] Test with `/utils/component_preview?type=your_component`
 - [ ] **Verify preview looks identical to reference HTML** (compare side-by-side)
 - [ ] Verify output escaping
