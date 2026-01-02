@@ -14,6 +14,7 @@ require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 require_once(PathHelper::getIncludePath('data/components_class.php'));
 require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 require_once(PathHelper::getIncludePath('data/pages_class.php'));
+require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(5); // Admin level
@@ -31,8 +32,28 @@ if (isset($_REQUEST['pac_page_content_id']) && $_REQUEST['pac_page_content_id'])
 	}
 }
 
-// Process form submission
-if ($_POST) {
+// Check if loading a previous version
+$loading_version = false;
+$version_notice = '';
+if (isset($_GET['cnv_content_version_id']) && $_GET['cnv_content_version_id'] && $content->key) {
+	$loading_version = true;
+	$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
+
+	// Parse the versioned config JSON
+	$versioned_content = $content_version->get('cnv_content');
+	$versioned_config = json_decode($versioned_content, true);
+	if ($versioned_config !== null) {
+		// Valid JSON - restore as component config
+		$content->set_config($versioned_config);
+	}
+
+	$version_notice = 'Viewing version from ' .
+		LibraryFunctions::convert_time($content_version->get('cnv_create_time'), 'UTC', $session->get_timezone()) .
+		'. Save to restore this version.';
+}
+
+// Process form submission (skip if loading a version to prevent accidental overwrite)
+if ($_POST && !$loading_version) {
 	// Set basic fields
 	$content->set('pac_title', trim($_POST['pac_title']));
 
@@ -139,6 +160,13 @@ if (isset($error_message)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error_message) . '</div>';
 }
 
+if ($version_notice) {
+	echo '<div class="alert alert-info">';
+	echo '<i class="fas fa-history me-2"></i>';
+	echo htmlspecialchars($version_notice);
+	echo '</div>';
+}
+
 $formwriter = $page->getFormWriter('form1', [
 	'model' => $content,
 	'edit_primary_key_value' => $content->key
@@ -190,7 +218,6 @@ if ($current_type_id) {
 
 	if (!empty($schema_fields)) {
 		echo '<hr><h5>Component Configuration</h5>';
-		echo '<p class="text-muted">Configure the content and settings for this component.</p>';
 
 		$current_config = $content->get_config();
 
@@ -319,26 +346,62 @@ if ($current_type_id) {
 	echo '<div class="alert alert-warning mt-3">Select a component type to configure its settings.</div>';
 }
 
-echo '</div><div class="col-md-4">';
-
-// Sidebar with publishing options
-echo '<div class="card"><div class="card-body">';
+// Publishing options (in main content area so they're part of the form)
+echo '<div class="card mt-4"><div class="card-body">';
 echo '<h6 class="card-title">Publishing</h6>';
-
+echo '<div class="row">';
+echo '<div class="col-md-4">';
 $formwriter->checkboxinput('pac_is_published', 'Published', [
 	'help' => 'Only published components are rendered on the site'
 ]);
-
+echo '</div><div class="col-md-4">';
 $formwriter->dropinput('pac_pag_page_id', 'Assign to Page', [
 	'options' => $pages_dropdown,
 	'help' => 'Optional. Auto-render on this page via get_filled_content()'
 ]);
-
+echo '</div><div class="col-md-4">';
 $formwriter->textinput('pac_order', 'Display Order', [
 	'help' => 'Order when multiple components on same page (lower = first)'
 ]);
-
 echo '</div></div>';
+echo '</div></div>';
+
+echo '<hr>';
+$formwriter->submitbutton('btn_submit', 'Save Component');
+$formwriter->end_form();
+
+echo '</div><div class="col-md-4">';
+
+// Sidebar - Version history (only for existing components)
+if ($content->key) {
+	$content_versions = new MultiContentVersion(
+		array('type' => ContentVersion::TYPE_PAGE_CONTENT, 'foreign_key_id' => $content->key),
+		array('create_time' => 'DESC')
+	);
+	$content_versions->load();
+
+	$version_options = $content_versions->get_dropdown_array($session, FALSE);
+
+	if (count($version_options)) {
+		echo '<div class="card"><div class="card-body">';
+		echo '<h6 class="card-title">Version History</h6>';
+		echo '<p class="text-muted small">Load a previous version to view or restore it.</p>';
+
+		$version_form = $page->getFormWriter('form_load_version', [
+			'method' => 'GET',
+			'action' => '/admin/admin_component_edit'
+		]);
+		$version_form->begin_form();
+		$version_form->hiddeninput('pac_page_content_id', '', ['value' => $content->key]);
+		$version_form->dropinput('cnv_content_version_id', 'Version', [
+			'options' => $version_options
+		]);
+		$version_form->submitbutton('btn_load', 'Load');
+		$version_form->end_form();
+
+		echo '</div></div>';
+	}
+}
 
 // Preview info
 if ($content->key && $content->get('pac_location_name')) {
@@ -349,10 +412,6 @@ if ($content->key && $content->get('pac_location_name')) {
 }
 
 echo '</div></div>';
-
-echo '<hr>';
-$formwriter->submitbutton('btn_submit', 'Save Component');
-$formwriter->end_form();
 
 $page->end_box();
 
