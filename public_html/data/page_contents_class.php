@@ -192,10 +192,14 @@ class PageContent extends SystemBase {
 
 		if ($this->key) {
 			// SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
+			// Version pac_config (JSON) for components, fall back to pac_body for legacy content
+			$config_json = $this->get('pac_config');
+			$version_content = $config_json ?: $this->get('pac_body');
+
 			ContentVersion::NewVersion(
 				ContentVersion::TYPE_PAGE_CONTENT,
 				$this->key,
-				$this->get('pac_body'),
+				$version_content,
 				$this->get('pac_title'),
 				$this->get('pac_title')
 			);
