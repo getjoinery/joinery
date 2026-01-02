@@ -3990,32 +3990,33 @@ document.addEventListener("DOMContentLoaded", function() {
      * @see Page Component System spec: /specs/page_component_system.md
      */
     protected function repeater_row($name, $index, $subfields, $values) {
+        // Separate regular and advanced fields
+        $regular_fields = [];
+        $advanced_fields = [];
+        foreach ($subfields as $subfield) {
+            if (!empty($subfield['advanced'])) {
+                $advanced_fields[] = $subfield;
+            } else {
+                $regular_fields[] = $subfield;
+            }
+        }
+
         echo '<div class="repeater-row card card-body mb-2" data-index="' . htmlspecialchars($index) . '">';
         echo '<div class="row align-items-end">';
 
-        // Render each sub-field - type is the FormWriter method name directly
-        foreach ($subfields as $subfield) {
+        // Helper to render a field
+        $render_subfield = function($subfield, $name, $index, $values, $col_class) {
             $field_name = $name . '[' . $index . '][' . $subfield['name'] . ']';
             $field_value = $values[$subfield['name']] ?? '';
             $method = $subfield['type'] ?? 'textinput';
-
-            // Calculate column width based on number of fields
-            $col_class = 'col-md';
-            if (count($subfields) <= 2) {
-                $col_class = 'col-md-5';
-            } elseif (count($subfields) == 3) {
-                $col_class = 'col-md-3';
-            } elseif (count($subfields) >= 4) {
-                $col_class = 'col-md';
-            }
 
             echo '<div class="' . $col_class . '">';
 
             // Build options for the sub-field
             $field_options = [
                 'value' => $field_value,
-                'model' => false,  // Disable auto-detection for repeater fields
-                'validation' => false  // Disable validation for individual repeater items
+                'model' => false,
+                'validation' => false
             ];
 
             // Merge in any options from the schema
@@ -4032,19 +4033,58 @@ document.addEventListener("DOMContentLoaded", function() {
             if (method_exists($this, $method)) {
                 $this->$method($field_name, $subfield['label'] ?? '', $field_options);
             } else {
-                // Fallback to textinput if method doesn't exist
                 $this->textinput($field_name, $subfield['label'] ?? '', $field_options);
             }
 
             echo '</div>';
+        };
+
+        // Calculate column width based on number of regular fields
+        $col_class = 'col-md';
+        if (count($regular_fields) <= 2) {
+            $col_class = 'col-md-5';
+        } elseif (count($regular_fields) == 3) {
+            $col_class = 'col-md-3';
         }
 
-        // Remove button - JavaScript attaches click handler via event delegation
+        // Render regular fields
+        foreach ($regular_fields as $subfield) {
+            $render_subfield($subfield, $name, $index, $values, $col_class);
+        }
+
+        // Remove button
         echo '<div class="col-auto">';
         echo '<button type="button" class="repeater-remove btn btn-outline-danger btn-sm mb-3">Remove</button>';
         echo '</div>';
 
-        echo '</div></div>';
+        echo '</div>'; // end row
+
+        // Advanced fields section (if any)
+        if (!empty($advanced_fields)) {
+            $advanced_id = 'repeater_advanced_' . $name . '_' . $index . '_' . uniqid();
+            echo '<div class="repeater-advanced-section mt-2">';
+            echo '<a href="#" class="repeater-advanced-toggle small text-muted" data-target="' . $advanced_id . '">';
+            echo '<i class="fas fa-cog me-1"></i>Advanced (' . count($advanced_fields) . ')';
+            echo '</a>';
+            echo '<div id="' . $advanced_id . '" class="repeater-advanced-content" style="display:none;">';
+            echo '<div class="row align-items-end mt-2 pt-2 border-top">';
+
+            // Calculate column width for advanced fields
+            $adv_col_class = 'col-md';
+            if (count($advanced_fields) <= 2) {
+                $adv_col_class = 'col-md-5';
+            } elseif (count($advanced_fields) == 3) {
+                $adv_col_class = 'col-md-3';
+            }
+
+            foreach ($advanced_fields as $subfield) {
+                $render_subfield($subfield, $name, $index, $values, $adv_col_class);
+            }
+
+            echo '</div></div></div>';
+        }
+
+        echo '</div>'; // end repeater-row
     }
 
     /**
