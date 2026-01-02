@@ -235,6 +235,16 @@ if ($current_type_id) {
 					}
 				}
 				$formwriter->imageselector($field_name, $field_label, $field_options);
+			} elseif ($field_type === 'colorpicker') {
+				// Pass through any colorpicker-specific options from schema
+				$colorpicker_options = ['theme', 'max_swatches', 'custom_colors',
+					'show_custom_picker', 'swatch_size', 'sort', 'initial_display'];
+				foreach ($colorpicker_options as $opt) {
+					if (isset($field[$opt])) {
+						$field_options[$opt] = $field[$opt];
+					}
+				}
+				$formwriter->colorpicker($field_name, $field_label, $field_options);
 			} elseif (method_exists($formwriter, $field_type)) {
 				$formwriter->$field_type($field_name, $field_label, $field_options);
 			} else {
