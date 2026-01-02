@@ -70,6 +70,8 @@ function get_previous_version(){
 		}
 	}	
 	
+	const MAX_VERSIONS_PER_ITEM = 100;
+
 	static function NewVersion($type, $foreign_key_id, $content, $description=NULL, $title=NULL){
 		$session = SessionControl::get_instance();
 		$results = new MultiContentVersion(array('type' => $type, 'foreign_key_id' => $foreign_key_id), array('content_version_id' => 'DESC'));
@@ -91,10 +93,10 @@ function get_previous_version(){
 			$new_item->prepare();
 			$new_item->save();
 			$new_item->load();
-			
+
 			$last_item->set('cnv_next_version_id', $new_item->key);
 			$last_item->save();
-			
+
 		}
 		else{
 			$new_item = new ContentVersion(NULL);
@@ -111,6 +113,31 @@ function get_previous_version(){
 			$new_item->load();
 		}
 
+		// Prune old versions if over limit
+		self::pruneOldVersions($type, $foreign_key_id);
+	}
+
+	/**
+	 * Delete oldest versions if count exceeds MAX_VERSIONS_PER_ITEM
+	 */
+	static function pruneOldVersions($type, $foreign_key_id) {
+		$versions = new MultiContentVersion(
+			array('type' => $type, 'foreign_key_id' => $foreign_key_id),
+			array('content_version_id' => 'ASC') // Oldest first
+		);
+		$count = $versions->count_all();
+
+		if ($count > self::MAX_VERSIONS_PER_ITEM) {
+			$to_delete = $count - self::MAX_VERSIONS_PER_ITEM;
+			$versions->load();
+
+			for ($i = 0; $i < $to_delete; $i++) {
+				$old_version = $versions->get($i);
+				if ($old_version) {
+					$old_version->permanent_delete();
+				}
+			}
+		}
 	}
 
 	function authenticate_write($data) {
