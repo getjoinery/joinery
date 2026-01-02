@@ -488,6 +488,7 @@ The config schema is a JSON object defining the admin form fields for a componen
 | `default` | No | Default value for new component instances |
 | `options` | For dropinput/radioinput | Key-value pairs for selection fields |
 | `fields` | For repeater | Nested field definitions |
+| `advanced` | No | If `true`, field is hidden behind "Show advanced fields" toggle |
 
 ### Default Values
 
@@ -506,6 +507,41 @@ The `default` property pre-populates fields when creating new component instance
 ```
 
 **Important:** Default values are applied in the admin form when creating new components. They are NOT applied at render time - templates should still use `??` fallbacks for robustness.
+
+### Advanced Fields
+
+Fields that users rarely need to change can be marked as `"advanced": true`. These fields are hidden behind a collapsible "Show advanced fields" link in the admin form, keeping the interface cleaner.
+
+```json
+{
+  "fields": [
+    {"name": "heading", "label": "Heading", "type": "textinput"},
+    {"name": "subheading", "label": "Subheading", "type": "textarea"},
+    {"name": "background_color", "label": "Background", "type": "colorpicker", "advanced": true},
+    {"name": "text_alignment", "label": "Alignment", "type": "dropinput", "advanced": true,
+     "options": {"left": "Left", "center": "Center", "right": "Right"}}
+  ]
+}
+```
+
+**Repeater sub-fields** can also be marked as advanced. They appear in a nested collapsible section within each repeater row:
+
+```json
+{
+  "name": "features",
+  "type": "repeater",
+  "fields": [
+    {"name": "title", "label": "Title", "type": "textinput"},
+    {"name": "description", "label": "Description", "type": "textarea"},
+    {"name": "link_url", "label": "Link URL", "type": "textinput", "advanced": true}
+  ]
+}
+```
+
+**Guidelines for advanced fields:**
+- Mark styling options (colors, alignment, spacing) as advanced
+- Keep content fields (text, images, main links) as regular
+- If a field has a sensible default that works 80%+ of the time, consider marking it advanced
 
 ### Accessing Defaults Programmatically
 
@@ -538,6 +574,8 @@ $all_fields = $component_type->get_default_config(true);
 | `datetimeinput` | Date and time | - |
 | `fileinput` | File upload | - |
 | `imageinput` | Image upload | - |
+| `imageselector` | Image picker with gallery | `button_text`, `grid_columns`, etc. |
+| `colorpicker` | Color picker with theme swatches | `max_swatches`, `sort`, etc. |
 | `hiddeninput` | Hidden field | - |
 | `repeater` | Repeatable field group | `fields` |
 

@@ -183,10 +183,6 @@ $formwriter->textinput('pac_title', 'Label', [
 	'help' => 'Internal name for identifying this component'
 ]);
 
-$formwriter->textinput('pac_location_name', 'Slug (optional)', [
-	'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
-]);
-
 // Dynamic config fields based on component type
 if ($current_type_id) {
 	$component_type = new Component($current_type_id, TRUE);
@@ -198,7 +194,19 @@ if ($current_type_id) {
 
 		$current_config = $content->get_config();
 
+		// Separate fields into regular and advanced
+		$regular_fields = [];
+		$advanced_fields = [];
 		foreach ($schema_fields as $field) {
+			if (!empty($field['advanced'])) {
+				$advanced_fields[] = $field;
+			} else {
+				$regular_fields[] = $field;
+			}
+		}
+
+		// Helper function to render a field
+		$render_field = function($field, $formwriter, $current_config) {
 			$field_name = $field['name'];
 			$field_label = $field['label'] ?? $field_name;
 			$field_type = $field['type'] ?? 'textinput';
@@ -250,12 +258,65 @@ if ($current_type_id) {
 			} else {
 				$formwriter->textinput($field_name, $field_label, $field_options);
 			}
+		};
+
+		// Render regular fields
+		foreach ($regular_fields as $field) {
+			$render_field($field, $formwriter, $current_config);
 		}
+
+		// Render advanced fields in collapsible section (includes slug + schema advanced fields)
+		$advanced_count = count($advanced_fields) + 1; // +1 for slug
+		$advanced_id = 'advanced_fields_' . uniqid();
+		echo '<div class="advanced-fields-section mt-4">';
+		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
+		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (' . $advanced_count . ')';
+		echo '</a>';
+		echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
+		echo '<div class="mt-3 pt-3 border-top">';
+
+		// Slug field (always advanced)
+		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
+			'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
+		]);
+
+		// Schema-defined advanced fields
+		foreach ($advanced_fields as $field) {
+			$render_field($field, $formwriter, $current_config);
+		}
+
+		echo '</div></div></div>';
 	} else {
-		echo '<div class="alert alert-info">This component type has no configurable fields.</div>';
+		// No component type selected yet, but still show slug in advanced section
+		$advanced_id = 'advanced_fields_' . uniqid();
+		echo '<div class="advanced-fields-section mt-4">';
+		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
+		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (1)';
+		echo '</a>';
+		echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
+		echo '<div class="mt-3 pt-3 border-top">';
+		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
+			'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
+		]);
+		echo '</div></div></div>';
+
+		echo '<div class="alert alert-info mt-3">This component type has no configurable fields.</div>';
 	}
 } else {
-	echo '<div class="alert alert-warning">Select a component type to configure its settings.</div>';
+	// No component type selected - show slug in advanced and prompt to select type
+	$advanced_id = 'advanced_fields_' . uniqid();
+	echo '<div class="advanced-fields-section mt-4">';
+	echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
+	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (1)';
+	echo '</a>';
+	echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
+	echo '<div class="mt-3 pt-3 border-top">';
+	$formwriter->textinput('pac_location_name', 'Slug (optional)', [
+		'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
+	]);
+	echo '</div></div></div>';
+
+	echo '<div class="alert alert-warning mt-3">Select a component type to configure its settings.</div>';
 }
 
 echo '</div><div class="col-md-4">';
@@ -294,6 +355,52 @@ $formwriter->submitbutton('btn_submit', 'Save Component');
 $formwriter->end_form();
 
 $page->end_box();
+
+// JavaScript for advanced fields toggle
+?>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+	// Main advanced fields toggle
+	document.querySelectorAll('.advanced-fields-toggle').forEach(function(link) {
+		link.addEventListener('click', function(e) {
+			e.preventDefault();
+			var targetId = this.getAttribute('data-target');
+			var target = document.getElementById(targetId);
+			if (target) {
+				var isHidden = target.style.display === 'none';
+				target.style.display = isHidden ? 'block' : 'none';
+				var count = target.querySelectorAll('.mb-3, .form-group').length;
+				if (isHidden) {
+					this.innerHTML = '<i class="fas fa-cog me-1"></i>Hide advanced fields';
+				} else {
+					this.innerHTML = '<i class="fas fa-cog me-1"></i>Show advanced fields (' + count + ')';
+				}
+			}
+		});
+	});
+
+	// Repeater advanced fields toggle (use event delegation for dynamic rows)
+	document.addEventListener('click', function(e) {
+		if (e.target.closest('.repeater-advanced-toggle')) {
+			e.preventDefault();
+			var link = e.target.closest('.repeater-advanced-toggle');
+			var targetId = link.getAttribute('data-target');
+			var target = document.getElementById(targetId);
+			if (target) {
+				var isHidden = target.style.display === 'none';
+				target.style.display = isHidden ? 'block' : 'none';
+				var count = target.querySelectorAll('.col-md, .col-md-3, .col-md-5').length;
+				if (isHidden) {
+					link.innerHTML = '<i class="fas fa-cog me-1"></i>Hide advanced';
+				} else {
+					link.innerHTML = '<i class="fas fa-cog me-1"></i>Advanced (' + count + ')';
+				}
+			}
+		}
+	});
+});
+</script>
+<?php
 
 $page->admin_footer();
 ?>
