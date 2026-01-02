@@ -454,6 +454,72 @@ Components attached to a page render automatically when using `ComponentRenderer
 
 5. **Group related fields logically** in the schema order
 
+6. **Mark rarely-changed fields as advanced:**
+   ```json
+   {"name": "icon_color", "type": "colorpicker", "default": "#007bff", "advanced": true}
+   ```
+
+---
+
+## Advanced Fields
+
+Fields that users rarely need to change can be marked as `"advanced": true`. These fields are hidden behind a collapsible "Show advanced fields" link, keeping the form cleaner.
+
+### Usage
+
+Add `"advanced": true` to any field definition:
+
+```json
+{
+  "fields": [
+    {"name": "heading", "label": "Heading", "type": "textinput"},
+    {"name": "subheading", "label": "Subheading", "type": "textarea"},
+    {"name": "background_color", "label": "Background Color", "type": "colorpicker", "advanced": true},
+    {"name": "text_alignment", "label": "Alignment", "type": "dropinput", "advanced": true, "options": {...}}
+  ]
+}
+```
+
+### Advanced Fields in Repeaters
+
+Repeater sub-fields can also be marked as advanced. They appear in a nested collapsible section within each repeater row:
+
+```json
+{
+  "name": "features",
+  "label": "Features",
+  "type": "repeater",
+  "fields": [
+    {"name": "title", "label": "Title", "type": "textinput"},
+    {"name": "description", "label": "Description", "type": "textarea"},
+    {"name": "link_url", "label": "Link URL", "type": "textinput", "advanced": true},
+    {"name": "link_text", "label": "Link Text", "type": "textinput", "advanced": true}
+  ]
+}
+```
+
+### Common Advanced vs Regular Fields
+
+| Typically Regular (shown by default) | Typically Advanced (hidden by default) |
+|-------------------------------------|---------------------------------------|
+| Headings and titles | Colors (background, text, accent) |
+| Body text and descriptions | Icon classes and icon styles |
+| Primary images | CSS classes and custom styles |
+| Button text | Alignment and layout options |
+| Main URLs/links | Animation settings |
+| Repeater content items | Spacing and padding options |
+| Enable/disable toggles | SEO fields (aria labels, etc.) |
+| | Slugs and internal identifiers |
+
+**Note:** The component slug field is always treated as advanced in the admin interface since most page-attached components don't need one.
+
+### Guidelines
+
+- **Regular fields**: Content that changes per-instance (text, images, main links)
+- **Advanced fields**: Styling and configuration that usually keeps defaults (colors, icons, layout options)
+- Keep the majority of fields as regular - only hide truly optional customization
+- If a field has a sensible default that works 80% of the time, consider marking it advanced
+
 ---
 
 ## Working with Repeaters
