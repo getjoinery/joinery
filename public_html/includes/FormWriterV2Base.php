@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.2.1
+ * @version 2.3.0
+ * @changelog 2.3.0 - Added colorpicker() method with theme color extraction and custom picker
  * @changelog 2.2.0 - Added imageselector() method for visual image picker with modal
  * @changelog 2.1.0 - Added automatic edit_primary_key_value hidden field support
  */
@@ -1652,6 +1653,457 @@ abstract class FormWriterV2Base {
         });
     } else {
         ImageSelectorManager.init();
+    }
+})();
+</script>';
+    }
+
+    /**
+     * Create a color picker field with theme color swatches
+     *
+     * Provides theme-extracted color swatches plus a native color picker for custom colors.
+     * Colors are automatically extracted from the current theme's CSS files.
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options:
+     *   - value: Current hex color value (default: '')
+     *   - help: Help text
+     *   - required: Boolean
+     *   - theme: Theme name to scan for colors (default: current theme)
+     *   - max_swatches: Maximum swatches to show (default: 100)
+     *   - custom_colors: Additional colors to include (array of hex values)
+     *   - show_custom_picker: Show "Custom..." button (default: true)
+     *   - swatch_size: CSS size for swatches (default: '32px')
+     *   - sort: Sort order - 'dark_first', 'light_first', 'none' (default: 'dark_first')
+     *   - initial_display: Colors to show before "more" link (default: 100)
+     */
+    public function colorpicker($name, $label = '', $options = []) {
+        $this->registerField($name, 'colorpicker', $label, $options);
+
+        // Extract options with defaults
+        $value = $options['value'] ?? '';
+        $help = $options['help'] ?? '';
+        $required = !empty($options['required']);
+        $id = $options['id'] ?? preg_replace('/[^a-zA-Z0-9_]/', '_', $name);
+        $theme = $options['theme'] ?? null;
+        $max_swatches = $options['max_swatches'] ?? 100; // Hard limit for sanity
+        $initial_display = $options['initial_display'] ?? 100; // Show this many before "more"
+        $custom_colors = $options['custom_colors'] ?? [];
+        $show_custom_picker = $options['show_custom_picker'] ?? true;
+        $swatch_size = $options['swatch_size'] ?? '32px';
+        $sort = $options['sort'] ?? 'dark_first';
+
+        // Get theme colors (fetch up to max)
+        $theme_colors = $this->extractThemeColors($theme, [
+            'limit' => $max_swatches,
+            'sort' => $sort
+        ]);
+
+        // Merge custom colors at the beginning
+        if (!empty($custom_colors)) {
+            $theme_colors = array_merge($custom_colors, $theme_colors);
+            $theme_colors = array_unique($theme_colors);
+            $theme_colors = array_slice($theme_colors, 0, $max_swatches);
+        }
+
+        // Calculate if we need "show more"
+        $total_colors = count($theme_colors);
+        $has_more = $total_colors > $initial_display;
+
+        $uniqueId = 'colorpicker_' . $id . '_' . uniqid();
+
+        // Output field wrapper
+        echo '<div class="mb-3 colorpicker-wrapper" id="' . htmlspecialchars($uniqueId) . '"';
+        echo ' style="--cp-swatch-size:' . htmlspecialchars($swatch_size) . ';">';
+
+        // Label
+        if ($label) {
+            echo '<label class="form-label" for="' . htmlspecialchars($id) . '">';
+            echo htmlspecialchars($label);
+            if ($required) {
+                echo ' <span class="text-danger">*</span>';
+            }
+            echo '</label>';
+        }
+
+        // Hidden input for the actual value
+        echo '<input type="hidden" name="' . htmlspecialchars($name) . '" ';
+        echo 'id="' . htmlspecialchars($id) . '" ';
+        echo 'class="colorpicker-value" ';
+        echo 'value="' . htmlspecialchars($value) . '"';
+        if ($required) {
+            echo ' required';
+        }
+        echo '>';
+
+        // Swatches container
+        echo '<div class="colorpicker-swatches">';
+
+        // Theme color swatches (initial set)
+        $display_count = 0;
+        foreach ($theme_colors as $index => $color) {
+            $is_selected = (strtolower($value) === strtolower($color));
+            $swatch_class = 'colorpicker-swatch' . ($is_selected ? ' selected' : '');
+
+            // Hide colors beyond initial_display
+            if ($has_more && $index >= $initial_display) {
+                $swatch_class .= ' colorpicker-hidden';
+            }
+
+            echo '<div class="' . $swatch_class . '" ';
+            echo 'data-color="' . htmlspecialchars($color) . '" ';
+            echo 'style="background-color:' . htmlspecialchars($color) . ';" ';
+            echo 'title="' . htmlspecialchars($color) . '"></div>';
+        }
+
+        // "Show more" link
+        if ($has_more) {
+            $remaining = $total_colors - $initial_display;
+            echo '<a href="#" class="colorpicker-show-more">+' . $remaining . ' more</a>';
+        }
+
+        // Custom color picker button
+        if ($show_custom_picker) {
+            echo '<label class="colorpicker-custom-btn" title="Choose custom color">';
+            echo '<input type="color" class="colorpicker-native" value="' . htmlspecialchars($value ?: '#000000') . '">';
+            echo '<span>Custom...</span>';
+            echo '</label>';
+        }
+
+        echo '</div>'; // end swatches container
+
+        // Current value display
+        echo '<div class="colorpicker-current">';
+        echo '<div class="colorpicker-preview" style="background-color:' . htmlspecialchars($value ?: 'transparent') . ';"></div>';
+        echo '<input type="text" class="colorpicker-hex-input form-control form-control-sm" ';
+        echo 'value="' . htmlspecialchars($value) . '" ';
+        echo 'placeholder="#000000" ';
+        echo 'pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$">';
+        echo '</div>';
+
+        // Help text
+        if ($help) {
+            echo '<div class="form-text">' . htmlspecialchars($help) . '</div>';
+        }
+
+        echo '</div>'; // end wrapper
+
+        // Output CSS and JS assets (once per page)
+        $this->outputColorPickerAssets();
+    }
+
+    /**
+     * Extract colors from theme CSS files
+     *
+     * @param string|null $theme_name Theme name, or null for current theme
+     * @param array $options Options: limit, sort, dedupe
+     * @return array Array of hex color codes
+     */
+    protected function extractThemeColors($theme_name = null, $options = []) {
+        static $color_cache = [];
+
+        // Get theme name
+        if ($theme_name === null) {
+            $settings = Globalvars::get_instance();
+            $theme_name = $settings->get_setting('theme_template');
+        }
+
+        // Check cache
+        $cache_key = $theme_name . '_' . md5(serialize($options));
+        if (isset($color_cache[$cache_key])) {
+            return $color_cache[$cache_key];
+        }
+
+        // Default options
+        $limit = $options['limit'] ?? 20;
+        $sort = $options['sort'] ?? 'dark_first';
+        $dedupe = $options['dedupe'] ?? true;
+
+        // Find CSS files (skip framework/library files)
+        $css_dir = PathHelper::getIncludePath('theme/' . $theme_name . '/assets/css');
+        $colors = [];
+
+        // Framework files to skip - these contain generic colors, not theme-specific
+        $skip_patterns = [
+            'bootstrap', 'boxicons', 'fontawesome', 'animate',
+            'magnific', 'owl.', 'slick', 'swiper', 'flaticon',
+            'meanmenu', 'nice-select', 'jquery', 'vendor'
+        ];
+
+        if (is_dir($css_dir)) {
+            $css_files = glob($css_dir . '/*.css');
+            foreach ($css_files as $css_file) {
+                // Skip framework files
+                $filename = strtolower(basename($css_file));
+                $skip = false;
+                foreach ($skip_patterns as $pattern) {
+                    if (strpos($filename, $pattern) !== false) {
+                        $skip = true;
+                        break;
+                    }
+                }
+                if ($skip) continue;
+
+                $content = file_get_contents($css_file);
+                if (!$content) continue;
+
+                // Match hex colors: #fff, #ffffff
+                preg_match_all('/#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/', $content, $matches);
+                if (!empty($matches[0])) {
+                    $colors = array_merge($colors, $matches[0]);
+                }
+
+                // Match rgb/rgba
+                preg_match_all('/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/', $content, $matches, PREG_SET_ORDER);
+                foreach ($matches as $m) {
+                    $r = min(255, max(0, intval($m[1])));
+                    $g = min(255, max(0, intval($m[2])));
+                    $b = min(255, max(0, intval($m[3])));
+                    $colors[] = sprintf('#%02x%02x%02x', $r, $g, $b);
+                }
+            }
+        }
+
+        // Normalize to lowercase 6-char hex
+        $hex_colors = [];
+        foreach ($colors as $color) {
+            $color = strtolower(trim($color));
+            // Expand 3-char hex
+            if (preg_match('/^#([0-9a-f])([0-9a-f])([0-9a-f])$/', $color, $m)) {
+                $color = '#' . $m[1] . $m[1] . $m[2] . $m[2] . $m[3] . $m[3];
+            }
+            if (preg_match('/^#[0-9a-f]{6}$/', $color)) {
+                $hex_colors[] = $color;
+            }
+        }
+
+        // Deduplicate
+        if ($dedupe) {
+            $hex_colors = array_unique($hex_colors);
+        }
+
+        // Sort by luminance
+        if ($sort !== 'none') {
+            usort($hex_colors, function($a, $b) use ($sort) {
+                $lumA = $this->getColorLuminance($a);
+                $lumB = $this->getColorLuminance($b);
+                if ($sort === 'light_first') {
+                    return $lumB <=> $lumA;
+                }
+                return $lumA <=> $lumB; // dark_first
+            });
+        }
+
+        // Limit
+        if ($limit > 0 && count($hex_colors) > $limit) {
+            $hex_colors = array_slice($hex_colors, 0, $limit);
+        }
+
+        $hex_colors = array_values($hex_colors);
+        $color_cache[$cache_key] = $hex_colors;
+        return $hex_colors;
+    }
+
+    /**
+     * Calculate luminance of a hex color
+     *
+     * @param string $hex Hex color
+     * @return float Luminance (0-1)
+     */
+    protected function getColorLuminance($hex) {
+        $hex = ltrim($hex, '#');
+        $r = hexdec(substr($hex, 0, 2)) / 255;
+        $g = hexdec(substr($hex, 2, 2)) / 255;
+        $b = hexdec(substr($hex, 4, 2)) / 255;
+
+        // sRGB to linear
+        $r = $r <= 0.03928 ? $r / 12.92 : pow(($r + 0.055) / 1.055, 2.4);
+        $g = $g <= 0.03928 ? $g / 12.92 : pow(($g + 0.055) / 1.055, 2.4);
+        $b = $b <= 0.03928 ? $b / 12.92 : pow(($b + 0.055) / 1.055, 2.4);
+
+        return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
+    }
+
+    /**
+     * Output CSS and JavaScript for color picker functionality
+     */
+    protected function outputColorPickerAssets() {
+        static $assets_loaded = false;
+        if ($assets_loaded) return;
+        $assets_loaded = true;
+
+        echo '<style>
+.colorpicker-wrapper {
+    --cp-swatch-size: 32px;
+}
+.colorpicker-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.colorpicker-swatch {
+    width: var(--cp-swatch-size);
+    height: var(--cp-swatch-size);
+    border-radius: 4px;
+    cursor: pointer;
+    border: 2px solid #ccc;
+    transition: border-color 0.15s, transform 0.15s;
+}
+.colorpicker-swatch:hover {
+    border-color: #666;
+    transform: scale(1.1);
+}
+.colorpicker-swatch.selected {
+    border-color: #000;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #000;
+}
+.colorpicker-custom-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: #f0f0f0;
+    border: 2px dashed #999;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    height: var(--cp-swatch-size);
+    box-sizing: border-box;
+}
+.colorpicker-custom-btn:hover {
+    border-color: #333;
+    background: #e8e8e8;
+}
+.colorpicker-custom-btn input[type="color"] {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid #ccc;
+    border-radius: 2px;
+    cursor: pointer;
+}
+.colorpicker-current {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.colorpicker-preview {
+    width: 36px;
+    height: 36px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+.colorpicker-hex-input {
+    width: 100px;
+    font-family: monospace;
+}
+.colorpicker-hidden {
+    display: none;
+}
+.colorpicker-show-more {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #495057;
+    text-decoration: none;
+    height: var(--cp-swatch-size);
+    box-sizing: border-box;
+}
+.colorpicker-show-more:hover {
+    background: #e9ecef;
+    color: #212529;
+    text-decoration: none;
+}
+</style>';
+
+        echo '<script>
+(function() {
+    "use strict";
+
+    document.addEventListener("click", function(e) {
+        // Swatch click
+        if (e.target.classList.contains("colorpicker-swatch")) {
+            var wrapper = e.target.closest(".colorpicker-wrapper");
+            var color = e.target.dataset.color;
+            selectColor(wrapper, color);
+        }
+
+        // Show more link
+        if (e.target.classList.contains("colorpicker-show-more")) {
+            e.preventDefault();
+            var wrapper = e.target.closest(".colorpicker-wrapper");
+            wrapper.querySelectorAll(".colorpicker-hidden").forEach(function(el) {
+                el.classList.remove("colorpicker-hidden");
+            });
+            e.target.style.display = "none";
+        }
+    });
+
+    document.addEventListener("input", function(e) {
+        // Native color picker change
+        if (e.target.classList.contains("colorpicker-native")) {
+            var wrapper = e.target.closest(".colorpicker-wrapper");
+            var color = e.target.value;
+            selectColor(wrapper, color);
+        }
+
+        // Hex input change
+        if (e.target.classList.contains("colorpicker-hex-input")) {
+            var wrapper = e.target.closest(".colorpicker-wrapper");
+            var color = e.target.value.trim();
+            if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color)) {
+                selectColor(wrapper, color, true);
+            }
+        }
+    });
+
+    function selectColor(wrapper, color, fromInput) {
+        var valueInput = wrapper.querySelector(".colorpicker-value");
+        var preview = wrapper.querySelector(".colorpicker-preview");
+        var hexInput = wrapper.querySelector(".colorpicker-hex-input");
+        var nativePicker = wrapper.querySelector(".colorpicker-native");
+
+        // Update hidden value
+        valueInput.value = color;
+
+        // Update preview
+        preview.style.backgroundColor = color;
+
+        // Update hex input (unless triggered from it)
+        if (!fromInput) {
+            hexInput.value = color;
+        }
+
+        // Update native picker
+        if (nativePicker) {
+            // Expand 3-char hex for native picker
+            var expandedColor = color;
+            if (/^#[0-9a-fA-F]{3}$/.test(color)) {
+                expandedColor = "#" + color[1] + color[1] + color[2] + color[2] + color[3] + color[3];
+            }
+            nativePicker.value = expandedColor;
+        }
+
+        // Update swatch selection
+        wrapper.querySelectorAll(".colorpicker-swatch").forEach(function(swatch) {
+            var swatchColor = swatch.dataset.color.toLowerCase();
+            var selectedColor = color.toLowerCase();
+            // Expand for comparison
+            if (/^#[0-9a-fA-F]{3}$/.test(selectedColor)) {
+                selectedColor = "#" + selectedColor[1] + selectedColor[1] + selectedColor[2] + selectedColor[2] + selectedColor[3] + selectedColor[3];
+            }
+            swatch.classList.toggle("selected", swatchColor === selectedColor);
+        });
+
+        // Trigger change event
+        valueInput.dispatchEvent(new Event("change", { bubbles: true }));
     }
 })();
 </script>';
