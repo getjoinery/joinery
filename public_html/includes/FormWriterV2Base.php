@@ -1713,7 +1713,7 @@ abstract class FormWriterV2Base {
 
         $uniqueId = 'colorpicker_' . $id . '_' . uniqid();
 
-        // Output field wrapper
+        // Output field wrapper (starts collapsed)
         echo '<div class="mb-3 colorpicker-wrapper" id="' . htmlspecialchars($uniqueId) . '"';
         echo ' style="--cp-swatch-size:' . htmlspecialchars($swatch_size) . ';">';
 
@@ -1737,11 +1737,23 @@ abstract class FormWriterV2Base {
         }
         echo '>';
 
-        // Swatches container
+        // Collapsed trigger - color preview + hex + expand icon
+        echo '<div class="colorpicker-trigger">';
+        echo '<div class="colorpicker-preview" style="background-color:' . htmlspecialchars($value ?: 'transparent') . ';"></div>';
+        echo '<input type="text" class="colorpicker-hex-input form-control form-control-sm" ';
+        echo 'value="' . htmlspecialchars($value) . '" ';
+        echo 'placeholder="#000000" ';
+        echo 'pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$">';
+        echo '<button type="button" class="colorpicker-expand-btn" title="Choose from theme colors">';
+        echo '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/><path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H4z"/></svg>';
+        echo '</button>';
+        echo '</div>';
+
+        // Expandable swatches panel (hidden by default)
+        echo '<div class="colorpicker-panel">';
         echo '<div class="colorpicker-swatches">';
 
-        // Theme color swatches (initial set)
-        $display_count = 0;
+        // Theme color swatches
         foreach ($theme_colors as $index => $color) {
             $is_selected = (strtolower($value) === strtolower($color));
             $swatch_class = 'colorpicker-swatch' . ($is_selected ? ' selected' : '');
@@ -1771,16 +1783,8 @@ abstract class FormWriterV2Base {
             echo '</label>';
         }
 
-        echo '</div>'; // end swatches container
-
-        // Current value display
-        echo '<div class="colorpicker-current">';
-        echo '<div class="colorpicker-preview" style="background-color:' . htmlspecialchars($value ?: 'transparent') . ';"></div>';
-        echo '<input type="text" class="colorpicker-hex-input form-control form-control-sm" ';
-        echo 'value="' . htmlspecialchars($value) . '" ';
-        echo 'placeholder="#000000" ';
-        echo 'pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$">';
-        echo '</div>';
+        echo '</div>'; // end swatches
+        echo '</div>'; // end panel
 
         // Help text
         if ($help) {
@@ -1936,12 +1940,64 @@ abstract class FormWriterV2Base {
         echo '<style>
 .colorpicker-wrapper {
     --cp-swatch-size: 32px;
+    position: relative;
+}
+.colorpicker-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+}
+.colorpicker-preview {
+    width: 36px;
+    height: 36px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+.colorpicker-hex-input {
+    width: 100px;
+    font-family: monospace;
+}
+.colorpicker-expand-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #495057;
+    transition: background 0.15s, border-color 0.15s;
+}
+.colorpicker-expand-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+.colorpicker-wrapper.expanded .colorpicker-expand-btn {
+    background: #0d6efd;
+    border-color: #0d6efd;
+    color: #fff;
+}
+.colorpicker-panel {
+    display: none;
+    margin-top: 10px;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.colorpicker-wrapper.expanded .colorpicker-panel {
+    display: block;
 }
 .colorpicker-swatches {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    margin-bottom: 10px;
 }
 .colorpicker-swatch {
     width: var(--cp-swatch-size);
@@ -1984,22 +2040,6 @@ abstract class FormWriterV2Base {
     border-radius: 2px;
     cursor: pointer;
 }
-.colorpicker-current {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.colorpicker-preview {
-    width: 36px;
-    height: 36px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    flex-shrink: 0;
-}
-.colorpicker-hex-input {
-    width: 100px;
-    font-family: monospace;
-}
 .colorpicker-hidden {
     display: none;
 }
@@ -2028,11 +2068,21 @@ abstract class FormWriterV2Base {
     "use strict";
 
     document.addEventListener("click", function(e) {
+        // Expand button click
+        if (e.target.closest(".colorpicker-expand-btn")) {
+            e.preventDefault();
+            var wrapper = e.target.closest(".colorpicker-wrapper");
+            wrapper.classList.toggle("expanded");
+            return;
+        }
+
         // Swatch click
         if (e.target.classList.contains("colorpicker-swatch")) {
             var wrapper = e.target.closest(".colorpicker-wrapper");
             var color = e.target.dataset.color;
             selectColor(wrapper, color);
+            wrapper.classList.remove("expanded");
+            return;
         }
 
         // Show more link
@@ -2043,6 +2093,14 @@ abstract class FormWriterV2Base {
                 el.classList.remove("colorpicker-hidden");
             });
             e.target.style.display = "none";
+            return;
+        }
+
+        // Click outside - close any open panels
+        if (!e.target.closest(".colorpicker-wrapper")) {
+            document.querySelectorAll(".colorpicker-wrapper.expanded").forEach(function(w) {
+                w.classList.remove("expanded");
+            });
         }
     });
 
