@@ -1,0 +1,59 @@
+# Joinery Docker Template
+# VERSION 1.0
+#
+# Usage:
+#   docker build \
+#     --build-arg SITENAME=clientsite \
+#     --build-arg POSTGRES_PASSWORD=secure_password \
+#     --build-arg DOMAIN_NAME=client.example.com \
+#     -t joinery-clientsite .
+#
+# Build Arguments:
+#   SITENAME          - Site directory name (default: dockertest)
+#   POSTGRES_PASSWORD - Database password (required)
+#   DOMAIN_NAME       - Domain for VirtualHost (default: localhost)
+
+FROM ubuntu:24.04
+
+# Build arguments (customizable per deployment)
+ARG SITENAME=dockertest
+ARG POSTGRES_PASSWORD
+ARG DOMAIN_NAME=localhost
+
+# Set as environment variables for runtime
+ENV DEBIAN_FRONTEND=noninteractive
+ENV SITENAME=${SITENAME}
+ENV POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+ENV DOMAIN_NAME=${DOMAIN_NAME}
+
+# Copy source files
+COPY ${SITENAME}/ /var/www/html/${SITENAME}/
+COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
+
+# Run server setup (installs all dependencies)
+RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/*.sh && \
+    cd /var/www/html/${SITENAME}/maintenance_scripts && \
+    ./server_setup.sh
+
+# Create VirtualHost configuration during build (persists across restarts)
+# Note: Composer install and 000-default disable are handled by new_account.sh
+RUN cp /var/www/html/${SITENAME}/maintenance_scripts/default_virtualhost.conf /etc/apache2/sites-available/${SITENAME}.conf && \
+    sed -i "s/{{SERVER_IP}}/*/g" /etc/apache2/sites-available/${SITENAME}.conf && \
+    sed -i "s/{{DOMAIN_NAME}}/${DOMAIN_NAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
+    sed -i "s/{{SITE_NAME}}/${SITENAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
+    mkdir -p /var/www/html/${SITENAME}_test/public_html && \
+    mkdir -p /var/www/html/${SITENAME}_test/logs && \
+    a2ensite ${SITENAME}.conf
+
+# Expose ports
+EXPOSE 80 5432
+
+# Start services
+CMD service postgresql start && \
+    sleep 3 && \
+    export PGPASSWORD="${POSTGRES_PASSWORD}" && \
+    ([ -f /var/www/html/${SITENAME}/config/Globalvars_site.php ] || \
+        cd /var/www/html/${SITENAME}/maintenance_scripts && \
+        ./new_account.sh ${SITENAME} ${DOMAIN_NAME} "*") && \
+    php /var/www/html/${SITENAME}/public_html/utils/update_database.php 2>/dev/null || true && \
+    apache2ctl -D FOREGROUND

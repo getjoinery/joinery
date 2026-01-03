@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.0 - Docker and Traditional Environment Compatible
+#VERSION 2.6 - Docker-aware Apache reload, disable 000-default, add composer install
 #Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file]
 
 # Get the directory where this script is located
@@ -69,13 +69,19 @@ if test -f "$GLOBALVARS_DEFAULT"; then
 	DB_PASSWORD=$(echo "$DB_PASSWORD_LINE" | sed -n "s/.*=\s*['\"]\\([^'\"]*\\)['\"].*/\\1/p")
 	
 	if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" == "" ]; then
-		echo "ERROR: Database password is empty in $GLOBALVARS_DEFAULT"
-		echo "Please edit the file and set a password for:"
-		echo "\$this->settings['dbpassword'] = 'your_password_here';"
-		exit 1
+		# If PGPASSWORD is set, use it instead
+		if [ -n "$PGPASSWORD" ]; then
+			echo "Using PGPASSWORD environment variable for database password."
+			DB_PASSWORD="$PGPASSWORD"
+		else
+			echo "ERROR: Database password is empty in $GLOBALVARS_DEFAULT"
+			echo "Please edit the file and set a password for:"
+			echo "\$this->settings['dbpassword'] = 'your_password_here';"
+			exit 1
+		fi
+	else
+		echo "Database password is configured."
 	fi
-	
-	echo "Database password is configured."
 	
 	# Validate database restore file (use default if not overridden)
 	if [ ! -f "$DATABASE_RESTORE_FILE" ]; then
@@ -94,12 +100,21 @@ fi
 #TEST FOR SITE EXISTENCE
 NEW_SITE_ROOT=/var/www/html/$1
 NEW_TEST_SITE_ROOT=/var/www/html/$1_test
+NEW_CONFIG_FILE=$NEW_SITE_ROOT/config/Globalvars_site.php
+
+# Check if this is a Docker first-run (directory exists but config doesn't)
+DOCKER_FIRST_RUN=false
 if [ -d "$NEW_SITE_ROOT" ]; then
-  echo "ERROR: $NEW_SITE_ROOT already exists."
-  exit 1
+  if [ ! -f "$NEW_CONFIG_FILE" ]; then
+    echo "Docker first-run detected: $NEW_SITE_ROOT exists but config doesn't. Continuing setup..."
+    DOCKER_FIRST_RUN=true
+  else
+    echo "ERROR: $NEW_SITE_ROOT already exists and is fully configured."
+    exit 1
+  fi
 fi
 
-if [ -d "$NEW_TEST_SITE_ROOT" ]; then
+if [ -d "$NEW_TEST_SITE_ROOT" ] && [ "$DOCKER_FIRST_RUN" = false ]; then
   echo "ERROR: $NEW_TEST_SITE_ROOT already exists."
   exit 1
 fi
@@ -111,136 +126,187 @@ else
 	exit 1
 fi
 
-# Create main site directories
-echo "Creating main site directory structure..."
-mkdir -p /var/www/html/$1
-mkdir -p /var/www/html/$1/public_html
-mkdir -p /var/www/html/$1/static_files
-mkdir -p /var/www/html/$1/config
-mkdir -p /var/www/html/$1/logs
-mkdir -p /var/www/html/$1/uploads
-mkdir -p /var/www/html/$1/uploads/small
-mkdir -p /var/www/html/$1/uploads/medium
-mkdir -p /var/www/html/$1/uploads/large
-mkdir -p /var/www/html/$1/uploads/thumbnail
-mkdir -p /var/www/html/$1/uploads/lthumbnail
-chown -R user1 /var/www/html/$1
-chgrp -R user1 /var/www/html/$1
+# Create main site directories (skip if Docker first-run)
+if [ "$DOCKER_FIRST_RUN" = true ]; then
+    echo "Docker first-run: Skipping directory creation (already exists from image)..."
+    # Ensure upload directories exist and have correct permissions
+    mkdir -p /var/www/html/$1/uploads/small
+    mkdir -p /var/www/html/$1/uploads/medium
+    mkdir -p /var/www/html/$1/uploads/large
+    mkdir -p /var/www/html/$1/uploads/thumbnail
+    mkdir -p /var/www/html/$1/uploads/lthumbnail
+    mkdir -p /var/www/html/$1/config
+else
+    echo "Creating main site directory structure..."
+    mkdir -p /var/www/html/$1
+    mkdir -p /var/www/html/$1/public_html
+    mkdir -p /var/www/html/$1/static_files
+    mkdir -p /var/www/html/$1/config
+    mkdir -p /var/www/html/$1/logs
+    mkdir -p /var/www/html/$1/uploads
+    mkdir -p /var/www/html/$1/uploads/small
+    mkdir -p /var/www/html/$1/uploads/medium
+    mkdir -p /var/www/html/$1/uploads/large
+    mkdir -p /var/www/html/$1/uploads/thumbnail
+    mkdir -p /var/www/html/$1/uploads/lthumbnail
+fi
+chown -R user1 /var/www/html/$1 2>/dev/null || true
+chgrp -R user1 /var/www/html/$1 2>/dev/null || true
 chmod -R 777 /var/www/html/$1/uploads
 chown -R www-data /var/www/html/$1/uploads
 
 # Copy configuration files for main site
 cp Globalvars_site_default.php /var/www/html/$1/config/Globalvars_site.php
-cp serve.php /var/www/html/$1/public_html/serve.php
+if [ "$DOCKER_FIRST_RUN" = false ]; then
+    cp serve.php /var/www/html/$1/public_html/serve.php
+fi
 sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1/config/Globalvars_site.php
 sed -i -e "s/{{SITE_NAME}}/${1}/g" /var/www/html/$1/config/Globalvars_site.php
-echo "$NEW_SITE_ROOT created."
+# Update password in config file using DB_PASSWORD
+sed -i -e "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${DB_PASSWORD}';/g" /var/www/html/$1/config/Globalvars_site.php
+echo "$NEW_SITE_ROOT created/configured."
 
 # Create test site directories
-echo "Creating test site directory structure..."
-mkdir -p /var/www/html/$1_test
-mkdir -p /var/www/html/$1_test/public_html
-mkdir -p /var/www/html/$1_test/static_files
-mkdir -p /var/www/html/$1_test/config
-mkdir -p /var/www/html/$1_test/logs
-mkdir -p /var/www/html/$1_test/uploads
-mkdir -p /var/www/html/$1_test/uploads/small
-mkdir -p /var/www/html/$1_test/uploads/medium
-mkdir -p /var/www/html/$1_test/uploads/large
-mkdir -p /var/www/html/$1_test/uploads/thumbnail
-mkdir -p /var/www/html/$1_test/uploads/lthumbnail
-chown -R user1 /var/www/html/$1_test
-chgrp -R user1 /var/www/html/$1_test
-chmod -R 777 /var/www/html/$1_test/uploads
-chown -R www-data /var/www/html/$1_test/uploads
+if [ "$DOCKER_FIRST_RUN" = false ]; then
+    echo "Creating test site directory structure..."
+    mkdir -p /var/www/html/$1_test
+    mkdir -p /var/www/html/$1_test/public_html
+    mkdir -p /var/www/html/$1_test/static_files
+    mkdir -p /var/www/html/$1_test/config
+    mkdir -p /var/www/html/$1_test/logs
+    mkdir -p /var/www/html/$1_test/uploads
+    mkdir -p /var/www/html/$1_test/uploads/small
+    mkdir -p /var/www/html/$1_test/uploads/medium
+    mkdir -p /var/www/html/$1_test/uploads/large
+    mkdir -p /var/www/html/$1_test/uploads/thumbnail
+    mkdir -p /var/www/html/$1_test/uploads/lthumbnail
+    chown -R user1 /var/www/html/$1_test
+    chgrp -R user1 /var/www/html/$1_test
+    chmod -R 777 /var/www/html/$1_test/uploads
+    chown -R www-data /var/www/html/$1_test/uploads
 
-# Copy configuration files for test site
-cp Globalvars_site_default.php /var/www/html/$1_test/config/Globalvars_site.php
-cp serve.php /var/www/html/$1_test/public_html/serve.php
-sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1_test/config/Globalvars_site.php
-sed -i -e "s/{{SITE_NAME}}/${1}_test/g" /var/www/html/$1_test/config/Globalvars_site.php
-echo "$NEW_TEST_SITE_ROOT created."
+    # Copy configuration files for test site
+    cp Globalvars_site_default.php /var/www/html/$1_test/config/Globalvars_site.php
+    cp serve.php /var/www/html/$1_test/public_html/serve.php
+    sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1_test/config/Globalvars_site.php
+    sed -i -e "s/{{SITE_NAME}}/${1}_test/g" /var/www/html/$1_test/config/Globalvars_site.php
+    echo "$NEW_TEST_SITE_ROOT created."
+else
+    # Docker first-run: Create minimal test site structure for Apache VirtualHost
+    echo "Docker first-run: Creating minimal test site directories for Apache..."
+    mkdir -p /var/www/html/$1_test/public_html
+    mkdir -p /var/www/html/$1_test/logs
+    chown -R www-data:www-data /var/www/html/$1_test
+    echo "Minimal test site structure created."
+fi
 
-# Create PostgreSQL database
-echo "Creating PostgreSQL database '$1'..."
-
-# Check for PGPASSWORD environment variable for non-interactive mode
+# Check if database already exists (handles container restarts with persistent volumes)
+echo "Checking if PostgreSQL database '$1' already exists..."
+DB_EXISTS=false
 if [ -n "$PGPASSWORD" ]; then
-	# Non-interactive mode (Docker/automated)
-	if ! createdb -T template0 "$1" -U postgres; then
-		echo "ERROR: Failed to create database '$1'"
-		echo "Rolling back: removing created directories..."
-		rm -rf "/var/www/html/$1"
-		rm -rf "/var/www/html/$1_test"
-		exit 1
+	if psql -U postgres -lqt | cut -d \| -f 1 | grep -qw "$1"; then
+		DB_EXISTS=true
+		echo "Database '$1' already exists. Skipping creation and restore."
 	fi
 else
-	# Interactive mode (traditional)
-	echo "Enter PostgreSQL postgres user password:"
-	if ! createdb -T template0 "$1" -U postgres -W; then
-		echo "ERROR: Failed to create database '$1'"
-		echo "Rolling back: removing created directories..."
-		rm -rf "/var/www/html/$1"
-		rm -rf "/var/www/html/$1_test"
-		exit 1
+	if psql -U postgres -W -lqt | cut -d \| -f 1 | grep -qw "$1"; then
+		DB_EXISTS=true
+		echo "Database '$1' already exists. Skipping creation and restore."
 	fi
 fi
 
-# Load database restore file
-echo "Loading database from restore file '$DATABASE_RESTORE_FILE'..."
+if [ "$DB_EXISTS" = false ]; then
+	# Create PostgreSQL database
+	echo "Creating PostgreSQL database '$1'..."
 
-# Check if file is compressed
-if [[ "$DATABASE_RESTORE_FILE" == *.gz ]]; then
-	# Decompress and pipe to psql
+	# Check for PGPASSWORD environment variable for non-interactive mode
 	if [ -n "$PGPASSWORD" ]; then
-		# Non-interactive mode
-		if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -d "$1"; then
-			echo "ERROR: Failed to load database from compressed restore file"
-			echo "Database '$1' was created but restore failed."
-			echo "You may need to manually restore or recreate the database."
-		else
-			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		# Non-interactive mode (Docker/automated)
+		if ! createdb -T template0 "$1" -U postgres; then
+			echo "ERROR: Failed to create database '$1'"
+			echo "Rolling back: removing created directories..."
+			rm -rf "/var/www/html/$1"
+			rm -rf "/var/www/html/$1_test"
+			exit 1
 		fi
 	else
-		# Interactive mode
+		# Interactive mode (traditional)
 		echo "Enter PostgreSQL postgres user password:"
-		if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -W -d "$1"; then
-			echo "ERROR: Failed to load database from compressed restore file"
-			echo "Database '$1' was created but restore failed."
-			echo "You may need to manually restore or recreate the database."
-		else
-			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		if ! createdb -T template0 "$1" -U postgres -W; then
+			echo "ERROR: Failed to create database '$1'"
+			echo "Rolling back: removing created directories..."
+			rm -rf "/var/www/html/$1"
+			rm -rf "/var/www/html/$1_test"
+			exit 1
 		fi
 	fi
-else
-	# Load uncompressed SQL file
-	if [ -n "$PGPASSWORD" ]; then
-		# Non-interactive mode
-		if ! psql -U postgres -d "$1" -f "$DATABASE_RESTORE_FILE"; then
-			echo "ERROR: Failed to load database from restore file"
-			echo "Database '$1' was created but restore failed."
-			echo "You may need to manually restore or recreate the database."
+
+	# Load database restore file
+	echo "Loading database from restore file '$DATABASE_RESTORE_FILE'..."
+
+	# Check if file is compressed
+	if [[ "$DATABASE_RESTORE_FILE" == *.gz ]]; then
+		# Decompress and pipe to psql
+		if [ -n "$PGPASSWORD" ]; then
+			# Non-interactive mode
+			if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -d "$1"; then
+				echo "ERROR: Failed to load database from compressed restore file"
+				echo "Database '$1' was created but restore failed."
+				echo "You may need to manually restore or recreate the database."
+			else
+				echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+			fi
 		else
-			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+			# Interactive mode
+			echo "Enter PostgreSQL postgres user password:"
+			if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -W -d "$1"; then
+				echo "ERROR: Failed to load database from compressed restore file"
+				echo "Database '$1' was created but restore failed."
+				echo "You may need to manually restore or recreate the database."
+			else
+				echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+			fi
 		fi
 	else
-		# Interactive mode
-		echo "Enter PostgreSQL postgres user password:"
-		if ! psql -U postgres -W -d "$1" -f "$DATABASE_RESTORE_FILE"; then
-			echo "ERROR: Failed to load database from restore file"
-			echo "Database '$1' was created but restore failed."
-			echo "You may need to manually restore or recreate the database."
+		# Load uncompressed SQL file
+		if [ -n "$PGPASSWORD" ]; then
+			# Non-interactive mode
+			if ! psql -U postgres -d "$1" -f "$DATABASE_RESTORE_FILE"; then
+				echo "ERROR: Failed to load database from restore file"
+				echo "Database '$1' was created but restore failed."
+				echo "You may need to manually restore or recreate the database."
+			else
+				echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+			fi
 		else
-			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+			# Interactive mode
+			echo "Enter PostgreSQL postgres user password:"
+			if ! psql -U postgres -W -d "$1" -f "$DATABASE_RESTORE_FILE"; then
+				echo "ERROR: Failed to load database from restore file"
+				echo "Database '$1' was created but restore failed."
+				echo "You may need to manually restore or recreate the database."
+			else
+				echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+			fi
 		fi
 	fi
 fi
+
+# Install composer dependencies
+# Must be after database restore (Globalvars needs stg_settings table)
+# Before virtualhost setup (fail early if composer fails)
+echo "Installing composer dependencies..."
+if ! php /var/www/html/$1/public_html/utils/composer_install_if_needed.php; then
+	echo "ERROR: Failed to install composer dependencies"
+	exit 1
+fi
+echo "Composer dependencies installed."
 
 VIRTUALHOST_FILE=/etc/apache2/sites-available/$1.conf
 if [ -f "$VIRTUALHOST_FILE" ]; then
     echo "$VIRTUALHOST_FILE exists."
 else
-	cp /home/user1/default_virtualhost.conf /etc/apache2/sites-available/$1.conf
+	cp "$VIRTUALHOST_TEMPLATE" /etc/apache2/sites-available/$1.conf
 	# Updated to use new {{}} placeholder format
 	sed -i -e "s/{{SERVER_IP}}/${3}/g" /etc/apache2/sites-available/$1.conf
 	sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /etc/apache2/sites-available/$1.conf
@@ -254,6 +320,9 @@ if ! apache2ctl configtest; then
 	echo "ERROR: Apache configuration test failed. Please fix configuration errors before proceeding."
 	exit 1
 fi
+
+# Disable default site (safe on all servers - we're enabling our own site)
+a2dissite 000-default.conf 2>/dev/null || true
 
 # Enable the new virtualhost
 echo "Enabling virtualhost $1..."
@@ -272,18 +341,22 @@ if ! apache2ctl configtest; then
 	exit 1
 fi
 
-# Reload Apache gracefully
-echo "Reloading Apache..."
-if ! service apache2 reload; then
-	echo "ERROR: Failed to reload Apache. Attempting graceful restart..."
-	if ! apache2ctl graceful; then
-		echo "ERROR: Failed to gracefully restart Apache."
-		echo "WARNING: Apache may be in an inconsistent state. Please check manually."
-		exit 1
+# Only reload if not Docker (Docker starts Apache fresh after this script)
+# Check both /.dockerenv file and cgroup for robust Docker detection
+if [ ! -f /.dockerenv ] && ! grep -q docker /proc/1/cgroup 2>/dev/null; then
+	echo "Reloading Apache..."
+	if ! service apache2 reload; then
+		echo "ERROR: Failed to reload Apache. Attempting graceful restart..."
+		if ! apache2ctl graceful; then
+			echo "ERROR: Failed to gracefully restart Apache."
+			echo "WARNING: Apache may be in an inconsistent state. Please check manually."
+			exit 1
+		fi
 	fi
+	echo "Apache successfully reloaded."
+else
+	echo "Docker detected - skipping Apache reload (will start fresh via apache2ctl -D FOREGROUND)"
 fi
-
-echo "Apache successfully reloaded."
 echo "All done. Site $1 is now active and accessible."
 echo "Main site: http://${2}"
 echo "Test site: http://test.${2}"
