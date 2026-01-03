@@ -21,6 +21,31 @@
 	// Increase execution time for large zip file creation (5 minutes)
 	set_time_limit(300);
 
+	// Handle delete request - process before rendering page
+	if(isset($_REQUEST['delete']) && is_numeric($_REQUEST['delete'])){
+		$delete_id = intval($_REQUEST['delete']);
+		$upgrade_to_delete = new Upgrade($delete_id, TRUE);
+
+		if($upgrade_to_delete->key){
+			// Get the archive filename before deleting
+			$archive_filename = $upgrade_to_delete->get('upg_name');
+			$archive_path = $full_site_dir.'/static_files/'.$archive_filename;
+
+			// Delete the archive file if it exists
+			if(file_exists($archive_path)){
+				unlink($archive_path);
+			}
+
+			// Delete the database record using permanent_delete
+			$version_string = $upgrade_to_delete->get('upg_major_version').'.'.$upgrade_to_delete->get('upg_minor_version');
+			$upgrade_to_delete->permanent_delete();
+
+			// Redirect to clean URL with success message
+			header('Location: /utils/publish_upgrade?deleted=' . urlencode($version_string));
+			exit;
+		}
+	}
+
 	if(isset($_REQUEST['version_major']) && isset($_REQUEST['version_minor'])){
 
 		$version_major = $_REQUEST['version_major'];
@@ -271,7 +296,12 @@
 		
 		$pageoptions['title'] = "Publish Upgrade";
 		$page->begin_box($pageoptions);
-		
+
+		// Display delete result message if redirected after delete
+		if(isset($_REQUEST['deleted'])){
+			echo '<div class="alert alert-success">Upgrade version '.htmlspecialchars($_REQUEST['deleted']).' has been deleted.</div>';
+		}
+
 		echo '<h4>Upgrade History</h4>';
 		
 		$upgrades = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 10, 0);
@@ -292,6 +322,11 @@
 					$version_string .= ' <span style="color: blue;">[zip - legacy]</span>';
 				}
 			}
+
+			// Add delete link
+			$delete_url = '/utils/publish_upgrade?delete=' . $upgrade->key;
+			$version_label = $upgrade->get('upg_major_version') . '.' . $upgrade->get('upg_minor_version');
+			$version_string .= ' <a href="' . htmlspecialchars($delete_url) . '" onclick="return confirm(\'Are you sure you want to delete version ' . $version_label . '? This will delete both the archive file and database record.\');" style="color: #dc3545; margin-left: 10px;"><i class="fas fa-trash-alt"></i> Delete</a>';
 
 			echo $version_string.'<br />';
 		}
