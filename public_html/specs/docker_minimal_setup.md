@@ -1391,3 +1391,56 @@ When migrating existing sites:
 2. **Uploads directory:** Copy all files from the existing uploads directory
 3. **Config file:** Update `Globalvars_site.php` if paths need adjustment
 4. **Test thoroughly:** Verify all functionality before switching production traffic
+
+---
+
+## Appendix: Automated Deployment with sshpass
+
+When automating Docker deployments to remote servers, `sshpass` enables non-interactive SSH connections with password authentication. This is useful for scripted deployments before SSH keys are configured.
+
+### Installing sshpass
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y sshpass
+
+# CentOS/RHEL
+sudo yum install -y sshpass
+
+# macOS (via Homebrew)
+brew install hudochenkov/sshpass/sshpass
+```
+
+### Usage Examples
+
+```bash
+# Basic SSH command with password
+sshpass -p 'YOUR_PASSWORD' ssh -o StrictHostKeyChecking=no user@server 'command'
+
+# Copy files to remote server
+sshpass -p 'YOUR_PASSWORD' scp -o StrictHostKeyChecking=no localfile.tar.gz user@server:~/
+
+# Run multiple commands
+sshpass -p 'YOUR_PASSWORD' ssh user@server 'cd ~/joinery-docker && docker build -t joinery-mysite .'
+```
+
+### Security Considerations
+
+- **Use SSH keys for production:** sshpass is convenient for initial setup but SSH keys are more secure for ongoing access
+- **Avoid storing passwords in scripts:** Use environment variables or secure vaults
+- **StrictHostKeyChecking=no:** Only use during initial setup; remove after adding the host to known_hosts
+
+### Setting Up SSH Keys (Recommended After Initial Setup)
+
+After initial deployment with sshpass, configure SSH keys for secure, passwordless access:
+
+```bash
+# Generate key pair (if you don't have one)
+ssh-keygen -t ed25519 -f ~/.ssh/id_joinery
+
+# Copy public key to server using sshpass
+sshpass -p 'YOUR_PASSWORD' ssh-copy-id -i ~/.ssh/id_joinery.pub -o StrictHostKeyChecking=no user@server
+
+# Now you can SSH without password
+ssh -i ~/.ssh/id_joinery user@server
+```
