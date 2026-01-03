@@ -394,10 +394,63 @@ When integrating a theme, update these paths:
 
 3. **Consolidate similar images:** Use one set of placeholder images
 
+## Production-Only Files Rule
+
+**CRITICAL:** Only add files to a theme that are needed in production deployment. Theme directories are included in release archives, so unnecessary files waste space and bandwidth.
+
+### Files That MUST Be Excluded
+
+**Never include these file types in themes:**
+
+| File Type | Extension | Reason |
+|-----------|-----------|--------|
+| Photoshop files | `.psd` | Source files, not needed for rendering |
+| Illustrator files | `.ai` | Source files, not needed for rendering |
+| EPS files | `.eps` | Vector source files |
+| InDesign files | `.indd` | Source files |
+| Video files | `.mp4`, `.webm`, `.mov`, `.avi` | Demo content, too large |
+| Raw images | `.raw`, `.cr2`, `.nef` | Unprocessed camera files |
+| Archive files | `.zip`, `.tar`, `.gz` | Compressed source bundles |
+
+### Files That ARE Allowed
+
+| File Type | Extension | Notes |
+|-----------|-----------|-------|
+| Images | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.svg` | Optimized for web |
+| Stylesheets | `.css` | Required for styling |
+| JavaScript | `.js` | Required for functionality |
+| Fonts | `.woff`, `.woff2`, `.ttf`, `.eot` | Web fonts |
+| JSON | `.json` | Configuration files |
+| PHP | `.php` | Theme logic files |
+
+### When In Doubt, Ask
+
+If you're unsure whether a file should be included:
+1. **Ask before adding** - It's easier to add files later than to remove them from deployed sites
+2. **Check file size** - Files over 1MB should be questioned
+3. **Check file purpose** - Is it needed to render pages, or is it source/demo content?
+
+### Cleaning Up Purchased Themes
+
+Many purchased HTML templates include source files and demo content. Before integrating:
+
+```bash
+# Remove source/design files
+find theme/$THEME_NAME -type f \( -name "*.psd" -o -name "*.ai" -o -name "*.eps" -o -name "*.indd" \) -delete
+
+# Remove video files
+find theme/$THEME_NAME -type f \( -name "*.mp4" -o -name "*.webm" -o -name "*.mov" \) -delete
+
+# Check what's left and how much space
+du -sh theme/$THEME_NAME
+find theme/$THEME_NAME -type f -size +1M -exec ls -lh {} \;
+```
+
 ## Validation Checklist
 
 Before declaring theme complete:
 
+- [ ] **No source files present** (.psd, .ai, .eps, .indd, .mp4, .webm, .mov)
 - [ ] All directories created with 755 permissions
 - [ ] All files have 644 permissions
 - [ ] theme.json exists and is valid JSON
