@@ -2,7 +2,7 @@
 
 # Complete Linode Server Setup Script for Ubuntu 24.04
 # This script sets up LAMP stack with Composer and your specified dependencies
-# Version 2.1 - Improved Docker build detection
+# Version 2.2 - Skip SSH/firewall/fail2ban in Docker containers
 
 # CONFIGURATION - Edit these values before running (optional)
 # Use environment variable if set (for Docker), otherwise prompt
@@ -353,48 +353,52 @@ sed -i 's/^;extension=pgsql/extension=pgsql/' /etc/php/8.3/apache2/php.ini
 
 log "PDO PostgreSQL extension enabled"
 
-# Configure SSH security
-log "Configuring SSH security..."
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+# Skip SSH, firewall, and security hardening in Docker (not needed in containers)
+if is_docker; then
+    log "Docker detected - skipping SSH, firewall, and security hardening (not needed in containers)"
+else
+    # Configure SSH security
+    log "Configuring SSH security..."
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
 
-# Disable root login via SSH
-sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+    # Disable root login via SSH
+    sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+    sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
 
-# Additional SSH hardening
-sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-sed -i 's/PermitEmptyPasswords yes/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-sed -i 's/#MaxAuthTries 6/MaxAuthTries 3/' /etc/ssh/sshd_config
-sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 300/' /etc/ssh/sshd_config
-sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' /etc/ssh/sshd_config
+    # Additional SSH hardening
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config
+    sed -i 's/PermitEmptyPasswords yes/PermitEmptyPasswords no/' /etc/ssh/sshd_config
+    sed -i 's/#MaxAuthTries 6/MaxAuthTries 3/' /etc/ssh/sshd_config
+    sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 300/' /etc/ssh/sshd_config
+    sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' /etc/ssh/sshd_config
 
-# Restart SSH service to apply changes
-service_restart ssh
+    # Restart SSH service to apply changes
+    service_restart ssh
 
-log "SSH security configured: root login disabled, connection limits set"
+    log "SSH security configured: root login disabled, connection limits set"
 
-# Configure UFW firewall
-log "Configuring firewall..."
-ufw --force reset
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow ssh
-ufw allow http
-ufw allow https
-ufw allow 5432
-ufw --force enable
+    # Configure UFW firewall
+    log "Configuring firewall..."
+    ufw --force reset
+    ufw default deny incoming
+    ufw default allow outgoing
+    ufw allow ssh
+    ufw allow http
+    ufw allow https
+    ufw allow 5432
+    ufw --force enable
 
-# Configure fail2ban
-log "Configuring fail2ban..."
-service_start fail2ban
+    # Configure fail2ban
+    log "Configuring fail2ban..."
+    service_start fail2ban
 
-# Create basic fail2ban jail configuration using defaults
-cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+    # Create basic fail2ban jail configuration using defaults
+    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
 
-# Enable SSH protection (most important)
-tee -a /etc/fail2ban/jail.local > /dev/null << 'EOF'
+    # Enable SSH protection (most important)
+    tee -a /etc/fail2ban/jail.local > /dev/null << 'EOF'
 
 # Enable SSH protection
 [sshd]
@@ -414,25 +418,25 @@ enabled = true
 enabled = true
 EOF
 
-# Restart fail2ban to apply configuration
-service_restart fail2ban
+    # Restart fail2ban to apply configuration
+    service_restart fail2ban
 
-log "fail2ban configured with default settings and basic protections enabled"
+    log "fail2ban configured with default settings and basic protections enabled"
 
-# Install automatic security updates
-log "Configuring automatic security updates..."
-apt install -y unattended-upgrades apt-listchanges
+    # Install automatic security updates
+    log "Configuring automatic security updates..."
+    apt install -y unattended-upgrades apt-listchanges
 
-# Configure automatic security updates
-tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null << 'EOF'
+    # Configure automatic security updates
+    tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null << 'EOF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::Download-Upgradeable-Packages "1";
 APT::Periodic::AutocleanInterval "7";
 EOF
 
-# Configure unattended upgrades for security updates only
-tee /etc/apt/apt.conf.d/50unattended-upgrades > /dev/null << 'EOF'
+    # Configure unattended upgrades for security updates only
+    tee /etc/apt/apt.conf.d/50unattended-upgrades > /dev/null << 'EOF'
 Unattended-Upgrade::Allowed-Origins {
     "${distro_id}:${distro_codename}-security";
     "${distro_id}ESMApps:${distro_codename}-apps-security";
@@ -446,19 +450,23 @@ Unattended-Upgrade::Automatic-Reboot "false";
 Unattended-Upgrade::Automatic-Reboot-Time "02:00";
 EOF
 
-log "Automatic security updates configured"
+    log "Automatic security updates configured"
+fi
 
-# Security hardening
-log "Applying additional security hardening..."
+# Security hardening - skip in Docker (kernel settings are managed by host)
+if is_docker; then
+    log "Docker detected - skipping kernel security hardening (managed by host)"
+else
+    log "Applying additional security hardening..."
 
-# Disable unused network protocols
-echo "install dccp /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
-echo "install sctp /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
-echo "install rds /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
-echo "install tipc /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
+    # Disable unused network protocols
+    echo "install dccp /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
+    echo "install sctp /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
+    echo "install rds /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
+    echo "install tipc /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
 
-# Set kernel parameters for security
-tee /etc/sysctl.d/99-security.conf > /dev/null << 'EOF'
+    # Set kernel parameters for security
+    tee /etc/sysctl.d/99-security.conf > /dev/null << 'EOF'
 # IP Spoofing protection
 net.ipv4.conf.default.rp_filter = 1
 net.ipv4.conf.all.rp_filter = 1
@@ -503,10 +511,11 @@ net.ipv4.tcp_syn_retries = 5
 kernel.randomize_va_space = 2
 EOF
 
-# Apply sysctl settings (ignore errors for non-existent parameters)
-sysctl -p /etc/sysctl.d/99-security.conf || true
+    # Apply sysctl settings (ignore errors for non-existent parameters)
+    sysctl -p /etc/sysctl.d/99-security.conf || true
 
-log "Security hardening applied"
+    log "Security hardening applied"
+fi
 
 # Set proper permissions for web directory
 log "Setting up web directory permissions..."
