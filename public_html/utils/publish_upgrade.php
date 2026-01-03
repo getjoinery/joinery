@@ -205,7 +205,8 @@
 			'fix_permissions.sh',
 			'fix_postgres_auth.sh',
 			'Globalvars_site_default.php',
-			'default_virtualhost.conf'
+			'default_virtualhost.conf',
+			'virtualhost_update_script.sh'
 		];
 
 		$maintenance_dir = '/var/www/html/joinerytest/maintenance_scripts/';

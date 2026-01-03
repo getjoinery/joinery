@@ -359,6 +359,17 @@ if (!empty($data_files)) {
     foreach ($data_files as $table => $file) {
         $data_content = file_get_contents($file);
         if ($data_content) {
+            // Transform absolute composerAutoLoad paths to relative paths for portability
+            // This ensures the install SQL works in any environment (Docker, traditional, etc.)
+            if ($table === 'stg_settings') {
+                // Match composerAutoLoad setting with absolute vendor path and convert to relative
+                $data_content = preg_replace(
+                    "/('composerAutoLoad',\s*')\/var\/www\/html\/[^\/]+\/vendor\/(')/",
+                    '$1../vendor/$2',
+                    $data_content
+                );
+                echo "   Transformed composerAutoLoad to use relative path\n";
+            }
             fwrite($output_handle, "-- Data for table: $table\n");
             fwrite($output_handle, $data_content);
             fwrite($output_handle, "\n");
