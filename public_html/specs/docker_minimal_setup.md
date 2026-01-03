@@ -1,12 +1,16 @@
 # Specification: Minimal Docker Setup - Single Container Per Site
 
-## Current Status (as of December 2024)
+## Current Status (as of January 2025)
 
-**Overall Docker Compatibility: 95% Complete** ✅
+**Specification Status: 100% COMPLETE** ✅
 
-- ✅ **Phase 1 (Archive Structure):** FULLY IMPLEMENTED - tar.gz creation, extraction, and deployment working
-- ✅ **Phase 2 (Composer Management):** COMPLETE - All components implemented
-- 📋 **Docker Implementation:** SPECIFICATION COMPLETE - Ready to implement
+- ✅ **Phase 1 (Archive Structure):** IMPLEMENTED - `publish_upgrade.php` creates tar.gz archives
+- ✅ **Phase 2 (Composer Management):** IMPLEMENTED - All components updated
+- ✅ **Phase 3 (Docker Specification):** COMPLETE - Ready to implement
+
+**Testing Status: NOT YET VALIDATED** 🧪
+
+See [Validation Checklist](#validation-checklist) for required testing steps.
 
 Fresh Docker installations use `joinery-install.sql.gz` which already has the correct `../vendor/` path configured. No additional setup needed.
 
@@ -15,6 +19,16 @@ Fresh Docker installations use `joinery-install.sql.gz` which already has the co
 Run each Joinery site in its own Docker container that includes everything - Apache, PHP, PostgreSQL, and the application. Just run your existing server_setup.sh script unchanged.
 
 **Strategy: Your script does ALL the work, Docker just provides Ubuntu 24.04.**
+
+### Persistent Storage Philosophy
+
+**We err on the side of including MORE directories for persistent storage.** This ensures:
+- No unexpected data loss across container restarts
+- Complete operational state preserved
+- Logs and audit trails maintained
+- Fast restarts without cache rebuilding
+
+See [Understanding the Volume Mounts](#understanding-the-volume-mounts-data-directories) for the complete list of 11 persistent volumes we recommend.
 
 ## Important: Site Name Variable
 
@@ -182,19 +196,75 @@ joinery-X-Y.tar.gz
     └── ... (8 more scripts)
 ```
 
-### Next Steps to Reach 100%
+---
 
-**Priority 1: End-to-End Test (30-60 minutes)**
-- Create fresh archive with publish_upgrade.php
-- Extract and run server_setup.sh on test system
-- Verify `/var/www/html/{SITE}/vendor/` is populated
-- Verify `/var/www/html/{SITE}/maintenance_scripts/` deployed correctly
-- Run deploy.sh and confirm dependencies installed
+## Validation Checklist
 
-**Priority 2: Docker Implementation**
-- All infrastructure is ready
-- Build test container following this specification
-- Verify container starts and application loads correctly
+This checklist validates that all components work together. The specification is complete; these steps confirm the implementation.
+
+### Test 1: Archive Creation
+- [ ] Run `php /var/www/html/{SITE}/public_html/utils/publish_upgrade.php`
+- [ ] Verify archive created at `/var/www/html/{SITE}/static_files/joinery-X-Y.tar.gz`
+- [ ] Extract archive and verify contents:
+  - [ ] `public_html/` directory with application files
+  - [ ] `config/Globalvars_site_default.php` template
+  - [ ] `maintenance_scripts/server_setup.sh`
+  - [ ] `maintenance_scripts/deploy.sh`
+  - [ ] `maintenance_scripts/new_account.sh`
+  - [ ] `maintenance_scripts/joinery-install.sql.gz`
+
+### Test 2: Fresh Server Setup (Non-Docker)
+- [ ] Copy archive to clean Ubuntu 24.04 system
+- [ ] Extract: `tar -xzf joinery-X-Y.tar.gz`
+- [ ] Run `bash maintenance_scripts/server_setup.sh`
+- [ ] Verify directory structure created at `/var/www/html/{SITE}/`
+- [ ] Verify `/var/www/html/{SITE}/vendor/` populated with composer dependencies
+- [ ] Verify `/var/www/html/{SITE}/maintenance_scripts/` contains scripts
+- [ ] Run `php /var/www/html/{SITE}/public_html/utils/update_database.php` to apply migrations
+- [ ] Access site in browser, verify application loads
+
+**Note:** `deploy.sh` is for git-based deployments and is not used in tar.gz-based installations.
+
+### Test 3: Docker Container Build
+- [ ] Create `Dockerfile` per specification (see [Files to Create](#files-to-create-only-2))
+- [ ] Create `.dockerignore` per specification
+- [ ] Run `docker build -t joinery-{SITENAME} .`
+- [ ] Verify build completes without errors
+
+### Test 4: Docker Container Runtime
+- [ ] Run container with all persistent volumes (see [Step 5: Run the Container](#step-5-run-the-container)):
+  ```bash
+  docker run -d --name {SITENAME} -p 8080:80 \
+    -v {SITENAME}_postgres:/var/lib/postgresql \
+    -v {SITENAME}_uploads:/var/www/html/{SITENAME}/uploads \
+    -v {SITENAME}_config:/var/www/html/{SITENAME}/config \
+    [... all 11 volumes ...] \
+    joinery-{SITENAME}
+  ```
+- [ ] Check container logs: `docker logs {SITENAME}`
+- [ ] Verify PostgreSQL started: `docker exec {SITENAME} service postgresql status`
+- [ ] Verify Apache running: `docker exec {SITENAME} apache2ctl -t`
+- [ ] Access `http://localhost:8080` in browser
+- [ ] Verify application loads and is functional
+
+### Test 5: Data Persistence
+- [ ] Create test data in application (e.g., create a user account)
+- [ ] Stop container: `docker stop {SITENAME}`
+- [ ] Start container: `docker start {SITENAME}`
+- [ ] Verify test data persists after restart
+- [ ] Remove and recreate container (keeping volumes):
+  ```bash
+  docker rm {SITENAME}
+  docker run -d --name {SITENAME} [same volume mounts] joinery-{SITENAME}
+  ```
+- [ ] Verify data still persists
+
+### Test 6: Reverse Proxy (Optional)
+- [ ] Configure Apache reverse proxy per [Making Sites Accessible Without Port Numbers](#making-sites-accessible-without-port-numbers)
+- [ ] Run `sudo a2ensite {SITENAME}` and `sudo systemctl reload apache2`
+- [ ] Access site via domain name without port
+- [ ] Run `sudo certbot --apache -d {DOMAIN}` for SSL
+- [ ] Verify HTTPS access works
 
 ---
 
@@ -390,18 +460,22 @@ docker run -d --name SITENAME -p PORT:80 joinery-SITENAME
 
 # RECOMMENDED: Run with persistent storage for all data directories
 # Replace SITENAME and PORT with your actual values!
+# We include ALL directories that might benefit from persistence
 docker run -d \
   --name SITENAME \
   -p PORT:80 \
   -p PORT_PLUS_1000:5432 \
   -v SITENAME_postgres:/var/lib/postgresql \
   -v SITENAME_uploads:/var/www/html/SITENAME/uploads \
-  -v SITENAME_cache:/var/www/html/SITENAME/cache \
-  -v SITENAME_logs:/var/www/html/SITENAME/logs \
-  -v SITENAME_static:/var/www/html/SITENAME/static_files \
-  -v SITENAME_backups:/var/www/html/SITENAME/backups \
   -v SITENAME_config:/var/www/html/SITENAME/config \
+  -v SITENAME_backups:/var/www/html/SITENAME/backups \
+  -v SITENAME_static:/var/www/html/SITENAME/static_files \
+  -v SITENAME_logs:/var/www/html/SITENAME/logs \
+  -v SITENAME_cache:/var/www/html/SITENAME/cache \
+  -v SITENAME_vendor:/var/www/html/SITENAME/vendor \
   -v SITENAME_sessions:/var/lib/php/sessions \
+  -v SITENAME_apache_logs:/var/log/apache2 \
+  -v SITENAME_pg_logs:/var/log/postgresql \
   joinery-SITENAME
 
 # Real example for site "integralzen" on port 8080:
@@ -411,35 +485,106 @@ docker run -d \
   -p 9080:5432 \
   -v integralzen_postgres:/var/lib/postgresql \
   -v integralzen_uploads:/var/www/html/integralzen/uploads \
-  -v integralzen_cache:/var/www/html/integralzen/cache \
-  -v integralzen_logs:/var/www/html/integralzen/logs \
-  -v integralzen_static:/var/www/html/integralzen/static_files \
-  -v integralzen_backups:/var/www/html/integralzen/backups \
   -v integralzen_config:/var/www/html/integralzen/config \
+  -v integralzen_backups:/var/www/html/integralzen/backups \
+  -v integralzen_static:/var/www/html/integralzen/static_files \
+  -v integralzen_logs:/var/www/html/integralzen/logs \
+  -v integralzen_cache:/var/www/html/integralzen/cache \
+  -v integralzen_vendor:/var/www/html/integralzen/vendor \
   -v integralzen_sessions:/var/lib/php/sessions \
+  -v integralzen_apache_logs:/var/log/apache2 \
+  -v integralzen_pg_logs:/var/log/postgresql \
   joinery-integralzen
 ```
 
 ### Understanding the Volume Mounts (Data Directories)
 
+**IMPORTANT:** We err on the side of including more directories for persistent storage. This ensures no data loss and preserves operational state across container restarts.
+
 Each `-v` line creates persistent storage that survives container restarts:
+
+#### Critical Volumes (Data Loss Without These)
 
 | Volume | Directory | What Gets Preserved | Why It Matters |
 |--------|-----------|-------------------|----------------|
-| `joinery_postgres` | `/var/lib/postgresql` | PostgreSQL database files | **Critical:** All user data, settings, content |
-| `joinery_uploads` | `.../uploads` | User uploaded files, images | **Critical:** User content, profile pics, documents |
-| `joinery_cache` | `.../cache` | Compiled templates, query cache | **Important:** Avoids slow rebuilds after restart |
-| `joinery_logs` | `.../logs` | Error logs, access logs | **Important:** Debugging, audit trails |
-| `joinery_static` | `.../static_files` | Generated PDFs, exports | **Important:** User-generated downloads |
-| `joinery_backups` | `.../backups` | Database backups, migrations | **Important:** Recovery data |
-| `joinery_config` | `.../config` | Globalvars_site.php | **Important:** Custom settings that may change |
-| `joinery_sessions` | `/var/lib/php/sessions` | PHP session files | **Nice to have:** Users stay logged in |
+| `SITENAME_postgres` | `/var/lib/postgresql` | PostgreSQL database files | **Critical:** All user data, settings, content, accounts |
+| `SITENAME_uploads` | `.../uploads` | User uploaded files, images | **Critical:** User content, profile pics, documents, videos |
+| `SITENAME_config` | `.../config` | Globalvars_site.php | **Critical:** Database credentials, site settings |
+
+#### Important Volumes (Operational State)
+
+| Volume | Directory | What Gets Preserved | Why It Matters |
+|--------|-----------|-------------------|----------------|
+| `SITENAME_backups` | `.../backups` | Database backups, migration backups | **Important:** Recovery data, rollback capability |
+| `SITENAME_static` | `.../static_files` | Generated upgrade packages, exports | **Important:** System exports, upgrade files |
+| `SITENAME_logs` | `.../logs` | Application error logs, access logs | **Important:** Debugging, audit trails (2.5GB+) |
+| `SITENAME_cache` | `.../cache` | Compiled templates, static page cache | **Important:** Performance, avoids slow rebuilds |
+
+#### Recommended Volumes (Convenience & Performance)
+
+| Volume | Directory | What Gets Preserved | Why It Matters |
+|--------|-----------|-------------------|----------------|
+| `SITENAME_vendor` | `.../vendor` | Composer dependencies | **Recommended:** Preserves exact package versions |
+| `SITENAME_sessions` | `/var/lib/php/sessions` | PHP session files | **Recommended:** Users stay logged in after restart |
+| `SITENAME_apache_logs` | `/var/log/apache2` | Apache access/error logs | **Recommended:** Web server audit trail |
+| `SITENAME_pg_logs` | `/var/log/postgresql` | PostgreSQL server logs | **Recommended:** Database diagnostics |
 
 **Without these volumes:** Every container restart loses all this data!
 
-### Simplified Version (Minimum Recommended)
+### Directory Structure Reference
 
-If the full list seems overwhelming, at minimum use:
+For reference, here is the complete directory structure showing which directories benefit from persistent storage:
+
+```
+/var/www/html/SITENAME/
+├── backups/                    # ✅ PERSIST - Database/migration backups
+│   └── field_migration_*/      #    Migration backup subdirectories
+├── cache/                      # ✅ PERSIST - Runtime cache
+│   └── static_pages/           #    Cached static page content
+├── config/                     # ✅ PERSIST - Site configuration
+│   └── Globalvars_site.php     #    Database credentials, settings
+├── logs/                       # ✅ PERSIST - Application logs
+│   ├── access.log              #    Apache access log
+│   └── error.log               #    Apache error log (can be large)
+├── maintenance_scripts/        # ❌ NO PERSIST - Comes with image
+├── public_html/                # ❌ NO PERSIST - Application code in image
+│   ├── adm/                    #    Admin interface
+│   ├── ajax/                   #    AJAX endpoints
+│   ├── api/                    #    REST API
+│   ├── assets/                 #    Static assets
+│   ├── data/                   #    Model classes
+│   ├── docs/                   #    Documentation
+│   ├── includes/               #    Core classes
+│   ├── logic/                  #    Business logic
+│   ├── migrations/             #    Database migrations
+│   ├── plugins/                #    Plugin modules
+│   ├── specs/                  #    Specifications
+│   ├── tests/                  #    Test suites
+│   ├── theme/                  #    Theme files
+│   ├── utils/                  #    Utility scripts
+│   └── views/                  #    View templates
+├── static_files/               # ✅ PERSIST - Generated files
+│   └── *.tar.gz, *.upg.zip     #    Upgrade packages, exports
+├── uploads/                    # ✅ PERSIST - User uploaded content
+│   ├── large/                  #    Large image variants
+│   ├── lthumbnail/             #    Large thumbnails
+│   ├── medium/                 #    Medium image variants
+│   ├── small/                  #    Small image variants
+│   ├── thumbnail/              #    Thumbnail images
+│   ├── upgrades/               #    Uploaded upgrade files
+│   └── *.jpg, *.pdf, *.mp4     #    Direct uploads
+└── vendor/                     # ✅ PERSIST (optional) - Composer deps
+
+System directories:
+├── /var/lib/postgresql/        # ✅ PERSIST - PostgreSQL data files
+├── /var/lib/php/sessions/      # ✅ PERSIST - PHP session data
+├── /var/log/apache2/           # ✅ PERSIST (optional) - Apache logs
+└── /var/log/postgresql/        # ✅ PERSIST (optional) - PG logs
+```
+
+### Simplified Version (Absolute Minimum)
+
+If the full list seems overwhelming, this is the **absolute minimum** to avoid critical data loss:
 
 ```bash
 docker run -d \
@@ -447,11 +592,20 @@ docker run -d \
   -p PORT:80 \
   -v SITENAME_postgres:/var/lib/postgresql \
   -v SITENAME_uploads:/var/www/html/SITENAME/uploads \
-  -v SITENAME_cache:/var/www/html/SITENAME/cache \
+  -v SITENAME_config:/var/www/html/SITENAME/config \
   joinery-SITENAME
 ```
 
-This preserves the most critical data (database, uploads, cache).
+This preserves only the most critical data (database, uploads, config). However, **we strongly recommend using the full volume list** above to preserve all operational state.
+
+**What you lose with minimum volumes:**
+- `backups/` - No database backup history
+- `static_files/` - No generated upgrade packages
+- `logs/` - No audit trail or debugging history (logs can reach 2.5GB+)
+- `cache/` - Slower startup as cache rebuilds
+- `vendor/` - May get different package versions on rebuild
+- `sessions/` - Users logged out on restart
+- System logs - No Apache/PostgreSQL log history
 
 ### Step 6: Access Your Application
 
@@ -701,32 +855,22 @@ This places the vendor directory at `/var/www/html/SITENAME/vendor/`, which work
 - **Docker containers**: Vendor directory at a predictable location
 - **Multiple sites**: Each site has its own isolated vendor directory
 
-### 2. Volume Mount for Vendor Directory (Optional)
+### 2. Volume Mount for Vendor Directory (Included by Default)
 
-If you want to cache composer dependencies between container rebuilds or updates, add a vendor volume:
+The vendor directory is now included in our recommended persistent volume list. This ensures composer dependencies are preserved between container rebuilds:
 
 ```bash
-docker run -d \
-  --name SITENAME \
-  -p PORT:80 \
-  -v SITENAME_vendor:/var/www/html/SITENAME/vendor \
-  -v SITENAME_postgres:/var/lib/postgresql \
-  -v SITENAME_uploads:/var/www/html/SITENAME/uploads \
-  -v SITENAME_cache:/var/www/html/SITENAME/cache \
-  -v SITENAME_logs:/var/www/html/SITENAME/logs \
-  -v SITENAME_static:/var/www/html/SITENAME/static_files \
-  -v SITENAME_backups:/var/www/html/SITENAME/backups \
-  -v SITENAME_config:/var/www/html/SITENAME/config \
-  -v SITENAME_sessions:/var/lib/php/sessions \
-  joinery-SITENAME
+# Vendor is already included in the recommended full volume list:
+-v SITENAME_vendor:/var/www/html/SITENAME/vendor
 ```
 
 **Benefits of vendor volume:**
 - Faster container rebuilds (dependencies cached)
 - Preserves exact package versions during updates
 - Reduces bandwidth usage for package downloads
+- Consistent behavior across container restarts
 
-**Note:** This is optional. The default approach includes vendor in the container image, which ensures consistency.
+**Note:** The recommended docker run command in Step 5 already includes all volumes including vendor.
 
 ### 3. Database Setting for Composer Autoload
 
@@ -826,21 +970,234 @@ CMD service postgresql start && \
 
 ## Making Sites Accessible Without Port Numbers
 
-When running multiple containerized sites, users would normally need to type port numbers (e.g., `site.com:8080`). Here are solutions to provide clean URLs:
+When running multiple containerized sites, users would normally need to type port numbers (e.g., `site.com:8080`). Use a reverse proxy on the host to route domains to container ports.
 
-### Option 1: Nginx Reverse Proxy (Recommended)
+### Recommended: Apache Reverse Proxy
 
-Install Nginx on the host to route domains to container ports:
+**Why Apache?** Since Joinery already uses Apache inside containers, you maintain a consistent technology stack. For typical Joinery deployments with a handful of sites, Apache performs excellently as a reverse proxy.
+
+#### Step 1: Install Apache on the Host
 
 ```bash
-# Install Nginx on the host (not in Docker)
-sudo apt-get update && sudo apt-get install -y nginx
+# Install Apache on the host (not in Docker)
+sudo apt-get update && sudo apt-get install -y apache2
 
-# Create a config for each site in /etc/nginx/sites-available/
-# For example: /etc/nginx/sites-available/integralzen
+# Enable required modules for reverse proxy
+sudo a2enmod proxy proxy_http proxy_wstunnel headers ssl rewrite
+
+# Restart Apache to load modules
+sudo systemctl restart apache2
 ```
 
-Example Nginx configuration (`/etc/nginx/sites-available/integralzen`):
+#### Step 2: Create VirtualHost Configuration
+
+Create a configuration file for each site. Example for "integralzen":
+
+**File:** `/etc/apache2/sites-available/integralzen.conf`
+
+```apache
+<VirtualHost *:80>
+    ServerName integralzen.org
+    ServerAlias www.integralzen.org
+
+    # Redirect all HTTP to HTTPS (uncomment after SSL is configured)
+    # RewriteEngine On
+    # RewriteCond %{HTTPS} off
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Proxy settings
+    ProxyPreserveHost On
+    ProxyRequests Off
+
+    # Pass requests to Docker container on port 8080
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+
+    # Pass real client IP to the container
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "http"
+
+    # Timeout settings for long-running requests
+    ProxyTimeout 300
+
+    # Error and access logs (optional, container has its own logs)
+    ErrorLog ${APACHE_LOG_DIR}/integralzen-error.log
+    CustomLog ${APACHE_LOG_DIR}/integralzen-access.log combined
+</VirtualHost>
+```
+
+#### Step 3: Enable the Site
+
+```bash
+# Enable the site configuration
+sudo a2ensite integralzen
+
+# Test configuration for syntax errors
+sudo apache2ctl configtest
+
+# Reload Apache to apply changes
+sudo systemctl reload apache2
+```
+
+Now users can access `http://integralzen.org` and Apache routes to the container on port 8080.
+
+#### Step 4: Add SSL with Let's Encrypt (Recommended for Production)
+
+```bash
+# Install Certbot for Apache
+sudo apt-get install -y certbot python3-certbot-apache
+
+# Obtain SSL certificate (automatically configures Apache)
+sudo certbot --apache -d integralzen.org -d www.integralzen.org
+
+# Certbot will:
+# 1. Obtain the certificate
+# 2. Create /etc/apache2/sites-available/integralzen-le-ssl.conf
+# 3. Configure automatic HTTP to HTTPS redirect
+# 4. Set up auto-renewal via systemd timer
+```
+
+After Certbot runs, your SSL configuration will look like:
+
+**File:** `/etc/apache2/sites-available/integralzen-le-ssl.conf` (auto-generated)
+
+```apache
+<VirtualHost *:443>
+    ServerName integralzen.org
+    ServerAlias www.integralzen.org
+
+    # SSL Configuration (managed by Certbot)
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/integralzen.org/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/integralzen.org/privkey.pem
+    Include /etc/letsencrypt/options-ssl-apache.conf
+
+    # Proxy settings
+    ProxyPreserveHost On
+    ProxyRequests Off
+
+    ProxyPass / http://127.0.0.1:8080/
+    ProxyPassReverse / http://127.0.0.1:8080/
+
+    # Pass real client IP and protocol to container
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "https"
+
+    ProxyTimeout 300
+
+    ErrorLog ${APACHE_LOG_DIR}/integralzen-ssl-error.log
+    CustomLog ${APACHE_LOG_DIR}/integralzen-ssl-access.log combined
+</VirtualHost>
+```
+
+#### Step 5: Verify SSL Auto-Renewal
+
+```bash
+# Test the renewal process (dry run)
+sudo certbot renew --dry-run
+
+# Check the systemd timer for auto-renewal
+sudo systemctl status certbot.timer
+```
+
+Certificates auto-renew before expiry (typically every 60-90 days).
+
+### Managing Multiple Sites
+
+For each additional site, repeat Steps 2-4 with different:
+- Configuration filename (e.g., `testclient.conf`)
+- ServerName/ServerAlias values
+- Container port number (e.g., 8081, 8082)
+
+**Example port mapping:**
+```
+integralzen.org  → localhost:8080 → integralzen container
+testclient.org   → localhost:8081 → testclient container
+democompany.org  → localhost:8082 → democompany container
+```
+
+**Quick setup script for a new site:**
+```bash
+#!/bin/bash
+# Usage: ./add-site.sh sitename domain port
+
+SITENAME=$1
+DOMAIN=$2
+PORT=$3
+
+cat > /etc/apache2/sites-available/${SITENAME}.conf << EOF
+<VirtualHost *:80>
+    ServerName ${DOMAIN}
+    ServerAlias www.${DOMAIN}
+
+    ProxyPreserveHost On
+    ProxyRequests Off
+    ProxyPass / http://127.0.0.1:${PORT}/
+    ProxyPassReverse / http://127.0.0.1:${PORT}/
+
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "http"
+
+    ProxyTimeout 300
+
+    ErrorLog \${APACHE_LOG_DIR}/${SITENAME}-error.log
+    CustomLog \${APACHE_LOG_DIR}/${SITENAME}-access.log combined
+</VirtualHost>
+EOF
+
+a2ensite ${SITENAME}
+apache2ctl configtest && systemctl reload apache2
+echo "Site ${SITENAME} configured. Run: sudo certbot --apache -d ${DOMAIN} -d www.${DOMAIN}"
+```
+
+### Troubleshooting Apache Reverse Proxy
+
+**Issue: 503 Service Unavailable**
+```bash
+# Check if container is running
+docker ps | grep SITENAME
+
+# Check if container port is accessible
+curl -I http://localhost:8080
+
+# Check Apache error logs
+tail -50 /var/log/apache2/SITENAME-error.log
+```
+
+**Issue: Mixed Content Warnings (HTTPS)**
+
+If your site loads over HTTPS but has mixed content warnings, ensure `X-Forwarded-Proto` is set correctly. The application should detect this header and generate HTTPS URLs.
+
+**Issue: WebSocket connections failing**
+
+If your application uses WebSockets, ensure `proxy_wstunnel` is enabled and add:
+```apache
+RewriteEngine On
+RewriteCond %{HTTP:Upgrade} websocket [NC]
+RewriteCond %{HTTP:Connection} upgrade [NC]
+RewriteRule ^/?(.*) ws://127.0.0.1:8080/$1 [P,L]
+```
+
+**Issue: Large file uploads timing out**
+
+Increase proxy timeout and add request body limits:
+```apache
+ProxyTimeout 600
+LimitRequestBody 104857600  # 100MB
+```
+
+### Alternative: Nginx Reverse Proxy
+
+If you prefer Nginx (slightly better performance for high-traffic sites):
+
+```bash
+sudo apt-get update && sudo apt-get install -y nginx
+```
+
+**File:** `/etc/nginx/sites-available/integralzen`
 ```nginx
 server {
     listen 80;
@@ -852,91 +1209,28 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+        proxy_read_timeout 300;
     }
 }
 ```
 
-Enable the site:
 ```bash
 sudo ln -s /etc/nginx/sites-available/integralzen /etc/nginx/sites-enabled/
-sudo nginx -t  # Test configuration
-sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d integralzen.org -d www.integralzen.org
 ```
 
-Now users can access `integralzen.org` and Nginx routes to the container on port 8080.
+### Why We Recommend Apache Over Nginx
 
-### Option 2: Apache Reverse Proxy
+For Joinery deployments:
+- **Consistency** - Same technology as your application containers
+- **Familiarity** - One configuration syntax to learn
+- **Adequate Performance** - For dozens of sites, Apache handles the load fine
+- **Simpler Maintenance** - One technology stack to update and secure
 
-If you prefer Apache (since your application uses it):
-
-```bash
-# Install Apache on the host
-sudo apt-get update && sudo apt-get install -y apache2
-
-# Enable proxy modules
-sudo a2enmod proxy proxy_http
-
-# Create VirtualHost configuration
-```
-
-Example Apache configuration (`/etc/apache2/sites-available/integralzen.conf`):
-```apache
-<VirtualHost *:80>
-    ServerName integralzen.org
-
-    ProxyPreserveHost On
-    ProxyPass / http://localhost:8080/
-    ProxyPassReverse / http://localhost:8080/
-</VirtualHost>
-```
-
-Enable the site:
-```bash
-sudo a2ensite integralzen
-sudo systemctl reload apache2
-```
-
-### Option 3: Use a Docker-based Reverse Proxy
-
-Run Traefik or Nginx Proxy Manager in Docker to handle routing:
-
-```yaml
-# docker-compose.yml for Traefik (example)
-version: '3'
-services:
-  traefik:
-    image: traefik:v2.10
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--entrypoints.web.address=:80"
-    ports:
-      - "80:80"
-      - "8080:8080"  # Traefik dashboard
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-```
-
-Then label your containers for automatic routing:
-```bash
-docker run -d \
-  --name integralzen \
-  --label "traefik.enable=true" \
-  --label "traefik.http.routers.integralzen.rule=Host(\`integralzen.org\`)" \
-  --label "traefik.http.services.integralzen.loadbalancer.server.port=80" \
-  -p 8081:80 \
-  [other options] \
-  joinery-integralzen
-```
-
-### Recommendation for Multiple Sites
-
-For production with multiple sites, use **Option 1 (Nginx)** because:
-- Simple to configure and maintain
-- Excellent performance
-- Can handle SSL certificates with Let's Encrypt
-- Well-documented and widely used
-- Keeps reverse proxy separate from application containers
+Choose Nginx only if you're already familiar with it or expect very high traffic (1000+ concurrent users).
 
 ## Troubleshooting Docker Deployment
 
