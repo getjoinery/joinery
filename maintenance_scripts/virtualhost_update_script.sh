@@ -5,7 +5,7 @@
 # Usage: ./virtualhost_update_script.sh <filename> [site_name] [domain_name] [server_ip]
 
 # Version info
-VERSION="2.1.0"
+VERSION="2.2.0"
 echo "Virtual Host Template Script v${VERSION}"
 echo "=========================================="
 
@@ -216,10 +216,10 @@ echo "Apache config test output: $CONFIG_TEST_OUTPUT"
 if echo "$CONFIG_TEST_OUTPUT" | grep -q "Syntax OK"; then
     echo "Configuration test passed"
     
-    # Restart Apache
+    # Restart Apache (use service command for Docker compatibility)
     echo "Restarting Apache..."
-    systemctl restart apache2
-    
+    service apache2 restart
+
     if [ $? -eq 0 ]; then
         echo "Apache restarted successfully"
         echo "Update completed successfully!"
@@ -232,7 +232,7 @@ if echo "$CONFIG_TEST_OUTPUT" | grep -q "Syntax OK"; then
         if [ -n "$BACKUP_FILE" ]; then
             echo "Restoring backup..."
             cp "$BACKUP_FILE" "$CONFIG_FILE"
-            systemctl restart apache2
+            service apache2 restart
         fi
         exit 1
     fi
