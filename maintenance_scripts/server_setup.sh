@@ -2,7 +2,7 @@
 
 # Complete Linode Server Setup Script for Ubuntu 24.04
 # This script sets up LAMP stack with Composer and your specified dependencies
-# Version 2.0 - Docker and Traditional Environment Compatible
+# Version 2.1 - Improved Docker build detection
 
 # CONFIGURATION - Edit these values before running (optional)
 # Use environment variable if set (for Docker), otherwise prompt
@@ -39,9 +39,19 @@ info() {
 # ENVIRONMENT DETECTION
 # ============================================================
 
-# Detect if running in Docker
+# Detect if running in Docker (including during docker build)
 is_docker() {
-    [ -f /.dockerenv ] || grep -q docker /proc/1/cgroup 2>/dev/null
+    # Check for running container
+    [ -f /.dockerenv ] && return 0
+
+    # Check cgroup for running container
+    grep -q docker /proc/1/cgroup 2>/dev/null && return 0
+
+    # Check for Docker build environment (no systemd running)
+    # This also works correctly for non-systemd systems where service commands are appropriate
+    [ ! -d /run/systemd/system ] && return 0
+
+    return 1
 }
 
 # ============================================================
