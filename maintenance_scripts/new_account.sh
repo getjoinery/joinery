@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-#VERSION 1.31
+#VERSION 2.0 - Docker and Traditional Environment Compatible
 #Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file]
 
-VIRTUALHOST_TEMPLATE=/home/user1/default_virtualhost.conf
-GLOBALVARS_DEFAULT=/home/user1/Globalvars_site_default.php
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Template files - relative to script location
+VIRTUALHOST_TEMPLATE="${SCRIPT_DIR}/default_virtualhost.conf"
+GLOBALVARS_DEFAULT="${SCRIPT_DIR}/Globalvars_site_default.php"
 
 if [ "$EUID" -ne 0 ]
 then
@@ -159,37 +163,76 @@ echo "$NEW_TEST_SITE_ROOT created."
 
 # Create PostgreSQL database
 echo "Creating PostgreSQL database '$1'..."
-echo "Enter PostgreSQL postgres user password:"
-if ! createdb -T template0 "$1" -U postgres; then
-	echo "ERROR: Failed to create database '$1'"
-	echo "Rolling back: removing created directories..."
-	rm -rf "/var/www/html/$1"
-	rm -rf "/var/www/html/$1_test"
-	exit 1
+
+# Check for PGPASSWORD environment variable for non-interactive mode
+if [ -n "$PGPASSWORD" ]; then
+	# Non-interactive mode (Docker/automated)
+	if ! createdb -T template0 "$1" -U postgres; then
+		echo "ERROR: Failed to create database '$1'"
+		echo "Rolling back: removing created directories..."
+		rm -rf "/var/www/html/$1"
+		rm -rf "/var/www/html/$1_test"
+		exit 1
+	fi
+else
+	# Interactive mode (traditional)
+	echo "Enter PostgreSQL postgres user password:"
+	if ! createdb -T template0 "$1" -U postgres -W; then
+		echo "ERROR: Failed to create database '$1'"
+		echo "Rolling back: removing created directories..."
+		rm -rf "/var/www/html/$1"
+		rm -rf "/var/www/html/$1_test"
+		exit 1
+	fi
 fi
 
 # Load database restore file
 echo "Loading database from restore file '$DATABASE_RESTORE_FILE'..."
-echo "Enter PostgreSQL postgres user password:"
 
 # Check if file is compressed
 if [[ "$DATABASE_RESTORE_FILE" == *.gz ]]; then
 	# Decompress and pipe to psql
-	if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -W -d "$1"; then
-		echo "ERROR: Failed to load database from compressed restore file"
-		echo "Database '$1' was created but restore failed."
-		echo "You may need to manually restore or recreate the database."
+	if [ -n "$PGPASSWORD" ]; then
+		# Non-interactive mode
+		if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -d "$1"; then
+			echo "ERROR: Failed to load database from compressed restore file"
+			echo "Database '$1' was created but restore failed."
+			echo "You may need to manually restore or recreate the database."
+		else
+			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		fi
 	else
-		echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		# Interactive mode
+		echo "Enter PostgreSQL postgres user password:"
+		if ! gunzip -c "$DATABASE_RESTORE_FILE" | psql -U postgres -W -d "$1"; then
+			echo "ERROR: Failed to load database from compressed restore file"
+			echo "Database '$1' was created but restore failed."
+			echo "You may need to manually restore or recreate the database."
+		else
+			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		fi
 	fi
 else
 	# Load uncompressed SQL file
-	if ! psql -U postgres -W -d "$1" -f "$DATABASE_RESTORE_FILE"; then
-		echo "ERROR: Failed to load database from restore file"
-		echo "Database '$1' was created but restore failed."
-		echo "You may need to manually restore or recreate the database."
+	if [ -n "$PGPASSWORD" ]; then
+		# Non-interactive mode
+		if ! psql -U postgres -d "$1" -f "$DATABASE_RESTORE_FILE"; then
+			echo "ERROR: Failed to load database from restore file"
+			echo "Database '$1' was created but restore failed."
+			echo "You may need to manually restore or recreate the database."
+		else
+			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		fi
 	else
-		echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		# Interactive mode
+		echo "Enter PostgreSQL postgres user password:"
+		if ! psql -U postgres -W -d "$1" -f "$DATABASE_RESTORE_FILE"; then
+			echo "ERROR: Failed to load database from restore file"
+			echo "Database '$1' was created but restore failed."
+			echo "You may need to manually restore or recreate the database."
+		else
+			echo "Database '$1' loaded successfully from '$DATABASE_RESTORE_FILE'."
+		fi
 	fi
 fi
 
@@ -231,7 +274,7 @@ fi
 
 # Reload Apache gracefully
 echo "Reloading Apache..."
-if ! systemctl reload apache2; then
+if ! service apache2 reload; then
 	echo "ERROR: Failed to reload Apache. Attempting graceful restart..."
 	if ! apache2ctl graceful; then
 		echo "ERROR: Failed to gracefully restart Apache."

@@ -2,10 +2,11 @@
 
 # Complete Linode Server Setup Script for Ubuntu 24.04
 # This script sets up LAMP stack with Composer and your specified dependencies
-# Version 1.02 - Added PHP dependencies setup
+# Version 2.0 - Docker and Traditional Environment Compatible
 
 # CONFIGURATION - Edit these values before running (optional)
-POSTGRES_PASSWORD=""  # Leave blank to be prompted, or set your desired PostgreSQL password here
+# Use environment variable if set (for Docker), otherwise prompt
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 
 set -e  # Exit on any error
 
@@ -32,6 +33,68 @@ warning() {
 
 info() {
     echo -e "${GREEN}[INFO] $1${NC}"
+}
+
+# ============================================================
+# ENVIRONMENT DETECTION
+# ============================================================
+
+# Detect if running in Docker
+is_docker() {
+    [ -f /.dockerenv ] || grep -q docker /proc/1/cgroup 2>/dev/null
+}
+
+# ============================================================
+# SERVICE MANAGEMENT (auto-detects environment)
+# ============================================================
+
+# Prevent services from auto-starting during package installation (Docker)
+prevent_service_start() {
+    printf '#!/bin/sh\nexit 101' > /usr/sbin/policy-rc.d
+    chmod +x /usr/sbin/policy-rc.d
+}
+
+# Allow services to auto-start again
+allow_service_start() {
+    rm -f /usr/sbin/policy-rc.d
+}
+
+# Service management that works in both Docker and traditional environments
+service_start() {
+    local service_name="$1"
+    if is_docker; then
+        service "$service_name" start || true
+    else
+        systemctl start "$service_name"
+        systemctl enable "$service_name"
+    fi
+}
+
+service_stop() {
+    local service_name="$1"
+    if is_docker; then
+        service "$service_name" stop || true
+    else
+        systemctl stop "$service_name"
+    fi
+}
+
+service_restart() {
+    local service_name="$1"
+    if is_docker; then
+        service "$service_name" restart || true
+    else
+        systemctl restart "$service_name"
+    fi
+}
+
+service_reload() {
+    local service_name="$1"
+    if is_docker; then
+        service "$service_name" reload || true
+    else
+        systemctl reload "$service_name"
+    fi
 }
 
 # Check if running with sudo
@@ -76,22 +139,30 @@ apt update && apt upgrade -y
 log "Installing essential packages..."
 apt install -y curl wget git unzip software-properties-common apt-transport-https ca-certificates gnupg lsb-release build-essential fail2ban
 
-# Configure user1 (assumes user1 already exists)
-log "Configuring user1..."
-if id "user1" &>/dev/null; then
-    # Set up SSH directory for user1 if it doesn't exist
-    mkdir -p /home/user1/.ssh
-    chmod 700 /home/user1/.ssh
-    chown user1:user1 /home/user1/.ssh
-    
-    # Create authorized_keys file if it doesn't exist
-    touch /home/user1/.ssh/authorized_keys
-    chmod 600 /home/user1/.ssh/authorized_keys
-    chown user1:user1 /home/user1/.ssh/authorized_keys
-    
-    log "user1 configured successfully"
-else
-    error "user1 does not exist. Please create user1 before running this script."
+# Create and configure user1
+log "Setting up user1..."
+
+# Create user1 if it doesn't exist
+if ! id "user1" &>/dev/null; then
+    log "Creating user1..."
+    useradd -m -s /bin/bash user1
+    log "user1 created"
+fi
+
+# Configure user1's SSH directory
+mkdir -p /home/user1/.ssh
+chmod 700 /home/user1/.ssh
+chown user1:user1 /home/user1/.ssh
+touch /home/user1/.ssh/authorized_keys
+chmod 600 /home/user1/.ssh/authorized_keys
+chown user1:user1 /home/user1/.ssh/authorized_keys
+
+log "user1 configured successfully"
+
+# Prevent service auto-start during package installation (Docker safety)
+if is_docker; then
+    log "Docker detected - preventing service auto-start during package installation..."
+    prevent_service_start
 fi
 
 # Install PHP 8.3 and extensions
@@ -174,8 +245,7 @@ log "Installing PostgreSQL server..."
 apt install -y postgresql postgresql-contrib
 
 # Start and enable PostgreSQL
-systemctl start postgresql
-systemctl enable postgresql
+service_start postgresql
 
 # Configure PostgreSQL
 log "Configuring PostgreSQL..."
@@ -222,7 +292,7 @@ sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" ${PG_CONFIG_D
 sed -i "s/#port = 5432/port = 5432/" ${PG_CONFIG_DIR}/postgresql.conf
 
 # Restart PostgreSQL to apply configuration
-systemctl restart postgresql
+service_restart postgresql
 
 # Set PostgreSQL postgres user password automatically
 log "Setting PostgreSQL postgres user password..."
@@ -231,7 +301,7 @@ log "Setting PostgreSQL postgres user password..."
 sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' ${PG_CONFIG_DIR}/pg_hba.conf
 
 # Reload PostgreSQL configuration
-systemctl reload postgresql
+service_reload postgresql
 
 # Set the postgres user password
 su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres
@@ -240,7 +310,7 @@ su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgre
 sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' ${PG_CONFIG_DIR}/pg_hba.conf
 
 # Reload PostgreSQL configuration again
-systemctl reload postgresql
+service_reload postgresql
 
 log "PostgreSQL postgres user password set successfully"
 
@@ -248,12 +318,9 @@ log "PostgreSQL configured and listening on port 5432"
 
 # Start and enable services
 log "Starting and enabling services..."
-systemctl start apache2
-systemctl enable apache2
-systemctl start postgresql
-systemctl enable postgresql
-systemctl start php8.3-fpm
-systemctl enable php8.3-fpm
+service_start apache2
+service_start postgresql
+service_start php8.3-fpm
 
 # Install Certbot for SSL
 log "Installing Certbot for SSL certificates..."
@@ -294,7 +361,7 @@ sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 300/' /etc/ssh/sshd_config
 sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' /etc/ssh/sshd_config
 
 # Restart SSH service to apply changes
-systemctl restart ssh
+service_restart ssh
 
 log "SSH security configured: root login disabled, connection limits set"
 
@@ -311,8 +378,7 @@ ufw --force enable
 
 # Configure fail2ban
 log "Configuring fail2ban..."
-systemctl start fail2ban
-systemctl enable fail2ban
+service_start fail2ban
 
 # Create basic fail2ban jail configuration using defaults
 cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
@@ -339,7 +405,7 @@ enabled = true
 EOF
 
 # Restart fail2ban to apply configuration
-systemctl restart fail2ban
+service_restart fail2ban
 
 log "fail2ban configured with default settings and basic protections enabled"
 
@@ -442,8 +508,11 @@ usermod -aG www-data user1
 
 # Restart services
 log "Restarting services..."
-systemctl restart apache2
-systemctl restart php8.3-fpm
+service_restart apache2
+service_restart php8.3-fpm
+
+# Remove policy-rc.d if we created it (Docker cleanup)
+allow_service_start
 
 # Display completion message
 log "Server setup completed successfully!"
