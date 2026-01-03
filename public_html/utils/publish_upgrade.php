@@ -104,10 +104,11 @@
 			exit;
 		}
 		
-		if(posix_getpwuid(fileowner($file_output_folder))['name'] != 'www-data'){
-			echo $file_output_folder . ' must be owned by www-data.  Aborting upgrade.<br>';
-			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
-			exit;		
+		// Check if directory is writable by current process
+		if(!is_writable($file_output_folder)){
+			echo $file_output_folder . ' must be writable.  Aborting upgrade.<br>';
+			echo 'It is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
+			exit;
 		}		
 		 
 		
@@ -143,8 +144,9 @@
 		mkdir($temp_dir . '/maintenance_scripts', 0755, true);
 
 		// Copy public_html files using rsync
+		// Exclude: version control, dev docs, runtime directories, and testing tools
 		$rsync_cmd = sprintf(
-			'rsync -av --exclude=.git --exclude=.gitignore %s %s 2>&1',
+			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests %s %s 2>&1',
 			escapeshellarg($full_site_dir . '/public_html/'),
 			escapeshellarg($temp_dir . '/public_html/')
 		);
