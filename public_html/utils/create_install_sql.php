@@ -363,8 +363,9 @@ if (!empty($data_files)) {
             // This ensures the install SQL works in any environment (Docker, traditional, etc.)
             if ($table === 'stg_settings') {
                 // Match composerAutoLoad setting with absolute vendor path and convert to relative
+                // COPY format uses tabs, not SQL quotes: id\tcomposerAutoLoad\t/var/www/html/site/vendor/\t...
                 $data_content = preg_replace(
-                    "/('composerAutoLoad',\s*')\/var\/www\/html\/[^\/]+\/vendor\/(')/",
+                    "/(composerAutoLoad\t)\/var\/www\/html\/[^\t]+\/vendor\/(\t)/",
                     '$1../vendor/$2',
                     $data_content
                 );
