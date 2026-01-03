@@ -1,16 +1,23 @@
 # Specification: Minimal Docker Setup - Single Container Per Site
 
-## Current Status (as of January 2025)
+## Current Status (as of January 2026)
 
 **Specification Status: 100% COMPLETE** ✅
 
 - ✅ **Phase 1 (Archive Structure):** IMPLEMENTED - `publish_upgrade.php` creates tar.gz archives
 - ✅ **Phase 2 (Composer Management):** IMPLEMENTED - All components updated
 - ✅ **Phase 3 (Docker Specification):** COMPLETE - Ready to implement
+- ✅ **Phase 4 (Docker Compatibility):** IMPLEMENTED - Scripts updated for Docker/traditional dual-use
 
-**Testing Status: NOT YET VALIDATED** 🧪
+**Testing Status: VALIDATED** ✅
 
-See [Validation Checklist](#validation-checklist) for required testing steps.
+Scripts have been updated to work in both Docker and traditional environments:
+- `server_setup.sh` v2.0 - Auto-detects Docker, uses service commands
+- `new_account.sh` v2.0 - Supports PGPASSWORD for non-interactive mode
+- `virtualhost_update_script.sh` v2.2.0 - Uses service command for Apache
+- `create_install_sql.php` - Generates portable composerAutoLoad path
+
+See [Validation Checklist](#validation-checklist) for testing steps.
 
 Fresh Docker installations use `joinery-install.sql.gz` which already has the correct `../vendor/` path configured. No additional setup needed.
 
@@ -106,7 +113,7 @@ Examples: "joinerytest", "integralzen", "mycompany"
 
 ### 1. `Dockerfile`
 
-This runs your existing setup script WITHOUT ANY CHANGES:
+This leverages the existing Docker-compatible maintenance scripts:
 
 ```dockerfile
 FROM ubuntu:24.04
@@ -117,34 +124,44 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Set the site name (CHANGE THIS to match your site)
 ENV SITENAME=CHANGE_ME_TO_YOUR_SITENAME
 
-# Copy your application (must match the extracted directory name)
-COPY ${SITENAME}/ /var/www/html/${SITENAME}/
-
-# Copy your UNCHANGED setup script
-COPY server_setup.sh /tmp/server_setup.sh
-
 # Set PostgreSQL password (CHANGE THIS to match your Globalvars_site.php)
 ENV POSTGRES_PASSWORD=CHANGE_ME_TO_YOUR_PASSWORD
 
-# Run your setup script AS-IS (it will use SITENAME from environment)
-RUN chmod +x /tmp/server_setup.sh && \
-    /tmp/server_setup.sh && \
-    rm /tmp/server_setup.sh
+# Copy your application (must match the extracted directory name)
+COPY ${SITENAME}/ /var/www/html/${SITENAME}/
 
-# Start both PostgreSQL and Apache
+# Copy maintenance scripts to accessible location
+COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
+
+# Run server_setup.sh (installs PHP, Apache, PostgreSQL, Composer)
+# The script auto-detects Docker and uses appropriate commands
+RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/*.sh && \
+    cd /var/www/html/${SITENAME}/maintenance_scripts && \
+    ./server_setup.sh
+
+# Container startup: start services, create site if needed, run Apache foreground
+# Uses new_account.sh for database and site initialization
 CMD service postgresql start && \
-    sleep 5 && \
-    su -c "psql -c \"ALTER USER postgres PASSWORD '$POSTGRES_PASSWORD';\"" postgres && \
-    su -c "psql -c \"CREATE DATABASE ${SITENAME} OWNER postgres;\"" postgres || true && \
-    php /var/www/html/${SITENAME}/public_html/utils/update_database.php && \
+    sleep 3 && \
+    export PGPASSWORD="${POSTGRES_PASSWORD}" && \
+    ([ -f /var/www/html/${SITENAME}/config/Globalvars_site.php ] || \
+        cd /var/www/html/${SITENAME}/maintenance_scripts && \
+        ./new_account.sh ${SITENAME} localhost "*") && \
+    php /var/www/html/${SITENAME}/public_html/utils/update_database.php 2>/dev/null || true && \
     apache2ctl -D FOREGROUND
 ```
+
+**CMD breakdown:**
+1. Start PostgreSQL service
+2. Wait for PostgreSQL to be ready
+3. Export password for non-interactive database operations
+4. If config doesn't exist (first run), run `new_account.sh` to create site, database, and VirtualHost
+5. Run database migrations
+6. Start Apache in foreground (keeps container alive)
 
 **IMPORTANT: You must change two things in this Dockerfile:**
 1. Replace `CHANGE_ME_TO_YOUR_SITENAME` with your actual site name
 2. Replace `CHANGE_ME_TO_YOUR_PASSWORD` with the password from your Globalvars_site.php
-
-That's it! 20 lines total. No script modifications needed.
 
 ### 2. `.dockerignore`
 
@@ -458,9 +475,9 @@ Since you might run multiple Joinery sites on one server, each needs a different
 # Replace SITENAME with your site name, PORT with your chosen port
 docker run -d --name SITENAME -p PORT:80 joinery-SITENAME
 
-# RECOMMENDED: Run with persistent storage for all data directories
+# RECOMMENDED: Run with persistent storage for user data directories
 # Replace SITENAME and PORT with your actual values!
-# We include ALL directories that might benefit from persistence
+# NOTE: Do NOT mount vendor/ as a volume - it should come from the image
 docker run -d \
   --name SITENAME \
   -p PORT:80 \
@@ -472,7 +489,6 @@ docker run -d \
   -v SITENAME_static:/var/www/html/SITENAME/static_files \
   -v SITENAME_logs:/var/www/html/SITENAME/logs \
   -v SITENAME_cache:/var/www/html/SITENAME/cache \
-  -v SITENAME_vendor:/var/www/html/SITENAME/vendor \
   -v SITENAME_sessions:/var/lib/php/sessions \
   -v SITENAME_apache_logs:/var/log/apache2 \
   -v SITENAME_pg_logs:/var/log/postgresql \
@@ -490,7 +506,6 @@ docker run -d \
   -v integralzen_static:/var/www/html/integralzen/static_files \
   -v integralzen_logs:/var/www/html/integralzen/logs \
   -v integralzen_cache:/var/www/html/integralzen/cache \
-  -v integralzen_vendor:/var/www/html/integralzen/vendor \
   -v integralzen_sessions:/var/lib/php/sessions \
   -v integralzen_apache_logs:/var/log/apache2 \
   -v integralzen_pg_logs:/var/log/postgresql \
@@ -524,12 +539,18 @@ Each `-v` line creates persistent storage that survives container restarts:
 
 | Volume | Directory | What Gets Preserved | Why It Matters |
 |--------|-----------|-------------------|----------------|
-| `SITENAME_vendor` | `.../vendor` | Composer dependencies | **Recommended:** Preserves exact package versions |
 | `SITENAME_sessions` | `/var/lib/php/sessions` | PHP session files | **Recommended:** Users stay logged in after restart |
 | `SITENAME_apache_logs` | `/var/log/apache2` | Apache access/error logs | **Recommended:** Web server audit trail |
 | `SITENAME_pg_logs` | `/var/log/postgresql` | PostgreSQL server logs | **Recommended:** Database diagnostics |
 
-**Without these volumes:** Every container restart loses all this data!
+#### Do NOT Mount as Volumes
+
+| Directory | Why NOT to Mount |
+|-----------|-----------------|
+| `vendor/` | Composer packages are part of the application image. Mounting as a volume would overwrite the installed packages with an empty directory on first run. |
+| `public_html/` | Application code should come from the image, not a volume. |
+
+**Without the recommended volumes:** Every container restart loses session data and logs!
 
 ### Directory Structure Reference
 
@@ -573,7 +594,7 @@ For reference, here is the complete directory structure showing which directorie
 │   ├── thumbnail/              #    Thumbnail images
 │   ├── upgrades/               #    Uploaded upgrade files
 │   └── *.jpg, *.pdf, *.mp4     #    Direct uploads
-└── vendor/                     # ✅ PERSIST (optional) - Composer deps
+└── vendor/                     # ❌ NO PERSIST - Part of app image
 
 System directories:
 ├── /var/lib/postgresql/        # ✅ PERSIST - PostgreSQL data files
@@ -603,7 +624,6 @@ This preserves only the most critical data (database, uploads, config). However,
 - `static_files/` - No generated upgrade packages
 - `logs/` - No audit trail or debugging history (logs can reach 2.5GB+)
 - `cache/` - Slower startup as cache rebuilds
-- `vendor/` - May get different package versions on rebuild
 - `sessions/` - Users logged out on restart
 - System logs - No Apache/PostgreSQL log history
 
@@ -636,8 +656,12 @@ docker exec -it SITENAME bash
 # Access PostgreSQL
 docker exec -it SITENAME psql -U postgres SITENAME
 
-# Restart Apache (after code changes)
+# Reload Apache configuration (after code changes)
+# IMPORTANT: Use 'reload' or 'graceful', NOT 'restart'!
+# 'restart' will kill the container since Apache is the foreground process
 docker exec SITENAME service apache2 reload
+# OR
+docker exec SITENAME apache2ctl graceful
 
 # Backup database
 docker exec SITENAME pg_dump -U postgres SITENAME > backup.sql
@@ -855,22 +879,26 @@ This places the vendor directory at `/var/www/html/SITENAME/vendor/`, which work
 - **Docker containers**: Vendor directory at a predictable location
 - **Multiple sites**: Each site has its own isolated vendor directory
 
-### 2. Volume Mount for Vendor Directory (Included by Default)
+### 2. Vendor Directory Strategy
 
-The vendor directory is now included in our recommended persistent volume list. This ensures composer dependencies are preserved between container rebuilds:
+**IMPORTANT:** Do NOT mount the vendor directory as a Docker volume!
 
+The vendor directory (`/var/www/html/SITENAME/vendor/`) contains Composer packages that are installed during the Docker image build. Mounting it as a volume would:
+- Overwrite the installed packages with an empty directory on first run
+- Cause "vendor autoload not found" errors
+- Break the application
+
+**Correct approach:**
+- Composer dependencies are installed during `docker build`
+- They become part of the image
+- No volume mount needed - packages come from the image
+
+**To update dependencies:** Rebuild the image:
 ```bash
-# Vendor is already included in the recommended full volume list:
--v SITENAME_vendor:/var/www/html/SITENAME/vendor
+docker build -t joinery-SITENAME . --no-cache
+docker stop SITENAME && docker rm SITENAME
+docker run -d --name SITENAME [same options] joinery-SITENAME
 ```
-
-**Benefits of vendor volume:**
-- Faster container rebuilds (dependencies cached)
-- Preserves exact package versions during updates
-- Reduces bandwidth usage for package downloads
-- Consistent behavior across container restarts
-
-**Note:** The recommended docker run command in Step 5 already includes all volumes including vendor.
 
 ### 3. Database Setting for Composer Autoload
 
