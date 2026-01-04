@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.1 - Docker installation master script
+#VERSION 1.2 - Docker installation master script
 #
 # Usage: ./docker_install_master.sh SITENAME POSTGRES_PASSWORD [DOMAIN_NAME] [PORT]
 #        ./docker_install_master.sh --list
@@ -207,11 +207,11 @@ if [ -z "$1" ]; then
     echo "  --list, -l        - List existing Joinery containers and their ports"
     echo ""
     echo "Example:"
-    echo "  $0 mysite SecurePass123! mysite.com 8080"
+    echo "  $0 mysite YOUR_SECURE_PASSWORD mysite.com 8080"
     echo ""
     echo "Multiple sites:"
-    echo "  $0 site1 Pass123! site1.com 8080"
-    echo "  $0 site2 Pass456! site2.com 8081"
+    echo "  $0 site1 YOUR_PASSWORD_1 site1.com 8080"
+    echo "  $0 site2 YOUR_PASSWORD_2 site2.com 8081"
     exit 1
 fi
 
