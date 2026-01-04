@@ -207,7 +207,8 @@
 			'Globalvars_site_default.php',
 			'default_virtualhost.conf',
 			'virtualhost_update_script.sh',
-			'Dockerfile.template'
+			'Dockerfile.template',
+			'docker_install_master.sh'
 		];
 
 		$maintenance_dir = '/var/www/html/joinerytest/maintenance_scripts/';
