@@ -2,17 +2,45 @@
 
 ## Overview
 
-Three complementary tools provide deployment and upgrade capabilities:
+Four complementary tools provide deployment and upgrade capabilities:
 
 1. **deploy.sh** - Git-based deployment for development/production environments
 2. **upgrade.php** - Web-based upgrade system for client installations
 3. **publish_upgrade.php** - Package creation tool for distributing updates
+4. **docker_install_master.sh** - Docker container deployment for isolated environments
 
-All three use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation.
+The first three use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation.
+
+For Docker-based deployments, see **[Docker Installation Guide](/docs/docker_install.md)**.
 
 ---
 
 ## Quick Reference
+
+### docker_install_master.sh
+
+**Location:** `/var/www/html/joinerytest/maintenance_scripts/docker_install_master.sh`
+
+```bash
+# Install new site
+./docker_install_master.sh mysite SecurePass123! mysite.com 8080
+
+# List existing containers
+./docker_install_master.sh --list
+
+# Multiple sites (auto port detection)
+./docker_install_master.sh site1 Pass1! site1.com 8080
+./docker_install_master.sh site2 Pass2! site2.com 8081
+```
+
+**Features:**
+- One-command Docker installation from archive
+- Automatic port conflict detection and suggestion
+- Site-isolated build contexts (multi-site support)
+- PostgreSQL password setup on first run
+- Automatic cleanup after build
+
+---
 
 ### deploy.sh
 
@@ -226,4 +254,4 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 
 ---
 
-*Last Updated: 2025-10-18*
+*Last Updated: 2026-01-04*
