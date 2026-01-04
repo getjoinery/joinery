@@ -37,16 +37,10 @@ cd maintenance_scripts
 ### Example
 
 ```bash
-# Generate a secure password first
-POSTGRES_PASSWORD=$(openssl rand -base64 24)
-echo "Save this password: $POSTGRES_PASSWORD"
-
 tar -xzf joinery-2-21.tar.gz
 cd maintenance_scripts
-./docker_install_master.sh mysite "$POSTGRES_PASSWORD" mysite.com 8080
+./docker_install_master.sh mysite YOUR_PASSWORD mysite.com 8080
 ```
-
-**Important:** Always generate a secure, random password for your database. Never use simple passwords like "password123" in production.
 
 ### What the Script Does
 
@@ -88,10 +82,10 @@ The script fully supports running multiple sites on the same server:
 
 ```bash
 # First site (uses port 8080)
-./docker_install_master.sh site1 Pass123! site1.com 8080
+./docker_install_master.sh site1 YOUR_PASSWORD_1 site1.com 8080
 
 # Second site (uses port 8081)
-./docker_install_master.sh site2 Pass456! site2.com 8081
+./docker_install_master.sh site2 YOUR_PASSWORD_2 site2.com 8081
 
 # Check what's running
 ./docker_install_master.sh --list
@@ -236,7 +230,7 @@ Access the site at `http://YOUR_SERVER_IP:8080/`
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `SITENAME` | Site directory name, database name | `mycompany` |
-| `POSTGRES_PASSWORD` | PostgreSQL password | `SecurePass123!` |
+| `POSTGRES_PASSWORD` | PostgreSQL password | (your password) |
 | `DOMAIN_NAME` | Domain for VirtualHost | `mycompany.com` or server IP |
 
 ### Port Mapping
@@ -337,9 +331,6 @@ POSTGRES_PASSWORD="your_password"
 
 # Connect to database
 docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" $SITENAME psql -h 127.0.0.1 -U postgres -d $SITENAME
-
-# Run SQL command
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" $SITENAME psql -h 127.0.0.1 -U postgres -d $SITENAME -c "SELECT * FROM usr_users LIMIT 5;"
 ```
 
 ---
@@ -496,16 +487,16 @@ The installation script fully supports running multiple sites on the same server
 
 ```bash
 # First site - uses default port 8080
-./docker_install_master.sh site1 Pass123! site1.com
+./docker_install_master.sh site1 YOUR_PASSWORD_1 site1.com
 
 # Second site - specify port 8081
-./docker_install_master.sh site2 Pass456! site2.com 8081
+./docker_install_master.sh site2 YOUR_PASSWORD_2 site2.com 8081
 
 # Third site - if you forget to specify a port, the script will:
 #   1. Detect the conflict
 #   2. Show existing containers
 #   3. Suggest the next available port
-./docker_install_master.sh site3 Pass789! site3.com
+./docker_install_master.sh site3 YOUR_PASSWORD_3 site3.com
 ```
 
 ### Listing Existing Sites
@@ -642,8 +633,8 @@ After fresh installation:
 
 ## Version Information
 
-- **Guide Version:** 1.3
+- **Guide Version:** 1.4
 - **Tested With:** Ubuntu 24.04, Docker 29.1.3
 - **Dockerfile Template:** v1.1
-- **Install Script:** v1.1
+- **Install Script:** v1.2
 - **Last Updated:** 2026-01-04
