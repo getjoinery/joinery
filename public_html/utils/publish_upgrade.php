@@ -138,16 +138,23 @@
 		 
 		
 
-		// Check that required maintenance script files exist
+		// Check that required maintenance script files exist AND are readable
+		// Critical files that MUST be in the archive for installation to work
+		$maintenance_dir = $full_site_dir . '/maintenance_scripts/';
 		$required_files = [
-			'/var/www/html/joinerytest/maintenance_scripts/server_setup.sh',
-			'/var/www/html/joinerytest/maintenance_scripts/deploy.sh',
+			$maintenance_dir . 'server_setup.sh',
+			$maintenance_dir . 'deploy.sh',
+			$maintenance_dir . 'Dockerfile.template',
+			$maintenance_dir . 'docker_install_master.sh',
 			$sql_source
 		];
 
 		foreach ($required_files as $file) {
 			if (!file_exists($file)) {
 				die("ERROR: Required file $file not found. Cannot create archive.\n");
+			}
+			if (!is_readable($file)) {
+				die("ERROR: Required file $file exists but is not readable. Check file permissions (should be at least 644).\n");
 			}
 		}
 
@@ -185,7 +192,7 @@
 		}
 
 		// Copy config file
-		$config_source = '/var/www/html/joinerytest/maintenance_scripts/Globalvars_site_default.php';
+		$config_source = $maintenance_dir . 'Globalvars_site_default.php';
 		if (file_exists($config_source)) {
 			copy($config_source, $temp_dir . '/config/Globalvars_site_default.php');
 			echo "Copied config template<br>";
@@ -211,16 +218,30 @@
 			'docker_install_master.sh'
 		];
 
-		$maintenance_dir = '/var/www/html/joinerytest/maintenance_scripts/';
+		$copied_count = 0;
+		$failed_files = [];
 		foreach ($maintenance_files as $file) {
-			if (file_exists($maintenance_dir . $file)) {
-				copy($maintenance_dir . $file, $temp_dir . '/maintenance_scripts/' . $file);
-				if ($verbose) {
-					echo "Copied maintenance script: $file<br>";
+			$source = $maintenance_dir . $file;
+			$dest = $temp_dir . '/maintenance_scripts/' . $file;
+			if (file_exists($source)) {
+				if (is_readable($source)) {
+					if (copy($source, $dest)) {
+						$copied_count++;
+						if ($verbose) {
+							echo "Copied maintenance script: $file<br>";
+						}
+					} else {
+						$failed_files[] = $file . ' (copy failed)';
+					}
+				} else {
+					$failed_files[] = $file . ' (not readable - check permissions)';
 				}
 			}
 		}
-		echo "Copied " . count($maintenance_files) . " maintenance script files<br>";
+		if (!empty($failed_files)) {
+			echo "<span style='color: orange;'>Warning: Failed to copy: " . implode(', ', $failed_files) . "</span><br>";
+		}
+		echo "Copied $copied_count of " . count($maintenance_files) . " maintenance script files<br>";
 		flush();
 
 		// Copy install SQL file with simplified name
