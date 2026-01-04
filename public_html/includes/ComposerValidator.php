@@ -356,7 +356,8 @@ class ComposerValidator {
         }
 
         // Check if the errors are composer-install-fixable
-        $installFixableErrors = ['composer.lock not found', 'Missing required packages', 'Vendor directory mismatch'];
+        // Note: 'autoload.php not found' handles fresh installs where vendor directory doesn't exist
+        $installFixableErrors = ['composer.lock not found', 'Missing required packages', 'Vendor directory mismatch', 'autoload.php not found'];
         $canFix = false;
 
         foreach ($this->errors as $error) {
