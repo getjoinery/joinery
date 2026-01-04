@@ -1,17 +1,69 @@
 # Joinery Docker Installation Guide
 
-This guide covers the complete process for deploying Joinery in Docker containers, from a blank server to a fully functional site.
+This guide covers deploying Joinery in Docker containers, from a blank server to a fully functional site.
 
 ## Table of Contents
 
-1. [Prerequisites](#prerequisites)
-2. [Server Setup](#server-setup)
-3. [Installation Process](#installation-process)
+1. [Quick Install](#quick-install)
+2. [Prerequisites](#prerequisites)
+3. [Manual Installation](#manual-installation)
 4. [Configuration Parameters](#configuration-parameters)
 5. [Container Management](#container-management)
 6. [Maintenance Operations](#maintenance-operations)
 7. [Troubleshooting](#troubleshooting)
 8. [Multiple Sites](#multiple-sites)
+
+---
+
+## Quick Install
+
+The fastest way to deploy Joinery with Docker is using the master installation script.
+
+### One-Command Installation
+
+On your target server (Ubuntu 24.04):
+
+```bash
+# 1. Transfer and extract the archive
+scp joinery-X-Y.tar.gz root@YOUR_SERVER:~/
+ssh root@YOUR_SERVER
+
+# 2. Extract and run the installer
+tar -xzf joinery-X-Y.tar.gz
+cd maintenance_scripts
+./docker_install_master.sh SITENAME POSTGRES_PASSWORD [DOMAIN_NAME] [PORT]
+```
+
+### Example
+
+```bash
+tar -xzf joinery-2-21.tar.gz
+cd maintenance_scripts
+./docker_install_master.sh mysite SecurePass123! mysite.com 8080
+```
+
+### What the Script Does
+
+The `docker_install_master.sh` script automates the entire process:
+
+1. Validates parameters and archive structure
+2. Installs Docker if not present (with confirmation)
+3. Prepares the build context
+4. Builds the Docker image
+5. Starts the container with all persistent volumes
+6. Verifies the site is responding
+7. Displays access information and useful commands
+
+### Script Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `SITENAME` | Yes | - | Site/database name (e.g., `mysite`) |
+| `POSTGRES_PASSWORD` | Yes | - | Database password |
+| `DOMAIN_NAME` | No | Server IP | Domain for VirtualHost |
+| `PORT` | No | 8080 | Host port for web traffic |
+
+After installation, access your site at `http://YOUR_SERVER:PORT/`
 
 ---
 
@@ -21,7 +73,7 @@ This guide covers the complete process for deploying Joinery in Docker container
 - `joinery-X-Y.tar.gz` - The Joinery archive containing:
   - `public_html/` - Application code
   - `config/` - Configuration templates
-  - `maintenance_scripts/` - Setup and maintenance scripts (including `Dockerfile.template`)
+  - `maintenance_scripts/` - Setup scripts, Dockerfile.template, docker_install_master.sh
 
 ### Server Requirements
 - Fresh Ubuntu 24.04 LTS installation
@@ -32,7 +84,9 @@ This guide covers the complete process for deploying Joinery in Docker container
 
 ---
 
-## Server Setup
+## Manual Installation
+
+If you prefer to run each step manually, follow these instructions.
 
 ### Step 1: Install Docker
 
@@ -58,35 +112,19 @@ apt-get install -y docker-ce docker-ce-cli containerd.io
 
 # Verify installation
 docker --version
-docker run hello-world
 ```
 
----
-
-## Installation Process
-
-### Step 2: Transfer Files to Server
-
-From your local machine or source server:
+### Step 2: Prepare Build Context
 
 ```bash
-# Upload the archive
-scp joinery-X-Y.tar.gz root@YOUR_SERVER:~/
-```
-
-### Step 3: Prepare Build Context
-
-On the target server:
-
-```bash
-# Set your site name (this determines directory names and database name)
+# Set your site name
 SITENAME="yoursite"
 
 # Create build directory
 mkdir -p ~/joinery-docker-build
 cd ~/joinery-docker-build
 
-# Extract the archive
+# Extract the archive (assuming it's in home directory)
 tar -xzf ~/joinery-X-Y.tar.gz
 
 # Organize files under site name
@@ -94,7 +132,7 @@ mkdir -p $SITENAME
 mv config $SITENAME/
 mv public_html $SITENAME/
 
-# Copy Dockerfile template from the archive
+# Copy Dockerfile template
 cp maintenance_scripts/Dockerfile.template ./Dockerfile
 
 # Create .dockerignore
@@ -105,15 +143,13 @@ cat > .dockerignore << 'EOF'
 EOF
 ```
 
-### Step 4: Build the Docker Image
+### Step 3: Build the Docker Image
 
 ```bash
-# Set your configuration values
 SITENAME="yoursite"
 POSTGRES_PASSWORD="your_secure_password_here"
-DOMAIN_NAME="example.com"  # or server IP for testing
+DOMAIN_NAME="example.com"  # or server IP
 
-# Build the image
 docker build \
   --build-arg SITENAME=$SITENAME \
   --build-arg POSTGRES_PASSWORD=$POSTGRES_PASSWORD \
@@ -121,15 +157,14 @@ docker build \
   -t joinery-$SITENAME .
 ```
 
-**Build time:** Approximately 5-10 minutes depending on server speed.
+**Build time:** Approximately 5-10 minutes.
 
-### Step 5: Run the Container
+### Step 4: Run the Container
 
 ```bash
 SITENAME="yoursite"
 PORT=8080
 
-# Run with all recommended volumes
 docker run -d \
   --name $SITENAME \
   -p $PORT:80 \
@@ -147,23 +182,16 @@ docker run -d \
   joinery-$SITENAME
 ```
 
-### Step 6: Verify Installation
+### Step 5: Verify Installation
 
-The container automatically handles:
-- Composer dependency installation
-- Apache site configuration (disables default, enables your site)
-- PostgreSQL password setup
-
-Wait about 30 seconds for initial setup, then verify:
+Wait about 30 seconds for initialization, then:
 
 ```bash
-# Check if site returns HTTP 200
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/
-
 # Should return: 200
 ```
 
-Access the site in a browser at `http://YOUR_SERVER_IP:8080/`
+Access the site at `http://YOUR_SERVER_IP:8080/`
 
 ---
 
@@ -208,7 +236,7 @@ Access the site in a browser at `http://YOUR_SERVER_IP:8080/`
 ```bash
 SITENAME="yoursite"
 
-# Stop container (gracefully)
+# Stop container
 docker stop $SITENAME
 
 # Start container
@@ -319,22 +347,21 @@ SITENAME="yoursite"
 POSTGRES_PASSWORD="yourpass"
 DOMAIN_NAME="yourdomain"
 
-# 1. Stop the container
+# 1. Stop and remove the container (volumes are preserved!)
 docker stop $SITENAME
-
-# 2. Remove the container (volumes are preserved!)
 docker rm $SITENAME
 
-# 3. Update source files and rebuild the image
+# 2. Update source files and rebuild
 cd ~/joinery-docker-build
-# Extract new archive, reorganize files as in Step 3
+# Extract new archive and reorganize files...
+
 docker build \
   --build-arg SITENAME=$SITENAME \
   --build-arg POSTGRES_PASSWORD=$POSTGRES_PASSWORD \
   --build-arg DOMAIN_NAME=$DOMAIN_NAME \
   -t joinery-$SITENAME .
 
-# 4. Run new container with same volumes
+# 3. Run new container with same volumes
 docker run -d \
   --name $SITENAME \
   -p 8080:80 \
@@ -352,7 +379,7 @@ docker run -d \
   joinery-$SITENAME
 ```
 
-**Note:** The container automatically detects this is not a first run (config file exists) and skips initial setup. Your data and configuration persist in the volumes.
+The container detects this is not a first run and skips initial setup. Your data persists in the volumes.
 
 ### Run Database Migrations
 
@@ -389,50 +416,6 @@ docker volume prune
 ---
 
 ## Troubleshooting
-
-### Site Shows Apache Default Page
-
-**Cause:** The 000-default site is enabled (should be disabled automatically).
-
-```bash
-docker exec $SITENAME a2dissite 000-default.conf
-docker exec $SITENAME service apache2 reload
-```
-
-### "Vendor autoload not found" Error
-
-**Cause:** Composer dependencies not installed (should install automatically).
-
-```bash
-docker exec $SITENAME bash -c "cd /var/www/html/$SITENAME/public_html && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev"
-docker exec $SITENAME chown -R www-data:www-data /var/www/html/$SITENAME/vendor
-```
-
-### Database Connection Failed
-
-**Cause:** PostgreSQL password not set or authentication issue.
-
-Check the error log:
-```bash
-docker exec $SITENAME tail -50 /var/www/html/$SITENAME/logs/error.log
-```
-
-If password needs to be reset manually:
-```bash
-SITENAME="yoursite"
-POSTGRES_PASSWORD="your_password_here"
-
-# Temporarily allow trust authentication
-docker exec $SITENAME bash -c "sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' /etc/postgresql/16/main/pg_hba.conf"
-docker exec $SITENAME service postgresql reload
-
-# Set the password
-docker exec $SITENAME bash -c "psql -U postgres -c \"ALTER USER postgres PASSWORD '$POSTGRES_PASSWORD';\""
-
-# Restore md5 authentication
-docker exec $SITENAME bash -c "sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' /etc/postgresql/16/main/pg_hba.conf"
-docker exec $SITENAME service postgresql reload
-```
 
 ### Container Won't Start
 
@@ -588,7 +571,8 @@ After fresh installation:
 
 ## Version Information
 
-- **Guide Version:** 1.1
+- **Guide Version:** 1.2
 - **Tested With:** Ubuntu 24.04, Docker 29.1.3
 - **Dockerfile Template:** v1.1
+- **Install Script:** v1.0
 - **Last Updated:** 2026-01-04
