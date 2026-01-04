@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 1.0
+# VERSION 1.1
 #
 # Usage:
 #   docker build \
@@ -43,15 +43,25 @@ RUN cp /var/www/html/${SITENAME}/maintenance_scripts/default_virtualhost.conf /e
     sed -i "s/{{SITE_NAME}}/${SITENAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     mkdir -p /var/www/html/${SITENAME}_test/public_html && \
     mkdir -p /var/www/html/${SITENAME}_test/logs && \
+    a2dissite 000-default.conf 2>/dev/null || true && \
     a2ensite ${SITENAME}.conf
 
 # Expose ports
 EXPOSE 80 5432
 
 # Start services
+# On first run: set PostgreSQL password (persists in volume for subsequent runs)
 CMD service postgresql start && \
     sleep 3 && \
     export PGPASSWORD="${POSTGRES_PASSWORD}" && \
+    PG_CONF="/etc/postgresql/16/main/pg_hba.conf" && \
+    if [ ! -f /var/www/html/${SITENAME}/config/Globalvars_site.php ]; then \
+        sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' $PG_CONF && \
+        service postgresql reload && \
+        su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres && \
+        sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' $PG_CONF && \
+        service postgresql reload; \
+    fi && \
     ([ -f /var/www/html/${SITENAME}/config/Globalvars_site.php ] || \
         cd /var/www/html/${SITENAME}/maintenance_scripts && \
         ./new_account.sh ${SITENAME} ${DOMAIN_NAME} "*") && \
