@@ -47,12 +47,14 @@ cd maintenance_scripts
 The `docker_install_master.sh` script automates the entire process:
 
 1. Validates parameters and archive structure
-2. Installs Docker if not present (with confirmation)
-3. Prepares the build context
-4. Builds the Docker image
-5. Starts the container with all persistent volumes
-6. Verifies the site is responding
-7. Displays access information and useful commands
+2. Checks port availability (detects conflicts, suggests alternatives)
+3. Installs Docker if not present (with confirmation)
+4. Prepares an isolated build context
+5. Builds the Docker image
+6. Starts the container with all persistent volumes
+7. Verifies the site is responding
+8. Cleans up build directory
+9. Displays access information and all running containers
 
 ### Script Parameters
 
@@ -62,6 +64,32 @@ The `docker_install_master.sh` script automates the entire process:
 | `POSTGRES_PASSWORD` | Yes | - | Database password |
 | `DOMAIN_NAME` | No | Server IP | Domain for VirtualHost |
 | `PORT` | No | 8080 | Host port for web traffic |
+
+### Script Options
+
+```bash
+# List existing Joinery containers
+./docker_install_master.sh --list
+```
+
+### Multi-Site Support
+
+The script fully supports running multiple sites on the same server:
+
+- **Port conflict detection**: Automatically checks if ports are in use
+- **Port suggestions**: Offers next available port if conflict detected
+- **Site isolation**: Each site uses completely isolated build context and volumes
+
+```bash
+# First site (uses port 8080)
+./docker_install_master.sh site1 Pass123! site1.com 8080
+
+# Second site (uses port 8081)
+./docker_install_master.sh site2 Pass456! site2.com 8081
+
+# Check what's running
+./docker_install_master.sh --list
+```
 
 After installation, access your site at `http://YOUR_SERVER:PORT/`
 
@@ -425,7 +453,7 @@ docker logs $SITENAME
 ```
 
 Common causes:
-- Port already in use: Change the host port
+- Port already in use: The install script now detects this automatically and suggests available ports
 - Volume permission issues: Check volume mounts
 - Out of disk space: Clean up old images/containers
 
@@ -438,13 +466,63 @@ docker exec $SITENAME service postgresql start
 docker exec $SITENAME service apache2 start
 ```
 
+### Checking What's Running
+
+Use the built-in list command to see all Joinery containers:
+
+```bash
+./docker_install_master.sh --list
+```
+
+Or use Docker directly:
+
+```bash
+docker ps -a --filter "name=joinery" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
 ---
 
 ## Multiple Sites
 
+The installation script fully supports running multiple sites on the same server with automatic port management.
+
+### Installing Multiple Sites
+
+```bash
+# First site - uses default port 8080
+./docker_install_master.sh site1 Pass123! site1.com
+
+# Second site - specify port 8081
+./docker_install_master.sh site2 Pass456! site2.com 8081
+
+# Third site - if you forget to specify a port, the script will:
+#   1. Detect the conflict
+#   2. Show existing containers
+#   3. Suggest the next available port
+./docker_install_master.sh site3 Pass789! site3.com
+```
+
+### Listing Existing Sites
+
+```bash
+# Show all Joinery containers with their ports and status
+./docker_install_master.sh --list
+```
+
+Example output:
+```
+Existing Joinery containers:
+───────────────────────────────────────────────────────────────
+SITE NAME            WEB PORT        DB PORT      STATUS
+───────────────────────────────────────────────────────────────
+site1                8080            9080         Up 2 hours
+site2                8081            9081         Up 1 hour
+───────────────────────────────────────────────────────────────
+```
+
 ### Port Management
 
-Each site needs unique ports:
+Each site needs unique ports. The script automatically checks and suggests available ports:
 
 | Site | Web Port | Database Port |
 |------|----------|---------------|
@@ -452,44 +530,28 @@ Each site needs unique ports:
 | site2 | 8081 | 9081 |
 | site3 | 8082 | 9082 |
 
-### Quick Reference Script
+### Port Conflict Handling
 
-Create `~/manage-sites.sh`:
+If you try to use a port that's already in use:
 
-```bash
-#!/bin/bash
+1. The script detects the conflict
+2. Shows all existing Joinery containers
+3. Finds the next available port pair
+4. Prompts you to accept the suggestion
 
-case "$1" in
-  list)
-    echo "=== Running Joinery Containers ==="
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-    ;;
-  start)
-    docker start $2
-    ;;
-  stop)
-    docker stop $2
-    ;;
-  logs)
-    docker logs --tail 100 $2
-    ;;
-  shell)
-    docker exec -it $2 bash
-    ;;
-  *)
-    echo "Usage: $0 {list|start|stop|logs|shell} [sitename]"
-    ;;
-esac
 ```
+[WARN] Port 8080 is already in use
 
-Usage:
-```bash
-chmod +x ~/manage-sites.sh
-./manage-sites.sh list
-./manage-sites.sh stop mysite
-./manage-sites.sh start mysite
-./manage-sites.sh logs mysite
-./manage-sites.sh shell mysite
+Existing Joinery containers:
+───────────────────────────────────────────────────────────────
+SITE NAME            WEB PORT        DB PORT      STATUS
+───────────────────────────────────────────────────────────────
+site1                8080            9080         Up 2 hours
+───────────────────────────────────────────────────────────────
+
+Suggested available port: 8081 (database: 9081)
+
+Would you like to use port 8081 instead? [Y/n]
 ```
 
 ### Reverse Proxy Setup
@@ -535,6 +597,9 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 ### Essential Commands
 
 ```bash
+# List all Joinery containers
+./docker_install_master.sh --list
+
 # Start container
 docker start SITENAME
 
@@ -571,8 +636,8 @@ After fresh installation:
 
 ## Version Information
 
-- **Guide Version:** 1.2
+- **Guide Version:** 1.3
 - **Tested With:** Ubuntu 24.04, Docker 29.1.3
 - **Dockerfile Template:** v1.1
-- **Install Script:** v1.0
+- **Install Script:** v1.1
 - **Last Updated:** 2026-01-04

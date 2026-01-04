@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
-#VERSION 1.0 - Docker installation master script
+#VERSION 1.1 - Docker installation master script
 #
 # Usage: ./docker_install_master.sh SITENAME POSTGRES_PASSWORD [DOMAIN_NAME] [PORT]
+#        ./docker_install_master.sh --list
 #
 # This script automates the entire Docker installation process.
 # Run this script after extracting the joinery archive on your target server.
 #
-# Example:
+# Features:
+#   - Automatic Docker installation if not present
+#   - Port conflict detection with automatic suggestion
+#   - Site-isolated build contexts (supports multiple sites)
+#   - Automatic cleanup after build
+#
+# Example (single site):
 #   tar -xzf joinery-2-21.tar.gz
 #   cd maintenance_scripts
 #   ./docker_install_master.sh mysite SecurePass123! mysite.com 8080
+#
+# Example (multiple sites):
+#   ./docker_install_master.sh site1 Pass123! site1.com 8080
+#   ./docker_install_master.sh site2 Pass456! site2.com 8081
+#
+# List existing sites:
+#   ./docker_install_master.sh --list
 #
 
 set -e  # Exit on error
@@ -57,6 +71,107 @@ print_success() {
 }
 
 #------------------------------------------------------------------------------
+# Port Management Functions
+#------------------------------------------------------------------------------
+
+# Check if a port is in use (by system or Docker)
+is_port_in_use() {
+    local port=$1
+
+    # Check system ports using ss (preferred) or netstat
+    if command -v ss &> /dev/null; then
+        if ss -tuln | grep -q ":${port} "; then
+            return 0
+        fi
+    elif command -v netstat &> /dev/null; then
+        if netstat -tuln | grep -q ":${port} "; then
+            return 0
+        fi
+    fi
+
+    # Check Docker container port mappings
+    if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+        if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q "0.0.0.0:${port}->"; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Find next available port starting from given port
+find_available_port() {
+    local start_port=$1
+    local port=$start_port
+    local max_port=$((start_port + 100))
+
+    while [ $port -lt $max_port ]; do
+        if ! is_port_in_use $port && ! is_port_in_use $((port + 1000)); then
+            echo $port
+            return 0
+        fi
+        port=$((port + 1))
+    done
+
+    echo ""
+    return 1
+}
+
+# List existing Joinery containers with their ports
+list_joinery_containers() {
+    echo ""
+    echo -e "${BLUE}Existing Joinery containers:${NC}"
+    echo "───────────────────────────────────────────────────────────────"
+    printf "%-20s %-15s %-12s %s\n" "SITE NAME" "WEB PORT" "DB PORT" "STATUS"
+    echo "───────────────────────────────────────────────────────────────"
+
+    local found=0
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            local name=$(echo "$line" | awk '{print $1}')
+            local ports=$(echo "$line" | awk '{print $2}')
+            local status=$(echo "$line" | awk '{$1=$2=""; print $0}' | xargs)
+
+            # Extract web port (format: 0.0.0.0:8080->80/tcp)
+            local web_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->80)' | head -1)
+            local db_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->5432)' | head -1)
+
+            if [ -n "$web_port" ]; then
+                printf "%-20s %-15s %-12s %s\n" "$name" "$web_port" "${db_port:-N/A}" "$status"
+                found=1
+            fi
+        fi
+    done < <(docker ps -a --filter "ancestor=joinery-*" --format "{{.Names}} {{.Ports}} {{.Status}}" 2>/dev/null)
+
+    # Also check by naming convention if ancestor filter didn't work
+    if [ $found -eq 0 ]; then
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                local name=$(echo "$line" | awk '{print $1}')
+                local image=$(echo "$line" | awk '{print $2}')
+                local ports=$(echo "$line" | awk '{print $3}')
+                local status=$(echo "$line" | awk '{$1=$2=$3=""; print $0}' | xargs)
+
+                # Check if image starts with joinery-
+                if [[ "$image" == joinery-* ]]; then
+                    local web_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->80)' | head -1)
+                    local db_port=$(echo "$ports" | grep -oP '0\.0\.0\.0:\K[0-9]+(?=->5432)' | head -1)
+
+                    printf "%-20s %-15s %-12s %s\n" "$name" "${web_port:-N/A}" "${db_port:-N/A}" "$status"
+                    found=1
+                fi
+            fi
+        done < <(docker ps -a --format "{{.Names}} {{.Image}} {{.Ports}} {{.Status}}" 2>/dev/null)
+    fi
+
+    if [ $found -eq 0 ]; then
+        echo "  (no existing Joinery containers found)"
+    fi
+    echo "───────────────────────────────────────────────────────────────"
+    echo ""
+}
+
+#------------------------------------------------------------------------------
 # Validation
 #------------------------------------------------------------------------------
 
@@ -66,9 +181,21 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Handle --list flag to show existing containers
+if [ "$1" = "--list" ] || [ "$1" = "-l" ]; then
+    if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+        list_joinery_containers
+        exit 0
+    else
+        print_error "Docker is not installed or not running"
+        exit 1
+    fi
+fi
+
 # Check parameters
 if [ -z "$1" ]; then
     echo "Usage: $0 SITENAME POSTGRES_PASSWORD [DOMAIN_NAME] [PORT]"
+    echo "       $0 --list"
     echo ""
     echo "Parameters:"
     echo "  SITENAME          - Site/database name (required, e.g., 'mysite')"
@@ -76,8 +203,15 @@ if [ -z "$1" ]; then
     echo "  DOMAIN_NAME       - Domain for VirtualHost (optional, defaults to server IP)"
     echo "  PORT              - Host port for web traffic (optional, defaults to 8080)"
     echo ""
+    echo "Options:"
+    echo "  --list, -l        - List existing Joinery containers and their ports"
+    echo ""
     echo "Example:"
     echo "  $0 mysite SecurePass123! mysite.com 8080"
+    echo ""
+    echo "Multiple sites:"
+    echo "  $0 site1 Pass123! site1.com 8080"
+    echo "  $0 site2 Pass456! site2.com 8081"
     exit 1
 fi
 
@@ -101,6 +235,63 @@ if [ "$DOMAIN_NAME" = "localhost" ]; then
         DOMAIN_NAME="$SERVER_IP"
         print_info "Auto-detected server IP: $DOMAIN_NAME"
     fi
+fi
+
+#------------------------------------------------------------------------------
+# Port Conflict Detection
+#------------------------------------------------------------------------------
+
+print_step "Checking port availability..."
+
+PORT_CONFLICT=0
+SUGGESTED_PORT=""
+
+# Check web port
+if is_port_in_use $PORT; then
+    print_warning "Port $PORT is already in use"
+    PORT_CONFLICT=1
+fi
+
+# Check database port
+if is_port_in_use $DB_PORT; then
+    print_warning "Database port $DB_PORT is already in use"
+    PORT_CONFLICT=1
+fi
+
+if [ $PORT_CONFLICT -eq 1 ]; then
+    # Show existing containers for context
+    if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+        list_joinery_containers
+    fi
+
+    # Find next available port
+    SUGGESTED_PORT=$(find_available_port 8080)
+
+    if [ -n "$SUGGESTED_PORT" ]; then
+        echo ""
+        echo -e "Suggested available port: ${GREEN}$SUGGESTED_PORT${NC} (database: $((SUGGESTED_PORT + 1000)))"
+        echo ""
+        read -p "Would you like to use port $SUGGESTED_PORT instead? [Y/n] " -n 1 -r
+        echo ""
+
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            PORT=$SUGGESTED_PORT
+            DB_PORT=$((PORT + 1000))
+            print_success "Using port $PORT (database: $DB_PORT)"
+        else
+            print_error "Cannot continue with port conflict. Please specify a different port."
+            echo ""
+            echo "Usage: $0 $SITENAME $POSTGRES_PASSWORD $DOMAIN_NAME <PORT>"
+            echo "Example: $0 $SITENAME $POSTGRES_PASSWORD $DOMAIN_NAME $SUGGESTED_PORT"
+            exit 1
+        fi
+    else
+        print_error "Could not find an available port in range 8080-8180"
+        print_error "Please specify a port manually or free up existing ports"
+        exit 1
+    fi
+else
+    print_success "Ports $PORT and $DB_PORT are available"
 fi
 
 #------------------------------------------------------------------------------
@@ -231,25 +422,24 @@ fi
 
 print_step "Preparing build context..."
 
-BUILD_DIR=~/joinery-docker-build
-BUILD_SITE_DIR="$BUILD_DIR/$SITENAME"
+# Use site-isolated build directory (prevents any shared file issues)
+BUILD_DIR=~/joinery-docker-build-${SITENAME}
 
 # Clean up any existing build directory for this site
-if [ -d "$BUILD_SITE_DIR" ]; then
+if [ -d "$BUILD_DIR" ]; then
     print_info "Cleaning up existing build directory..."
-    rm -rf "$BUILD_SITE_DIR"
+    rm -rf "$BUILD_DIR"
 fi
 
 # Create build directory structure
-mkdir -p "$BUILD_DIR"
-mkdir -p "$BUILD_SITE_DIR"
+mkdir -p "$BUILD_DIR/$SITENAME"
 
 # Copy files
 print_info "Copying public_html..."
-cp -r "$ARCHIVE_ROOT/public_html" "$BUILD_SITE_DIR/"
+cp -r "$ARCHIVE_ROOT/public_html" "$BUILD_DIR/$SITENAME/"
 
 print_info "Copying config..."
-cp -r "$ARCHIVE_ROOT/config" "$BUILD_SITE_DIR/"
+cp -r "$ARCHIVE_ROOT/config" "$BUILD_DIR/$SITENAME/"
 
 print_info "Copying maintenance_scripts..."
 mkdir -p "$BUILD_DIR/maintenance_scripts"
@@ -352,6 +542,16 @@ while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
 done
 
 #------------------------------------------------------------------------------
+# Cleanup Build Directory
+#------------------------------------------------------------------------------
+
+print_step "Cleaning up build directory..."
+if [ -d "$BUILD_DIR" ]; then
+    rm -rf "$BUILD_DIR"
+    print_success "Build directory removed"
+fi
+
+#------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
 
@@ -383,5 +583,7 @@ else
     print_warning "Container may not be running. Check logs with: docker logs $SITENAME"
 fi
 
-echo ""
+# Show all running Joinery containers
+list_joinery_containers
+
 print_success "Docker installation complete!"
