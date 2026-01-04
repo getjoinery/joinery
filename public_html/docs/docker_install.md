@@ -37,10 +37,16 @@ cd maintenance_scripts
 ### Example
 
 ```bash
+# Generate a secure password first
+POSTGRES_PASSWORD=$(openssl rand -base64 24)
+echo "Save this password: $POSTGRES_PASSWORD"
+
 tar -xzf joinery-2-21.tar.gz
 cd maintenance_scripts
-./docker_install_master.sh mysite SecurePass123! mysite.com 8080
+./docker_install_master.sh mysite "$POSTGRES_PASSWORD" mysite.com 8080
 ```
+
+**Important:** Always generate a secure, random password for your database. Never use simple passwords like "password123" in production.
 
 ### What the Script Does
 
