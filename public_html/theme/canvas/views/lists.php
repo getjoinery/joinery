@@ -138,7 +138,7 @@ $page_vars = $page_vars->data;
 												   id="usr_email" 
 												   class="form-control rounded-pill" 
 												   placeholder="Enter your email address" 
-												   value="<?php echo strip_tags($_GET['email']); ?>"
+												   value="<?php echo htmlspecialchars($_GET['email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
 												   maxlength="64" />
 										</div>
 

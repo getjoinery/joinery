@@ -31,19 +31,35 @@
 
 	}
 
-	if(is_numeric($_REQUEST['point'])){
-		$query_number = (int)$_REQUEST['point'];
-		$results= json_decode(exec('node '.$node_dir.'/number-to-name.js '.$query_number));
-		$query_name = $results;
-	}
-	else if ($_REQUEST['point']) {
-		$query_name = $_REQUEST['point'];
-		$results= json_decode(exec('node '.$node_dir.'/name-to-number.js '.$query_name));
-		$query_number = $results;
-	}
-	else{
-		$query_name = NULL;
-		$query_number = NULL;
+	// Validate Urbit point input (numeric 0-4294967295 or @p format)
+	$raw_input = trim($_REQUEST['point'] ?? '');
+	$query_name = NULL;
+	$query_number = NULL;
+	$safe_name = NULL;
+	$safe_number = NULL;
+
+	if ($raw_input !== '') {
+		if (is_numeric($raw_input)) {
+			$num = (int)$raw_input;
+			if ($num < 0 || $num > 4294967295) {
+				throw new SystemDisplayableError('Invalid point number. Must be 0-4294967295.');
+			}
+			$query_number = (string)$num;
+			$safe_number = $query_number;
+			$results = json_decode(exec('node '.$node_dir.'/number-to-name.js '.$safe_number));
+			$query_name = $results;
+			$safe_name = escapeshellarg($query_name);
+		} elseif (preg_match('/^~[a-z]{3}$/', $raw_input) ||
+		          preg_match('/^~[a-z]{6}$/', $raw_input) ||
+		          preg_match('/^~[a-z]{6}-[a-z]{6}$/', $raw_input)) {
+			$query_name = $raw_input;
+			$safe_name = escapeshellarg($raw_input);
+			$results = json_decode(exec('node '.$node_dir.'/name-to-number.js '.$safe_name));
+			$query_number = (int)$results;
+			$safe_number = (string)$query_number;
+		} else {
+			throw new SystemDisplayableError('Invalid point format. Use numeric ID or @p name (e.g., ~zod, ~marzod, ~sampel-palnet).');
+		}
 	}
 
 	$page = new PublicPage();
@@ -61,7 +77,7 @@
 	if($query_number){
 		$point = Point::get_by_id($query_number);
 
-		echo '<h3>Info for point '. $query_name . ' (' . $query_number .')</h3>';
+		echo '<h3>Info for point '. htmlspecialchars($query_name, ENT_QUOTES, 'UTF-8') . ' (' . (int)$query_number .')</h3>';
 
 		if($point->get('pnt_clan')){
 			if($point->get('pnt_clan') == 1){
@@ -75,7 +91,7 @@
 			}
 		}
 		else{
-			$type= json_decode(exec('node '.$node_dir.'/point-type.js '.$query_name));
+			$type= json_decode(exec('node '.$node_dir.'/point-type.js '.$safe_name));
 			if($type == 'galaxy'){
 				$point->set('pnt_clan', 1);
 			}
@@ -88,7 +104,7 @@
 		}
 		echo 'Type: '.$type.'<br>';
 
-		$results= json_decode(exec('node '.$node_dir.'/point-info.js '.$query_number));
+		$results= json_decode(exec('node '.$node_dir.'/point-info.js '.$safe_number));
 
 		if($point && $point->get('pnt_is_active') === NULL){
 			echo 'Active: '. ($results->active ? 'yes' : 'no').'<br>';
@@ -101,20 +117,20 @@
 			echo 'Active: '. ($results->active ? 'yes' : 'no').'<br>';
 		}
 
-		echo 'Owner: '. $results->owner.'<br>';
-		$sponsor= json_decode(exec('node '.$node_dir.'/number-to-name.js '.$results->sponsor));
-		echo 'Sponsor: '. $sponsor . '('.$results->sponsor.')<br>';
+		echo 'Owner: '. htmlspecialchars($results->owner, ENT_QUOTES, 'UTF-8') .'<br>';
+		$sponsor= json_decode(exec('node '.$node_dir.'/number-to-name.js '. (int)$results->sponsor));
+		echo 'Sponsor: '. htmlspecialchars($sponsor, ENT_QUOTES, 'UTF-8') . '('. (int)$results->sponsor .')<br>';
 		if($type == 'star'){
 			$point->set('pnt_sein', $results->sponsor);
 		}
 
 		if($point){
-			$results= json_decode(exec('node '.$node_dir.'/get-spawn-count.js '.$query_number));
-			echo '# points spawned: '. $results.'<br>';
+			$results= json_decode(exec('node '.$node_dir.'/get-spawn-count.js '.$safe_number));
+			echo '# points spawned: '. (int)$results .'<br>';
 		}
 
 		if($point && $point->get('pnt_is_booted') === NULL){
-			$results= json_decode(exec('node '.$node_dir.'/has-been-linked.js '.$query_number));
+			$results= json_decode(exec('node '.$node_dir.'/has-been-linked.js '.$safe_number));
 			echo 'Has been booted: '. ($results ? 'yes' : 'no').'<br>';
 			$point->set('pnt_is_booted', $results);
 
@@ -123,12 +139,12 @@
 			echo 'Has been booted: '. ($point->get('pnt_is_booted') ? 'yes' : 'no').'<br>';
 		}
 		else{
-			$results= json_decode(exec('node '.$node_dir.'/has-been-linked.js '.$query_number));
+			$results= json_decode(exec('node '.$node_dir.'/has-been-linked.js '.$safe_number));
 			echo 'Has been booted: '. ($results ? 'yes' : 'no').'<br>';
 		}
 
 		if($point && $point->get('pnt_is_live') === NULL){
-			$results= json_decode(exec('node '.$node_dir.'/is-live.js '.$query_number));
+			$results= json_decode(exec('node '.$node_dir.'/is-live.js '.$safe_number));
 			echo 'Is Live: '. ($results ? 'yes' : 'no').'<br>';
 			$point->set('pnt_is_live', $results);
 		}
@@ -136,7 +152,7 @@
 			echo 'Is Live: '. ($point->get('pnt_is_live') ? 'yes' : 'no').'<br>';
 		}
 		else{
-			$results= json_decode(exec('node '.$node_dir.'is-live.js '.$query_number));
+			$results= json_decode(exec('node '.$node_dir.'/is-live.js '.$safe_number));
 			echo 'Is Live: '. ($results ? 'yes' : 'no').'<br>';
 			$point->set('pnt_is_live', $results);
 		}
