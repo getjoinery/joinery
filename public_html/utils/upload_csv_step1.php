@@ -121,7 +121,7 @@ if($_POST) {
 }
 else{
 
-	printf('<form name="form1" class="form" enctype="multipart/form-data" method="post" action="%s%s">', $_SERVER['PHP_SELF'], $getvars);
+	printf('<form name="form1" class="form" enctype="multipart/form-data" method="post" action="%s%s">', htmlspecialchars($_SERVER['SCRIPT_NAME'], ENT_QUOTES, 'UTF-8'), htmlspecialchars($getvars, ENT_QUOTES, 'UTF-8'));
 			echo "<fieldset><h4>Upload a csv mailing list. Max. filesize = $max_size bytes.  Only .csv files accepted.</h4>";
 				echo '<div class="fields full">';
 
