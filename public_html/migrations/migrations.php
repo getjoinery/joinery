@@ -1043,3 +1043,36 @@
 		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug) VALUES ('Components', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'system'), 'admin_component_types', 6, 9, 0, 'puzzle-piece', 'system-components');";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// ========== Statistics Menu Cleanup (v74) ==========
+		// Fix: Remove duplicate Funnels menu entry (keep first, delete second duplicate)
+		$migration = array();
+		$migration['database_version'] = '74';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'funnels' HAVING count(1) <= 1";
+		$migration['migration_sql'] = "DELETE FROM amu_admin_menus WHERE amu_admin_menu_id = (SELECT MAX(amu_admin_menu_id) FROM amu_admin_menus WHERE amu_slug = 'funnels');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix: Funnels menu entry points to wrong page (admin_locations instead of admin_analytics_funnels)
+		$migration = array();
+		$migration['database_version'] = '74';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'funnels' AND amu_defaultpage = 'admin_analytics_funnels'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_defaultpage = 'admin_analytics_funnels' WHERE amu_slug = 'funnels';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix: Slug typo 'signups-by date' should be 'signups-by-date' (space vs hyphen)
+		$migration = array();
+		$migration['database_version'] = '74';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'signups-by-date'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_slug = 'signups-by-date' WHERE amu_slug = 'signups-by date';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Fix: Slug typo 'email-debug logs' should be 'email-debug-logs' (space vs hyphen)
+		$migration = array();
+		$migration['database_version'] = '74';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'email-debug-logs'";
+		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_slug = 'email-debug-logs' WHERE amu_slug = 'email-debug logs';";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
