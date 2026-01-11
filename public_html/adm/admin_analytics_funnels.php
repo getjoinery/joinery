@@ -11,9 +11,10 @@ $page_vars = process_logic(admin_analytics_funnels_logic($_GET, $_POST));
 $page = new AdminPage();
 $page->admin_header(
 array(
-	'menu-id'=> 'email-statistics',
+	'menu-id'=> 'funnels',
 	'breadcrumbs' => array(
-		'Statistics'=>'',
+		'Statistics'=>'/admin/admin_analytics_stats',
+		'Funnels'=>'',
 	),
 	'session' => $session,
 )
