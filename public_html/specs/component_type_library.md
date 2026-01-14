@@ -7,6 +7,8 @@ This document defines the planned component types for the page builder system. E
 
 **Note:** Schemas marked with `*` require field types from Phase 2/3 enhancements. Simplified versions can be created using currently available field types.
 
+**Last Updated:** January 2026 - Updated implementation status for hero_static, feature_grid, cta_banner, custom_html, page_title. Added theme-specific components section.
+
 ---
 
 ## Implementation Status Key
@@ -21,7 +23,7 @@ This document defines the planned component types for the page builder system. E
 
 ## Hero Components
 
-### `hero_static` [ ] *
+### `hero_static` [x]
 
 **Category:** hero
 **Description:** Single hero section with heading, subheading, background, and CTA
@@ -184,7 +186,7 @@ This document defines the planned component types for the page builder system. E
 
 ## Feature Components
 
-### `feature_grid` [ ]
+### `feature_grid` [x]
 
 **Category:** features
 **Description:** Grid of icon + title + description items
@@ -308,7 +310,7 @@ This document defines the planned component types for the page builder system. E
 
 ## Conversion Components
 
-### `cta_banner` [ ]
+### `cta_banner` [x]
 
 **Category:** conversion
 **Description:** Full-width call-to-action banner
@@ -366,6 +368,26 @@ This document defines the planned component types for the page builder system. E
 ---
 
 ## Layout Components
+
+### `page_title` [x]
+
+**Category:** layout
+**Description:** Page title with optional subtitle and breadcrumbs
+
+**Schema:**
+```json
+{
+  "fields": [
+    {"name": "title", "label": "Page Title", "type": "textinput"},
+    {"name": "subtitle", "label": "Subtitle", "type": "textinput"},
+    {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "options": {"left": "Left", "center": "Center"}},
+    {"name": "show_breadcrumbs", "label": "Show Breadcrumbs", "type": "checkboxinput"},
+    {"name": "background_color", "label": "Background Color (hex)", "type": "textinput"}
+  ]
+}
+```
+
+---
 
 ### `spacer` [ ]
 
@@ -456,7 +478,7 @@ This document defines the planned component types for the page builder system. E
 
 ## Custom Components
 
-### `custom_html` [ ]
+### `custom_html` [x]
 
 **Category:** custom
 **Description:** Raw HTML for advanced users
@@ -520,6 +542,32 @@ These components require logic functions to fetch data.
   ]
 }
 ```
+
+---
+
+## Theme-Specific Components
+
+Themes can define their own component types by prefixing the type key with the theme name. These components are specific to that theme and include both the database record and template file within the theme directory.
+
+**Naming Convention:** `{theme}_{component_name}`
+
+**Example (linka-reference theme):**
+- `linka_hero` - Theme-specific hero variant
+- `linka_featured_card` - Card component for blog features
+- `linka_featured_grid` - Grid layout for featured content
+- `linka_editor_choice` - Editor's choice showcase
+- `linka_inspiration` - Inspiration section
+- `linka_contact_info` - Contact information display
+- `linka_newsletter` - Newsletter signup form
+- `linka_social_follow` - Social media follow buttons
+- `linka_page_title` - Theme-styled page title
+
+**Template Location:**
+```
+/theme/{theme}/views/components/{component_template}.php
+```
+
+Theme-specific components should set `com_css_framework` to indicate compatibility (e.g., 'bootstrap', 'tailwind').
 
 ---
 
