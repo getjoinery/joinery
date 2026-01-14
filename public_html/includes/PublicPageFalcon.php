@@ -673,8 +673,6 @@ class PublicPageFalcon extends PublicPageBase {
 	<script src="<?php echo PathHelper::getThemeFilePath('bootstrap.min.js', 'assets/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('all.min.js', 'assets/vendors/fontawesome', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('theme-admin.js', 'assets/js', 'web', 'falcon'); ?>"></script>
-	
-
 
   </body>
 </html>

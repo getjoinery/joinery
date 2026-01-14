@@ -790,6 +790,30 @@ This shows detailed routing information in HTML comments.
 - Check abstract method implementation in theme-specific classes
 - Verify class file naming conventions match theme requirements
 
+## Cookie Consent Integration
+
+If your plugin adds analytics or marketing scripts to public pages, you should wrap them for GDPR/CCPA consent compliance.
+
+**Using ConsentHelper to wrap scripts:**
+```php
+require_once(PathHelper::getIncludePath('includes/ConsentHelper.php'));
+$consent = ConsentHelper::get_instance();
+echo $consent->wrapTrackingCode('<script>...your tracking code...</script>', 'analytics');
+```
+
+**Or manually add the consent attribute to script tags:**
+```html
+<script type="text/plain" data-joinery-consent="analytics">
+  // This script only runs after user consents to analytics
+</script>
+```
+
+**Consent categories:**
+- `analytics` - For analytics and tracking scripts (e.g., Google Analytics)
+- `marketing` - For advertising and remarketing scripts (e.g., Facebook Pixel)
+
+When cookie consent is enabled, scripts marked with `data-joinery-consent` remain inactive until the user grants consent for that category.
+
 ## CSS Framework Integration
 
 ### Supported CSS Frameworks

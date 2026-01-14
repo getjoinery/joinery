@@ -10,9 +10,15 @@ require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 class VisitorEventException extends SystemBaseException {}
 
-class VisitorEvent extends SystemBase {	public static $prefix = 'vse';
+class VisitorEvent extends SystemBase {
+	public static $prefix = 'vse';
 	public static $tablename = 'vse_visitor_events';
 	public static $pkey_column = 'vse_visitor_event_id';
+
+	/** Event type: Page view */
+	const TYPE_PAGE_VIEW = 1;
+	/** Event type: Cookie consent record */
+	const TYPE_COOKIE_CONSENT = 2;
 
 	protected static $foreign_key_actions = [
 		'vse_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
@@ -61,6 +67,13 @@ class VisitorEvent extends SystemBase {	public static $prefix = 'vse';
 				return;
 			}
 
+			// Check consent before tracking (analytics tracking requires consent)
+			require_once(PathHelper::getIncludePath('includes/ConsentHelper.php'));
+			$consent = ConsentHelper::get_instance();
+			if ($consent->isEnabled() && !$consent->allowsAnalytics()) {
+				return; // Don't track without consent
+			}
+
 			$visitor_event = new VisitorEvent(NULL);
 
 			// Set visitor ID from cookie or generate new one
@@ -79,7 +92,7 @@ class VisitorEvent extends SystemBase {	public static $prefix = 'vse';
 			}
 
 			// Set tracking data
-			$visitor_event->set('vse_type', 1); // 1 = page view
+			$visitor_event->set('vse_type', self::TYPE_PAGE_VIEW);
 			$visitor_event->set('vse_ip', $_SERVER['REMOTE_ADDR'] ?? '');
 			$visitor_event->set('vse_page', $page);
 			$visitor_event->set('vse_referrer', $_SERVER['HTTP_REFERER'] ?? '');
