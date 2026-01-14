@@ -1076,3 +1076,20 @@
 		$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_slug = 'email-debug-logs' WHERE amu_slug = 'email-debug logs';";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// ========== Cookie Consent Compliance (v75) ==========
+		// Add cookie_consent_mode setting
+		$migration = array();
+		$migration['database_version'] = '75';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'cookie_consent_mode'";
+		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('cookie_consent_mode', 'off', 1, now(), now(), 'general');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+
+		// Add cookie_privacy_policy_link setting
+		$migration = array();
+		$migration['database_version'] = '75';
+		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'cookie_privacy_policy_link'";
+		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('cookie_privacy_policy_link', '', 1, now(), now(), 'general');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
