@@ -801,9 +801,33 @@ abstract class FormWriterV2Base {
     /**
      * Create a select dropdown field
      *
+     * IMPORTANT: Options use [value => label] format where:
+     *   - Key (value) = what gets submitted/stored in database
+     *   - Value (label) = what the user sees in the dropdown
+     *
+     * Example - Correct:
+     *   'options' => [
+     *       'gdpr' => 'GDPR (Opt-in required)',
+     *       'ccpa' => 'CCPA (Opt-out)',
+     *       1 => 'Yes',
+     *       0 => 'No',
+     *   ]
+     *
+     * Example - WRONG (backwards):
+     *   'options' => [
+     *       'GDPR (Opt-in required)' => 'gdpr',  // Don't do this!
+     *       'Yes' => 1,                           // Don't do this!
+     *   ]
+     *
      * @param string $name Field name
      * @param string $label Field label
-     * @param array $options Field options (must include 'options' key with select options)
+     * @param array $options Field options including:
+     *   - 'options' array: [value => label] pairs for dropdown choices
+     *   - 'value' mixed: Currently selected value
+     *   - 'empty_option' bool|string: Add empty first option (true for "Select...", string for custom)
+     *   - 'multiple' bool: Allow multiple selections
+     *   - 'disabled' bool: Disable the field
+     *   - 'help' string: Help text displayed below field
      */
     public function dropinput($name, $label = '', $options = []) {
         // Validate option format in debug mode

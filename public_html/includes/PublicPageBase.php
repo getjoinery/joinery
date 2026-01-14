@@ -483,6 +483,12 @@ abstract class PublicPageBase {
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
 		}
+
+		// Render tracking code (wrapped for consent if enabled)
+		echo $this->renderTrackingCode();
+
+		// Render cookie consent banner (if enabled) - JS waits for DOMContentLoaded
+		echo $this->renderConsentBanner();
 	}
 
 	public function public_header_common($options=array()) {
@@ -605,6 +611,35 @@ abstract class PublicPageBase {
 	public function public_footer($options=array()) {
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();
+	}
+
+	/**
+	 * Render tracking code with consent wrapping
+	 * Should be called in the footer before closing </body> tag
+	 *
+	 * @return string Tracking code wrapped for consent compliance
+	 */
+	public function renderTrackingCode() {
+		$settings = Globalvars::get_instance();
+		$tracking_code = $settings->get_setting('tracking_code');
+
+		if (empty($tracking_code)) return '';
+
+		require_once(PathHelper::getIncludePath('includes/ConsentHelper.php'));
+		$consent = ConsentHelper::get_instance();
+		return $consent->wrapTrackingCode($tracking_code, 'analytics');
+	}
+
+	/**
+	 * Render cookie consent banner
+	 * Should be called at the end of the page, before closing </body> tag
+	 *
+	 * @return string Consent banner HTML/CSS/JS
+	 */
+	public function renderConsentBanner() {
+		require_once(PathHelper::getIncludePath('includes/ConsentHelper.php'));
+		$consent = ConsentHelper::get_instance();
+		return $consent->renderConsentBanner();
 	}
 
 	/**

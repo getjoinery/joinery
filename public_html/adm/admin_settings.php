@@ -404,12 +404,12 @@
 		]);
 
 		$formwriter->dropinput('debug_css', 'CSS Debug Mode (tailwind themes only)', [
-			'options' => ["Yes"=>1, 'No' => 0],
+			'options' => [1 => 'Yes', 0 => 'No'],
 			'value' => $settings->get_setting('debug_css')
 		]);
 
 		$formwriter->dropinput('show_errors', 'Show errors', [
-			'options' => ["Yes (show to screen)"=>1, 'No (logged)' => 0],
+			'options' => [1 => 'Yes (show to screen)', 0 => 'No (logged)'],
 			'value' => $settings->get_setting('show_errors')
 		]);		
 		
@@ -1160,6 +1160,23 @@
 	}
 	$formwriter->textinput('allowed_upload_extensions', 'Allowed file upload extensions (comma separated)', [
 		'value' => $allowed_upload_extensions
+	]);
+
+	echo '<h3>Cookie Consent</h3>';
+	$formwriter->dropinput('cookie_consent_mode', 'Cookie consent mode', [
+		'options' => [
+			'off' => 'Off',
+			'auto' => 'Auto-detect by location (Recommended)',
+			'gdpr' => 'GDPR (Opt-in required)',
+			'ccpa' => 'CCPA (Opt-out)'
+		],
+		'value' => $settings->get_setting('cookie_consent_mode'),
+		'help' => 'Auto detects visitor location. GDPR requires consent before setting cookies. CCPA allows opt-out.'
+	]);
+	$formwriter->textinput('cookie_privacy_policy_link', 'Privacy policy URL', [
+		'value' => $settings->get_setting('cookie_privacy_policy_link'),
+		'prepend' => rtrim($settings->get_setting('webDir'), '/') . '/',
+		'help' => 'Path to your privacy policy page (shown in consent banner)'
 	]);
 
 	echo '<h3>Video Settings</h3>';
