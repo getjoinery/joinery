@@ -1,0 +1,10 @@
+{
+    "name": "empoweredhealth",
+    "display_name": "Empowered Health",
+    "version": "1.0.0",
+    "description": "Modern healthcare and wellness theme inspired by empoweredhealthtn.com",
+    "author": "Joinery Team",
+    "cssFramework": "bootstrap",
+    "formWriterBase": "FormWriterBootstrap",
+    "publicPageBase": "PublicPageBase"
+}
