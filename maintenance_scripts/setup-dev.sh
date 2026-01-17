@@ -1,7 +1,12 @@
 #!/bin/bash
 # setup-dev.sh - Works as both setup and reset script
+# VERSION 1.1 - Centralized permissions to fix_permissions.sh
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 WEB_DIR="/var/www/html/joinerytest/public_html"
+SITE_NAME="joinerytest"  # Site name for fix_permissions.sh
 THEME_REPO_DIR="/home/user1/joinery/joinery"
 CLAUDE_DIR="/home/user1/joinery/joinery-claude"
 
@@ -79,10 +84,9 @@ echo "  Created theme -> $THEME_REPO_DIR/theme"
 echo "  Created plugins -> $THEME_REPO_DIR/plugins"  
 echo "  Created .claude -> $CLAUDE_DIR"
 
-# Set proper permissions
+# Set proper permissions using centralized script (dev mode)
 echo "Setting permissions..."
-sudo chown -R www-data:www-data "$WEB_DIR"
-sudo chmod -R 755 "$WEB_DIR"
+sudo "$SCRIPT_DIR/fix_permissions.sh" "$SITE_NAME" --dev
 
 echo ""
 echo "✓ Development environment ready!"
