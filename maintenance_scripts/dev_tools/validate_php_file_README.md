@@ -1,8 +1,8 @@
-# Method Existence Test - Blacklist Feature
+# PHP File Validator - Blacklist Feature
 
 ## Overview
 
-The method existence test now includes a **blacklist** feature to flag known incorrect function/method/property usage patterns. This helps catch common mistakes before they cause runtime errors.
+The PHP file validator (`validate_php_file.php`) includes a **blacklist** feature to flag known incorrect function/method/property usage patterns. This helps catch common mistakes before they cause runtime errors.
 
 ## Blacklist Categories
 
@@ -83,7 +83,7 @@ Issues found:
 
 ## Adding to the Blacklist
 
-Edit `/home/user1/joinery/joinery/maintenance scripts/method_existence_test.php`:
+Edit `maintenance_scripts/dev_tools/validate_php_file.php`:
 
 ```php
 private $blacklist = [

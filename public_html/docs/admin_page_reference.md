@@ -42,7 +42,7 @@ This guide provides a complete reference for creating admin pages in the Joinery
 1. **Create the logic file** at `/adm/logic/admin_[page]_logic.php`
 2. **Create the view file** at `/adm/admin_[page].php`
 3. **Validate syntax**: `php -l filename.php`
-4. **Test methods**: `php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" filename.php`
+4. **Test methods**: `php "/var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php" filename.php`
 
 ### Naming Conventions
 
@@ -871,9 +871,9 @@ if ($post_vars) {
 php -l /var/www/html/joinerytest/public_html/adm/logic/admin_user_logic.php
 php -l /var/www/html/joinerytest/public_html/adm/admin_user.php
 
-# Check method existence
-php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" /var/www/html/joinerytest/public_html/adm/logic/admin_user_logic.php
-php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" /var/www/html/joinerytest/public_html/adm/admin_user.php
+# Validate PHP files
+php "/var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php" /var/www/html/joinerytest/public_html/adm/logic/admin_user_logic.php
+php "/var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php" /var/www/html/joinerytest/public_html/adm/admin_user.php
 ```
 
 ### Testing Checklist
@@ -881,7 +881,7 @@ php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" /v
 After creating or converting an admin page:
 
 - [ ] **Syntax validated** with `php -l`
-- [ ] **Methods verified** with method_existence_test.php
+- [ ] **Methods verified** with validate_php_file.php
 - [ ] **Permissions work** - unauthorized users redirected
 - [ ] **Data loads** correctly in all sections
 - [ ] **Sorting works** (if applicable)

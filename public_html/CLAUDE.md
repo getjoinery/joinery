@@ -573,9 +573,9 @@ mcp__browser__browser_click with element: "description" and ref: "e123"
 
 1. **Syntax Validation**: Always check PHP files for syntax errors using `php -l filename.php` before declaring any PHP development task complete.
 
-2. **Method Existence Validation**: Run the method existence test on all PHP files created or modified:
+2. **Method Existence Validation**: Run the PHP file validator on all PHP files created or modified:
    ```bash
-   php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" /path/to/modified/file.php
+   php "/var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php" /path/to/modified/file.php
    ```
    - Investigate any missing methods flagged by the script
    - Only report task completion after all flags are investigated and resolved
@@ -587,8 +587,8 @@ mcp__browser__browser_click with element: "description" and ref: "e123"
 # PHP Syntax Validation
 php -l filename.php
 
-# Method Existence Validation
-php "/var/www/html/joinerytest/maintenance_scripts/method_existence_test.php" /path/to/file.php
+# PHP File Validation
+php "/var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php" /path/to/file.php
 
 # Check error logs
 tail /var/www/html/joinerytest/logs/error.log
@@ -620,7 +620,7 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 
 1. **Custom Commands**: Check `/home/user1/.claude/commands/` for project-specific slash commands before proceeding
 2. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
-3. **Method Existence Validation**: ALWAYS run method_existence_test.php on created/modified PHP files and investigate any flagged issues before completion
+3. **Method Existence Validation**: ALWAYS run validate_php_file.php on created/modified PHP files and investigate any flagged issues before completion
 4. **Method Verification**: NEVER assume available functions - always check class definitions first
 5. **Security**: Always validate and sanitize user input
 6. **FormWriter**: Always use FormWriter class for forms

@@ -297,8 +297,8 @@ php -l theme/$THEME_NAME/includes/FormWriter.php
 php -l theme/$THEME_NAME/includes/PublicPage.php
 php -l theme/$THEME_NAME/views/index.php
 
-# Run method existence validation
-php /var/www/html/joinerytest/maintenance_scripts/method_existence_test.php \
+# Run PHP file validation
+php /var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php \
     theme/$THEME_NAME/includes/PublicPage.php
 ```
 
@@ -464,7 +464,7 @@ Before declaring theme complete:
 - [ ] index.php uses actual HTML from source (not placeholders)
 - [ ] All image paths updated to `/theme/[name]/assets/images/`
 - [ ] PHP syntax validation passes on all files
-- [ ] method_existence_test.php passes on all files
+- [ ] validate_php_file.php passes on all files
 - [ ] No 404 errors in browser network tab
 - [ ] No JavaScript errors in browser console
 
