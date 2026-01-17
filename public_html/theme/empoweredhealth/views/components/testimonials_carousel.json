@@ -1,0 +1,18 @@
+{
+  "title": "Testimonials Carousel",
+  "description": "Full-width section with green overlay background and owl carousel testimonials",
+  "category": "testimonials",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [
+      {"name": "heading", "label": "Heading", "type": "textinput", "default": "Hear from our happy patients"},
+      {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "We have more happy patients than we can list, but we'll try to list just a few..."},
+      {"name": "testimonials", "label": "Testimonials", "type": "repeater", "fields": [
+        {"name": "name", "label": "Name", "type": "textinput"},
+        {"name": "location", "label": "Location", "type": "textinput"},
+        {"name": "rating", "label": "Star Rating (1-5)", "type": "textinput", "default": "5"},
+        {"name": "content", "label": "Testimonial Content", "type": "textarea"}
+      ]}
+    ]
+  }
+}
