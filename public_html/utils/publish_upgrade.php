@@ -193,9 +193,9 @@
 		}
 
 		// Copy config file
-		$config_source = $maintenance_dir . 'Globalvars_site_default.php';
+		$config_source = $maintenance_dir . 'default_Globalvars_site.php';
 		if (file_exists($config_source)) {
-			copy($config_source, $temp_dir . '/config/Globalvars_site_default.php');
+			copy($config_source, $temp_dir . '/config/default_Globalvars_site.php');
 			echo "Copied config template<br>";
 			flush();
 		}
@@ -212,9 +212,10 @@
 			'remove_account.sh',
 			'fix_permissions.sh',
 			'fix_postgres_auth.sh',
-			'Globalvars_site_default.php',
+			'default_Globalvars_site.php',
+			'default_serve.php',
 			'default_virtualhost.conf',
-			'virtualhost_update_script.sh',
+			'sysadmin_tools/virtualhost_update_script.sh',
 			'Dockerfile.template',
 			'docker_install_master.sh'
 		];
