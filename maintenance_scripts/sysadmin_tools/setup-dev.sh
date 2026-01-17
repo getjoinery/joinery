@@ -86,7 +86,7 @@ echo "  Created .claude -> $CLAUDE_DIR"
 
 # Set proper permissions using centralized script (dev mode)
 echo "Setting permissions..."
-sudo "$SCRIPT_DIR/fix_permissions.sh" "$SITE_NAME" --dev
+sudo "$SCRIPT_DIR/../fix_permissions.sh" "$SITE_NAME" --dev
 
 echo ""
 echo "✓ Development environment ready!"
