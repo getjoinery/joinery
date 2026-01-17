@@ -174,6 +174,7 @@
 		mkdir($temp_dir . '/public_html', 0755, true);
 		mkdir($temp_dir . '/config', 0755, true);
 		mkdir($temp_dir . '/maintenance_scripts', 0755, true);
+		mkdir($temp_dir . '/maintenance_scripts/install_tools', 0755, true);
 		mkdir($temp_dir . '/maintenance_scripts/sysadmin_tools', 0755, true);
 
 		// Copy public_html files using rsync
@@ -192,58 +193,35 @@
 			die("ERROR: Failed to copy public_html files:\n" . implode("\n", $output) . "\n");
 		}
 
-		// Copy config file
-		$config_source = $maintenance_dir . 'default_Globalvars_site.php';
+		// Copy config template from install_tools
+		$config_source = $maintenance_dir . 'install_tools/default_Globalvars_site.php';
 		if (file_exists($config_source)) {
 			copy($config_source, $temp_dir . '/config/default_Globalvars_site.php');
 			echo "Copied config template<br>";
 			flush();
 		}
 
-		// Copy maintenance scripts
-		$maintenance_files = [
-			'server_setup.sh',
-			'deploy.sh',
-			'sysadmin_tools/backup_database.sh',
-			'sysadmin_tools/restore_database.sh',
-			'sysadmin_tools/restore_project.sh',
-			'sysadmin_tools/copy_database.sh',
-			'new_account.sh',
-			'sysadmin_tools/remove_account.sh',
-			'fix_permissions.sh',
-			'fix_postgres_auth.sh',
-			'default_Globalvars_site.php',
-			'default_serve.php',
-			'default_virtualhost.conf',
-			'sysadmin_tools/virtualhost_update_script.sh',
-			'Dockerfile.template',
-			'docker_install_master.sh'
-		];
-
-		$copied_count = 0;
-		$failed_files = [];
-		foreach ($maintenance_files as $file) {
-			$source = $maintenance_dir . $file;
-			$dest = $temp_dir . '/maintenance_scripts/' . $file;
-			if (file_exists($source)) {
-				if (is_readable($source)) {
-					if (copy($source, $dest)) {
-						$copied_count++;
-						if ($verbose) {
-							echo "Copied maintenance script: $file<br>";
-						}
-					} else {
-						$failed_files[] = $file . ' (copy failed)';
-					}
+		// Copy maintenance script directories using rsync (no manual file list needed)
+		$script_dirs = ['install_tools', 'sysadmin_tools'];
+		foreach ($script_dirs as $dir) {
+			$source_dir = $maintenance_dir . $dir . '/';
+			$dest_dir = $temp_dir . '/maintenance_scripts/' . $dir . '/';
+			if (is_dir($source_dir)) {
+				$rsync_cmd = sprintf(
+					'rsync -av %s %s 2>&1',
+					escapeshellarg($source_dir),
+					escapeshellarg($dest_dir)
+				);
+				exec($rsync_cmd, $output, $exit_code);
+				if ($exit_code === 0) {
+					echo "Copied maintenance_scripts/$dir/<br>";
 				} else {
-					$failed_files[] = $file . ' (not readable - check permissions)';
+					echo "<span style='color: orange;'>Warning: Failed to copy $dir/</span><br>";
 				}
+				flush();
 			}
 		}
-		if (!empty($failed_files)) {
-			echo "<span style='color: orange;'>Warning: Failed to copy: " . implode(', ', $failed_files) . "</span><br>";
-		}
-		echo "Copied $copied_count of " . count($maintenance_files) . " maintenance script files<br>";
+		echo "Copied maintenance script directories<br>";
 		flush();
 
 		// Copy install SQL file with simplified name

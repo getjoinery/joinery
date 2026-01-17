@@ -101,7 +101,8 @@ After installation, access your site at `http://YOUR_SERVER:PORT/`
 - `joinery-X-Y.tar.gz` - The Joinery archive containing:
   - `public_html/` - Application code
   - `config/` - Configuration templates
-  - `maintenance_scripts/` - Setup scripts, Dockerfile.template, docker_install_master.sh
+  - `maintenance_scripts/install_tools/` - Setup scripts, Dockerfile.template, docker_install_master.sh
+  - `maintenance_scripts/sysadmin_tools/` - Backup, restore, and maintenance utilities
 
 ### Server Requirements
 - Fresh Ubuntu 24.04 LTS installation
@@ -161,7 +162,7 @@ mv config $SITENAME/
 mv public_html $SITENAME/
 
 # Copy Dockerfile template
-cp maintenance_scripts/Dockerfile.template ./Dockerfile
+cp maintenance_scripts/install_tools/Dockerfile.template ./Dockerfile
 
 # Create .dockerignore
 cat > .dockerignore << 'EOF'
