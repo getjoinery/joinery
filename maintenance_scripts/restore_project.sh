@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
-# Version: 1.0.0
+# Version: 1.1.0 - Centralized permissions to fix_permissions.sh
 #
 # Description:
 #   Restores a web project from a backup archive created by backup_project.sh
@@ -373,16 +373,12 @@ perform_restore() {
         if sudo cp -r "$backup_dir/project_files/"* "$PROJECT_DIR/" 2>/dev/null || \
            sudo cp -r "$backup_dir/project_files/".[^.]* "$PROJECT_DIR/" 2>/dev/null; then
 
-            # Set proper ownership (www-data for Apache)
-            sudo chown -R www-data:www-data "$PROJECT_DIR"
+            # Set proper permissions using centralized script (production mode)
+            sudo "$SCRIPT_DIR/fix_permissions.sh" "$PROJECT_NAME" --production
 
-            # Set proper permissions
-            sudo find "$PROJECT_DIR" -type d -exec chmod 755 {} \;
-            sudo find "$PROJECT_DIR" -type f -exec chmod 644 {} \;
-
-            # Make scripts executable if there's a scripts directory
-            if [ -d "$PROJECT_DIR/scripts" ]; then
-                sudo find "$PROJECT_DIR/scripts" -type f -name "*.sh" -exec chmod 755 {} \;
+            # Make maintenance scripts executable
+            if [ -d "$PROJECT_DIR/maintenance_scripts" ]; then
+                sudo find "$PROJECT_DIR/maintenance_scripts" -type f -name "*.sh" -exec chmod 755 {} \;
             fi
 
             print_success "Project files restored to: $PROJECT_DIR"
