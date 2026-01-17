@@ -1,6 +1,0 @@
-https://shuffle.dev/editor?project=b0b9c8d0d85fe40a423f0ea966517476b37bfe69
-https://tailwind-elements.com/docs/standard/components/testimonials/
-https://tailwindui.com/components/marketing/page-examples/landing-pages
-https://tailwindcomponents.com/cheatsheet/
-https://heroicons.com/
-https://www.themes.dev/blog/typographic-defaults-in-tailwind-css/

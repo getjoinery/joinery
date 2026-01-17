@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.6 - Docker-aware Apache reload, disable 000-default, add composer install
+#VERSION 2.7 - Centralized permissions to fix_permissions.sh
 #Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file]
 
 # Get the directory where this script is located
@@ -150,10 +150,9 @@ else
     mkdir -p /var/www/html/$1/uploads/thumbnail
     mkdir -p /var/www/html/$1/uploads/lthumbnail
 fi
-chown -R user1 /var/www/html/$1 2>/dev/null || true
-chgrp -R user1 /var/www/html/$1 2>/dev/null || true
-chmod -R 777 /var/www/html/$1/uploads
-chown -R www-data /var/www/html/$1/uploads
+
+# Fix permissions for main site using centralized script (staging mode for new sites)
+"$SCRIPT_DIR/fix_permissions.sh" "$1" --production
 
 # Copy configuration files for main site
 cp Globalvars_site_default.php /var/www/html/$1/config/Globalvars_site.php
@@ -180,10 +179,9 @@ if [ "$DOCKER_FIRST_RUN" = false ]; then
     mkdir -p /var/www/html/$1_test/uploads/large
     mkdir -p /var/www/html/$1_test/uploads/thumbnail
     mkdir -p /var/www/html/$1_test/uploads/lthumbnail
-    chown -R user1 /var/www/html/$1_test
-    chgrp -R user1 /var/www/html/$1_test
-    chmod -R 777 /var/www/html/$1_test/uploads
-    chown -R www-data /var/www/html/$1_test/uploads
+
+    # Fix permissions for test site using centralized script (staging mode)
+    "$SCRIPT_DIR/fix_permissions.sh" "${1}_test" --production
 
     # Copy configuration files for test site
     cp Globalvars_site_default.php /var/www/html/$1_test/config/Globalvars_site.php
@@ -196,7 +194,8 @@ else
     echo "Docker first-run: Creating minimal test site directories for Apache..."
     mkdir -p /var/www/html/$1_test/public_html
     mkdir -p /var/www/html/$1_test/logs
-    chown -R www-data:www-data /var/www/html/$1_test
+    # Fix permissions for test site using centralized script (staging mode)
+    "$SCRIPT_DIR/fix_permissions.sh" "${1}_test" --production
     echo "Minimal test site structure created."
 fi
 

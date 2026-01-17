@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 3.10 - Added deployment hash display at end of deployment
+#version 3.11 - Centralized permissions to fix_permissions.sh
 # MODIFIED v3.8: Renamed "maintenance scripts" to "maintenance_scripts" (underscore instead of space)
 # MODIFIED v3.8: Updated git sparse-checkout to use "maintenance_scripts"
 # MODIFIED v3.8: Updated all path references to use underscore notation
@@ -23,7 +23,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.10"
+DEPLOY_VERSION="3.11"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -129,10 +129,8 @@ cleanup_and_rollback() {
             # Restore from backup
             echo "Restoring from backup: $backup_dir"
             if cp -a "$backup_dir/." "$public_html_dir/"; then
-                # Fix permissions after rollback
-                echo "Fixing permissions after rollback..."
-                chown -R www-data:user1 "$public_html_dir" 2>/dev/null || echo "  Warning: Could not change ownership (try with sudo)"
-                chmod -R 775 "$public_html_dir" 2>/dev/null || echo "  Warning: Could not change permissions (try with sudo)"
+                # Fix permissions after rollback using centralized script
+                fix_permissions "$TARGET_SITE" --production
 
                 echo "✓ Automatic rollback completed successfully."
                 if [[ -d "$failed_dir" ]]; then
@@ -162,82 +160,39 @@ REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/getjoinery/joinery.g
 # Theme/Plugin repository is same as main repo now (single repository)
 THEME_PLUGIN_REPO_URL="$REPO_URL"
 
-# Function to fix permissions
+# Function to fix permissions - calls centralized fix_permissions.sh script
 fix_permissions() {
     local target_site="$1"
-    local has_warnings=false
-    
+    local mode="${2:---production}"  # Default to production mode
+
+    # Get the directory where this script is located
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local fix_script="$script_dir/fix_permissions.sh"
+
     if [ "$VERBOSE" = true ]; then
-        echo "Fixing permissions for $target_site..."
+        echo "Fixing permissions for $target_site (mode: $mode)..."
     fi
-    
-    # Check if running with sufficient privileges
-    if [ "$EUID" -ne 0 ]; then
-        has_warnings=true
+
+    # Check if fix_permissions.sh exists
+    if [[ ! -f "$fix_script" ]]; then
+        echo "ERROR: fix_permissions.sh not found at $fix_script"
+        return 1
+    fi
+
+    # Call the centralized script
+    if [ "$EUID" -eq 0 ]; then
+        # Running as root, call directly
+        "$fix_script" "$target_site" "$mode"
+    else
+        # Not root, warn and attempt anyway
         if [ "$VERBOSE" = true ]; then
             echo "WARNING: Not running as root/sudo. Permission changes may fail."
             echo "For best results, run this script with: sudo $0 $*"
-            echo "Attempting permission changes anyway..."
         fi
-    fi
-    
-    # Test for site existence
-    local site_root="/var/www/html/$target_site"
-    if [[ ! -d "$site_root" ]]; then
-        echo "ERROR: Site directory $site_root does not exist."
-        return 1
-    fi
-    
-    # Set the correct ownership and permissions (suppress errors for non-root execution)
-    if [ "$VERBOSE" = true ]; then
-        echo "Setting ownership to www-data..."
-    fi
-    if ! chown -R www-data "/var/www/html/$target_site" 2>/dev/null; then
-        has_warnings=true
-        if [ "$VERBOSE" = true ]; then
-            echo "  Warning: Could not change ownership (may need sudo)"
-        fi
-    fi
-    
-    if [ "$VERBOSE" = true ]; then
-        echo "Setting group to user1..."
-    fi
-    if ! chgrp -R user1 "/var/www/html/$target_site" 2>/dev/null; then
-        has_warnings=true
-        if [ "$VERBOSE" = true ]; then
-            echo "  Warning: Could not change group (may need sudo)"
-        fi
-    fi
-    
-    if [ "$VERBOSE" = true ]; then
-        echo "Setting permissions to 775..."
-    fi
-    if ! chmod -R 775 "/var/www/html/$target_site" 2>/dev/null; then
-        has_warnings=true
-        if [ "$VERBOSE" = true ]; then
-            echo "  Warning: Could not change permissions (may need sudo)"
-        fi
-    fi
-    
-    # Special permissions for uploads directory if it exists
-    if [[ -d "/var/www/html/$target_site/uploads" ]]; then
-        if [ "$VERBOSE" = true ]; then
-            echo "Setting uploads directory permissions to 777..."
-        fi
-        if ! chmod -R 777 "/var/www/html/$target_site/uploads" 2>/dev/null; then
-            has_warnings=true
-            if [ "$VERBOSE" = true ]; then
-                echo "  Warning: Could not change uploads permissions (may need sudo)"
-            fi
-        fi
-    fi
-    
-    if [ "$VERBOSE" = true ]; then
-        echo "Permissions update complete for $target_site."
-    elif [ "$has_warnings" = true ]; then
-        echo "  Permissions updated (warnings occurred - use --verbose for details)"
-    else
-        echo "  Permissions updated successfully"
+        "$fix_script" "$target_site" "$mode" 2>/dev/null || {
+            echo "  Permissions update failed (try running with sudo)"
+            return 1
+        }
     fi
 }
 
@@ -600,7 +555,7 @@ if [ "$IS_FIX_PERMISSIONS_ONLY" = true ]; then
     echo "Target site: $TARGET_SITE"
     echo "========================================="
     echo "This will fix permissions for: /var/www/html/$TARGET_SITE"
-    echo "Owner: www-data, Group: user1, Permissions: 775 (777 for uploads)"
+    echo "Owner: www-data, Group: user1, Permissions: 770 (777 for uploads)"
     echo "========================================="
     read -p "Continue with permission fix? (y/N): " -n 1 -r
     echo
@@ -706,11 +661,9 @@ if [ "$IS_MANUAL_ROLLBACK" = true ]; then
         exit 1
     }
     
-    # Fix permissions
-    echo "Fixing permissions after rollback..."
-    chown -R www-data:user1 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change ownership (try with sudo)"
-    chmod -R 775 "$public_html_dir" 2>/dev/null || echo "Warning: Could not change permissions (try with sudo)"
-    
+    # Fix permissions using centralized script
+    fix_permissions "$TARGET_SITE" --production
+
     echo "========================================="
     echo "SUCCESS: Manual rollback completed for '$TARGET_SITE'!"
     echo "Restored from: $source_dir"
