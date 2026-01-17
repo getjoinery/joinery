@@ -209,7 +209,7 @@
 			'sysadmin_tools/restore_project.sh',
 			'sysadmin_tools/copy_database.sh',
 			'new_account.sh',
-			'remove_account.sh',
+			'sysadmin_tools/remove_account.sh',
 			'fix_permissions.sh',
 			'fix_postgres_auth.sh',
 			'default_Globalvars_site.php',
