@@ -174,6 +174,7 @@
 		mkdir($temp_dir . '/public_html', 0755, true);
 		mkdir($temp_dir . '/config', 0755, true);
 		mkdir($temp_dir . '/maintenance_scripts', 0755, true);
+		mkdir($temp_dir . '/maintenance_scripts/sysadmin_tools', 0755, true);
 
 		// Copy public_html files using rsync
 		// Exclude: version control, dev docs, runtime directories, and testing tools
@@ -203,10 +204,10 @@
 		$maintenance_files = [
 			'server_setup.sh',
 			'deploy.sh',
-			'backup_database.sh',
-			'restore_database.sh',
-			'restore_project.sh',
-			'copy_database.sh',
+			'sysadmin_tools/backup_database.sh',
+			'sysadmin_tools/restore_database.sh',
+			'sysadmin_tools/restore_project.sh',
+			'sysadmin_tools/copy_database.sh',
 			'new_account.sh',
 			'remove_account.sh',
 			'fix_permissions.sh',

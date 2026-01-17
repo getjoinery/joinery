@@ -749,15 +749,15 @@ if [ "$IS_TEST_DEPLOY" = true ]; then
     
     # COPY DATABASE FROM LIVE SITE TO TEST SITE
     echo "Copying database from $LIVE_SITE to $TARGET_SITE..."
-    if [[ -f "./copy_database.sh" ]]; then
-        ./copy_database.sh "$LIVE_SITE" "$TARGET_SITE"
+    if [[ -f "./sysadmin_tools/copy_database.sh" ]]; then
+        ./sysadmin_tools/copy_database.sh "$LIVE_SITE" "$TARGET_SITE"
         if [ $? -ne 0 ]; then
             echo "ERROR: Database copy failed. Aborting deploy."
             exit 1
         fi
         echo "Database copy successful."
     else
-        echo "ERROR: copy_database.sh not found in current directory. Aborting deploy."
+        echo "ERROR: sysadmin_tools/copy_database.sh not found. Aborting deploy."
         exit 1
     fi
 fi
