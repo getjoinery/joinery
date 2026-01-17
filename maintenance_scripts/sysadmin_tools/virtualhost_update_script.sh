@@ -33,7 +33,7 @@ if [[ ! "$FILENAME" == *.conf ]]; then
 fi
 
 CONFIG_FILE="/etc/apache2/sites-available/${FILENAME}"
-TEMPLATE_FILE="$(dirname "$0")/default_virtualhost.conf"
+TEMPLATE_FILE="$(dirname "$0")/../default_virtualhost.conf"
 
 # Check if the template file exists
 if [ ! -f "$TEMPLATE_FILE" ]; then

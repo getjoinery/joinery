@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.7 - Centralized permissions to fix_permissions.sh
+#VERSION 2.8 - Renamed template files to default_* prefix
 #Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file]
 
 # Get the directory where this script is located
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Template files - relative to script location
 VIRTUALHOST_TEMPLATE="${SCRIPT_DIR}/default_virtualhost.conf"
-GLOBALVARS_DEFAULT="${SCRIPT_DIR}/Globalvars_site_default.php"
+GLOBALVARS_DEFAULT="${SCRIPT_DIR}/default_Globalvars_site.php"
 
 if [ "$EUID" -ne 0 ]
 then
@@ -155,9 +155,9 @@ fi
 "$SCRIPT_DIR/fix_permissions.sh" "$1" --production
 
 # Copy configuration files for main site
-cp Globalvars_site_default.php /var/www/html/$1/config/Globalvars_site.php
+cp default_Globalvars_site.php /var/www/html/$1/config/Globalvars_site.php
 if [ "$DOCKER_FIRST_RUN" = false ]; then
-    cp serve.php /var/www/html/$1/public_html/serve.php
+    cp default_serve.php /var/www/html/$1/public_html/serve.php
 fi
 sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1/config/Globalvars_site.php
 sed -i -e "s/{{SITE_NAME}}/${1}/g" /var/www/html/$1/config/Globalvars_site.php
@@ -184,8 +184,8 @@ if [ "$DOCKER_FIRST_RUN" = false ]; then
     "$SCRIPT_DIR/fix_permissions.sh" "${1}_test" --production
 
     # Copy configuration files for test site
-    cp Globalvars_site_default.php /var/www/html/$1_test/config/Globalvars_site.php
-    cp serve.php /var/www/html/$1_test/public_html/serve.php
+    cp default_Globalvars_site.php /var/www/html/$1_test/config/Globalvars_site.php
+    cp default_serve.php /var/www/html/$1_test/public_html/serve.php
     sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1_test/config/Globalvars_site.php
     sed -i -e "s/{{SITE_NAME}}/${1}_test/g" /var/www/html/$1_test/config/Globalvars_site.php
     echo "$NEW_TEST_SITE_ROOT created."

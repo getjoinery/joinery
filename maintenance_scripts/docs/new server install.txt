@@ -4,5 +4,5 @@ sudo usermod -aG sudo user1
 su user1
 chmod +x *.sh
 sudo ./server_setup.sh
-#Edit Globalvars_site_default.php to add postgres user password
+#Edit default_Globalvars_site.php to add postgres user password
 sudo ./new_account.sh joinerytest joinerytest.site 69.164.209.253
