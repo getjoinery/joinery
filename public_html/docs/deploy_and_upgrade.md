@@ -7,38 +7,43 @@ Four complementary tools provide deployment and upgrade capabilities:
 1. **deploy.sh** - Git-based deployment for development/production environments
 2. **upgrade.php** - Web-based upgrade system for client installations
 3. **publish_upgrade.php** - Package creation tool for distributing updates
-4. **docker_install_master.sh** - Docker container deployment for isolated environments
+4. **install.sh** - Universal installer for Docker and bare-metal deployments
 
 The first three use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation.
 
-For Docker-based deployments, see **[Docker Installation Guide](/docs/docker_install.md)**.
+For Docker and bare-metal deployments, see **[Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)**.
 
 ---
 
 ## Quick Reference
 
-### docker_install_master.sh
+### install.sh
 
-**Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/docker_install_master.sh`
+**Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/install.sh`
 
 ```bash
-# Install new site
-./docker_install_master.sh mysite SecurePass123! mysite.com 8080
+# Docker deployment
+./install.sh docker                              # One-time: install Docker
+./install.sh site mysite SecurePass123! mysite.com 8080
 
-# List existing containers
-./docker_install_master.sh --list
+# Bare-metal deployment
+./install.sh server                              # One-time: set up server
+./install.sh site mysite SecurePass123! mysite.com
 
-# Multiple sites (auto port detection)
-./docker_install_master.sh site1 Pass1! site1.com 8080
-./docker_install_master.sh site2 Pass2! site2.com 8081
+# List existing sites
+./install.sh list
+
+# Multiple sites
+./install.sh site site1 Pass1! site1.com 8080
+./install.sh site site2 Pass2! site2.com 8081
 ```
 
 **Features:**
-- One-command Docker installation from archive
+- Single entry point for all installation operations
+- Auto-detects Docker vs bare-metal environment
+- Docker installation and server setup subcommands
 - Automatic port conflict detection and suggestion
 - Site-isolated build contexts (multi-site support)
-- PostgreSQL password setup on first run
-- Automatic cleanup after build
 
 ---
 
@@ -254,4 +259,4 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 
 ---
 
-*Last Updated: 2026-01-04*
+*Last Updated: 2026-01-17*
