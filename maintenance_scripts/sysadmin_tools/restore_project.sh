@@ -374,7 +374,7 @@ perform_restore() {
            sudo cp -r "$backup_dir/project_files/".[^.]* "$PROJECT_DIR/" 2>/dev/null; then
 
             # Set proper permissions using centralized script (production mode)
-            sudo "$SCRIPT_DIR/fix_permissions.sh" "$PROJECT_NAME" --production
+            sudo "$SCRIPT_DIR/../install_tools/fix_permissions.sh" "$PROJECT_NAME" --production
 
             # Make maintenance scripts executable
             if [ -d "$PROJECT_DIR/maintenance_scripts" ]; then

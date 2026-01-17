@@ -499,7 +499,7 @@
 			exec("mv $stage_directory_contents $live_directory");
 
 			// Fix permissions using centralized script (production mode)
-			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/fix_permissions.sh';
+			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
 			if(file_exists($fix_permissions_script)) {
 				echo 'Setting permissions using fix_permissions.sh --production<br>';
 				exec("$fix_permissions_script " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
