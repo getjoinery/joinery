@@ -19,7 +19,7 @@ For Docker-based deployments, see **[Docker Installation Guide](/docs/docker_ins
 
 ### docker_install_master.sh
 
-**Location:** `/var/www/html/joinerytest/maintenance_scripts/docker_install_master.sh`
+**Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/docker_install_master.sh`
 
 ```bash
 # Install new site
@@ -44,7 +44,7 @@ For Docker-based deployments, see **[Docker Installation Guide](/docs/docker_ins
 
 ### deploy.sh
 
-**Location:** `/var/www/html/joinerytest/maintenance_scripts/deploy.sh`
+**Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/deploy.sh`
 
 ```bash
 # Basic deployment

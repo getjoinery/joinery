@@ -112,7 +112,10 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/specs/` - Feature specifications (active and implemented)
 - `/docs/` - Documentation and Claude-specific guidance
 - `/tests/` - Test suites (email, functional, integration, models)
-- `/var/www/html/joinerytest/maintenance_scripts/` - Development and deployment scripts
+- `/var/www/html/joinerytest/maintenance_scripts/` - Deployment and maintenance scripts
+  - `install_tools/` - Installation scripts (server_setup.sh, new_account.sh, deploy.sh, etc.)
+  - `sysadmin_tools/` - Maintenance utilities (backup, restore, etc.)
+  - `dev_tools/` - Development utilities (PHP validation, etc.)
 
 **Repository Structure Note:** In the GitHub repository (getjoinery/joinery), theme/ and plugins/ are located inside public_html/. The paths above reflect the deployed structure where public_html/ is the web root.
 
@@ -446,7 +449,7 @@ $session->check_permission(5); // Requires permission level 5 (admin minimum)
 - `/tests/models/` - Data model CRUD operations and validation
 
 ### Deployment Scripts
-Located in `/var/www/html/joinerytest/maintenance_scripts/`
+Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 
 ## Development Workflow
 
