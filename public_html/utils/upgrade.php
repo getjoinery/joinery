@@ -497,7 +497,20 @@
 
 			exec("mv $live_directory_contents $backup_directory");
 			exec("mv $stage_directory_contents $live_directory");
-			exec("chmod -R 770 $live_directory");
+
+			// Fix permissions using centralized script (production mode)
+			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/fix_permissions.sh';
+			if(file_exists($fix_permissions_script)) {
+				echo 'Setting permissions using fix_permissions.sh --production<br>';
+				exec("$fix_permissions_script " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
+				if($perm_exit !== 0) {
+					echo 'Warning: fix_permissions.sh failed, falling back to chmod<br>';
+					exec("chmod -R 770 $live_directory");
+				}
+			} else {
+				echo 'Warning: fix_permissions.sh not found, using fallback chmod<br>';
+				exec("chmod -R 770 $live_directory");
+			}
 			exec("chmod -R 770 $backup_directory");
 
 			// Check if deployment succeeded
