@@ -153,9 +153,11 @@ sudo ./install.sh site SITENAME POSTGRES_PASSWORD [DOMAIN_NAME] [PORT]
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `SITENAME` | Yes | - | Site/database name (e.g., `mysite`) |
-| `POSTGRES_PASSWORD` | Yes | - | Database password |
+| `POSTGRES_PASSWORD` | Yes | - | Database password (use `-` to auto-generate) |
 | `DOMAIN_NAME` | No | Server IP | Domain for VirtualHost |
 | `PORT` | No | 8080 | Host port for web traffic |
+
+> **Password Auto-Generation:** Use `-` as the password parameter to auto-generate a secure 24-character password. The generated password will be displayed at the end of installation and saved to the site's config file.
 
 **What the script does:**
 1. Validates parameters and archive structure
@@ -661,7 +663,7 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 
 ## Version Information
 
-- **Guide Version:** 2.0
-- **install.sh Version:** 1.0
-- **Tested With:** Ubuntu 24.04, Docker 29.1.3
-- **Last Updated:** 2026-01-17
+- **Guide Version:** 2.1
+- **install.sh Version:** 1.1
+- **Tested With:** Ubuntu 24.04, Docker 29.1.5
+- **Last Updated:** 2026-01-20

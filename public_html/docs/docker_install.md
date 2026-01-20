@@ -16,8 +16,11 @@ cd maintenance_scripts/install_tools
 # Install Docker (one-time)
 sudo ./install.sh docker
 
-# Create your site
+# Create your site (with explicit password)
 sudo ./install.sh site mysite SecurePass123! mysite.com 8080
+
+# Create your site (auto-generate secure password)
+sudo ./install.sh site mysite - mysite.com 8080
 
 # List sites
 sudo ./install.sh list
@@ -33,12 +36,17 @@ cd maintenance_scripts/install_tools
 # Set up server (one-time)
 sudo ./install.sh server
 
-# Create your site
+# Create your site (with explicit password)
 sudo ./install.sh site mysite SecurePass123! mysite.com
+
+# Create your site (auto-generate secure password)
+sudo ./install.sh site mysite - mysite.com
 
 # List sites
 sudo ./install.sh list
 ```
+
+> **Password Auto-Generation:** Use `-` as the password parameter to auto-generate a secure 24-character password. The generated password will be displayed at the end of installation and saved to the site's config file.
 
 ### Common Commands
 
@@ -64,4 +72,4 @@ See the **[Unified Installation Guide](../../maintenance_scripts/install_tools/I
 
 ---
 
-*Last Updated: 2026-01-17*
+*Last Updated: 2026-01-20*
