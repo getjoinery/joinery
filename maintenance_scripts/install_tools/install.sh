@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.0 - Universal Joinery Installer
+#VERSION 1.1 - Universal Joinery Installer
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -898,6 +898,15 @@ do_site_create() {
         exit 1
     fi
 
+    # Auto-generate password if "-" is provided
+    if [ "$POSTGRES_PASSWORD" = "-" ]; then
+        POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
+        print_info "Auto-generated secure password: $POSTGRES_PASSWORD"
+        PASSWORD_WAS_GENERATED=1
+    else
+        PASSWORD_WAS_GENERATED=0
+    fi
+
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
         print_error "This command must be run as root (use sudo)"
@@ -1180,6 +1189,13 @@ EOF
     echo -e "Web Port:         ${GREEN}$PORT${NC}"
     echo -e "Database Port:    ${GREEN}$DB_PORT${NC}"
     echo ""
+    if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
+        echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+    fi
     echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME:$PORT/${NC}"
     echo ""
     echo "Default admin login:"
@@ -1277,6 +1293,13 @@ do_site_baremetal() {
     echo -e "Domain:           ${GREEN}$DOMAIN_NAME${NC}"
     echo -e "Location:         ${GREEN}/var/www/html/$SITENAME/${NC}"
     echo ""
+    if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
+        echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+    fi
     echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME/${NC}"
     echo ""
     echo "Default admin login:"
