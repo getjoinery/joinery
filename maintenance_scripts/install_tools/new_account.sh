@@ -165,6 +165,10 @@ sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1/config/Globalvars_site.php
 sed -i -e "s/{{SITE_NAME}}/${1}/g" /var/www/html/$1/config/Globalvars_site.php
 # Update password in config file using DB_PASSWORD
 sed -i -e "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${DB_PASSWORD}';/g" /var/www/html/$1/config/Globalvars_site.php
+
+# Fix permissions again after config files are created (ensures correct ownership)
+"$SCRIPT_DIR/fix_permissions.sh" "$1" --production
+
 echo "$NEW_SITE_ROOT created/configured."
 
 # Create test site directories
@@ -190,6 +194,10 @@ if [ "$DOCKER_FIRST_RUN" = false ]; then
     cp default_serve.php /var/www/html/$1_test/public_html/serve.php
     sed -i -e "s/{{DOMAIN_NAME}}/${2}/g" /var/www/html/$1_test/config/Globalvars_site.php
     sed -i -e "s/{{SITE_NAME}}/${1}_test/g" /var/www/html/$1_test/config/Globalvars_site.php
+
+    # Fix permissions again after config files are created (ensures correct ownership)
+    "$SCRIPT_DIR/fix_permissions.sh" "${1}_test" --production
+
     echo "$NEW_TEST_SITE_ROOT created."
 else
     # Docker first-run: Create minimal test site structure for Apache VirtualHost
