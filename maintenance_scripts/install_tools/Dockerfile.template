@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 1.1
+# VERSION 1.2
 #
 # Usage:
 #   docker build \
@@ -31,13 +31,13 @@ COPY ${SITENAME}/ /var/www/html/${SITENAME}/
 COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
 
 # Run server setup (installs all dependencies)
-RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/*.sh && \
-    cd /var/www/html/${SITENAME}/maintenance_scripts && \
-    ./server_setup.sh
+RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh && \
+    cd /var/www/html/${SITENAME}/maintenance_scripts/install_tools && \
+    ./install.sh server
 
 # Create VirtualHost configuration during build (persists across restarts)
 # Note: Composer install and 000-default disable are handled by new_account.sh
-RUN cp /var/www/html/${SITENAME}/maintenance_scripts/default_virtualhost.conf /etc/apache2/sites-available/${SITENAME}.conf && \
+RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtualhost.conf /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{SERVER_IP}}/*/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{DOMAIN_NAME}}/${DOMAIN_NAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{SITE_NAME}}/${SITENAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
@@ -63,7 +63,7 @@ CMD service postgresql start && \
         service postgresql reload; \
     fi && \
     ([ -f /var/www/html/${SITENAME}/config/Globalvars_site.php ] || \
-        cd /var/www/html/${SITENAME}/maintenance_scripts && \
+        cd /var/www/html/${SITENAME}/maintenance_scripts/install_tools && \
         ./new_account.sh ${SITENAME} ${DOMAIN_NAME} "*") && \
     php /var/www/html/${SITENAME}/public_html/utils/update_database.php 2>/dev/null || true && \
     apache2ctl -D FOREGROUND
