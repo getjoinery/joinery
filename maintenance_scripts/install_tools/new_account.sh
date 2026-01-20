@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.8 - Renamed template files to default_* prefix
+#VERSION 2.9 - Fixed SQL file path and sed regex
 #Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file]
 
 # Get the directory where this script is located
@@ -36,10 +36,15 @@ fi
 
 # Set database restore file (default or user-specified)
 # Check for joinery-install.sql.gz from archive first, then fall back to legacy names
+# Check both current directory and parent directory (for Docker builds)
 if [ -f "joinery-install.sql.gz" ]; then
 	DATABASE_RESTORE_FILE="joinery-install.sql.gz"
+elif [ -f "${SCRIPT_DIR}/../joinery-install.sql.gz" ]; then
+	DATABASE_RESTORE_FILE="${SCRIPT_DIR}/../joinery-install.sql.gz"
 elif [ -f "joinery-install.sql" ]; then
 	DATABASE_RESTORE_FILE="joinery-install.sql"
+elif [ -f "${SCRIPT_DIR}/../joinery-install.sql" ]; then
+	DATABASE_RESTORE_FILE="${SCRIPT_DIR}/../joinery-install.sql"
 else
 	DATABASE_RESTORE_FILE="joinery-install-sql.sql"
 fi
@@ -63,9 +68,6 @@ if test -f "$GLOBALVARS_DEFAULT"; then
 	fi
 	
 	# Extract the password value using sed - handles both single and double quotes
-	DB_PASSWORD=$(echo "$DB_PASSWORD_LINE" | sed -n "s/.*settings\['dbpassword'\]\s*=\s*['\"][^'\"]*['\"];.*/\1/p" | sed "s/.*['\"]//;s/['\"];.*//")
-	
-	# Alternative extraction method that's more reliable
 	DB_PASSWORD=$(echo "$DB_PASSWORD_LINE" | sed -n "s/.*=\s*['\"]\\([^'\"]*\\)['\"].*/\\1/p")
 	
 	if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" == "" ]; then
