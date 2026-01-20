@@ -138,27 +138,24 @@
 		 
 		
 
-		// Check that required maintenance script files exist AND are readable
-		// Critical files that MUST be in the archive for installation to work
+		// Check that required directories and files exist
 		$maintenance_dir = $full_site_dir . '/maintenance_scripts/';
-		$required_files = [
-			$maintenance_dir . 'server_setup.sh',
-			$maintenance_dir . 'deploy.sh',
-			$maintenance_dir . 'Dockerfile.template',
-			$maintenance_dir . 'docker_install_master.sh',
-			$sql_source
+		$required_dirs = [
+			$maintenance_dir . 'install_tools',
+			$maintenance_dir . 'sysadmin_tools',
 		];
 
-		foreach ($required_files as $file) {
-			if (!file_exists($file)) {
-				die("ERROR: Required file $file not found. Cannot create archive.\n");
-			}
-			if (!is_readable($file)) {
-				die("ERROR: Required file $file exists but is not readable. Check file permissions (should be at least 644).\n");
+		foreach ($required_dirs as $dir) {
+			if (!is_dir($dir)) {
+				die("ERROR: Required directory $dir not found. Cannot create archive.\n");
 			}
 		}
 
-		echo "All required files present<br>";
+		if (!file_exists($sql_source)) {
+			die("ERROR: Required file $sql_source not found. Cannot create archive.\n");
+		}
+
+		echo "All required directories and files present<br>";
 		flush();
 
 		// Create temporary directory for archive staging
