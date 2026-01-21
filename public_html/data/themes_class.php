@@ -53,7 +53,9 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         'thm_is_active' => array('type'=>'bool', 'default'=>false),
     
         'thm_is_stock' => array('type'=>'bool', 'default'=>true),
-    
+
+        'thm_is_system' => array('type'=>'bool', 'default'=>false),
+
         'thm_status' => array('type'=>'varchar(20)', 'default'=>'installed'),
     
         'thm_metadata' => array('type'=>'jsonb'),
@@ -138,7 +140,11 @@ class MultiTheme extends SystemMultiBase {
         if (isset($this->options['thm_is_stock'])) {
             $filters['thm_is_stock'] = [$this->options['thm_is_stock'], PDO::PARAM_BOOL];
         }
-        
+
+        if (isset($this->options['thm_is_system'])) {
+            $filters['thm_is_system'] = [$this->options['thm_is_system'], PDO::PARAM_BOOL];
+        }
+
         if (isset($this->options['thm_status'])) {
             $filters['thm_status'] = [$this->options['thm_status'], PDO::PARAM_STR];
         }

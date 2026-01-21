@@ -136,7 +136,7 @@ class ThemeManager extends AbstractExtensionManager {
     protected function loadMetadataIntoModel($model, $name) {
         $manifest_path = $this->getExtensionPath($name) . '/theme.json';
         if (!file_exists($manifest_path)) return;
-        
+
         $metadata = json_decode(file_get_contents($manifest_path), true);
         if (json_last_error() === JSON_ERROR_NONE && $metadata) {
             $model->set('thm_metadata', json_encode($metadata));
@@ -145,6 +145,8 @@ class ThemeManager extends AbstractExtensionManager {
             $model->set('thm_version', $metadata['version'] ?? '1.0.0');
             $model->set('thm_author', $metadata['author'] ?? 'Unknown');
             $model->set('thm_is_stock', $metadata['is_stock'] ?? true);
+            // Load system flag from manifest
+            $model->set('thm_is_system', $metadata['system'] ?? false);
         }
     }
     
@@ -432,6 +434,106 @@ class ThemeManager extends AbstractExtensionManager {
         }
 
         return $discovered;
+    }
+
+    // ============================================
+    // THEME MANAGEMENT HELPER METHODS
+    // ============================================
+
+    /**
+     * Check if a theme is installed (files exist on disk)
+     * @param string $theme_name Theme name to check
+     * @return bool True if theme directory exists
+     */
+    public function isInstalled($theme_name) {
+        $install_path = PathHelper::getAbsolutePath('theme/' . $theme_name);
+        return is_dir($install_path);
+    }
+
+    /**
+     * Write is_stock value back to theme manifest
+     * This ensures the manifest stays in sync with database changes
+     * @param string $theme_name Theme name
+     * @param bool $is_stock Whether theme should be marked as stock
+     * @return int|false Number of bytes written or false on failure
+     */
+    public function writeManifestStockStatus($theme_name, $is_stock) {
+        $manifest_path = $this->getExtensionPath($theme_name) . '/theme.json';
+
+        if (!file_exists($manifest_path)) {
+            // Create new manifest if it doesn't exist
+            $manifest = array(
+                'name' => $theme_name,
+                'version' => '1.0.0',
+                'is_stock' => $is_stock
+            );
+        } else {
+            $manifest = json_decode(file_get_contents($manifest_path), true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return false;
+            }
+            $manifest['is_stock'] = $is_stock;
+        }
+
+        return file_put_contents($manifest_path, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * Delete a theme completely (files and database record)
+     * @param string $theme_name Theme to delete
+     * @return bool Success
+     * @throws Exception If theme cannot be deleted
+     */
+    public function deleteTheme($theme_name) {
+        $theme = Theme::get_by_theme_name($theme_name);
+
+        if (!$theme) {
+            throw new Exception("Theme not found: $theme_name");
+        }
+
+        if ($theme->get('thm_is_system')) {
+            throw new Exception("Cannot delete system theme: $theme_name. System themes are required for the platform to function.");
+        }
+
+        if ($theme->get('thm_is_active')) {
+            throw new Exception("Cannot delete active theme. Switch to another theme first.");
+        }
+
+        // Delete files first
+        $theme_path = PathHelper::getAbsolutePath('theme/' . $theme_name);
+        if (is_dir($theme_path)) {
+            exec("rm -rf " . escapeshellarg($theme_path), $output, $result);
+
+            // Verify deletion succeeded
+            if (is_dir($theme_path)) {
+                throw new Exception("Failed to delete theme files. Check file permissions.");
+            }
+        }
+
+        // Delete database record only after files are confirmed deleted
+        $theme->permanent_delete();
+
+        return true;
+    }
+
+    /**
+     * Get list of currently installed theme names
+     * @return array Array of theme directory names
+     */
+    public function getInstalledThemeNames() {
+        $theme_dir = PathHelper::getAbsolutePath('theme');
+        $themes = array();
+
+        if (is_dir($theme_dir)) {
+            foreach (scandir($theme_dir) as $name) {
+                if ($name === '.' || $name === '..') continue;
+                if (is_dir($theme_dir . '/' . $name)) {
+                    $themes[] = $name;
+                }
+            }
+        }
+
+        return $themes;
     }
 }
 ?>

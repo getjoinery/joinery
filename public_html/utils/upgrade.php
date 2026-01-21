@@ -438,19 +438,20 @@
 			echo "✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")<br>";
 		}
 
-		echo '<br><h3>Preserving Custom Themes/Plugins</h3>';
+		echo '<br><h3>Updating Installed Themes/Plugins</h3>';
 
-		// Preserve custom themes/plugins
-		$result = DeploymentHelper::preserveCustomThemesPlugins($stage_directory, $backup_directory, $verbose);
+		// Update installed themes/plugins using the new "update-only" model
+		// This only updates themes that are already installed, never adds new ones
+		$result = DeploymentHelper::updateInstalledThemesOnly($stage_directory, $live_directory, $verbose);
 		if ($result['success']) {
-			echo "✓ Themes: {$result['themes_preserved']} preserved, {$result['themes_updated']} updated, {$result['themes_added']} added<br>";
-			echo "✓ Plugins: {$result['plugins_preserved']} preserved, {$result['plugins_updated']} updated, {$result['plugins_added']} added<br>";
+			echo "✓ Themes: {$result['themes_updated']} updated, {$result['themes_preserved']} preserved<br>";
+			echo "✓ Plugins: {$result['plugins_updated']} updated, {$result['plugins_preserved']} preserved<br>";
 		} else {
-			echo "Theme/Plugin preservation had errors:<br>";
+			echo "Theme/Plugin update had errors:<br>";
 			foreach ($result['errors'] as $error) {
 				echo "  • " . htmlspecialchars($error) . "<br>";
 			}
-			// Don't abort on preservation errors, but log them
+			// Don't abort on update errors, but log them
 		}
 
 		// ============================================

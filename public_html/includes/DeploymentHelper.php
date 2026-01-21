@@ -306,11 +306,142 @@ class DeploymentHelper {
     }
 
     // ============================================
-    // THEME/PLUGIN PRESERVATION
+    // THEME/PLUGIN MANAGEMENT
     // ============================================
 
     /**
+     * Update only themes/plugins that are already installed
+     * This is the new "sparse-fetch, update-only" model.
+     *
+     * Key behavior:
+     * - Only processes themes/plugins that are ALREADY in public_html
+     * - Never adds new themes/plugins from staging
+     * - Stock themes (is_stock=true) are updated from staging
+     * - Custom themes (is_stock=false) are preserved
+     * - Themes not in repo (custom uploads) are preserved
+     *
+     * @param string $stage_dir Staging directory with new themes/plugins
+     * @param string $public_html_dir Current public_html directory
+     * @param bool $verbose Echo progress to screen
+     * @return array ['success' => bool,
+     *                'themes_updated' => int, 'themes_preserved' => int,
+     *                'plugins_updated' => int, 'plugins_preserved' => int,
+     *                'errors' => array]
+     */
+    public static function updateInstalledThemesOnly($stage_dir, $public_html_dir, $verbose = false) {
+        $result = [
+            'success' => true,
+            'themes_updated' => 0,
+            'themes_preserved' => 0,
+            'plugins_updated' => 0,
+            'plugins_preserved' => 0,
+            'errors' => []
+        ];
+
+        if ($verbose) {
+            echo "Updating installed themes and plugins (update-only model)...\n";
+        }
+
+        // Process themes - only themes already in public_html
+        $installed_themes_dir = $public_html_dir . '/theme';
+        $staged_themes_dir = $stage_dir . '/theme';
+
+        if (is_dir($installed_themes_dir)) {
+            foreach (scandir($installed_themes_dir) as $theme_name) {
+                if ($theme_name === '.' || $theme_name === '..') continue;
+
+                $installed_path = $installed_themes_dir . '/' . $theme_name;
+                $staged_path = $staged_themes_dir . '/' . $theme_name;
+
+                if (!is_dir($installed_path)) continue;
+
+                // Check if theme exists in staging (repository)
+                if (is_dir($staged_path)) {
+                    // Read installed theme's manifest to determine stock status
+                    $manifest_path = $installed_path . '/theme.json';
+                    $is_stock = true;
+
+                    if (file_exists($manifest_path)) {
+                        $manifest = json_decode(file_get_contents($manifest_path), true);
+                        $is_stock = $manifest['is_stock'] ?? true;
+                    }
+
+                    if ($is_stock) {
+                        // Update from staging
+                        exec("rm -rf " . escapeshellarg($installed_path));
+                        exec("cp -r " . escapeshellarg($staged_path) . " " . escapeshellarg($installed_themes_dir . '/'));
+                        $result['themes_updated']++;
+
+                        if ($verbose) echo "  Updated stock theme: $theme_name\n";
+                    } else {
+                        // Preserve custom theme
+                        $result['themes_preserved']++;
+                        if ($verbose) echo "  Preserved custom theme: $theme_name\n";
+                    }
+                } else {
+                    // Theme not in repo (custom upload) - preserve it
+                    $result['themes_preserved']++;
+                    if ($verbose) echo "  Preserved uploaded theme: $theme_name (not in repo)\n";
+                }
+            }
+        }
+
+        // Process plugins - only plugins already in public_html
+        $installed_plugins_dir = $public_html_dir . '/plugins';
+        $staged_plugins_dir = $stage_dir . '/plugins';
+
+        if (is_dir($installed_plugins_dir)) {
+            foreach (scandir($installed_plugins_dir) as $plugin_name) {
+                if ($plugin_name === '.' || $plugin_name === '..') continue;
+
+                $installed_path = $installed_plugins_dir . '/' . $plugin_name;
+                $staged_path = $staged_plugins_dir . '/' . $plugin_name;
+
+                if (!is_dir($installed_path)) continue;
+
+                // Check if plugin exists in staging (repository)
+                if (is_dir($staged_path)) {
+                    // Read installed plugin's manifest to determine stock status
+                    $manifest_path = $installed_path . '/plugin.json';
+                    $is_stock = true;
+
+                    if (file_exists($manifest_path)) {
+                        $manifest = json_decode(file_get_contents($manifest_path), true);
+                        $is_stock = $manifest['is_stock'] ?? true;
+                    }
+
+                    if ($is_stock) {
+                        // Update from staging
+                        exec("rm -rf " . escapeshellarg($installed_path));
+                        exec("cp -r " . escapeshellarg($staged_path) . " " . escapeshellarg($installed_plugins_dir . '/'));
+                        $result['plugins_updated']++;
+
+                        if ($verbose) echo "  Updated stock plugin: $plugin_name\n";
+                    } else {
+                        // Preserve custom plugin
+                        $result['plugins_preserved']++;
+                        if ($verbose) echo "  Preserved custom plugin: $plugin_name\n";
+                    }
+                } else {
+                    // Plugin not in repo (custom upload) - preserve it
+                    $result['plugins_preserved']++;
+                    if ($verbose) echo "  Preserved uploaded plugin: $plugin_name (not in repo)\n";
+                }
+            }
+        }
+
+        if ($verbose) {
+            echo "Theme/Plugin update complete:\n";
+            echo "  Themes: {$result['themes_updated']} updated, {$result['themes_preserved']} preserved\n";
+            echo "  Plugins: {$result['plugins_updated']} updated, {$result['plugins_preserved']} preserved\n";
+        }
+
+        return $result;
+    }
+
+    /**
      * Preserve custom themes/plugins based on is_stock flag
+     * @deprecated Use updateInstalledThemesOnly() instead for the new sparse-fetch model
      * @param string $stage_dir Staging directory with new themes/plugins
      * @param string $backup_dir Backup directory with existing themes/plugins
      * @param bool $verbose Echo progress to screen
