@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-#version 3.11 - Centralized permissions to fix_permissions.sh
+#version 3.12 - Update-only theme model (no new theme installation during deploy)
+# MODIFIED v3.12: Changed from "add new themes" to "update installed themes only" model
+# MODIFIED v3.12: Now uses sparse checkout to only fetch themes already in public_html
+# MODIFIED v3.12: Replaced preserveCustomThemesPlugins with updateInstalledThemesOnly
+# MODIFIED v3.12: New sites must use new_account.sh --themes to install initial themes
+# MODIFIED v3.11: Centralized permissions to fix_permissions.sh
 # MODIFIED v3.8: Renamed "maintenance scripts" to "maintenance_scripts" (underscore instead of space)
 # MODIFIED v3.8: Updated git sparse-checkout to use "maintenance_scripts"
 # MODIFIED v3.8: Updated all path references to use underscore notation
@@ -23,7 +28,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.11"
+DEPLOY_VERSION="3.12"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -215,149 +220,117 @@ handle_test_failure() {
     fi
 }
 
-# Function to deploy themes and plugins from staging to public_html
-deploy_themes_plugins_from_stage() {
+# Function to get list of installed themes/plugins for sparse checkout
+get_installed_extensions() {
+    local extension_type="$1"  # "theme" or "plugins"
+    local public_html_dir="$2"
+    local extensions=""
+
+    if [[ -d "$public_html_dir/$extension_type" ]]; then
+        for ext_dir in "$public_html_dir/$extension_type"/*; do
+            if [[ -d "$ext_dir" ]]; then
+                local ext_name=$(basename "$ext_dir")
+                if [[ -n "$extensions" ]]; then
+                    extensions="$extensions $ext_name"
+                else
+                    extensions="$ext_name"
+                fi
+            fi
+        done
+    fi
+    echo "$extensions"
+}
+
+# Function to update only installed themes and plugins (update-only model)
+# This is the new v3.12 approach: no new themes are added, only existing ones updated
+update_installed_themes_plugins() {
     local target_site="$1"
     local staging_dir="/var/www/html/$target_site/public_html_stage"
     local public_html_dir="/var/www/html/$target_site/public_html"
-    
-    echo "Deploying themes and plugins from staging to public_html..."
-    
+
+    echo "Updating installed themes and plugins (update-only model)..."
+
     # Validate that staging directory exists
     if [[ ! -d "$staging_dir" ]]; then
         echo "ERROR: Staging directory not found: $staging_dir"
         return 1
     fi
-    
-    # Ensure theme directory exists
-    mkdir -p "$public_html_dir/theme" || {
-        echo "ERROR: Failed to create public_html/theme directory"
-        return 1
-    }
-    
-    # Check for theme directory and deploy if present
-    if [[ -d "$staging_dir/theme" ]]; then
-        echo "Found themes in staging, processing..."
-        
-        for theme_dir in "$staging_dir/theme"/*; do
+
+    local themes_updated=0
+    local themes_preserved=0
+    local plugins_updated=0
+    local plugins_preserved=0
+
+    # Process ONLY themes already in public_html
+    if [[ -d "$public_html_dir/theme" ]]; then
+        for theme_dir in "$public_html_dir/theme"/*; do
             if [[ -d "$theme_dir" ]]; then
                 local theme_name=$(basename "$theme_dir")
+                local staged_theme="$staging_dir/theme/$theme_name"
                 local manifest_file="$theme_dir/theme.json"
-                
-                # Auto-generate manifest if missing
-                if [[ ! -f "$manifest_file" ]]; then
-                    echo "Auto-generating theme.json for $theme_name"
-                    cat > "$manifest_file" << EOF
-{
-  "name": "$theme_name",
-  "version": "1.0.0",
-  "description": "Auto-generated manifest for $theme_name theme",
-  "author": "Unknown",
-  "is_stock": true
-}
-EOF
-                fi
-                
-                # Check if theme is stock by reading manifest
-                local is_stock
-                if [[ -f "$manifest_file" ]]; then
-                    is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
+
+                # Check if theme exists in staging (repository)
+                if [[ -d "$staged_theme" ]]; then
+                    # Read installed theme's manifest to determine stock status
+                    local is_stock="true"
+                    if [[ -f "$manifest_file" ]]; then
+                        is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
+                    fi
+
+                    if [[ "$is_stock" == "true" ]]; then
+                        verbose_echo "  Updating stock theme: $theme_name"
+                        rm -rf "$theme_dir"
+                        cp -r "$staged_theme" "$public_html_dir/theme/"
+                        ((themes_updated++))
+                    else
+                        verbose_echo "  Preserved custom theme: $theme_name"
+                        ((themes_preserved++))
+                    fi
                 else
-                    # Fallback if jq fails
-                    is_stock="true"
-                fi
-                
-                if [[ ! -d "$public_html_dir/theme/$theme_name" ]]; then
-                    echo "Adding new theme: $theme_name (stock: $is_stock)"
-                    cp -r "$theme_dir" "$public_html_dir/theme/" || {
-                        echo "ERROR: Failed to copy theme $theme_name"
-                        return 1
-                    }
-                elif [[ "$is_stock" == "true" ]]; then
-                    echo "Updating stock theme: $theme_name"
-                    rm -rf "$public_html_dir/theme/$theme_name" || {
-                        echo "ERROR: Failed to remove old theme $theme_name"
-                        return 1
-                    }
-                    cp -r "$theme_dir" "$public_html_dir/theme/" || {
-                        echo "ERROR: Failed to copy theme $theme_name"
-                        return 1
-                    }
-                else
-                    echo "Skipping custom theme: $theme_name (use admin interface to upgrade)"
+                    # Theme not in repo (custom upload) - preserve it
+                    verbose_echo "  Preserved uploaded theme: $theme_name (not in repo)"
+                    ((themes_preserved++))
                 fi
             fi
         done
-        echo "Theme deployment completed."
-    else
-        echo "No themes found in staging directory."
     fi
-    
-    # Ensure plugins directory exists
-    mkdir -p "$public_html_dir/plugins" || {
-        echo "ERROR: Failed to create public_html/plugins directory"
-        return 1
-    }
-    
-    # Check for plugin directory and deploy if present  
-    if [[ -d "$staging_dir/plugins" ]]; then
-        echo "Found plugins in staging, processing..."
-        
-        for plugin_dir in "$staging_dir/plugins"/*; do
+
+    # Process ONLY plugins already in public_html
+    if [[ -d "$public_html_dir/plugins" ]]; then
+        for plugin_dir in "$public_html_dir/plugins"/*; do
             if [[ -d "$plugin_dir" ]]; then
                 local plugin_name=$(basename "$plugin_dir")
+                local staged_plugin="$staging_dir/plugins/$plugin_name"
                 local manifest_file="$plugin_dir/plugin.json"
-                
-                # Auto-generate manifest if missing
-                if [[ ! -f "$manifest_file" ]]; then
-                    echo "Auto-generating plugin.json for $plugin_name"
-                    cat > "$manifest_file" << EOF
-{
-  "name": "$plugin_name",
-  "version": "1.0.0",
-  "description": "Auto-generated manifest for $plugin_name plugin",
-  "author": "Unknown",
-  "is_stock": true
-}
-EOF
-                fi
-                
-                # Check if plugin is stock by reading manifest
-                local is_stock
-                if [[ -f "$manifest_file" ]]; then
-                    is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
+
+                # Check if plugin exists in staging (repository)
+                if [[ -d "$staged_plugin" ]]; then
+                    # Read installed plugin's manifest to determine stock status
+                    local is_stock="true"
+                    if [[ -f "$manifest_file" ]]; then
+                        is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
+                    fi
+
+                    if [[ "$is_stock" == "true" ]]; then
+                        verbose_echo "  Updating stock plugin: $plugin_name"
+                        rm -rf "$plugin_dir"
+                        cp -r "$staged_plugin" "$public_html_dir/plugins/"
+                        ((plugins_updated++))
+                    else
+                        verbose_echo "  Preserved custom plugin: $plugin_name"
+                        ((plugins_preserved++))
+                    fi
                 else
-                    # Fallback if jq fails
-                    is_stock="true"
-                fi
-                
-                if [[ ! -d "$public_html_dir/plugins/$plugin_name" ]]; then
-                    echo "Adding new plugin: $plugin_name (stock: $is_stock)"
-                    cp -r "$plugin_dir" "$public_html_dir/plugins/" || {
-                        echo "ERROR: Failed to copy plugin $plugin_name"
-                        return 1
-                    }
-                elif [[ "$is_stock" == "true" ]]; then
-                    echo "Updating stock plugin: $plugin_name"
-                    rm -rf "$public_html_dir/plugins/$plugin_name" || {
-                        echo "ERROR: Failed to remove old plugin $plugin_name"
-                        return 1
-                    }
-                    cp -r "$plugin_dir" "$public_html_dir/plugins/" || {
-                        echo "ERROR: Failed to copy plugin $plugin_name"
-                        return 1
-                    }
-                else
-                    echo "Skipping custom plugin: $plugin_name (use admin interface to upgrade)"
+                    # Plugin not in repo (custom upload) - preserve it
+                    verbose_echo "  Preserved uploaded plugin: $plugin_name (not in repo)"
+                    ((plugins_preserved++))
                 fi
             fi
         done
-        echo "Plugin deployment completed."
-    else
-        echo "No plugins found in staging directory."
     fi
-    
-    echo "Theme and plugin deployment from staging completed successfully."
+
+    echo "✓ Themes: $themes_updated updated, $themes_preserved preserved"
+    echo "✓ Plugins: $plugins_updated updated, $plugins_preserved preserved"
     return 0
 }
 
@@ -907,33 +880,12 @@ if ! deploy_maintenance_scripts "$TARGET_SITE"; then
     exit 1
 fi
 
-# PRESERVE CUSTOM THEMES AND PLUGINS FROM EXISTING PUBLIC_HTML (using DeploymentHelper)
-verbose_echo "Preserving custom themes and plugins from existing deployment..."
-preservation_output=$(php -r "
-    require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
-    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
-
-    \$verbose = $VERBOSE ? true : false;
-    \$result = DeploymentHelper::preserveCustomThemesPlugins('/var/www/html/$TARGET_SITE', \$verbose);
-
-    if (!\$result['success']) {
-        echo 'ERROR:' . \$result['message'] . PHP_EOL;
-        exit(1);
-    } else {
-        echo 'SUCCESS:' . \$result['summary'];
-        exit(0);
-    }
-" 2>&1)
-preservation_exit=$?
-
-if [ $preservation_exit -ne 0 ]; then
-    echo "$preservation_output" | grep "^ERROR:" | while IFS=: read -r prefix message; do
-        echo "ERROR: $message"
-    done
+# UPDATE INSTALLED THEMES AND PLUGINS (update-only model)
+# Uses pure bash implementation for reliability during deployment
+verbose_echo "Updating installed themes and plugins from staging..."
+if ! update_installed_themes_plugins "$TARGET_SITE"; then
+    echo "ERROR: Failed to update themes and plugins"
     exit 1
-else
-    summary=$(echo "$preservation_output" | grep "^SUCCESS:" | cut -d: -f2-)
-    echo "$summary"
 fi
 
 # RUN PRE-DEPLOYMENT TESTS ON STAGING

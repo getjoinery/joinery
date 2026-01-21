@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.1
+#VERSION 2.2 - Added explicit empty string validation for defensive programming
 #
 # Fix permissions for a Joinery site
 #
