@@ -52,6 +52,23 @@ sudo ./install.sh server
 sudo ./install.sh site mysite SecurePass123! mysite.com
 ```
 
+### Non-Interactive / Scripted Deployment
+
+For CI/CD pipelines or automated deployments, use the `-y` and `-q` flags:
+
+```bash
+# -y: Auto-accept all prompts (non-interactive)
+# -q: Quiet mode (minimal output)
+
+# Fully automated Docker deployment
+sudo ./install.sh -y docker
+sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
+
+# Output in quiet mode is minimal:
+# Installation Complete!
+# Site: mysite | URL: http://mysite.com:8080/
+```
+
 ---
 
 ## Example Workflows
@@ -594,9 +611,28 @@ Universal installer with subcommands:
 | `install.sh site` | Create a new Joinery site |
 | `install.sh list` | List existing sites |
 
+**Global options (apply to all commands):**
+
+| Option | Description |
+|--------|-------------|
+| `-y`, `--yes` | Auto-accept all prompts (non-interactive mode) |
+| `-q`, `--quiet` | Suppress progress output, show only errors and final summary |
+
 **Site command options:**
 ```bash
-./install.sh site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT]
+./install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT]
+```
+
+**Examples:**
+```bash
+# Interactive (default)
+./install.sh site mysite Pass123! mysite.com 8080
+
+# Non-interactive (auto-accept prompts)
+./install.sh -y site mysite Pass123! mysite.com 8080
+
+# Quiet mode (minimal output, for CI/CD)
+./install.sh -y -q site mysite Pass123! mysite.com 8080
 ```
 
 ### Supporting Scripts
@@ -663,7 +699,7 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 
 ## Version Information
 
-- **Guide Version:** 2.1
-- **install.sh Version:** 1.1
+- **Guide Version:** 2.2
+- **install.sh Version:** 1.2
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
-- **Last Updated:** 2026-01-20
+- **Last Updated:** 2026-01-21
