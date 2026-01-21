@@ -22,6 +22,10 @@ sudo ./install.sh site mysite SecurePass123! mysite.com 8080
 # Create your site (auto-generate secure password)
 sudo ./install.sh site mysite - mysite.com 8080
 
+# Non-interactive deployment (for scripting/CI)
+sudo ./install.sh -y docker
+sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
+
 # List sites
 sudo ./install.sh list
 ```
@@ -72,4 +76,4 @@ See the **[Unified Installation Guide](../../maintenance_scripts/install_tools/I
 
 ---
 
-*Last Updated: 2026-01-20*
+*Last Updated: 2026-01-21*
