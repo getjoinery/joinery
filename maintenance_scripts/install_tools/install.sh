@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.1 - Universal Joinery Installer
+#VERSION 1.2 - Added -y/--yes and -q/--quiet flags for non-interactive/scripted deployments
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -7,10 +7,18 @@
 #   ./install.sh site SITENAME PASS DOMAIN [PORT]   # Create a site
 #   ./install.sh list                                # List existing sites
 #
+# Global Options:
+#   -y, --yes     Auto-accept all prompts (non-interactive mode)
+#   -q, --quiet   Suppress most output, show only errors and final status
+#
 # Examples:
 #   # Docker deployment
 #   sudo ./install.sh docker
 #   sudo ./install.sh site mysite SecurePass123! mysite.com 8080
+#
+#   # Non-interactive deployment (for scripting/CI)
+#   sudo ./install.sh -y docker
+#   sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 #
 #   # Bare-metal deployment
 #   sudo ./install.sh server
@@ -24,6 +32,13 @@ set -e  # Exit on error
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 #==============================================================================
+# GLOBAL FLAGS (parsed before command dispatch)
+#==============================================================================
+
+ASSUME_YES=0      # -y/--yes: Auto-accept all prompts
+QUIET_MODE=0      # -q/--quiet: Suppress most output
+
+#==============================================================================
 # HELPER FUNCTIONS (from docker_install_master.sh)
 #==============================================================================
 
@@ -35,6 +50,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 print_header() {
+    [ "$QUIET_MODE" -eq 1 ] && return
     echo ""
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}  $1${NC}"
@@ -43,23 +59,33 @@ print_header() {
 }
 
 print_step() {
+    [ "$QUIET_MODE" -eq 1 ] && return
     echo -e "${GREEN}[STEP]${NC} $1"
 }
 
 print_info() {
+    [ "$QUIET_MODE" -eq 1 ] && return
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
 print_warning() {
+    # Warnings always shown (even in quiet mode)
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
 print_error() {
+    # Errors always shown (even in quiet mode)
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
 print_success() {
+    [ "$QUIET_MODE" -eq 1 ] && return
     echo -e "${GREEN}[OK]${NC} $1"
+}
+
+# Final summary output (always shown, even in quiet mode)
+print_final() {
+    echo -e "$1"
 }
 
 #==============================================================================
@@ -339,13 +365,18 @@ do_docker_install() {
     fi
 
     print_info "Docker is not installed"
-    echo ""
-    read -p "Would you like to install Docker now? [Y/n] " -n 1 -r
-    echo ""
 
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        print_info "Docker installation cancelled"
-        exit 0
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        print_info "Auto-accepting Docker installation (-y flag)"
+    else
+        echo ""
+        read -p "Would you like to install Docker now? [Y/n] " -n 1 -r
+        echo ""
+
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_info "Docker installation cancelled"
+            exit 0
+        fi
     fi
 
     print_step "Installing Docker..."
@@ -387,7 +418,11 @@ do_docker_install() {
         exit 1
     fi
 
-    print_success "Docker installation complete!"
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        echo -e "${GREEN}Docker installation complete!${NC}"
+    else
+        print_success "Docker installation complete!"
+    fi
 }
 
 #==============================================================================
@@ -1000,19 +1035,26 @@ do_site_docker() {
         SUGGESTED_PORT=$(find_available_port 8080)
 
         if [ -n "$SUGGESTED_PORT" ]; then
-            echo ""
-            echo -e "Suggested available port: ${GREEN}$SUGGESTED_PORT${NC} (database: $((SUGGESTED_PORT + 1000)))"
-            echo ""
-            read -p "Would you like to use port $SUGGESTED_PORT instead? [Y/n] " -n 1 -r
-            echo ""
-
-            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            if [ "$ASSUME_YES" -eq 1 ]; then
+                print_info "Auto-accepting suggested port $SUGGESTED_PORT (-y flag)"
                 PORT=$SUGGESTED_PORT
                 DB_PORT=$((PORT + 1000))
                 print_success "Using port $PORT (database: $DB_PORT)"
             else
-                print_error "Cannot continue with port conflict. Please specify a different port."
-                exit 1
+                echo ""
+                echo -e "Suggested available port: ${GREEN}$SUGGESTED_PORT${NC} (database: $((SUGGESTED_PORT + 1000)))"
+                echo ""
+                read -p "Would you like to use port $SUGGESTED_PORT instead? [Y/n] " -n 1 -r
+                echo ""
+
+                if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                    PORT=$SUGGESTED_PORT
+                    DB_PORT=$((PORT + 1000))
+                    print_success "Using port $PORT (database: $DB_PORT)"
+                else
+                    print_error "Cannot continue with port conflict. Please specify a different port."
+                    exit 1
+                fi
             fi
         else
             print_error "Could not find an available port in range 8080-8180"
@@ -1051,18 +1093,26 @@ do_site_docker() {
 
     if docker ps -a --format '{{.Names}}' | grep -q "^${SITENAME}$"; then
         print_warning "A container named '$SITENAME' already exists"
-        echo ""
-        read -p "Would you like to remove it and continue? [y/N] " -n 1 -r
-        echo ""
 
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Stopping and removing existing container..."
+        if [ "$ASSUME_YES" -eq 1 ]; then
+            print_info "Auto-removing existing container (-y flag)"
             docker stop "$SITENAME" 2>/dev/null || true
             docker rm "$SITENAME" 2>/dev/null || true
             print_success "Existing container removed"
         else
-            print_error "Cannot continue with existing container."
-            exit 1
+            echo ""
+            read -p "Would you like to remove it and continue? [y/N] " -n 1 -r
+            echo ""
+
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Stopping and removing existing container..."
+                docker stop "$SITENAME" 2>/dev/null || true
+                docker rm "$SITENAME" 2>/dev/null || true
+                print_success "Existing container removed"
+            else
+                print_error "Cannot continue with existing container."
+                exit 1
+            fi
         fi
     else
         print_success "No existing container found"
@@ -1106,11 +1156,20 @@ EOF
 
     cd "$BUILD_DIR"
 
-    docker build \
-        --build-arg SITENAME="$SITENAME" \
-        --build-arg POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-        --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
-        -t "joinery-$SITENAME" .
+    # Build with -q flag in quiet mode to suppress build output
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        docker build -q \
+            --build-arg SITENAME="$SITENAME" \
+            --build-arg POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
+            -t "joinery-$SITENAME" . > /dev/null
+    else
+        docker build \
+            --build-arg SITENAME="$SITENAME" \
+            --build-arg POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
+            -t "joinery-$SITENAME" .
+    fi
 
     if [ $? -eq 0 ]; then
         print_success "Docker image built successfully"
@@ -1122,21 +1181,39 @@ EOF
     # Run container
     print_step "Starting container..."
 
-    docker run -d \
-        --name "$SITENAME" \
-        -p "$PORT":80 \
-        -p "$DB_PORT":5432 \
-        -v "${SITENAME}_postgres":/var/lib/postgresql \
-        -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
-        -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
-        -v "${SITENAME}_backups":/var/www/html/"${SITENAME}"/backups \
-        -v "${SITENAME}_static":/var/www/html/"${SITENAME}"/static_files \
-        -v "${SITENAME}_logs":/var/www/html/"${SITENAME}"/logs \
-        -v "${SITENAME}_cache":/var/www/html/"${SITENAME}"/cache \
-        -v "${SITENAME}_sessions":/var/lib/php/sessions \
-        -v "${SITENAME}_apache_logs":/var/log/apache2 \
-        -v "${SITENAME}_pg_logs":/var/log/postgresql \
-        "joinery-$SITENAME"
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        docker run -d \
+            --name "$SITENAME" \
+            -p "$PORT":80 \
+            -p "$DB_PORT":5432 \
+            -v "${SITENAME}_postgres":/var/lib/postgresql \
+            -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
+            -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
+            -v "${SITENAME}_backups":/var/www/html/"${SITENAME}"/backups \
+            -v "${SITENAME}_static":/var/www/html/"${SITENAME}"/static_files \
+            -v "${SITENAME}_logs":/var/www/html/"${SITENAME}"/logs \
+            -v "${SITENAME}_cache":/var/www/html/"${SITENAME}"/cache \
+            -v "${SITENAME}_sessions":/var/lib/php/sessions \
+            -v "${SITENAME}_apache_logs":/var/log/apache2 \
+            -v "${SITENAME}_pg_logs":/var/log/postgresql \
+            "joinery-$SITENAME" > /dev/null
+    else
+        docker run -d \
+            --name "$SITENAME" \
+            -p "$PORT":80 \
+            -p "$DB_PORT":5432 \
+            -v "${SITENAME}_postgres":/var/lib/postgresql \
+            -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
+            -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
+            -v "${SITENAME}_backups":/var/www/html/"${SITENAME}"/backups \
+            -v "${SITENAME}_static":/var/www/html/"${SITENAME}"/static_files \
+            -v "${SITENAME}_logs":/var/www/html/"${SITENAME}"/logs \
+            -v "${SITENAME}_cache":/var/www/html/"${SITENAME}"/cache \
+            -v "${SITENAME}_sessions":/var/lib/php/sessions \
+            -v "${SITENAME}_apache_logs":/var/log/apache2 \
+            -v "${SITENAME}_pg_logs":/var/log/postgresql \
+            "joinery-$SITENAME"
+    fi
 
     if [ $? -eq 0 ]; then
         print_success "Container started"
@@ -1181,43 +1258,53 @@ EOF
         print_success "Build directory removed"
     fi
 
-    # Summary
-    print_header "Installation Complete!"
-
-    echo -e "Site Name:        ${GREEN}$SITENAME${NC}"
-    echo -e "Domain:           ${GREEN}$DOMAIN_NAME${NC}"
-    echo -e "Web Port:         ${GREEN}$PORT${NC}"
-    echo -e "Database Port:    ${GREEN}$DB_PORT${NC}"
-    echo ""
-    if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
-        echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
-        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+    # Summary (always shown, even in quiet mode)
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        # Minimal summary for quiet mode
         echo ""
-    fi
-    echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME:$PORT/${NC}"
-    echo ""
-    echo "Default admin login:"
-    echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
-    echo ""
-    echo "Useful commands:"
-    echo -e "  View logs:      ${BLUE}docker logs $SITENAME${NC}"
-    echo -e "  Shell access:   ${BLUE}docker exec -it $SITENAME bash${NC}"
-    echo -e "  Stop container: ${BLUE}docker stop $SITENAME${NC}"
-    echo -e "  Start container:${BLUE}docker start $SITENAME${NC}"
-    echo ""
-
-    CONTAINER_STATUS=$(docker ps --filter "name=$SITENAME" --format "{{.Status}}" 2>/dev/null)
-    if [ -n "$CONTAINER_STATUS" ]; then
-        echo -e "Container status: ${GREEN}$CONTAINER_STATUS${NC}"
+        echo -e "${GREEN}Installation Complete!${NC}"
+        echo -e "Site: ${GREEN}$SITENAME${NC} | URL: ${GREEN}http://$DOMAIN_NAME:$PORT/${NC}"
+        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
+            echo -e "Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+        fi
     else
-        print_warning "Container may not be running. Check logs with: docker logs $SITENAME"
+        print_header "Installation Complete!"
+
+        echo -e "Site Name:        ${GREEN}$SITENAME${NC}"
+        echo -e "Domain:           ${GREEN}$DOMAIN_NAME${NC}"
+        echo -e "Web Port:         ${GREEN}$PORT${NC}"
+        echo -e "Database Port:    ${GREEN}$DB_PORT${NC}"
+        echo ""
+        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
+            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+            echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
+            echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+            echo ""
+        fi
+        echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME:$PORT/${NC}"
+        echo ""
+        echo "Default admin login:"
+        echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
+        echo ""
+        echo "Useful commands:"
+        echo -e "  View logs:      ${BLUE}docker logs $SITENAME${NC}"
+        echo -e "  Shell access:   ${BLUE}docker exec -it $SITENAME bash${NC}"
+        echo -e "  Stop container: ${BLUE}docker stop $SITENAME${NC}"
+        echo -e "  Start container:${BLUE}docker start $SITENAME${NC}"
+        echo ""
+
+        CONTAINER_STATUS=$(docker ps --filter "name=$SITENAME" --format "{{.Status}}" 2>/dev/null)
+        if [ -n "$CONTAINER_STATUS" ]; then
+            echo -e "Container status: ${GREEN}$CONTAINER_STATUS${NC}"
+        else
+            print_warning "Container may not be running. Check logs with: docker logs $SITENAME"
+        fi
+
+        list_docker_containers
+
+        print_success "Docker site installation complete!"
     fi
-
-    list_docker_containers
-
-    print_success "Docker site installation complete!"
 }
 
 #------------------------------------------------------------------------------
@@ -1286,33 +1373,43 @@ do_site_baremetal() {
         print_warning "Site returned HTTP $HTTP_CODE - may need manual verification"
     fi
 
-    # Summary
-    print_header "Installation Complete!"
-
-    echo -e "Site Name:        ${GREEN}$SITENAME${NC}"
-    echo -e "Domain:           ${GREEN}$DOMAIN_NAME${NC}"
-    echo -e "Location:         ${GREEN}/var/www/html/$SITENAME/${NC}"
-    echo ""
-    if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
-        echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
-        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+    # Summary (always shown, even in quiet mode)
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        # Minimal summary for quiet mode
         echo ""
+        echo -e "${GREEN}Installation Complete!${NC}"
+        echo -e "Site: ${GREEN}$SITENAME${NC} | URL: ${GREEN}http://$DOMAIN_NAME/${NC}"
+        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
+            echo -e "Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+        fi
+    else
+        print_header "Installation Complete!"
+
+        echo -e "Site Name:        ${GREEN}$SITENAME${NC}"
+        echo -e "Domain:           ${GREEN}$DOMAIN_NAME${NC}"
+        echo -e "Location:         ${GREEN}/var/www/html/$SITENAME/${NC}"
+        echo ""
+        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
+            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+            echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
+            echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+            echo ""
+        fi
+        echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME/${NC}"
+        echo ""
+        echo "Default admin login:"
+        echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
+        echo ""
+        echo "Useful commands:"
+        echo -e "  View logs:      ${BLUE}tail -f /var/www/html/$SITENAME/logs/error.log${NC}"
+        echo -e "  Restart Apache: ${BLUE}sudo systemctl restart apache2${NC}"
+        echo ""
+
+        list_baremetal_sites
+
+        print_success "Bare-metal site installation complete!"
     fi
-    echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME/${NC}"
-    echo ""
-    echo "Default admin login:"
-    echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
-    echo ""
-    echo "Useful commands:"
-    echo -e "  View logs:      ${BLUE}tail -f /var/www/html/$SITENAME/logs/error.log${NC}"
-    echo -e "  Restart Apache: ${BLUE}sudo systemctl restart apache2${NC}"
-    echo ""
-
-    list_baremetal_sites
-
-    print_success "Bare-metal site installation complete!"
 }
 
 #==============================================================================
@@ -1343,7 +1440,11 @@ show_help() {
     echo "Joinery Installation Script"
     echo ""
     echo "Usage:"
-    echo "  ./install.sh <command> [options]"
+    echo "  ./install.sh [global-options] <command> [options]"
+    echo ""
+    echo "Global Options:"
+    echo "  -y, --yes     Auto-accept all prompts (non-interactive mode)"
+    echo "  -q, --quiet   Suppress most output, show only errors and final status"
     echo ""
     echo "Commands:"
     echo "  docker    Install Docker (one-time, for Docker deployments)"
@@ -1372,6 +1473,10 @@ show_help() {
     echo "  sudo ./install.sh site site2 Pass2! site2.com"
     echo "  sudo ./install.sh list"
     echo ""
+    echo "  # Non-interactive deployment (for scripting/CI)"
+    echo "  sudo ./install.sh -y docker"
+    echo "  sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080"
+    echo ""
     echo "Auto-Detection:"
     echo "  'install.sh site' automatically detects the environment:"
     echo "  - Docker installed and running → creates Docker container"
@@ -1386,6 +1491,23 @@ show_help() {
 #==============================================================================
 # MAIN DISPATCHER
 #==============================================================================
+
+# Parse global flags first (before command)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -y|--yes)
+            ASSUME_YES=1
+            shift
+            ;;
+        -q|--quiet)
+            QUIET_MODE=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
 
 case "${1:-}" in
     docker)
