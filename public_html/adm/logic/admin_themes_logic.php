@@ -44,7 +44,9 @@ function admin_themes_logic($get, $post) {
 						if ($theme) {
 							$theme->set('thm_is_stock', true);
 							$theme->save();
-							$message = "Theme '$theme_name' marked as stock.";
+							// Write back to manifest to keep in sync
+							$theme_manager->writeManifestStockStatus($theme_name, true);
+							$message = "Theme '$theme_name' marked as stock. It will receive updates during deployments.";
 						}
 						break;
 
@@ -52,9 +54,16 @@ function admin_themes_logic($get, $post) {
 						$theme_name = $post['theme_name'];
 						$theme = Theme::get_by_theme_name($theme_name);
 						if ($theme) {
+							// Block marking system themes as custom
+							if ($theme->get('thm_is_system')) {
+								$error = "Cannot mark system theme '$theme_name' as custom. System themes must always receive updates.";
+								break;
+							}
 							$theme->set('thm_is_stock', false);
 							$theme->save();
-							$message = "Theme '$theme_name' marked as custom.";
+							// Write back to manifest to keep in sync
+							$theme_manager->writeManifestStockStatus($theme_name, false);
+							$message = "Theme '$theme_name' marked as custom. It will be preserved during deployments.";
 						}
 						break;
 
@@ -97,18 +106,10 @@ function admin_themes_logic($get, $post) {
 
 					case 'delete':
 						$theme_name = $post['theme_name'];
-						$theme = Theme::get_by_theme_name($theme_name);
-						if ($theme) {
-							// Only allow deletion if theme files are missing or it's not active
-							if (!$theme->theme_files_exist() || !$theme->get('thm_is_active')) {
-								$theme->permanent_delete();
-								$message = "Theme '$theme_name' has been deleted from the database.";
-							} else {
-								$error = "Cannot delete an active theme with existing files.";
-							}
-						} else {
-							$error = "Theme not found.";
-						}
+						// Use ThemeManager::deleteTheme() which handles files AND database record
+						// It also enforces system theme protection and active theme checks
+						$theme_manager->deleteTheme($theme_name);
+						$message = "Theme '$theme_name' has been completely removed (files and database record).";
 						break;
 				}
 			}

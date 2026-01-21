@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 1.2
+# VERSION 1.3 - Added defensive variable validation in CMD
 #
 # Usage:
 #   docker build \
@@ -51,19 +51,23 @@ EXPOSE 80 5432
 
 # Start services
 # On first run: set PostgreSQL password (persists in volume for subsequent runs)
-CMD service postgresql start && \
+# CRITICAL: All variables must be quoted to handle special characters in passwords
+CMD echo "Container starting with SITENAME=${SITENAME}, DOMAIN_NAME=${DOMAIN_NAME}" && \
+    if [ -z "${SITENAME}" ]; then echo "FATAL: SITENAME environment variable is empty"; exit 1; fi && \
+    if [ -z "${POSTGRES_PASSWORD}" ]; then echo "FATAL: POSTGRES_PASSWORD environment variable is empty"; exit 1; fi && \
+    service postgresql start && \
     sleep 3 && \
     export PGPASSWORD="${POSTGRES_PASSWORD}" && \
     PG_CONF="/etc/postgresql/16/main/pg_hba.conf" && \
-    if [ ! -f /var/www/html/${SITENAME}/config/Globalvars_site.php ]; then \
-        sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' $PG_CONF && \
+    if [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then \
+        sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' "$PG_CONF" && \
         service postgresql reload && \
         su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres && \
-        sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' $PG_CONF && \
+        sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' "$PG_CONF" && \
         service postgresql reload; \
     fi && \
-    ([ -f /var/www/html/${SITENAME}/config/Globalvars_site.php ] || \
-        cd /var/www/html/${SITENAME}/maintenance_scripts/install_tools && \
-        ./new_account.sh ${SITENAME} ${DOMAIN_NAME} "*") && \
-    php /var/www/html/${SITENAME}/public_html/utils/update_database.php 2>/dev/null || true && \
+    ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
+        (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
+        ./new_account.sh "${SITENAME}" "${DOMAIN_NAME}" "*")) && \
+    php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     apache2ctl -D FOREGROUND

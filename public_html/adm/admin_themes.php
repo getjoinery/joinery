@@ -96,8 +96,9 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 $author = $theme->get('thm_author') ?: 'Unknown';
                                 $is_active = $theme->get('thm_is_active');
                                 $is_stock = $theme->get('thm_is_stock');
+                                $is_system = $theme->get('thm_is_system');
                                 $files_exist = $theme->theme_files_exist();
-                                
+
                                 // Get status badge
                                 if (!$files_exist) {
                                     $status_badge = '<span class="badge bg-danger">Missing Files</span>';
@@ -106,12 +107,16 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 } else {
                                     $status_badge = '<span class="badge bg-secondary">Inactive</span>';
                                 }
-                                
-                                // Get type badge
-                                $type_badge = $is_stock ? 
-                                    '<span class="badge bg-info">Stock</span>' : 
-                                    '<span class="badge bg-warning">Custom</span>';
-                                
+
+                                // Get type badge - system themes get special badge
+                                if ($is_system) {
+                                    $type_badge = '<span class="badge bg-primary"><i class="fas fa-lock me-1"></i>System</span>';
+                                } elseif ($is_stock) {
+                                    $type_badge = '<span class="badge bg-info">Stock</span>';
+                                } else {
+                                    $type_badge = '<span class="badge bg-warning">Custom</span>';
+                                }
+
                                 echo '<tr>';
                                 echo '<td>';
                                 echo '<strong>' . htmlspecialchars($display_name) . '</strong>';
@@ -124,7 +129,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 echo '<td>' . $status_badge . '</td>';
                                 echo '<td>' . $type_badge . '</td>';
                                 echo '<td>';
-                                
+
                                 // Build actions array
                                 $actions = array();
 
@@ -132,17 +137,20 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     $actions['Activate'] = "javascript:submitAction('activate', '$theme_name')";
                                 }
 
-                                if ($is_stock) {
-                                    $actions['Mark as Custom'] = "javascript:submitAction('mark_custom', '$theme_name')";
-                                } else {
-                                    $actions['Mark as Stock'] = "javascript:submitAction('mark_stock', '$theme_name')";
+                                // System themes cannot be marked as custom or deleted
+                                if (!$is_system) {
+                                    if ($is_stock) {
+                                        $actions['Mark as Custom'] = "javascript:submitAction('mark_custom', '$theme_name')";
+                                    } else {
+                                        $actions['Mark as Stock'] = "javascript:submitAction('mark_stock', '$theme_name')";
+                                    }
+
+                                    // Add delete option for themes with missing files or inactive themes
+                                    if (!$files_exist || !$is_active) {
+                                        $actions['Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "')";
+                                    }
                                 }
 
-                                // Add delete option for themes with missing files or inactive themes
-                                if (!$files_exist || !$is_active) {
-                                    $actions['Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "')";
-                                }
-                                
                                 if (!empty($actions)) {
                                     echo '<div class="dropdown">';
                                     echo '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
@@ -155,7 +163,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 } else {
                                     echo '<span class="text-muted">No actions</span>';
                                 }
-                                
+
                                 echo '</td>';
                                 echo '</tr>';
                             }
@@ -171,9 +179,14 @@ $page->begin_box(array('altlinks' => $altlinks));
     
     <div class="mt-3">
         <p class="text-muted">
-            <strong>Note:</strong> Stock themes are automatically updated during deployments. 
-            Custom themes are preserved during deployments.
+            <strong>Notes:</strong>
         </p>
+        <ul class="text-muted small">
+            <li><strong>System themes</strong> (lock icon) are protected and cannot be deleted or marked as custom. They always receive updates during deployment.</li>
+            <li><strong>Stock themes</strong> are automatically updated during deployments.</li>
+            <li><strong>Custom themes</strong> are preserved during deployments and will not receive automatic updates.</li>
+            <li>Deleting a theme permanently removes both the theme files and database record. The theme will not return on deployment.</li>
+        </ul>
     </div>
 </div>
 
@@ -187,7 +200,12 @@ $page->begin_box(array('altlinks' => $altlinks));
             </div>
             <div class="modal-body">
                 <p>Are you sure you want to delete the theme "<span id="deleteThemeName"></span>"?</p>
-                <p class="text-danger"><strong>This action cannot be undone.</strong></p>
+                <p>This will:</p>
+                <ul>
+                    <li>Remove all theme files from the server</li>
+                    <li>Delete the theme's database record</li>
+                </ul>
+                <p class="text-danger"><strong>This action cannot be undone.</strong> The theme will not be reinstalled during deployments.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
