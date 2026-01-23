@@ -176,8 +176,27 @@
 
 		// Copy public_html files using rsync
 		// Exclude: version control, dev docs, runtime directories, and testing tools
+
+		// Build theme exclusions based on form selection
+		$selected_themes = isset($_REQUEST['themes']) && is_array($_REQUEST['themes']) ? $_REQUEST['themes'] : [];
+		$all_themes = ThemeHelper::getAvailableThemes();
+		$theme_exclusions = '';
+
+		foreach ($all_themes as $theme_name => $theme) {
+			if (!in_array($theme_name, $selected_themes)) {
+				$theme_exclusions .= ' --exclude=theme/' . escapeshellarg($theme_name);
+			}
+		}
+
+		// Show which themes will be included
+		$included_count = count($selected_themes);
+		$excluded_count = count($all_themes) - $included_count;
+		echo "Including {$included_count} themes, excluding {$excluded_count} themes<br>";
+		flush();
+
 		$rsync_cmd = sprintf(
-			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests %s %s 2>&1',
+			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests%s %s %s 2>&1',
+			$theme_exclusions,
 			escapeshellarg($full_site_dir . '/public_html/'),
 			escapeshellarg($temp_dir . '/public_html/')
 		);
@@ -278,6 +297,11 @@
 		echo '- config/ (default configuration template)<br>';
 		echo '- maintenance_scripts/ (deployment and setup scripts)<br>';
 		echo '- maintenance_scripts/joinery-install.sql.gz (fresh install database)<br>';
+		echo '<br>Themes included (' . count($selected_themes) . '):<br>';
+		sort($selected_themes);
+		foreach ($selected_themes as $theme_name) {
+			echo '- ' . htmlspecialchars($theme_name) . '<br>';
+		}
 
 	}
 	else{
@@ -376,6 +400,32 @@
 			'validation' => ['required' => true]
 		]);
 
+		// Build theme checkbox list
+		$available_themes = ThemeHelper::getAvailableThemes();
+		$theme_options = [];
+		$system_themes = [];
+		$checked_themes = [];
+
+		foreach ($available_themes as $theme_name => $theme) {
+			$display_name = $theme->get('display_name', $theme->get('displayName', $theme_name));
+			$is_system = $theme->get('system', false);
+
+			$theme_options[$theme_name] = $display_name . ($is_system ? ' (system)' : '');
+
+			if ($is_system) {
+				$system_themes[] = $theme_name;
+				$checked_themes[] = $theme_name;
+			}
+		}
+
+		// Sort options alphabetically by display name
+		asort($theme_options);
+
+		echo $formwriter->checkboxlist('themes', 'Themes to Include', [
+			'options' => $theme_options,
+			'checked' => $checked_themes,
+			'readonly' => $system_themes,
+		]);
 
 		echo $formwriter->submitbutton('submit_button', 'Publish Upgrade');
 
