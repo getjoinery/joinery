@@ -1357,8 +1357,9 @@ do_site_create() {
     # Early DNS validation - fail before doing any work if SSL is expected but DNS isn't ready
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
         print_step "Validating DNS configuration for SSL..."
-        check_dns_points_here "$DOMAIN_NAME"
-        local dns_result=$?
+        # Capture return code without set -e killing the script
+        local dns_result=0
+        check_dns_points_here "$DOMAIN_NAME" || dns_result=$?
 
         if [ $dns_result -eq 0 ]; then
             # Direct DNS match - proceed with Let's Encrypt
