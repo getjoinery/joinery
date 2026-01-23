@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#VERSION 2.13 - Fixed sed pattern to match any existing password, not just empty string
-#Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file] [--themes theme1,theme2,...] [--activate theme_name]
+#VERSION 2.14 - Removed git theme installation; themes now come from tar archive
+#Usage:  ./new_account.sh site_name domain_name server_ip [database_restore_file] [--activate theme_name]
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,83 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Template files - relative to script location
 VIRTUALHOST_TEMPLATE="${SCRIPT_DIR}/default_virtualhost.conf"
 GLOBALVARS_DEFAULT="${SCRIPT_DIR}/default_Globalvars_site.php"
-
-# GitHub credentials for theme/plugin installation
-GITHUB_USER="getjoinery"
-GITHUB_TOKEN="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"
-REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/getjoinery/joinery.git"
-
-# Function to install themes from repository
-install_themes_from_repo() {
-	local site_name="$1"
-	local themes="$2"  # Comma-separated list
-	local site_root="/var/www/html/$site_name"
-	local public_html="$site_root/public_html"
-
-	echo "Installing themes: $themes"
-
-	# Create theme directory if it doesn't exist
-	mkdir -p "$public_html/theme"
-
-	# Create temporary staging directory
-	local stage_dir="$site_root/theme_install_stage"
-	rm -rf "$stage_dir"
-	mkdir -p "$stage_dir"
-
-	# Build sparse-checkout paths
-	local sparse_paths=""
-	IFS=',' read -ra THEME_ARRAY <<< "$themes"
-	for theme in "${THEME_ARRAY[@]}"; do
-		theme=$(echo "$theme" | xargs)  # Trim whitespace
-		sparse_paths="$sparse_paths \"public_html/theme/$theme\""
-	done
-
-	# Clone with sparse checkout for only selected themes
-	echo "Cloning repository with sparse checkout for themes..."
-	git clone --no-checkout --quiet "$REPO_URL" "$stage_dir" 2>/dev/null || {
-		echo "ERROR: Failed to clone repository for theme installation"
-		rm -rf "$stage_dir"
-		return 1
-	}
-
-	cd "$stage_dir" || return 1
-	git config core.sparseCheckout true
-	git sparse-checkout init --cone
-
-	# Set sparse-checkout for themes
-	for theme in "${THEME_ARRAY[@]}"; do
-		theme=$(echo "$theme" | xargs)
-		git sparse-checkout add "public_html/theme/$theme"
-	done
-
-	git checkout --quiet main 2>/dev/null || {
-		echo "ERROR: Failed to checkout main branch"
-		cd - > /dev/null
-		rm -rf "$stage_dir"
-		return 1
-	}
-
-	cd - > /dev/null
-
-	# Copy themes to public_html
-	local installed_count=0
-	for theme in "${THEME_ARRAY[@]}"; do
-		theme=$(echo "$theme" | xargs)
-		if [[ -d "$stage_dir/public_html/theme/$theme" ]]; then
-			echo "  Installing theme: $theme"
-			cp -r "$stage_dir/public_html/theme/$theme" "$public_html/theme/"
-			((installed_count++))
-		else
-			echo "  WARNING: Theme '$theme' not found in repository"
-		fi
-	done
-
-	# Cleanup
-	rm -rf "$stage_dir"
-
-	echo "Installed $installed_count theme(s)."
-	return 0
-}
 
 # Function to activate a theme via database update
 activate_theme() {
@@ -118,7 +41,7 @@ fi
 
 if [ "$1" == "" ]
 then
-	echo "Usage:  sudo ./new_account.sh site_name domain_name server_ip [database_restore_file] [--themes theme1,theme2,...] [--activate theme_name]"
+	echo "Usage:  sudo ./new_account.sh site_name domain_name server_ip [database_restore_file] [--activate theme_name]"
 	echo ""
 	echo "Arguments:"
 	echo "  site_name           Name for the new site (e.g., mysite)"
@@ -127,13 +50,11 @@ then
 	echo "  database_restore_file  (Optional) SQL file to restore"
 	echo ""
 	echo "Options:"
-	echo "  --themes theme1,theme2   Install specific themes from repository (default: falcon)"
-	echo "  --activate theme_name    Set the active theme after installation (default: first theme)"
+	echo "  --activate theme_name    Set the active theme (default: falcon)"
 	echo ""
 	echo "Examples:"
 	echo "  sudo ./new_account.sh mysite example.com 1.2.3.4"
-	echo "  sudo ./new_account.sh mysite example.com 1.2.3.4 --themes falcon"
-	echo "  sudo ./new_account.sh mysite example.com 1.2.3.4 --themes falcon,custom --activate falcon"
+	echo "  sudo ./new_account.sh mysite example.com 1.2.3.4 --activate canvas"
 	echo ""
 	echo "ERROR: You must pass the new site name as the first argument."
 	exit 1
@@ -157,7 +78,6 @@ DOMAIN_NAME="$2"
 SERVER_IP="$3"
 
 # Defaults for optional arguments
-THEMES_TO_INSTALL="falcon"
 ACTIVATE_THEME=""
 DATABASE_RESTORE_FILE=""
 
@@ -166,10 +86,6 @@ DATABASE_RESTORE_FILE=""
 for ((i=4; i<=$#; i++)); do
 	arg="${!i}"
 	case "$arg" in
-		--themes)
-			((i++))
-			THEMES_TO_INSTALL="${!i}"
-			;;
 		--activate)
 			((i++))
 			ACTIVATE_THEME="${!i}"
@@ -303,9 +219,9 @@ fi
 "$SCRIPT_DIR/fix_permissions.sh" "$SITE_NAME" --production
 
 # Copy configuration files for main site
-cp default_Globalvars_site.php /var/www/html/$SITE_NAME/config/Globalvars_site.php
+cp "${SCRIPT_DIR}/default_Globalvars_site.php" /var/www/html/$SITE_NAME/config/Globalvars_site.php
 if [ "$DOCKER_FIRST_RUN" = false ]; then
-    cp default_serve.php /var/www/html/$SITE_NAME/public_html/serve.php
+    cp "${SCRIPT_DIR}/default_serve.php" /var/www/html/$SITE_NAME/public_html/serve.php
 fi
 sed -i -e "s/{{DOMAIN_NAME}}/${DOMAIN_NAME}/g" /var/www/html/$SITE_NAME/config/Globalvars_site.php
 sed -i -e "s/{{SITE_NAME}}/${SITE_NAME}/g" /var/www/html/$SITE_NAME/config/Globalvars_site.php
@@ -337,8 +253,8 @@ if [ "$DOCKER_FIRST_RUN" = false ]; then
     "$SCRIPT_DIR/fix_permissions.sh" "${SITE_NAME}_test" --production
 
     # Copy configuration files for test site
-    cp default_Globalvars_site.php /var/www/html/${SITE_NAME}_test/config/Globalvars_site.php
-    cp default_serve.php /var/www/html/${SITE_NAME}_test/public_html/serve.php
+    cp "${SCRIPT_DIR}/default_Globalvars_site.php" /var/www/html/${SITE_NAME}_test/config/Globalvars_site.php
+    cp "${SCRIPT_DIR}/default_serve.php" /var/www/html/${SITE_NAME}_test/public_html/serve.php
     sed -i -e "s/{{DOMAIN_NAME}}/${DOMAIN_NAME}/g" /var/www/html/${SITE_NAME}_test/config/Globalvars_site.php
     sed -i -e "s/{{SITE_NAME}}/${SITE_NAME}_test/g" /var/www/html/${SITE_NAME}_test/config/Globalvars_site.php
 
@@ -458,24 +374,9 @@ if ! php /var/www/html/$SITE_NAME/public_html/utils/composer_install_if_needed.p
 fi
 echo "Composer dependencies installed."
 
-# Install themes from repository
-if [[ -n "$THEMES_TO_INSTALL" ]]; then
-	if ! install_themes_from_repo "$SITE_NAME" "$THEMES_TO_INSTALL"; then
-		echo "WARNING: Theme installation failed, continuing with setup..."
-	fi
-
-	# Activate specified theme or default to first installed theme
-	if [[ -n "$ACTIVATE_THEME" ]]; then
-		activate_theme "$SITE_NAME" "$ACTIVATE_THEME"
-	else
-		# Activate first theme in the list
-		IFS=',' read -ra THEME_ARRAY <<< "$THEMES_TO_INSTALL"
-		first_theme=$(echo "${THEME_ARRAY[0]}" | xargs)
-		activate_theme "$SITE_NAME" "$first_theme"
-	fi
-
-	# Fix permissions after theme installation
-	"$SCRIPT_DIR/fix_permissions.sh" "$SITE_NAME" --production
+# Activate theme if specified (themes are bundled in the tar archive)
+if [[ -n "$ACTIVATE_THEME" ]]; then
+	activate_theme "$SITE_NAME" "$ACTIVATE_THEME"
 fi
 
 VIRTUALHOST_FILE=/etc/apache2/sites-available/$SITE_NAME.conf
