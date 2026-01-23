@@ -802,12 +802,58 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 
 ---
 
+## Cloudflare Proxy Support
+
+The installer automatically detects when a domain is behind Cloudflare proxy (orange cloud) and handles SSL appropriately.
+
+### How It Works
+
+1. During DNS validation, the script checks if the resolved IP belongs to Cloudflare's IP ranges
+2. If Cloudflare is detected, the installer proceeds without Let's Encrypt (Cloudflare provides edge SSL)
+3. An HTTP proxy is created for Docker sites to allow Cloudflare to reach the origin
+
+### Cloudflare SSL Modes
+
+Configure your preferred SSL mode in Cloudflare dashboard → SSL/TLS:
+
+| Mode | Description | Origin Requirement |
+|------|-------------|-------------------|
+| **Flexible** | SSL browser↔Cloudflare only | No SSL needed on origin |
+| **Full** | SSL everywhere, any cert OK | Self-signed or no validation |
+| **Full (Strict)** | SSL everywhere, valid cert | Cloudflare Origin Certificate |
+
+### Recommended Setup
+
+For production sites behind Cloudflare:
+
+1. Run installation normally (Cloudflare will be auto-detected)
+2. In Cloudflare dashboard, set SSL/TLS mode to "Full" or "Full (Strict)"
+3. For "Full (Strict)", download and install a Cloudflare Origin Certificate
+
+### Installing Origin Certificate (Optional)
+
+For Full (Strict) mode:
+
+1. Go to Cloudflare → SSL/TLS → Origin Server
+2. Create Certificate (select your domain, 15-year validity)
+3. Save the certificate and private key to your server
+4. Configure Apache to use the certificate
+
+---
+
 ## Version Information
 
-- **Guide Version:** 3.2
-- **install.sh Version:** 2.2
+- **Guide Version:** 3.3
+- **install.sh Version:** 2.3
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
 - **Last Updated:** 2026-01-23
+
+### Changes in Version 3.3
+
+- **Cloudflare proxy detection**: Automatically detects domains behind Cloudflare proxy
+- Skips Let's Encrypt when Cloudflare is detected (Cloudflare handles edge SSL)
+- Creates HTTP proxy for Docker sites to work with Cloudflare origin connections
+- Provides guidance on Cloudflare SSL modes
 
 ### Changes in Version 3.2
 
