@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 1.3 - Added defensive variable validation in CMD
+# VERSION 2.0 - Updated to use _site_init.sh for first-run initialization
 #
 # Usage:
 #   docker build \
@@ -36,7 +36,7 @@ RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh &&
     ./install.sh server
 
 # Create VirtualHost configuration during build (persists across restarts)
-# Note: Composer install and 000-default disable are handled by new_account.sh
+# Note: Composer install and 000-default disable are handled by _site_init.sh
 RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtualhost.conf /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{SERVER_IP}}/*/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{DOMAIN_NAME}}/${DOMAIN_NAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
@@ -50,11 +50,11 @@ RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtu
 EXPOSE 80 5432
 
 # Start services
-# On first run: set PostgreSQL password (persists in volume for subsequent runs)
+# On first run: _site_init.sh creates database and configures site
 # CRITICAL: All variables must be quoted to handle special characters in passwords
-CMD echo "Container starting with SITENAME=${SITENAME}, DOMAIN_NAME=${DOMAIN_NAME}" && \
-    if [ -z "${SITENAME}" ]; then echo "FATAL: SITENAME environment variable is empty"; exit 1; fi && \
-    if [ -z "${POSTGRES_PASSWORD}" ]; then echo "FATAL: POSTGRES_PASSWORD environment variable is empty"; exit 1; fi && \
+CMD echo "Container starting: SITENAME=${SITENAME}, DOMAIN=${DOMAIN_NAME}" && \
+    if [ -z "${SITENAME}" ]; then echo "FATAL: SITENAME is empty"; exit 1; fi && \
+    if [ -z "${POSTGRES_PASSWORD}" ]; then echo "FATAL: POSTGRES_PASSWORD is empty"; exit 1; fi && \
     service postgresql start && \
     sleep 3 && \
     export PGPASSWORD="${POSTGRES_PASSWORD}" && \
@@ -68,6 +68,6 @@ CMD echo "Container starting with SITENAME=${SITENAME}, DOMAIN_NAME=${DOMAIN_NAM
     fi && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
-        ./new_account.sh "${SITENAME}" "${DOMAIN_NAME}" "*")) && \
+        ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode)) && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     apache2ctl -D FOREGROUND

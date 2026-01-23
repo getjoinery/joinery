@@ -20,7 +20,25 @@ This guide covers deploying Joinery on both Docker containers and bare-metal ser
 
 ## Quick Start
 
-### Docker Deployment
+### One-Liner Install (Latest Version)
+
+```bash
+# Docker - download and install latest version
+mkdir -p /tmp/joinery && \
+  curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
+  cd /tmp/joinery/maintenance_scripts/install_tools && \
+  sudo ./install.sh docker && \
+  sudo ./install.sh site mysite 'MySecurePass123!' example.com 8080
+
+# Bare-metal - download and install latest version
+mkdir -p /tmp/joinery && \
+  curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
+  cd /tmp/joinery/maintenance_scripts/install_tools && \
+  sudo ./install.sh server && \
+  sudo ./install.sh site mysite 'MySecurePass123!' example.com
+```
+
+### Docker Deployment (Manual Transfer)
 
 ```bash
 # 1. Transfer and extract the archive
@@ -36,7 +54,7 @@ sudo ./install.sh docker
 sudo ./install.sh site mysite SecurePass123! mysite.com 8080
 ```
 
-### Bare-Metal Deployment
+### Bare-Metal Deployment (Manual Transfer)
 
 ```bash
 # 1. Transfer and extract the archive
@@ -111,8 +129,8 @@ sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 
 | Environment | Result |
 |-------------|--------|
-| Docker installed and running | Creates Docker container |
-| Docker not present | Creates bare-metal site via `new_account.sh` |
+| PORT specified | Creates Docker container |
+| No PORT | Creates bare-metal site |
 
 **The PORT parameter signals intent:**
 - With port → Docker mode (port required for container mapping)
@@ -122,6 +140,15 @@ sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 ```bash
 ./install.sh site --docker mysite Pass123 mysite.com 8080
 ./install.sh site --bare-metal mysite Pass123 mysite.com
+```
+
+**Additional options:**
+```bash
+# Activate a specific theme
+./install.sh site mysite Pass123 mysite.com --activate falcon
+
+# Create with a test site (bare-metal only)
+./install.sh site mysite Pass123 mysite.com --with-test-site
 ```
 
 ---
@@ -254,18 +281,24 @@ This command installs and configures:
 ### Creating Sites
 
 ```bash
-sudo ./install.sh site SITENAME POSTGRES_PASSWORD DOMAIN_NAME
+sudo ./install.sh site SITENAME POSTGRES_PASSWORD DOMAIN_NAME [OPTIONS]
 ```
+
+**Options:**
+- `--activate THEME` - Activate specified theme after installation
+- `--with-test-site` - Create companion test site
 
 **What happens:**
 1. Verifies server prerequisites (Apache, PHP, PostgreSQL)
-2. Calls `new_account.sh` to create:
-   - Site directory structure at `/var/www/html/{sitename}/`
-   - PostgreSQL database
-   - Apache VirtualHost configuration
-   - Test site at `/var/www/html/{sitename}_test/`
-3. Installs Composer dependencies
-4. Enables Apache VirtualHost
+2. Deploys application code to `/var/www/html/{sitename}/`
+3. Calls `_site_init.sh` (internal) to:
+   - Create directory structure
+   - Configure `Globalvars_site.php`
+   - Create PostgreSQL database
+   - Load database schema
+   - Install Composer dependencies
+   - Create Apache VirtualHost
+4. Optionally creates test site (if `--with-test-site`)
 5. Verifies site is responding
 
 ### Directory Structure
@@ -620,7 +653,11 @@ Universal installer with subcommands:
 
 **Site command options:**
 ```bash
-./install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT]
+./install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT] [OPTIONS]
+
+Options:
+  --activate THEME    Activate specified theme after installation
+  --with-test-site    Create companion test site (bare-metal only)
 ```
 
 **Examples:**
@@ -633,18 +670,26 @@ Universal installer with subcommands:
 
 # Quiet mode (minimal output, for CI/CD)
 ./install.sh -y -q site mysite Pass123! mysite.com 8080
+
+# With theme activation
+./install.sh site mysite Pass123! mysite.com --activate falcon
+
+# With test site (bare-metal)
+./install.sh site mysite Pass123! mysite.com --with-test-site
 ```
 
 ### Supporting Scripts
 
 | Script | Purpose | Called By |
 |--------|---------|-----------|
-| `new_account.sh` | Creates site directory, database, virtualhost, user | `install.sh site` (bare-metal) |
-| `fix_permissions.sh` | Sets correct ownership and permissions on site files | `install.sh site`, manual use |
+| `_site_init.sh` | Internal: shared site initialization (database, config, composer) | `install.sh site`, Dockerfile CMD |
+| `fix_permissions.sh` | Sets correct ownership and permissions on site files | `_site_init.sh`, manual use |
 | `Dockerfile.template` | Template for building Docker images | `install.sh site` (Docker) |
-| `default_Globalvars_site.php` | Template for site configuration | `new_account.sh` |
-| `default_serve.php` | Template for front controller | `new_account.sh` |
-| `default_virtualhost.conf` | Template for Apache virtualhost | `new_account.sh` |
+| `default_Globalvars_site.php` | Template for site configuration | `_site_init.sh` |
+| `default_serve.php` | Template for front controller | `_site_init.sh` |
+| `default_virtualhost.conf` | Template for Apache virtualhost | `_site_init.sh` |
+
+**Note:** `_site_init.sh` (underscore prefix) is an internal script and should not be called directly. Use `install.sh site` for all site creation operations.
 
 ### Sysadmin Tools
 
@@ -699,7 +744,18 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 
 ## Version Information
 
-- **Guide Version:** 2.2
-- **install.sh Version:** 1.2
+- **Guide Version:** 3.0
+- **install.sh Version:** 2.0
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
-- **Last Updated:** 2026-01-21
+- **Last Updated:** 2026-01-23
+
+### Changes in Version 3.0
+
+- Refactored to use `_site_init.sh` as internal shared initialization script
+- Removed `new_account.sh` (replaced by `_site_init.sh`)
+- Added `--activate THEME` option for site creation
+- Added `--with-test-site` option for bare-metal deployments
+- Added one-liner install commands using distribution server
+- Added `/utils/latest_release` endpoint for fetching latest release
+- `install.sh site` now deploys application code for bare-metal installs
+- Improved password handling for special characters

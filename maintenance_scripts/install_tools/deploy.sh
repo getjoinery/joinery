@@ -3,7 +3,7 @@
 # MODIFIED v3.12: Changed from "add new themes" to "update installed themes only" model
 # MODIFIED v3.12: Now uses sparse checkout to only fetch themes already in public_html
 # MODIFIED v3.12: Replaced preserveCustomThemesPlugins with updateInstalledThemesOnly
-# MODIFIED v3.12: New sites must use new_account.sh --themes to install initial themes
+# MODIFIED v3.12: New sites get themes from tar archive during install.sh site
 # MODIFIED v3.11: Centralized permissions to fix_permissions.sh
 # MODIFIED v3.8: Renamed "maintenance scripts" to "maintenance_scripts" (underscore instead of space)
 # MODIFIED v3.8: Updated git sparse-checkout to use "maintenance_scripts"
