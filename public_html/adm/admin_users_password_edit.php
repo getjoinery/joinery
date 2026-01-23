@@ -9,7 +9,17 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
+	// Validate user ID is provided
+	if (empty($_REQUEST['usr_user_id'])) {
+		throw new SystemDisplayableError('User ID is required.');
+	}
+
 	$user = new User($_REQUEST['usr_user_id'], TRUE);
+
+	// Validate user exists
+	if (!$user->key) {
+		throw new SystemDisplayableError('User not found.');
+	}
 
 	if($_POST){
 
@@ -47,7 +57,7 @@
 
 	$formwriter = $page->getFormWriter('form1');
 	$formwriter->begin_form();
-	$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
+	$formwriter->hiddeninput('usr_user_id', '', ['value' => $user->key]);
 
 	echo '<fieldset><h4>Change password for '.$user->display_name().'</h4>';
 		echo '<div class="fields full">';
