@@ -268,8 +268,8 @@ $bcrypt_hash = password_hash($default_password, PASSWORD_BCRYPT);
 $admin_user_sql = sprintf(
     "-- Default admin user (email: admin@example.com, password: %s)\n" .
     "INSERT INTO public.usr_users (usr_first_name, usr_last_name, usr_email, usr_permission, " .
-    "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date) " .
-    "VALUES ('Admin', '', 'admin@example.com', 10, true, true, '%s', CURRENT_DATE);\n",
+    "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change) " .
+    "VALUES ('Admin', '', 'admin@example.com', 10, true, true, '%s', CURRENT_DATE, true);\n",
     $default_password,
     $bcrypt_hash
 );

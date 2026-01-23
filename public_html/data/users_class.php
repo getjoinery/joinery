@@ -73,6 +73,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_calendly_uri' => array('type'=>'varchar(255)'),
 	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	    'usr_allowed_ips' => array('type'=>'jsonb'),
+	    'usr_force_password_change' => array('type'=>'bool', 'default'=>false),
 	);
 
 private static function UcName($string) {

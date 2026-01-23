@@ -768,12 +768,41 @@ class SessionControl{
 
 		}
 		else{
+			// Check if user must change password before accessing any other page
+			if ($this->must_change_password()) {
+				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+				// Don't redirect if already on the password change page or logging out
+				if ($current_path !== '/change-password-required' && $current_path !== '/logout') {
+					header('Location: /change-password-required');
+					exit();
+				}
+			}
+
 			if(!isset($_SESSION['permission']) || $_SESSION['permission'] < $level){
 				header("HTTP/1.1 401 Unauthorized");
 				throw new SystemAuthenticationError(
 					'Sorry, you do not have the needed permissions to view this page.');
 			}
 		}
+	}
+
+	/**
+	 * Check if the current user must change their password
+	 * @return bool True if password change is required
+	 */
+	function must_change_password() {
+		if (!isset($_SESSION['usr_user_id'])) {
+			return false;
+		}
+
+		// Cache the result in session to avoid repeated DB queries
+		if (!isset($_SESSION['force_password_change'])) {
+			require_once(PathHelper::getIncludePath('data/users_class.php'));
+			$user = new User($_SESSION['usr_user_id'], true);
+			$_SESSION['force_password_change'] = (bool)$user->get('usr_force_password_change');
+		}
+
+		return $_SESSION['force_password_change'];
 	}
 
 	// Log somebody into the site and store their information in the session
