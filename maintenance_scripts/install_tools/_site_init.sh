@@ -136,7 +136,7 @@ ESCAPED_PASSWORD=$(sed_escape "$PASSWORD")
 # Copy and configure Globalvars_site.php
 cp "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"
 sed -i "s/{{PASSWORD}}/${ESCAPED_PASSWORD}/g" "$SITE_ROOT/config/Globalvars_site.php"
-sed -i "s/{{SITENAME}}/${SITENAME}/g" "$SITE_ROOT/config/Globalvars_site.php"
+sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "$SITE_ROOT/config/Globalvars_site.php"
 sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "$SITE_ROOT/config/Globalvars_site.php"
 # Also handle the legacy pattern with empty password
 sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
