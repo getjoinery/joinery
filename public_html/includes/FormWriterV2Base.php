@@ -968,11 +968,28 @@ abstract class FormWriterV2Base {
     /**
      * Create a hidden input field
      *
+     * CORRECT USAGE: hiddeninput('field_name', '', ['value' => $value])
+     *
+     * Note: Always pass an empty string as the second parameter (label), even though
+     * it's ignored for hidden fields. This maintains consistency with other form methods.
+     *
      * @param string $name Field name
-     * @param string $label Field label (ignored for hidden fields)
-     * @param array $options Field options
+     * @param string|array $label Field label (ignored) or options array for backwards compatibility
+     * @param array $options Field options (use 'value' key to set the hidden field value)
      */
     public function hiddeninput($name, $label = '', $options = []) {
+        // TODO: There are 59 places in the codebase using the incorrect two-argument pattern:
+        //       hiddeninput('name', ['value' => x]) instead of hiddeninput('name', '', ['value' => x])
+        //       These should be updated to use the correct three-argument convention.
+        //       Search pattern: grep -r "hiddeninput([^,]*, \[" --include="*.php"
+        //
+        // Support both calling conventions for backwards compatibility:
+        // hiddeninput('name', '', ['value' => x])  - correct convention
+        // hiddeninput('name', ['value' => x])      - legacy shorthand (label is ignored anyway)
+        if (is_array($label)) {
+            $options = $label;
+            $label = '';
+        }
         $this->registerField($name, 'hidden', '', $options);
         $this->outputHiddenInput($name, $options);
     }
