@@ -176,14 +176,18 @@ $page->public_header(array(
                     <div class="card-body">
                         <p class="mb-3">Default administrator login:</p>
                         <div class="bg-light p-3 rounded mb-3">
-                            <div class="row">
+                            <div class="row mb-2">
                                 <div class="col-4 text-muted">Email:</div>
                                 <div class="col-8"><code>admin@example.com</code></div>
                             </div>
+                            <div class="row">
+                                <div class="col-4 text-muted">Password:</div>
+                                <div class="col-8"><code>changeme123</code></div>
+                            </div>
                         </div>
-                        <div class="alert alert-warning mb-0">
-                            <i class="fas fa-exclamation-triangle me-2"></i>
-                            <strong>Important:</strong> Change the default password immediately after first login.
+                        <div class="alert alert-info mb-0">
+                            <i class="fas fa-info-circle me-2"></i>
+                            You will be prompted to change the default password on first login.
                         </div>
                     </div>
                     <div class="card-footer bg-transparent">
