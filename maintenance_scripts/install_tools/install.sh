@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.1 - Added automatic SSL setup with Let's Encrypt when domain is provided
+#VERSION 2.2 - Fixed Docker SSL: installs certbot on host, validates DNS before installation
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -121,12 +121,6 @@ should_setup_ssl() {
         return 1
     fi
 
-    # Skip if certbot not installed
-    if ! command -v certbot &> /dev/null; then
-        print_warning "Certbot not installed - skipping SSL setup"
-        return 1
-    fi
-
     return 0
 }
 
@@ -194,6 +188,12 @@ setup_ssl_docker_proxy() {
         print_info "Installing Apache for reverse proxy..."
         apt-get update -qq
         apt-get install -y -qq apache2
+    fi
+
+    # Check if certbot is installed on host
+    if ! command -v certbot &> /dev/null; then
+        print_info "Installing Certbot for SSL certificates..."
+        apt-get install -y -qq certbot python3-certbot-apache
     fi
 
     # Enable required modules
@@ -1264,6 +1264,25 @@ do_site_create() {
     fi
     if [ "$NO_SSL" = true ]; then
         print_info "SSL: disabled"
+    fi
+
+    # Early DNS validation - fail before doing any work if SSL is expected but DNS isn't ready
+    if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
+        print_step "Validating DNS configuration for SSL..."
+        if ! check_dns_points_here "$DOMAIN_NAME"; then
+            echo ""
+            print_error "DNS for $DOMAIN_NAME does not point to this server"
+            echo ""
+            echo "SSL requires DNS to be configured correctly before installation."
+            echo ""
+            echo "Options:"
+            echo "  1. Update DNS to point $DOMAIN_NAME to this server's IP, then retry"
+            echo "  2. Use --no-ssl flag to skip SSL setup and configure it later:"
+            echo "     ./install.sh site $SITENAME PASSWORD $DOMAIN_NAME${PORT:+ $PORT} --no-ssl"
+            echo ""
+            exit 1
+        fi
+        print_success "DNS validated - $DOMAIN_NAME points to this server"
     fi
 
     if [ "$MODE" = "docker" ]; then

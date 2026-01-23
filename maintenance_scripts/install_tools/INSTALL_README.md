@@ -804,10 +804,16 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 
 ## Version Information
 
-- **Guide Version:** 3.1
-- **install.sh Version:** 2.1
+- **Guide Version:** 3.2
+- **install.sh Version:** 2.2
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
 - **Last Updated:** 2026-01-23
+
+### Changes in Version 3.2
+
+- **Docker SSL fix**: Certbot is now automatically installed on the host for Docker deployments
+- **Early DNS validation**: Script validates DNS before installation begins (fails fast if DNS misconfigured)
+- When a domain is provided without `--no-ssl`, DNS must point to the server or installation aborts
 
 ### Changes in Version 3.1
 
