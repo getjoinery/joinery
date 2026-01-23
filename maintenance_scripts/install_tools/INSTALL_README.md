@@ -149,6 +149,67 @@ sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 
 # Create with a test site (bare-metal only)
 ./install.sh site mysite Pass123 mysite.com --with-test-site
+
+# Skip automatic SSL setup
+./install.sh site mysite Pass123 mysite.com --no-ssl
+```
+
+---
+
+## SSL Certificates (Automatic)
+
+**SSL is automatically configured** when you provide a domain name (not localhost or an IP address).
+
+### How It Works
+
+1. After site creation, the script checks if DNS for your domain points to this server
+2. If DNS is configured correctly, certbot runs automatically to get a Let's Encrypt certificate
+3. If DNS is not ready, SSL is skipped with instructions to run certbot manually later
+
+### Requirements
+
+- Domain DNS must point to this server's public IP
+- Certbot must be installed (included in `install.sh server`)
+- Port 80 must be accessible for Let's Encrypt verification
+
+### Bare-Metal SSL
+
+```bash
+# SSL is automatic when domain is provided
+./install.sh site mysite Pass123! mysite.example.com
+```
+
+Certbot configures Apache directly with the SSL certificate.
+
+### Docker SSL
+
+```bash
+# SSL is automatic - creates reverse proxy on host
+./install.sh site mysite Pass123! mysite.example.com 8080
+```
+
+For Docker sites, the script:
+1. Installs Apache on the host (if not present)
+2. Creates a reverse proxy: `mysite.example.com` → `localhost:8080`
+3. Runs certbot to add SSL to the proxy
+
+### Skip SSL
+
+```bash
+# Use --no-ssl to skip automatic SSL setup
+./install.sh site mysite Pass123! mysite.example.com --no-ssl
+```
+
+### Manual SSL Setup
+
+If DNS wasn't ready during installation, run certbot manually once DNS is configured:
+
+```bash
+# Bare-metal
+sudo certbot --apache -d mysite.example.com
+
+# Docker (after proxy is created)
+sudo certbot --apache -d mysite.example.com
 ```
 
 ---
@@ -744,10 +805,17 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 
 ## Version Information
 
-- **Guide Version:** 3.0
-- **install.sh Version:** 2.0
+- **Guide Version:** 3.1
+- **install.sh Version:** 2.1
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
 - **Last Updated:** 2026-01-23
+
+### Changes in Version 3.1
+
+- **Automatic SSL** with Let's Encrypt when domain is provided
+- DNS check before SSL setup (skips gracefully if DNS not ready)
+- `--no-ssl` flag to skip SSL setup
+- Docker sites get reverse proxy with SSL on host automatically
 
 ### Changes in Version 3.0
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.0 - Refactored to use _site_init.sh, added deploy_application_code, --activate, --with-test-site
+#VERSION 2.1 - Added automatic SSL setup with Let's Encrypt when domain is provided
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -14,19 +14,24 @@
 # Site Options:
 #   --activate THEME    Set active theme after installation
 #   --with-test-site    Create companion test site (bare-metal only)
+#   --no-ssl            Skip automatic SSL certificate setup
+#
+# SSL Behavior:
+#   SSL is automatically configured when a domain name is provided (not localhost/IP).
+#   DNS must point to this server for SSL setup to succeed.
+#   Use --no-ssl to skip SSL setup.
 #
 # Examples:
-#   # Docker deployment
+#   # Docker deployment (with automatic SSL)
 #   sudo ./install.sh docker
 #   sudo ./install.sh site mysite SecurePass123! mysite.com 8080
 #
-#   # Non-interactive deployment (for scripting/CI)
-#   sudo ./install.sh -y docker
-#   sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
-#
-#   # Bare-metal deployment with theme activation
+#   # Bare-metal deployment (with automatic SSL)
 #   sudo ./install.sh server
-#   sudo ./install.sh site mysite SecurePass123! mysite.com --activate falcon
+#   sudo ./install.sh site mysite SecurePass123! mysite.com
+#
+#   # Skip SSL setup
+#   sudo ./install.sh site mysite SecurePass123! mysite.com --no-ssl
 #
 # See INSTALL_README.md for complete documentation.
 
@@ -90,6 +95,166 @@ print_success() {
 # Final summary output (always shown, even in quiet mode)
 print_final() {
     echo -e "$1"
+}
+
+#==============================================================================
+# SSL SETUP FUNCTIONS
+#==============================================================================
+
+# Check if domain should have SSL configured
+should_setup_ssl() {
+    local domain="$1"
+    local no_ssl="$2"
+
+    # Skip if --no-ssl flag was passed
+    if [ "$no_ssl" = true ]; then
+        return 1
+    fi
+
+    # Skip for localhost
+    if [ "$domain" = "localhost" ]; then
+        return 1
+    fi
+
+    # Skip for IP addresses
+    if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        return 1
+    fi
+
+    # Skip if certbot not installed
+    if ! command -v certbot &> /dev/null; then
+        print_warning "Certbot not installed - skipping SSL setup"
+        return 1
+    fi
+
+    return 0
+}
+
+# Check if DNS for domain points to this server
+check_dns_points_here() {
+    local domain="$1"
+
+    # Get this server's public IP
+    local server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+    if [ -z "$server_ip" ]; then
+        print_warning "Could not determine server's public IP"
+        return 1
+    fi
+
+    # Get DNS resolution for domain
+    local dns_ip=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+    if [ -z "$dns_ip" ]; then
+        print_warning "DNS lookup failed for $domain"
+        return 1
+    fi
+
+    # Compare
+    if [ "$dns_ip" = "$server_ip" ]; then
+        return 0
+    else
+        print_warning "DNS for $domain points to $dns_ip, but this server is $server_ip"
+        return 1
+    fi
+}
+
+# Set up SSL for bare-metal site
+setup_ssl_baremetal() {
+    local domain="$1"
+
+    print_step "Setting up SSL certificate for $domain..."
+
+    # Check DNS first
+    if ! check_dns_points_here "$domain"; then
+        print_warning "Skipping SSL - DNS not configured"
+        print_info "Run 'sudo certbot --apache -d $domain' once DNS is pointing to this server"
+        return 1
+    fi
+
+    # Run certbot
+    if certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email; then
+        print_success "SSL certificate installed for $domain"
+        return 0
+    else
+        print_warning "SSL setup failed - site will work over HTTP"
+        print_info "Run 'sudo certbot --apache -d $domain' to retry"
+        return 1
+    fi
+}
+
+# Set up reverse proxy with SSL for Docker site
+setup_ssl_docker_proxy() {
+    local sitename="$1"
+    local domain="$2"
+    local port="$3"
+
+    print_step "Setting up reverse proxy with SSL for $domain..."
+
+    # Check if Apache is installed on host
+    if ! command -v apache2 &> /dev/null; then
+        print_info "Installing Apache for reverse proxy..."
+        apt-get update -qq
+        apt-get install -y -qq apache2
+    fi
+
+    # Enable required modules
+    a2enmod proxy proxy_http ssl headers rewrite > /dev/null 2>&1 || true
+
+    # Check DNS first
+    if ! check_dns_points_here "$domain"; then
+        print_warning "Skipping SSL - DNS not configured"
+        print_info "Creating HTTP-only proxy for now"
+
+        # Create HTTP-only proxy config
+        cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
+<VirtualHost *:80>
+    ServerName ${domain}
+
+    ProxyPreserveHost On
+    ProxyRequests Off
+    ProxyPass / http://127.0.0.1:${port}/
+    ProxyPassReverse / http://127.0.0.1:${port}/
+
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "http"
+</VirtualHost>
+EOF
+
+        a2ensite "${sitename}-proxy.conf" > /dev/null
+        systemctl reload apache2
+
+        print_info "Run 'sudo certbot --apache -d $domain' once DNS is pointing to this server"
+        return 1
+    fi
+
+    # Create proxy config (certbot will add SSL)
+    cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
+<VirtualHost *:80>
+    ServerName ${domain}
+
+    ProxyPreserveHost On
+    ProxyRequests Off
+    ProxyPass / http://127.0.0.1:${port}/
+    ProxyPassReverse / http://127.0.0.1:${port}/
+
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "http"
+</VirtualHost>
+EOF
+
+    a2ensite "${sitename}-proxy.conf" > /dev/null
+    systemctl reload apache2
+
+    # Run certbot to add SSL
+    if certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email; then
+        print_success "Reverse proxy with SSL configured for $domain"
+        return 0
+    else
+        print_warning "SSL setup failed - proxy will work over HTTP only"
+        print_info "Run 'sudo certbot --apache -d $domain' to retry"
+        return 1
+    fi
 }
 
 #==============================================================================
@@ -959,6 +1124,7 @@ do_site_create() {
     local PORT=""
     local ACTIVATE_THEME=""
     local WITH_TEST_SITE=false
+    local NO_SSL=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -979,6 +1145,10 @@ do_site_create() {
                 WITH_TEST_SITE=true
                 shift
                 ;;
+            --no-ssl)
+                NO_SSL=true
+                shift
+                ;;
             -h|--help)
                 echo "Usage: $0 site [OPTIONS] SITENAME PASSWORD [DOMAIN] [PORT]"
                 echo ""
@@ -989,6 +1159,7 @@ do_site_create() {
                 echo "Site Options:"
                 echo "  --activate THEME    Set active theme after installation"
                 echo "  --with-test-site    Create companion test site (bare-metal only)"
+                echo "  --no-ssl            Skip automatic SSL certificate setup"
                 echo ""
                 echo "Parameters:"
                 echo "  SITENAME      Site/database name (required)"
@@ -996,9 +1167,13 @@ do_site_create() {
                 echo "  DOMAIN        Domain name (optional, defaults to server IP)"
                 echo "  PORT          Web port (Docker only, default: 8080)"
                 echo ""
+                echo "SSL:"
+                echo "  SSL is automatically configured when a domain is provided."
+                echo "  DNS must point to this server. Use --no-ssl to skip."
+                echo ""
                 echo "Auto-detection:"
                 echo "  - With PORT specified: Docker mode"
-                echo "  - Without PORT: Bare-metal mode (if no Docker) or Docker mode (if Docker running)"
+                echo "  - Without PORT: Bare-metal mode"
                 exit 0
                 ;;
             *)
@@ -1087,11 +1262,14 @@ do_site_create() {
     if [ "$WITH_TEST_SITE" = true ]; then
         print_info "Test site: enabled"
     fi
+    if [ "$NO_SSL" = true ]; then
+        print_info "SSL: disabled"
+    fi
 
     if [ "$MODE" = "docker" ]; then
-        do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME"
+        do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME" "$NO_SSL"
     else
-        do_site_baremetal "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$ACTIVATE_THEME" "$WITH_TEST_SITE"
+        do_site_baremetal "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$ACTIVATE_THEME" "$WITH_TEST_SITE" "$NO_SSL"
     fi
 }
 
@@ -1105,6 +1283,7 @@ do_site_docker() {
     local DOMAIN_NAME="${3:-localhost}"
     local PORT="${4:-8080}"
     local ACTIVATE_THEME="${5:-}"
+    local NO_SSL="${6:-false}"
     local DB_PORT=$((PORT + 1000))
 
     # Auto-detect server IP if domain is localhost
@@ -1408,6 +1587,11 @@ EOF
 
         print_success "Docker site installation complete!"
     fi
+
+    # Set up SSL with reverse proxy if domain provided
+    if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
+        setup_ssl_docker_proxy "$SITENAME" "$DOMAIN_NAME" "$PORT"
+    fi
 }
 
 #------------------------------------------------------------------------------
@@ -1420,6 +1604,7 @@ do_site_baremetal() {
     local DOMAIN_NAME="${3:-localhost}"
     local ACTIVATE_THEME="${4:-}"
     local WITH_TEST_SITE="${5:-false}"
+    local NO_SSL="${6:-false}"
 
     # Auto-detect server IP if domain is localhost
     if [ "$DOMAIN_NAME" = "localhost" ]; then
@@ -1553,6 +1738,11 @@ do_site_baremetal() {
 
         print_success "Bare-metal site installation complete!"
     fi
+
+    # Set up SSL if domain provided
+    if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
+        setup_ssl_baremetal "$DOMAIN_NAME"
+    fi
 }
 
 #==============================================================================
@@ -1634,7 +1824,7 @@ do_list() {
 
 show_help() {
     echo ""
-    echo "Joinery Installation Script v2.0"
+    echo "Joinery Installation Script v2.1"
     echo ""
     echo "Usage:"
     echo "  ./install.sh [global-options] <command> [options]"
@@ -1652,30 +1842,33 @@ show_help() {
     echo "Site Command Options:"
     echo "  --activate THEME    Activate specified theme after installation"
     echo "  --with-test-site    Also create a test site (bare-metal only)"
+    echo "  --no-ssl            Skip automatic SSL certificate setup"
     echo "  --docker            Force Docker mode"
     echo "  --bare-metal        Force bare-metal mode"
+    echo ""
+    echo "SSL (Automatic):"
+    echo "  When a domain name is provided (not localhost/IP), SSL is automatically"
+    echo "  configured using Let's Encrypt. DNS must point to this server."
+    echo "  Use --no-ssl to skip SSL setup."
     echo ""
     echo "Examples:"
     echo "  # Install Docker (once)"
     echo "  sudo ./install.sh docker"
     echo ""
-    echo "  # Create Docker site"
+    echo "  # Create Docker site (with automatic SSL)"
     echo "  sudo ./install.sh site production SecurePass! prod.example.com 8080"
     echo ""
-    echo "  # Create another Docker site"
-    echo "  sudo ./install.sh site staging StagePass! stage.example.com 8081"
+    echo "  # Create site without SSL"
+    echo "  sudo ./install.sh site staging StagePass! stage.example.com 8081 --no-ssl"
     echo ""
     echo "  # Set up bare-metal server (once)"
     echo "  sudo ./install.sh server"
     echo ""
-    echo "  # Create bare-metal site"
+    echo "  # Create bare-metal site (with automatic SSL)"
     echo "  sudo ./install.sh site client1 Pass1! client1.example.com"
     echo ""
     echo "  # Create site with test site"
     echo "  sudo ./install.sh site client2 Pass2! client2.example.com --with-test-site"
-    echo ""
-    echo "  # Create site with specific theme"
-    echo "  sudo ./install.sh site client3 Pass3! client3.example.com --activate falcon"
     echo ""
     echo "  # Non-interactive deployment (for scripting/CI)"
     echo "  sudo ./install.sh -y -q site mysite SecurePass! mysite.com 8080"
