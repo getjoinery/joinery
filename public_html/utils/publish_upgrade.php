@@ -240,8 +240,8 @@
 		echo "Copied maintenance script directories<br>";
 		flush();
 
-		// Copy install SQL file with simplified name
-		copy($sql_source, $temp_dir . '/maintenance_scripts/joinery-install.sql.gz');
+		// Copy install SQL file to install_tools (where _site_init.sh expects it)
+		copy($sql_source, $temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
 		echo "Added install SQL file<br>";
 		flush();
 
