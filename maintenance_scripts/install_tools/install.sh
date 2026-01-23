@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.2 - Added -y/--yes and -q/--quiet flags for non-interactive/scripted deployments
+#VERSION 2.0 - Refactored to use _site_init.sh, added deploy_application_code, --activate, --with-test-site
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -11,6 +11,10 @@
 #   -y, --yes     Auto-accept all prompts (non-interactive mode)
 #   -q, --quiet   Suppress most output, show only errors and final status
 #
+# Site Options:
+#   --activate THEME    Set active theme after installation
+#   --with-test-site    Create companion test site (bare-metal only)
+#
 # Examples:
 #   # Docker deployment
 #   sudo ./install.sh docker
@@ -20,9 +24,9 @@
 #   sudo ./install.sh -y docker
 #   sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 #
-#   # Bare-metal deployment
+#   # Bare-metal deployment with theme activation
 #   sudo ./install.sh server
-#   sudo ./install.sh site mysite SecurePass123! mysite.com
+#   sudo ./install.sh site mysite SecurePass123! mysite.com --activate falcon
 #
 # See INSTALL_README.md for complete documentation.
 
@@ -235,6 +239,84 @@ list_baremetal_sites() {
     fi
     echo "───────────────────────────────────────────────────────────────"
     echo ""
+}
+
+#==============================================================================
+# CODE DEPLOYMENT (for bare-metal installs)
+#==============================================================================
+
+# Deploy application code from archive to site directory
+deploy_application_code() {
+    local site_name="$1"
+    local archive_root="$2"
+    local site_root="/var/www/html/$site_name"
+
+    print_step "Deploying application code..."
+
+    # Create site directory
+    mkdir -p "$site_root"
+
+    # Copy public_html (excluding runtime directories)
+    if [ -d "$archive_root/public_html" ]; then
+        print_info "Copying public_html..."
+        rsync -av --exclude='.git' \
+                  --exclude='uploads' \
+                  --exclude='cache' \
+                  --exclude='logs' \
+                  --exclude='.playwright-mcp' \
+                  "$archive_root/public_html/" \
+                  "$site_root/public_html/" > /dev/null
+    else
+        print_error "public_html directory not found in archive"
+        return 1
+    fi
+
+    # Copy maintenance_scripts
+    if [ -d "$archive_root/maintenance_scripts" ]; then
+        print_info "Copying maintenance_scripts..."
+        rsync -av "$archive_root/maintenance_scripts/" \
+                  "$site_root/maintenance_scripts/" > /dev/null
+    fi
+
+    # Copy config templates if they exist
+    if [ -d "$archive_root/config" ]; then
+        print_info "Copying config templates..."
+        mkdir -p "$site_root/config"
+    fi
+
+    print_success "Application code deployed to $site_root"
+}
+
+# Create a test site (copy from main site)
+create_test_site() {
+    local main_site="$1"
+    local password="$2"
+    local domain="$3"
+
+    local test_site="${main_site}_test"
+    local test_domain="test.${domain}"
+
+    print_step "Creating test site: $test_site"
+
+    # Deploy code (copy from main site to save time)
+    local site_root="/var/www/html/$test_site"
+    mkdir -p "$site_root"
+
+    rsync -av --exclude='uploads/*' \
+              --exclude='cache/*' \
+              --exclude='logs/*' \
+              "/var/www/html/$main_site/public_html/" \
+              "$site_root/public_html/" > /dev/null
+
+    if [ -d "/var/www/html/$main_site/maintenance_scripts" ]; then
+        rsync -av "/var/www/html/$main_site/maintenance_scripts/" \
+                  "$site_root/maintenance_scripts/" > /dev/null
+    fi
+
+    # Run initialization (creates separate database)
+    "$SCRIPT_DIR/_site_init.sh" "$test_site" "$password" "$test_domain"
+
+    print_success "Test site created: $test_site"
 }
 
 #==============================================================================
@@ -875,6 +957,8 @@ do_site_create() {
     local POSTGRES_PASSWORD=""
     local DOMAIN_NAME=""
     local PORT=""
+    local ACTIVATE_THEME=""
+    local WITH_TEST_SITE=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -887,16 +971,28 @@ do_site_create() {
                 FORCE_MODE="bare-metal"
                 shift
                 ;;
+            --activate)
+                ACTIVATE_THEME="$2"
+                shift 2
+                ;;
+            --with-test-site)
+                WITH_TEST_SITE=true
+                shift
+                ;;
             -h|--help)
-                echo "Usage: $0 site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT]"
+                echo "Usage: $0 site [OPTIONS] SITENAME PASSWORD [DOMAIN] [PORT]"
                 echo ""
-                echo "Options:"
+                echo "Mode Options:"
                 echo "  --docker      Force Docker mode (requires Docker installed)"
                 echo "  --bare-metal  Force bare-metal mode (requires Apache/PHP/PostgreSQL)"
                 echo ""
+                echo "Site Options:"
+                echo "  --activate THEME    Set active theme after installation"
+                echo "  --with-test-site    Create companion test site (bare-metal only)"
+                echo ""
                 echo "Parameters:"
                 echo "  SITENAME      Site/database name (required)"
-                echo "  PASSWORD      PostgreSQL password (required)"
+                echo "  PASSWORD      PostgreSQL password (required, use '-' to auto-generate)"
                 echo "  DOMAIN        Domain name (optional, defaults to server IP)"
                 echo "  PORT          Web port (Docker only, default: 8080)"
                 echo ""
@@ -985,11 +1081,17 @@ do_site_create() {
 
     print_header "Creating Joinery Site: $SITENAME"
     print_info "Mode: $MODE"
+    if [ -n "$ACTIVATE_THEME" ]; then
+        print_info "Theme: $ACTIVATE_THEME"
+    fi
+    if [ "$WITH_TEST_SITE" = true ]; then
+        print_info "Test site: enabled"
+    fi
 
     if [ "$MODE" = "docker" ]; then
-        do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT"
+        do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME"
     else
-        do_site_baremetal "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME"
+        do_site_baremetal "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$ACTIVATE_THEME" "$WITH_TEST_SITE"
     fi
 }
 
@@ -1002,6 +1104,7 @@ do_site_docker() {
     local POSTGRES_PASSWORD="$2"
     local DOMAIN_NAME="${3:-localhost}"
     local PORT="${4:-8080}"
+    local ACTIVATE_THEME="${5:-}"
     local DB_PORT=$((PORT + 1000))
 
     # Auto-detect server IP if domain is localhost
@@ -1315,6 +1418,8 @@ do_site_baremetal() {
     local SITENAME="$1"
     local POSTGRES_PASSWORD="$2"
     local DOMAIN_NAME="${3:-localhost}"
+    local ACTIVATE_THEME="${4:-}"
+    local WITH_TEST_SITE="${5:-false}"
 
     # Auto-detect server IP if domain is localhost
     if [ "$DOMAIN_NAME" = "localhost" ]; then
@@ -1325,39 +1430,68 @@ do_site_baremetal() {
         fi
     fi
 
-    # Update default_Globalvars_site.php with the password
-    print_step "Configuring database password..."
+    # Check if site already exists
+    if [ -d "/var/www/html/$SITENAME" ] && [ -f "/var/www/html/$SITENAME/config/Globalvars_site.php" ]; then
+        if [ "$ASSUME_YES" -eq 1 ]; then
+            print_warning "Site $SITENAME already exists. Overwriting..."
+        else
+            echo ""
+            read -p "Site $SITENAME already exists. Overwrite? [y/N] " -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_error "Aborted."
+                exit 1
+            fi
+        fi
+    fi
 
-    local GLOBALVARS_DEFAULT="${SCRIPT_DIR}/default_Globalvars_site.php"
-    if [ ! -f "$GLOBALVARS_DEFAULT" ]; then
-        print_error "Cannot find $GLOBALVARS_DEFAULT"
+    # Verify archive structure and locate source files
+    print_step "Locating source files..."
+
+    # Determine archive root (parent of maintenance_scripts which is parent of install_tools)
+    ARCHIVE_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
+    if [ ! -d "$ARCHIVE_ROOT/public_html" ]; then
+        print_error "Cannot find public_html directory in $ARCHIVE_ROOT"
+        print_error "Make sure you've extracted the joinery archive correctly"
         exit 1
     fi
 
-    # Create temporary copy with password set
-    cp "$GLOBALVARS_DEFAULT" "${GLOBALVARS_DEFAULT}.tmp"
-    sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${POSTGRES_PASSWORD}';/g" "${GLOBALVARS_DEFAULT}.tmp"
-    mv "${GLOBALVARS_DEFAULT}.tmp" "$GLOBALVARS_DEFAULT"
+    print_success "Source files located at $ARCHIVE_ROOT"
 
-    print_success "Database password configured"
+    # Deploy application code
+    deploy_application_code "$SITENAME" "$ARCHIVE_ROOT"
 
-    # Call new_account.sh
-    print_step "Creating site via new_account.sh..."
-
-    if [ ! -f "${SCRIPT_DIR}/new_account.sh" ]; then
-        print_error "Cannot find new_account.sh in $SCRIPT_DIR"
+    # Verify _site_init.sh exists
+    if [ ! -f "${SCRIPT_DIR}/_site_init.sh" ]; then
+        print_error "Cannot find _site_init.sh in $SCRIPT_DIR"
         exit 1
     fi
+
+    # Build _site_init.sh arguments
+    local INIT_ARGS="$SITENAME $POSTGRES_PASSWORD $DOMAIN_NAME"
+    if [ -n "$ACTIVATE_THEME" ]; then
+        INIT_ARGS="$INIT_ARGS --activate $ACTIVATE_THEME"
+    fi
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        INIT_ARGS="$INIT_ARGS -q"
+    fi
+
+    # Call _site_init.sh for shared setup
+    print_step "Initializing site via _site_init.sh..."
 
     # Export PGPASSWORD for non-interactive database operations
     export PGPASSWORD="$POSTGRES_PASSWORD"
 
-    # Change to script directory and run new_account.sh
-    cd "$SCRIPT_DIR"
-
-    if ! ./new_account.sh "$SITENAME" "$DOMAIN_NAME" "$SERVER_IP"; then
-        print_error "new_account.sh failed"
+    # Run the initialization script
+    if ! "$SCRIPT_DIR/_site_init.sh" $INIT_ARGS; then
+        print_error "_site_init.sh failed"
         exit 1
+    fi
+
+    # Create test site if requested
+    if [ "$WITH_TEST_SITE" = true ]; then
+        create_test_site "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME"
     fi
 
     # Verify site is responding
@@ -1388,6 +1522,12 @@ do_site_baremetal() {
         echo -e "Site Name:        ${GREEN}$SITENAME${NC}"
         echo -e "Domain:           ${GREEN}$DOMAIN_NAME${NC}"
         echo -e "Location:         ${GREEN}/var/www/html/$SITENAME/${NC}"
+        if [ -n "$ACTIVATE_THEME" ]; then
+            echo -e "Theme:            ${GREEN}$ACTIVATE_THEME${NC}"
+        fi
+        if [ "$WITH_TEST_SITE" = true ]; then
+            echo -e "Test Site:        ${GREEN}/var/www/html/${SITENAME}_test/${NC}"
+        fi
         echo ""
         if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
             echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
@@ -1397,6 +1537,9 @@ do_site_baremetal() {
             echo ""
         fi
         echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME/${NC}"
+        if [ "$WITH_TEST_SITE" = true ]; then
+            echo -e "Test site:        ${GREEN}http://test.$DOMAIN_NAME/${NC}"
+        fi
         echo ""
         echo "Default admin login:"
         echo -e "  Email:    ${YELLOW}admin@example.com${NC}"
@@ -1420,15 +1563,69 @@ do_list() {
     print_header "Existing Joinery Sites"
 
     # Check for Docker sites
-    if is_docker_available; then
-        list_docker_containers
+    if command -v docker &> /dev/null; then
+        echo -e "${BLUE}Docker containers:${NC}"
+
+        local found=false
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                local name=$(echo "$line" | awk '{print $1}')
+                local status=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
+                local ports=$(docker port "$name" 2>/dev/null | head -1 | sed 's/.*://')
+
+                # Only show joinery containers
+                if [[ "$name" == joinery-* ]] || docker inspect "$name" --format '{{.Config.Image}}' 2>/dev/null | grep -q "^joinery-"; then
+                    echo "  $name	$status	Port: ${ports:-N/A}"
+                    found=true
+                fi
+            fi
+        done < <(docker ps -a --format "{{.Names}} {{.Status}}" 2>/dev/null)
+
+        # Also show stopped containers
+        local stopped=$(docker ps -a --filter "status=exited" --format "{{.Names}}" 2>/dev/null | grep "^joinery-")
+        if [ -n "$stopped" ]; then
+            echo "$stopped" | while read name; do
+                if ! docker ps --format "{{.Names}}" 2>/dev/null | grep -q "^${name}$"; then
+                    echo "  ${name}	(stopped)"
+                    found=true
+                fi
+            done
+        fi
+
+        if [ "$found" = false ]; then
+            echo "  (none)"
+        fi
+        echo ""
     else
-        print_info "Docker not available - skipping Docker container list"
+        print_info "Docker not installed"
         echo ""
     fi
 
     # Check for bare-metal sites
-    list_baremetal_sites
+    echo -e "${BLUE}Bare-metal sites:${NC}"
+    local found=false
+    for dir in /var/www/html/*/; do
+        if [ -f "${dir}config/Globalvars_site.php" ]; then
+            local sitename=$(basename "$dir")
+            # Skip test sites in listing (show as suffix)
+            if [[ "$sitename" != *"_test" ]]; then
+                local status="configured"
+                if [ -f "/etc/apache2/sites-enabled/${sitename}.conf" ]; then
+                    status="enabled"
+                fi
+                # Check for companion test site
+                local test_suffix=""
+                if [ -d "/var/www/html/${sitename}_test" ]; then
+                    test_suffix=" (+test site)"
+                fi
+                echo "  ${sitename}	${status}${test_suffix}"
+                found=true
+            fi
+        fi
+    done
+    if [ "$found" = false ]; then
+        echo "  (none)"
+    fi
 }
 
 #==============================================================================
@@ -1437,7 +1634,7 @@ do_list() {
 
 show_help() {
     echo ""
-    echo "Joinery Installation Script"
+    echo "Joinery Installation Script v2.0"
     echo ""
     echo "Usage:"
     echo "  ./install.sh [global-options] <command> [options]"
@@ -1450,38 +1647,46 @@ show_help() {
     echo "  docker    Install Docker (one-time, for Docker deployments)"
     echo "  server    Set up base server (one-time, for bare-metal deployments)"
     echo "  site      Create a new Joinery site"
-    echo "  list      List existing Joinery sites"
+    echo "  list      List existing Joinery sites (Docker and bare-metal)"
+    echo ""
+    echo "Site Command Options:"
+    echo "  --activate THEME    Activate specified theme after installation"
+    echo "  --with-test-site    Also create a test site (bare-metal only)"
+    echo "  --docker            Force Docker mode"
+    echo "  --bare-metal        Force bare-metal mode"
     echo ""
     echo "Examples:"
-    echo "  # Docker deployment"
+    echo "  # Install Docker (once)"
     echo "  sudo ./install.sh docker"
-    echo "  sudo ./install.sh site mysite SecurePass123! mysite.com 8080"
     echo ""
-    echo "  # Bare-metal deployment"
+    echo "  # Create Docker site"
+    echo "  sudo ./install.sh site production SecurePass! prod.example.com 8080"
+    echo ""
+    echo "  # Create another Docker site"
+    echo "  sudo ./install.sh site staging StagePass! stage.example.com 8081"
+    echo ""
+    echo "  # Set up bare-metal server (once)"
     echo "  sudo ./install.sh server"
-    echo "  sudo ./install.sh site mysite SecurePass123! mysite.com"
     echo ""
-    echo "  # Multi-site Docker deployment"
-    echo "  sudo ./install.sh docker"
-    echo "  sudo ./install.sh site site1 Pass1! site1.com 8080"
-    echo "  sudo ./install.sh site site2 Pass2! site2.com 8081"
-    echo "  sudo ./install.sh list"
+    echo "  # Create bare-metal site"
+    echo "  sudo ./install.sh site client1 Pass1! client1.example.com"
     echo ""
-    echo "  # Multi-site bare-metal deployment"
-    echo "  sudo ./install.sh server"
-    echo "  sudo ./install.sh site site1 Pass1! site1.com"
-    echo "  sudo ./install.sh site site2 Pass2! site2.com"
-    echo "  sudo ./install.sh list"
+    echo "  # Create site with test site"
+    echo "  sudo ./install.sh site client2 Pass2! client2.example.com --with-test-site"
+    echo ""
+    echo "  # Create site with specific theme"
+    echo "  sudo ./install.sh site client3 Pass3! client3.example.com --activate falcon"
     echo ""
     echo "  # Non-interactive deployment (for scripting/CI)"
-    echo "  sudo ./install.sh -y docker"
-    echo "  sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080"
+    echo "  sudo ./install.sh -y -q site mysite SecurePass! mysite.com 8080"
+    echo ""
+    echo "  # List all sites"
+    echo "  sudo ./install.sh list"
     echo ""
     echo "Auto-Detection:"
     echo "  'install.sh site' automatically detects the environment:"
-    echo "  - Docker installed and running → creates Docker container"
-    echo "  - No Docker → creates bare-metal site via new_account.sh"
-    echo "  - PORT parameter specified → forces Docker mode"
+    echo "  - With PORT specified: Docker mode"
+    echo "  - Without PORT: Bare-metal mode"
     echo "  - Use --docker or --bare-metal flags to override"
     echo ""
     echo "Run './install.sh <command> --help' for command-specific help."
