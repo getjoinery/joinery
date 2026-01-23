@@ -29,6 +29,8 @@ function change_password_required_logic($get_vars, $post_vars){
 
 	// If user doesn't need to change password, redirect to admin
 	if (!$user->get('usr_force_password_change')) {
+		// Clear the session cache to prevent redirect loops
+		unset($_SESSION['force_password_change']);
 		if ($ajax) {
 			echo json_encode(array('success' => 1, 'redirect' => '/admin/admin_users'));
 			exit();
