@@ -95,7 +95,6 @@ SITE_ROOT="/var/www/html/$SITENAME"
 
 # Template files location
 GLOBALVARS_TEMPLATE="${SCRIPT_DIR}/default_Globalvars_site.php"
-SERVE_TEMPLATE="${SCRIPT_DIR}/default_serve.php"
 VIRTUALHOST_TEMPLATE="${SCRIPT_DIR}/default_virtualhost.conf"
 SQL_RESTORE="${SCRIPT_DIR}/joinery-install.sql.gz"
 
@@ -140,13 +139,6 @@ sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "$SITE_ROOT/config/Globalvars_site.php"
 sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "$SITE_ROOT/config/Globalvars_site.php"
 # Also handle the legacy pattern with empty password
 sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
-
-# Copy serve.php (skip in Docker - already copied during build)
-if [ "$DOCKER_MODE" = false ]; then
-    if [ -f "$SERVE_TEMPLATE" ]; then
-        cp "$SERVE_TEMPLATE" "$SITE_ROOT/public_html/serve.php"
-    fi
-fi
 
 # =============================================================================
 # DATABASE SETUP

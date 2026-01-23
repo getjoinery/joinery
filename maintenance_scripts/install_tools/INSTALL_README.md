@@ -747,7 +747,6 @@ Options:
 | `fix_permissions.sh` | Sets correct ownership and permissions on site files | `_site_init.sh`, manual use |
 | `Dockerfile.template` | Template for building Docker images | `install.sh site` (Docker) |
 | `default_Globalvars_site.php` | Template for site configuration | `_site_init.sh` |
-| `default_serve.php` | Template for front controller | `_site_init.sh` |
 | `default_virtualhost.conf` | Template for Apache virtualhost | `_site_init.sh` |
 
 **Note:** `_site_init.sh` (underscore prefix) is an internal script and should not be called directly. Use `install.sh site` for all site creation operations.
