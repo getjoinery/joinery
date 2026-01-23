@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.2 - Fixed Docker SSL: installs certbot on host, validates DNS before installation
+#VERSION 2.3 - Added Cloudflare proxy detection: skips certbot when behind Cloudflare
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -46,6 +46,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ASSUME_YES=0      # -y/--yes: Auto-accept all prompts
 QUIET_MODE=0      # -q/--quiet: Suppress most output
+CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
 
 #==============================================================================
 # HELPER FUNCTIONS (from docker_install_master.sh)
@@ -124,7 +125,51 @@ should_setup_ssl() {
     return 0
 }
 
+# Check if an IP address belongs to Cloudflare
+# Returns 0 if IP is Cloudflare, 1 otherwise
+is_cloudflare_ip() {
+    local ip="$1"
+
+    # Try to fetch current Cloudflare IP ranges
+    local cf_ranges=$(curl -s --max-time 5 https://www.cloudflare.com/ips-v4 2>/dev/null)
+
+    # Fallback to known ranges if fetch fails (updated Jan 2025)
+    if [ -z "$cf_ranges" ]; then
+        cf_ranges="173.245.48.0/20
+103.21.244.0/22
+103.22.200.0/22
+103.31.4.0/22
+141.101.64.0/18
+108.162.192.0/18
+190.93.240.0/20
+188.114.96.0/20
+197.234.240.0/22
+198.41.128.0/17
+162.158.0.0/15
+104.16.0.0/13
+104.24.0.0/14
+172.64.0.0/13
+131.0.72.0/22"
+    fi
+
+    # Use Python to check CIDR membership (Python3 is standard on Ubuntu)
+    python3 -c "
+import ipaddress
+import sys
+
+ip = ipaddress.ip_address('$ip')
+ranges = '''$cf_ranges'''.strip().split('\n')
+
+for cidr in ranges:
+    cidr = cidr.strip()
+    if cidr and ip in ipaddress.ip_network(cidr):
+        sys.exit(0)
+sys.exit(1)
+" 2>/dev/null
+}
+
 # Check if DNS for domain points to this server
+# Returns: 0 = points here, 1 = doesn't point here, 2 = Cloudflare proxy detected
 check_dns_points_here() {
     local domain="$1"
 
@@ -142,18 +187,33 @@ check_dns_points_here() {
         return 1
     fi
 
-    # Compare
+    # Compare - direct match
     if [ "$dns_ip" = "$server_ip" ]; then
         return 0
-    else
-        print_warning "DNS for $domain points to $dns_ip, but this server is $server_ip"
-        return 1
     fi
+
+    # Check if it's Cloudflare proxy
+    if is_cloudflare_ip "$dns_ip"; then
+        print_info "DNS for $domain points to Cloudflare proxy ($dns_ip)"
+        CLOUDFLARE_PROXY=1
+        return 2  # Special return code for Cloudflare
+    fi
+
+    # Neither direct nor Cloudflare
+    print_warning "DNS for $domain points to $dns_ip, but this server is $server_ip"
+    return 1
 }
 
 # Set up SSL for bare-metal site
 setup_ssl_baremetal() {
     local domain="$1"
+
+    # Skip certbot if behind Cloudflare proxy (Cloudflare handles SSL)
+    if [ "$CLOUDFLARE_PROXY" -eq 1 ]; then
+        print_info "Skipping Let's Encrypt - Cloudflare provides edge SSL"
+        print_info "Configure Cloudflare SSL/TLS settings for origin encryption if needed"
+        return 0
+    fi
 
     print_step "Setting up SSL certificate for $domain..."
 
@@ -181,7 +241,7 @@ setup_ssl_docker_proxy() {
     local domain="$2"
     local port="$3"
 
-    print_step "Setting up reverse proxy with SSL for $domain..."
+    print_step "Setting up reverse proxy for $domain..."
 
     # Check if Apache is installed on host
     if ! command -v apache2 &> /dev/null; then
@@ -190,14 +250,42 @@ setup_ssl_docker_proxy() {
         apt-get install -y -qq apache2
     fi
 
-    # Check if certbot is installed on host
+    # Enable required modules
+    a2enmod proxy proxy_http ssl headers rewrite > /dev/null 2>&1 || true
+
+    # Handle Cloudflare proxy - create HTTP proxy only (Cloudflare handles SSL)
+    if [ "$CLOUDFLARE_PROXY" -eq 1 ]; then
+        print_info "Creating HTTP proxy for Cloudflare origin connection..."
+
+        # Create HTTP proxy config for Cloudflare
+        cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
+<VirtualHost *:80>
+    ServerName ${domain}
+
+    ProxyPreserveHost On
+    ProxyRequests Off
+    ProxyPass / http://127.0.0.1:${port}/
+    ProxyPassReverse / http://127.0.0.1:${port}/
+
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "https"
+</VirtualHost>
+EOF
+
+        a2ensite "${sitename}-proxy.conf" > /dev/null
+        systemctl reload apache2
+
+        print_success "HTTP proxy configured for Cloudflare origin"
+        print_info "Cloudflare handles SSL at the edge"
+        return 0
+    fi
+
+    # Check if certbot is installed on host (only needed for non-Cloudflare)
     if ! command -v certbot &> /dev/null; then
         print_info "Installing Certbot for SSL certificates..."
         apt-get install -y -qq certbot python3-certbot-apache
     fi
-
-    # Enable required modules
-    a2enmod proxy proxy_http ssl headers rewrite > /dev/null 2>&1 || true
 
     # Check DNS first
     if ! check_dns_points_here "$domain"; then
@@ -1269,7 +1357,22 @@ do_site_create() {
     # Early DNS validation - fail before doing any work if SSL is expected but DNS isn't ready
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
         print_step "Validating DNS configuration for SSL..."
-        if ! check_dns_points_here "$DOMAIN_NAME"; then
+        check_dns_points_here "$DOMAIN_NAME"
+        local dns_result=$?
+
+        if [ $dns_result -eq 0 ]; then
+            # Direct DNS match - proceed with Let's Encrypt
+            print_success "DNS validated - $DOMAIN_NAME points to this server"
+        elif [ $dns_result -eq 2 ]; then
+            # Cloudflare proxy detected - proceed without Let's Encrypt
+            print_success "Cloudflare proxy detected - SSL handled by Cloudflare"
+            echo ""
+            print_info "Cloudflare provides SSL at the edge. For origin encryption, configure:"
+            echo "  - Cloudflare SSL/TLS → Full (Strict) with Origin Certificate, or"
+            echo "  - Cloudflare SSL/TLS → Full (works with self-signed or no origin cert)"
+            echo ""
+        else
+            # DNS doesn't point here and it's not Cloudflare
             echo ""
             print_error "DNS for $DOMAIN_NAME does not point to this server"
             echo ""
@@ -1282,7 +1385,6 @@ do_site_create() {
             echo ""
             exit 1
         fi
-        print_success "DNS validated - $DOMAIN_NAME points to this server"
     fi
 
     if [ "$MODE" = "docker" ]; then
