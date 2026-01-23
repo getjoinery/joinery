@@ -93,4 +93,4 @@ fi
 
 echo ""
 echo "Cleanup completed for site: $SITE_NAME"
-echo "You can now run new_account.sh again to recreate the site."
+echo "You can now run 'install.sh site' again to recreate the site."

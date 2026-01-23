@@ -113,7 +113,7 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/docs/` - Documentation and Claude-specific guidance
 - `/tests/` - Test suites (email, functional, integration, models)
 - `/var/www/html/joinerytest/maintenance_scripts/` - Deployment and maintenance scripts
-  - `install_tools/` - Installation scripts (server_setup.sh, new_account.sh, deploy.sh, etc.)
+  - `install_tools/` - Installation scripts (install.sh, _site_init.sh, deploy.sh, etc.)
   - `sysadmin_tools/` - Maintenance utilities (backup, restore, etc.)
   - `dev_tools/` - Development utilities (PHP validation, etc.)
 
