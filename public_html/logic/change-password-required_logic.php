@@ -11,8 +11,15 @@ function change_password_required_logic($get_vars, $post_vars){
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
+	// Check if this is an AJAX request
+	$ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] == 'XMLHttpRequest';
+
 	// Must be logged in to access this page
 	if (!$session->is_logged_in()) {
+		if ($ajax) {
+			echo json_encode(array('success' => 0, 'error' => 'Not logged in'));
+			exit();
+		}
 		header('Location: /login');
 		exit();
 	}
@@ -22,6 +29,10 @@ function change_password_required_logic($get_vars, $post_vars){
 
 	// If user doesn't need to change password, redirect to admin
 	if (!$user->get('usr_force_password_change')) {
+		if ($ajax) {
+			echo json_encode(array('success' => 1, 'redirect' => '/admin/admin_users'));
+			exit();
+		}
 		header('Location: /admin/admin_users');
 		exit();
 	}
@@ -29,14 +40,26 @@ function change_password_required_logic($get_vars, $post_vars){
 	if ($post_vars) {
 		// Validate passwords
 		if (empty($post_vars['new_password'])) {
+			if ($ajax) {
+				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
+				throw new ValidationException('Please enter a new password.', ['new_password' => 'Password is required']);
+			}
 			throw new SystemDisplayableError('Please enter a new password.');
 		}
 
 		if ($post_vars['new_password'] !== $post_vars['confirm_password']) {
+			if ($ajax) {
+				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
+				throw new ValidationException('Passwords do not match.', ['confirm_password' => 'Passwords do not match']);
+			}
 			throw new SystemDisplayableError('Passwords do not match.');
 		}
 
 		if (strlen($post_vars['new_password']) < 8) {
+			if ($ajax) {
+				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
+				throw new ValidationException('Password must be at least 8 characters long.', ['new_password' => 'Minimum 8 characters']);
+			}
 			throw new SystemDisplayableError('Password must be at least 8 characters long.');
 		}
 
@@ -48,6 +71,10 @@ function change_password_required_logic($get_vars, $post_vars){
 		// Clear the session cache so check_permission won't redirect anymore
 		unset($_SESSION['force_password_change']);
 
+		if ($ajax) {
+			echo json_encode(array('success' => 1, 'redirect' => '/admin/admin_users'));
+			exit();
+		}
 		header('Location: /admin/admin_users');
 		exit();
 	}
