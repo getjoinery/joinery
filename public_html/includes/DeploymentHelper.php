@@ -858,6 +858,173 @@ class DeploymentHelper {
 
         return $result;
     }
+
+    // ============================================
+    // STAGING PREPARATION
+    // ============================================
+
+    /**
+     * Copy custom themes and plugins from live to staging before deployment.
+     *
+     * This ensures custom themes/plugins are included when staging is moved to live.
+     * A theme/plugin is considered "custom" if:
+     * - It has is_stock=false in its manifest (theme.json/plugin.json)
+     * - It exists in live but not in staging (uploaded directly, not from repo)
+     *
+     * @param string $live_dir Current live public_html directory
+     * @param string $stage_dir Staging directory with new code from tarball
+     * @param bool $verbose Echo progress to screen
+     * @return array ['success' => bool,
+     *                'themes_copied' => int, 'themes_skipped' => int,
+     *                'plugins_copied' => int, 'plugins_skipped' => int,
+     *                'errors' => array]
+     */
+    public static function copyCustomToStaging($live_dir, $stage_dir, $verbose = false) {
+        $result = [
+            'success' => true,
+            'themes_copied' => 0,
+            'themes_skipped' => 0,
+            'plugins_copied' => 0,
+            'plugins_skipped' => 0,
+            'errors' => []
+        ];
+
+        if ($verbose) {
+            echo "Copying custom themes/plugins from live to staging...\n";
+        }
+
+        // Process themes
+        $live_themes_dir = $live_dir . '/theme';
+        $stage_themes_dir = $stage_dir . '/theme';
+
+        // Ensure staging theme directory exists
+        if (!is_dir($stage_themes_dir)) {
+            mkdir($stage_themes_dir, 0770, true);
+        }
+
+        if (is_dir($live_themes_dir)) {
+            foreach (scandir($live_themes_dir) as $theme_name) {
+                if ($theme_name === '.' || $theme_name === '..') continue;
+
+                $live_path = $live_themes_dir . '/' . $theme_name;
+                $stage_path = $stage_themes_dir . '/' . $theme_name;
+
+                if (!is_dir($live_path)) continue;
+
+                // Determine if this theme should be copied to staging
+                $should_copy = false;
+                $reason = '';
+
+                if (!is_dir($stage_path)) {
+                    // Theme not in staging (custom upload, not from repo)
+                    $should_copy = true;
+                    $reason = 'not in staging';
+                } else {
+                    // Theme exists in both - check if live version is custom
+                    $manifest_path = $live_path . '/theme.json';
+                    if (file_exists($manifest_path)) {
+                        $manifest = json_decode(file_get_contents($manifest_path), true);
+                        if (isset($manifest['is_stock']) && $manifest['is_stock'] === false) {
+                            $should_copy = true;
+                            $reason = 'is_stock=false';
+                        }
+                    }
+                }
+
+                if ($should_copy) {
+                    // Remove staged version if exists, then copy live version
+                    if (is_dir($stage_path)) {
+                        exec("rm -rf " . escapeshellarg($stage_path));
+                    }
+
+                    $copy_result = 0;
+                    exec("cp -r " . escapeshellarg($live_path) . " " . escapeshellarg($stage_themes_dir . '/'), $output, $copy_result);
+
+                    if ($copy_result !== 0) {
+                        $result['errors'][] = "Failed to copy theme: $theme_name";
+                        $result['success'] = false;
+                        if ($verbose) echo "  ERROR: Failed to copy theme: $theme_name\n";
+                    } else {
+                        $result['themes_copied']++;
+                        if ($verbose) echo "  Copied custom theme: $theme_name ($reason)\n";
+                    }
+                } else {
+                    $result['themes_skipped']++;
+                    if ($verbose) echo "  Skipped stock theme: $theme_name (will be updated from staging)\n";
+                }
+            }
+        }
+
+        // Process plugins
+        $live_plugins_dir = $live_dir . '/plugins';
+        $stage_plugins_dir = $stage_dir . '/plugins';
+
+        // Ensure staging plugins directory exists
+        if (!is_dir($stage_plugins_dir)) {
+            mkdir($stage_plugins_dir, 0770, true);
+        }
+
+        if (is_dir($live_plugins_dir)) {
+            foreach (scandir($live_plugins_dir) as $plugin_name) {
+                if ($plugin_name === '.' || $plugin_name === '..') continue;
+
+                $live_path = $live_plugins_dir . '/' . $plugin_name;
+                $stage_path = $stage_plugins_dir . '/' . $plugin_name;
+
+                if (!is_dir($live_path)) continue;
+
+                // Determine if this plugin should be copied to staging
+                $should_copy = false;
+                $reason = '';
+
+                if (!is_dir($stage_path)) {
+                    // Plugin not in staging (custom upload, not from repo)
+                    $should_copy = true;
+                    $reason = 'not in staging';
+                } else {
+                    // Plugin exists in both - check if live version is custom
+                    $manifest_path = $live_path . '/plugin.json';
+                    if (file_exists($manifest_path)) {
+                        $manifest = json_decode(file_get_contents($manifest_path), true);
+                        if (isset($manifest['is_stock']) && $manifest['is_stock'] === false) {
+                            $should_copy = true;
+                            $reason = 'is_stock=false';
+                        }
+                    }
+                }
+
+                if ($should_copy) {
+                    // Remove staged version if exists, then copy live version
+                    if (is_dir($stage_path)) {
+                        exec("rm -rf " . escapeshellarg($stage_path));
+                    }
+
+                    $copy_result = 0;
+                    exec("cp -r " . escapeshellarg($live_path) . " " . escapeshellarg($stage_plugins_dir . '/'), $output, $copy_result);
+
+                    if ($copy_result !== 0) {
+                        $result['errors'][] = "Failed to copy plugin: $plugin_name";
+                        $result['success'] = false;
+                        if ($verbose) echo "  ERROR: Failed to copy plugin: $plugin_name\n";
+                    } else {
+                        $result['plugins_copied']++;
+                        if ($verbose) echo "  Copied custom plugin: $plugin_name ($reason)\n";
+                    }
+                } else {
+                    $result['plugins_skipped']++;
+                    if ($verbose) echo "  Skipped stock plugin: $plugin_name (will be updated from staging)\n";
+                }
+            }
+        }
+
+        if ($verbose) {
+            echo "Custom themes/plugins copy complete:\n";
+            echo "  Themes: {$result['themes_copied']} copied, {$result['themes_skipped']} skipped\n";
+            echo "  Plugins: {$result['plugins_copied']} copied, {$result['plugins_skipped']} skipped\n";
+        }
+
+        return $result;
+    }
 }
 
 ?>

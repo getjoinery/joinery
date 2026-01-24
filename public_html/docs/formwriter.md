@@ -443,6 +443,17 @@ $formwriter = new FormWriterV2Bootstrap('upload_form', [
 $formwriter->hiddeninput('user_id', '', ['value' => $user_id]);
 ```
 
+**Important:** Always use the three-argument form with an empty string as the second parameter (label),
+even though labels are ignored for hidden fields. This maintains consistency with other FormWriter methods:
+
+```php
+// CORRECT - use three arguments
+$formwriter->hiddeninput('field_name', '', ['value' => $value]);
+
+// AVOID - two arguments (works due to backwards compatibility, but not recommended)
+$formwriter->hiddeninput('field_name', ['value' => $value]);
+```
+
 ### Repeater Fields
 
 Repeater fields allow users to add multiple sets of related fields dynamically. Used primarily by the Page Component System for configurable content blocks.
@@ -718,7 +729,7 @@ $form = $page->getFormWriter('form_' . $item->id, 'v2', [
 ]);
 
 // Add fields (stored, not echoed)
-$form->hiddeninput('action', ['value' => 'delete']);
+$form->hiddeninput('action', '', ['value' => 'delete']);
 $form->submitbutton('btn_delete', 'Delete');
 
 // Get HTML as string
@@ -737,7 +748,7 @@ foreach ($items as $item) {
         'action' => '/admin/process'
     ]);
 
-    $form->hiddeninput('item_id', ['value' => $item->id]);
+    $form->hiddeninput('item_id', '', ['value' => $item->id]);
     $form->submitbutton('btn_delete', 'Delete');
 
     $row['action'] = $form->getFieldsHTML();

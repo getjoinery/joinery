@@ -386,6 +386,57 @@
 		// ============================================
 		echo '<br><h3>Pre-deployment Validation</h3>';
 
+		// Check that active theme is available
+		$active_theme = $settings->get_setting('theme');
+		if ($active_theme) {
+			$staged_theme_path = $stage_directory . '/theme/' . $active_theme;
+			$live_theme_path = $live_directory . '/theme/' . $active_theme;
+
+			if (!is_dir($staged_theme_path)) {
+				// Theme not in staging - check if it's a custom theme in live that will be preserved
+				$theme_will_be_preserved = false;
+				$preservation_reason = '';
+
+				if (is_dir($live_theme_path)) {
+					// Theme exists in live - check if it's custom
+					$manifest_path = $live_theme_path . '/theme.json';
+					if (file_exists($manifest_path)) {
+						$manifest = json_decode(file_get_contents($manifest_path), true);
+						if (isset($manifest['is_stock']) && $manifest['is_stock'] === false) {
+							$theme_will_be_preserved = true;
+							$preservation_reason = 'marked as custom (is_stock=false)';
+						}
+					}
+				}
+
+				if ($theme_will_be_preserved) {
+					echo '<div style="border: 2px solid #856404; padding: 15px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
+					echo "<strong>⚠️ NOTE:</strong> Active theme '<strong>" . htmlspecialchars($active_theme) . "</strong>' is not in the upgrade package.<br>";
+					echo "However, it will be preserved because it is " . $preservation_reason . ".<br>";
+					echo '</div>';
+				} else {
+					echo '<div style="border: 2px solid #dc3545; padding: 20px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+					echo '<h3 style="margin-top: 0; color: #721c24;">❌ UPGRADE BLOCKED: Active Theme Missing</h3>';
+					echo "<p>The currently active theme '<strong>" . htmlspecialchars($active_theme) . "</strong>' is not included in this upgrade package.</p>";
+					echo '<p>If the upgrade proceeds, your site would lose its theme and may become unusable.</p>';
+					echo '<p><strong>To fix this:</strong></p>';
+					echo '<ul>';
+					echo '<li>Republish the upgrade with the "' . htmlspecialchars($active_theme) . '" theme selected, OR</li>';
+					echo '<li>Switch to a different theme before upgrading, OR</li>';
+					echo '<li>Mark the theme as custom by adding <code>"is_stock": false</code> to its theme.json</li>';
+					echo '</ul>';
+					echo '</div>';
+
+					// Clean up staging
+					echo 'Cleaning up staging area...<br>';
+					exec("rm -rf " . escapeshellarg($stage_location) . "/*");
+					exit(1);
+				}
+			} else {
+				echo "✓ Active theme '" . htmlspecialchars($active_theme) . "' found in upgrade package<br>";
+			}
+		}
+
 		// Validate PHP syntax
 		$result = DeploymentHelper::validatePHPSyntax($stage_directory, $verbose);
 		if (!$result['success']) {
@@ -438,20 +489,23 @@
 			echo "✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")<br>";
 		}
 
-		echo '<br><h3>Updating Installed Themes/Plugins</h3>';
+		echo '<br><h3>Preserving Custom Themes/Plugins</h3>';
 
-		// Update installed themes/plugins using the new "update-only" model
-		// This only updates themes that are already installed, never adds new ones
-		$result = DeploymentHelper::updateInstalledThemesOnly($stage_directory, $live_directory, $verbose);
+		// Copy custom themes/plugins from live into staging BEFORE the mv
+		// This ensures custom themes are included when staging moves to live
+		// - Themes/plugins with is_stock=false are copied
+		// - Themes/plugins not in staging (uploaded directly) are copied
+		// - Stock themes/plugins are left alone (will be updated from staging)
+		$result = DeploymentHelper::copyCustomToStaging($live_directory, $stage_directory, $verbose);
 		if ($result['success']) {
-			echo "✓ Themes: {$result['themes_updated']} updated, {$result['themes_preserved']} preserved<br>";
-			echo "✓ Plugins: {$result['plugins_updated']} updated, {$result['plugins_preserved']} preserved<br>";
+			echo "✓ Themes: {$result['themes_copied']} custom preserved, {$result['themes_skipped']} stock (will update)<br>";
+			echo "✓ Plugins: {$result['plugins_copied']} custom preserved, {$result['plugins_skipped']} stock (will update)<br>";
 		} else {
-			echo "Theme/Plugin update had errors:<br>";
+			echo "Theme/Plugin preservation had errors:<br>";
 			foreach ($result['errors'] as $error) {
 				echo "  • " . htmlspecialchars($error) . "<br>";
 			}
-			// Don't abort on update errors, but log them
+			// Don't abort on preservation errors, but log them
 		}
 
 		// ============================================
@@ -722,9 +776,7 @@
 				echo '<p style="margin: 10px 0 0 28px; color: #6c757d; font-size: 0.9em;">Files will be downloaded and validated, but not deployed. Database migrations will be skipped.</p>';
 				echo '</div>';
 
-				echo $formwriter->start_buttons();
-				echo $formwriter->new_form_button('Submit');
-				echo $formwriter->end_buttons();
+				$formwriter->submitbutton('submit', 'Submit');
 
 			}
 			else if($decode_response['system_version'] == $settings->get_setting('system_version')){
@@ -740,9 +792,7 @@
 				echo '<p style="margin: 10px 0 0 28px; color: #6c757d; font-size: 0.9em;">Files will be downloaded and validated, but not deployed. Database migrations will be skipped.</p>';
 				echo '</div>';
 
-				echo $formwriter->start_buttons();
-				echo $formwriter->new_form_button('Upgrade anyway');
-				echo $formwriter->end_buttons();
+				$formwriter->submitbutton('submit', 'Upgrade anyway');
 
 			}
 			else{
