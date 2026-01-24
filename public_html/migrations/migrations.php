@@ -22,10 +22,7 @@
 		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'blog_active\', \'1\', 1, \'now()\', \'now()\', \'general\');';
 		$migrations[] = $migration;
 
-		$migration['database_version'] = '12';
-		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'blog_subdirectory'";
-		$migration['migration_sql'] = 'INSERT INTO "public"."stg_settings"("stg_name", "stg_value", "stg_usr_user_id", "stg_create_time", "stg_update_time", "stg_group_name") VALUES (\'blog_subdirectory\', \'\', 1, \'now()\', \'now()\', \'general\');';
-		$migrations[] = $migration;
+		// REMOVED: blog_subdirectory migration - setting was deprecated and deleted in migration 32
 
 		$migration['database_version'] = '12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'events_active'";
@@ -452,11 +449,7 @@
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;	
 		
- 		$migration['database_version'] = '32';
-		$migration['test'] = NULL;
-		$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'blog_subdirectory'";
-		$migration['migration_file'] = NULL;
-		$migrations[] = $migration;	
+		// REMOVED: blog_subdirectory DELETE migration - INSERT was also removed from migration 12
 
  		$migration['database_version'] = '33';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'custom_css'";

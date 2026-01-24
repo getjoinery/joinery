@@ -305,6 +305,157 @@ class DeploymentHelper {
         return $result;
     }
 
+    /**
+     * Validate extracted tarball has expected Joinery structure
+     *
+     * Performs heuristic checks to catch obvious issues:
+     * - Required files/directories exist
+     * - No suspicious files (binaries, symlinks)
+     * - Critical files contain expected content
+     *
+     * Note: This cannot stop a sophisticated attacker who knows the codebase,
+     * but catches wrong files, basic malware, and misconfigurations.
+     *
+     * @param string $stage_dir Staging directory containing extracted public_html
+     * @param bool $verbose Echo progress to screen
+     * @return array ['success' => bool, 'errors' => array, 'warnings' => array]
+     */
+    public static function validateTarballStructure($stage_dir, $verbose = false) {
+        $result = [
+            'success' => true,
+            'errors' => [],
+            'warnings' => []
+        ];
+
+        $public_html = $stage_dir;
+        if (!is_dir($public_html)) {
+            $result['success'] = false;
+            $result['errors'][] = "Staging directory does not exist: $stage_dir";
+            return $result;
+        }
+
+        // Required files that must exist
+        $required_files = [
+            'serve.php' => 'Front controller',
+            'includes/PathHelper.php' => 'Core path helper',
+            'includes/Globalvars.php' => 'Global settings',
+            'includes/DbConnector.php' => 'Database connector',
+            'includes/SessionControl.php' => 'Session management',
+        ];
+
+        // Required directories
+        $required_dirs = [
+            'includes' => 'Core includes',
+            'data' => 'Data models',
+            'views' => 'View templates',
+            'adm' => 'Admin interface',
+        ];
+
+        if ($verbose) {
+            echo "Validating tarball structure...\n";
+        }
+
+        // Check required directories
+        foreach ($required_dirs as $dir => $description) {
+            $path = $public_html . '/' . $dir;
+            if (!is_dir($path)) {
+                $result['success'] = false;
+                $result['errors'][] = "Missing required directory: $dir ($description)";
+            }
+        }
+
+        // Check required files
+        foreach ($required_files as $file => $description) {
+            $path = $public_html . '/' . $file;
+            if (!file_exists($path)) {
+                $result['success'] = false;
+                $result['errors'][] = "Missing required file: $file ($description)";
+            }
+        }
+
+        // If basic structure is missing, don't continue with deeper checks
+        if (!$result['success']) {
+            return $result;
+        }
+
+        // Sanity check critical files contain expected content
+        $content_checks = [
+            'includes/PathHelper.php' => 'class PathHelper',
+            'includes/Globalvars.php' => 'class Globalvars',
+            'serve.php' => 'RouteHelper',
+        ];
+
+        foreach ($content_checks as $file => $expected) {
+            $path = $public_html . '/' . $file;
+            $content = @file_get_contents($path, false, null, 0, 8192); // Read first 8KB
+            if ($content === false) {
+                $result['warnings'][] = "Could not read $file for validation";
+            } elseif (strpos($content, $expected) === false) {
+                $result['success'] = false;
+                $result['errors'][] = "File $file does not contain expected content (looking for '$expected')";
+            }
+        }
+
+        // Check for suspicious files (limit scan depth for performance)
+        $suspicious_count = 0;
+        $max_suspicious_report = 5;
+
+        try {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($public_html, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+            $iterator->setMaxDepth(10); // Limit depth for performance
+
+            foreach ($iterator as $file) {
+                // Check for symlinks (can point outside archive)
+                if (is_link($file->getPathname())) {
+                    $suspicious_count++;
+                    if ($suspicious_count <= $max_suspicious_report) {
+                        $result['warnings'][] = "Symlink found: " . $file->getPathname();
+                    }
+                }
+
+                // Check for ELF binaries (Linux executables)
+                if ($file->isFile() && $file->isReadable()) {
+                    $handle = @fopen($file->getPathname(), 'rb');
+                    if ($handle) {
+                        $magic = fread($handle, 4);
+                        fclose($handle);
+                        // ELF magic bytes: 0x7F 'E' 'L' 'F'
+                        if ($magic === "\x7FELF") {
+                            $suspicious_count++;
+                            if ($suspicious_count <= $max_suspicious_report) {
+                                $relative = str_replace($public_html . '/', '', $file->getPathname());
+                                $result['warnings'][] = "Binary executable found: $relative";
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            $result['warnings'][] = "Could not complete file scan: " . $e->getMessage();
+        }
+
+        if ($suspicious_count > $max_suspicious_report) {
+            $result['warnings'][] = "... and " . ($suspicious_count - $max_suspicious_report) . " more suspicious files";
+        }
+
+        // If there are warnings but no errors, still succeed but report warnings
+        if ($verbose) {
+            if ($result['success']) {
+                echo "  ✓ Tarball structure validation passed\n";
+            } else {
+                echo "  ✗ Tarball structure validation FAILED\n";
+            }
+            foreach ($result['warnings'] as $warning) {
+                echo "  ⚠ $warning\n";
+            }
+        }
+
+        return $result;
+    }
+
     // ============================================
     // THEME/PLUGIN MANAGEMENT
     // ============================================
