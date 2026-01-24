@@ -359,10 +359,10 @@ if (!empty($data_files)) {
     foreach ($data_files as $table => $file) {
         $data_content = file_get_contents($file);
         if ($data_content) {
-            // Transform absolute composerAutoLoad paths to relative paths for portability
-            // This ensures the install SQL works in any environment (Docker, traditional, etc.)
+            // Transform settings for portability
             if ($table === 'stg_settings') {
-                // Match composerAutoLoad setting with absolute vendor path and convert to relative
+                // Transform absolute composerAutoLoad paths to relative paths for portability
+                // This ensures the install SQL works in any environment (Docker, traditional, etc.)
                 // COPY format uses tabs, not SQL quotes: id\tcomposerAutoLoad\t/var/www/html/site/vendor/\t...
                 $data_content = preg_replace(
                     "/(composerAutoLoad\t)\/var\/www\/html\/[^\t]+\/vendor\/(\t)/",
@@ -370,6 +370,16 @@ if (!empty($data_files)) {
                     $data_content
                 );
                 echo "   Transformed composerAutoLoad to use relative path\n";
+
+                // Set system_version to the version being published
+                // This ensures fresh installs have the correct version set
+                // COPY format: id\tsystem_version\tVALUE\t...
+                $data_content = preg_replace(
+                    "/(system_version\t)[^\t]*(\t)/",
+                    '$1' . $version . '$2',
+                    $data_content
+                );
+                echo "   Set system_version to $version\n";
             }
             fwrite($output_handle, "-- Data for table: $table\n");
             fwrite($output_handle, $data_content);
@@ -383,6 +393,165 @@ fwrite($output_handle, "\n-- ===================================================
 fwrite($output_handle, "-- DEFAULT ADMIN USER\n");
 fwrite($output_handle, "-- ============================================================================\n\n");
 fwrite($output_handle, file_get_contents($admin_file));
+
+// ============================================================================
+// GENERATE SEQUENCE RESET STATEMENTS
+// ============================================================================
+
+echo "[8.5/10] Generating sequence reset statements...\n";
+
+fwrite($output_handle, "\n-- ============================================================================\n");
+fwrite($output_handle, "-- SEQUENCE RESETS\n");
+fwrite($output_handle, "-- Reset sequences to match imported data to prevent duplicate key errors\n");
+fwrite($output_handle, "-- ============================================================================\n\n");
+
+$sequence_count = 0;
+
+// Query to find sequences and their associated tables/columns
+$seq_sql = "
+    SELECT
+        s.relname as sequence_name,
+        t.relname as table_name,
+        a.attname as column_name
+    FROM pg_class s
+    JOIN pg_depend d ON d.objid = s.oid
+    JOIN pg_class t ON d.refobjid = t.oid
+    JOIN pg_attribute a ON (a.attrelid = t.oid AND a.attnum = d.refobjsubid)
+    WHERE s.relkind = 'S'
+    AND t.relname = ANY(:tables)
+";
+
+try {
+    $q = $dblink->prepare($seq_sql);
+    $q->execute([':tables' => '{' . implode(',', $essential_tables) . '}']);
+    $sequences = $q->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($sequences as $seq) {
+        $table = $seq['table_name'];
+        $column = $seq['column_name'];
+        $sequence = $seq['sequence_name'];
+
+        // Get max value for this column
+        $max_sql = "SELECT COALESCE(MAX($column), 0) as max_val FROM $table";
+        $max_q = $dblink->prepare($max_sql);
+        $max_q->execute();
+        $max_result = $max_q->fetch(PDO::FETCH_ASSOC);
+        $max_val = $max_result['max_val'] ?? 0;
+
+        if ($max_val > 0) {
+            $setval_sql = "SELECT pg_catalog.setval('public.$sequence', $max_val, true);\n";
+            fwrite($output_handle, $setval_sql);
+            echo "   Reset $sequence to $max_val\n";
+            $sequence_count++;
+        }
+    }
+} catch (Exception $e) {
+    echo "   WARNING: Could not query sequences: " . $e->getMessage() . "\n";
+}
+
+// Also reset usr_users sequence for the admin user we're inserting
+// The admin user will get the next available ID, so we need to ensure the sequence is correct
+$usr_max_sql = "SELECT COALESCE(MAX(usr_user_id), 0) as max_val FROM usr_users";
+try {
+    $usr_q = $dblink->prepare($usr_max_sql);
+    $usr_q->execute();
+    $usr_result = $usr_q->fetch(PDO::FETCH_ASSOC);
+    $usr_max = $usr_result['max_val'] ?? 0;
+
+    // The admin INSERT doesn't specify an ID, so it will use nextval
+    // We set the sequence to current max, and the INSERT will get max+1
+    if ($usr_max >= 0) {
+        $setval_sql = "SELECT pg_catalog.setval('public.usr_users_usr_user_id_seq', $usr_max, true);\n";
+        fwrite($output_handle, $setval_sql);
+        echo "   Reset usr_users_usr_user_id_seq to $usr_max\n";
+        $sequence_count++;
+    }
+} catch (Exception $e) {
+    echo "   WARNING: Could not reset usr_users sequence: " . $e->getMessage() . "\n";
+}
+
+echo "   Generated $sequence_count sequence reset statements\n";
+
+// ============================================================================
+// GENERATE MIGRATION BASELINE
+// ============================================================================
+
+echo "[8.6/10] Generating migration baseline...\n";
+
+fwrite($output_handle, "\n-- ============================================================================\n");
+fwrite($output_handle, "-- MIGRATION BASELINE\n");
+fwrite($output_handle, "-- Mark all historical migrations as 'already applied' for fresh installs\n");
+fwrite($output_handle, "-- This prevents old migrations from running on new installations\n");
+fwrite($output_handle, "-- ============================================================================\n\n");
+
+// Load migrations from migrations.php
+$migrations = [];
+require_once(PathHelper::getIncludePath('migrations/migrations.php'));
+
+$migration_count = 0;
+
+/**
+ * Normalize SQL before hashing (same logic as Migration class)
+ */
+function normalize_sql_for_hash($sql) {
+    $sql = preg_replace('/\s+/', ' ', $sql);
+    $sql = trim($sql);
+    $sql = rtrim($sql, ';');
+    return $sql;
+}
+
+foreach ($migrations as $migration) {
+    $migration_hash = null;
+    $migration_sql = null;
+    $migration_file = null;
+
+    // Generate hash based on migration type (same logic as Migration::shouldRunMigration)
+    if (isset($migration['migration_sql']) && !empty($migration['migration_sql'])) {
+        $normalized_sql = normalize_sql_for_hash($migration['migration_sql']);
+        $migration_hash = md5($normalized_sql);
+        $migration_sql = addslashes($migration['migration_sql']);
+    } elseif (isset($migration['migration_file']) && !empty($migration['migration_file'])) {
+        $migration_file_path = PathHelper::getIncludePath('migrations/' . $migration['migration_file']);
+        if (file_exists($migration_file_path)) {
+            $migration_hash = md5_file($migration_file_path);
+            $migration_file = addslashes($migration['migration_file']);
+        } else {
+            echo "   WARNING: Migration file not found: {$migration['migration_file']}\n";
+            continue;
+        }
+    } else {
+        // Skip empty migrations
+        continue;
+    }
+
+    $db_version = floatval($migration['database_version']);
+
+    // Generate INSERT statement for this migration
+    $insert_sql = "INSERT INTO mig_migrations (mig_version, mig_name, mig_hash, mig_success, mig_output, mig_create_time";
+    if ($migration_sql) {
+        $insert_sql .= ", mig_sql";
+    }
+    if ($migration_file) {
+        $insert_sql .= ", mig_file";
+    }
+    $insert_sql .= ") VALUES ($db_version, 'Baseline migration $db_version', '$migration_hash', true, 'Pre-applied during fresh install', CURRENT_TIMESTAMP";
+    if ($migration_sql) {
+        $insert_sql .= ", '$migration_sql'";
+    }
+    if ($migration_file) {
+        $insert_sql .= ", '$migration_file'";
+    }
+    $insert_sql .= ");\n";
+
+    fwrite($output_handle, $insert_sql);
+    $migration_count++;
+}
+
+// Reset mig_migrations sequence
+fwrite($output_handle, "\n-- Reset mig_migrations sequence\n");
+fwrite($output_handle, "SELECT pg_catalog.setval('public.mig_migrations_mig_migration_id_seq', $migration_count, true);\n");
+
+echo "   Generated baseline for $migration_count migrations\n";
 
 // Write footer
 $footer = <<<SQL
