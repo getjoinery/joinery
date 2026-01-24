@@ -42,6 +42,15 @@
 		$dry_run = isset($_REQUEST['dry-run']);
 	}
 
+	// Helper function to output and flush immediately
+	function upgrade_echo($message) {
+		echo $message;
+		if (ob_get_level() > 0) {
+			ob_flush();
+		}
+		flush();
+	}
+
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
 	$live_directory = $full_site_dir. '/public_html';
 	$backup_directory = $full_site_dir. '/public_html_last';
@@ -64,7 +73,7 @@
 		$response['release_notes'] = $upgrade->get('upg_release_notes');
 		$response['upgrade_location'] = LibraryFunctions::get_absolute_url('/static_files/'.$upgrade->get('upg_name'));
 		header("Content-Type: application/json");
-		http_response_code(400);
+		http_response_code(200);
 
 		$response = json_encode($response);
 		echo $response . PHP_EOL;
@@ -112,21 +121,53 @@
 	//GET THE UPGRADE INFO
 	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade?serve-upgrade=1';
 	$access_token = '';
-	$curl=curl_init();
+	$curl = curl_init();
 	curl_setopt_array($curl, array(
 	  CURLOPT_URL => $upgrade_source,
 	  CURLOPT_RETURNTRANSFER => true,
 	  CURLOPT_ENCODING => '',
 	  CURLOPT_MAXREDIRS => 10,
-	  CURLOPT_TIMEOUT => 0,
+	  CURLOPT_TIMEOUT => 30, // 30 second timeout for info request
+	  CURLOPT_CONNECTTIMEOUT => 10, // 10 second connection timeout
 	  CURLOPT_FOLLOWLOCATION => true,
 	  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
 	  CURLOPT_CUSTOMREQUEST => 'GET',
 	));
 	$response = curl_exec($curl);
+	$curl_error = curl_error($curl);
+	$curl_errno = curl_errno($curl);
 	curl_close($curl);
+
+	// Validate cURL request succeeded
+	if ($curl_errno !== 0) {
+		if (!$is_cli) {
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Connection Error:</strong> Unable to reach upgrade server.<br>';
+			echo 'Error: ' . htmlspecialchars($curl_error) . '<br>';
+			echo 'Server: ' . htmlspecialchars($upgrade_source) . '<br>';
+			echo '</div>';
+		} else {
+			echo "ERROR: Unable to reach upgrade server: $curl_error\n";
+		}
+		exit(1);
+	}
+
+	// Validate JSON response
 	$decode_response = json_decode($response, true);
-	$sourceFile = $decode_response['upgrade_location'];
+	if (json_last_error() !== JSON_ERROR_NONE) {
+		if (!$is_cli) {
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Invalid Response:</strong> Upgrade server returned invalid data.<br>';
+			echo 'JSON Error: ' . htmlspecialchars(json_last_error_msg()) . '<br>';
+			echo '</div>';
+		} else {
+			echo "ERROR: Invalid JSON response from upgrade server: " . json_last_error_msg() . "\n";
+		}
+		exit(1);
+	}
+
+	// Validate required fields in response
+	$sourceFile = $decode_response['upgrade_location'] ?? null;
 
 	if ($_POST && $_POST['confirm']){
 
@@ -284,54 +325,99 @@
 
 		$sourceFile = $decode_response['upgrade_location'];
 
+		if (!$sourceFile) {
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Invalid Response:</strong> Upgrade server did not provide a download location.<br>';
+			echo '</div>';
+			exit(1);
+		}
+
 		$file_download_location = $full_site_dir.'/uploads/'.basename($sourceFile);
 
-		//GET THE UPGRADE FILE
-		echo 'Getting: '. $sourceFile.'<br>';
+		// Check disk space before download (require at least 500MB free)
+		$free_space = disk_free_space($full_site_dir.'/uploads/');
+		$min_required = 500 * 1024 * 1024; // 500MB
+		if ($free_space !== false && $free_space < $min_required) {
+			$free_mb = round($free_space / 1024 / 1024);
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo "<strong>❌ Insufficient Disk Space:</strong> Only {$free_mb}MB available, need at least 500MB.<br>";
+			echo 'Free up disk space before upgrading.<br>';
+			echo '</div>';
+			exit(1);
+		}
 
-		$new_file = fopen($file_download_location, "w") or die("cannot open" . $file_download_location);
+		//GET THE UPGRADE FILE
+		upgrade_echo('Getting: '. $sourceFile.'<br>');
+
+		$new_file = fopen($file_download_location, "w");
+		if (!$new_file) {
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ File Error:</strong> Cannot create download file at ' . htmlspecialchars($file_download_location) . '<br>';
+			echo 'Check directory permissions.<br>';
+			echo '</div>';
+			exit(1);
+		}
 
 		// Setting the curl operations
 		$cd = curl_init();
 		curl_setopt($cd, CURLOPT_URL, $sourceFile);
 		curl_setopt($cd, CURLOPT_FILE, $new_file);
-		curl_setopt($cd, CURLOPT_TIMEOUT, 30); // timeout is 30 seconds, to download the large files you may need to increase the timeout limit.
+		curl_setopt($cd, CURLOPT_TIMEOUT, 300); // 5 minute timeout for large files
+		curl_setopt($cd, CURLOPT_CONNECTTIMEOUT, 30); // 30 second connection timeout
+		curl_setopt($cd, CURLOPT_FOLLOWLOCATION, true);
 
-		curl_exec($cd);
-		if (curl_errno($cd)) {
-		  echo "the cURL error is : " . curl_error($cd);
-		  exit;
-		}
-		else {
-			$status = curl_getinfo($cd);
-			if($status["http_code"] == 200){
-				//echo "The upgrade is downloaded...<br>";
-			}
-			else{
-				echo "The error code is : " . $status["http_code"];
-				exit;
-			}
-		  // the http status 200 means everything is going well. the error codes can be 401, 403 or 404.
-		}
+		$curl_success = curl_exec($cd);
+		$curl_error = curl_error($cd);
+		$curl_errno = curl_errno($cd);
+		$status = curl_getinfo($cd);
 
 		// close and finalize the operations.
 		curl_close($cd);
 		fclose($new_file);
 
+		if ($curl_errno !== 0) {
+			@unlink($file_download_location); // Clean up partial download
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Download Error:</strong> ' . htmlspecialchars($curl_error) . '<br>';
+			echo '</div>';
+			exit(1);
+		}
+
+		if ($status["http_code"] != 200) {
+			@unlink($file_download_location); // Clean up failed download
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Download Failed:</strong> Server returned HTTP ' . $status["http_code"] . '<br>';
+			echo 'URL: ' . htmlspecialchars($sourceFile) . '<br>';
+			echo '</div>';
+			exit(1);
+		}
+
 		if(file_exists($file_download_location)){
-			echo "The upgrade is downloaded...<br>";
+			$file_size = filesize($file_download_location);
+			if ($file_size < 1024) { // Less than 1KB is suspicious
+				@unlink($file_download_location);
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Download Error:</strong> Downloaded file is too small (' . $file_size . ' bytes).<br>';
+				echo 'The upgrade package may be corrupt or the URL may be invalid.<br>';
+				echo '</div>';
+				exit(1);
+			}
+			$size_mb = round($file_size / 1024 / 1024, 2);
+			upgrade_echo("The upgrade is downloaded ({$size_mb} MB)...<br>");
 		}
 		else{
-			echo "The upgrade failed to download...aborting.<br>";
-			exit;
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Download Failed:</strong> File was not created at ' . htmlspecialchars($file_download_location) . '<br>';
+			echo '</div>';
+			exit(1);
 		}
 
 		//CLEAR OLD STAGED FILES
-		echo 'Clearing staging area: '.$stage_location.'<br>';
-		exec("chmod -R 770 $stage_location");
-		exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
-		exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
+		upgrade_echo('Clearing staging area: '.$stage_location.'<br>');
 		if(file_exists($stage_location)){
+			exec("chmod -R 770 $stage_location");
+			exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
+			exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
 			exec ("rm -rf $stage_location".'/*');
 			if(!is_dir_empty($stage_location)){
 				echo 'Failed to clear staging location:'.$stage_location.'...aborting.<br>';
@@ -339,8 +425,16 @@
 				exit;
 			}
 			else{
-				echo 'Staging area cleared<br>';
+				upgrade_echo('Staging area cleared<br>');
 			}
+		}
+		else{
+			// Create staging directory if it doesn't exist
+			if(!mkdir($stage_location, 0770, true)){
+				echo 'Failed to create staging location: '.$stage_location.'...aborting.<br>';
+				exit;
+			}
+			upgrade_echo('Staging area created<br>');
 		}
 
 		// EXTRACT THE ARCHIVE (supports both tar.gz and legacy zip)
@@ -349,7 +443,7 @@
 
 		if ($is_tar_gz) {
 			// Extract tar.gz archive
-			echo 'Extracting tar.gz archive...<br>';
+			upgrade_echo('Extracting tar.gz archive...<br>');
 			$tar_cmd = sprintf(
 				'tar -xzf %s -C %s 2>&1',
 				escapeshellarg($file_download_location),
@@ -364,11 +458,11 @@
 				echo 'Error: ' . implode('<br>', $tar_output) . '<br>';
 				exit;
 			}
-			echo 'Upgrade at '.$file_download_location. ' extracted to '.$stage_location.'<br>';
+			upgrade_echo('Upgrade at '.$file_download_location. ' extracted to '.$stage_location.'<br>');
 		}
 		else {
 			// Extract legacy zip archive
-			echo 'Extracting legacy zip archive...<br>';
+			upgrade_echo('Extracting legacy zip archive...<br>');
 			$zip = new ZipArchive;
 			if ($zip->open($file_download_location)){
 			  $zip->extractTo($stage_location);
@@ -384,7 +478,33 @@
 		// ============================================
 		// PRE-DEPLOYMENT VALIDATION
 		// ============================================
-		echo '<br><h3>Pre-deployment Validation</h3>';
+		upgrade_echo('<br><h3>Pre-deployment Validation</h3>');
+
+		// Validate tarball structure (heuristic check for obvious issues)
+		$result = DeploymentHelper::validateTarballStructure($stage_directory, $verbose);
+		if (!$result['success']) {
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Tarball Validation Failed:</strong> The upgrade package does not have the expected structure.<br>';
+			echo '<ul>';
+			foreach ($result['errors'] as $error) {
+				echo '<li>' . htmlspecialchars($error) . '</li>';
+			}
+			echo '</ul>';
+			echo 'This may indicate a corrupted download or wrong file.<br>';
+			echo '</div>';
+			// Clean up staging
+			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
+			exit(1);
+		}
+		echo "✓ Tarball structure validation passed<br>";
+		if (!empty($result['warnings'])) {
+			echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
+			echo '<strong>⚠️ Warnings:</strong><br>';
+			foreach ($result['warnings'] as $warning) {
+				echo '• ' . htmlspecialchars($warning) . '<br>';
+			}
+			echo '</div>';
+		}
 
 		// Check that active theme is available
 		$active_theme = $settings->get_setting('theme');
@@ -489,7 +609,7 @@
 			echo "✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")<br>";
 		}
 
-		echo '<br><h3>Preserving Custom Themes/Plugins</h3>';
+		upgrade_echo('<br><h3>Preserving Custom Themes/Plugins</h3>');
 
 		// Copy custom themes/plugins from live into staging BEFORE the mv
 		// This ensures custom themes are included when staging moves to live
@@ -511,7 +631,7 @@
 		// ============================================
 		// DEPLOYMENT
 		// ============================================
-		echo '<br><h3>Deploying Upgrade</h3>';
+		upgrade_echo('<br><h3>Deploying Upgrade</h3>');
 
 		if($dry_run){
 			echo '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">';
@@ -519,11 +639,21 @@
 			echo '</div>';
 		}
 		else{
-			//CLEAR BACKUP AREA
+			//CLEAR OR CREATE BACKUP AREA
 			echo 'Clearing backup area: '.$backup_directory.'<br>';
-			exec ("rm -rf $backup_directory".'/*');
-			exec ("rm -rf $backup_directory".'/.git');  //REMOVE LATENT GIT FILES
-			exec ("rm -rf $backup_directory".'/.gitignore');  //REMOVE LATENT GIT FILES
+			if (!is_dir($backup_directory)) {
+				if (!mkdir($backup_directory, 0770, true)) {
+					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+					echo '<strong>❌ Error:</strong> Could not create backup directory: ' . htmlspecialchars($backup_directory) . '<br>';
+					echo '</div>';
+					exit(1);
+				}
+				echo 'Backup area created<br>';
+			} else {
+				exec ("rm -rf $backup_directory".'/*');
+				exec ("rm -rf $backup_directory".'/.git');  //REMOVE LATENT GIT FILES
+				exec ("rm -rf $backup_directory".'/.gitignore');  //REMOVE LATENT GIT FILES
+			}
 			if(is_dir_empty($backup_directory)){
 				echo 'Backup area cleared<br>';
 			}
@@ -550,8 +680,32 @@
 			echo 'Moving '.$live_directory. ' to '. $backup_directory.'<br>';
 			echo 'Moving '.$stage_directory. ' to '. $live_directory.'<br>';
 
-			exec("mv $live_directory_contents $backup_directory");
-			exec("mv $stage_directory_contents $live_directory");
+			// Move live to backup
+			$mv_output = [];
+			$mv_exit = 0;
+			exec("mv $live_directory_contents $backup_directory 2>&1", $mv_output, $mv_exit);
+			if ($mv_exit !== 0) {
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Backup Failed:</strong> Could not move live files to backup.<br>';
+				echo 'Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '<br>';
+				echo '</div>';
+				exit(1);
+			}
+
+			// Move staged to live
+			$mv_output = [];
+			$mv_exit = 0;
+			exec("mv $stage_directory_contents $live_directory 2>&1", $mv_output, $mv_exit);
+			if ($mv_exit !== 0) {
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Deployment Failed:</strong> Could not move staged files to live.<br>';
+				echo 'Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '<br>';
+				echo 'Attempting rollback...<br>';
+				echo '</div>';
+				// Attempt to restore from backup
+				exec("mv $backup_directory_contents $live_directory 2>&1");
+				exit(1);
+			}
 
 			// Fix permissions using centralized script (production mode)
 			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
@@ -618,7 +772,7 @@
 		// ============================================
 		// COMPOSER VALIDATION
 		// ============================================
-		echo '<br><h3>Validating Composer Dependencies</h3>';
+		upgrade_echo('<br><h3>Validating Composer Dependencies</h3>');
 
 		if($dry_run){
 			echo '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">';
@@ -656,7 +810,7 @@
 		// ============================================
 		// DATABASE MIGRATION
 		// ============================================
-		echo '<br><h3>Running Database Migrations</h3>';
+		upgrade_echo('<br><h3>Running Database Migrations</h3>');
 
 		if($dry_run){
 			echo '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">';
@@ -692,18 +846,20 @@
 			}
 
 			//UPDATE THE SYSTEM VERSION
-			$sql = "UPDATE stg_settings set stg_value='".$decode_response['system_version']."' WHERE stg_name='system_version'";
 			try{
+				$sql = "UPDATE stg_settings SET stg_value = :version WHERE stg_name = 'system_version'";
 				$q = $dblink->prepare($sql);
-				$q->execute();
+				$q->execute([':version' => $decode_response['system_version']]);
 				if($verbose){
-					echo 'System version now '.$decode_response['system_version']."<br>\n";
+					echo 'System version now ' . htmlspecialchars($decode_response['system_version']) . "<br>\n";
 				}
 			}
 			catch(PDOException $e){
-				echo $e->getMessage();
-				echo 'ABORTING MIGRATIONS.  Failed to set system version: '. $decode_response['system_version'] ."<br>\n";
-				exit;
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Database Error:</strong> Failed to update system version.<br>';
+				echo 'Error: ' . htmlspecialchars($e->getMessage()) . '<br>';
+				echo '</div>';
+				exit(1);
 			}
 		}
 
@@ -726,8 +882,8 @@
 			echo '</div>';
 		}
 		else{
-			echo '<br><h2>✓ Upgrade Complete!</h2>';
-			echo 'System upgraded to version: ' . $decode_response['system_version'] . '<br>';
+			upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
+			upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 		}
 	}
 	else{
@@ -765,8 +921,9 @@
 				print_r($response);
 			}
 			else if($decode_response['system_version'] > $settings->get_setting('system_version')){
-				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . '('.$decode_response['upgrade_name'].') released on '. $decode_response['release_date'] .' - '.$decode_response['release_notes'].' </p>';
-				echo $formwriter->hiddeninput("confirm", 1);
+				$friendly_date = date('F j, Y', strtotime($decode_response['release_date']));
+				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . ' ('.$decode_response['upgrade_name'].') released on '. $friendly_date .' - '.$decode_response['release_notes'].' </p>';
+				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
 
 				echo '<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;">';
 				echo '<label style="display: flex; align-items: center; cursor: pointer;">';
@@ -780,9 +937,10 @@
 
 			}
 			else if($decode_response['system_version'] == $settings->get_setting('system_version')){
-				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . '('.$decode_response['upgrade_name'].') released on '. $decode_response['release_date'] .' - '.$decode_response['release_notes'].' </p>';
+				$friendly_date = date('F j, Y', strtotime($decode_response['release_date']));
+				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . ' ('.$decode_response['upgrade_name'].') released on '. $friendly_date .' - '.$decode_response['release_notes'].' </p>';
 				echo 'Your version '. $settings->get_setting('system_version'). ' is up to date.  No upgrade needed.  ';
-				echo $formwriter->hiddeninput("confirm", 1);
+				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
 
 				echo '<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;">';
 				echo '<label style="display: flex; align-items: center; cursor: pointer;">';
@@ -833,7 +991,14 @@
 	}
 
 	function is_dir_empty($dir) {
-		$numfiles = count(scandir($dir));
+		if (!is_dir($dir)) {
+			return true; // Non-existent directory is considered empty
+		}
+		$files = scandir($dir);
+		if ($files === false) {
+			return true; // Unable to read directory, treat as empty
+		}
+		$numfiles = count($files);
 		if($numfiles == 0 || $numfiles == 2){
 			return true;
 		}
