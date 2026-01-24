@@ -359,28 +359,6 @@ if (!empty($data_files)) {
     foreach ($data_files as $table => $file) {
         $data_content = file_get_contents($file);
         if ($data_content) {
-            // Transform settings for portability
-            if ($table === 'stg_settings') {
-                // Transform absolute composerAutoLoad paths to relative paths for portability
-                // This ensures the install SQL works in any environment (Docker, traditional, etc.)
-                // COPY format uses tabs, not SQL quotes: id\tcomposerAutoLoad\t/var/www/html/site/vendor/\t...
-                $data_content = preg_replace(
-                    "/(composerAutoLoad\t)\/var\/www\/html\/[^\t]+\/vendor\/(\t)/",
-                    '$1../vendor/$2',
-                    $data_content
-                );
-                echo "   Transformed composerAutoLoad to use relative path\n";
-
-                // Set system_version to the version being published
-                // This ensures fresh installs have the correct version set
-                // COPY format: id\tsystem_version\tVALUE\t...
-                $data_content = preg_replace(
-                    "/(system_version\t)[^\t]*(\t)/",
-                    '$1' . $version . '$2',
-                    $data_content
-                );
-                echo "   Set system_version to $version\n";
-            }
             fwrite($output_handle, "-- Data for table: $table\n");
             fwrite($output_handle, $data_content);
             fwrite($output_handle, "\n");
@@ -552,6 +530,23 @@ fwrite($output_handle, "\n-- Reset mig_migrations sequence\n");
 fwrite($output_handle, "SELECT pg_catalog.setval('public.mig_migrations_mig_migration_id_seq', $migration_count, true);\n");
 
 echo "   Generated baseline for $migration_count migrations\n";
+
+// ============================================================================
+// PORTABILITY FIXES
+// TODO: Eventually the composerAutoLoad value in the source database should
+// be set to a portable relative path, eliminating the need for this fix.
+// ============================================================================
+
+fwrite($output_handle, "\n-- ============================================================================\n");
+fwrite($output_handle, "-- PORTABILITY FIXES\n");
+fwrite($output_handle, "-- These UPDATE statements ensure settings work across different environments\n");
+fwrite($output_handle, "-- ============================================================================\n\n");
+
+// Set composerAutoLoad to relative path for portability
+fwrite($output_handle, "-- Set composerAutoLoad to relative vendor path (works in Docker and bare-metal)\n");
+fwrite($output_handle, "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';\n\n");
+
+echo "   Added portability fix for composerAutoLoad\n";
 
 // Write footer
 $footer = <<<SQL
