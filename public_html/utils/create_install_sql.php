@@ -212,7 +212,8 @@ $essential_tables = [
     'zone',               // Timezone names (IANA)
     'ety_event_types',    // Event type definitions
     'emt_email_templates', // Email templates
-    'pmu_public_menus'    // Public menu structure
+    'pmu_public_menus',   // Public menu structure
+    'com_components'      // Page components (all Bootstrap-based, work with falcon theme)
 ];
 
 $data_files = [];
