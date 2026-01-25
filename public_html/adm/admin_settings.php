@@ -848,10 +848,6 @@
 	$formwriter->textinput('nickname_display_as', 'Nickname display as (blank for no nicknames)', [
 		'value' => $settings->get_setting('nickname_display_as')
 	]);
-	$formwriter->dropinput('form_style', 'Form styling', [
-		'options' => ["Default (UIKit)"=>'', 'Bootstrap' => 'admin', 'Tailwind' => 'tailwind'],
-		'value' => $settings->get_setting('form_style')
-	]);
 
 	$formwriter->dropinput('activation_required_login', 'Require email activation to log on', [
 		'options' => $yes_no_options,
