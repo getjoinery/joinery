@@ -208,9 +208,20 @@ public static function get_by_name($name) {
 		$upload_dir = $settings->get_setting('upload_dir');
 
 		if ($this->is_image()) {
-		
+
 			//RESIZE THE PICTURE
 			$old_path = $upload_dir.'/'.$this->get('fil_name');
+
+			// Ensure all resize subdirectories exist
+			$resize_dirs = ['thumbnail', 'lthumbnail', 'small', 'medium', 'large'];
+			foreach ($resize_dirs as $dir) {
+				$dir_path = $upload_dir . '/' . $dir;
+				if (!is_dir($dir_path)) {
+					if (!mkdir($dir_path, 0777, true)) {
+						error_log("Failed to create resize directory: $dir_path");
+					}
+				}
+			}
 
 			//THUMBNAIL SIZE
 			if($size == 'all' || $size == 'thumbnail'){
