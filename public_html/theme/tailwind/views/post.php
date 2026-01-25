@@ -146,8 +146,7 @@
 
 									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
-											$settings = Globalvars::get_instance();
-											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key, $settings->get_setting('form_style'));
+											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key);
 	
 											$validation_rules = array();
 											$validation_rules['cmt']['required']['value'] = 'true';

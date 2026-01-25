@@ -238,8 +238,7 @@ $page_vars = $page_vars->data;
 										<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
 										<div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="mt-3 p-3 bg-light rounded">
 											<?php
-											$settings = Globalvars::get_instance();
-											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key, $settings->get_setting('form_style'));
+											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key);
 
 											$validation_rules = array();
 											$validation_rules['cmt']['required']['value'] = 'true';
