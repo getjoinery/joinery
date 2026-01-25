@@ -255,28 +255,44 @@ foreach ($essential_tables as $table) {
 }
 
 // ============================================================================
-// GENERATE DEFAULT ADMIN USER
+// GENERATE DEFAULT USERS (Admin, System, Deleted)
 // ============================================================================
 
-echo "[7/10] Generating default admin user...\n";
+echo "[7/10] Generating default users...\n";
 
 // Generate bcrypt hash for default password
 $default_password = 'changeme123';
 $bcrypt_hash = password_hash($default_password, PASSWORD_BCRYPT);
 
-// Create admin user SQL (without usr_active which doesn't exist in table)
+// Create admin user SQL (user_id 1) - explicit ID to ensure correct ordering
 $admin_user_sql = sprintf(
     "-- Default admin user (email: admin@example.com, password: %s)\n" .
-    "INSERT INTO public.usr_users (usr_first_name, usr_last_name, usr_email, usr_permission, " .
+    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
     "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
-    "VALUES ('Admin', '', 'admin@example.com', 10, true, true, '%s', CURRENT_DATE, true, 'America/New_York');\n",
+    "VALUES (1, 'Admin', '', 'admin@example.com', 10, true, true, '%s', CURRENT_DATE, true, 'America/New_York');\n\n",
     $default_password,
     $bcrypt_hash
 );
 
+// Create system user SQL (user_id 2) - used for system-generated actions
+$system_user_sql = "-- System user (user_id 2) - used for system-generated actions\n" .
+    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
+    "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
+    "VALUES (2, 'System', 'User', 'system-user@joinery.local', 10, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n";
+
+// Create deleted user SQL (user_id 3) - placeholder for reassigning ownership when users are deleted
+$deleted_user_sql = "-- Deleted user (user_id 3) - placeholder for reassigning ownership when users are deleted\n" .
+    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
+    "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
+    "VALUES (3, 'Deleted', 'User', 'deleted-user@joinery.local', 0, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n" .
+    "-- Reset usr_users sequence to start after default users\n" .
+    "SELECT setval('usr_users_usr_user_id_seq', 3, true);\n";
+
 $admin_file = $temp_dir . '/admin_user.sql';
-file_put_contents($admin_file, $admin_user_sql);
+file_put_contents($admin_file, $admin_user_sql . $system_user_sql . $deleted_user_sql);
 echo "   Generated admin user (admin@example.com / $default_password)\n";
+echo "   Generated system user (user_id 2)\n";
+echo "   Generated deleted user (user_id 3)\n";
 
 // ============================================================================
 // ASSEMBLE FINAL SQL FILE
@@ -366,9 +382,9 @@ if (!empty($data_files)) {
     }
 }
 
-// Write admin user data
+// Write default users data (admin, system, deleted)
 fwrite($output_handle, "\n-- ============================================================================\n");
-fwrite($output_handle, "-- DEFAULT ADMIN USER\n");
+fwrite($output_handle, "-- DEFAULT USERS (Admin, System, Deleted)\n");
 fwrite($output_handle, "-- ============================================================================\n\n");
 fwrite($output_handle, file_get_contents($admin_file));
 
@@ -427,26 +443,8 @@ try {
     echo "   WARNING: Could not query sequences: " . $e->getMessage() . "\n";
 }
 
-// Also reset usr_users sequence for the admin user we're inserting
-// The admin user will get the next available ID, so we need to ensure the sequence is correct
-$usr_max_sql = "SELECT COALESCE(MAX(usr_user_id), 0) as max_val FROM usr_users";
-try {
-    $usr_q = $dblink->prepare($usr_max_sql);
-    $usr_q->execute();
-    $usr_result = $usr_q->fetch(PDO::FETCH_ASSOC);
-    $usr_max = $usr_result['max_val'] ?? 0;
-
-    // The admin INSERT doesn't specify an ID, so it will use nextval
-    // We set the sequence to current max, and the INSERT will get max+1
-    if ($usr_max >= 0) {
-        $setval_sql = "SELECT pg_catalog.setval('public.usr_users_usr_user_id_seq', $usr_max, true);\n";
-        fwrite($output_handle, $setval_sql);
-        echo "   Reset usr_users_usr_user_id_seq to $usr_max\n";
-        $sequence_count++;
-    }
-} catch (Exception $e) {
-    echo "   WARNING: Could not reset usr_users sequence: " . $e->getMessage() . "\n";
-}
+// Note: usr_users sequence is reset to 3 in the DEFAULT USERS section
+// after inserting the three default users (admin, system, deleted) with explicit IDs
 
 echo "   Generated $sequence_count sequence reset statements\n";
 
