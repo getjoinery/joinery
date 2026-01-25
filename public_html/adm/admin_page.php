@@ -217,8 +217,14 @@
 	endif; // has_placeholders && !uses_components
 
 	// Components Table
+	// Check if page has legacy body content (prevents adding components)
+	$has_legacy_body_content = !empty(trim($page->get('pag_body') ?? ''));
+
 	$comp_headers = array("Component", "Type", "Order", "Status", "Actions");
-	$comp_altlinks = array('Add Component' => '/admin/admin_component_edit?pag_page_id='.$page->key);
+	$comp_altlinks = array();
+	if (!$has_legacy_body_content) {
+		$comp_altlinks['Add Component'] = '/admin/admin_component_edit?pag_page_id='.$page->key;
+	}
 	$comp_table_options = array(
 		'altlinks' => $comp_altlinks,
 		'title' => 'Components (' . $num_components . ')',
@@ -226,6 +232,17 @@
 	);
 	$paget->tableheader($comp_headers, $comp_table_options, NULL);
 
+	// Show warning if page has legacy body content (always show, even if components exist)
+	if ($has_legacy_body_content) {
+		echo '<tr><td colspan="5" class="py-3">';
+		echo '<div class="alert alert-warning mb-0">';
+		echo '<i class="fas fa-exclamation-triangle me-2"></i>';
+		echo 'This page has legacy body content. To use components, <a href="/admin/admin_page_edit?pag_page_id=' . $page->key . '">edit this page</a> and remove the content there.';
+		echo '</div>';
+		echo '</td></tr>';
+	}
+
+	// Show components if any exist
 	foreach ($page_components as $component) {
 		$rowvalues = array();
 
@@ -264,7 +281,8 @@
 		$paget->disprow($rowvalues);
 	}
 
-	if ($num_components == 0) {
+	// Show "no components" message only if no legacy content and no components
+	if ($num_components == 0 && !$has_legacy_body_content) {
 		echo '<tr><td colspan="5" class="text-center text-muted py-3">No components on this page. <a href="/admin/admin_component_edit?pag_page_id=' . $page->key . '">Add one</a></td></tr>';
 	}
 
@@ -277,7 +295,7 @@
 			<h5 class="mb-0">Page Preview</h5>
 		</div>
 		<div class="card-body p-0">
-			<iframe src="<?php echo htmlspecialchars($page->get_url()); ?>" width="100%" height="500" style="border:none;"></iframe>
+			<iframe src="<?php echo htmlspecialchars($page->get_url()); ?>" width="100%" height="650" style="border:none;"></iframe>
 		</div>
 	</div>
 

@@ -124,51 +124,17 @@
 		'options' => [1 => 'Yes', 0 => 'No']
 	]);
 
-	// Determine if we should show the content editor (if content exists) or component system (default)
-	$has_content = !empty(trim($content ?? ''));
-	$content_mode = $has_content ? 'editor' : 'components';
+	// Only show body content editor for legacy pages that already have content
+	// New pages should use the component system instead
+	$has_legacy_content = !empty(trim($content ?? ''));
 
-	// Build component info message
-	$component_info = '<i class="fas fa-puzzle-piece me-2"></i> This page will use the component system. ';
-	if($page->key) {
-		$component_info .= '<a href="/admin/admin_page_contents?pag_page_id=' . $page->key . '">Manage components &rarr;</a>';
-	} else {
-		$component_info .= '<em>Save the page first to add components.</em>';
+	if ($has_legacy_content) {
+		$formwriter->textbox('pag_body', 'Content (Legacy)', [
+			'validation' => ['required' => false],
+			'htmlmode' => 'yes',
+			'help' => 'This page uses legacy body content. To switch to the component system, remove all content from this field.'
+		]);
 	}
-
-	$formwriter->dropinput('content_mode', 'Content Source', [
-		'options' => ['components' => 'Use component system', 'editor' => 'Enter content here'],
-		'value' => $content_mode,
-		'visibility_rules' => [
-			'components' => [
-				'show' => ['component_info'],
-				'hide' => ['pag_body']
-			],
-			'editor' => [
-				'show' => ['pag_body'],
-				'hide' => ['component_info']
-			]
-		]
-	]);
-
-	// Component info message - using container ID pattern for visibility_rules
-	?>
-	<div id="component_info_container" class="mb-3">
-		<div class="alert alert-info mb-0">
-			<i class="fas fa-puzzle-piece me-2"></i> This page will use the component system.
-			<?php if($page->key): ?>
-				<a href="/admin/admin_page_contents?pag_page_id=<?php echo $page->key; ?>">Manage components &rarr;</a>
-			<?php else: ?>
-				<em>Save the page first to add components.</em>
-			<?php endif; ?>
-		</div>
-	</div>
-	<?php
-
-	$formwriter->textbox('pag_body', 'Content', [
-		'validation' => ['required' => false],
-		'htmlmode' => 'yes'
-	]);
 
 	$formwriter->submitbutton('btn_submit', 'Submit');
 	$formwriter->end_form();
