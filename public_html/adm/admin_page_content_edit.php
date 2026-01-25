@@ -25,7 +25,7 @@
 		
 		$page_content->set('pac_body', $_POST['pac_body']);
 
-		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name');
+		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name', 'pac_pag_page_id');
 
 		foreach($editable_fields as $field) {
 			$page_content->set($field, $_POST[$field]);
@@ -111,6 +111,11 @@
 
 	$formwriter->begin_form();
 
+	// Include the primary key as hidden field when editing existing record
+	if ($page_content->key) {
+		$formwriter->hiddeninput('pac_page_content_id', ['value' => $page_content->key]);
+	}
+
 	$formwriter->textinput('pac_location_name', 'Name for this content', [
 		'validation' => ['required' => true]
 	]);
@@ -131,7 +136,7 @@
 	}
 
 	$formwriter->dropinput('pac_is_published', 'Published', [
-		'options' => ['No' => 0, 'Yes' => 1]
+		'options' => [0 => 'No', 1 => 'Yes']
 	]);
 
 	$formwriter->textbox('pac_body', 'Content', [
