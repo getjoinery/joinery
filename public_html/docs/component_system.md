@@ -14,7 +14,7 @@ The Page Component System enables composing pages from reusable, configurable co
 6. [Logic Functions](#6-logic-functions)
 7. [Config Schema Reference](#7-config-schema-reference)
 8. [Admin Interface](#8-admin-interface)
-9. [Legacy Placeholder System](#9-legacy-placeholder-system)
+9. [Legacy Content Systems](#9-legacy-content-systems)
 
 ---
 
@@ -758,34 +758,41 @@ function my_logic($config) {
 
 ---
 
-## 9. Legacy Placeholder System
+## 9. Legacy Content Systems
 
-Before the component system, pages used a placeholder-based content system where `*!**slug**!*` markers in the page body (`pag_body`) were replaced with content from `pac_page_contents` records.
+The component system replaces two older content approaches. Both are preserved for backward compatibility but are considered legacy features.
 
-### How It Works
+### 9.1 Legacy Body Content (`pag_body`)
 
+Pages can store HTML directly in the `pag_body` field. This is now a legacy feature.
+
+**Admin UI Behavior (`/admin/admin_page_edit`):**
+- Content editor **only appears** when the page already has body content
+- New pages do not show the content editor (use components instead)
+- Field is labeled "Content (Legacy)" with migration guidance
+
+**Admin UI Behavior (`/admin/admin_page`):**
+- Warning displays when page has legacy body content: "This page has legacy body content. To use components, edit this page and remove the content there."
+- "Add Component" button is **hidden** when legacy body content exists
+- Warning appears even if components already exist on the page
+
+**Migration:** To switch a page to components, edit the page and remove all body content.
+
+### 9.2 Legacy Placeholder System
+
+Before components, pages used placeholder markers in `pag_body` that were replaced with content from `pac_page_contents` records.
+
+**How It Works:**
 1. Page body contains placeholder: `*!**about**!*`
 2. System finds `PageContent` record with matching `pac_link` = "about"
 3. Placeholder is replaced with `pac_body` content
 
-### Admin UI Behavior
-
+**Admin UI Behavior:**
 The "Page Content (Legacy)" section in `/admin/admin_page` is **hidden** when:
-- The page body contains no placeholders, OR
+- The page body contains no placeholders (`*!**slug**!*`), OR
 - The page is already using the component system
 
-This keeps the admin interface clean while preserving backward compatibility for sites still using the legacy system.
-
-### Migration Path
-
-For sites using the legacy placeholder system:
-
-1. **Keep using placeholders** - They continue to work indefinitely
-2. **Migrate to components** - Create component instances and attach to page
-   - Once a page has components, the placeholder system is bypassed
-   - Components render via `get_filled_content()` which checks for components first
-
-### Code Reference
+### 9.3 Content Rendering Priority
 
 The rendering logic in `Page::get_filled_content()`:
 
@@ -794,16 +801,31 @@ The rendering logic in `Page::get_filled_content()`:
 $components = new MultiPageContent(['page_id' => $this->key, 'components_only' => true, ...]);
 
 if ($components->count_all() > 0) {
-    // Has components - render them, ignore page body placeholders
+    // Has components - render them, ignore page body entirely
     foreach ($components as $component) {
         $output .= ComponentRenderer::render_component($component);
     }
     return $output;
 }
 
-// No components - fall back to placeholder substitution
+// No components - fall back to body content (with placeholder substitution)
 return $this->get_body_content();
 ```
+
+**Priority order:**
+1. **Components** - If any published components are attached, they render and body content is ignored
+2. **Body content with placeholders** - Placeholders are substituted
+3. **Plain body content** - Rendered as-is
+
+### 9.4 Migration Path
+
+For sites using legacy content:
+
+1. **Keep using legacy content** - It continues to work indefinitely
+2. **Migrate to components:**
+   - Create component instances and attach to the page
+   - Remove legacy body content from the page
+   - Once body content is removed, the "Add Component" button appears
 
 ---
 
