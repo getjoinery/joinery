@@ -75,7 +75,7 @@
 							<?php endif; ?>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Uploader</td>
-								<td class="p-1 text-600"><a href="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>"><?php echo htmlspecialchars($user->display_name()); ?> (ID: <?php echo $user->key; ?>)</a></td>
+								<td class="p-1 text-600"><a href="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>"><?php echo htmlspecialchars($user->display_name()); ?></a></td>
 							</tr>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Uploaded</td>
