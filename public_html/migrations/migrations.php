@@ -1086,3 +1086,12 @@
 		$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('cookie_privacy_policy_link', '', 1, now(), now(), 'general');";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+		// ========== Component Types Menu Item (v76) ==========
+		// Add Component Types menu item under Pages
+		$migration = array();
+		$migration['database_version'] = '76';
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'component-types'";
+		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug, amu_setting_activate) VALUES ('Component Types', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'pages'), 'admin_component_types', 3, 5, 0, '', 'component-types', 'page_contents_active');";
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
