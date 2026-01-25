@@ -14,6 +14,7 @@ The Page Component System enables composing pages from reusable, configurable co
 6. [Logic Functions](#6-logic-functions)
 7. [Config Schema Reference](#7-config-schema-reference)
 8. [Admin Interface](#8-admin-interface)
+9. [Legacy Placeholder System](#9-legacy-placeholder-system)
 
 ---
 
@@ -753,6 +754,55 @@ function my_logic($config) {
     // Fetch/compute data
     return ['key' => $value];
 }
+```
+
+---
+
+## 9. Legacy Placeholder System
+
+Before the component system, pages used a placeholder-based content system where `*!**slug**!*` markers in the page body (`pag_body`) were replaced with content from `pac_page_contents` records.
+
+### How It Works
+
+1. Page body contains placeholder: `*!**about**!*`
+2. System finds `PageContent` record with matching `pac_link` = "about"
+3. Placeholder is replaced with `pac_body` content
+
+### Admin UI Behavior
+
+The "Page Content (Legacy)" section in `/admin/admin_page` is **hidden** when:
+- The page body contains no placeholders, OR
+- The page is already using the component system
+
+This keeps the admin interface clean while preserving backward compatibility for sites still using the legacy system.
+
+### Migration Path
+
+For sites using the legacy placeholder system:
+
+1. **Keep using placeholders** - They continue to work indefinitely
+2. **Migrate to components** - Create component instances and attach to page
+   - Once a page has components, the placeholder system is bypassed
+   - Components render via `get_filled_content()` which checks for components first
+
+### Code Reference
+
+The rendering logic in `Page::get_filled_content()`:
+
+```php
+// Check for components first
+$components = new MultiPageContent(['page_id' => $this->key, 'components_only' => true, ...]);
+
+if ($components->count_all() > 0) {
+    // Has components - render them, ignore page body placeholders
+    foreach ($components as $component) {
+        $output .= ComponentRenderer::render_component($component);
+    }
+    return $output;
+}
+
+// No components - fall back to placeholder substitution
+return $this->get_body_content();
 ```
 
 ---

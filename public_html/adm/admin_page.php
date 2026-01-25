@@ -24,6 +24,7 @@
 	$search_criteria = array();
 
 	$search_criteria['page_id'] = $page->key;
+	$search_criteria['legacy_only'] = true;  // Exclude components from legacy content list
 
 	$page_contents = new MultiPageContent(
 		$search_criteria,
@@ -64,9 +65,16 @@
 		exit();
 	}
 
+	// Check if page uses legacy placeholder system
+	$page_body_check = $page->get('pag_body') ?: '';
+	$page_has_placeholders = preg_match('/\*!\*\*[^*]+\*\*!\*/', $page_body_check);
+
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Page' => '/admin/admin_page_edit?pag_page_id='.$page->key);
-	$options['altlinks'] += array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
+	// Only show "New Content" for legacy pages with placeholders
+	if ($page_has_placeholders && $num_components == 0) {
+		$options['altlinks'] += array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
+	}
 	if(!$page->get('pag_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = '/admin/admin_page?action=delete&pag_page_id='.$page->key;
 	}
@@ -156,13 +164,21 @@
 	</div>
 
 	<?php
-	// Page Content Table
+	// Page Content Table - Legacy placeholder system
+	// Only show if page body contains placeholders (*!**slug**!*) and page isn't using components
+	$page_body = $page->get('pag_body') ?: '';
+	$has_placeholders = preg_match('/\*!\*\*[^*]+\*\*!\*/', $page_body);
+	$uses_components = $num_components > 0;
+
+	// Show legacy content section only if placeholders exist and not using components
+	if ($has_placeholders && !$uses_components):
+
 	$headers = array("Content",  "Published", "Creator", "Status");
 	$altlinks = array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		'altlinks' => $altlinks,
-		'title' => 'Page Content',
+		'title' => 'Page Content (Legacy)',
 		'card' => true
 	);
 	$paget->tableheader($headers, $table_options, NULL);
@@ -197,6 +213,8 @@
 		$paget->disprow($rowvalues);
 	}
 	$paget->endtable($pager);
+
+	endif; // has_placeholders && !uses_components
 
 	// Components Table
 	$comp_headers = array("Component", "Type", "Order", "Status", "Actions");
