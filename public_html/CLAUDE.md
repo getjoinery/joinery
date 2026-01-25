@@ -534,6 +534,15 @@ This is the live test server where changes can be verified in a browser.
 - Email: `jeremy.tunnell+claude@gmail.com`
 - Password: `sKU^1cK1pVJCNAv`
 
+### Docker Production Server (docker-prod)
+**IP:** `23.239.11.53`
+**SSH Key:** `~/.ssh/id_ed25519_claude` (passphrase: `Cl@ude$ecureK3y#2026!`)
+
+Production Docker server hosting multiple client sites. Each site runs in its own container.
+
+**Containers:**
+- `empoweredhealthtn` - Empowered Health (empoweredhealthtn.com)
+
 ### Browser Testing (MCP)
 A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
 
