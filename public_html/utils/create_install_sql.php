@@ -205,8 +205,9 @@ echo "   Schema export complete (" . filesize($schema_file) . " bytes)\n";
 echo "[6/10] Exporting essential table data...\n";
 
 // List of essential tables to export (from spec)
+// Note: stg_settings is NOT included here - we use explicit INSERTs for settings
+// to avoid exporting site-specific values (API keys, paths, etc.)
 $essential_tables = [
-    'stg_settings',       // System configuration
     'amu_admin_menus',    // Admin menu structure
     'cco_country_codes',  // Country reference data
     'zone',               // Timezone names (IANA)
@@ -531,21 +532,127 @@ fwrite($output_handle, "SELECT pg_catalog.setval('public.mig_migrations_mig_migr
 echo "   Generated baseline for $migration_count migrations\n";
 
 // ============================================================================
-// PORTABILITY FIXES
-// TODO: Eventually the composerAutoLoad value in the source database should
-// be set to a portable relative path, eliminating the need for this fix.
+// DEFAULT SETTINGS
+// Generate explicit INSERT statements for settings needed in a fresh install.
+// This avoids exporting site-specific values (API keys, paths, credentials).
 // ============================================================================
 
+echo "[8.7/10] Generating default settings...\n";
+
 fwrite($output_handle, "\n-- ============================================================================\n");
-fwrite($output_handle, "-- PORTABILITY FIXES\n");
-fwrite($output_handle, "-- These UPDATE statements ensure settings work across different environments\n");
+fwrite($output_handle, "-- DEFAULT SETTINGS\n");
+fwrite($output_handle, "-- Curated list of settings for a fresh Joinery installation.\n");
+fwrite($output_handle, "-- Site-specific settings (paths, API keys, etc.) are intentionally omitted.\n");
 fwrite($output_handle, "-- ============================================================================\n\n");
 
-// Set composerAutoLoad to relative path for portability
-fwrite($output_handle, "-- Set composerAutoLoad to relative vendor path (works in Docker and bare-metal)\n");
-fwrite($output_handle, "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';\n\n");
+// Define all settings for a fresh install: name => value
+// Only include settings that are needed for the system to function
+$default_settings = [
+    // Feature Flags (enable/disable features)
+    'blog_active' => '1',
+    'events_active' => '1',
+    'products_active' => '1',
+    'bookings_active' => '1',
+    'surveys_active' => '1',
+    'files_active' => '1',
+    'videos_active' => '1',
+    'urls_active' => '1',
+    'emails_active' => '1',
+    'page_contents_active' => '1',
+    'subscriptions_active' => '1',
+    'coupons_active' => '1',
+    'comments_active' => '1',
+    'newsletter_active' => '1',
+    'mailing_lists_active' => '1',
+    'register_active' => '1',
+    'products_list_events_active' => '1',
+    'products_list_items_active' => '1',
+    'social_settings_active' => '0',
 
-echo "   Added portability fix for composerAutoLoad\n";
+    // Comment Settings
+    'comments_unregistered_users' => '0',
+    'default_comment_status' => 'Approved',
+    'show_comments' => '1',
+
+    // Security/Spam Settings
+    'use_captcha' => '1',
+    'use_honeypot' => '1',
+    'use_captcha_comments' => '1',
+    'activation_required_login' => '1',
+
+    // System Defaults
+    'default_timezone' => 'America/New_York',
+    'site_currency' => 'US Dollar',
+    'checkout_type' => 'stripe_regular',
+    'protocol_mode' => 'auto',
+    'tracking' => 'Use built in tracking',
+    'cookie_consent_mode' => 'auto',
+    'standard_error' => 'Sorry, that operation caused an error.',
+    'composerAutoLoad' => '../vendor/',
+    'theme_template' => 'falcon',
+    'upload_web_dir' => 'uploads',
+    'allowed_upload_extensions' => 'gif,jpeg,jpg,png,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a',
+    'max_subscriptions_per_user' => '10',
+    'use_blog_as_homepage' => '0',
+    'force_https' => '0',
+
+    // Email Template References
+    'event_email_inner_template' => 'blank_template',
+    'event_email_outer_template' => 'default_outer_template',
+    'event_email_footer_template' => 'event_bulk_footer',
+    'group_email_inner_template' => 'blank_template',
+    'group_email_outer_template' => 'default_outer_template',
+    'group_email_footer_template' => 'event_bulk_footer',
+    'individual_email_inner_template' => 'blank_template',
+    'bulk_footer' => 'default_footer',
+    'bulk_outer_template' => 'default_outer_template',
+    'default_email_template' => 'default_outer_template',
+    'default_mailing_list' => '1',
+
+    // Email Service Defaults
+    'email_service' => 'smtp',
+    'email_fallback_service' => 'smtp',
+    'mailgun_version' => '2',
+    'smtp_port' => '465',
+    'smtp_auth' => '1',
+    'email_test_mode' => '0',
+    'email_dry_run' => '0',
+    'email_debug_mode' => '0',
+
+    // Subscription Settings
+    'subscription_downgrades_enabled' => '1',
+    'subscription_downgrade_timing' => 'Immediate',
+    'subscription_cancellation_enabled' => '1',
+    'subscription_cancellation_timing' => 'Immediate',
+    'subscription_reactivation_enabled' => '1',
+    'subscription_downgrade_prorate' => '1',
+    'subscription_upgrade_prorate' => '1',
+    'subscription_cancellation_prorate' => '1',
+
+    // Payment Defaults
+    'use_paypal_checkout' => '0',
+
+    // Debug/Development (off for production)
+    'debug' => '0',
+    'debug_css' => '0',
+    'show_errors' => '0',
+    'upgrade_server_active' => '0',
+];
+
+// Generate INSERT statements for each setting
+$setting_id = 1;
+foreach ($default_settings as $setting_name => $setting_value) {
+    $escaped_value = str_replace("'", "''", $setting_value);
+    fwrite($output_handle, "INSERT INTO stg_settings (stg_setting_id, stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_group_name) ");
+    fwrite($output_handle, "VALUES ($setting_id, '$setting_name', '$escaped_value', 1, CURRENT_TIMESTAMP, 'general');\n");
+    $setting_id++;
+}
+
+// Reset stg_settings sequence
+fwrite($output_handle, "\n-- Reset stg_settings sequence\n");
+fwrite($output_handle, "SELECT pg_catalog.setval('public.stg_settings_stg_setting_id_seq', $setting_id, true);\n\n");
+
+echo "   Generated " . count($default_settings) . " default settings\n";
 
 // Write footer
 $footer = <<<SQL
