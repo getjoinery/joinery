@@ -80,7 +80,7 @@
 	$numrecords = $pages->count_all();
 	if($numrecords){
 		$pages->load();
-		$optionvals = $pages->get_dropdown_array_link();
+		$optionvals = array('' => '-- None --') + $pages->get_dropdown_array_link();
 		$formwriter->dropinput("pmu_link_choose", "Link existing page", [
 			'options' => $optionvals,
 			'visibility_rules' => [
@@ -103,7 +103,7 @@
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$menulist->load();
-	$optionvals = $menulist->get_dropdown_array();
+	$optionvals = array('' => '-- None (Top Level) --') + $menulist->get_dropdown_array();
 	$formwriter->dropinput("pmu_parent_menu_id", "Parent Menu", [
 		'options' => $optionvals
 	]);

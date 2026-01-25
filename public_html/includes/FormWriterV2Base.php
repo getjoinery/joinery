@@ -3048,7 +3048,7 @@ class AjaxSearchSelect {
         $output .= '  ' . "\n";
         $output .= '  function update' . $varName . 'Visibility() {' . "\n";
         $output .= '    const selected = document.getElementById("' . $fieldId . '").value;' . "\n";
-        $output .= '    const rules = visibilityRules' . $varName . '[selected] || {};' . "\n";
+        $output .= '    const rules = visibilityRules' . $varName . '[selected] || visibilityRules' . $varName . '["default"] || {};' . "\n";
         $output .= '    ' . "\n";
         $output .= '    (rules.show || []).forEach(function(id) {' . "\n";
         $output .= '      // Try to find element with _container suffix first, then fall back to plain ID' . "\n";
