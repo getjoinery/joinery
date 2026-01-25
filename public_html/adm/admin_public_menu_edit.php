@@ -94,7 +94,8 @@
 	$webDir = $settings->get_setting('webDir');
 
 	$formwriter->textinput('pmu_link', 'Or type in a link', [
-		'prepend' => $webDir
+		'prepend' => $webDir,
+		'validation' => false  // Disable auto-validation - handled server-side since this field is conditionally shown
 	]);
 
 	$menulist = new MultiPublicMenu(

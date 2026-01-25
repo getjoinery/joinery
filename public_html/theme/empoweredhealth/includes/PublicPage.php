@@ -169,7 +169,7 @@ class PublicPage extends PublicPageBase {
                             <h6>Newsletter</h6>
                             <p>Keep up-to-date on news and promotions from us.  We do not sell personal data.</p>
                             <div id="mc_embed_signup">
-                                <form action="/newsletter" method="get" class="form-inline">
+                                <form action="/lists" method="get" class="form-inline">
 
                                     <div class="form-group row" style="width: 100%">
                                         <div class="col-lg-8 col-md-12">
