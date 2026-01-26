@@ -14,6 +14,7 @@
 #   -q, --quiet         Suppress most output
 
 set -e
+set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
 
 # Get script directory for finding template files
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
