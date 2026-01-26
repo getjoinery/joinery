@@ -288,7 +288,7 @@ $deleted_user_sql = "-- Deleted user (user_id 3) - placeholder for reassigning o
     "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
     "VALUES (3, 'Deleted', 'User', 'deleted-user@joinery.local', 0, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n" .
     "-- Reset usr_users sequence to start after default users\n" .
-    "SELECT setval('usr_users_usr_user_id_seq', 3, true);\n";
+    "SELECT setval('public.usr_users_usr_user_id_seq', 3, true);\n";
 
 $admin_file = $temp_dir . '/admin_user.sql';
 file_put_contents($admin_file, $admin_user_sql . $system_user_sql . $deleted_user_sql);
@@ -487,7 +487,8 @@ foreach ($migrations as $migration) {
     if (isset($migration['migration_sql']) && !empty($migration['migration_sql'])) {
         $normalized_sql = normalize_sql_for_hash($migration['migration_sql']);
         $migration_hash = md5($normalized_sql);
-        $migration_sql = addslashes($migration['migration_sql']);
+        // Use raw SQL - we'll use dollar-quoting in the INSERT to avoid escaping issues
+        $migration_sql = $migration['migration_sql'];
     } elseif (isset($migration['migration_file']) && !empty($migration['migration_file'])) {
         $migration_file_path = PathHelper::getIncludePath('migrations/' . $migration['migration_file']);
         if (file_exists($migration_file_path)) {
@@ -505,7 +506,8 @@ foreach ($migrations as $migration) {
     $db_version = floatval($migration['database_version']);
 
     // Generate INSERT statement for this migration
-    $insert_sql = "INSERT INTO mig_migrations (mig_version, mig_name, mig_hash, mig_success, mig_output, mig_create_time";
+    // Use public. prefix since pg_dump sets search_path to empty
+    $insert_sql = "INSERT INTO public.mig_migrations (mig_version, mig_name, mig_hash, mig_success, mig_output, mig_create_time";
     if ($migration_sql) {
         $insert_sql .= ", mig_sql";
     }
@@ -514,7 +516,9 @@ foreach ($migrations as $migration) {
     }
     $insert_sql .= ") VALUES ($db_version, 'Baseline migration $db_version', '$migration_hash', true, 'Pre-applied during fresh install', CURRENT_TIMESTAMP";
     if ($migration_sql) {
-        $insert_sql .= ", '$migration_sql'";
+        // Use dollar-quoting to avoid escaping issues with embedded SQL
+        // The $mig$ tag is unique enough to avoid conflicts with migration content
+        $insert_sql .= ", \$mig\$" . $migration_sql . "\$mig\$";
     }
     if ($migration_file) {
         $insert_sql .= ", '$migration_file'";
@@ -636,14 +640,18 @@ $default_settings = [
     'debug' => '0',
     'debug_css' => '0',
     'show_errors' => '0',
+
+    // Upgrade Settings
     'upgrade_server_active' => '0',
+    'upgrade_source' => 'https://joinerytest.site',
 ];
 
 // Generate INSERT statements for each setting
+// Use public. prefix since pg_dump sets search_path to empty
 $setting_id = 1;
 foreach ($default_settings as $setting_name => $setting_value) {
     $escaped_value = str_replace("'", "''", $setting_value);
-    fwrite($output_handle, "INSERT INTO stg_settings (stg_setting_id, stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_group_name) ");
+    fwrite($output_handle, "INSERT INTO public.stg_settings (stg_setting_id, stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_group_name) ");
     fwrite($output_handle, "VALUES ($setting_id, '$setting_name', '$escaped_value', 1, CURRENT_TIMESTAMP, 'general');\n");
     $setting_id++;
 }
