@@ -724,6 +724,35 @@ Suggested available port: 8081 (database: 9081)
 Would you like to use port 8081 instead? [Y/n]
 ```
 
+### Database Load Failures
+
+If database initialization fails during site creation, the cause is almost always a **syntax or escaping error** in the SQL file or password handling.
+
+**Common symptoms:**
+- "Database validation failed" errors
+- Missing tables after initialization
+- Empty settings table
+
+**What to check:**
+1. **Password escaping**: Special characters in passwords (`!`, `$`, `&`, `\`) can cause issues when passed through shells. Use `--password-file` to avoid this.
+2. **SQL file syntax**: If you've modified `joinery-install.sql.gz`, check for syntax errors
+3. **Character encoding**: Ensure the SQL file uses UTF-8 encoding
+
+**What is NOT the problem:**
+- PostgreSQL `pg_hba.conf` restrict statements are not the cause
+- PostgreSQL authentication method (trust vs md5) is handled correctly by the installer
+- Database user permissions are set up automatically
+
+**Debugging steps:**
+```bash
+# Check container logs for specific errors
+docker logs $SITENAME 2>&1 | grep -i "error\|fail"
+
+# Connect to database manually to test
+docker exec -it $SITENAME bash
+su postgres -c "psql -d $SITENAME -c '\dt'"
+```
+
 ---
 
 ## Quick Reference
@@ -924,10 +953,16 @@ For Full (Strict) mode:
 
 ## Version Information
 
-- **Guide Version:** 3.5
-- **install.sh Version:** 2.5
+- **Guide Version:** 3.6
+- **install.sh Version:** 2.6
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
 - **Last Updated:** 2026-01-26
+
+### Changes in Version 3.6
+
+- Added database load failure troubleshooting section
+- Clarified that pg_hba.conf restrict statements are not the cause of load failures
+- Updated install.sh version to 2.6 (added `-y` flag support in site subcommand)
 
 ### Changes in Version 3.5
 

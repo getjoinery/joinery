@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 1.0
+# VERSION: 1.1 - Added database validation after initialization
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -171,6 +171,75 @@ if [ "$DB_EXISTS" = false ]; then
         }
         log "Database '$SITENAME' loaded successfully."
     fi
+
+    # =========================================================================
+    # DATABASE VALIDATION
+    # =========================================================================
+    log "Validating database initialization..."
+
+    VALIDATION_FAILED=false
+
+    # Check that key tables exist
+    REQUIRED_TABLES="usr_users stg_settings evt_events pro_products"
+    for table in $REQUIRED_TABLES; do
+        TABLE_EXISTS=$(psql -U postgres -d "$SITENAME" -tAc \
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '$table');" 2>/dev/null)
+        if [ "$TABLE_EXISTS" != "t" ]; then
+            log_error "Required table '$table' does not exist!"
+            VALIDATION_FAILED=true
+        fi
+    done
+
+    # Check that settings table has data
+    SETTINGS_COUNT=$(psql -U postgres -d "$SITENAME" -tAc \
+        "SELECT COUNT(*) FROM stg_settings;" 2>/dev/null)
+    if [ -z "$SETTINGS_COUNT" ] || [ "$SETTINGS_COUNT" -lt 10 ]; then
+        log_error "Settings table is empty or has insufficient data (found: ${SETTINGS_COUNT:-0} rows, expected: 10+)"
+        VALIDATION_FAILED=true
+    else
+        log "Settings table populated: $SETTINGS_COUNT rows"
+    fi
+
+    # Check for critical settings (these are always present in fresh installs)
+    CRITICAL_SETTINGS="blog_active theme_template events_active"
+    for setting in $CRITICAL_SETTINGS; do
+        SETTING_EXISTS=$(psql -U postgres -d "$SITENAME" -tAc \
+            "SELECT COUNT(*) FROM stg_settings WHERE stg_name = '$setting';" 2>/dev/null)
+        if [ "$SETTING_EXISTS" != "1" ]; then
+            log_error "Critical setting '$setting' not found in stg_settings!"
+            VALIDATION_FAILED=true
+        fi
+    done
+    log "Critical settings verified"
+
+    # Check that users table has the admin user
+    ADMIN_EXISTS=$(psql -U postgres -d "$SITENAME" -tAc \
+        "SELECT COUNT(*) FROM usr_users WHERE usr_email = 'admin@example.com';" 2>/dev/null)
+    if [ "$ADMIN_EXISTS" != "1" ]; then
+        log_error "Default admin user (admin@example.com) not found!"
+        VALIDATION_FAILED=true
+    else
+        log "Default admin user exists"
+    fi
+
+    # Check migrations table has entries (indicates SQL loaded properly)
+    MIGRATIONS_COUNT=$(psql -U postgres -d "$SITENAME" -tAc \
+        "SELECT COUNT(*) FROM mig_migrations;" 2>/dev/null)
+    if [ -z "$MIGRATIONS_COUNT" ] || [ "$MIGRATIONS_COUNT" -lt 1 ]; then
+        log_error "Migrations table is empty - database may not have loaded correctly"
+        VALIDATION_FAILED=true
+    else
+        log "Migrations table populated: $MIGRATIONS_COUNT entries"
+    fi
+
+    if [ "$VALIDATION_FAILED" = true ]; then
+        log_error "DATABASE VALIDATION FAILED - The database was not initialized correctly."
+        log_error "This usually indicates a problem with the SQL restore file or PostgreSQL."
+        log_error "Check the logs above for specific errors."
+        exit 1
+    fi
+
+    log "Database validation passed"
 fi
 
 # =============================================================================

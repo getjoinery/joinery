@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.5 - Added --password-file option for secure password handling
+#VERSION 2.6 - Added -y flag support in site subcommand, database validation after init
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -1358,6 +1358,10 @@ do_site_create() {
                 ;;
             --bare-metal)
                 FORCE_MODE="bare-metal"
+                shift
+                ;;
+            -y|--yes)
+                ASSUME_YES=1
                 shift
                 ;;
             --activate)
