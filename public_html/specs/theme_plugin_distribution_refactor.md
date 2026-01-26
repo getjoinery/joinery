@@ -25,10 +25,10 @@ Refactor the theme and plugin distribution system to separate core updates from 
 | 5 | Upgrade Client Site | N/A | upgrade.php downloads core + individual themes |
 | 6 | Upgrade Theme/Dev Server | deploy.sh pulls from git | **No change** |
 
-### Theme Selection Logic
+### Theme/Plugin Selection Logic
 
 ```
-install.sh site NAME PASS DOMAIN [PORT] [--themes="..."]
+install.sh site NAME PASS DOMAIN [PORT] [--themes="..."] [--plugins="..."]
 
 If --themes specified:
   → Download only those themes
@@ -36,7 +36,34 @@ If --themes specified:
 If --themes NOT specified:
   → Query server for system themes (is_system: true in theme.json)
   → Download all system themes automatically
+
+If --plugins specified:
+  → Download only those plugins
+
+If --plugins NOT specified:
+  → Query server for system plugins (is_system: true in plugin.json)
+  → Download all system plugins automatically
+
+Default active theme: falcon (unless --activate specified)
 ```
+
+### Key Properties
+
+- **is_system**: Theme/plugin is part of core install (auto-downloaded if no flag specified)
+- **is_stock**: Theme/plugin is unmodified stock (updated during upgrades)
+
+### Archive Structure
+
+Theme archives contain just the theme directory:
+```
+falcon-2.0.0.tar.gz
+└── falcon/
+    ├── theme.json
+    ├── views/
+    └── ...
+```
+
+Extract with: `tar xz -C public_html/theme/` → creates `public_html/theme/falcon/`
 
 ---
 
@@ -444,7 +471,7 @@ download_plugins "$ARCHIVE_ROOT/public_html/plugins"
 | Bare-metal (system themes) | `./install.sh site test Pass123 localhost` | Downloads core + system themes |
 | Bare-metal (selective) | `./install.sh site test Pass123 localhost --themes="falcon"` | Downloads core + falcon only |
 | Upgrade client site | Visit /utils/upgrade | Downloads core + installed stock themes |
-| Theme list | `curl .../publish_theme?list=themes` | Returns JSON of stock themes |
+| Theme list | `curl .../publish_theme?list=themes` | Returns JSON with is_system flag; install.sh filters for auto-install |
 | Theme download | `curl .../publish_theme?download=falcon` | Returns theme tar.gz |
 | Plugin download | `curl .../publish_theme?download=bookings&type=plugin` | Returns plugin tar.gz |
 
@@ -489,7 +516,7 @@ After all changes are complete, test these paths:
 | Test | Command/Action | Expected Result |
 |------|----------------|-----------------|
 | Publish | Run publish_upgrade.php | Creates core + theme + plugin archives in /static_files/ |
-| Theme list endpoint | `curl .../publish_theme?list=themes` | Returns JSON of stock themes |
+| Theme list endpoint | `curl .../publish_theme?list=themes` | Returns JSON of stock themes (includes is_system flag) |
 | Theme download endpoint | `curl .../publish_theme?download=falcon` | Returns theme tar.gz |
 | Core download endpoint | `curl .../publish_theme?core` | Redirects to core archive |
 | Fresh Docker (default) | `./install.sh site test Pass localhost 8080` | Downloads core + system themes |
