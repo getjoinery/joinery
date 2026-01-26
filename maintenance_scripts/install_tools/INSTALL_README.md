@@ -5,16 +5,17 @@ This guide covers deploying Joinery on both Docker containers and bare-metal ser
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [Example Workflows](#example-workflows)
-3. [Auto-Detection Behavior](#auto-detection-behavior)
-4. [Prerequisites](#prerequisites)
-5. [Docker Deployment](#docker-deployment-detailed)
-6. [Bare-Metal Deployment](#bare-metal-deployment-detailed)
-7. [Site Management](#site-management)
-8. [Maintenance Operations](#maintenance-operations)
-9. [Troubleshooting](#troubleshooting)
-10. [Quick Reference](#quick-reference)
-11. [Script Reference](#script-reference)
+2. [Password Security](#password-security)
+3. [Example Workflows](#example-workflows)
+4. [Auto-Detection Behavior](#auto-detection-behavior)
+5. [Prerequisites](#prerequisites)
+6. [Docker Deployment](#docker-deployment-detailed)
+7. [Bare-Metal Deployment](#bare-metal-deployment-detailed)
+8. [Site Management](#site-management)
+9. [Maintenance Operations](#maintenance-operations)
+10. [Troubleshooting](#troubleshooting)
+11. [Quick Reference](#quick-reference)
+12. [Script Reference](#script-reference)
 
 ---
 
@@ -23,19 +24,19 @@ This guide covers deploying Joinery on both Docker containers and bare-metal ser
 ### One-Liner Install (Latest Version)
 
 ```bash
-# Docker - download and install latest version
+# Docker - download and install latest version (auto-generates secure password)
 mkdir -p /tmp/joinery && \
   curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh docker && \
-  sudo ./install.sh site mysite 'MySecurePass123!' example.com 8080
+  sudo ./install.sh site mysite example.com 8080
 
-# Bare-metal - download and install latest version
+# Bare-metal - download and install latest version (auto-generates secure password)
 mkdir -p /tmp/joinery && \
   curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh server && \
-  sudo ./install.sh site mysite 'MySecurePass123!' example.com
+  sudo ./install.sh site mysite example.com
 ```
 
 ### Docker Deployment (Manual Transfer)
@@ -50,8 +51,8 @@ cd maintenance_scripts/install_tools
 # 2. Install Docker (one-time)
 sudo ./install.sh docker
 
-# 3. Create your site
-sudo ./install.sh site mysite SecurePass123! mysite.com 8080
+# 3. Create your site (password auto-generated - save it!)
+sudo ./install.sh site mysite mysite.com 8080
 ```
 
 ### Bare-Metal Deployment (Manual Transfer)
@@ -66,9 +67,54 @@ cd maintenance_scripts/install_tools
 # 2. Set up server (one-time)
 sudo ./install.sh server
 
-# 3. Create your site
-sudo ./install.sh site mysite SecurePass123! mysite.com
+# 3. Create your site (password auto-generated - save it!)
+sudo ./install.sh site mysite mysite.com
 ```
+
+---
+
+## Password Security
+
+**⚠️ CRITICAL: Never use weak or example passwords in production!**
+
+Passwords like `TestPass123`, `password123`, `admin123`, or any variation thereof are trivially guessable and will be compromised. Your database contains sensitive user data - protect it accordingly.
+
+### Recommended Approach: Auto-Generated Passwords
+
+The safest approach is to let the installer generate a secure password:
+
+```bash
+# No password specified = secure 24-character password auto-generated
+sudo ./install.sh site mysite mysite.com 8080
+# Output: "Auto-generated secure password: xK9mN2pQ7rT4vW8yB3cF6hJ1"
+# SAVE THIS PASSWORD IMMEDIATELY!
+```
+
+### Using Your Own Password
+
+If you must use a specific password, use `--password-file` to avoid shell escaping issues:
+
+```bash
+# Create a file with your password (use a strong password!)
+echo 'YourStr0ng&Secure#Pass!' > /tmp/dbpass.txt
+
+# Use --password-file
+sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
+
+# Delete the password file immediately
+rm /tmp/dbpass.txt
+```
+
+### Password Requirements
+
+- **Minimum 16 characters** (24+ recommended)
+- Mix of uppercase, lowercase, numbers, and symbols
+- **Never use**:
+  - Dictionary words
+  - Personal information
+  - Sequential patterns (123, abc)
+  - Common substitutions (p@ssw0rd)
+  - Example passwords from documentation
 
 ### Non-Interactive / Scripted Deployment
 
@@ -271,8 +317,33 @@ sudo ./install.sh site SITENAME POSTGRES_PASSWORD [DOMAIN_NAME] [PORT]
 4. Builds the Docker image
 5. Starts the container with all persistent volumes
 6. Verifies the site is responding
-7. Cleans up build directory
-8. Displays access information and all running containers
+7. Downloads stock themes/plugins from upgrade server (if `--themes` flag is used)
+8. Cleans up build directory
+9. Displays access information and all running containers
+
+### Downloading Themes and Plugins
+
+By default, fresh installations include only the core application. Use `--themes` to download stock themes and plugins from the upgrade server:
+
+```bash
+# Create site and download themes/plugins
+./install.sh site mysite Pass123! mysite.com 8080 --themes
+```
+
+The `--themes` flag:
+- Downloads theme/plugin archives from the `upgrade_source` URL (default: `https://joinerytest.site`)
+- Installs all stock themes (falcon, phillyzouk, etc.)
+- Installs all stock plugins (bookings, controld, etc.)
+- Uses the same distribution system as `upgrade.php`
+
+To download themes after site creation, use `upgrade.php`:
+```bash
+# Docker
+docker exec mysite php /var/www/html/mysite/public_html/utils/upgrade.php
+
+# Bare-metal
+php /var/www/html/mysite/public_html/utils/upgrade.php
+```
 
 ### Multi-Site Support
 
@@ -714,29 +785,39 @@ Universal installer with subcommands:
 
 **Site command options:**
 ```bash
-./install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT] [OPTIONS]
+./install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT] [OPTIONS]
 
 Options:
-  --activate THEME    Activate specified theme after installation
-  --with-test-site    Create companion test site (bare-metal only)
+  --password-file=FILE  Read database password from file (recommended)
+  --activate THEME      Activate specified theme after installation
+  --with-test-site      Create companion test site (bare-metal only)
+  --themes              Download stock themes/plugins from upgrade server
+  --no-ssl              Skip automatic SSL certificate setup
+
+Note: If no password is provided, a secure 24-character password is auto-generated.
 ```
 
 **Examples:**
 ```bash
-# Interactive (default)
-./install.sh site mysite Pass123! mysite.com 8080
+# Auto-generate secure password (RECOMMENDED)
+./install.sh site mysite mysite.com 8080
 
-# Non-interactive (auto-accept prompts)
-./install.sh -y site mysite Pass123! mysite.com 8080
+# Use password from file (for special characters)
+echo 'MyStr0ng#Pass!' > /tmp/pass.txt
+./install.sh site mysite --password-file=/tmp/pass.txt mysite.com 8080
+rm /tmp/pass.txt
 
-# Quiet mode (minimal output, for CI/CD)
-./install.sh -y -q site mysite Pass123! mysite.com 8080
+# Non-interactive with auto-generated password
+./install.sh -y site mysite mysite.com 8080
 
 # With theme activation
-./install.sh site mysite Pass123! mysite.com --activate falcon
+./install.sh site mysite mysite.com --activate falcon
 
 # With test site (bare-metal)
-./install.sh site mysite Pass123! mysite.com --with-test-site
+./install.sh site mysite mysite.com --with-test-site
+
+# Download themes/plugins from upgrade server after creation
+./install.sh site mysite mysite.com 8080 --themes
 ```
 
 ### Supporting Scripts
@@ -843,10 +924,24 @@ For Full (Strict) mode:
 
 ## Version Information
 
-- **Guide Version:** 3.3
-- **install.sh Version:** 2.3
+- **Guide Version:** 3.5
+- **install.sh Version:** 2.5
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
-- **Last Updated:** 2026-01-23
+- **Last Updated:** 2026-01-26
+
+### Changes in Version 3.5
+
+- **`--password-file` option**: Read database password from file to avoid shell escaping issues
+- **Auto-generated passwords**: If no password provided, secure 24-character password is auto-generated
+- **Password security section**: Added documentation on secure password practices
+- Removed insecure example passwords from documentation
+
+### Changes in Version 3.4
+
+- **`--themes` flag**: Download stock themes and plugins from upgrade server after site creation
+- Themes and plugins are distributed as separate archives for modular updates
+- Integration with upgrade.php for post-installation theme downloads
+- See [Deploy and Upgrade Guide](../../public_html/docs/deploy_and_upgrade.md) for distribution architecture details
 
 ### Changes in Version 3.3
 

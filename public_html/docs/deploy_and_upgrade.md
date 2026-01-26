@@ -2,16 +2,30 @@
 
 ## Overview
 
-Four complementary tools provide deployment and upgrade capabilities:
+Five complementary tools provide deployment and upgrade capabilities:
 
 1. **deploy.sh** - Git-based deployment for development/production environments
 2. **upgrade.php** - Web-based upgrade system for client installations
-3. **publish_upgrade.php** - Package creation tool for distributing updates
-4. **install.sh** - Universal installer for Docker and bare-metal deployments
+3. **publish_upgrade.php** - Package creation tool for distributing updates (core + themes + plugins)
+4. **publish_theme.php** - Individual theme/plugin publishing
+5. **install.sh** - Universal installer for Docker and bare-metal deployments
 
-The first three use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation.
+The first four use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation.
 
 For Docker and bare-metal deployments, see **[Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)**.
+
+### Distribution Architecture
+
+Updates are distributed as separate archives:
+- **Core archive** (`joinery-core-X.XX.upg.zip`) - Main application without themes/plugins
+- **Theme archives** (`theme-THEMENAME-X.XX.upg.zip`) - Individual themes
+- **Plugin archives** (`plugin-PLUGINNAME-X.XX.upg.zip`) - Individual plugins
+
+This allows:
+- Independent versioning of themes and plugins
+- Selective updates (update core without touching themes)
+- Smaller download sizes for incremental updates
+- Third-party theme/plugin distribution
 
 ---
 
@@ -21,29 +35,9 @@ For Docker and bare-metal deployments, see **[Installation Guide](../../maintena
 
 **Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/install.sh`
 
-```bash
-# Docker deployment
-./install.sh docker                              # One-time: install Docker
-./install.sh site mysite SecurePass123! mysite.com 8080
+Universal installer for Docker and bare-metal deployments. Supports `--themes` flag to download stock themes/plugins from the upgrade server after site creation.
 
-# Bare-metal deployment
-./install.sh server                              # One-time: set up server
-./install.sh site mysite SecurePass123! mysite.com
-
-# List existing sites
-./install.sh list
-
-# Multiple sites
-./install.sh site site1 Pass1! site1.com 8080
-./install.sh site site2 Pass2! site2.com 8081
-```
-
-**Features:**
-- Single entry point for all installation operations
-- Auto-detects Docker vs bare-metal environment
-- Docker installation and server setup subcommands
-- Automatic port conflict detection and suggestion
-- Site-isolated build contexts (multi-site support)
+**Full documentation:** [Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)
 
 ---
 
@@ -103,11 +97,20 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --dry-run
 ```
 
 **Features:**
-- Downloads packages from upgrade server
+- Downloads packages from upgrade server (configured via `upgrade_source` setting)
+- Downloads core, themes, and plugins as separate archives
 - Pre-deployment validation via DeploymentHelper
-- Preserves custom themes/plugins
+- Preserves custom themes/plugins (is_stock: false)
 - Enhanced rollback (preserves failed deployments with timestamps)
 - Database migrations and composer integration
+
+**Download Flow:**
+1. Fetches available upgrade info from upgrade server
+2. Downloads core archive (`joinery-core-X.XX.upg.zip`)
+3. Downloads each stock theme archive (`theme-THEMENAME-X.XX.upg.zip`)
+4. Downloads each stock plugin archive (`plugin-PLUGINNAME-X.XX.upg.zip`)
+5. Extracts and validates all archives
+6. Performs deployment with rollback protection
 
 ---
 
@@ -125,10 +128,47 @@ https://yoursite.com/utils/publish_upgrade?version_major=3&version_minor=26&verb
 ```
 
 **Features:**
-- Creates ZIP packages from public_html directory
+- Creates separate archives for core, themes, and plugins
+- Core archive excludes theme/ and plugins/ directories
+- Each stock theme/plugin gets its own versioned archive
 - Prevents overwriting existing versions
 - Automatic cleanup on failure
 - Registers upgrade in stg_upgrades table
+
+**Output Archives:**
+```
+static_files/
+├── joinery-core-3.26.upg.zip        # Core application
+├── theme-falcon-3.26.upg.zip        # Falcon theme
+├── theme-phillyzouk-3.26.upg.zip    # Phillyzouk theme
+├── plugin-bookings-3.26.upg.zip     # Bookings plugin
+├── plugin-controld-3.26.upg.zip     # ControlD plugin
+└── ...
+```
+
+---
+
+### publish_theme.php
+
+**Location:** `/utils/publish_theme.php`
+**Access:** Superadmin only (permission level 8)
+
+```
+# Publish a single theme
+https://yoursite.com/utils/publish_theme?type=theme&name=falcon&version=1.0.0
+
+# Publish a single plugin
+https://yoursite.com/utils/publish_theme?type=plugin&name=bookings&version=2.1.0
+
+# With verbose output
+https://yoursite.com/utils/publish_theme?type=theme&name=mytheme&version=1.0.0&verbose=1
+```
+
+**Features:**
+- Publishes individual themes or plugins independently of core
+- Allows different versioning for themes/plugins vs core
+- Useful for third-party theme/plugin distribution
+- Validates theme.json/plugin.json exists before packaging
 
 ---
 
@@ -160,9 +200,17 @@ If ANY step fails → Automatic rollback
 ├── public_html_last/         # Backup (for rollback)
 ├── public_html_stage/        # Staging area for validation
 ├── public_html_failed_*/     # Preserved failed deployments (timestamped)
-├── static_files/             # Upgrade packages (.upg.zip)
-└── uploads/upgrades/         # Downloaded packages
+├── static_files/             # Published upgrade packages
+│   ├── joinery-core-X.XX.upg.zip
+│   ├── theme-THEMENAME-X.XX.upg.zip
+│   └── plugin-PLUGINNAME-X.XX.upg.zip
+└── uploads/upgrades/         # Downloaded packages (client sites)
 ```
+
+**Archive Naming Convention:**
+- `joinery-core-X.XX.upg.zip` - Core application (no themes/plugins)
+- `theme-{name}-X.XX.upg.zip` - Individual theme archive
+- `plugin-{name}-X.XX.upg.zip` - Individual plugin archive
 
 ---
 
@@ -243,9 +291,11 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 | `baseDir` | Base directory (e.g., `/var/www/html/`) |
 | `site_template` | Site directory name (e.g., `joinerytest`) |
 | `system_version` | Current version (e.g., `3.25`) |
-| `upgrade_server_active` | Enable upgrade server mode |
-| `upgrade_server_url` | Upgrade server URL |
+| `upgrade_server_active` | Enable upgrade server mode (set to `1` on server that publishes upgrades) |
+| `upgrade_source` | URL of upgrade server to download from (e.g., `https://joinerytest.site`) |
 | `composerAutoLoad` | Composer vendor path |
+
+**Note:** `upgrade_server_active` enables a site to *serve* upgrades to other sites. `upgrade_source` specifies where a site *downloads* upgrades from.
 
 ---
 
@@ -256,7 +306,8 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 - **Specifications:**
   - `/specs/implemented/upgrade_system.md` - Feature parity analysis
   - `/specs/implemented/fix_publish_upgrade_system.md` - Publish upgrade fixes
+  - `/specs/implemented/theme_plugin_distribution_refactor.md` - Separate archive distribution
 
 ---
 
-*Last Updated: 2026-01-17*
+*Last Updated: 2026-01-26*
