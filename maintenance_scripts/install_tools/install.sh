@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.3 - Added Cloudflare proxy detection: skips certbot when behind Cloudflare
+#VERSION 2.4 - Added theme/plugin download from distribution server
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -12,9 +12,15 @@
 #   -q, --quiet   Suppress most output, show only errors and final status
 #
 # Site Options:
-#   --activate THEME    Set active theme after installation
-#   --with-test-site    Create companion test site (bare-metal only)
-#   --no-ssl            Skip automatic SSL certificate setup
+#   --activate THEME       Set active theme after installation
+#   --with-test-site       Create companion test site (bare-metal only)
+#   --no-ssl               Skip automatic SSL certificate setup
+#   --themes="t1,t2,..."   Download specific themes/plugins (comma-separated)
+#   --upgrade-server=URL   Override default distribution server
+#
+# Theme/Plugin Behavior:
+#   By default, all system themes and plugins are downloaded from the distribution server.
+#   Use --themes to download specific themes/plugins instead.
 #
 # SSL Behavior:
 #   SSL is automatically configured when a domain name is provided (not localhost/IP).
@@ -538,6 +544,130 @@ deploy_application_code() {
     fi
 
     print_success "Application code deployed to $site_root"
+}
+
+#==============================================================================
+# THEME/PLUGIN DOWNLOAD FUNCTIONS
+#==============================================================================
+
+# Default upgrade server (can be overridden via --upgrade-server)
+UPGRADE_SERVER="${UPGRADE_SERVER:-https://joinerytest.site}"
+
+# Download themes and plugins from distribution server
+# Usage: download_themes_and_plugins TARGET_DIR [THEMES_LIST]
+#   If THEMES_LIST is empty, downloads all system themes/plugins
+download_themes_and_plugins() {
+    local target_dir="$1"
+    local themes_list="$2"
+
+    print_step "Downloading themes and plugins from $UPGRADE_SERVER..."
+
+    # Ensure target directories exist
+    mkdir -p "$target_dir/theme"
+    mkdir -p "$target_dir/plugins"
+
+    if [[ -n "$themes_list" ]]; then
+        # Download specific themes (comma-separated)
+        IFS=',' read -ra THEME_ARRAY <<< "$themes_list"
+        for theme in "${THEME_ARRAY[@]}"; do
+            theme=$(echo "$theme" | xargs)  # Trim whitespace
+            download_single_item "$theme" "$target_dir"
+        done
+    else
+        # No themes specified - download all system themes and plugins
+        print_info "No --themes specified, downloading system themes and plugins..."
+
+        # Get system themes from server
+        local themes_json=$(curl -sf "${UPGRADE_SERVER}/utils/publish_theme?list=themes" 2>/dev/null)
+        if [[ -n "$themes_json" ]]; then
+            # Parse JSON and download each system theme
+            local system_themes=$(echo "$themes_json" | grep -oP '"name"\s*:\s*"\K[^"]+' | while read theme_name; do
+                # Check if this theme is a system theme
+                if echo "$themes_json" | grep -A5 "\"name\".*\"$theme_name\"" | grep -q '"is_system"\s*:\s*true'; then
+                    echo "$theme_name"
+                fi
+            done)
+
+            for theme in $system_themes; do
+                download_single_item "$theme" "$target_dir" "theme"
+            done
+        else
+            print_warning "Could not fetch theme list from server"
+        fi
+
+        # Get system plugins from server
+        local plugins_json=$(curl -sf "${UPGRADE_SERVER}/utils/publish_theme?list=plugins" 2>/dev/null)
+        if [[ -n "$plugins_json" ]]; then
+            # Parse JSON and download each system plugin
+            local system_plugins=$(echo "$plugins_json" | grep -oP '"name"\s*:\s*"\K[^"]+' | while read plugin_name; do
+                # Check if this plugin is a system plugin
+                if echo "$plugins_json" | grep -A5 "\"name\".*\"$plugin_name\"" | grep -q '"is_system"\s*:\s*true'; then
+                    echo "$plugin_name"
+                fi
+            done)
+
+            for plugin in $system_plugins; do
+                download_single_item "$plugin" "$target_dir" "plugin"
+            done
+        else
+            print_warning "Could not fetch plugin list from server"
+        fi
+    fi
+
+    print_success "Theme and plugin download complete"
+}
+
+# Download a single theme or plugin
+# Usage: download_single_item NAME TARGET_DIR [TYPE]
+#   TYPE is "theme" or "plugin" (defaults to trying both)
+download_single_item() {
+    local item_name="$1"
+    local target_dir="$2"
+    local item_type="${3:-auto}"
+
+    if [[ "$item_type" == "theme" ]]; then
+        print_info "Downloading theme: $item_name"
+        if curl -sfL "${UPGRADE_SERVER}/utils/publish_theme?download=${item_name}" | tar xz -C "$target_dir/theme" 2>/dev/null; then
+            if [[ -d "$target_dir/theme/$item_name" ]]; then
+                print_success "Downloaded theme: $item_name"
+                return 0
+            fi
+        fi
+        print_error "Failed to download theme: $item_name"
+        return 1
+    elif [[ "$item_type" == "plugin" ]]; then
+        print_info "Downloading plugin: $item_name"
+        if curl -sfL "${UPGRADE_SERVER}/utils/publish_theme?download=${item_name}&type=plugin" | tar xz -C "$target_dir/plugins" 2>/dev/null; then
+            if [[ -d "$target_dir/plugins/$item_name" ]]; then
+                print_success "Downloaded plugin: $item_name"
+                return 0
+            fi
+        fi
+        print_error "Failed to download plugin: $item_name"
+        return 1
+    else
+        # Auto-detect: try theme first, then plugin
+        print_info "Downloading: $item_name"
+
+        # Try as theme first
+        if curl -sfL "${UPGRADE_SERVER}/utils/publish_theme?download=${item_name}" | tar xz -C "$target_dir/theme" 2>/dev/null; then
+            if [[ -d "$target_dir/theme/$item_name" ]]; then
+                print_success "Downloaded theme: $item_name"
+                return 0
+            fi
+        fi
+
+        # Try as plugin
+        if curl -sfL "${UPGRADE_SERVER}/utils/publish_theme?download=${item_name}&type=plugin" | tar xz -C "$target_dir/plugins" 2>/dev/null; then
+            if [[ -d "$target_dir/plugins/$item_name" ]]; then
+                print_success "Downloaded plugin: $item_name"
+                return 0
+            fi
+        fi
+
+        print_error "Failed to download: $item_name (not found as theme or plugin)"
+        return 1
+    fi
 }
 
 # Create a test site (copy from main site)
@@ -1213,6 +1343,7 @@ do_site_create() {
     local ACTIVATE_THEME=""
     local WITH_TEST_SITE=false
     local NO_SSL=false
+    local THEMES=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1236,6 +1367,22 @@ do_site_create() {
             --no-ssl)
                 NO_SSL=true
                 shift
+                ;;
+            --themes=*)
+                THEMES="${1#*=}"
+                shift
+                ;;
+            --themes)
+                THEMES="$2"
+                shift 2
+                ;;
+            --upgrade-server=*)
+                UPGRADE_SERVER="${1#*=}"
+                shift
+                ;;
+            --upgrade-server)
+                UPGRADE_SERVER="$2"
+                shift 2
                 ;;
             -h|--help)
                 echo "Usage: $0 site [OPTIONS] SITENAME PASSWORD [DOMAIN] [PORT]"
@@ -1534,6 +1681,9 @@ do_site_docker() {
 
     mkdir -p "$BUILD_DIR/$SITENAME"
 
+    # Download themes and plugins to archive before copying
+    download_themes_and_plugins "$ARCHIVE_ROOT/public_html" "$THEMES"
+
     print_info "Copying public_html..."
     cp -r "$ARCHIVE_ROOT/public_html" "$BUILD_DIR/$SITENAME/"
 
@@ -1765,6 +1915,9 @@ do_site_baremetal() {
     fi
 
     print_success "Source files located at $ARCHIVE_ROOT"
+
+    # Download themes and plugins to archive before deployment
+    download_themes_and_plugins "$ARCHIVE_ROOT/public_html" "$THEMES"
 
     # Deploy application code
     deploy_application_code "$SITENAME" "$ARCHIVE_ROOT"

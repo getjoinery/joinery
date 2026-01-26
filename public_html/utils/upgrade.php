@@ -67,11 +67,25 @@
 		$major = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'));
 		$major->load();
 		$upgrade =  $major->get(0);
-		$response['system_version'] = $upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version');
+		$version = $upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version');
+		$response['system_version'] = $version;
 		$response['upgrade_name'] = $upgrade->get('upg_name');
 		$response['release_date'] = $upgrade->get('upg_create_time');
 		$response['release_notes'] = $upgrade->get('upg_release_notes');
+
+		// Legacy: full bundle location (for backwards compatibility during transition)
 		$response['upgrade_location'] = LibraryFunctions::get_absolute_url('/static_files/'.$upgrade->get('upg_name'));
+
+		// New: core-only archive location
+		$core_filename = 'joinery-core-' . $version . '.tar.gz';
+		$core_path = $full_site_dir . '/static_files/' . $core_filename;
+		if (file_exists($core_path)) {
+			$response['core_location'] = LibraryFunctions::get_absolute_url('/static_files/' . $core_filename);
+		}
+
+		// New: theme/plugin download endpoint
+		$response['theme_endpoint'] = LibraryFunctions::get_absolute_url('/utils/publish_theme');
+
 		header("Content-Type: application/json");
 		http_response_code(200);
 
@@ -323,17 +337,6 @@
 			}
 		}
 
-		$sourceFile = $decode_response['upgrade_location'];
-
-		if (!$sourceFile) {
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Invalid Response:</strong> Upgrade server did not provide a download location.<br>';
-			echo '</div>';
-			exit(1);
-		}
-
-		$file_download_location = $full_site_dir.'/uploads/'.basename($sourceFile);
-
 		// Check disk space before download (require at least 500MB free)
 		$free_space = disk_free_space($full_site_dir.'/uploads/');
 		$min_required = 500 * 1024 * 1024; // 500MB
@@ -346,70 +349,142 @@
 			exit(1);
 		}
 
-		//GET THE UPGRADE FILE
-		upgrade_echo('Getting: '. $sourceFile.'<br>');
+		// Determine download method: new (core + themes) or legacy (full bundle)
+		$use_new_method = isset($decode_response['core_location']) && !empty($decode_response['core_location']);
 
-		$new_file = fopen($file_download_location, "w");
-		if (!$new_file) {
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ File Error:</strong> Cannot create download file at ' . htmlspecialchars($file_download_location) . '<br>';
-			echo 'Check directory permissions.<br>';
-			echo '</div>';
-			exit(1);
-		}
+		if ($use_new_method) {
+			// =====================================================
+			// NEW METHOD: Download core + individual themes/plugins
+			// =====================================================
+			upgrade_echo('<h3>Downloading Upgrade Components</h3>');
 
-		// Setting the curl operations
-		$cd = curl_init();
-		curl_setopt($cd, CURLOPT_URL, $sourceFile);
-		curl_setopt($cd, CURLOPT_FILE, $new_file);
-		curl_setopt($cd, CURLOPT_TIMEOUT, 300); // 5 minute timeout for large files
-		curl_setopt($cd, CURLOPT_CONNECTTIMEOUT, 30); // 30 second connection timeout
-		curl_setopt($cd, CURLOPT_FOLLOWLOCATION, true);
+			$sourceFile = $decode_response['core_location'];
+			$theme_endpoint = $decode_response['theme_endpoint'];
 
-		$curl_success = curl_exec($cd);
-		$curl_error = curl_error($cd);
-		$curl_errno = curl_errno($cd);
-		$status = curl_getinfo($cd);
+			upgrade_echo('Downloading core archive: ' . htmlspecialchars($sourceFile) . '<br>');
+			flush();
 
-		// close and finalize the operations.
-		curl_close($cd);
-		fclose($new_file);
+			$file_download_location = $full_site_dir . '/uploads/' . basename($sourceFile);
 
-		if ($curl_errno !== 0) {
-			@unlink($file_download_location); // Clean up partial download
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Download Error:</strong> ' . htmlspecialchars($curl_error) . '<br>';
-			echo '</div>';
-			exit(1);
-		}
-
-		if ($status["http_code"] != 200) {
-			@unlink($file_download_location); // Clean up failed download
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Download Failed:</strong> Server returned HTTP ' . $status["http_code"] . '<br>';
-			echo 'URL: ' . htmlspecialchars($sourceFile) . '<br>';
-			echo '</div>';
-			exit(1);
-		}
-
-		if(file_exists($file_download_location)){
-			$file_size = filesize($file_download_location);
-			if ($file_size < 1024) { // Less than 1KB is suspicious
-				@unlink($file_download_location);
+			// Download core archive
+			$new_file = fopen($file_download_location, "w");
+			if (!$new_file) {
 				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-				echo '<strong>❌ Download Error:</strong> Downloaded file is too small (' . $file_size . ' bytes).<br>';
-				echo 'The upgrade package may be corrupt or the URL may be invalid.<br>';
+				echo '<strong>❌ File Error:</strong> Cannot create download file at ' . htmlspecialchars($file_download_location) . '<br>';
 				echo '</div>';
 				exit(1);
 			}
-			$size_mb = round($file_size / 1024 / 1024, 2);
-			upgrade_echo("The upgrade is downloaded ({$size_mb} MB)...<br>");
-		}
-		else{
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Download Failed:</strong> File was not created at ' . htmlspecialchars($file_download_location) . '<br>';
-			echo '</div>';
-			exit(1);
+
+			$cd = curl_init();
+			curl_setopt($cd, CURLOPT_URL, $sourceFile);
+			curl_setopt($cd, CURLOPT_FILE, $new_file);
+			curl_setopt($cd, CURLOPT_TIMEOUT, 300);
+			curl_setopt($cd, CURLOPT_CONNECTTIMEOUT, 30);
+			curl_setopt($cd, CURLOPT_FOLLOWLOCATION, true);
+			$curl_success = curl_exec($cd);
+			$curl_error = curl_error($cd);
+			$curl_errno = curl_errno($cd);
+			$status = curl_getinfo($cd);
+			curl_close($cd);
+			fclose($new_file);
+
+			if ($curl_errno !== 0 || $status["http_code"] != 200) {
+				@unlink($file_download_location);
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Core Download Failed:</strong> ' . htmlspecialchars($curl_error ?: "HTTP " . $status["http_code"]) . '<br>';
+				echo '</div>';
+				exit(1);
+			}
+
+			$core_size_mb = round(filesize($file_download_location) / 1024 / 1024, 2);
+			upgrade_echo("✓ Core archive downloaded ({$core_size_mb} MB)<br>");
+
+			// Store theme/plugin download info for after extraction
+			$themes_to_download = get_installed_stock_themes($live_directory . '/theme');
+			$plugins_to_download = get_installed_stock_plugins($live_directory . '/plugins');
+
+			upgrade_echo("Stock themes to update: " . count($themes_to_download) . " (" . implode(', ', $themes_to_download) . ")<br>");
+			upgrade_echo("Stock plugins to update: " . count($plugins_to_download) . " (" . implode(', ', $plugins_to_download) . ")<br>");
+
+		} else {
+			// =====================================================
+			// LEGACY METHOD: Download full bundle
+			// =====================================================
+			$sourceFile = $decode_response['upgrade_location'];
+
+			if (!$sourceFile) {
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Invalid Response:</strong> Upgrade server did not provide a download location.<br>';
+				echo '</div>';
+				exit(1);
+			}
+
+			$file_download_location = $full_site_dir.'/uploads/'.basename($sourceFile);
+
+			upgrade_echo('Getting: '. $sourceFile.'<br>');
+
+			$new_file = fopen($file_download_location, "w");
+			if (!$new_file) {
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ File Error:</strong> Cannot create download file at ' . htmlspecialchars($file_download_location) . '<br>';
+				echo 'Check directory permissions.<br>';
+				echo '</div>';
+				exit(1);
+			}
+
+			$cd = curl_init();
+			curl_setopt($cd, CURLOPT_URL, $sourceFile);
+			curl_setopt($cd, CURLOPT_FILE, $new_file);
+			curl_setopt($cd, CURLOPT_TIMEOUT, 300);
+			curl_setopt($cd, CURLOPT_CONNECTTIMEOUT, 30);
+			curl_setopt($cd, CURLOPT_FOLLOWLOCATION, true);
+			$curl_success = curl_exec($cd);
+			$curl_error = curl_error($cd);
+			$curl_errno = curl_errno($cd);
+			$status = curl_getinfo($cd);
+			curl_close($cd);
+			fclose($new_file);
+
+			if ($curl_errno !== 0) {
+				@unlink($file_download_location);
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Download Error:</strong> ' . htmlspecialchars($curl_error) . '<br>';
+				echo '</div>';
+				exit(1);
+			}
+
+			if ($status["http_code"] != 200) {
+				@unlink($file_download_location);
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Download Failed:</strong> Server returned HTTP ' . $status["http_code"] . '<br>';
+				echo 'URL: ' . htmlspecialchars($sourceFile) . '<br>';
+				echo '</div>';
+				exit(1);
+			}
+
+			if(file_exists($file_download_location)){
+				$file_size = filesize($file_download_location);
+				if ($file_size < 1024) {
+					@unlink($file_download_location);
+					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+					echo '<strong>❌ Download Error:</strong> Downloaded file is too small (' . $file_size . ' bytes).<br>';
+					echo '</div>';
+					exit(1);
+				}
+				$size_mb = round($file_size / 1024 / 1024, 2);
+				upgrade_echo("The upgrade is downloaded ({$size_mb} MB)...<br>");
+			}
+			else{
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Download Failed:</strong> File was not created at ' . htmlspecialchars($file_download_location) . '<br>';
+				echo '</div>';
+				exit(1);
+			}
+
+			// For legacy method, no separate theme downloads needed
+			$themes_to_download = [];
+			$plugins_to_download = [];
+			$theme_endpoint = '';
 		}
 
 		//CLEAR OLD STAGED FILES
@@ -473,6 +548,56 @@
 			  echo 'Unable to unzip upgrade from '.$file_download_location.' <br>';
 			  exit;
 			}
+		}
+
+		// =====================================================
+		// DOWNLOAD INDIVIDUAL THEMES AND PLUGINS (new method only)
+		// =====================================================
+		if (!empty($themes_to_download) || !empty($plugins_to_download)) {
+			upgrade_echo('<br><h3>Downloading Individual Themes and Plugins</h3>');
+
+			// Download themes
+			foreach ($themes_to_download as $theme_name) {
+				$theme_url = $theme_endpoint . '?download=' . urlencode($theme_name);
+				upgrade_echo("Downloading theme: {$theme_name}...");
+				flush();
+
+				$result = download_and_extract($theme_url, $stage_directory . '/theme/');
+				if ($result['success']) {
+					upgrade_echo(" ✓<br>");
+				} else {
+					upgrade_echo(" ❌ " . htmlspecialchars($result['error']) . "<br>");
+					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+					echo '<strong>❌ Theme Download Failed:</strong> ' . htmlspecialchars($theme_name) . '<br>';
+					echo 'Error: ' . htmlspecialchars($result['error']) . '<br>';
+					echo '</div>';
+					exec("rm -rf " . escapeshellarg($stage_location) . "/*");
+					exit(1);
+				}
+			}
+
+			// Download plugins
+			foreach ($plugins_to_download as $plugin_name) {
+				$plugin_url = $theme_endpoint . '?download=' . urlencode($plugin_name) . '&type=plugin';
+				upgrade_echo("Downloading plugin: {$plugin_name}...");
+				flush();
+
+				$result = download_and_extract($plugin_url, $stage_directory . '/plugins/');
+				if ($result['success']) {
+					upgrade_echo(" ✓<br>");
+				} else {
+					upgrade_echo(" ❌ " . htmlspecialchars($result['error']) . "<br>");
+					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+					echo '<strong>❌ Plugin Download Failed:</strong> ' . htmlspecialchars($plugin_name) . '<br>';
+					echo 'Error: ' . htmlspecialchars($result['error']) . '<br>';
+					echo '</div>';
+					exec("rm -rf " . escapeshellarg($stage_location) . "/*");
+					exit(1);
+				}
+			}
+
+			$total_items = count($themes_to_download) + count($plugins_to_download);
+			upgrade_echo("✓ Downloaded {$total_items} theme/plugin archives<br>");
 		}
 
 		// ============================================
@@ -1005,6 +1130,99 @@
 		else{
 			return false;
 		}
+	}
+
+	/**
+	 * Get list of installed stock themes (those with is_stock=true in theme.json)
+	 */
+	function get_installed_stock_themes($theme_dir) {
+		$themes = [];
+		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
+			$theme_data = json_decode(file_get_contents($json_file), true);
+			if ($theme_data) {
+				$is_stock = $theme_data['is_stock'] ?? false;
+				if ($is_stock) {
+					$themes[] = basename(dirname($json_file));
+				}
+			}
+		}
+		return $themes;
+	}
+
+	/**
+	 * Get list of installed stock plugins (those with is_stock=true in plugin.json)
+	 */
+	function get_installed_stock_plugins($plugin_dir) {
+		$plugins = [];
+		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
+			$plugin_data = json_decode(file_get_contents($json_file), true);
+			if ($plugin_data) {
+				$is_stock = $plugin_data['is_stock'] ?? false;
+				if ($is_stock) {
+					$plugins[] = basename(dirname($json_file));
+				}
+			}
+		}
+		return $plugins;
+	}
+
+	/**
+	 * Download and extract a tar.gz archive to a target directory
+	 */
+	function download_and_extract($url, $target_dir, $item_name = null) {
+		// Create temp file for download
+		$temp_file = tempnam(sys_get_temp_dir(), 'joinery_dl_');
+
+		// Download the file
+		$ch = curl_init();
+		$fp = fopen($temp_file, 'w');
+		curl_setopt_array($ch, [
+			CURLOPT_URL => $url,
+			CURLOPT_FILE => $fp,
+			CURLOPT_TIMEOUT => 120,
+			CURLOPT_CONNECTTIMEOUT => 30,
+			CURLOPT_FOLLOWLOCATION => true,
+		]);
+		$success = curl_exec($ch);
+		$error = curl_error($ch);
+		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+		fclose($fp);
+
+		if (!$success || $http_code !== 200) {
+			@unlink($temp_file);
+			return ['success' => false, 'error' => "Download failed: $error (HTTP $http_code)"];
+		}
+
+		// Verify file size
+		if (filesize($temp_file) < 100) {
+			@unlink($temp_file);
+			return ['success' => false, 'error' => 'Downloaded file too small'];
+		}
+
+		// Create target directory if needed
+		if (!is_dir($target_dir)) {
+			mkdir($target_dir, 0755, true);
+		}
+
+		// Extract the archive
+		$tar_cmd = sprintf(
+			'tar -xzf %s -C %s 2>&1',
+			escapeshellarg($temp_file),
+			escapeshellarg($target_dir)
+		);
+		$output = [];
+		$exit_code = 0;
+		exec($tar_cmd, $output, $exit_code);
+
+		// Clean up temp file
+		@unlink($temp_file);
+
+		if ($exit_code !== 0) {
+			return ['success' => false, 'error' => 'Extract failed: ' . implode("\n", $output)];
+		}
+
+		return ['success' => true];
 	}
 
 ?>

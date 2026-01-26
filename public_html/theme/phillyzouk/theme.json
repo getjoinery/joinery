@@ -4,6 +4,8 @@
     "version": "1.0.0",
     "description": "Modern and responsive blog & magazine theme",
     "author": "Joinery Team",
+    "is_stock": true,
+    "system": false,
     "cssFramework": "bootstrap",
     "formWriterBase": "FormWriterBootstrap",
     "publicPageBase": "PublicPageBase"

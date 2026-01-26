@@ -242,7 +242,16 @@
 
 		// Copy install SQL file to install_tools (where _site_init.sh expects it)
 		copy($sql_source, $temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
-		echo "Added install SQL file<br>";
+		echo "Added install SQL file to archive<br>";
+		flush();
+
+		// Also update the on-disk copy for Docker builds that copy directly from disk
+		$ondisk_sql_path = dirname($full_site_dir) . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
+		if (copy($sql_source, $ondisk_sql_path)) {
+			echo "Updated on-disk install SQL at $ondisk_sql_path<br>";
+		} else {
+			echo "<span style='color: orange;'>Warning: Could not update on-disk SQL at $ondisk_sql_path</span><br>";
+		}
 		flush();
 
 		// Create tar.gz archive
@@ -288,7 +297,7 @@
 
 		//GET THE UPGRADE FILE
 		$filesize_mb = round(filesize($file_output_location) / 1048576, 2);
-		echo '<br><strong>Archive created successfully!</strong><br>';
+		echo '<br><strong>Full archive created successfully!</strong><br>';
 		echo 'Location: '. $file_output_location.'<br>';
 		echo 'Size: ' . $filesize_mb . ' MB<br>';
 		echo 'Format: tar.gz<br>';
@@ -302,6 +311,169 @@
 		foreach ($selected_themes as $theme_name) {
 			echo '- ' . htmlspecialchars($theme_name) . '<br>';
 		}
+
+		// =====================================================
+		// Create CORE-ONLY archive (no themes or plugins)
+		// =====================================================
+		echo '<br><hr><br>';
+		echo '<strong>Creating core-only archive...</strong><br>';
+		flush();
+
+		$core_filename = 'joinery-core-' . $version_major . '.' . $version_minor . '.tar.gz';
+		$core_output_location = $file_output_folder . '/' . $core_filename;
+
+		// Create temporary directory for core archive staging
+		$core_temp_dir = sys_get_temp_dir() . '/joinery_core_' . uniqid();
+		if (!mkdir($core_temp_dir, 0755, true)) {
+			echo "ERROR: Failed to create core temp directory<br>";
+		} else {
+			// Create directory structure
+			mkdir($core_temp_dir . '/public_html', 0755, true);
+			mkdir($core_temp_dir . '/config', 0755, true);
+			mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
+
+			// Copy public_html excluding themes and plugins content
+			$rsync_core_cmd = sprintf(
+				'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="theme/*" --exclude="plugins/*" %s %s 2>&1',
+				escapeshellarg($full_site_dir . '/public_html/'),
+				escapeshellarg($core_temp_dir . '/public_html/')
+			);
+			exec($rsync_core_cmd, $output, $exit_code);
+
+			// Create empty theme/ and plugins/ directories in the core archive
+			mkdir($core_temp_dir . '/public_html/theme', 0755, true);
+			mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
+
+			// Copy config template
+			if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
+				copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
+			}
+
+			// Copy maintenance_scripts
+			foreach (['install_tools', 'sysadmin_tools'] as $dir) {
+				$source_dir = $maintenance_dir . $dir . '/';
+				$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
+				if (is_dir($source_dir)) {
+					mkdir($dest_dir, 0755, true);
+					exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
+				}
+			}
+
+			// Copy install SQL file
+			if (file_exists($sql_source)) {
+				copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
+			}
+
+			// Create core tar.gz archive
+			$tar_cmd = sprintf(
+				'tar -czf %s -C %s . 2>&1',
+				escapeshellarg($core_output_location),
+				escapeshellarg($core_temp_dir)
+			);
+			exec($tar_cmd, $output, $exit_code);
+
+			// Clean up temp directory
+			exec('rm -rf ' . escapeshellarg($core_temp_dir));
+
+			if (file_exists($core_output_location) && filesize($core_output_location) > 0) {
+				$core_size_mb = round(filesize($core_output_location) / 1048576, 2);
+				echo "Core archive created: $core_filename ({$core_size_mb} MB)<br>";
+			} else {
+				echo "ERROR: Failed to create core archive<br>";
+			}
+		}
+
+		// =====================================================
+		// Create individual THEME archives
+		// =====================================================
+		echo '<br><strong>Creating individual theme archives...</strong><br>';
+		flush();
+
+		$themes_dir = $file_output_folder . '/themes';
+		if (!is_dir($themes_dir)) {
+			mkdir($themes_dir, 0755, true);
+		}
+
+		$theme_base_dir = $full_site_dir . '/public_html/theme';
+		foreach (glob($theme_base_dir . '/*/theme.json') as $theme_json) {
+			$theme_dir = dirname($theme_json);
+			$theme_name = basename($theme_dir);
+
+			// Read theme.json for version and is_stock
+			$theme_data = json_decode(file_get_contents($theme_json), true);
+			$is_stock = $theme_data['is_stock'] ?? true;
+
+			if (!$is_stock) {
+				echo "- Skipping {$theme_name} (not stock)<br>";
+				continue;
+			}
+
+			$theme_version = $theme_data['version'] ?? '1.0.0';
+			$theme_archive = $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz';
+
+			// Create tar.gz with just the theme directory
+			$tar_cmd = sprintf(
+				'tar -czf %s -C %s %s 2>&1',
+				escapeshellarg($theme_archive),
+				escapeshellarg($theme_base_dir),
+				escapeshellarg($theme_name)
+			);
+			exec($tar_cmd, $output, $exit_code);
+
+			if (file_exists($theme_archive)) {
+				$theme_size_kb = round(filesize($theme_archive) / 1024, 1);
+				echo "- {$theme_name}-{$theme_version}.tar.gz ({$theme_size_kb} KB)<br>";
+			} else {
+				echo "- ERROR: Failed to create archive for {$theme_name}<br>";
+			}
+		}
+
+		// =====================================================
+		// Create individual PLUGIN archives
+		// =====================================================
+		echo '<br><strong>Creating individual plugin archives...</strong><br>';
+		flush();
+
+		$plugins_dir = $file_output_folder . '/plugins';
+		if (!is_dir($plugins_dir)) {
+			mkdir($plugins_dir, 0755, true);
+		}
+
+		$plugin_base_dir = $full_site_dir . '/public_html/plugins';
+		foreach (glob($plugin_base_dir . '/*/plugin.json') as $plugin_json) {
+			$plugin_dir = dirname($plugin_json);
+			$plugin_name = basename($plugin_dir);
+
+			// Read plugin.json for version and is_stock
+			$plugin_data = json_decode(file_get_contents($plugin_json), true);
+			$is_stock = $plugin_data['is_stock'] ?? true;
+
+			if (!$is_stock) {
+				echo "- Skipping {$plugin_name} (not stock)<br>";
+				continue;
+			}
+
+			$plugin_version = $plugin_data['version'] ?? '1.0.0';
+			$plugin_archive = $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz';
+
+			// Create tar.gz with just the plugin directory
+			$tar_cmd = sprintf(
+				'tar -czf %s -C %s %s 2>&1',
+				escapeshellarg($plugin_archive),
+				escapeshellarg($plugin_base_dir),
+				escapeshellarg($plugin_name)
+			);
+			exec($tar_cmd, $output, $exit_code);
+
+			if (file_exists($plugin_archive)) {
+				$plugin_size_kb = round(filesize($plugin_archive) / 1024, 1);
+				echo "- {$plugin_name}-{$plugin_version}.tar.gz ({$plugin_size_kb} KB)<br>";
+			} else {
+				echo "- ERROR: Failed to create archive for {$plugin_name}<br>";
+			}
+		}
+
+		echo '<br><strong>All archives created successfully!</strong><br>';
 
 	}
 	else{
