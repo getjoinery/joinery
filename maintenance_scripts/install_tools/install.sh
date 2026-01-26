@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-#VERSION 2.4 - Added theme/plugin download from distribution server
+#VERSION 2.5 - Added --password-file option for secure password handling
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
 #   ./install.sh server                              # One-time: set up bare-metal server
-#   ./install.sh site SITENAME PASS DOMAIN [PORT]   # Create a site
+#   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
 #
 # Global Options:
@@ -12,15 +12,17 @@
 #   -q, --quiet   Suppress most output, show only errors and final status
 #
 # Site Options:
+#   --password-file=FILE   Read database password from file (recommended for special chars)
 #   --activate THEME       Set active theme after installation
 #   --with-test-site       Create companion test site (bare-metal only)
 #   --no-ssl               Skip automatic SSL certificate setup
-#   --themes="t1,t2,..."   Download specific themes/plugins (comma-separated)
+#   --themes               Download themes/plugins from distribution server
 #   --upgrade-server=URL   Override default distribution server
 #
-# Theme/Plugin Behavior:
-#   By default, all system themes and plugins are downloaded from the distribution server.
-#   Use --themes to download specific themes/plugins instead.
+# Password Handling:
+#   If no password is provided, a secure 24-character password is auto-generated.
+#   For passwords with special characters (like !), use --password-file to avoid
+#   shell escaping issues.
 #
 # SSL Behavior:
 #   SSL is automatically configured when a domain name is provided (not localhost/IP).
@@ -28,20 +30,21 @@
 #   Use --no-ssl to skip SSL setup.
 #
 # Examples:
-#   # Docker deployment (with automatic SSL)
-#   sudo ./install.sh docker
-#   sudo ./install.sh site mysite SecurePass123! mysite.com 8080
+#   # Auto-generate secure password (recommended)
+#   sudo ./install.sh site mysite mysite.com 8080
 #
-#   # Bare-metal deployment (with automatic SSL)
-#   sudo ./install.sh server
-#   sudo ./install.sh site mysite SecurePass123! mysite.com
+#   # Use password from file (for special characters)
+#   echo 'MyP@ss!word' > /tmp/dbpass.txt
+#   sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
+#   rm /tmp/dbpass.txt
 #
 #   # Skip SSL setup
-#   sudo ./install.sh site mysite SecurePass123! mysite.com --no-ssl
+#   sudo ./install.sh site mysite mysite.com --no-ssl
 #
 # See INSTALL_README.md for complete documentation.
 
 set -e  # Exit on error
+set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1338,6 +1341,7 @@ do_site_create() {
     local FORCE_MODE=""
     local SITENAME=""
     local POSTGRES_PASSWORD=""
+    local PASSWORD_FILE=""
     local DOMAIN_NAME=""
     local PORT=""
     local ACTIVATE_THEME=""
@@ -1368,13 +1372,28 @@ do_site_create() {
                 NO_SSL=true
                 shift
                 ;;
+            --password-file=*)
+                PASSWORD_FILE="${1#*=}"
+                shift
+                ;;
+            --password-file)
+                PASSWORD_FILE="$2"
+                shift 2
+                ;;
             --themes=*)
                 THEMES="${1#*=}"
                 shift
                 ;;
             --themes)
-                THEMES="$2"
-                shift 2
+                # --themes alone means "download all" (default), --themes VALUE means specific list
+                if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                    THEMES="$2"
+                    shift 2
+                else
+                    # No value provided - keep THEMES empty to trigger "download all" behavior
+                    THEMES=""
+                    shift
+                fi
                 ;;
             --upgrade-server=*)
                 UPGRADE_SERVER="${1#*=}"
@@ -1414,8 +1433,16 @@ do_site_create() {
             *)
                 if [ -z "$SITENAME" ]; then
                     SITENAME="$1"
-                elif [ -z "$POSTGRES_PASSWORD" ]; then
-                    POSTGRES_PASSWORD="$1"
+                elif [ -z "$POSTGRES_PASSWORD" ] && [ -z "$PASSWORD_FILE" ]; then
+                    # Check if this looks like a domain or port (skip password)
+                    # Domain: contains a dot (example.com, localhost.local)
+                    # Port: all digits
+                    if [[ "$1" =~ \. ]] || [[ "$1" =~ ^[0-9]+$ ]]; then
+                        # Looks like domain or port - skip password, go to domain
+                        DOMAIN_NAME="$1"
+                    else
+                        POSTGRES_PASSWORD="$1"
+                    fi
                 elif [ -z "$DOMAIN_NAME" ]; then
                     DOMAIN_NAME="$1"
                 elif [ -z "$PORT" ]; then
@@ -1433,19 +1460,27 @@ do_site_create() {
         exit 1
     fi
 
-    if [ -z "$POSTGRES_PASSWORD" ]; then
-        print_error "PASSWORD is required"
-        echo "Usage: $0 site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT]"
-        exit 1
-    fi
+    # Handle password: --password-file takes priority, then command line, then auto-generate
+    PASSWORD_WAS_GENERATED=0
 
-    # Auto-generate password if "-" is provided
-    if [ "$POSTGRES_PASSWORD" = "-" ]; then
+    if [ -n "$PASSWORD_FILE" ]; then
+        # Read password from file
+        if [ ! -f "$PASSWORD_FILE" ]; then
+            print_error "Password file not found: $PASSWORD_FILE"
+            exit 1
+        fi
+        POSTGRES_PASSWORD=$(cat "$PASSWORD_FILE" | tr -d '\n')
+        if [ -z "$POSTGRES_PASSWORD" ]; then
+            print_error "Password file is empty: $PASSWORD_FILE"
+            exit 1
+        fi
+        print_info "Password read from file: $PASSWORD_FILE"
+    elif [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "-" ]; then
+        # Auto-generate secure password if none provided or "-" specified
         POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
         print_info "Auto-generated secure password: $POSTGRES_PASSWORD"
+        print_warning "Save this password - you will need it for database access!"
         PASSWORD_WAS_GENERATED=1
-    else
-        PASSWORD_WAS_GENERATED=0
     fi
 
     # Check if running as root

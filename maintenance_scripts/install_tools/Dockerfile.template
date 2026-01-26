@@ -49,10 +49,15 @@ RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtu
 # Expose ports
 EXPOSE 80 5432
 
+# Use bash for CMD (required for set +H to disable history expansion)
+SHELL ["/bin/bash", "-c"]
+
 # Start services
 # On first run: _site_init.sh creates database and configures site
 # CRITICAL: All variables must be quoted to handle special characters in passwords
-CMD echo "Container starting: SITENAME=${SITENAME}, DOMAIN=${DOMAIN_NAME}" && \
+# set +H disables history expansion so ! in passwords works correctly
+CMD set +H && \
+    echo "Container starting: SITENAME=${SITENAME}, DOMAIN=${DOMAIN_NAME}" && \
     if [ -z "${SITENAME}" ]; then echo "FATAL: SITENAME is empty"; exit 1; fi && \
     if [ -z "${POSTGRES_PASSWORD}" ]; then echo "FATAL: POSTGRES_PASSWORD is empty"; exit 1; fi && \
     service postgresql start && \
