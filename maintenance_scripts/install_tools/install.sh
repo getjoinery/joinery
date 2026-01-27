@@ -1815,6 +1815,10 @@ EOF
         exit 1
     fi
 
+    # Create host-side logs directory for reverse proxy (used by manage_domain.sh)
+    # Container has its own /var/www/html/{site}/ but host needs logs dir for proxy
+    mkdir -p "/var/www/html/${SITENAME}/logs"
+
     # Verify installation
     print_step "Waiting for services to initialize..."
 
