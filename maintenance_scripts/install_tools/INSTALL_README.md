@@ -12,10 +12,11 @@ This guide covers deploying Joinery on both Docker containers and bare-metal ser
 6. [Docker Deployment](#docker-deployment-detailed)
 7. [Bare-Metal Deployment](#bare-metal-deployment-detailed)
 8. [Site Management](#site-management)
-9. [Maintenance Operations](#maintenance-operations)
-10. [Troubleshooting](#troubleshooting)
-11. [Quick Reference](#quick-reference)
-12. [Script Reference](#script-reference)
+9. [Domain Management](#domain-management)
+10. [Maintenance Operations](#maintenance-operations)
+11. [Troubleshooting](#troubleshooting)
+12. [Quick Reference](#quick-reference)
+13. [Script Reference](#script-reference)
 
 ---
 
@@ -564,6 +565,66 @@ psql -U postgres -d $SITENAME
 
 ---
 
+## Domain Management
+
+Use `manage_domain.sh` to add, change, or remove domains from existing sites. This works for both Docker and bare-metal deployments.
+
+**Location:** `maintenance_scripts/sysadmin_tools/manage_domain.sh`
+
+### Check Current Configuration
+
+```bash
+cd maintenance_scripts/sysadmin_tools
+sudo ./manage_domain.sh status mysite
+```
+
+Output shows:
+- Site type (Docker or bare-metal)
+- Current domain (or IP-only)
+- SSL status and certificate expiry
+
+### Assign a Domain
+
+```bash
+# With automatic SSL certificate
+sudo ./manage_domain.sh set mysite example.com
+
+# Without SSL (for Cloudflare-proxied sites or testing)
+sudo ./manage_domain.sh set mysite example.com --no-ssl
+```
+
+**What happens:**
+- Creates backup of current configuration
+- For Docker sites: Creates Apache reverse proxy on host
+- For bare-metal: Updates Apache VirtualHost
+- Attempts SSL via certbot (unless `--no-ssl` or Cloudflare detected)
+
+### Remove Domain (Revert to IP-Only)
+
+```bash
+sudo ./manage_domain.sh clear mysite
+```
+
+Removes domain configuration and reverts to IP-based access.
+
+### Rollback to Previous Configuration
+
+```bash
+sudo ./manage_domain.sh rollback mysite
+```
+
+Restores the most recent backup created before a `set` or `clear` operation.
+
+### Remove SSL Only (Keep Domain)
+
+```bash
+sudo ./manage_domain.sh remove-ssl mysite
+```
+
+Removes SSL certificate configuration while keeping the domain.
+
+---
+
 ## Maintenance Operations
 
 ### Database Backup
@@ -867,6 +928,7 @@ Located in `maintenance_scripts/sysadmin_tools/`:
 
 | Script | Purpose |
 |--------|---------|
+| `manage_domain.sh` | Manage domain assignments (set, clear, status, rollback, remove-ssl) |
 | `backup_database.sh` | Backup PostgreSQL database |
 | `restore_database.sh` | Restore PostgreSQL database |
 | `backup_project.sh` | Full site backup (files + database) |
@@ -953,10 +1015,16 @@ For Full (Strict) mode:
 
 ## Version Information
 
-- **Guide Version:** 3.6
+- **Guide Version:** 3.7
 - **install.sh Version:** 2.6
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
 - **Last Updated:** 2026-01-26
+
+### Changes in Version 3.7
+
+- Added `manage_domain.sh` script for domain management
+- New commands: set, clear, status, rollback, remove-ssl
+- Added Domain Management section to documentation
 
 ### Changes in Version 3.6
 

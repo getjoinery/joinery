@@ -536,7 +536,7 @@ This is the live test server where changes can be verified in a browser.
 
 ### Docker Production Server (docker-prod)
 **IP:** `23.239.11.53`
-**SSH Key:** `~/.ssh/id_ed25519_claude` (passphrase: `Cl@ude$ecureK3y#2026!`)
+**SSH Key:** `~/.ssh/id_ed25519_claude` (no passphrase)
 
 Production Docker server hosting multiple client sites. Each site runs in its own container.
 
