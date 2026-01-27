@@ -6,7 +6,7 @@ A standalone script to manage domain assignments for Joinery sites. The script h
 
 **Design Principles:**
 - Self-contained script with no external dependencies on shared libraries
-- No modifications to existing scripts (install.sh, _site_init.sh, etc.)
+- Minimal modifications to existing scripts
 - Simple, focused functionality
 
 ## Location
@@ -250,14 +250,11 @@ Manages domain assignments for existing sites.
 **New files (1):**
 - `maintenance_scripts/sysadmin_tools/manage_domain.sh`
 
-**Modified files (1):**
+**Modified files (2):**
 - `maintenance_scripts/install_tools/INSTALL_README.md` - Add domain management documentation
-
-**Existing scripts modified (0):**
-- None (install.sh, _site_init.sh, Dockerfile.template remain untouched)
+- `maintenance_scripts/install_tools/install.sh` - Create host-side logs directory for Docker sites (for reverse proxy)
 
 ## Notes
 
-- This script does NOT modify install.sh or any other existing scripts
 - All helper functions are defined within the script itself
-- Backups are stored per-site for easy management
+- Backups are stored per-site in `/var/www/html/{site}/backups/domain/`
