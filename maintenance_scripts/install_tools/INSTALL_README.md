@@ -98,7 +98,7 @@ If you must use a specific password, use `--password-file` to avoid shell escapi
 
 ```bash
 # Create a file with your password (use a strong password!)
-echo 'YourStr0ng&Secure#Pass!' > /tmp/dbpass.txt
+echo 'YourStr0ng&Secure#Pass@9' > /tmp/dbpass.txt
 
 # Use --password-file
 sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
@@ -118,6 +118,40 @@ rm /tmp/dbpass.txt
   - Common substitutions (p@ssw0rd)
   - Example passwords from documentation
 
+### Password Character Restrictions
+
+**IMPORTANT:** Due to shell and sed escaping limitations, the following characters **MUST NOT** be used in database passwords:
+
+| Character | Name | Reason |
+|-----------|------|--------|
+| `'` | Single quote | Breaks PHP string literals |
+| `"` | Double quote | Breaks shell double-quoted strings |
+| `\` | Backslash | Escape character in shell, sed, and PHP |
+| `$` | Dollar sign | Variable expansion in shell |
+| `` ` `` | Backtick | Command substitution in shell |
+| `!` | Exclamation mark | History expansion in bash |
+| Newlines | Line breaks | Breaks sed replacement patterns |
+
+**Safe characters for passwords:**
+- Letters: `A-Z`, `a-z`
+- Numbers: `0-9`
+- Symbols: `@`, `#`, `%`, `^`, `*`, `(`, `)`, `-`, `_`, `+`, `=`, `{`, `}`, `[`, `]`, `|`, `:`, `;`, `<`, `>`, `,`, `.`, `?`, `~`, `/`, `&`
+
+**Example of a safe password:**
+```
+Kj8@mN#2pQ%xR^4sT*9w
+```
+
+**Examples of passwords that will FAIL:**
+```
+MyP@ss'word     # Contains single quote
+Hello"World     # Contains double quote
+Pass\word       # Contains backslash
+Cost$100        # Contains dollar sign
+Run`cmd`        # Contains backticks
+Hello!There     # Contains exclamation mark
+```
+
 ### Non-Interactive / Scripted Deployment
 
 For CI/CD pipelines or automated deployments, use the `-y` and `-q` flags:
@@ -128,7 +162,7 @@ For CI/CD pipelines or automated deployments, use the `-y` and `-q` flags:
 
 # Fully automated Docker deployment
 sudo ./install.sh -y docker
-sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
+sudo ./install.sh -y -q site mysite SecurePass@123 mysite.com 8080
 
 # Output in quiet mode is minimal:
 # Installation Complete!
@@ -146,9 +180,9 @@ sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 ./install.sh docker
 
 # 2. Create sites (each in its own container)
-./install.sh site site1 SecurePass1! site1.com 8080
-./install.sh site site2 SecurePass2! site2.com 8081
-./install.sh site site3 SecurePass3! site3.com 8082
+./install.sh site site1 SecurePass@1 site1.com 8080
+./install.sh site site2 SecurePass@2 site2.com 8081
+./install.sh site site3 SecurePass@3 site3.com 8082
 
 # 3. View all running sites
 ./install.sh list
@@ -161,9 +195,9 @@ sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 ./install.sh server
 
 # 2. Create sites (each in /var/www/html/{sitename}/)
-./install.sh site site1 SecurePass1! site1.com
-./install.sh site site2 SecurePass2! site2.com
-./install.sh site site3 SecurePass3! site3.com
+./install.sh site site1 SecurePass@1 site1.com
+./install.sh site site2 SecurePass@2 site2.com
+./install.sh site site3 SecurePass@3 site3.com
 
 # 3. View all sites
 ./install.sh list
@@ -224,7 +258,7 @@ sudo ./install.sh -y -q site mysite SecurePass123! mysite.com 8080
 
 ```bash
 # SSL is automatic when domain is provided
-./install.sh site mysite Pass123! mysite.example.com
+./install.sh site mysite Pass@123 mysite.example.com
 ```
 
 Certbot configures Apache directly with the SSL certificate.
@@ -233,7 +267,7 @@ Certbot configures Apache directly with the SSL certificate.
 
 ```bash
 # SSL is automatic - creates reverse proxy on host
-./install.sh site mysite Pass123! mysite.example.com 8080
+./install.sh site mysite Pass@123 mysite.example.com 8080
 ```
 
 For Docker sites, the script:
@@ -245,7 +279,7 @@ For Docker sites, the script:
 
 ```bash
 # Use --no-ssl to skip automatic SSL setup
-./install.sh site mysite Pass123! mysite.example.com --no-ssl
+./install.sh site mysite Pass@123 mysite.example.com --no-ssl
 ```
 
 ### Manual SSL Setup
@@ -329,7 +363,7 @@ By default, fresh installations include only the core application. Use `--themes
 
 ```bash
 # Create site and download themes/plugins
-./install.sh site mysite Pass123! mysite.com 8080 --themes
+./install.sh site mysite Pass@123 mysite.com 8080 --themes
 ```
 
 The `--themes` flag:
@@ -807,6 +841,27 @@ docker exec $SITENAME php /var/www/html/$SITENAME/public_html/utils/update_datab
 php /var/www/html/$SITENAME/public_html/utils/update_database.php
 ```
 
+### Remove Site
+
+Use the `remove_account.sh` script to completely remove a site. It automatically detects whether the site is Docker or bare-metal and handles both.
+
+```bash
+# Remove a site (will prompt for confirmation)
+sudo ./sysadmin_tools/remove_account.sh SITENAME
+
+# Remove without confirmation prompt
+sudo ./sysadmin_tools/remove_account.sh SITENAME -y
+```
+
+**What gets removed:**
+
+| Docker Sites | Bare-Metal Sites |
+|-------------|------------------|
+| Docker container | Website directories |
+| All Docker volumes (postgres, uploads, config, etc.) | Test site directories |
+| Docker image | Apache virtual host |
+| Build directory | PostgreSQL database |
+
 ---
 
 ## Troubleshooting
@@ -887,7 +942,7 @@ If database initialization fails during site creation, the cause is almost alway
 - Empty settings table
 
 **What to check:**
-1. **Password escaping**: Special characters in passwords (`!`, `$`, `&`, `\`) can cause issues when passed through shells. Use `--password-file` to avoid this.
+1. **Password escaping**: Certain characters MUST NOT be used in passwords: `'`, `"`, `\`, `$`, `` ` ``, `!`. See [Password Character Restrictions](#password-character-restrictions) for the full list.
 2. **SQL file syntax**: If you've modified `joinery-install.sql.gz`, check for syntax errors
 3. **Character encoding**: Ensure the SQL file uses UTF-8 encoding
 
@@ -987,7 +1042,7 @@ Note: If no password is provided, a secure 24-character password is auto-generat
 ./install.sh site mysite mysite.com 8080
 
 # Use password from file (for special characters)
-echo 'MyStr0ng#Pass!' > /tmp/pass.txt
+echo 'MyStr0ng#Pass@9' > /tmp/pass.txt
 ./install.sh site mysite --password-file=/tmp/pass.txt mysite.com 8080
 rm /tmp/pass.txt
 
