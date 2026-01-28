@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 1.1 - Added database validation after initialization
+# VERSION: 1.2 - Added site cloning support
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -9,9 +9,12 @@
 #   ./_site_init.sh SITENAME PASSWORD DOMAIN [OPTIONS]
 #
 # Options:
-#   --activate THEME    Set active theme
-#   --docker-mode       Running inside Docker container (skips virtualhost, serve.php)
-#   -q, --quiet         Suppress most output
+#   --activate THEME       Set active theme
+#   --docker-mode          Running inside Docker container (skips virtualhost, serve.php)
+#   --clone-from=URL       Clone database and uploads from URL
+#   --clone-key=KEY        Authentication key for clone source
+#   --skip-db-validation   Skip default admin/settings validation
+#   -q, --quiet            Suppress most output
 
 set -e
 set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
@@ -32,6 +35,9 @@ shift 3 || true
 DOCKER_MODE=false
 ACTIVATE_THEME=""
 QUIET=false
+CLONE_FROM=""
+CLONE_KEY=""
+SKIP_DB_VALIDATION=false
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -42,6 +48,15 @@ while [[ $# -gt 0 ]]; do
         --activate)
             ACTIVATE_THEME="$2"
             shift
+            ;;
+        --clone-from=*)
+            CLONE_FROM="${1#*=}"
+            ;;
+        --clone-key=*)
+            CLONE_KEY="${1#*=}"
+            ;;
+        --skip-db-validation)
+            SKIP_DB_VALIDATION=true
             ;;
         -q|--quiet)
             QUIET=true
@@ -157,7 +172,61 @@ if psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$SITENAME"; th
     log "Database '$SITENAME' already exists. Skipping creation and restore."
 fi
 
-if [ "$DB_EXISTS" = false ]; then
+if [ -n "$CLONE_FROM" ]; then
+    # ==========================================================================
+    # CLONE MODE: Stream database and uploads from source
+    # ==========================================================================
+
+    # Create database (ignore error if already exists)
+    log "Creating PostgreSQL database '$SITENAME'..."
+    createdb -T template0 "$SITENAME" -U postgres 2>/dev/null || true
+
+    set -o pipefail  # Catch failures anywhere in pipeline
+
+    log "Streaming database from clone source..."
+
+    CLONE_URL="${CLONE_FROM}/utils/clone_export.php"
+
+    curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=database" | \
+        openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:${CLONE_KEY} | \
+        gunzip | \
+        psql -U postgres -d "$SITENAME" -q 2>/dev/null || {
+            log_error "Failed to load database from clone source"
+            exit 1
+        }
+
+    log "Database cloned successfully"
+
+    # Stream uploads
+    log "Streaming uploads from clone source..."
+
+    curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" | \
+        tar -xzf - -C "$SITE_ROOT/" || {
+            log_error "Failed to load uploads from clone source"
+            exit 1
+        }
+
+    log "Uploads cloned successfully"
+
+    # Update site URL in settings
+    log "Updating site settings for new domain..."
+
+    psql -U postgres -d "$SITENAME" -q -c \
+        "UPDATE stg_settings SET stg_value = 'https://${DOMAIN}' WHERE stg_name = 'site_url';" \
+        2>/dev/null || true
+
+    # Disable clone export key on the new site (security)
+    psql -U postgres -d "$SITENAME" -q -c \
+        "DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';" \
+        2>/dev/null || true
+
+    SKIP_DB_VALIDATION=true
+
+elif [ "$DB_EXISTS" = false ]; then
+    # ==========================================================================
+    # NORMAL MODE: Load from SQL file
+    # ==========================================================================
+
     # Create database (ignore error if already exists)
     log "Creating PostgreSQL database '$SITENAME'..."
     createdb -T template0 "$SITENAME" -U postgres 2>/dev/null || true
@@ -171,10 +240,13 @@ if [ "$DB_EXISTS" = false ]; then
         }
         log "Database '$SITENAME' loaded successfully."
     fi
+fi
 
-    # =========================================================================
-    # DATABASE VALIDATION
-    # =========================================================================
+# =============================================================================
+# DATABASE VALIDATION (skip for cloned sites)
+# =============================================================================
+
+if [ "$SKIP_DB_VALIDATION" = false ] && [ "$DB_EXISTS" = false ]; then
     log "Validating database initialization..."
 
     VALIDATION_FAILED=false
