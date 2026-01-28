@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.6 - Added -y flag support in site subcommand, database validation after init
+#VERSION 2.7 - Added site cloning support (--clone-from, --clone-key)
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -18,6 +18,8 @@
 #   --no-ssl               Skip automatic SSL certificate setup
 #   --themes               Download themes/plugins from distribution server
 #   --upgrade-server=URL   Override default distribution server
+#   --clone-from=URL       Clone database and uploads from existing site
+#   --clone-key=KEY        Authentication key for clone source
 #
 # Password Handling:
 #   If no password is provided, a secure 24-character password is auto-generated.
@@ -1348,6 +1350,8 @@ do_site_create() {
     local WITH_TEST_SITE=false
     local NO_SSL=false
     local THEMES=""
+    local CLONE_FROM=""
+    local CLONE_KEY=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1407,6 +1411,22 @@ do_site_create() {
                 UPGRADE_SERVER="$2"
                 shift 2
                 ;;
+            --clone-from=*)
+                CLONE_FROM="${1#*=}"
+                shift
+                ;;
+            --clone-from)
+                CLONE_FROM="$2"
+                shift 2
+                ;;
+            --clone-key=*)
+                CLONE_KEY="${1#*=}"
+                shift
+                ;;
+            --clone-key)
+                CLONE_KEY="$2"
+                shift 2
+                ;;
             -h|--help)
                 echo "Usage: $0 site [OPTIONS] SITENAME PASSWORD [DOMAIN] [PORT]"
                 echo ""
@@ -1415,9 +1435,13 @@ do_site_create() {
                 echo "  --bare-metal  Force bare-metal mode (requires Apache/PHP/PostgreSQL)"
                 echo ""
                 echo "Site Options:"
-                echo "  --activate THEME    Set active theme after installation"
-                echo "  --with-test-site    Create companion test site (bare-metal only)"
-                echo "  --no-ssl            Skip automatic SSL certificate setup"
+                echo "  --activate THEME       Set active theme after installation"
+                echo "  --with-test-site       Create companion test site (bare-metal only)"
+                echo "  --no-ssl               Skip automatic SSL certificate setup"
+                echo ""
+                echo "Clone Options:"
+                echo "  --clone-from=URL       Clone database and uploads from existing site"
+                echo "  --clone-key=KEY        Authentication key for clone source"
                 echo ""
                 echo "Parameters:"
                 echo "  SITENAME      Site/database name (required)"
@@ -1428,6 +1452,10 @@ do_site_create() {
                 echo "SSL:"
                 echo "  SSL is automatically configured when a domain is provided."
                 echo "  DNS must point to this server. Use --no-ssl to skip."
+                echo ""
+                echo "Cloning:"
+                echo "  Clone an existing site's database and uploads to create a new site."
+                echo "  The source site must have clone_export_key configured in stg_settings."
                 echo ""
                 echo "Auto-detection:"
                 echo "  - With PORT specified: Docker mode"
@@ -1574,10 +1602,53 @@ do_site_create() {
         fi
     fi
 
+    # Clone source verification
+    if [ -n "$CLONE_FROM" ]; then
+        print_step "Verifying clone source..."
+
+        if [ -z "$CLONE_KEY" ]; then
+            print_error "--clone-key is required when using --clone-from"
+            exit 1
+        fi
+
+        MANIFEST=$(curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_FROM}/utils/clone_export.php?action=manifest" 2>/dev/null)
+
+        if [ $? -ne 0 ] || [ -z "$MANIFEST" ]; then
+            print_error "Cannot connect to clone source or invalid key"
+            print_info "Verify the URL and clone key are correct"
+            exit 1
+        fi
+
+        # Check for error response
+        if echo "$MANIFEST" | grep -q '"status".*"error"'; then
+            ERROR_MSG=$(echo "$MANIFEST" | grep -oP '"message"\s*:\s*"\K[^"]+')
+            print_error "Clone source error: $ERROR_MSG"
+            exit 1
+        fi
+
+        # Display clone info (using grep to avoid jq dependency)
+        print_info "Clone source: $CLONE_FROM"
+        print_info "Database size: $(echo "$MANIFEST" | grep -oP '"database_size_mb"\s*:\s*\K[0-9]+') MB"
+        print_info "Uploads size: $(echo "$MANIFEST" | grep -oP '"uploads_size_mb"\s*:\s*\K[0-9]+') MB"
+        print_info "Themes: $(echo "$MANIFEST" | grep -oP '"themes"\s*:\s*\[\K[^\]]+' | tr -d '"')"
+
+        if [ "$ASSUME_YES" -eq 0 ]; then
+            echo ""
+            read -p "Proceed with clone? [y/N] " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                print_info "Clone cancelled"
+                exit 0
+            fi
+        fi
+
+        # Use clone source as upgrade server for themes/plugins
+        UPGRADE_SERVER="$CLONE_FROM"
+    fi
+
     if [ "$MODE" = "docker" ]; then
-        do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME" "$NO_SSL"
+        do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME" "$NO_SSL" "$CLONE_FROM" "$CLONE_KEY"
     else
-        do_site_baremetal "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$ACTIVATE_THEME" "$WITH_TEST_SITE" "$NO_SSL"
+        do_site_baremetal "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$ACTIVATE_THEME" "$WITH_TEST_SITE" "$NO_SSL" "$CLONE_FROM" "$CLONE_KEY"
     fi
 }
 
@@ -1592,6 +1663,8 @@ do_site_docker() {
     local PORT="${4:-8080}"
     local ACTIVATE_THEME="${5:-}"
     local NO_SSL="${6:-false}"
+    local CLONE_FROM="${7:-}"
+    local CLONE_KEY="${8:-}"
     local DB_PORT=$((PORT + 1000))
 
     # Auto-detect server IP if domain is localhost
@@ -1750,6 +1823,7 @@ EOF
     cd "$BUILD_DIR"
 
     # Build with -q flag in quiet mode to suppress build output
+    # Note: Clone options are passed at runtime, not build time (security)
     if [ "$QUIET_MODE" -eq 1 ]; then
         docker build -q \
             --build-arg SITENAME="$SITENAME" \
@@ -1774,11 +1848,18 @@ EOF
     # Run container
     print_step "Starting container..."
 
+    # Build clone environment options (passed at runtime, not baked into image)
+    CLONE_ENV_OPTS=""
+    if [ -n "$CLONE_FROM" ] && [ -n "$CLONE_KEY" ]; then
+        CLONE_ENV_OPTS="-e CLONE_FROM=${CLONE_FROM} -e CLONE_KEY=${CLONE_KEY}"
+    fi
+
     if [ "$QUIET_MODE" -eq 1 ]; then
         docker run -d \
             --name "$SITENAME" \
             -p "$PORT":80 \
             -p "$DB_PORT":5432 \
+            $CLONE_ENV_OPTS \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
             -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
@@ -1795,6 +1876,7 @@ EOF
             --name "$SITENAME" \
             -p "$PORT":80 \
             -p "$DB_PORT":5432 \
+            $CLONE_ENV_OPTS \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
             -v "${SITENAME}_config":/var/www/html/"${SITENAME}"/config \
@@ -1920,6 +2002,8 @@ do_site_baremetal() {
     local ACTIVATE_THEME="${4:-}"
     local WITH_TEST_SITE="${5:-false}"
     local NO_SSL="${6:-false}"
+    local CLONE_FROM="${7:-}"
+    local CLONE_KEY="${8:-}"
 
     # Auto-detect server IP if domain is localhost
     if [ "$DOMAIN_NAME" = "localhost" ]; then
@@ -1978,6 +2062,9 @@ do_site_baremetal() {
     fi
     if [ "$QUIET_MODE" -eq 1 ]; then
         INIT_ARGS="$INIT_ARGS -q"
+    fi
+    if [ -n "$CLONE_FROM" ] && [ -n "$CLONE_KEY" ]; then
+        INIT_ARGS="$INIT_ARGS --clone-from=${CLONE_FROM} --clone-key=${CLONE_KEY}"
     fi
 
     # Call _site_init.sh for shared setup
@@ -2142,7 +2229,7 @@ do_list() {
 
 show_help() {
     echo ""
-    echo "Joinery Installation Script v2.1"
+    echo "Joinery Installation Script v2.7"
     echo ""
     echo "Usage:"
     echo "  ./install.sh [global-options] <command> [options]"
@@ -2158,11 +2245,13 @@ show_help() {
     echo "  list      List existing Joinery sites (Docker and bare-metal)"
     echo ""
     echo "Site Command Options:"
-    echo "  --activate THEME    Activate specified theme after installation"
-    echo "  --with-test-site    Also create a test site (bare-metal only)"
-    echo "  --no-ssl            Skip automatic SSL certificate setup"
-    echo "  --docker            Force Docker mode"
-    echo "  --bare-metal        Force bare-metal mode"
+    echo "  --activate THEME       Activate specified theme after installation"
+    echo "  --with-test-site       Also create a test site (bare-metal only)"
+    echo "  --no-ssl               Skip automatic SSL certificate setup"
+    echo "  --docker               Force Docker mode"
+    echo "  --bare-metal           Force bare-metal mode"
+    echo "  --clone-from=URL       Clone database and uploads from existing site"
+    echo "  --clone-key=KEY        Authentication key for clone source"
     echo ""
     echo "SSL (Automatic):"
     echo "  When a domain name is provided (not localhost/IP), SSL is automatically"
@@ -2178,6 +2267,10 @@ show_help() {
     echo ""
     echo "  # Create site without SSL"
     echo "  sudo ./install.sh site staging StagePass! stage.example.com 8081 --no-ssl"
+    echo ""
+    echo "  # Clone an existing site"
+    echo "  sudo ./install.sh site newsite example.com 8080 \\"
+    echo "      --clone-from=https://source.example.com --clone-key=SecretKey123"
     echo ""
     echo "  # Set up bare-metal server (once)"
     echo "  sudo ./install.sh server"

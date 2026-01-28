@@ -12,6 +12,10 @@
 #   SITENAME          - Site directory name (default: dockertest)
 #   POSTGRES_PASSWORD - Database password (required)
 #   DOMAIN_NAME       - Domain for VirtualHost (default: localhost)
+#
+# Runtime Environment Variables (for cloning):
+#   CLONE_FROM        - URL to clone database and uploads from (optional)
+#   CLONE_KEY         - Authentication key for clone source (optional)
 
 FROM ubuntu:24.04
 
@@ -71,8 +75,12 @@ CMD set +H && \
         sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' "$PG_CONF" && \
         service postgresql reload; \
     fi && \
+    CLONE_OPTS="" && \
+    if [ -n "${CLONE_FROM}" ] && [ -n "${CLONE_KEY}" ]; then \
+        CLONE_OPTS="--clone-from=${CLONE_FROM} --clone-key=${CLONE_KEY}"; \
+    fi && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
-        ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode)) && \
+        ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     apache2ctl -D FOREGROUND

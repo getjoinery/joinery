@@ -12,11 +12,12 @@ This guide covers deploying Joinery on both Docker containers and bare-metal ser
 6. [Docker Deployment](#docker-deployment-detailed)
 7. [Bare-Metal Deployment](#bare-metal-deployment-detailed)
 8. [Site Management](#site-management)
-9. [Domain Management](#domain-management)
-10. [Maintenance Operations](#maintenance-operations)
-11. [Troubleshooting](#troubleshooting)
-12. [Quick Reference](#quick-reference)
-13. [Script Reference](#script-reference)
+9. [Site Cloning](#site-cloning)
+10. [Domain Management](#domain-management)
+11. [Maintenance Operations](#maintenance-operations)
+12. [Troubleshooting](#troubleshooting)
+13. [Quick Reference](#quick-reference)
+14. [Script Reference](#script-reference)
 
 ---
 
@@ -565,6 +566,97 @@ psql -U postgres -d $SITENAME
 
 ---
 
+## Site Cloning
+
+Clone an existing Joinery site to a new server, copying database and uploads. All commands run on the target machine - the target pulls data from the source.
+
+### Enabling Clone Export on Source Site
+
+Before cloning, enable export on the source site:
+
+```sql
+-- Enable clone export with a secure key (run on source site database)
+INSERT INTO stg_settings (stg_name, stg_value)
+VALUES ('clone_export_key', 'YourSecureRandomKey123');
+
+-- Or update existing key
+UPDATE stg_settings SET stg_value = 'YourSecureRandomKey123'
+WHERE stg_name = 'clone_export_key';
+
+-- Disable clone export when done
+DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';
+```
+
+**Security Notes:**
+- Use a strong key (at least 32 random characters)
+- HTTPS is required for clone export
+- Remove or rotate the key after cloning
+- Clone requests are logged on the source site
+
+### Cloning to Docker
+
+```bash
+# On target server
+./install.sh site newsite newdomain.com 8080 \
+    --clone-from=https://sourcesite.com \
+    --clone-key=YourSecureRandomKey123
+```
+
+### Cloning to Bare-Metal
+
+```bash
+# On target server
+./install.sh site newsite newdomain.com \
+    --clone-from=https://sourcesite.com \
+    --clone-key=YourSecureRandomKey123
+```
+
+### What Gets Cloned
+
+| Item | Behavior |
+|------|----------|
+| Database (all tables) | **Cloned** - exact copy from source |
+| All settings | **Cloned** - exact copy from source |
+| `site_url` setting | **Updated** - set to target domain |
+| Uploads directory | **Cloned** - exact copy from source |
+| User accounts | **Cloned** - source users preserved |
+| `clone_export_key` | **Removed** - disabled on new site |
+| `Globalvars_site.php` | **Generated** - new DB credentials |
+| Themes/plugins | **Downloaded** - from source site |
+
+### Clone Process
+
+1. **Pre-flight check**: Verifies clone source is reachable and key is valid
+2. **Display manifest**: Shows database size, uploads size, themes/plugins
+3. **Confirmation prompt**: Asks to proceed (use `-y` to skip)
+4. **Deploy code**: Copies application files to target
+5. **Stream database**: Encrypted, compressed download and restore
+6. **Stream uploads**: Compressed download and extract
+7. **Update settings**: Sets new site URL
+8. **Standard setup**: Composer install, permissions, SSL (if applicable)
+
+### Clone Examples
+
+```bash
+# Basic clone
+./install.sh site clientsite newclient.com 8080 \
+    --clone-from=https://template.joinerysite.com \
+    --clone-key=abc123
+
+# Clone with theme activation
+./install.sh site clientsite newclient.com 8080 \
+    --clone-from=https://template.joinerysite.com \
+    --clone-key=abc123 \
+    --activate customtheme
+
+# Non-interactive clone (for scripts)
+./install.sh -y site clientsite newclient.com 8080 \
+    --clone-from=https://template.joinerysite.com \
+    --clone-key=abc123
+```
+
+---
+
 ## Domain Management
 
 Use `manage_domain.sh` to add, change, or remove domains from existing sites. This works for both Docker and bare-metal deployments.
@@ -883,6 +975,8 @@ Options:
   --with-test-site      Create companion test site (bare-metal only)
   --themes              Download stock themes/plugins from upgrade server
   --no-ssl              Skip automatic SSL certificate setup
+  --clone-from=URL      Clone database and uploads from existing site
+  --clone-key=KEY       Authentication key for clone source
 
 Note: If no password is provided, a secure 24-character password is auto-generated.
 ```
@@ -899,6 +993,10 @@ rm /tmp/pass.txt
 
 # Non-interactive with auto-generated password
 ./install.sh -y site mysite mysite.com 8080
+
+# Clone an existing site
+./install.sh site newsite newdomain.com 8080 \
+    --clone-from=https://source.example.com --clone-key=SecretKey123
 
 # With theme activation
 ./install.sh site mysite mysite.com --activate falcon
@@ -1015,10 +1113,18 @@ For Full (Strict) mode:
 
 ## Version Information
 
-- **Guide Version:** 3.7
-- **install.sh Version:** 2.6
+- **Guide Version:** 3.8
+- **install.sh Version:** 2.7
 - **Tested With:** Ubuntu 24.04, Docker 29.1.5
-- **Last Updated:** 2026-01-26
+- **Last Updated:** 2026-01-27
+
+### Changes in Version 3.8
+
+- **Site cloning support**: Clone existing sites with `--clone-from` and `--clone-key` options
+- New endpoint: `clone_export.php` for secure site export (HTTPS required, Bearer token auth)
+- Added Site Cloning section to documentation
+- Cloning streams encrypted database and compressed uploads from source to target
+- Clone export disabled by default (requires `clone_export_key` in stg_settings)
 
 ### Changes in Version 3.7
 
