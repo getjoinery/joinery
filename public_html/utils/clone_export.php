@@ -18,7 +18,7 @@
  * - themes: Streams tar.gz archive of themes directory
  * - plugins: Streams tar.gz archive of plugins directory
  *
- * @version 1.1
+ * @version 1.2 - Added static_files export (excludes upgrade packages and theme archives)
  */
 
 // Standalone script - load minimal requirements
@@ -123,6 +123,10 @@ switch ($action) {
         handle_plugins_export($settings, $client_ip);
         break;
 
+    case 'static_files':
+        handle_static_files_export($settings, $client_ip);
+        break;
+
     default:
         http_response_code(400);
         header('Content-Type: application/json');
@@ -188,6 +192,16 @@ function handle_manifest($settings, $client_ip) {
         }
     }
 
+    // Get static_files size and count
+    $static_files_dir = $site_root . '/static_files';
+    $static_files_size_mb = 0;
+    $static_files_count = 0;
+
+    if (is_dir($static_files_dir)) {
+        $static_files_count = count_files_recursive($static_files_dir);
+        $static_files_size_mb = (int) (get_directory_size($static_files_dir) / 1024 / 1024);
+    }
+
     // Get Joinery version
     $version = '0.0.0';
     $version_file = $site_root . '/version.txt';
@@ -201,6 +215,8 @@ function handle_manifest($settings, $client_ip) {
         'database_size_mb' => $db_size_mb,
         'uploads_size_mb' => $uploads_size_mb,
         'uploads_count' => $uploads_count,
+        'static_files_size_mb' => $static_files_size_mb,
+        'static_files_count' => $static_files_count,
         'themes' => $themes,
         'plugins' => $plugins,
         'joinery_version' => $version,
@@ -357,6 +373,57 @@ function handle_plugins_export($settings, $client_ip) {
     $cmd = sprintf(
         "tar -czf - -C %s plugins 2>/dev/null",
         escapeshellarg($site_root . '/public_html')
+    );
+
+    passthru($cmd);
+    exit;
+}
+
+/**
+ * Handle static_files export - streams tar.gz archive of static_files directory
+ */
+function handle_static_files_export($settings, $client_ip) {
+    log_clone_request('static_files', $client_ip);
+
+    $site_root = dirname(dirname(__DIR__));
+    $static_files_dir = $site_root . '/static_files';
+
+    // Check if static_files directory exists
+    if (!is_dir($static_files_dir)) {
+        // Return empty success response - no static_files to transfer
+        header('Content-Type: application/json');
+        die(json_encode(['status' => 'ok', 'message' => 'No static_files directory', 'count' => 0]));
+    }
+
+    // Count files that would actually be transferred (excluding upgrade packages and themes)
+    // Use find to count, excluding the patterns we'll exclude from tar
+    $count_cmd = sprintf(
+        "find %s -type f ! -name '*.upg.zip' ! -name '*.upg.zip.*' ! -path '*/themes/*' 2>/dev/null | wc -l",
+        escapeshellarg($static_files_dir)
+    );
+    $file_count = (int) trim(shell_exec($count_cmd));
+
+    if ($file_count === 0) {
+        // Return empty success response - no files to transfer after exclusions
+        header('Content-Type: application/json');
+        die(json_encode(['status' => 'ok', 'message' => 'No static files to transfer (only upgrade packages/themes present)', 'count' => 0]));
+    }
+
+    // Set headers for streaming download
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="static_files.tar.gz"');
+    header('X-Content-Type-Options: nosniff');
+
+    // Disable output buffering
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+
+    // Stream tar output directly (from site root, creates static_files/ in archive)
+    // Exclude upgrade packages and theme archives (these are for the upgrade system, not user data)
+    $cmd = sprintf(
+        "tar -czf - -C %s --exclude='*.upg.zip' --exclude='*.upg.zip.*' --exclude='static_files/themes' static_files 2>/dev/null",
+        escapeshellarg($site_root)
     );
 
     passthru($cmd);

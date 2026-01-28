@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.8 - Skip theme download when cloning
+#VERSION 2.9 - Add static_files to clone manifest display
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -1630,6 +1630,7 @@ do_site_create() {
         print_info "Clone source: $CLONE_FROM"
         print_info "Database size: $(echo "$MANIFEST" | grep -oP '"database_size_mb"\s*:\s*\K[0-9]+') MB"
         print_info "Uploads size: $(echo "$MANIFEST" | grep -oP '"uploads_size_mb"\s*:\s*\K[0-9]+') MB"
+        print_info "Static files size: $(echo "$MANIFEST" | grep -oP '"static_files_size_mb"\s*:\s*\K[0-9]+') MB"
         print_info "Themes: $(echo "$MANIFEST" | grep -oP '"themes"\s*:\s*\[\K[^\]]+' | tr -d '"')"
 
         if [ "$ASSUME_YES" -eq 0 ]; then

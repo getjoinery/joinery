@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 1.5 - Reset protocol_mode when cloning
+# VERSION: 1.6 - Add static_files cloning
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -214,6 +214,25 @@ if [ -n "$CLONE_FROM" ]; then
                 exit 1
             }
         log "Uploads cloned successfully"
+    fi
+
+    # Stream static_files (skip if source has no static_files)
+    log "Streaming static_files from clone source..."
+
+    # Check Content-Type to determine if there are static_files to transfer
+    CONTENT_TYPE=$(curl -sI -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=static_files" 2>/dev/null | grep -i "^content-type:" | head -1)
+
+    if echo "$CONTENT_TYPE" | grep -qi "application/json"; then
+        # JSON response - no static_files to transfer
+        log "Source has no static_files to transfer"
+    else
+        # Binary response - stream and extract tar archive
+        curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=static_files" | \
+            tar -xzf - -C "$SITE_ROOT/" || {
+                log_error "Failed to extract static_files from clone source"
+                exit 1
+            }
+        log "Static files cloned successfully"
     fi
 
     # Update site URL in settings
