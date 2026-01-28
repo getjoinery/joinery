@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 1.2 - Added site cloning support
+# VERSION: 1.5 - Reset protocol_mode when cloning
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -185,7 +185,7 @@ if [ -n "$CLONE_FROM" ]; then
 
     log "Streaming database from clone source..."
 
-    CLONE_URL="${CLONE_FROM}/utils/clone_export.php"
+    CLONE_URL="${CLONE_FROM}/utils/clone_export"
 
     curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=database" | \
         openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:${CLONE_KEY} | \
@@ -197,16 +197,24 @@ if [ -n "$CLONE_FROM" ]; then
 
     log "Database cloned successfully"
 
-    # Stream uploads
+    # Stream uploads (skip if source has no uploads)
     log "Streaming uploads from clone source..."
 
-    curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" | \
-        tar -xzf - -C "$SITE_ROOT/" || {
-            log_error "Failed to load uploads from clone source"
-            exit 1
-        }
+    # Check Content-Type to determine if there are uploads to transfer
+    CONTENT_TYPE=$(curl -sI -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" 2>/dev/null | grep -i "^content-type:" | head -1)
 
-    log "Uploads cloned successfully"
+    if echo "$CONTENT_TYPE" | grep -qi "application/json"; then
+        # JSON response - no uploads to transfer
+        log "Source has no uploads to transfer"
+    else
+        # Binary response - stream and extract tar archive
+        curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" | \
+            tar -xzf - -C "$SITE_ROOT/public_html/" || {
+                log_error "Failed to extract uploads from clone source"
+                exit 1
+            }
+        log "Uploads cloned successfully"
+    fi
 
     # Update site URL in settings
     log "Updating site settings for new domain..."
@@ -218,6 +226,11 @@ if [ -n "$CLONE_FROM" ]; then
     # Disable clone export key on the new site (security)
     psql -U postgres -d "$SITENAME" -q -c \
         "DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';" \
+        2>/dev/null || true
+
+    # Reset protocol_mode to 'auto' (cloned site may have different SSL config)
+    psql -U postgres -d "$SITENAME" -q -c \
+        "UPDATE stg_settings SET stg_value = 'auto' WHERE stg_name = 'protocol_mode';" \
         2>/dev/null || true
 
     SKIP_DB_VALIDATION=true

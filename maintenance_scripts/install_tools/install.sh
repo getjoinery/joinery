@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.7 - Added site cloning support (--clone-from, --clone-key)
+#VERSION 2.8 - Skip theme download when cloning
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -1611,7 +1611,7 @@ do_site_create() {
             exit 1
         fi
 
-        MANIFEST=$(curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_FROM}/utils/clone_export.php?action=manifest" 2>/dev/null)
+        MANIFEST=$(curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_FROM}/utils/clone_export?action=manifest" 2>/dev/null)
 
         if [ $? -ne 0 ] || [ -z "$MANIFEST" ]; then
             print_error "Cannot connect to clone source or invalid key"
@@ -1793,14 +1793,28 @@ do_site_docker() {
 
     mkdir -p "$BUILD_DIR/$SITENAME"
 
-    # Download themes and plugins to archive before copying
-    download_themes_and_plugins "$ARCHIVE_ROOT/public_html" "$THEMES"
+    # Download themes and plugins to archive before copying (skip when cloning)
+    if [ -z "$CLONE_FROM" ]; then
+        if [ -n "$THEMES" ] || [ -n "$UPGRADE_SERVER" ]; then
+            download_themes_and_plugins "$ARCHIVE_ROOT/public_html" "$THEMES"
+        fi
+    else
+        print_info "Skipping theme download (will be cloned from source)"
+    fi
 
     print_info "Copying public_html..."
     cp -r "$ARCHIVE_ROOT/public_html" "$BUILD_DIR/$SITENAME/"
 
-    print_info "Copying config..."
-    cp -r "$ARCHIVE_ROOT/config" "$BUILD_DIR/$SITENAME/"
+    print_info "Setting up config directory..."
+    mkdir -p "$BUILD_DIR/$SITENAME/config"
+    if [ -n "$CLONE_FROM" ]; then
+        # When cloning, don't copy Globalvars_site.php - _site_init.sh will create it
+        # This ensures first-run initialization happens with the clone
+        print_info "Skipping config copy (will be configured during clone)"
+    else
+        # Normal install: copy the archive config
+        cp -r "$ARCHIVE_ROOT/config"/* "$BUILD_DIR/$SITENAME/config/"
+    fi
 
     print_info "Copying maintenance_scripts..."
     mkdir -p "$BUILD_DIR/maintenance_scripts"
