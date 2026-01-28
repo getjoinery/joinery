@@ -15,8 +15,10 @@
  * - manifest: Returns metadata about what will be cloned
  * - database: Streams encrypted, gzipped PostgreSQL dump
  * - uploads: Streams tar.gz archive of uploads directory
+ * - themes: Streams tar.gz archive of themes directory
+ * - plugins: Streams tar.gz archive of plugins directory
  *
- * @version 1.0
+ * @version 1.1
  */
 
 // Standalone script - load minimal requirements
@@ -28,8 +30,12 @@ require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 // SECURITY CHECKS
 // =============================================================================
 
-// Require HTTPS in production
-if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') {
+// Require HTTPS in production (check both direct HTTPS and proxy headers)
+$is_https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+    || (!empty($_SERVER['HTTP_CF_VISITOR']) && strpos($_SERVER['HTTP_CF_VISITOR'], '"https"') !== false);
+
+if (!$is_https) {
     // Allow non-HTTPS for localhost/testing
     $host = $_SERVER['HTTP_HOST'] ?? '';
     if (!preg_match('/^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/', $host)) {
@@ -51,7 +57,17 @@ if (empty($clone_key_setting)) {
 }
 
 // Validate key from Authorization header (timing-safe comparison)
-$auth_header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+// Check multiple sources as Apache/CGI may not set $_SERVER['HTTP_AUTHORIZATION']
+$auth_header = $_SERVER['HTTP_AUTHORIZATION']
+    ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+    ?? '';
+
+// Fallback to getallheaders() if available (works with Apache mod_php and some CGI setups)
+if (empty($auth_header) && function_exists('getallheaders')) {
+    $headers = getallheaders();
+    $auth_header = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+}
+
 $provided_key = '';
 if (preg_match('/^Bearer\s+(.+)$/i', $auth_header, $matches)) {
     $provided_key = $matches[1];
@@ -99,6 +115,14 @@ switch ($action) {
         handle_uploads_export($settings, $client_ip);
         break;
 
+    case 'themes':
+        handle_themes_export($settings, $client_ip);
+        break;
+
+    case 'plugins':
+        handle_plugins_export($settings, $client_ip);
+        break;
+
     default:
         http_response_code(400);
         header('Content-Type: application/json');
@@ -115,8 +139,8 @@ switch ($action) {
 function handle_manifest($settings, $client_ip) {
     log_clone_request('manifest', $client_ip);
 
-    $site_root = PathHelper::get_site_root();
-    $site_name = basename(dirname($site_root));
+    $site_root = dirname(dirname(__DIR__));
+    $site_name = basename($site_root);
 
     // Get database size
     $dbconnector = DbConnector::get_instance();
@@ -132,8 +156,8 @@ function handle_manifest($settings, $client_ip) {
         // Ignore errors, just report 0
     }
 
-    // Get uploads size and count
-    $uploads_dir = $site_root . '/uploads';
+    // Get uploads size and count (uploads are in public_html/uploads)
+    $uploads_dir = $site_root . '/public_html/uploads';
     $uploads_size_mb = 0;
     $uploads_count = 0;
 
@@ -142,9 +166,9 @@ function handle_manifest($settings, $client_ip) {
         $uploads_size_mb = (int) (get_directory_size($uploads_dir) / 1024 / 1024);
     }
 
-    // Get themes
+    // Get themes (in public_html/theme)
     $themes = [];
-    $theme_dir = $site_root . '/theme';
+    $theme_dir = $site_root . '/public_html/theme';
     if (is_dir($theme_dir)) {
         foreach (scandir($theme_dir) as $item) {
             if ($item !== '.' && $item !== '..' && is_dir($theme_dir . '/' . $item)) {
@@ -153,9 +177,9 @@ function handle_manifest($settings, $client_ip) {
         }
     }
 
-    // Get plugins
+    // Get plugins (in public_html/plugins)
     $plugins = [];
-    $plugin_dir = $site_root . '/plugins';
+    $plugin_dir = $site_root . '/public_html/plugins';
     if (is_dir($plugin_dir)) {
         foreach (scandir($plugin_dir) as $item) {
             if ($item !== '.' && $item !== '..' && is_dir($plugin_dir . '/' . $item)) {
@@ -194,11 +218,11 @@ function handle_manifest($settings, $client_ip) {
 function handle_database_export($settings, $client_ip, $clone_key) {
     log_clone_request('database', $client_ip);
 
-    // Get database credentials from Globalvars
-    $db_name = $settings->settings['dbname'];
-    $db_password = $settings->settings['dbpassword'];
-    $db_user = $settings->settings['dbuser'] ?? 'postgres';
-    $db_host = $settings->settings['dbhost'] ?? '127.0.0.1';
+    // Get database credentials from Globalvars (use get_setting accessor)
+    $db_name = $settings->get_setting('dbname');
+    $db_password = $settings->get_setting('dbpassword');
+    $db_user = $settings->get_setting('dbusername') ?: 'postgres';
+    $db_host = $settings->get_setting('dbhost') ?: '127.0.0.1';
 
     // Set headers for streaming download
     header('Content-Type: application/octet-stream');
@@ -231,13 +255,22 @@ function handle_database_export($settings, $client_ip, $clone_key) {
 function handle_uploads_export($settings, $client_ip) {
     log_clone_request('uploads', $client_ip);
 
-    $site_root = PathHelper::get_site_root();
-    $uploads_dir = $site_root . '/uploads';
+    $site_root = dirname(dirname(__DIR__));
+    $uploads_dir = $site_root . '/public_html/uploads';
 
+    // Check if uploads directory exists and has files
     if (!is_dir($uploads_dir)) {
-        http_response_code(404);
+        // Return empty success response - no uploads to transfer
         header('Content-Type: application/json');
-        die(json_encode(['status' => 'error', 'message' => 'Uploads directory not found']));
+        die(json_encode(['status' => 'ok', 'message' => 'No uploads directory', 'count' => 0]));
+    }
+
+    // Check if directory has any files
+    $file_count = count_files_recursive($uploads_dir);
+    if ($file_count === 0) {
+        // Return empty success response - no files to transfer
+        header('Content-Type: application/json');
+        die(json_encode(['status' => 'ok', 'message' => 'Uploads directory is empty', 'count' => 0]));
     }
 
     // Set headers for streaming download
@@ -250,10 +283,80 @@ function handle_uploads_export($settings, $client_ip) {
         ob_end_clean();
     }
 
-    // Stream tar output directly
+    // Stream tar output directly (from public_html directory, creates uploads/ in archive)
     $cmd = sprintf(
         "tar -czf - -C %s uploads 2>/dev/null",
-        escapeshellarg($site_root)
+        escapeshellarg($site_root . '/public_html')
+    );
+
+    passthru($cmd);
+    exit;
+}
+
+/**
+ * Handle themes export - streams tar.gz archive of themes directory
+ */
+function handle_themes_export($settings, $client_ip) {
+    log_clone_request('themes', $client_ip);
+
+    $site_root = dirname(dirname(__DIR__));
+    $themes_dir = $site_root . '/public_html/theme';
+
+    if (!is_dir($themes_dir)) {
+        http_response_code(404);
+        header('Content-Type: application/json');
+        die(json_encode(['status' => 'error', 'message' => 'Themes directory not found']));
+    }
+
+    // Set headers for streaming download
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="themes.tar.gz"');
+    header('X-Content-Type-Options: nosniff');
+
+    // Disable output buffering
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+
+    // Stream tar output directly (from public_html directory, creates theme/ in archive)
+    $cmd = sprintf(
+        "tar -czf - -C %s theme 2>/dev/null",
+        escapeshellarg($site_root . '/public_html')
+    );
+
+    passthru($cmd);
+    exit;
+}
+
+/**
+ * Handle plugins export - streams tar.gz archive of plugins directory
+ */
+function handle_plugins_export($settings, $client_ip) {
+    log_clone_request('plugins', $client_ip);
+
+    $site_root = dirname(dirname(__DIR__));
+    $plugins_dir = $site_root . '/public_html/plugins';
+
+    if (!is_dir($plugins_dir)) {
+        http_response_code(404);
+        header('Content-Type: application/json');
+        die(json_encode(['status' => 'error', 'message' => 'Plugins directory not found']));
+    }
+
+    // Set headers for streaming download
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="plugins.tar.gz"');
+    header('X-Content-Type-Options: nosniff');
+
+    // Disable output buffering
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+
+    // Stream tar output directly (from public_html directory, creates plugins/ in archive)
+    $cmd = sprintf(
+        "tar -czf - -C %s plugins 2>/dev/null",
+        escapeshellarg($site_root . '/public_html')
     );
 
     passthru($cmd);
@@ -268,7 +371,7 @@ function handle_uploads_export($settings, $client_ip) {
  * Log a clone export request
  */
 function log_clone_request($action, $client_ip) {
-    $site_root = PathHelper::get_site_root();
+    $site_root = dirname(dirname(__DIR__));
     $log_dir = dirname($site_root) . '/logs';
 
     if (!is_dir($log_dir)) {
