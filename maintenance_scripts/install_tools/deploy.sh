@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 3.12 - Update-only theme model (no new theme installation during deploy)
+#version 3.13 - Fixed fix_permissions path resolution after cd commands
 # MODIFIED v3.12: Changed from "add new themes" to "update installed themes only" model
 # MODIFIED v3.12: Now uses sparse checkout to only fetch themes already in public_html
 # MODIFIED v3.12: Replaced preserveCustomThemesPlugins with updateInstalledThemesOnly
@@ -28,7 +28,10 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.12"
+DEPLOY_VERSION="3.13"
+
+# Capture script directory at startup (before any cd commands change working directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Helper function for verbose output
 verbose_echo() {
@@ -170,9 +173,8 @@ fix_permissions() {
     local target_site="$1"
     local mode="${2:---production}"  # Default to production mode
 
-    # Get the directory where this script is located
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local fix_script="$script_dir/fix_permissions.sh"
+    # Use global SCRIPT_DIR captured at startup (working directory may have changed)
+    local fix_script="$SCRIPT_DIR/fix_permissions.sh"
 
     if [ "$VERBOSE" = true ]; then
         echo "Fixing permissions for $target_site (mode: $mode)..."
