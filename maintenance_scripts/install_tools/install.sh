@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.9 - Add static_files to clone manifest display
+#VERSION 2.10 - Add auto-restart policy to Docker containers
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -1872,6 +1872,7 @@ EOF
     if [ "$QUIET_MODE" -eq 1 ]; then
         docker run -d \
             --name "$SITENAME" \
+            --restart unless-stopped \
             -p "$PORT":80 \
             -p "$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
@@ -1889,6 +1890,7 @@ EOF
     else
         docker run -d \
             --name "$SITENAME" \
+            --restart unless-stopped \
             -p "$PORT":80 \
             -p "$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
