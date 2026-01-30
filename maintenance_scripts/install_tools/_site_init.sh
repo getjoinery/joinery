@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 1.6 - Add static_files cloning
+# VERSION: 1.8 - Use temp files for uploads/static_files to avoid pipe truncation in Docker
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -129,11 +129,11 @@ done
 log "Creating directory structure..."
 
 mkdir -p "$SITE_ROOT/config"
-mkdir -p "$SITE_ROOT/public_html/uploads/small"
-mkdir -p "$SITE_ROOT/public_html/uploads/medium"
-mkdir -p "$SITE_ROOT/public_html/uploads/large"
-mkdir -p "$SITE_ROOT/public_html/uploads/thumbnail"
-mkdir -p "$SITE_ROOT/public_html/uploads/lthumbnail"
+mkdir -p "$SITE_ROOT/uploads/small"
+mkdir -p "$SITE_ROOT/uploads/medium"
+mkdir -p "$SITE_ROOT/uploads/large"
+mkdir -p "$SITE_ROOT/uploads/thumbnail"
+mkdir -p "$SITE_ROOT/uploads/lthumbnail"
 mkdir -p "$SITE_ROOT/public_html/cache"
 mkdir -p "$SITE_ROOT/logs"
 mkdir -p "$SITE_ROOT/static_files"
@@ -197,8 +197,8 @@ if [ -n "$CLONE_FROM" ]; then
 
     log "Database cloned successfully"
 
-    # Stream uploads (skip if source has no uploads)
-    log "Streaming uploads from clone source..."
+    # Download and extract uploads (skip if source has no uploads)
+    log "Downloading uploads from clone source..."
 
     # Check Content-Type to determine if there are uploads to transfer
     CONTENT_TYPE=$(curl -sI -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" 2>/dev/null | grep -i "^content-type:" | head -1)
@@ -207,17 +207,25 @@ if [ -n "$CLONE_FROM" ]; then
         # JSON response - no uploads to transfer
         log "Source has no uploads to transfer"
     else
-        # Binary response - stream and extract tar archive
-        curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" | \
-            tar -xzf - -C "$SITE_ROOT/public_html/" || {
+        # Binary response - download to temp file then extract (avoids pipe truncation issues)
+        TEMP_UPLOADS=$(mktemp)
+        if curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=uploads" -o "$TEMP_UPLOADS"; then
+            tar -xzf "$TEMP_UPLOADS" -C "$SITE_ROOT/" || {
+                rm -f "$TEMP_UPLOADS"
                 log_error "Failed to extract uploads from clone source"
                 exit 1
             }
-        log "Uploads cloned successfully"
+            rm -f "$TEMP_UPLOADS"
+            log "Uploads cloned successfully"
+        else
+            rm -f "$TEMP_UPLOADS"
+            log_error "Failed to download uploads from clone source"
+            exit 1
+        fi
     fi
 
-    # Stream static_files (skip if source has no static_files)
-    log "Streaming static_files from clone source..."
+    # Download and extract static_files (skip if source has no static_files)
+    log "Downloading static_files from clone source..."
 
     # Check Content-Type to determine if there are static_files to transfer
     CONTENT_TYPE=$(curl -sI -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=static_files" 2>/dev/null | grep -i "^content-type:" | head -1)
@@ -226,13 +234,21 @@ if [ -n "$CLONE_FROM" ]; then
         # JSON response - no static_files to transfer
         log "Source has no static_files to transfer"
     else
-        # Binary response - stream and extract tar archive
-        curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=static_files" | \
-            tar -xzf - -C "$SITE_ROOT/" || {
+        # Binary response - download to temp file then extract (avoids pipe truncation issues)
+        TEMP_STATIC=$(mktemp)
+        if curl -sf -H "Authorization: Bearer ${CLONE_KEY}" "${CLONE_URL}?action=static_files" -o "$TEMP_STATIC"; then
+            tar -xzf "$TEMP_STATIC" -C "$SITE_ROOT/" || {
+                rm -f "$TEMP_STATIC"
                 log_error "Failed to extract static_files from clone source"
                 exit 1
             }
-        log "Static files cloned successfully"
+            rm -f "$TEMP_STATIC"
+            log "Static files cloned successfully"
+        else
+            rm -f "$TEMP_STATIC"
+            log_error "Failed to download static_files from clone source"
+            exit 1
+        fi
     fi
 
     # Update site URL in settings
@@ -459,7 +475,7 @@ else
     # Fallback: set permissions manually
     chown -R www-data:www-data "$SITE_ROOT"
     chmod -R 755 "$SITE_ROOT/public_html"
-    chmod -R 775 "$SITE_ROOT/public_html/uploads"
+    chmod -R 775 "$SITE_ROOT/uploads"
     chmod -R 775 "$SITE_ROOT/public_html/cache"
     chmod -R 775 "$SITE_ROOT/logs"
 fi
