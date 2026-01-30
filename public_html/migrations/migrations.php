@@ -16,6 +16,19 @@
 			$migrations = array();
 		}
 
+	// =============================================================================
+	// ARCHIVED MIGRATIONS (v12-v76)
+	// =============================================================================
+	// All legacy sites have been upgraded. These migrations are preserved for 
+	// reference but are no longer executed. New installations use joinery-install.sql
+	// which already includes all settings and data up to the current version.
+	//
+	// To add new migrations for FUTURE changes, add them after this archived block.
+	// =============================================================================
+
+/*
+// ===== BEGIN ARCHIVED MIGRATIONS =====
+
 	
 		$migration['database_version'] = '12';
 		$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'blog_active'";
@@ -1095,3 +1108,14 @@
 		$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug, amu_setting_activate) VALUES ('Component Types', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'pages'), 'admin_component_types', 3, 5, 0, '', 'component-types', 'page_contents_active');";
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
+
+// ===== END ARCHIVED MIGRATIONS =====
+*/
+
+	// =============================================================================
+	// ACTIVE MIGRATIONS
+	// =============================================================================
+	// Add new migrations below this line. These will run on existing installations
+	// when they upgrade. New installations already have everything via the SQL dump.
+	// =============================================================================
+
