@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-#Version 2.01 - Fixed password prompts and improved user experience
+#Version 3.0 - Added --non-interactive mode for automated backups
 
-# Global flag for encryption (default: encrypted)
+# Global flags
 ENCRYPT_BACKUPS=true
+NON_INTERACTIVE=false
+ENCRYPTION_KEY=""
 
 # Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt
 
@@ -50,7 +52,7 @@ else
         fi
     fi
     
-    # If still no password, fall back to interactive prompt
+    # If still no password, fall back to interactive prompt (unless non-interactive)
     if [[ -z "$PGPASSWORD" ]]; then
         echo "⚠️  No .pgpass file found, no config file found, and PGPASSWORD not set."
         echo "You will be prompted for the postgres password multiple times."
@@ -60,8 +62,12 @@ else
         echo "  2) Set PGPASSWORD: export PGPASSWORD='your_password'"
         echo "  3) Ensure config file exists at /var/www/html/SITENAME/config/Globalvars_site.php"
         echo ""
-        read -p "Press Enter to continue with password prompts..."
-        echo ""
+        # Note: NON_INTERACTIVE not set yet during initial config loading
+        # This prompt will be skipped if running via automated scripts that set PGPASSWORD
+        if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
+            read -p "Press Enter to continue with password prompts..."
+            echo ""
+        fi
     fi
 fi
 
@@ -71,20 +77,34 @@ now=$(date +"%m_%d_%Y")
 backup_database() {
     local db_name="$1"
     local backup_file
-    
+
     if [ "$ENCRYPT_BACKUPS" = true ]; then
         backup_file="${db_name}-${now}.sql.gz.enc"
         echo "📦 Backing up database (encrypted): $db_name"
         echo ""
-        
+
         # Create compressed + encrypted backup using temporary file
         local temp_file=$(mktemp --suffix=.sql)
-        
+
         if pg_dump -U postgres "$db_name" > "$temp_file"; then
             echo "✓ Database dump completed"
-            echo ""
-            echo "🔐 Enter encryption password for backup file:"
-            if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"; then
+
+            local encrypt_result=1
+            if [ -n "$ENCRYPTION_KEY" ]; then
+                # Non-interactive: use key from variable
+                if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"$ENCRYPTION_KEY" -out "$backup_file" 2>/dev/null; then
+                    encrypt_result=0
+                fi
+            else
+                # Interactive: prompt for password
+                echo ""
+                echo "🔐 Enter encryption password for backup file:"
+                if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"; then
+                    encrypt_result=0
+                fi
+            fi
+
+            if [ $encrypt_result -eq 0 ]; then
                 rm -f "$temp_file"
                 # Set restrictive permissions on encrypted file
                 chmod 600 "$backup_file"
@@ -161,17 +181,19 @@ backup_all_databases() {
     echo "$databases" | sed 's/^/  - /'
     echo ""
     
-    if [ "$ENCRYPT_BACKUPS" = true ]; then
-        echo "💡 Each database will prompt for an encryption password."
-        echo "For convenience, you may want to use the same password for all databases."
-        echo ""
-    fi
-    
-    read -p "Continue with backup of all databases? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Backup cancelled."
-        exit 0
+    if [ "$NON_INTERACTIVE" = false ]; then
+        if [ "$ENCRYPT_BACKUPS" = true ] && [ -z "$ENCRYPTION_KEY" ]; then
+            echo "💡 Each database will prompt for an encryption password."
+            echo "For convenience, you may want to use the same password for all databases."
+            echo ""
+        fi
+
+        read -p "Continue with backup of all databases? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Backup cancelled."
+            exit 0
+        fi
     fi
     
     echo ""
@@ -213,31 +235,69 @@ backup_all_databases() {
     fi
 }
 
+# Function to get encryption key for non-interactive mode
+get_encryption_key() {
+    # Priority 1: Environment variable
+    if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
+        ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
+        echo "✓ Using encryption key from BACKUP_ENCRYPTION_KEY environment variable"
+        return 0
+    fi
+
+    # Priority 2: Key file
+    local key_file="$HOME/.joinery_backup_key"
+    if [ -f "$key_file" ]; then
+        # Check file permissions (should be 600)
+        local perms=$(stat -c '%a' "$key_file" 2>/dev/null || stat -f '%Lp' "$key_file" 2>/dev/null)
+        if [ "$perms" != "600" ]; then
+            echo "⚠️  Warning: $key_file has permissions $perms (should be 600)"
+        fi
+        ENCRYPTION_KEY=$(cat "$key_file" | head -1 | tr -d '\n\r')
+        if [ -n "$ENCRYPTION_KEY" ]; then
+            echo "✓ Using encryption key from $key_file"
+            return 0
+        fi
+    fi
+
+    # No key available
+    return 1
+}
+
 # Function to show help
 show_help() {
-    echo "PostgreSQL Database Backup Script v2.01"
+    echo "PostgreSQL Database Backup Script v3.0"
     echo ""
     echo "Usage:"
-    echo "  $0                        # Backup all databases (encrypted)"
-    echo "  $0 [database_name]        # Backup specific database (encrypted)"
-    echo "  $0 --plaintext            # Backup all databases (unencrypted)"
-    echo "  $0 --plaintext [db_name]  # Backup specific database (unencrypted)"
+    echo "  $0                             # Backup all databases (encrypted, interactive)"
+    echo "  $0 [database_name]             # Backup specific database (encrypted, interactive)"
+    echo "  $0 --non-interactive [db_name] # Backup with key from env/file (for automation)"
+    echo "  $0 --plaintext [db_name]       # Backup specific database (unencrypted)"
     echo ""
     echo "Options:"
+    echo "  --non-interactive, -n     Use encryption key from env var or file (no prompts)"
     echo "  --plaintext, -p           Create unencrypted backups"
     echo "  --help, -h                Show this help message"
     echo ""
+    echo "Non-Interactive Mode:"
+    echo "  Encryption key sources (in order of precedence):"
+    echo "  1. \$BACKUP_ENCRYPTION_KEY environment variable"
+    echo "  2. ~/.joinery_backup_key file (must have 600 permissions)"
+    echo ""
     echo "Examples:"
-    echo "  $0                        # Backup all user databases (encrypted)"
-    echo "  $0 myapp                  # Backup only 'myapp' database (encrypted)"
-    echo "  $0 --plaintext            # Backup all databases (unencrypted)"
-    echo "  $0 --plaintext myapp      # Backup 'myapp' database (unencrypted)"
+    echo "  $0                              # Backup all databases (encrypted, prompts for password)"
+    echo "  $0 myapp                        # Backup 'myapp' database (encrypted, prompts)"
+    echo "  $0 --non-interactive myapp      # Backup 'myapp' using key from env/file"
+    echo "  $0 --plaintext myapp            # Backup 'myapp' database (unencrypted)"
+    echo ""
+    echo "  # Set encryption key via environment:"
+    echo "  BACKUP_ENCRYPTION_KEY='secretkey' $0 --non-interactive myapp"
     echo ""
     echo "Security Notes:"
     echo "  • Encrypted backups use AES-256-CBC + gzip compression"
     echo "  • System databases (postgres, template0, template1) are excluded from 'all' backup"
     echo "  • All backup files are created with 600 permissions (owner read/write only)"
     echo "  • Use strong passwords for encrypted backups"
+    echo "  • Key file should have 600 permissions"
     echo ""
     echo "Decryption:"
     echo "  openssl enc -aes-256-cbc -d -pbkdf2 -in backup.sql.gz.enc | gunzip > restored.sql"
@@ -248,6 +308,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --plaintext|-p)
             ENCRYPT_BACKUPS=false
+            shift
+            ;;
+        --non-interactive|-n)
+            NON_INTERACTIVE=true
             shift
             ;;
         --help|-h)
@@ -267,6 +331,18 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Handle non-interactive mode encryption key
+if [ "$NON_INTERACTIVE" = true ] && [ "$ENCRYPT_BACKUPS" = true ]; then
+    if ! get_encryption_key; then
+        echo "✗ Error: Non-interactive mode requires encryption key"
+        echo ""
+        echo "Please set one of the following:"
+        echo "  1. Environment variable: export BACKUP_ENCRYPTION_KEY='your_key'"
+        echo "  2. Key file: echo 'your_key' > ~/.joinery_backup_key && chmod 600 ~/.joinery_backup_key"
+        exit 1
+    fi
+fi
 
 # Check if OpenSSL is available when encryption is enabled
 if [ "$ENCRYPT_BACKUPS" = true ]; then
