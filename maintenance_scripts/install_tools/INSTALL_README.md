@@ -961,6 +961,30 @@ docker exec -it $SITENAME bash
 su postgres -c "psql -d $SITENAME -c '\dt'"
 ```
 
+### Composer Autoload Errors (Cloned Sites)
+
+When cloning a site, you may see errors like:
+```
+Composer autoload.php not found at: /home/user1/vendor/autoload.php
+```
+
+This happens because the `composerAutoLoad` database setting was copied from the source site and points to the wrong path.
+
+**Fix:** Update the setting to use the relative path `../vendor/`:
+
+```bash
+# For Docker containers
+docker exec -it $SITENAME bash
+PGPASSWORD='your_db_password' psql -U postgres -d $SITENAME \
+  -c "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';"
+
+# For bare-metal installations
+sudo -u postgres psql -d $SITENAME \
+  -c "UPDATE stg_settings SET stg_value = '../vendor/' WHERE stg_name = 'composerAutoLoad';"
+```
+
+The correct value is `../vendor/` (relative path), which works across all deployment types.
+
 ---
 
 ## Quick Reference

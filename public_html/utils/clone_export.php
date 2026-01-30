@@ -18,7 +18,7 @@
  * - themes: Streams tar.gz archive of themes directory
  * - plugins: Streams tar.gz archive of plugins directory
  *
- * @version 1.2 - Added static_files export (excludes upgrade packages and theme archives)
+ * @version 1.3 - Fixed uploads path (was incorrectly looking in public_html/uploads instead of uploads/)
  */
 
 // Standalone script - load minimal requirements
@@ -160,8 +160,8 @@ function handle_manifest($settings, $client_ip) {
         // Ignore errors, just report 0
     }
 
-    // Get uploads size and count (uploads are in public_html/uploads)
-    $uploads_dir = $site_root . '/public_html/uploads';
+    // Get uploads size and count (uploads are at site root level)
+    $uploads_dir = $site_root . '/uploads';
     $uploads_size_mb = 0;
     $uploads_count = 0;
 
@@ -272,7 +272,7 @@ function handle_uploads_export($settings, $client_ip) {
     log_clone_request('uploads', $client_ip);
 
     $site_root = dirname(dirname(__DIR__));
-    $uploads_dir = $site_root . '/public_html/uploads';
+    $uploads_dir = $site_root . '/uploads';
 
     // Check if uploads directory exists and has files
     if (!is_dir($uploads_dir)) {
@@ -299,10 +299,10 @@ function handle_uploads_export($settings, $client_ip) {
         ob_end_clean();
     }
 
-    // Stream tar output directly (from public_html directory, creates uploads/ in archive)
+    // Stream tar output directly (from site root, creates uploads/ in archive)
     $cmd = sprintf(
         "tar -czf - -C %s uploads 2>/dev/null",
-        escapeshellarg($site_root . '/public_html')
+        escapeshellarg($site_root)
     );
 
     passthru($cmd);
