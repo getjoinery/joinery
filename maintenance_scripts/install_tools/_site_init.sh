@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 1.8 - Use temp files for uploads/static_files to avoid pipe truncation in Docker
+# VERSION: 1.9 - Delay config creation in clone mode until clone completes (prevents partial clone state)
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -143,18 +143,25 @@ mkdir -p "$SITE_ROOT/backups"
 # CONFIGURATION FILES
 # =============================================================================
 
-log "Configuring site..."
-
 # Escape password for sed (handles special characters like /, &, \)
 ESCAPED_PASSWORD=$(sed_escape "$PASSWORD")
 
-# Copy and configure Globalvars_site.php
-cp "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"
-sed -i "s/{{PASSWORD}}/${ESCAPED_PASSWORD}/g" "$SITE_ROOT/config/Globalvars_site.php"
-sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "$SITE_ROOT/config/Globalvars_site.php"
-sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "$SITE_ROOT/config/Globalvars_site.php"
-# Also handle the legacy pattern with empty password
-sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
+# Helper function to create config file
+create_config_file() {
+    log "Configuring site..."
+    cp "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"
+    sed -i "s/{{PASSWORD}}/${ESCAPED_PASSWORD}/g" "$SITE_ROOT/config/Globalvars_site.php"
+    sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "$SITE_ROOT/config/Globalvars_site.php"
+    sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "$SITE_ROOT/config/Globalvars_site.php"
+    # Also handle the legacy pattern with empty password
+    sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
+}
+
+# In clone mode, delay config creation until clone completes successfully
+# This prevents partial clone state where config exists but clone failed partway
+if [ -z "$CLONE_FROM" ]; then
+    create_config_file
+fi
 
 # =============================================================================
 # DATABASE SETUP
@@ -269,6 +276,10 @@ if [ -n "$CLONE_FROM" ]; then
         2>/dev/null || true
 
     SKIP_DB_VALIDATION=true
+
+    # Clone completed successfully - NOW create the config file
+    # This ensures that if clone fails partway, config won't exist and next attempt will retry
+    create_config_file
 
 elif [ "$DB_EXISTS" = false ]; then
     # ==========================================================================
