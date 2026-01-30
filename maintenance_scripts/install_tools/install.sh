@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.10 - Add auto-restart policy to Docker containers
+#VERSION 2.11 - Remove volumes when removing existing container to ensure clean reinstall
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -1759,20 +1759,29 @@ do_site_docker() {
         print_warning "A container named '$SITENAME' already exists"
 
         if [ "$ASSUME_YES" -eq 1 ]; then
-            print_info "Auto-removing existing container (-y flag)"
+            print_info "Auto-removing existing container and volumes (-y flag)"
             docker stop "$SITENAME" 2>/dev/null || true
             docker rm "$SITENAME" 2>/dev/null || true
-            print_success "Existing container removed"
+            # Remove associated volumes to ensure clean reinstall
+            for vol in postgres uploads config backups static logs cache sessions apache_logs pg_logs; do
+                docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
+            done
+            print_success "Existing container and volumes removed"
         else
             echo ""
+            print_warning "Removing container will also delete all site data (database, uploads, config)!"
             read -p "Would you like to remove it and continue? [y/N] " -n 1 -r
             echo ""
 
             if [[ $REPLY =~ ^[Yy]$ ]]; then
-                print_info "Stopping and removing existing container..."
+                print_info "Stopping and removing existing container and volumes..."
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                print_success "Existing container removed"
+                # Remove associated volumes to ensure clean reinstall
+                for vol in postgres uploads config backups static logs cache sessions apache_logs pg_logs; do
+                    docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
+                done
+                print_success "Existing container and volumes removed"
             else
                 print_error "Cannot continue with existing container."
                 exit 1
