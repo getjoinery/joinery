@@ -937,6 +937,52 @@
 			}
 		}
 
+		// ============================================
+		// THEME AND PLUGIN SYNC
+		// ============================================
+		if(!$dry_run){
+			upgrade_echo('<br><h3>Syncing Themes and Plugins</h3>');
+
+			try {
+				require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
+				require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+
+				// Sync themes
+				$theme_manager = ThemeManager::getInstance();
+				$theme_result = $theme_manager->sync();
+				$theme_parts = array();
+				if (!empty($theme_result['added'])) {
+					$theme_parts[] = count($theme_result['added']) . " added";
+				}
+				if (!empty($theme_result['updated'])) {
+					$theme_parts[] = count($theme_result['updated']) . " updated";
+				}
+				if (empty($theme_parts)) {
+					upgrade_echo("✓ Themes synced (no changes)<br>");
+				} else {
+					upgrade_echo("✓ Themes synced: " . implode(", ", $theme_parts) . "<br>");
+				}
+
+				// Sync plugins
+				$plugin_manager = PluginManager::getInstance();
+				$plugin_result = $plugin_manager->sync();
+				$plugin_parts = array();
+				if (!empty($plugin_result['added'])) {
+					$plugin_parts[] = count($plugin_result['added']) . " added";
+				}
+				if (!empty($plugin_result['updated'])) {
+					$plugin_parts[] = count($plugin_result['updated']) . " updated";
+				}
+				if (empty($plugin_parts)) {
+					upgrade_echo("✓ Plugins synced (no changes)<br>");
+				} else {
+					upgrade_echo("✓ Plugins synced: " . implode(", ", $plugin_parts) . "<br>");
+				}
+			} catch (Exception $e) {
+				upgrade_echo("⚠ Theme/Plugin sync warning: " . htmlspecialchars($e->getMessage()) . "<br>");
+			}
+		}
+
 		if($dry_run){
 			echo '<br><div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
 			echo '<h2 style="margin-top: 0; color: #0066cc;">✓ Dry Run Complete!</h2>';
