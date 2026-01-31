@@ -122,6 +122,14 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
+	// Handle refresh archives request
+	if (isset($_POST['refresh_archives']) && $_POST['refresh_archives'] == '1') {
+		header('Content-Type: application/json');
+		$result = request_archive_refresh();
+		echo json_encode($result);
+		exit;
+	}
+
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 
@@ -396,8 +404,37 @@
 		$themes_to_download = get_installed_stock_themes($live_directory . '/theme');
 		$plugins_to_download = get_installed_stock_plugins($live_directory . '/plugins');
 
-		upgrade_echo("Stock themes to update: " . count($themes_to_download) . " (" . implode(', ', $themes_to_download) . ")<br>");
-		upgrade_echo("Stock plugins to update: " . count($plugins_to_download) . " (" . implode(', ', $plugins_to_download) . ")<br>");
+		// Get detailed info for status display
+		$all_themes_info = get_all_themes_info($live_directory . '/theme');
+		$all_plugins_info = get_all_plugins_info($live_directory . '/plugins');
+
+		// Display theme status
+		if ($is_cli) {
+			echo "\n=== INSTALLED THEMES ===\n";
+		} else {
+			upgrade_echo('<h4>Installed Themes</h4>');
+		}
+		output_component_status($all_themes_info, 'theme', $is_cli);
+
+		// Display plugin status
+		if ($is_cli) {
+			echo "=== INSTALLED PLUGINS ===\n";
+		} else {
+			upgrade_echo('<h4>Installed Plugins</h4>');
+		}
+		output_component_status($all_plugins_info, 'plugin', $is_cli);
+
+		// Summary
+		$total_themes = count($all_themes_info);
+		$stock_themes = count($themes_to_download);
+		$total_plugins = count($all_plugins_info);
+		$stock_plugins = count($plugins_to_download);
+
+		if ($is_cli) {
+			echo "Summary: {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded\n\n";
+		} else {
+			upgrade_echo("<p><strong>Summary:</strong> {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded</p>");
+		}
 
 		//CLEAR OLD STAGED FILES
 		upgrade_echo('Clearing staging area: '.$stage_location.'<br>');
@@ -998,6 +1035,17 @@
 		echo '</fieldset>';
 		echo $formwriter->end_form();
 
+		// Refresh Server Archives section
+		echo '<fieldset style="margin-top: 30px;"><h4>Server Archive Management</h4>';
+		echo '<div class="fields full">';
+		echo '<p>If you\'ve made changes to themes or plugins on the upgrade server, you can request the server to regenerate its archives.</p>';
+		echo '<div id="refresh-result"></div>';
+		echo '<button type="button" id="refresh-archives-btn" class="btn btn-secondary" onclick="refreshServerArchives()">';
+		echo '<i class="fas fa-sync-alt"></i> Refresh Server Archives';
+		echo '</button>';
+		echo '</div>';
+		echo '</fieldset>';
+
 		// Add JavaScript to disable submit button after click to prevent double submission
 		echo '<script>
 		document.addEventListener("DOMContentLoaded", function() {
@@ -1019,6 +1067,47 @@
 				});
 			}
 		});
+
+		function refreshServerArchives() {
+			var btn = document.getElementById("refresh-archives-btn");
+			var resultDiv = document.getElementById("refresh-result");
+
+			// Disable button and show loading state
+			btn.disabled = true;
+			btn.innerHTML = "<i class=\"fas fa-spinner fa-spin\"></i> Refreshing...";
+			resultDiv.innerHTML = "";
+
+			fetch("/utils/upgrade", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+				},
+				body: "refresh_archives=1"
+			})
+			.then(response => response.json())
+			.then(data => {
+				btn.disabled = false;
+				btn.innerHTML = "<i class=\"fas fa-sync-alt\"></i> Refresh Server Archives";
+
+				if (data.success) {
+					resultDiv.innerHTML = "<div style=\"padding: 15px; margin: 10px 0; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;\">" +
+						"<strong>✓ Success:</strong> " + data.message +
+						(data.version ? " (Version: " + data.version + ")" : "") +
+						"</div>";
+				} else {
+					resultDiv.innerHTML = "<div style=\"padding: 15px; margin: 10px 0; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;\">" +
+						"<strong>❌ Error:</strong> " + (data.error || "Unknown error") +
+						"</div>";
+				}
+			})
+			.catch(error => {
+				btn.disabled = false;
+				btn.innerHTML = "<i class=\"fas fa-sync-alt\"></i> Refresh Server Archives";
+				resultDiv.innerHTML = "<div style=\"padding: 15px; margin: 10px 0; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;\">" +
+					"<strong>❌ Error:</strong> " + error.message +
+					"</div>";
+			});
+		}
 		</script>';
 
 		$page->end_box();
@@ -1076,6 +1165,101 @@
 			}
 		}
 		return $plugins;
+	}
+
+	/**
+	 * Get detailed info about all installed themes
+	 * Returns array with theme name as key and metadata as value
+	 */
+	function get_all_themes_info($theme_dir) {
+		$themes = [];
+		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
+			$theme_data = json_decode(file_get_contents($json_file), true);
+			$theme_name = basename(dirname($json_file));
+			$themes[$theme_name] = [
+				'name' => $theme_name,
+				'display_name' => $theme_data['display_name'] ?? $theme_name,
+				'version' => $theme_data['version'] ?? 'unknown',
+				'is_stock' => $theme_data['is_stock'] ?? false,
+				'will_upgrade' => ($theme_data['is_stock'] ?? false) === true
+			];
+		}
+		ksort($themes);
+		return $themes;
+	}
+
+	/**
+	 * Get detailed info about all installed plugins
+	 * Returns array with plugin name as key and metadata as value
+	 */
+	function get_all_plugins_info($plugin_dir) {
+		$plugins = [];
+		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
+			$plugin_data = json_decode(file_get_contents($json_file), true);
+			$plugin_name = basename(dirname($json_file));
+			$plugins[$plugin_name] = [
+				'name' => $plugin_name,
+				'display_name' => $plugin_data['display_name'] ?? $plugin_name,
+				'version' => $plugin_data['version'] ?? 'unknown',
+				'is_stock' => $plugin_data['is_stock'] ?? false,
+				'will_upgrade' => ($plugin_data['is_stock'] ?? false) === true
+			];
+		}
+		ksort($plugins);
+		return $plugins;
+	}
+
+	/**
+	 * Output theme/plugin status table (works for both CLI and web)
+	 */
+	function output_component_status($components, $type, $is_cli) {
+		if (empty($components)) {
+			if ($is_cli) {
+				echo "No {$type}s installed.\n";
+			} else {
+				echo "No {$type}s installed.<br>";
+			}
+			return;
+		}
+
+		if ($is_cli) {
+			// CLI table output
+			echo str_pad("Name", 25) . str_pad("Version", 12) . str_pad("Stock", 8) . "Status\n";
+			echo str_repeat("-", 60) . "\n";
+			foreach ($components as $info) {
+				$status = $info['will_upgrade'] ? '✓ Will upgrade' : '⊘ Skipped (not stock)';
+				$stock = $info['is_stock'] ? 'Yes' : 'No';
+				echo str_pad($info['name'], 25) . str_pad($info['version'], 12) . str_pad($stock, 8) . $status . "\n";
+			}
+			echo "\n";
+		} else {
+			// HTML table output
+			echo '<table style="border-collapse: collapse; width: 100%; margin: 10px 0; font-family: monospace;">';
+			echo '<tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">';
+			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Name</th>';
+			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Version</th>';
+			echo '<th style="padding: 8px; text-align: center; border: 1px solid #dee2e6;">Stock</th>';
+			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Status</th>';
+			echo '</tr>';
+			foreach ($components as $info) {
+				$row_style = $info['will_upgrade']
+					? 'background-color: #d4edda;'
+					: 'background-color: #fff3cd;';
+				$status = $info['will_upgrade']
+					? '<span style="color: #155724;">✓ Will upgrade</span>'
+					: '<span style="color: #856404;">⊘ Skipped (not stock)</span>';
+				$stock = $info['is_stock']
+					? '<span style="color: #155724;">Yes</span>'
+					: '<span style="color: #6c757d;">No</span>';
+				echo '<tr style="' . $row_style . '">';
+				echo '<td style="padding: 8px; border: 1px solid #dee2e6;">' . htmlspecialchars($info['name']) . '</td>';
+				echo '<td style="padding: 8px; border: 1px solid #dee2e6;">' . htmlspecialchars($info['version']) . '</td>';
+				echo '<td style="padding: 8px; text-align: center; border: 1px solid #dee2e6;">' . $stock . '</td>';
+				echo '<td style="padding: 8px; border: 1px solid #dee2e6;">' . $status . '</td>';
+				echo '</tr>';
+			}
+			echo '</table>';
+		}
 	}
 
 	/**
@@ -1161,6 +1345,7 @@
 			CURLOPT_TIMEOUT => 120, // Archive refresh may take time
 			CURLOPT_CONNECTTIMEOUT => 30,
 			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4, // Force IPv4 for consistent IP whitelisting
 		]);
 
 		$response = curl_exec($ch);

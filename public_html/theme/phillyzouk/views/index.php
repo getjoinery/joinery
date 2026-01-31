@@ -25,7 +25,7 @@ $page->public_header(array(
                 <img src="/theme/phillyzouk/assets/images/home-three/banner-bg.jpg" alt="Dance Community">
                 <div class="main-blog-content">
                     <a href="#">
-                        <h3>Welcome to Our Dance Community</h3>
+                        <h3>Welcome to Philly Zouk</h3>
                     </a>
                 </div>
             </div>

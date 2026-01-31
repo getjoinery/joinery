@@ -35,13 +35,20 @@
 
 		// Check IP whitelist
 		$allowed_ips = json_decode($settings->get_setting('archive_refresh_allowed_ips') ?: '[]', true);
-		$client_ip = $_SERVER['REMOTE_ADDR'];
+		// Get real client IP (check Cloudflare and proxy headers first)
+		$client_ip = $_SERVER['HTTP_CF_CONNECTING_IP']
+			?? $_SERVER['HTTP_X_FORWARDED_FOR']
+			?? $_SERVER['REMOTE_ADDR'];
+		// X-Forwarded-For may contain multiple IPs - use the first one
+		if (strpos($client_ip, ',') !== false) {
+			$client_ip = trim(explode(',', $client_ip)[0]);
+		}
 
 		if (!is_ip_in_list($client_ip, $allowed_ips)) {
 			http_response_code(403);
 			echo json_encode([
 				'success' => false,
-				'error' => 'IP address not authorized for archive refresh'
+				'error' => 'IP address not authorized for archive refresh (your IP: ' . $client_ip . ')'
 			]);
 			exit;
 		}
