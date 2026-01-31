@@ -14,10 +14,10 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
-$settings = Globalvars::get_instance();
-
-$composer_dir = $settings->get_setting('composerAutoLoad');	
-require $composer_dir.'autoload.php';
+$autoload_path = PathHelper::getComposerAutoloadPath();
+if (file_exists($autoload_path)) {
+    require_once($autoload_path);
+}
 use MailchimpAPI\Mailchimp;
 
 class MailingListException extends SystemBaseException {}

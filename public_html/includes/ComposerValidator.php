@@ -10,8 +10,7 @@ class ComposerValidator {
     private $warnings = [];
     
     public function __construct() {
-        $settings = Globalvars::get_instance();
-        $this->composerPath = $settings->get_setting('composerAutoLoad');
+        $this->composerPath = PathHelper::getComposerVendorPath();
     }
     
     /**

@@ -32,8 +32,7 @@ function admin_user_logic($get_vars, $post_vars) {
 
 	// Get singletons (NO require needed - these are always pre-loaded)
 	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');
-	require_once $composer_dir.'autoload.php';
+	require_once(PathHelper::getComposerAutoloadPath());
 
 	$session = SessionControl::get_instance();
 
