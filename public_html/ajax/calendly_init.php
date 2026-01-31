@@ -10,9 +10,7 @@
 	exit;
 
 	//https://github.com/leadthread/php-calendly
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require $composer_dir.'autoload.php';
+	require_once(PathHelper::getComposerAutoloadPath());
 
 	/*
 	$settings = Globalvars::get_instance();

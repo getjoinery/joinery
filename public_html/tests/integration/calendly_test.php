@@ -8,9 +8,7 @@ require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
-$settings = Globalvars::get_instance();
-$composer_dir = $settings->get_setting('composerAutoLoad');
-require_once(PathHelper::getAbsolutePath('vendor/autoload.php'));
+require_once(PathHelper::getComposerAutoloadPath());
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);

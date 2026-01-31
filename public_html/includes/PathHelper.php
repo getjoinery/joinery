@@ -33,6 +33,29 @@ class PathHelper {
     }
 
     /**
+     * Get the absolute path to Composer's vendor directory
+     *
+     * The composerAutoLoad setting is relative to public_html, but vendor/
+     * lives at the site root. This method resolves the path correctly
+     * regardless of the current working directory.
+     *
+     * @return string Absolute path to vendor directory (with trailing slash)
+     */
+    public static function getComposerVendorPath() {
+        $settings = Globalvars::get_instance();
+        return self::getBasePath() . $settings->get_setting('composerAutoLoad');
+    }
+
+    /**
+     * Get the absolute path to Composer's autoload.php
+     *
+     * @return string Absolute path to autoload.php
+     */
+    public static function getComposerAutoloadPath() {
+        return self::getComposerVendorPath() . 'autoload.php';
+    }
+
+    /**
      * Check if file exists at given path
      * 
      * @param string $path Relative path from document root

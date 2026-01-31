@@ -38,10 +38,9 @@ if (!defined('GLOBALVARS_INCLUDED')) {
     require_once($base_path . '/includes/EmailTemplate.php');
     
     // Try to load Mailgun dependencies if they exist
-    $settings = Globalvars::get_instance();
-    $composer_dir = $settings->get_setting('composerAutoLoad');
-    if ($composer_dir && file_exists($composer_dir . 'autoload.php')) {
-        require_once($composer_dir . 'autoload.php');
+    $autoload_path = PathHelper::getComposerAutoloadPath();
+    if (file_exists($autoload_path)) {
+        require_once($autoload_path);
     }
 }
 

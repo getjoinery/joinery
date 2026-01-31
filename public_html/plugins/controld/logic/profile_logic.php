@@ -19,8 +19,7 @@ function profile_logic($get_vars, $post_vars){
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
-	$composer_dir = $settings->get_setting('composerAutoLoad');
-	require_once $composer_dir.'autoload.php';
+	require_once(PathHelper::getComposerAutoloadPath());
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

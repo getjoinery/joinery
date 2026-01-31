@@ -15,9 +15,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 	
 
 
-	$settings = Globalvars::get_instance();
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require $composer_dir.'autoload.php';
+	require_once(PathHelper::getComposerAutoloadPath());
 
 	use Mailgun\Mailgun;
 	# Instantiate the client.

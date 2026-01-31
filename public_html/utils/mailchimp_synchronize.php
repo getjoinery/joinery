@@ -10,8 +10,7 @@
 	
 	$test = LibraryFunctions::fetch_variable('test', 0,0,'');
 
-	$composer_dir = $settings->get_setting('composerAutoLoad');	
-	require $composer_dir.'autoload.php';
+	require_once(PathHelper::getComposerAutoloadPath());
 	use MailchimpAPI\Mailchimp;
 
 	require_once( __DIR__ . '/../data/event_logs_class.php');
