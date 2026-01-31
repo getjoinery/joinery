@@ -216,13 +216,43 @@ class ThemeManager extends AbstractExtensionManager {
     }
 
     /**
-     * Override sync to include component type discovery
+     * Override sync to include component type discovery and active status sync
      * @return array Result with theme and component sync counts
      */
     public function sync() {
         $result = parent::sync();
+
+        // Sync active status based on theme_template setting
+        $this->syncActiveStatus();
+
         $result['components'] = $this->syncComponentTypes();
         return $result;
+    }
+
+    /**
+     * Sync the thm_is_active flag based on the theme_template setting
+     * Ensures database active status matches the actual configured theme
+     */
+    protected function syncActiveStatus() {
+        $settings = Globalvars::get_instance();
+        $active_theme_name = $settings->get_setting('theme_template');
+
+        if (empty($active_theme_name)) {
+            return;
+        }
+
+        $dbconnector = DbConnector::get_instance();
+        $dblink = $dbconnector->get_db_link();
+
+        // Deactivate all themes
+        $sql = "UPDATE thm_themes SET thm_is_active = false, thm_status = 'installed' WHERE thm_is_active = true";
+        $q = $dblink->prepare($sql);
+        $q->execute();
+
+        // Activate the theme that matches theme_template setting
+        $sql = "UPDATE thm_themes SET thm_is_active = true, thm_status = 'active' WHERE thm_name = ?";
+        $q = $dblink->prepare($sql);
+        $q->execute([$active_theme_name]);
     }
 
     /**
