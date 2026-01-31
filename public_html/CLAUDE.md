@@ -465,11 +465,13 @@ Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 
 ### Specifications Management
 
-**Directory Structure:**
-- **`/specs/`** - Active specifications awaiting implementation
-- **`/specs/implemented/`** - Completed specifications
+**IMPORTANT: Specs go in `public_html/specs/`, NOT the root-level `/var/www/html/joinerytest/specs/` directory.**
 
-**Workflow:** Place new specs in `/specs/`, follow during development, move to `/specs/implemented/` when complete. This structure must be used unless explicitly specified otherwise.
+**Directory Structure:**
+- **`public_html/specs/`** - Active specifications awaiting implementation
+- **`public_html/specs/implemented/`** - Completed specifications
+
+**Workflow:** Place new specs in `public_html/specs/`, follow during development, move to `public_html/specs/implemented/` when complete. This structure must be used unless explicitly specified otherwise.
 
 **🚨 CRITICAL RULE: NEVER MODIFY FILES IN `/specs/implemented/`**
 
