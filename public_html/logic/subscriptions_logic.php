@@ -21,8 +21,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	//require_once(PathHelper::getIncludePath('includes/stripe-php/init.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
-	$composer_dir = $settings->get_setting('composerAutoLoad');
-	require_once $composer_dir.'autoload.php';
+	require_once(PathHelper::getComposerAutoloadPath());
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;

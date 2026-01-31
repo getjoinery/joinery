@@ -6,8 +6,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/orders_class.php'));
 require_once(PathHelper::getIncludePath('data/order_items_class.php'));
 
-$composer_dir = $settings->get_setting('composerAutoLoad');	
-require_once $composer_dir.'autoload.php';
+require_once(PathHelper::getComposerAutoloadPath());
 
 class StripeHelperException extends Exception {}
 

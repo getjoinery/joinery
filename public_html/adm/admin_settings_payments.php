@@ -161,10 +161,10 @@
 			
 			if (!empty($stripe_api_key)) {
 			// Test Stripe Live API connection
-			$composer_path = $settings->get_setting('composerAutoLoad');
-			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
+			$autoload_path = PathHelper::getComposerAutoloadPath();
+			if (file_exists($autoload_path)) {
 				try {
-					require_once(rtrim($composer_path, '/') . '/autoload.php');
+					require_once($autoload_path);
 					
 					// Create a temporary StripeHelper instance for live API
 					$original_test_mode = $_SESSION['test_mode'] ?? null;
@@ -259,10 +259,10 @@
 			
 			if (!empty($stripe_api_key_test)) {
 			// Test Stripe Test API connection
-			$composer_path = $settings->get_setting('composerAutoLoad');
-			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
+			$autoload_path = PathHelper::getComposerAutoloadPath();
+			if (file_exists($autoload_path)) {
 				try {
-					require_once(rtrim($composer_path, '/') . '/autoload.php');
+					require_once($autoload_path);
 					
 					// Create a temporary StripeHelper instance for test API
 					$original_test_mode = $_SESSION['test_mode'] ?? null;

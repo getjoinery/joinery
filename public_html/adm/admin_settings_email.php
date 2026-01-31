@@ -181,10 +181,10 @@
 			$mailchimp_api_key = $settings->get_setting('mailchimp_api_key');
 			if ($mailchimp_api_key && !empty(trim($mailchimp_api_key))) {
 			// Test Mailchimp API connection
-			$composer_path = $settings->get_setting('composerAutoLoad');
-			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
+			$autoload_path = PathHelper::getComposerAutoloadPath();
+			if (file_exists($autoload_path)) {
 				try {
-					require_once(rtrim($composer_path, '/') . '/autoload.php');
+					require_once($autoload_path);
 					
 					// Test the API key by getting lists (this validates the connection)
 					$mailchimp = new MailchimpAPI\Mailchimp($mailchimp_api_key);
@@ -337,10 +337,10 @@
 			
 			if (!empty($mailgun_api_key) && !empty($mailgun_domain)) {
 			// Test Mailgun API connection
-			$composer_path = $settings->get_setting('composerAutoLoad');
-			if ($composer_path && file_exists(rtrim($composer_path, '/') . '/autoload.php')) {
+			$autoload_path = PathHelper::getComposerAutoloadPath();
+			if (file_exists($autoload_path)) {
 				try {
-					require_once(rtrim($composer_path, '/') . '/autoload.php');
+					require_once($autoload_path);
 					
 					// Create Mailgun client based on version and test with a simple domain check
 					if ($mailgun_version == 1) {

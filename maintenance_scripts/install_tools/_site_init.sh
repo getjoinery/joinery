@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 1.9 - Delay config creation in clone mode until clone completes (prevents partial clone state)
+# VERSION: 2.0 - Add sequence synchronization after clone to prevent duplicate key errors
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -280,6 +280,16 @@ if [ -n "$CLONE_FROM" ]; then
     # Clone completed successfully - NOW create the config file
     # This ensures that if clone fails partway, config won't exist and next attempt will retry
     create_config_file
+
+    # Fix PostgreSQL sequences after clone
+    # Cloned databases often have sequences out of sync with their data
+    log "Synchronizing database sequences..."
+    if [ -f "$SITE_ROOT/public_html/utils/fix_sequences.php" ]; then
+        php "$SITE_ROOT/public_html/utils/fix_sequences.php" 2>/dev/null || {
+            log_error "Warning: Sequence synchronization failed (non-fatal)"
+        }
+        log "Sequences synchronized"
+    fi
 
 elif [ "$DB_EXISTS" = false ]; then
     # ==========================================================================
