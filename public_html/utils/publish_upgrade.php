@@ -8,13 +8,74 @@
 	$baseDir = $settings->get_setting('baseDir');
 	$site_template = $settings->get_setting('site_template');
 	$full_site_dir = $baseDir.$site_template;
-	
+
 	//IF WE ARE ACTING AS A SERVER
 	if(!$settings->get_setting('upgrade_server_active')){
 		echo 'Setting is turned off.';
-		exit;		
+		exit;
 	}
-	
+
+	// =====================================================
+	// REMOTE ARCHIVE REFRESH HANDLER
+	// =====================================================
+	// Handle remote archive refresh requests (before session check - uses IP auth)
+	if (isset($_GET['refresh-archives']) && $_GET['refresh-archives'] == '1') {
+		header('Content-Type: application/json');
+
+		// Check if feature is enabled (accepts '1' or 'true' as enabled)
+		$allow_refresh = $settings->get_setting('allow_remote_archive_refresh');
+		if ($allow_refresh !== '1' && $allow_refresh !== 'true') {
+			http_response_code(403);
+			echo json_encode([
+				'success' => false,
+				'error' => 'Remote archive refresh is not enabled on this server'
+			]);
+			exit;
+		}
+
+		// Check IP whitelist
+		$allowed_ips = json_decode($settings->get_setting('archive_refresh_allowed_ips') ?: '[]', true);
+		$client_ip = $_SERVER['REMOTE_ADDR'];
+
+		if (!is_ip_in_list($client_ip, $allowed_ips)) {
+			http_response_code(403);
+			echo json_encode([
+				'success' => false,
+				'error' => 'IP address not authorized for archive refresh'
+			]);
+			exit;
+		}
+
+		// All checks passed - regenerate archives using existing publish logic
+		try {
+			$result = regenerate_current_archives($full_site_dir, $settings);
+
+			if ($result['success']) {
+				echo json_encode([
+					'success' => true,
+					'message' => 'Archives refreshed successfully',
+					'version' => $result['version'],
+					'timestamp' => date('c')
+				]);
+			} else {
+				http_response_code(500);
+				echo json_encode([
+					'success' => false,
+					'error' => 'Archive refresh failed',
+					'details' => $result['error']
+				]);
+			}
+		} catch (Exception $e) {
+			http_response_code(500);
+			echo json_encode([
+				'success' => false,
+				'error' => 'Archive refresh failed',
+				'details' => $e->getMessage()
+			]);
+		}
+		exit;
+	}
+
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
@@ -728,7 +789,7 @@
 			} else {
 				echo '<br>The zip archive contains ',$zip->numFiles,' files with a status of ',$zip->getStatusString().'<br>';
 			}
-			
+
 			//close the zip -- done!
 
 			if($zip->close()){
@@ -753,7 +814,300 @@
 				echo 'There are no valid files for the zip file.';
 				return false;
 		}
-	}	
+	}
+
+	// =====================================================
+	// IP WHITELIST FUNCTIONS FOR REMOTE ARCHIVE REFRESH
+	// =====================================================
+
+	/**
+	 * Check if an IP address is in the allowed list
+	 * Supports exact matches and CIDR notation
+	 *
+	 * @param string $ip IP address to check
+	 * @param array $allowed_list List of allowed IPs/CIDRs
+	 * @return bool
+	 */
+	function is_ip_in_list($ip, $allowed_list) {
+		if (empty($allowed_list)) {
+			return false; // No whitelist = deny all
+		}
+
+		foreach ($allowed_list as $allowed) {
+			// Exact match
+			if ($ip === $allowed) {
+				return true;
+			}
+
+			// CIDR match
+			if (strpos($allowed, '/') !== false) {
+				if (ip_in_cidr($ip, $allowed)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if IP is within CIDR range
+	 *
+	 * @param string $ip IP address to check
+	 * @param string $cidr CIDR notation (e.g., "10.0.0.0/24")
+	 * @return bool
+	 */
+	function ip_in_cidr($ip, $cidr) {
+		list($subnet, $bits) = explode('/', $cidr);
+		$ip_long = ip2long($ip);
+		$subnet_long = ip2long($subnet);
+		$mask = -1 << (32 - $bits);
+		return ($ip_long & $mask) === ($subnet_long & $mask);
+	}
+
+	/**
+	 * Regenerate all archives for the current version
+	 * Used by remote archive refresh feature
+	 *
+	 * @param string $full_site_dir Full path to site directory
+	 * @param Globalvars $settings Settings instance
+	 * @return array Result with 'success', 'version', and optionally 'error'
+	 */
+	function regenerate_current_archives($full_site_dir, $settings) {
+		// Get the latest version from database
+		$latest = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1);
+		$latest->load();
+
+		if ($latest->count() == 0) {
+			return ['success' => false, 'error' => 'No existing version found in database'];
+		}
+
+		$upgrade = $latest->get(0);
+		$version_major = $upgrade->get('upg_major_version');
+		$version_minor = $upgrade->get('upg_minor_version');
+		$version = $version_major . '.' . $version_minor;
+
+		$maintenance_dir = $full_site_dir . '/maintenance_scripts/';
+		$file_output_folder = $full_site_dir . '/static_files';
+
+		// Increase execution time for archive creation
+		set_time_limit(300);
+
+		// Step 1: Generate fresh install SQL file
+		$create_sql_cmd = sprintf(
+			'php %s %s 2>&1',
+			escapeshellarg($full_site_dir . '/public_html/utils/create_install_sql.php'),
+			escapeshellarg($version)
+		);
+		$output = [];
+		$exit_code = 0;
+		exec($create_sql_cmd, $output, $exit_code);
+
+		if ($exit_code !== 0) {
+			return ['success' => false, 'error' => 'Failed to generate install SQL: ' . implode("\n", $output)];
+		}
+
+		$sql_source = $full_site_dir . '/uploads/joinery-install-' . $version . '.sql.gz';
+		if (!file_exists($sql_source)) {
+			return ['success' => false, 'error' => 'Generated SQL file not found'];
+		}
+
+		// Step 2: Create full archive with all stock themes
+		$filename = 'joinery-' . $version_major . '-' . $version_minor . '.tar.gz';
+		$file_output_location = $file_output_folder . '/' . $filename;
+
+		// Create temporary directory for archive staging
+		$temp_dir = sys_get_temp_dir() . '/joinery_archive_' . uniqid();
+		if (!mkdir($temp_dir, 0755, true)) {
+			return ['success' => false, 'error' => 'Failed to create temp directory'];
+		}
+
+		// Create directory structure
+		mkdir($temp_dir . '/public_html', 0755, true);
+		mkdir($temp_dir . '/config', 0755, true);
+		mkdir($temp_dir . '/maintenance_scripts', 0755, true);
+		mkdir($temp_dir . '/maintenance_scripts/install_tools', 0755, true);
+		mkdir($temp_dir . '/maintenance_scripts/sysadmin_tools', 0755, true);
+
+		// Get all stock themes to include
+		$all_themes = ThemeHelper::getAvailableThemes();
+		$selected_themes = [];
+		foreach ($all_themes as $theme_name => $theme) {
+			if ($theme->get('system', false) || $theme->get('is_stock', false)) {
+				$selected_themes[] = $theme_name;
+			}
+		}
+
+		// Build theme exclusions for non-selected themes
+		$theme_exclusions = '';
+		foreach ($all_themes as $theme_name => $theme) {
+			if (!in_array($theme_name, $selected_themes)) {
+				$theme_exclusions .= ' --exclude=theme/' . escapeshellarg($theme_name);
+			}
+		}
+
+		// Copy public_html files
+		$rsync_cmd = sprintf(
+			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests%s %s %s 2>&1',
+			$theme_exclusions,
+			escapeshellarg($full_site_dir . '/public_html/'),
+			escapeshellarg($temp_dir . '/public_html/')
+		);
+		exec($rsync_cmd, $output, $exit_code);
+		if ($exit_code !== 0) {
+			exec('rm -rf ' . escapeshellarg($temp_dir));
+			return ['success' => false, 'error' => 'Failed to copy public_html'];
+		}
+
+		// Copy config template
+		$config_source = $maintenance_dir . 'install_tools/default_Globalvars_site.php';
+		if (file_exists($config_source)) {
+			copy($config_source, $temp_dir . '/config/default_Globalvars_site.php');
+		}
+
+		// Copy maintenance script directories
+		foreach (['install_tools', 'sysadmin_tools'] as $dir) {
+			$source_dir = $maintenance_dir . $dir . '/';
+			$dest_dir = $temp_dir . '/maintenance_scripts/' . $dir . '/';
+			if (is_dir($source_dir)) {
+				exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
+			}
+		}
+
+		// Copy install SQL file
+		copy($sql_source, $temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
+
+		// Also update the on-disk copy
+		$ondisk_sql_path = dirname($full_site_dir) . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
+		@copy($sql_source, $ondisk_sql_path);
+
+		// Create tar.gz archive
+		$tar_cmd = sprintf(
+			'tar -czf %s -C %s . 2>&1',
+			escapeshellarg($file_output_location),
+			escapeshellarg($temp_dir)
+		);
+		exec($tar_cmd, $output, $exit_code);
+		exec('rm -rf ' . escapeshellarg($temp_dir));
+
+		if ($exit_code !== 0 || !file_exists($file_output_location) || filesize($file_output_location) == 0) {
+			return ['success' => false, 'error' => 'Failed to create full archive'];
+		}
+
+		// Step 3: Create core-only archive
+		$core_filename = 'joinery-core-' . $version . '.tar.gz';
+		$core_output_location = $file_output_folder . '/' . $core_filename;
+
+		$core_temp_dir = sys_get_temp_dir() . '/joinery_core_' . uniqid();
+		if (mkdir($core_temp_dir, 0755, true)) {
+			mkdir($core_temp_dir . '/public_html', 0755, true);
+			mkdir($core_temp_dir . '/config', 0755, true);
+			mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
+
+			// Copy public_html excluding themes and plugins
+			$rsync_core_cmd = sprintf(
+				'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="theme/*" --exclude="plugins/*" %s %s 2>&1',
+				escapeshellarg($full_site_dir . '/public_html/'),
+				escapeshellarg($core_temp_dir . '/public_html/')
+			);
+			exec($rsync_core_cmd);
+
+			// Create empty theme/ and plugins/ directories
+			mkdir($core_temp_dir . '/public_html/theme', 0755, true);
+			mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
+
+			// Copy config template
+			if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
+				copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
+			}
+
+			// Copy maintenance_scripts
+			foreach (['install_tools', 'sysadmin_tools'] as $dir) {
+				$source_dir = $maintenance_dir . $dir . '/';
+				$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
+				if (is_dir($source_dir)) {
+					mkdir($dest_dir, 0755, true);
+					exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
+				}
+			}
+
+			// Copy install SQL file
+			if (file_exists($sql_source)) {
+				copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
+			}
+
+			// Create core tar.gz archive
+			$tar_cmd = sprintf(
+				'tar -czf %s -C %s . 2>&1',
+				escapeshellarg($core_output_location),
+				escapeshellarg($core_temp_dir)
+			);
+			exec($tar_cmd);
+			exec('rm -rf ' . escapeshellarg($core_temp_dir));
+		}
+
+		// Step 4: Create individual theme archives
+		$themes_dir = $file_output_folder . '/themes';
+		if (!is_dir($themes_dir)) {
+			mkdir($themes_dir, 0755, true);
+		}
+
+		$theme_base_dir = $full_site_dir . '/public_html/theme';
+		foreach (glob($theme_base_dir . '/*/theme.json') as $theme_json) {
+			$theme_dir = dirname($theme_json);
+			$theme_name = basename($theme_dir);
+
+			$theme_data = json_decode(file_get_contents($theme_json), true);
+			$is_stock = $theme_data['is_stock'] ?? true;
+
+			if (!$is_stock) {
+				continue; // Skip non-stock themes
+			}
+
+			$theme_version = $theme_data['version'] ?? '1.0.0';
+			$theme_archive = $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz';
+
+			$tar_cmd = sprintf(
+				'tar -czf %s -C %s %s 2>&1',
+				escapeshellarg($theme_archive),
+				escapeshellarg($theme_base_dir),
+				escapeshellarg($theme_name)
+			);
+			exec($tar_cmd);
+		}
+
+		// Step 5: Create individual plugin archives
+		$plugins_dir = $file_output_folder . '/plugins';
+		if (!is_dir($plugins_dir)) {
+			mkdir($plugins_dir, 0755, true);
+		}
+
+		$plugin_base_dir = $full_site_dir . '/public_html/plugins';
+		foreach (glob($plugin_base_dir . '/*/plugin.json') as $plugin_json) {
+			$plugin_dir = dirname($plugin_json);
+			$plugin_name = basename($plugin_dir);
+
+			$plugin_data = json_decode(file_get_contents($plugin_json), true);
+			$is_stock = $plugin_data['is_stock'] ?? true;
+
+			if (!$is_stock) {
+				continue; // Skip non-stock plugins
+			}
+
+			$plugin_version = $plugin_data['version'] ?? '1.0.0';
+			$plugin_archive = $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz';
+
+			$tar_cmd = sprintf(
+				'tar -czf %s -C %s %s 2>&1',
+				escapeshellarg($plugin_archive),
+				escapeshellarg($plugin_base_dir),
+				escapeshellarg($plugin_name)
+			);
+			exec($tar_cmd);
+		}
+
+		return ['success' => true, 'version' => $version];
+	}
 
 
 ?>
