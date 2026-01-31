@@ -1119,3 +1119,20 @@
 	// when they upgrade. New installations already have everything via the SQL dump.
 	// =============================================================================
 
+	// ========== Remote Archive Refresh (v77) ==========
+	// Add setting to enable remote archive refresh requests
+	$migration = array();
+	$migration['database_version'] = '77';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'allow_remote_archive_refresh'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('allow_remote_archive_refresh', '0', 1, now(), now(), 'general');";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// Add setting for allowed IPs for archive refresh
+	$migration = array();
+	$migration['database_version'] = '77';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'archive_refresh_allowed_ips'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('archive_refresh_allowed_ips', '[]', 1, now(), now(), 'general');";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

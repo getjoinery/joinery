@@ -1225,4 +1225,52 @@
 		return ['success' => true];
 	}
 
+	/**
+	 * Request the upgrade server to refresh its archives
+	 * This triggers regeneration of all archives for the current version
+	 *
+	 * @return array Response with 'success', 'message' or 'error', and optionally 'version'
+	 */
+	function request_archive_refresh() {
+		$settings = Globalvars::get_instance();
+
+		$upgrade_source = $settings->get_setting('upgrade_source');
+
+		if (empty($upgrade_source)) {
+			return ['success' => false, 'error' => 'Upgrade source not configured'];
+		}
+
+		$url = rtrim($upgrade_source, '/') . '/utils/publish_upgrade?refresh-archives=1';
+
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_POST => true,
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT => 120, // Archive refresh may take time
+			CURLOPT_CONNECTTIMEOUT => 30,
+			CURLOPT_FOLLOWLOCATION => true,
+		]);
+
+		$response = curl_exec($ch);
+		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$curl_error = curl_error($ch);
+		curl_close($ch);
+
+		if ($curl_error) {
+			return ['success' => false, 'error' => 'Connection failed: ' . $curl_error];
+		}
+
+		if ($http_code !== 200) {
+			$error = json_decode($response, true);
+			return ['success' => false, 'error' => $error['error'] ?? 'Unknown error (HTTP ' . $http_code . ')'];
+		}
+
+		$result = json_decode($response, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			return ['success' => false, 'error' => 'Invalid response from server'];
+		}
+
+		return $result;
+	}
+
 ?>

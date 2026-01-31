@@ -1227,6 +1227,20 @@
 		'value' => $upgrade_source
 	]);
 
+	// Remote archive refresh settings (only shown if acting as upgrade server)
+	if($settings->get_setting('upgrade_server_active')){
+		$allow_refresh = $settings->get_setting('allow_remote_archive_refresh');
+		$formwriter->dropinput('allow_remote_archive_refresh', 'Allow remote archive refresh', [
+			'options' => $yes_no_options,
+			'value' => ($allow_refresh === '1' || $allow_refresh === 'true') ? '1' : '0',
+			'helptext' => 'Allow authorized client sites to trigger archive regeneration remotely'
+		]);
+		$formwriter->textinput('archive_refresh_allowed_ips', 'Allowed IPs for refresh', [
+			'value' => $settings->get_setting('archive_refresh_allowed_ips') ?: '[]',
+			'helptext' => 'JSON array of IPs. Example: ["203.0.113.50", "10.0.0.0/24"]'
+		]);
+	}
+
 	echo '<hr><h2>Plugin Settings</h2>';
 
 	// Scan and include plugin settings forms directly in this page
