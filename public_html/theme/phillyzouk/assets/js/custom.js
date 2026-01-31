@@ -28,34 +28,19 @@
 
 	// Main Blog Slider Item Wrap JS
 	$('.main-blog-slider-item-wrap').owlCarousel({
-		loop:true,
+		loop: true,
 		margin: 0,
-		nav:true,
+		nav: true,
 		mouseDrag: true,
-		items:1,
-		dots: false,
-		autoHeight: true,
+		items: 1,
+		dots: true,
+		autoHeight: false,
 		autoplay: true,
-		smartSpeed:1500,
+		autoplayTimeout: 5000,
 		autoplayHoverPause: true,
-		center: false,
-		responsive:{
-			0:{
-				items:1,
-			},
-			576:{
-				items:1,
-			},
-			768:{
-				items:2,
-			},
-			992:{
-				items:3,
-			},
-			1200:{
-				items:3,
-			}
-		},
+		smartSpeed: 800,
+		animateOut: 'fadeOut',
+		animateIn: 'fadeIn',
 		navText: [
 			"<i class='bx bx-chevron-left'></i>",
 			"<i class='bx bx-chevron-right'></i>",

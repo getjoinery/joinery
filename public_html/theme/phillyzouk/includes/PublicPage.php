@@ -318,7 +318,7 @@ class PublicPage extends PublicPageBase {
         <!-- Contact Form JS -->
         <script src="/theme/phillyzouk/assets/js/contact-form-script.js"></script>
         <!-- Custom JS -->
-        <script src="/theme/phillyzouk/assets/js/custom.js"></script>
+        <script src="/theme/phillyzouk/assets/js/custom.js?v=2"></script>
     </body>
 </html>
         <?php

@@ -17,61 +17,31 @@ $page->public_header(array(
 ));
 ?>
 
-<!-- Start Banner Area -->
-<section class="banner-area-three">
-    <div class="banner-slider-wrap owl-carousel owl-theme">
-        <div class="banner-item-area">
-            <div class="d-table">
-                <div class="d-table-cell">
-                    <div class="container">
-                        <div class="banner-text one">
-                            <span>News</span>
-                            <h1>If You Were A Start Business From Search Tomorrow</h1>
-                            <ul>
-                                <li>
-                                    <a href="#" class="admin">
-                                        <i class="bx bx-user"></i>
-                                        By Admin
-                                    </a>
-                                </li>
-                                <li>
-                                    <i class="bx bx-calendar"></i>
-                                    25 Mar 2024
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
+<!-- Start Hero Area -->
+<section class="main-blog-area pt-100 pb-70">
+    <div class="container">
+        <div class="main-blog-slider-item-wrap owl-carousel owl-theme">
+            <div class="single-main-blog-item">
+                <img src="/theme/phillyzouk/assets/images/home-three/banner-bg.jpg" alt="Dance Community">
+                <div class="main-blog-content">
+                    <a href="#">
+                        <h3>Welcome to Our Dance Community</h3>
+                    </a>
                 </div>
             </div>
-        </div>
 
-        <div class="banner-item-area">
-            <div class="d-table">
-                <div class="d-table-cell">
-                    <div class="container">
-                        <div class="banner-text two">
-                            <span>News</span>
-                            <h1>The Best Dog Tech & Accessories</h1>
-                            <ul>
-                                <li>
-                                    <a href="#" class="admin">
-                                        <i class="bx bx-user"></i>
-                                        By Admin
-                                    </a>
-                                </li>
-                                <li>
-                                    <i class="bx bx-calendar"></i>
-                                    25 Mar 2024
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
+            <div class="single-main-blog-item">
+                <img src="/theme/phillyzouk/assets/images/home-three/banner-bg.jpg" alt="Dance Events">
+                <div class="main-blog-content">
+                    <a href="/events">
+                        <h3>Discover Upcoming Events & Workshops</h3>
+                    </a>
                 </div>
             </div>
         </div>
     </div>
 </section>
-<!-- End Banner Area -->
+<!-- End Hero Area -->
 
 <!-- Start About Info Area -->
 <section class="contact-info-area pt-100 pb-70">
@@ -171,58 +141,48 @@ $page->public_header(array(
 </section>
 End Main Blog List Area -->
 
-<!-- Start Latest Project Area -->
+<!-- Start Events Section -->
 <section class="latest-project-area pb-70">
     <div class="container">
-        <div class="section-title">
-            <h2>Business</h2>
-        </div>
-
         <div class="row">
             <div class="col-lg-8">
+                <div class="section-title">
+                    <h2>Upcoming Events</h2>
+                </div>
                 <div class="row">
                     <?php
-                    if ($page_vars['recent_posts']->count() > 0) {
+                    if ($page_vars['upcoming_events']->count() > 0) {
                         $count = 0;
-                        foreach ($page_vars['recent_posts'] as $post) {
-                            if ($count >= 4) break;
-                            $author = new User($post->get('pst_usr_user_id'), TRUE);
-                            $post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
-                            $tag_name = !empty($post_tags) ? $post_tags[0] : 'News';
+                        foreach ($page_vars['upcoming_events'] as $event) {
+                            if ($count >= 6) break;
                             ?>
                             <div class="col-lg-6 col-md-6">
-                                <div class="single-featured">
-                                    <a href="<?php echo $post->get_url(); ?>" class="blog-img">
-                                        <?php if ($post->get('pst_image_link')): ?>
-                                            <img src="<?php echo htmlspecialchars($post->get('pst_image_link')); ?>" alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
+                                <div class="single-featured event-card">
+                                    <a href="<?php echo $event->get_url(); ?>" class="blog-img">
+                                        <?php if ($event->get('evt_image_link')): ?>
+                                            <img src="<?php echo htmlspecialchars($event->get('evt_image_link')); ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
                                         <?php else: ?>
-                                            <img src="https://via.placeholder.com/400x300/f8f9fa/6c757d?text=Blog+Post" alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
+                                            <img src="/theme/phillyzouk/assets/images/home-three/banner-bg.jpg" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
                                         <?php endif; ?>
                                     </a>
                                     <div class="featured-content">
                                         <ul>
                                             <li>
-                                                <a href="#" class="admin">
-                                                    <i class="bx bx-user"></i>
-                                                    <?php echo htmlspecialchars($author->display_name()); ?>
-                                                </a>
+                                                <i class="bx bx-calendar"></i>
+                                                <?php echo date('M d, Y', strtotime($event->get('evt_start_time'))); ?>
                                             </li>
                                             <li>
-                                                <i class="bx bx-calendar"></i>
-                                                <?php echo date('d M Y', strtotime($post->get('pst_published_time'))); ?>
+                                                <i class="bx bx-time"></i>
+                                                <?php echo date('g:i A', strtotime($event->get('evt_start_time'))); ?>
                                             </li>
                                         </ul>
-                                        <a href="<?php echo $post->get_url(); ?>">
-                                            <h3><?php echo htmlspecialchars($post->get('pst_title')); ?></h3>
+                                        <a href="<?php echo $event->get_url(); ?>">
+                                            <h3><?php echo htmlspecialchars($event->get('evt_name')); ?></h3>
                                         </a>
-                                        <p><?php
-                                            if($post->get('pst_short_description')){
-                                                echo htmlspecialchars($post->get('pst_short_description'));
-                                            } else {
-                                                echo htmlspecialchars(substr(strip_tags($post->get('pst_body')),0,150)) . '...';
-                                            }
-                                        ?></p>
-                                        <a href="<?php echo $post->get_url(); ?>" class="read-more">Read More</a>
+                                        <?php if ($event->get('evt_short_description')): ?>
+                                        <p><?php echo htmlspecialchars(substr($event->get('evt_short_description'), 0, 120)); ?>...</p>
+                                        <?php endif; ?>
+                                        <a href="<?php echo $event->get_url(); ?>" class="read-more">View Event</a>
                                     </div>
                                 </div>
                             </div>
@@ -232,7 +192,7 @@ End Main Blog List Area -->
                     } else {
                         ?>
                         <div class="col-lg-12">
-                            <p>No blog posts published yet.</p>
+                            <p>No upcoming events scheduled.</p>
                         </div>
                         <?php
                     }
@@ -241,30 +201,38 @@ End Main Blog List Area -->
             </div>
 
             <div class="col-lg-4">
+                <div class="section-title">
+                    <h2>Latest Posts</h2>
+                </div>
                 <div class="right-blog-editor-wrap-three">
-                    <h3 style="margin-bottom: 20px;">Upcoming Events</h3>
                     <?php
-                    if ($page_vars['upcoming_events']->count() > 0) {
-                        foreach ($page_vars['upcoming_events'] as $event) {
+                    if ($page_vars['recent_posts']->count() > 0) {
+                        $count = 0;
+                        foreach ($page_vars['recent_posts'] as $post) {
+                            if ($count >= 4) break;
                             ?>
-                            <div style="margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #eee;">
-                                <a href="<?php echo $event->get_url(); ?>">
-                                    <h4 style="margin-bottom: 10px; margin-top: 0;"><?php echo htmlspecialchars($event->get('evt_name')); ?></h4>
+                            <div class="sidebar-post-item">
+                                <?php if ($post->get('pst_image_link')): ?>
+                                <a href="<?php echo $post->get_url(); ?>" class="sidebar-post-img">
+                                    <img src="<?php echo htmlspecialchars($post->get('pst_image_link')); ?>" alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
                                 </a>
-                                <span style="display: block; font-size: 14px; color: #666; margin-bottom: 5px;">
-                                    <i class="bx bx-calendar"></i>
-                                    <?php echo date('M d, Y', strtotime($event->get('evt_start_time'))); ?>
-                                </span>
-                                <span style="display: block; font-size: 14px; color: #666;">
-                                    <i class="bx bx-time"></i>
-                                    <?php echo date('g:i A', strtotime($event->get('evt_start_time'))); ?>
-                                </span>
+                                <?php endif; ?>
+                                <div class="sidebar-post-content">
+                                    <a href="<?php echo $post->get_url(); ?>">
+                                        <h4><?php echo htmlspecialchars($post->get('pst_title')); ?></h4>
+                                    </a>
+                                    <span class="post-date">
+                                        <i class="bx bx-calendar"></i>
+                                        <?php echo date('M d, Y', strtotime($post->get('pst_published_time'))); ?>
+                                    </span>
+                                </div>
                             </div>
                             <?php
+                            $count++;
                         }
                     } else {
                         ?>
-                        <p>No upcoming events scheduled.</p>
+                        <p>No blog posts published yet.</p>
                         <?php
                     }
                     ?>
@@ -273,7 +241,7 @@ End Main Blog List Area -->
         </div>
     </div>
 </section>
-<!-- End Latest Project Area -->
+<!-- End Events Section -->
 
 <?php
 $page->public_footer();
