@@ -156,48 +156,14 @@
 		echo "Generated install SQL file version $version (compressed)<br>";
 		flush();
 
-		$filename = 'joinery-'.$version_major.'-'.$version_minor.'.tar.gz';
-
 		$file_output_folder = $full_site_dir.'/static_files';
-		$file_output_location = $full_site_dir.'/static_files/'.$filename;
 
-
-		//CHECK ALL FILE Permissions and owners
-		$perms = fileperms($file_output_folder);
-		$user_read = (($perms & 0x0100) ? 'r' : '-');
-		$user_write = (($perms & 0x0080) ? 'w' : '-');
-		$user_ex = (($perms & 0x0040) ?
-					(($perms & 0x0800) ? 's' : 'x' ) :
-					(($perms & 0x0800) ? 'S' : '-'));
-
-		// Group
-		$group_read = (($perms & 0x0020) ? 'r' : '-');
-		$group_write = (($perms & 0x0010) ? 'w' : '-');
-		$group_ex = (($perms & 0x0008) ?
-					(($perms & 0x0400) ? 's' : 'x' ) :
-					(($perms & 0x0400) ? 'S' : '-'));
-
-		// World
-		$world_read = (($perms & 0x0004) ? 'r' : '-');
-		$world_write = (($perms & 0x0002) ? 'w' : '-');
-		$world_ex = (($perms & 0x0001) ?
-					(($perms & 0x0200) ? 't' : 'x' ) :
-					(($perms & 0x0200) ? 'T' : '-'));
-		if(!($user_read && $user_write)){	
-		
-			echo $file_output_folder . ' must have user write permission.  Aborting upgrade.<br>';
-			echo 'Instead, it is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
-			exit;
-		}
-		
 		// Check if directory is writable by current process
 		if(!is_writable($file_output_folder)){
 			echo $file_output_folder . ' must be writable.  Aborting upgrade.<br>';
 			echo 'It is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
 			exit;
-		}		
-		 
-		
+		}
 
 		// Check that required directories and files exist
 		$maintenance_dir = $full_site_dir . '/maintenance_scripts/';
@@ -219,95 +185,8 @@
 		echo "All required directories and files present<br>";
 		flush();
 
-		// Create temporary directory for archive staging
-		$temp_dir = sys_get_temp_dir() . '/joinery_archive_' . uniqid();
-		if (!mkdir($temp_dir, 0755, true)) {
-			die("ERROR: Failed to create temporary directory: $temp_dir\n");
-		}
-
-		echo "Creating archive structure in temporary directory...<br>";
-		flush();
-
-		// Create directory structure
-		mkdir($temp_dir . '/public_html', 0755, true);
-		mkdir($temp_dir . '/config', 0755, true);
-		mkdir($temp_dir . '/maintenance_scripts', 0755, true);
-		mkdir($temp_dir . '/maintenance_scripts/install_tools', 0755, true);
-		mkdir($temp_dir . '/maintenance_scripts/sysadmin_tools', 0755, true);
-
-		// Copy public_html files using rsync
-		// Exclude: version control, dev docs, runtime directories, and testing tools
-
-		// Build theme exclusions based on form selection
-		$selected_themes = isset($_REQUEST['themes']) && is_array($_REQUEST['themes']) ? $_REQUEST['themes'] : [];
-		$all_themes = ThemeHelper::getAvailableThemes();
-		$theme_exclusions = '';
-
-		foreach ($all_themes as $theme_name => $theme) {
-			if (!in_array($theme_name, $selected_themes)) {
-				$theme_exclusions .= ' --exclude=theme/' . escapeshellarg($theme_name);
-			}
-		}
-
-		// Show which themes will be included
-		$included_count = count($selected_themes);
-		$excluded_count = count($all_themes) - $included_count;
-		echo "Including {$included_count} themes, excluding {$excluded_count} themes<br>";
-		flush();
-
-		$rsync_cmd = sprintf(
-			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests%s %s %s 2>&1',
-			$theme_exclusions,
-			escapeshellarg($full_site_dir . '/public_html/'),
-			escapeshellarg($temp_dir . '/public_html/')
-		);
-		echo "Copying public_html files...<br>";
-		flush();
-		exec($rsync_cmd, $output, $exit_code);
-		if ($exit_code !== 0) {
-			// Clean up temp directory
-			exec('rm -rf ' . escapeshellarg($temp_dir));
-			die("ERROR: Failed to copy public_html files:\n" . implode("\n", $output) . "\n");
-		}
-
-		// Copy config template from install_tools
-		$config_source = $maintenance_dir . 'install_tools/default_Globalvars_site.php';
-		if (file_exists($config_source)) {
-			copy($config_source, $temp_dir . '/config/default_Globalvars_site.php');
-			echo "Copied config template<br>";
-			flush();
-		}
-
-		// Copy maintenance script directories using rsync (no manual file list needed)
-		$script_dirs = ['install_tools', 'sysadmin_tools'];
-		foreach ($script_dirs as $dir) {
-			$source_dir = $maintenance_dir . $dir . '/';
-			$dest_dir = $temp_dir . '/maintenance_scripts/' . $dir . '/';
-			if (is_dir($source_dir)) {
-				$rsync_cmd = sprintf(
-					'rsync -av %s %s 2>&1',
-					escapeshellarg($source_dir),
-					escapeshellarg($dest_dir)
-				);
-				exec($rsync_cmd, $output, $exit_code);
-				if ($exit_code === 0) {
-					echo "Copied maintenance_scripts/$dir/<br>";
-				} else {
-					echo "<span style='color: orange;'>Warning: Failed to copy $dir/</span><br>";
-				}
-				flush();
-			}
-		}
-		echo "Copied maintenance script directories<br>";
-		flush();
-
-		// Copy install SQL file to install_tools (where _site_init.sh expects it)
-		copy($sql_source, $temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
-		echo "Added install SQL file to archive<br>";
-		flush();
-
 		// Also update the on-disk copy for Docker builds that copy directly from disk
-		$ondisk_sql_path = dirname($full_site_dir) . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
+		$ondisk_sql_path = $full_site_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
 		if (copy($sql_source, $ondisk_sql_path)) {
 			echo "Updated on-disk install SQL at $ondisk_sql_path<br>";
 		} else {
@@ -315,69 +194,10 @@
 		}
 		flush();
 
-		// Create tar.gz archive
-		echo "Creating tar.gz archive: $file_output_location<br>";
-		flush();
-
-		$tar_cmd = sprintf(
-			'tar -czf %s -C %s . 2>&1',
-			escapeshellarg($file_output_location),
-			escapeshellarg($temp_dir)
-		);
-		exec($tar_cmd, $output, $exit_code);
-
-		// Clean up temp directory
-		exec('rm -rf ' . escapeshellarg($temp_dir));
-
-		if ($exit_code !== 0) {
-			// Clean up failed file
-			if(file_exists($file_output_location)) {
-				@unlink($file_output_location);
-			}
-			die("ERROR: Failed to create tar.gz archive:\n" . implode("\n", $output) . "\n");
-		}
-
-		if(!file_exists($file_output_location) || filesize($file_output_location) == 0){
-			// Clean up empty/partial file
-			if(file_exists($file_output_location)) {
-				@unlink($file_output_location);
-			}
-			echo "Failed to write the archive file: $file_output_location...aborting.<br>";
-			exit;
-		}
-		
-		//STORE THE INFO IN THE DATABASE
-		$upgrade = new Upgrade(NULL);
-		$upgrade->set('upg_major_version', $version_major);
-		$upgrade->set('upg_minor_version', $version_minor);
-		$upgrade->set('upg_name', $filename);
-		$upgrade->set('upg_release_notes', $_REQUEST['release_notes']);
-		$upgrade->prepare();
-		$upgrade->save();
-
-
-		//GET THE UPGRADE FILE
-		$filesize_mb = round(filesize($file_output_location) / 1048576, 2);
-		echo '<br><strong>Full archive created successfully!</strong><br>';
-		echo 'Location: '. $file_output_location.'<br>';
-		echo 'Size: ' . $filesize_mb . ' MB<br>';
-		echo 'Format: tar.gz<br>';
-		echo '<br>Archive contents include:<br>';
-		echo '- public_html/ (all application files)<br>';
-		echo '- config/ (default configuration template)<br>';
-		echo '- maintenance_scripts/ (deployment and setup scripts)<br>';
-		echo '- maintenance_scripts/joinery-install.sql.gz (fresh install database)<br>';
-		echo '<br>Themes included (' . count($selected_themes) . '):<br>';
-		sort($selected_themes);
-		foreach ($selected_themes as $theme_name) {
-			echo '- ' . htmlspecialchars($theme_name) . '<br>';
-		}
-
 		// =====================================================
-		// Create CORE-ONLY archive (no themes or plugins)
+		// Create CORE archive (no themes or plugins)
 		// =====================================================
-		echo '<br><hr><br>';
-		echo '<strong>Creating core-only archive...</strong><br>';
+		echo '<strong>Creating core archive...</strong><br>';
 		flush();
 
 		$core_filename = 'joinery-core-' . $version_major . '.' . $version_minor . '.tar.gz';
@@ -386,63 +206,72 @@
 		// Create temporary directory for core archive staging
 		$core_temp_dir = sys_get_temp_dir() . '/joinery_core_' . uniqid();
 		if (!mkdir($core_temp_dir, 0755, true)) {
-			echo "ERROR: Failed to create core temp directory<br>";
-		} else {
-			// Create directory structure
-			mkdir($core_temp_dir . '/public_html', 0755, true);
-			mkdir($core_temp_dir . '/config', 0755, true);
-			mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
+			die("ERROR: Failed to create core temp directory<br>");
+		}
 
-			// Copy public_html excluding themes and plugins content
-			$rsync_core_cmd = sprintf(
-				'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="theme/*" --exclude="plugins/*" %s %s 2>&1',
-				escapeshellarg($full_site_dir . '/public_html/'),
-				escapeshellarg($core_temp_dir . '/public_html/')
-			);
-			exec($rsync_core_cmd, $output, $exit_code);
+		// Create directory structure
+		mkdir($core_temp_dir . '/public_html', 0755, true);
+		mkdir($core_temp_dir . '/config', 0755, true);
+		mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
 
-			// Create empty theme/ and plugins/ directories in the core archive
-			mkdir($core_temp_dir . '/public_html/theme', 0755, true);
-			mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
+		// Copy public_html excluding themes and plugins content
+		$rsync_core_cmd = sprintf(
+			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="theme/*" --exclude="plugins/*" %s %s 2>&1',
+			escapeshellarg($full_site_dir . '/public_html/'),
+			escapeshellarg($core_temp_dir . '/public_html/')
+		);
+		exec($rsync_core_cmd, $output, $exit_code);
 
-			// Copy config template
-			if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
-				copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
-			}
+		// Create empty theme/ and plugins/ directories in the core archive
+		mkdir($core_temp_dir . '/public_html/theme', 0755, true);
+		mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
 
-			// Copy maintenance_scripts
-			foreach (['install_tools', 'sysadmin_tools'] as $dir) {
-				$source_dir = $maintenance_dir . $dir . '/';
-				$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
-				if (is_dir($source_dir)) {
-					mkdir($dest_dir, 0755, true);
-					exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
-				}
-			}
+		// Copy config template
+		if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
+			copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
+		}
 
-			// Copy install SQL file
-			if (file_exists($sql_source)) {
-				copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
-			}
-
-			// Create core tar.gz archive
-			$tar_cmd = sprintf(
-				'tar -czf %s -C %s . 2>&1',
-				escapeshellarg($core_output_location),
-				escapeshellarg($core_temp_dir)
-			);
-			exec($tar_cmd, $output, $exit_code);
-
-			// Clean up temp directory
-			exec('rm -rf ' . escapeshellarg($core_temp_dir));
-
-			if (file_exists($core_output_location) && filesize($core_output_location) > 0) {
-				$core_size_mb = round(filesize($core_output_location) / 1048576, 2);
-				echo "Core archive created: $core_filename ({$core_size_mb} MB)<br>";
-			} else {
-				echo "ERROR: Failed to create core archive<br>";
+		// Copy maintenance_scripts
+		foreach (['install_tools', 'sysadmin_tools'] as $dir) {
+			$source_dir = $maintenance_dir . $dir . '/';
+			$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
+			if (is_dir($source_dir)) {
+				mkdir($dest_dir, 0755, true);
+				exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
 			}
 		}
+
+		// Copy install SQL file
+		if (file_exists($sql_source)) {
+			copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
+		}
+
+		// Create core tar.gz archive
+		$tar_cmd = sprintf(
+			'tar -czf %s -C %s . 2>&1',
+			escapeshellarg($core_output_location),
+			escapeshellarg($core_temp_dir)
+		);
+		exec($tar_cmd, $output, $exit_code);
+
+		// Clean up temp directory
+		exec('rm -rf ' . escapeshellarg($core_temp_dir));
+
+		if (!file_exists($core_output_location) || filesize($core_output_location) == 0) {
+			die("ERROR: Failed to create core archive<br>");
+		}
+
+		$core_size_mb = round(filesize($core_output_location) / 1048576, 2);
+		echo "Core archive created: $core_filename ({$core_size_mb} MB)<br>";
+
+		// Store the version info in the database (using core filename)
+		$upgrade = new Upgrade(NULL);
+		$upgrade->set('upg_major_version', $version_major);
+		$upgrade->set('upg_minor_version', $version_minor);
+		$upgrade->set('upg_name', $core_filename);
+		$upgrade->set('upg_release_notes', $_REQUEST['release_notes']);
+		$upgrade->prepare();
+		$upgrade->save();
 
 		// =====================================================
 		// Create individual THEME archives
@@ -565,7 +394,7 @@
 		$upgrades = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 10, 0);
 		$upgrades->load();
 		foreach ($upgrades as $upgrade){
-			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 30);
+			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 500);
 
 			// Check if archive file exists (supports both old .zip and new .tar.gz)
 			$archive_filename = $upgrade->get('upg_name');
@@ -633,32 +462,7 @@
 			'validation' => ['required' => true]
 		]);
 
-		// Build theme checkbox list
-		$available_themes = ThemeHelper::getAvailableThemes();
-		$theme_options = [];
-		$system_themes = [];
-		$checked_themes = [];
-
-		foreach ($available_themes as $theme_name => $theme) {
-			$display_name = $theme->get('display_name', $theme->get('displayName', $theme_name));
-			$is_system = $theme->get('system', false);
-
-			$theme_options[$theme_name] = $display_name . ($is_system ? ' (system)' : '');
-
-			if ($is_system) {
-				$system_themes[] = $theme_name;
-				$checked_themes[] = $theme_name;
-			}
-		}
-
-		// Sort options alphabetically by display name
-		asort($theme_options);
-
-		echo $formwriter->checkboxlist('themes', 'Themes to Include', [
-			'options' => $theme_options,
-			'checked' => $checked_themes,
-			'readonly' => $system_themes,
-		]);
+		echo '<p class="text-muted">Publishing creates: core archive + individual theme/plugin archives for all stock items.</p>';
 
 		echo $formwriter->submitbutton('submit_button', 'Publish Upgrade');
 
@@ -912,89 +716,11 @@
 			return ['success' => false, 'error' => 'Generated SQL file not found'];
 		}
 
-		// Step 2: Create full archive with all stock themes
-		$filename = 'joinery-' . $version_major . '-' . $version_minor . '.tar.gz';
-		$file_output_location = $file_output_folder . '/' . $filename;
-
-		// Create temporary directory for archive staging
-		$temp_dir = sys_get_temp_dir() . '/joinery_archive_' . uniqid();
-		if (!mkdir($temp_dir, 0755, true)) {
-			return ['success' => false, 'error' => 'Failed to create temp directory'];
-		}
-
-		// Create directory structure
-		mkdir($temp_dir . '/public_html', 0755, true);
-		mkdir($temp_dir . '/config', 0755, true);
-		mkdir($temp_dir . '/maintenance_scripts', 0755, true);
-		mkdir($temp_dir . '/maintenance_scripts/install_tools', 0755, true);
-		mkdir($temp_dir . '/maintenance_scripts/sysadmin_tools', 0755, true);
-
-		// Get all stock themes to include
-		$all_themes = ThemeHelper::getAvailableThemes();
-		$selected_themes = [];
-		foreach ($all_themes as $theme_name => $theme) {
-			if ($theme->get('system', false) || $theme->get('is_stock', false)) {
-				$selected_themes[] = $theme_name;
-			}
-		}
-
-		// Build theme exclusions for non-selected themes
-		$theme_exclusions = '';
-		foreach ($all_themes as $theme_name => $theme) {
-			if (!in_array($theme_name, $selected_themes)) {
-				$theme_exclusions .= ' --exclude=theme/' . escapeshellarg($theme_name);
-			}
-		}
-
-		// Copy public_html files
-		$rsync_cmd = sprintf(
-			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests%s %s %s 2>&1',
-			$theme_exclusions,
-			escapeshellarg($full_site_dir . '/public_html/'),
-			escapeshellarg($temp_dir . '/public_html/')
-		);
-		exec($rsync_cmd, $output, $exit_code);
-		if ($exit_code !== 0) {
-			exec('rm -rf ' . escapeshellarg($temp_dir));
-			return ['success' => false, 'error' => 'Failed to copy public_html'];
-		}
-
-		// Copy config template
-		$config_source = $maintenance_dir . 'install_tools/default_Globalvars_site.php';
-		if (file_exists($config_source)) {
-			copy($config_source, $temp_dir . '/config/default_Globalvars_site.php');
-		}
-
-		// Copy maintenance script directories
-		foreach (['install_tools', 'sysadmin_tools'] as $dir) {
-			$source_dir = $maintenance_dir . $dir . '/';
-			$dest_dir = $temp_dir . '/maintenance_scripts/' . $dir . '/';
-			if (is_dir($source_dir)) {
-				exec(sprintf('rsync -av %s %s 2>&1', escapeshellarg($source_dir), escapeshellarg($dest_dir)));
-			}
-		}
-
-		// Copy install SQL file
-		copy($sql_source, $temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
-
 		// Also update the on-disk copy
-		$ondisk_sql_path = dirname($full_site_dir) . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
+		$ondisk_sql_path = $full_site_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
 		@copy($sql_source, $ondisk_sql_path);
 
-		// Create tar.gz archive
-		$tar_cmd = sprintf(
-			'tar -czf %s -C %s . 2>&1',
-			escapeshellarg($file_output_location),
-			escapeshellarg($temp_dir)
-		);
-		exec($tar_cmd, $output, $exit_code);
-		exec('rm -rf ' . escapeshellarg($temp_dir));
-
-		if ($exit_code !== 0 || !file_exists($file_output_location) || filesize($file_output_location) == 0) {
-			return ['success' => false, 'error' => 'Failed to create full archive'];
-		}
-
-		// Step 3: Create core-only archive
+		// Step 2: Create core archive (no themes or plugins)
 		$core_filename = 'joinery-core-' . $version . '.tar.gz';
 		$core_output_location = $file_output_folder . '/' . $core_filename;
 
@@ -1046,7 +772,7 @@
 			exec('rm -rf ' . escapeshellarg($core_temp_dir));
 		}
 
-		// Step 4: Create individual theme archives
+		// Step 3: Create individual theme archives
 		$themes_dir = $file_output_folder . '/themes';
 		if (!is_dir($themes_dir)) {
 			mkdir($themes_dir, 0755, true);
@@ -1076,7 +802,7 @@
 			exec($tar_cmd);
 		}
 
-		// Step 5: Create individual plugin archives
+		// Step 4: Create individual plugin archives
 		$plugins_dir = $file_output_folder . '/plugins';
 		if (!is_dir($plugins_dir)) {
 			mkdir($plugins_dir, 0755, true);
