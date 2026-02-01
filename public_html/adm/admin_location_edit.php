@@ -107,7 +107,7 @@
 	}
 
 	$formwriter->dropinput('loc_is_published', 'Published', [
-		'options' => ['No' => 0, 'Yes' => 1]
+		'options' => [0 => 'No', 1 => 'Yes']
 	]);
 
 	$files = new MultiFile(

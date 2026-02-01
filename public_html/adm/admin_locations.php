@@ -25,7 +25,7 @@ array(
 )
 );
 
-$headers = array("Location",  "Description", "Deleted");
+$headers = array("Location", "Status");
 $altlinks = array('New Location'=>'/admin/admin_location_edit');
 $pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 $table_options = array(
@@ -38,11 +38,13 @@ foreach ($locations as $location){
 
 	$rowvalues = array();
 	array_push($rowvalues, '<a href="/admin/admin_location?loc_location_id='.$location->key.'">'.$location->get('loc_name').'</a>');
-	array_push($rowvalues, $location->get('loc_short_description'));
 
-	$status = 'Active';
 	if($location->get('loc_delete_time')) {
 		$status = 'Deleted';
+	} elseif($location->get('loc_is_published')) {
+		$status = 'Published';
+	} else {
+		$status = 'Unpublished';
 	}
 	array_push($rowvalues, $status);
 

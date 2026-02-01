@@ -22,6 +22,8 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 		$event = new Event($evt_event_id, TRUE);
 	} else {
 		$event = new Event(NULL);
+		$event->set('evt_timezone', 'America/New_York');
+		$event->set('evt_visibility', 1); // Live
 	}
 
 	// Process POST actions
