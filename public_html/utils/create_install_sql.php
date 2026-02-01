@@ -616,7 +616,6 @@ $default_settings = [
     // Email Service Defaults
     'email_service' => 'smtp',
     'email_fallback_service' => 'smtp',
-    'mailgun_version' => '2',
     'smtp_port' => '465',
     'smtp_auth' => '1',
     'email_test_mode' => '0',
