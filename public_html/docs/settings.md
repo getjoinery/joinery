@@ -73,14 +73,15 @@ Create `/plugins/{your_plugin}/settings_form.php`:
 
 echo '<p>Configure your plugin settings below.</p>';
 
-echo $formwriter->textinput("API Key", 'myplugin_api_key', '', 20,
-    $settings->get_setting('myplugin_api_key'),
-    "Your API key", 255, "");
+$formwriter->textinput('myplugin_api_key', 'API Key', [
+    'value' => $settings->get_setting('myplugin_api_key'),
+    'help' => 'Your API key'
+]);
 
-echo $formwriter->dropinput("Enable Feature", 'myplugin_feature_enabled', '',
-    array("Yes"=>1, 'No'=>0),
-    $settings->get_setting('myplugin_feature_enabled'),
-    '', FALSE);
+$formwriter->dropinput('myplugin_feature_enabled', 'Enable Feature', [
+    'options' => [1 => 'Yes', 0 => 'No'],
+    'value' => $settings->get_setting('myplugin_feature_enabled')
+]);
 ?>
 ```
 
@@ -107,20 +108,30 @@ The FormWriter provides various input types:
 
 ```php
 // Text input
-$formwriter->textinput("Label", 'setting_name', '', 20, $value, "Help text", 255, "");
+$formwriter->textinput('setting_name', 'Label', [
+    'value' => $settings->get_setting('setting_name'),
+    'help' => 'Help text'
+]);
 
 // Dropdown
-$formwriter->dropinput("Label", 'setting_name', '',
-    array("Option 1"=>1, "Option 2"=>2),
-    $value, "Help text", FALSE);
+$formwriter->dropinput('setting_name', 'Label', [
+    'options' => [1 => 'Option 1', 2 => 'Option 2'],
+    'value' => $settings->get_setting('setting_name'),
+    'help' => 'Help text'
+]);
 
 // Textarea
-$formwriter->textbox('Label', 'setting_name', 'ctrlHolder', 10, 80, $value, '', 'no');
+$formwriter->textbox('setting_name', 'Label', [
+    'value' => $settings->get_setting('setting_name'),
+    'rows' => 10,
+    'cols' => 80
+]);
 
-// Checkbox (use dropdown with Yes/No values)
-$formwriter->dropinput("Label", 'setting_name', '',
-    array("Yes"=>1, 'No'=>0),
-    $value, '', FALSE);
+// Boolean toggle
+$formwriter->dropinput('setting_name', 'Enable Feature', [
+    'options' => [1 => 'Yes', 0 => 'No'],
+    'value' => $settings->get_setting('setting_name')
+]);
 ```
 
 ## Using Settings in Code
@@ -140,8 +151,7 @@ if(empty($value)) {
 ### Boolean Settings
 
 ```php
-$enabled = $settings->get_setting('feature_enabled');
-if($enabled == '1') {
+if ($settings->get_setting('feature_enabled')) {
     // Feature is enabled
 }
 ```
