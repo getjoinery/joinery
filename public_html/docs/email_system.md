@@ -232,8 +232,7 @@ Three ways to set subject (priority order):
 ```php
 // Settings
 mailgun_api_key = "key-abc123..."
-mailgun_domain = "mg.example.com"  
-mailgun_version = 2  // Use Mailgun SDK v2+
+mailgun_domain = "mg.example.com"
 mailgun_eu_api_link = "https://api.eu.mailgun.net"  // EU endpoint (optional)
 ```
 
