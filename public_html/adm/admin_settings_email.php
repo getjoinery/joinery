@@ -312,7 +312,7 @@
 		echo '<div class="col-md-6">';
 		echo '<h5>Mailgun Settings</h5>';
 		$formwriter->dropinput('mailgun_version', 'Mailgun Version', [
-			'options' => ["Version 2.X"=>'1', 'Version 3.X' => '2'],
+			'options' => ['1' => "Version 2.X", '2' => 'Version 3.X'],
 			'value' => $settings->get_setting('mailgun_version')
 		]);
 		$formwriter->textinput('mailgun_api_key', 'Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)', [
