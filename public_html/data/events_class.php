@@ -98,7 +98,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_end_time_local' => array('type'=>'timestamp(6)'),
 	    'evt_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'evt_external_register_link' => array('type'=>'varchar(255)'),
-	    'evt_timezone' => array('type'=>'varchar(32)'),
+	    'evt_timezone' => array('type'=>'varchar(32)', 'default'=>'America/New_York'),
 	    'evt_is_accepting_signups' => array('type'=>'bool'),
 	    'evt_picture_link' => array('type'=>'varchar(255)'),
 	    'evt_collect_extra_info' => array('type'=>'bool'),

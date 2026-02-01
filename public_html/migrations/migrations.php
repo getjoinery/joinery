@@ -1136,3 +1136,12 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Event Types Menu Item (v78) ==========
+	// Add Event Types menu item under Events
+	$migration = array();
+	$migration['database_version'] = '78';
+	$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'event-types'";
+	$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug, amu_setting_activate) VALUES ('Event Types', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'events'), 'admin_event_types', 5, 8, 0, '', 'event-types', 'events_active');";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
