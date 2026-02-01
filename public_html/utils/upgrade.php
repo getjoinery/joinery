@@ -1201,12 +1201,30 @@
 	 */
 	function get_installed_stock_plugins($plugin_dir) {
 		$plugins = [];
+
+		// Get list of uninstalled plugins from database
+		$uninstalled = [];
+		try {
+			require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+			$all_plugins = new MultiPlugin();
+			$all_plugins->load();
+			foreach ($all_plugins as $plugin) {
+				if ($plugin->get('plg_status') === 'uninstalled') {
+					$uninstalled[] = $plugin->get('plg_name');
+				}
+			}
+		} catch (Exception $e) {
+			// If we can't check database, proceed with all stock plugins
+		}
+
 		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
 			$plugin_data = json_decode(file_get_contents($json_file), true);
 			if ($plugin_data) {
 				$is_stock = $plugin_data['is_stock'] ?? false;
-				if ($is_stock) {
-					$plugins[] = basename(dirname($json_file));
+				$plugin_name = basename(dirname($json_file));
+				// Skip uninstalled plugins
+				if ($is_stock && !in_array($plugin_name, $uninstalled)) {
+					$plugins[] = $plugin_name;
 				}
 			}
 		}
@@ -1240,15 +1258,34 @@
 	 */
 	function get_all_plugins_info($plugin_dir) {
 		$plugins = [];
+
+		// Get list of uninstalled plugins from database
+		$uninstalled = [];
+		try {
+			require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+			$all_plugins = new MultiPlugin();
+			$all_plugins->load();
+			foreach ($all_plugins as $plugin) {
+				if ($plugin->get('plg_status') === 'uninstalled') {
+					$uninstalled[] = $plugin->get('plg_name');
+				}
+			}
+		} catch (Exception $e) {
+			// If we can't check database, proceed without status info
+		}
+
 		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
 			$plugin_data = json_decode(file_get_contents($json_file), true);
 			$plugin_name = basename(dirname($json_file));
+			$is_stock = $plugin_data['is_stock'] ?? false;
+			$is_uninstalled = in_array($plugin_name, $uninstalled);
 			$plugins[$plugin_name] = [
 				'name' => $plugin_name,
 				'display_name' => $plugin_data['display_name'] ?? $plugin_name,
 				'version' => $plugin_data['version'] ?? 'unknown',
-				'is_stock' => $plugin_data['is_stock'] ?? false,
-				'will_upgrade' => ($plugin_data['is_stock'] ?? false) === true
+				'is_stock' => $is_stock,
+				'is_uninstalled' => $is_uninstalled,
+				'will_upgrade' => $is_stock && !$is_uninstalled
 			];
 		}
 		ksort($plugins);
@@ -1273,7 +1310,14 @@
 			echo str_pad("Name", 25) . str_pad("Version", 12) . str_pad("Stock", 8) . "Status\n";
 			echo str_repeat("-", 60) . "\n";
 			foreach ($components as $info) {
-				$status = $info['will_upgrade'] ? '✓ Will upgrade' : '⊘ Skipped (not stock)';
+				$is_uninstalled = $info['is_uninstalled'] ?? false;
+				if ($info['will_upgrade']) {
+					$status = '✓ Will upgrade';
+				} elseif ($is_uninstalled) {
+					$status = '⊗ Uninstalled (skipped)';
+				} else {
+					$status = '⊘ Skipped (not stock)';
+				}
 				$stock = $info['is_stock'] ? 'Yes' : 'No';
 				echo str_pad($info['name'], 25) . str_pad($info['version'], 12) . str_pad($stock, 8) . $status . "\n";
 			}
@@ -1288,12 +1332,17 @@
 			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Status</th>';
 			echo '</tr>';
 			foreach ($components as $info) {
-				$row_style = $info['will_upgrade']
-					? 'background-color: #d4edda;'
-					: 'background-color: #fff3cd;';
-				$status = $info['will_upgrade']
-					? '<span style="color: #155724;">✓ Will upgrade</span>'
-					: '<span style="color: #856404;">⊘ Skipped (not stock)</span>';
+				$is_uninstalled = $info['is_uninstalled'] ?? false;
+				if ($info['will_upgrade']) {
+					$row_style = 'background-color: #d4edda;';
+					$status = '<span style="color: #155724;">✓ Will upgrade</span>';
+				} elseif ($is_uninstalled) {
+					$row_style = 'background-color: #e2e3e5;';
+					$status = '<span style="color: #495057;">⊗ Uninstalled (skipped)</span>';
+				} else {
+					$row_style = 'background-color: #fff3cd;';
+					$status = '<span style="color: #856404;">⊘ Skipped (not stock)</span>';
+				}
 				$stock = $info['is_stock']
 					? '<span style="color: #155724;">Yes</span>'
 					: '<span style="color: #6c757d;">No</span>';
