@@ -122,6 +122,81 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         $theme_path = PathHelper::getAbsolutePath("theme/$theme_name");
         return is_dir($theme_path);
     }
+
+    /**
+     * Check if this is a stock theme (auto-updated)
+     * @return bool True if stock theme
+     */
+    public function is_stock() {
+        return (bool)$this->get('thm_is_stock');
+    }
+
+    /**
+     * Permanently delete theme - removes database record and files
+     * Note: Themes don't have uninstall scripts (no database components to clean up)
+     * @return array Results with success, errors, messages
+     */
+    public function permanent_delete_with_files() {
+        $results = array(
+            'success' => false,
+            'errors' => array(),
+            'messages' => array(),
+            'warnings' => array()
+        );
+
+        try {
+            $theme_name = $this->get('thm_name');
+            $theme_dir = PathHelper::getAbsolutePath('theme/' . $theme_name);
+
+            // Check if system theme
+            if ($this->get('thm_is_system')) {
+                $results['errors'][] = "Cannot delete system theme '$theme_name'. System themes are required for the platform to function.";
+                return $results;
+            }
+
+            // Check if active theme
+            $settings = Globalvars::get_instance();
+            if ($settings->get_setting('theme_template') === $theme_name) {
+                $results['errors'][] = "Cannot delete active theme '$theme_name'. Switch to another theme first.";
+                return $results;
+            }
+
+            // Pre-flight check: verify we can delete files before making any changes
+            if (is_dir($theme_dir)) {
+                require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                $perm_check = LibraryFunctions::check_directory_deletable($theme_dir);
+                if (!$perm_check['can_delete']) {
+                    $results['errors'][] = "Permission denied. Cannot delete: " . implode(', ', array_slice($perm_check['errors'], 0, 3));
+                    if (count($perm_check['errors']) > 3) {
+                        $results['errors'][0] .= ' (and ' . (count($perm_check['errors']) - 3) . ' more)';
+                    }
+                    return $results;
+                }
+            }
+
+            // Delete files first
+            if (is_dir($theme_dir)) {
+                if (LibraryFunctions::delete_directory($theme_dir)) {
+                    $results['messages'][] = "Deleted theme directory";
+                } else {
+                    $results['errors'][] = "Failed to delete theme directory";
+                    return $results;
+                }
+            } else {
+                $results['messages'][] = "Theme directory already removed";
+            }
+
+            // Delete theme database record only after files are confirmed deleted
+            $this->permanent_delete();
+            $results['messages'][] = "Removed theme from database";
+            $results['success'] = true;
+
+        } catch (Exception $e) {
+            $results['errors'][] = $e->getMessage();
+        }
+
+        return $results;
+    }
 }
 
 class MultiTheme extends SystemMultiBase {
