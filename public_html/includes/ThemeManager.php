@@ -521,27 +521,12 @@ class ThemeManager extends AbstractExtensionManager {
             throw new Exception("Theme not found: $theme_name");
         }
 
-        if ($theme->get('thm_is_system')) {
-            throw new Exception("Cannot delete system theme: $theme_name. System themes are required for the platform to function.");
+        // Use the Theme model's permanent_delete_with_files method
+        $result = $theme->permanent_delete_with_files();
+
+        if (!$result['success']) {
+            throw new Exception(implode('; ', $result['errors']));
         }
-
-        if ($theme->get('thm_is_active')) {
-            throw new Exception("Cannot delete active theme. Switch to another theme first.");
-        }
-
-        // Delete files first
-        $theme_path = PathHelper::getAbsolutePath('theme/' . $theme_name);
-        if (is_dir($theme_path)) {
-            exec("rm -rf " . escapeshellarg($theme_path), $output, $result);
-
-            // Verify deletion succeeded
-            if (is_dir($theme_path)) {
-                throw new Exception("Failed to delete theme files. Check file permissions.");
-            }
-        }
-
-        // Delete database record only after files are confirmed deleted
-        $theme->permanent_delete();
 
         return true;
     }

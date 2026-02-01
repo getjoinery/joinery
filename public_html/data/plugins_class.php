@@ -315,11 +315,19 @@ function authenticate_write($data) {
 			// Run migrations
 			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 			$plugin_manager = new PluginManager();
-			$migration_result = $plugin_manager->runPendingMigrations($plugin_name);
-			
-			if (!$migration_result['success']) {
-				$results['errors'] = $migration_result['errors'];
-				$this->set('plg_install_error', implode('; ', $migration_result['errors']));
+			$migration_results = $plugin_manager->runPendingMigrations($plugin_name);
+
+			// Check migration results - runPendingMigrations returns array of individual results
+			$migration_errors = array();
+			foreach ($migration_results as $migration_result) {
+				if (!empty($migration_result['error'])) {
+					$migration_errors[] = $migration_result['error'];
+				}
+			}
+
+			if (!empty($migration_errors)) {
+				$results['errors'] = $migration_errors;
+				$this->set('plg_install_error', implode('; ', $migration_errors));
 				$this->set('plg_status', 'error');
 				$this->save();
 				return $results;
@@ -337,16 +345,12 @@ function authenticate_write($data) {
 			}
 			
 			$this->save();
-			
-			// Mark version as installed
-			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
-			$version_detector = new PluginVersionDetector();
-			$version = $metadata['version'] ?? '0.0.0';
-			$version_detector->markAsUpdated($plugin_name, $version);
-			
+
 			$results['success'] = true;
 			$results['messages'][] = "Plugin '{$plugin_name}' installed successfully";
-			$results['messages'] = array_merge($results['messages'], $migration_result['messages']);
+			if (!empty($migration_results)) {
+				$results['messages'][] = count($migration_results) . " migration(s) completed";
+			}
 			
 		} catch (Exception $e) {
 			$results['errors'][] = $e->getMessage();
@@ -426,29 +430,27 @@ function authenticate_write($data) {
 				$results['messages'] = array_merge($results['messages'], $rollback_result['messages']);
 			}
 			
-			// Update plugin record
+			// Update plugin record - keep record with 'uninstalled' status
+			// so sync won't re-register it automatically
 			$this->set('plg_uninstalled_time', date('Y-m-d H:i:s'));
 			$this->set('plg_status', 'uninstalled');
+			$this->set('plg_activated_time', null);
+			$this->set('plg_active', 0);
 			$this->save();
-			
+
 			// Clear version tracking using model class
 			require_once(PathHelper::getIncludePath('data/plugin_versions_class.php'));
 			$plugin_versions = new MultiPluginVersion(['plv_plugin_name' => $plugin_name]);
 			$plugin_versions->load();
-			
+
 			foreach ($plugin_versions as $version) {
 				$version->permanent_delete();
 			}
-			
-			// Delete plugin record
-			$this->permanent_delete();
 
 			// Remove deletion rules for this plugin's models
-			// (Do this AFTER permanent_delete so the rules exist when needed)
-			require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 			$plugin_helper = PluginHelper::getInstance($plugin_name);
 			$plugin_helper->removePluginDeletionRules();
-			
+
 			$results['success'] = true;
 			$results['messages'][] = "Plugin '{$plugin_name}' uninstalled successfully";
 			
@@ -521,6 +523,80 @@ function authenticate_write($data) {
 	 */
 	public function is_stock() {
 		return (bool)$this->get('plg_is_stock');
+	}
+
+	/**
+	 * Permanently delete plugin files from filesystem
+	 * Runs uninstall first if not already uninstalled
+	 * @return array Results with success, errors, messages
+	 */
+	public function permanent_delete_with_files() {
+		$results = array(
+			'success' => false,
+			'errors' => array(),
+			'messages' => array(),
+			'warnings' => array()
+		);
+
+		try {
+			$plugin_name = $this->get('plg_name');
+			$plugin_dir = PathHelper::getAbsolutePath('plugins/' . $plugin_name);
+
+			// Check if this plugin is the active theme provider
+			try {
+				$plugin_helper = PluginHelper::getInstance($plugin_name);
+				if ($plugin_helper->isActiveThemeProvider()) {
+					$results['errors'][] = "Cannot delete plugin '$plugin_name' - it is the active theme provider. Switch to a different theme first.";
+					return $results;
+				}
+			} catch (Exception $e) {
+				// Plugin helper not available - proceed
+			}
+
+			// Pre-flight check: verify we can delete files before making any changes
+			if (is_dir($plugin_dir)) {
+				$perm_check = LibraryFunctions::check_directory_deletable($plugin_dir);
+				if (!$perm_check['can_delete']) {
+					$results['errors'][] = "Permission denied. Cannot delete: " . implode(', ', array_slice($perm_check['errors'], 0, 3));
+					if (count($perm_check['errors']) > 3) {
+						$results['errors'][0] .= ' (and ' . (count($perm_check['errors']) - 3) . ' more)';
+					}
+					return $results;
+				}
+			}
+
+			// Run uninstall if not already uninstalled
+			if ($this->get('plg_status') !== 'uninstalled') {
+				$uninstall_result = $this->uninstall();
+				if (!$uninstall_result['success']) {
+					$results['errors'] = $uninstall_result['errors'];
+					return $results;
+				}
+				$results['messages'] = array_merge($results['messages'], $uninstall_result['messages']);
+			}
+
+			// Delete files
+			if (is_dir($plugin_dir)) {
+				if (LibraryFunctions::delete_directory($plugin_dir)) {
+					$results['messages'][] = "Deleted plugin directory";
+				} else {
+					$results['errors'][] = "Failed to delete plugin directory";
+					return $results;
+				}
+			} else {
+				$results['messages'][] = "Plugin directory already removed";
+			}
+
+			// Delete the database record (permanent delete removes the record entirely)
+			$this->permanent_delete();
+			$results['messages'][] = "Removed plugin from database";
+			$results['success'] = true;
+
+		} catch (Exception $e) {
+			$results['errors'][] = $e->getMessage();
+		}
+
+		return $results;
 	}
 	
 	/**
