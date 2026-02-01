@@ -105,7 +105,7 @@ function authenticate_write($data) {
 			case 'error':
 				return '<span class="badge bg-danger">Error</span>';
 			case 'uninstalled':
-				return '<span class="badge bg-secondary">Not Installed</span>';
+				return '<span class="badge bg-dark text-white"><i class="fas fa-times-circle"></i> Uninstalled</span>';
 			default:
 				// Legacy support
 				if ($this->is_active()) {
@@ -417,7 +417,7 @@ function authenticate_write($data) {
 			$plugin_manager = new PluginManager();
 			// Note: Rollback not implemented in consolidated PluginManager
 			// For now, just skip rollback
-			$rollback_result = array('success' => true, 'errors' => []);
+			$rollback_result = array('success' => true, 'errors' => [], 'messages' => []);
 			
 			if (!$rollback_result['success']) {
 				$results['errors'] = array_merge($results['errors'], $rollback_result['errors']);
