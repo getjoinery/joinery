@@ -241,19 +241,11 @@ class EmailSender {
     public function sendViaMailgun(EmailMessage $message) {
         $settings = Globalvars::get_instance();
         
-        // Initialize Mailgun client (preserve existing logic)
-        if ($settings->get_setting('mailgun_version') == 1) {
-            if ($settings->get_setting('mailgun_eu_api_link')) {
-                $mg = new Mailgun($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-            } else {
-                $mg = new Mailgun($settings->get_setting('mailgun_api_key'));
-            }
+        // Initialize Mailgun client (v3.x SDK)
+        if ($settings->get_setting('mailgun_eu_api_link')) {
+            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
         } else {
-            if ($settings->get_setting('mailgun_eu_api_link')) {
-                $mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-            } else {
-                $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
-            }
+            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
         }
         
         $domain = $settings->get_setting('mailgun_domain');
@@ -288,11 +280,7 @@ class EmailSender {
             $email_to_send['recipient-variables'] = json_encode($recipient_variables);
             
             try {
-                if ($settings->get_setting('mailgun_version') == 1) {
-                    $result = $mg->sendMessage($domain, $email_to_send);
-                } else {
-                    $result = $mg->messages()->send($domain, $email_to_send);
-                }
+                $result = $mg->messages()->send($domain, $email_to_send);
                 $this->logEmailDebug("Email batch sent successfully via Mailgun", 'mailgun');
             } catch (Exception $e) {
                 $this->logEmailDebug("Mailgun send failed: " . $e->getMessage(), 'mailgun');
