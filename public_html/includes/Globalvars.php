@@ -23,7 +23,7 @@ class Globalvars {
 	public function get_setting($setting, $calculated_values=true, $fail_silently=false){
 		$found = 0;
 		if(isset($this->settings[$setting])){
-			if($this->settings[$setting] || $this->settings[$setting] === 0){
+			if($this->settings[$setting] || $this->settings[$setting] === 0 || $this->settings[$setting] === '0'){
 				//FOUND A SETTING THAT IS NOT BLANK
 				$found = 1;
 				return $this->settings[$setting];
@@ -52,7 +52,7 @@ class Globalvars {
 		if(isset($result->stg_value)){
 			$found = 1;
 			$setting_value = $result->stg_value;
-			if($setting_value || $setting_value === 0){
+			if($setting_value || $setting_value === 0 || $setting_value === '0'){
 				//FOUND A SETTING THAT IS NOT BLANK
 				$this->settings[$setting] = $setting_value;
 				return $setting_value;

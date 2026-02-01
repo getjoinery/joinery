@@ -1241,13 +1241,19 @@
 		]);
 	}
 
-	echo '<hr><h2>Plugin Settings</h2>';
-
-	// Scan and include plugin settings forms directly in this page
+	// Scan for plugin settings forms and only show section if any exist
 	$plugins = LibraryFunctions::list_plugins();
+	$plugin_settings_forms = array();
 	foreach($plugins as $plugin) {
 		$settings_form = PathHelper::getIncludePath("plugins/$plugin/settings_form.php");
 		if(file_exists($settings_form)) {
+			$plugin_settings_forms[$plugin] = $settings_form;
+		}
+	}
+
+	if(!empty($plugin_settings_forms)) {
+		echo '<hr><h2>Plugin Settings</h2>';
+		foreach($plugin_settings_forms as $plugin => $settings_form) {
 			echo "<div class='plugin-settings-section'>";
 			echo "<h4>" . ucfirst($plugin) . " Plugin</h4>";
 			include($settings_form);
