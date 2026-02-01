@@ -108,7 +108,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_max_signups' => array('type'=>'int4'),
 	    'evt_allow_waiting_list' => array('type'=>'bool'),
 	    'evt_session_display_type' => array('type'=>'int4'),
-	    'evt_visibility' => array('type'=>'int4', 'default'=>0),
+	    'evt_visibility' => array('type'=>'int4', 'default'=>1),
 	    'evt_fil_file_id' => array('type'=>'int4'),
 	    'evt_link' => array('type'=>'varchar(255)'),
 	    'evt_show_add_to_calendar_link' => array('type'=>'bool', 'default'=>true),

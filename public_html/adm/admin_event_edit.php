@@ -50,13 +50,15 @@ if($numlocations){
 	$location_id = $event->get('evt_loc_location_id');
 
 	// Build visibility rules for location dropdown
+	// Just use field IDs - FormWriter automatically detects _container elements
 	$visibility_rules = array(
-		'' => array('show' => array('evt_location_container'), 'hide' => array()),
+		'' => array('show' => array('evt_location'), 'hide' => array()),
 	);
 
 	// Add rules for each predefined location (hide custom location field)
-	foreach ($optionvals as $label => $value) {
-		$visibility_rules[$value] = array('show' => array(), 'hide' => array('evt_location_container'));
+	// Note: $optionvals is [location_id => location_name] format
+	foreach ($optionvals as $location_id => $location_name) {
+		$visibility_rules[$location_id] = array('show' => array(), 'hide' => array('evt_location'));
 	}
 
 	$formwriter->dropinput('evt_loc_location_id', 'Location', [
@@ -75,14 +77,7 @@ else{
 	]);
 }
 
-$formwriter->textinput('evt_max_signups', 'Max signups (number)');
-
 $formwriter->textinput('evt_short_description', 'Event short description (no html)', [
-	'maxlength' => 255
-]);
-
-$formwriter->textinput('evt_external_register_link', 'External register link (if needed)', [
-	'validation' => ['minlength' => 5],
 	'maxlength' => 255
 ]);
 
@@ -92,23 +87,10 @@ $formwriter->dropinput('evt_usr_user_id_leader', 'Led by', [
 	'empty_option' => 'None'
 ]);
 
-$optionvals = Address::get_timezone_drop_array();
-$formwriter->dropinput('evt_timezone', 'Event Time Zone', [
-	'options' => $optionvals
-]);
-
 $optionvals = array(1=>"Active", 2=>"Completed", 3=>"Cancelled");
 $formwriter->dropinput('evt_status', 'Status', [
 	'options' => $optionvals
 ]);
-
-if($num_event_types){
-	$optionvals = $event_types->get_dropdown_array();
-	$formwriter->dropinput('evt_ety_event_type_id', 'Type of event', [
-		'options' => $optionvals,
-		'empty_option' => '-- Select --'
-	]);
-}
 
 $optionvals = array(0=>"Hidden", 1=>"Live", 2=>"Live but unlisted");
 $formwriter->dropinput('evt_visibility', 'Visibility', [
@@ -120,6 +102,49 @@ $formwriter->dropinput('evt_is_accepting_signups', 'Registration', [
 	'options' => $optionvals
 ]);
 
+$formwriter->datetimeinput('evt_start_time', 'Event start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)');
+
+$formwriter->datetimeinput('evt_end_time', 'Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)');
+
+$formwriter->textbox('evt_description', 'Event Description', [
+	'rows' => 10,
+	'cols' => 80,
+	'htmlmode' => 'yes'
+]);
+
+// Determine if this is a new event (hide advanced fields by default)
+$is_new_event = empty($event->key);
+$advanced_style = $is_new_event ? 'display: none;' : '';
+$toggle_style = $is_new_event ? '' : 'display: none;';
+
+echo '<div id="advanced-toggle" class="mb-3" style="' . $toggle_style . '">
+	<a href="#" onclick="document.getElementById(\'advanced-fields\').style.display=\'block\'; document.getElementById(\'advanced-toggle\').style.display=\'none\'; return false;" class="btn btn-outline-secondary btn-sm">
+		Show Advanced Options
+	</a>
+</div>';
+
+echo '<div id="advanced-fields" style="' . $advanced_style . '">';
+
+$formwriter->textinput('evt_max_signups', 'Max signups (number)');
+
+$formwriter->textinput('evt_external_register_link', 'External register link (if needed)', [
+	'validation' => ['minlength' => 5],
+	'maxlength' => 255
+]);
+
+$optionvals = Address::get_timezone_drop_array();
+$formwriter->dropinput('evt_timezone', 'Event Time Zone', [
+	'options' => $optionvals
+]);
+
+if($num_event_types){
+	$optionvals = $event_types->get_dropdown_array();
+	$formwriter->dropinput('evt_ety_event_type_id', 'Type of event', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
+}
+
 $optionvals = array(1=>"Allow", 0=>"Prevent");
 $formwriter->dropinput('evt_allow_waiting_list', 'Waiting list', [
 	'options' => $optionvals
@@ -130,23 +155,9 @@ $formwriter->dropinput('evt_show_add_to_calendar_link', 'Show calendar link', [
 	'options' => $optionvals
 ]);
 
-$formwriter->hiddeninput('evt_collect_extra_info', '', ['value' => 0]);
-
 $optionvals = array(1=>"Condensed (all on one page)", 2=>"Separate (separate pages for each session)");
 $formwriter->dropinput('evt_session_display_type', 'Session display style', [
 	'options' => $optionvals
-]);
-
-$formwriter->datetimeinput('evt_start_time', 'Event start time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local') . ' timezone)');
-
-$formwriter->datetimeinput('evt_end_time', 'Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)');
-
-//echo $formwriter->textinput('Max attendees:', 'evt_max_purchase_count', 'ctrlHolder', 100, $event->get('evt_max_purchase_count'), '', 255, '');
-
-$formwriter->textbox('evt_description', 'Event Description', [
-	'rows' => 10,
-	'cols' => 80,
-	'htmlmode' => 'yes'
 ]);
 
 $formwriter->textbox('evt_private_info', 'Info only for registrants', [
@@ -154,6 +165,10 @@ $formwriter->textbox('evt_private_info', 'Info only for registrants', [
 	'cols' => 80,
 	'htmlmode' => 'yes'
 ]);
+
+echo '</div>';
+
+$formwriter->hiddeninput('evt_collect_extra_info', '', ['value' => 0]);
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 $formwriter->end_form();

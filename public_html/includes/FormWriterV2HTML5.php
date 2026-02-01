@@ -1022,73 +1022,108 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         }
 
         if ($htmlmode === 'yes') {
-            // Load Trumbowyg CSS and dynamically load scripts after jQuery is ready
+            // Load Trumbowyg CSS
             echo '<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">';
+            // Conditionally load jQuery (if not already present) then load Trumbowyg
             echo '<script type="text/javascript">
-            $(function() {
-                // Ensure jQuery is available in window scope for UMD modules
-                window.jQuery = $;
-                // Temporarily disable module detection to force browser global approach
-                var originalDefine = window.define;
-                var originalExports = window.exports;
-                delete window.define;
-                delete window.exports;
-
-                var scripts = [
+            (function() {
+                var editorId = "' . htmlspecialchars($id) . '";
+                var trumbowygScripts = [
                     "/assets/vendor/Trumbowyg-2-26/dist/trumbowyg.min.js",
                     "/assets/vendor/Trumbowyg-2-26/dist/plugins/cleanpaste/trumbowyg.cleanpaste.min.js",
                     "/assets/vendor/Trumbowyg-2-26/dist/plugins/preformatted/trumbowyg.preformatted.min.js",
                     "/assets/vendor/Trumbowyg-2-26/dist/plugins/allowtagsfrompaste/trumbowyg.allowtagsfrompaste.min.js"
                 ];
 
-                // Load scripts sequentially using jQuery.getScript
-                function loadNextScript(index) {
-                    if (index >= scripts.length) {
-                        // All scripts loaded, restore module detection
-                        if (originalDefine) window.define = originalDefine;
-                        if (originalExports) window.exports = originalExports;
-
-                        if (typeof $.fn.trumbowyg === "function") {
-                            $("#' . htmlspecialchars($id) . '").trumbowyg({
-                                svgPath: "/assets/vendor/Trumbowyg-2-26/dist/ui/icons.svg",
-                                autogrow: false,
-                                autogrowOnEnter: false,
-                                btns: [
-                                    ["viewHTML"],
-                                    ["undo", "redo"],
-                                    ["formatting"],
-                                    ["strong", "em", "del"],
-                                    ["superscript", "subscript"],
-                                    ["link"],
-                                    ["insertImage"],
-                                    ["preformatted"],
-                                    ["justifyLeft", "justifyCenter", "justifyRight", "justifyFull"],
-                                    ["unorderedList", "orderedList"],
-                                    ["horizontalRule"],
-                                    ["removeformat"],
-                                    ["fullscreen"]
-                                ],
-                                semantic: {
-                                    "div": "div"
-                                },
-                                plugins: {
-                                    allowTagsFromPaste: {
-                                        allowedTags: ["p", "br", "blockquote", "b", "i", "strong", "em", "ul", "li", "ol", "a", "code", "pre", "h1", "h2", "h3", "h4", "h5", "embed", "table", "tr", "td", "th", "img", "video"]
-                                    }
+                function initTrumbowyg() {
+                    if (typeof jQuery.fn.trumbowyg === "function") {
+                        jQuery("#" + editorId).trumbowyg({
+                            svgPath: "/assets/vendor/Trumbowyg-2-26/dist/ui/icons.svg",
+                            autogrow: false,
+                            autogrowOnEnter: false,
+                            btns: [
+                                ["viewHTML"],
+                                ["undo", "redo"],
+                                ["formatting"],
+                                ["strong", "em", "del"],
+                                ["superscript", "subscript"],
+                                ["link"],
+                                ["insertImage"],
+                                ["preformatted"],
+                                ["justifyLeft", "justifyCenter", "justifyRight", "justifyFull"],
+                                ["unorderedList", "orderedList"],
+                                ["horizontalRule"],
+                                ["removeformat"],
+                                ["fullscreen"]
+                            ],
+                            semantic: {
+                                "div": "div"
+                            },
+                            plugins: {
+                                allowTagsFromPaste: {
+                                    allowedTags: ["p", "br", "blockquote", "b", "i", "strong", "em", "ul", "li", "ol", "a", "code", "pre", "h1", "h2", "h3", "h4", "h5", "embed", "table", "tr", "td", "th", "img", "video"]
                                 }
-                            });
-                        }
-                        return;
-                    }
-
-                    $.getScript(scripts[index])
-                        .done(function() {
-                            loadNextScript(index + 1);
+                            }
                         });
+                    }
                 }
 
-                loadNextScript(0);
-            });
+                // Load a script and call callback when done
+                function loadScript(url, callback) {
+                    var script = document.createElement("script");
+                    script.type = "text/javascript";
+                    script.src = url;
+                    script.onload = callback;
+                    script.onerror = function() {
+                        console.error("Failed to load script: " + url);
+                    };
+                    document.head.appendChild(script);
+                }
+
+                // Load scripts sequentially
+                function loadScriptsSequentially(scripts, index, callback) {
+                    if (index >= scripts.length) {
+                        callback();
+                        return;
+                    }
+                    loadScript(scripts[index], function() {
+                        loadScriptsSequentially(scripts, index + 1, callback);
+                    });
+                }
+
+                // Main initialization
+                function initEditor() {
+                    // Temporarily disable module detection to force browser global approach
+                    var originalDefine = window.define;
+                    var originalExports = window.exports;
+                    delete window.define;
+                    delete window.exports;
+
+                    loadScriptsSequentially(trumbowygScripts, 0, function() {
+                        // Restore module detection
+                        if (originalDefine) window.define = originalDefine;
+                        if (originalExports) window.exports = originalExports;
+                        initTrumbowyg();
+                    });
+                }
+
+                // Check if jQuery is loaded, if not load it first
+                if (typeof jQuery === "undefined") {
+                    loadScript("https://code.jquery.com/jquery-3.7.1.min.js", function() {
+                        if (document.readyState === "loading") {
+                            document.addEventListener("DOMContentLoaded", initEditor);
+                        } else {
+                            initEditor();
+                        }
+                    });
+                } else {
+                    if (document.readyState === "loading") {
+                        document.addEventListener("DOMContentLoaded", initEditor);
+                    } else {
+                        initEditor();
+                    }
+                }
+            })();
             </script>';
             echo '<style>
             .trumbowyg-box,

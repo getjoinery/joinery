@@ -220,9 +220,9 @@ $formwriter->passwordinput('password_confirm', 'Confirm Password', [
 // Standard dropdown
 $formwriter->dropinput('country', 'Country', [
     'options' => [
-        'United States' => 'us',
-        'Canada' => 'ca',
-        'United Kingdom' => 'uk'
+        'us' => 'United States',
+        'ca' => 'Canada',
+        'uk' => 'United Kingdom'
     ],
     'value' => 'us',  // Default selected
     'empty_option' => '-- Select Country --',
@@ -230,7 +230,7 @@ $formwriter->dropinput('country', 'Country', [
 ]);
 ```
 
-**Note:** The dropdown format is: `'Display Text' => 'actual_value'`
+**Note:** The dropdown options format is: `'actual_value' => 'Display Text'` (value => label)
 
 ### Textarea
 
