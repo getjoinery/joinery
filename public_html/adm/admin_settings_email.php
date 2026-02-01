@@ -16,6 +16,7 @@
 	$settings = Globalvars::get_instance();
 
 	$run_validation = $page_vars['run_validation'];
+	$errors = isset($page_vars['errors']) ? $page_vars['errors'] : array();
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -50,6 +51,16 @@
 		'Email Settings' => '/admin/admin_settings_email',
 	);
 	echo AdminPage::tab_menu($tab_menus, 'Email Settings');
+
+	// Display validation errors if any
+	if (!empty($errors)) {
+		echo '<div class="alert alert-danger" role="alert">';
+		echo '<strong>Settings not saved:</strong><ul style="margin-bottom: 0;">';
+		foreach ($errors as $error) {
+			echo '<li>' . htmlspecialchars($error) . '</li>';
+		}
+		echo '</ul></div>';
+	}
 
 	$formwriter = $page->getFormWriter('form1');
 
