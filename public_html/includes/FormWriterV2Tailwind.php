@@ -1123,7 +1123,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= '<script>';
         $html .= '$(document).ready(function() {';
         $html .= '  $("#' . htmlspecialchars($id) . '").trumbowyg({';
-        $html .= '    btns: [[\'undo\', \'redo\'], [\'bold\', \'italic\', \'underline\'], [\'link\'], [\'justifyLeft\', \'justifyCenter\', \'justifyRight\']';
+        $html .= '    btns: [[\'undo\', \'redo\'], [\'bold\', \'italic\', \'underline\'], [\'link\'], [\'justifyLeft\', \'justifyCenter\', \'justifyRight\']]';
         $html .= '  });';
         $html .= '});';
         $html .= '</script>';
