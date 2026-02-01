@@ -207,8 +207,11 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $actions = array();
 
                     if (!$plugin['plugin'] || !$plugin_status) {
-                        // Not installed
+                        // Not installed (no database record) - allow install and permanent delete
                         $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
+                        // Permanent delete - assume custom since no database record
+                        $warning = 'WARNING: This will permanently delete all plugin files. Custom plugins cannot be recovered!';
+                        $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
                     } elseif ($plugin_status === 'uninstalled') {
                         // Uninstalled - could be legacy plugin or failed installation
                         if ($plugin['plugin']->get('plg_install_error')) {
@@ -216,28 +219,49 @@ $page->begin_box(array('altlinks' => $altlinks));
                         } else {
                             $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
                         }
+
+                        // Permanent delete with stock/custom warning
+                        $is_stock = $plugin['plugin'] ? $plugin['plugin']->is_stock() : false;
+                        $warning = $is_stock
+                            ? 'This will permanently delete all plugin files. Stock plugins can be re-downloaded later via the upgrade system.'
+                            : 'WARNING: This will permanently delete all plugin files and data. Custom plugins cannot be recovered!';
+                        $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
                     } elseif ($plugin_status === 'active') {
                         // Active
                         $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
                     } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed') {
                         // Inactive
                         $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
-                        // Only allow uninstall if not active theme provider
+                        // Only allow uninstall/delete if not active theme provider
                         if (!$is_active_theme_provider) {
                             $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
+
+                            // Permanent delete with stock/custom warning
+                            $is_stock = $plugin['plugin'] ? $plugin['plugin']->is_stock() : false;
+                            $warning = $is_stock
+                                ? 'This will permanently delete all plugin files. Stock plugins can be re-downloaded later via the upgrade system.'
+                                : 'WARNING: This will permanently delete all plugin files and data. Custom plugins cannot be recovered!';
+                            $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
                         }
                     } elseif ($plugin_status === 'error') {
                         // Error
                         $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
-                        // Only allow uninstall if not active theme provider
+                        // Only allow uninstall/delete if not active theme provider
                         if (!$is_active_theme_provider) {
                             $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
+
+                            // Permanent delete with stock/custom warning
+                            $is_stock = $plugin['plugin'] ? $plugin['plugin']->is_stock() : false;
+                            $warning = $is_stock
+                                ? 'This will permanently delete all plugin files. Stock plugins can be re-downloaded later via the upgrade system.'
+                                : 'WARNING: This will permanently delete all plugin files and data. Custom plugins cannot be recovered!';
+                            $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
                         }
                     }
 
                     if (!empty($actions)) {
                         $action_cell = '<div class="dropdown">';
-                        $action_cell .= '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+                        $action_cell .= '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-haspopup="true" aria-expanded="false">Actions</button>';
                         $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
                         foreach ($actions as $label => $action) {
                             $action_cell .= '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
@@ -353,51 +377,6 @@ $page->begin_box(array('altlinks' => $altlinks));
             </div>
 
         <?php endif; ?>
-
-        <div class="card mt-4">
-            <div class="card-header bg-body-tertiary">
-                <h6 class="mb-0">Plugin Development Guidelines</h6>
-            </div>
-            <div class="card-body">
-                <h6>Plugin Structure</h6>
-                <p>Plugins should be created in <code>/plugins/[plugin-name]/</code> with the following structure:</p>
-                <ul>
-                    <li><code>plugin.json</code> - <strong>Required</strong> metadata file (name, description, version, author)</li>
-                    <li><code>serve.php</code> - Optional custom routing</li>
-                    <li><code>uninstall.php</code> - Optional uninstall script</li>
-                    <li><code>adm/</code> - Admin interface files</li>
-                    <li><code>data/</code> - Data model classes</li>
-                    <li><code>logic/</code> - Business logic</li>
-                    <li><code>views/</code> - Template files</li>
-                    <li><code>migrations/</code> - Database migrations</li>
-                </ul>
-
-                <h6 class="mt-3">Plugin Lifecycle</h6>
-                <ol>
-                    <li><strong>Install</strong> - Creates database tables and runs migrations</li>
-                    <li><strong>Activate</strong> - Enables plugin routing and functionality</li>
-                    <li><strong>Deactivate</strong> - Disables plugin but keeps data</li>
-                    <li><strong>Uninstall</strong> - Removes plugin data and tables</li>
-                </ol>
-
-                <h6 class="mt-3">Plugin.json Example</h6>
-                <pre class="bg-light p-2 rounded"><code>{
-    "name": "My Plugin",
-    "description": "A sample plugin for demonstration",
-    "version": "1.0.0",
-    "author": "Plugin Developer",
-    "requires": {
-        "php": ">=8.0",
-        "joinery": ">=1.0",
-        "extensions": ["pdo", "json"]
-    },
-    "depends": {
-        "core-plugin": ">=1.0"
-    },
-    "conflicts": ["old-plugin-name"]
-}</code></pre>
-            </div>
-        </div>
 
     </div>
 </div>

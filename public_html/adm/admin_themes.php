@@ -147,13 +147,14 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                                     // Add delete option for themes with missing files or inactive themes
                                     if (!$files_exist || !$is_active) {
-                                        $actions['Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "')";
+                                        $is_stock_theme = $is_stock ? 'true' : 'false';
+                                        $actions['Permanently Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "', $is_stock_theme)";
                                     }
                                 }
 
                                 if (!empty($actions)) {
                                     echo '<div class="dropdown">';
-                                    echo '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+                                    echo '<button class="btn btn-falcon-default dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-haspopup="true" aria-expanded="false">Actions</button>';
                                     echo '<div class="dropdown-menu dropdown-menu-end py-0">';
                                     foreach ($actions as $label => $action) {
                                         echo '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
@@ -199,17 +200,23 @@ $page->begin_box(array('altlinks' => $altlinks));
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p>Are you sure you want to delete the theme "<span id="deleteThemeName"></span>"?</p>
+                <p>Are you sure you want to permanently delete the theme "<span id="deleteThemeName"></span>"?</p>
                 <p>This will:</p>
                 <ul>
                     <li>Remove all theme files from the server</li>
                     <li>Delete the theme's database record</li>
                 </ul>
-                <p class="text-danger"><strong>This action cannot be undone.</strong> The theme will not be reinstalled during deployments.</p>
+                <div id="stockThemeWarning" class="alert alert-info" style="display: none;">
+                    <i class="fas fa-info-circle"></i> This is a <strong>stock theme</strong>. It can be re-downloaded later via the upgrade system.
+                </div>
+                <div id="customThemeWarning" class="alert alert-danger" style="display: none;">
+                    <i class="fas fa-exclamation-triangle"></i> <strong>WARNING:</strong> This is a <strong>custom theme</strong>. Custom themes cannot be recovered once deleted!
+                </div>
+                <p class="text-danger"><strong>This action cannot be undone.</strong></p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete Theme</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Permanently Delete Theme</button>
             </div>
         </div>
     </div>
@@ -218,9 +225,19 @@ $page->begin_box(array('altlinks' => $altlinks));
 <script>
 var themeToDelete = '';
 
-function showDeleteModal(themeName, displayName) {
+function showDeleteModal(themeName, displayName, isStock) {
     themeToDelete = themeName;
     document.getElementById('deleteThemeName').textContent = displayName;
+
+    // Show appropriate warning based on stock status
+    if (isStock) {
+        document.getElementById('stockThemeWarning').style.display = 'block';
+        document.getElementById('customThemeWarning').style.display = 'none';
+    } else {
+        document.getElementById('stockThemeWarning').style.display = 'none';
+        document.getElementById('customThemeWarning').style.display = 'block';
+    }
+
     var modal = new bootstrap.Modal(document.getElementById('deleteThemeModal'));
     modal.show();
 }

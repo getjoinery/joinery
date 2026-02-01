@@ -1635,6 +1635,68 @@ class LibraryFunctions {
 	}
 
 	/**
+	 * Check if a directory can be deleted (all files/subdirs are writable)
+	 * Used for pre-flight checks before permanent deletion operations.
+	 * @param string $dir Directory path
+	 * @return array ['can_delete' => bool, 'errors' => array of problem paths]
+	 */
+	public static function check_directory_deletable($dir) {
+		$result = array('can_delete' => true, 'errors' => array());
+
+		if (!is_dir($dir)) {
+			return $result; // Doesn't exist = can "delete"
+		}
+
+		if (!is_writable($dir)) {
+			$result['can_delete'] = false;
+			$result['errors'][] = $dir;
+			return $result;
+		}
+
+		$files = array_diff(scandir($dir), array('.', '..'));
+		foreach ($files as $file) {
+			$path = $dir . '/' . $file;
+			if (is_dir($path)) {
+				$sub_result = self::check_directory_deletable($path);
+				if (!$sub_result['can_delete']) {
+					$result['can_delete'] = false;
+					$result['errors'] = array_merge($result['errors'], $sub_result['errors']);
+				}
+			} else {
+				if (!is_writable($path)) {
+					$result['can_delete'] = false;
+					$result['errors'][] = $path;
+				}
+			}
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Recursively delete a directory and all contents
+	 * @param string $dir Directory path
+	 * @return bool Success
+	 */
+	public static function delete_directory($dir) {
+		if (!is_dir($dir)) {
+			return false;
+		}
+
+		$files = array_diff(scandir($dir), array('.', '..'));
+		foreach ($files as $file) {
+			$path = $dir . '/' . $file;
+			if (is_dir($path)) {
+				self::delete_directory($path);
+			} else {
+				unlink($path);
+			}
+		}
+
+		return rmdir($dir);
+	}
+
+	/**
 	 * Extracts function names from a given PHP file.
 	 *
 	 * @param string $filePath The path to the PHP file.
