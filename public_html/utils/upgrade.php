@@ -1,9 +1,14 @@
 <?php
+	// Detect CLI mode early to avoid loading unnecessary UI components
+	$is_cli = (php_sapi_name() === 'cli');
+
 	require_once( __DIR__ . '/../includes/PathHelper.php');
 
 	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	if (!$is_cli) {
+		require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	}
 	require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
 	$settings = Globalvars::get_instance();
@@ -12,17 +17,14 @@
 	$full_site_dir = $baseDir.$site_template;
 
 	if($baseDir == '' || !$baseDir){
-		echo '$baseDir is empty.  Aborting upgrade.<br>';
+		echo '$baseDir is empty.  Aborting upgrade.' . ($is_cli ? "\n" : '<br>');
 		exit;
 	}
 
 	if($site_template == '' || !$site_template){
-		echo '$site_template is empty.  Aborting upgrade.<br>';
+		echo '$site_template is empty.  Aborting upgrade.' . ($is_cli ? "\n" : '<br>');
 		exit;
 	}
-
-	// Parse CLI arguments if running from command line
-	$is_cli = (php_sapi_name() === 'cli');
 	$verbose = false;
 	$force_upgrade = false;
 	$confirm_downgrade_cli = false;
@@ -120,7 +122,9 @@
 	}
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+	if (!$is_cli) {
+		$session->check_permission(8);
+	}
 
 	// Handle refresh archives request
 	if (isset($_POST['refresh_archives']) && $_POST['refresh_archives'] == '1') {
@@ -184,7 +188,7 @@
 	// Validate required fields in response
 	$sourceFile = $decode_response['upgrade_location'] ?? null;
 
-	if ($_POST && $_POST['confirm']){
+	if (($_POST && $_POST['confirm']) || $is_cli){
 
 		// Check ownership (relaxed for test/debug environments)
 		$current_owner = posix_getpwuid(fileowner($live_directory))['name'];
