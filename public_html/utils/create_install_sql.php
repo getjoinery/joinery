@@ -211,9 +211,7 @@ $essential_tables = [
     'amu_admin_menus',    // Admin menu structure
     'cco_country_codes',  // Country reference data
     'zone',               // Timezone names (IANA)
-    'ety_event_types',    // Event type definitions
     'emt_email_templates', // Email templates
-    'pmu_public_menus',   // Public menu structure
     'com_components'      // Page components (all Bootstrap-based, work with falcon theme)
 ];
 
