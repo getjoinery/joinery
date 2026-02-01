@@ -355,7 +355,7 @@
 							$domain_info = $mg->get("domains/{$mailgun_domain}");
 							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
 							echo '<strong>Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
-							
+
 							if (isset($domain_info->http_response_body->domain)) {
 								$domain_data = $domain_info->http_response_body->domain;
 								if (isset($domain_data->state)) {
@@ -365,15 +365,27 @@
 									echo '<strong>Created:</strong> ' . htmlspecialchars($domain_data->created_at) . '<br>';
 								}
 							}
-							
+
 							// Test if we can access the domain
 							echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Domain accessible via API</div>';
-							
+
 						} catch (Exception $domain_ex) {
-							// If domain check fails, try a simple validation
-							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
+							// Domain check failed - provide helpful error message
+							$error_msg = $domain_ex->getMessage();
+							echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Mailgun Validation Failed</strong></div>';
 							echo '<strong>Configured Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
-							echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Unable to verify domain details: ' . htmlspecialchars($domain_ex->getMessage()) . '</div>';
+
+							// Check for common issues
+							if (stripos($error_msg, 'endpoint') !== false || stripos($error_msg, 'does not exist') !== false) {
+								echo '<div style="color: #dc3545; font-size: 11px; margin-top: 10px;">';
+								echo '<strong>Possible causes:</strong><br>';
+								echo '• Wrong Mailgun Version selected (try switching between 2.X and 3.X)<br>';
+								echo '• EU region account without EU API Link configured<br>';
+								echo '• API key may be invalid or expired';
+								echo '</div>';
+							} else {
+								echo '<div style="color: #dc3545; font-size: 11px; margin-top: 10px;">Error: ' . htmlspecialchars($error_msg) . '</div>';
+							}
 						}
 						
 					} else {
@@ -388,7 +400,7 @@
 							$domain_info = $mg->domains()->show($mailgun_domain);
 							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
 							echo '<strong>Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
-							
+
 							// Try to get domain data from the response
 							if ($domain_info && method_exists($domain_info, 'getDomain')) {
 								$domain = $domain_info->getDomain();
@@ -401,14 +413,26 @@
 									}
 								}
 							}
-							
+
 							echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Domain accessible via API</div>';
-							
+
 						} catch (Exception $domain_ex) {
-							// If domain check fails, try a simple validation by checking if client was created
-							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
+							// Domain check failed - provide helpful error message
+							$error_msg = $domain_ex->getMessage();
+							echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Mailgun Validation Failed</strong></div>';
 							echo '<strong>Configured Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
-							echo '<div style="color: #ffc107; font-size: 11px; margin-top: 10px;">⚠ Unable to verify domain details: ' . htmlspecialchars($domain_ex->getMessage()) . '</div>';
+
+							// Check for common issues
+							if (stripos($error_msg, 'endpoint') !== false || stripos($error_msg, 'does not exist') !== false) {
+								echo '<div style="color: #dc3545; font-size: 11px; margin-top: 10px;">';
+								echo '<strong>Possible causes:</strong><br>';
+								echo '• Wrong Mailgun Version selected (try switching between 2.X and 3.X)<br>';
+								echo '• EU region account without EU API Link configured<br>';
+								echo '• API key may be invalid or expired';
+								echo '</div>';
+							} else {
+								echo '<div style="color: #dc3545; font-size: 11px; margin-top: 10px;">Error: ' . htmlspecialchars($error_msg) . '</div>';
+							}
 						}
 					}
 					
@@ -515,9 +539,22 @@
 					// Try to connect
 					try {
 						// Test connection without sending
-						$mailer->smtpConnect();
-						echo '<p style="color: green;"><strong>✓ Connection Test:</strong> Successfully connected to SMTP server</p>';
-						$mailer->smtpClose();
+						// Note: smtpConnect() returns false on failure, doesn't always throw
+						$connect_result = $mailer->smtpConnect();
+						if ($connect_result) {
+							echo '<p style="color: green;"><strong>✓ Connection Test:</strong> Successfully connected to SMTP server</p>';
+							if ($settings->get_setting('smtp_auth')) {
+								echo '<p style="color: green; font-size: 12px;">✓ Authentication successful</p>';
+							}
+							$mailer->smtpClose();
+						} else {
+							// Get error info from PHPMailer
+							$error_info = $mailer->ErrorInfo ?: 'Connection or authentication failed';
+							echo '<p style="color: red;"><strong>✗ Connection Failed:</strong> ' . htmlspecialchars($error_info) . '</p>';
+							if ($settings->get_setting('smtp_auth')) {
+								echo '<p style="color: #dc3545; font-size: 12px;">Check username and password if authentication is failing.</p>';
+							}
+						}
 					} catch (Exception $e) {
 						echo '<p style="color: red;"><strong>✗ Connection Failed:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
 					}
