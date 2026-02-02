@@ -136,15 +136,15 @@
 	}
 
 	$formwriter->dropinput("pst_is_published", "Published", [
-		'options' => ["No"=>0, "Yes"=>1]
+		'options' => [0=>"No", 1=>"Yes"]
 	]);
 
 	$formwriter->dropinput("pst_is_pinned", "Pinned", [
-		'options' => ["No"=>0, "Yes"=>1]
+		'options' => [0=>"No", 1=>"Yes"]
 	]);
 
 	$formwriter->dropinput("pst_is_on_homepage", "Is listed and searchable?", [
-		'options' => ["Yes"=>1, "No"=>0]
+		'options' => [1=>"Yes", 0=>"No"]
 	]);
 
 	$formwriter->textbox('pst_body', 'Post content', [

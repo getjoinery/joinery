@@ -81,6 +81,10 @@
 	// Override with content version values if loaded
 	$form_values['loc_name'] = $title;
 	$form_values['loc_description'] = $content;
+	// Default to published for new locations
+	if (!$location->key) {
+		$form_values['loc_is_published'] = 1;
+	}
 
 	// Editing an existing location - use automatic form filling
 	$formwriter = $page->getFormWriter('form1', [
