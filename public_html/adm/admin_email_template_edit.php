@@ -8,8 +8,11 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
-	if (isset($_REQUEST['emt_email_template_id'])) {
-		$email_template = new EmailTemplateStore($_REQUEST['emt_email_template_id'], TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$email_template = new EmailTemplateStore($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['emt_email_template_id'])) {
+		$email_template = new EmailTemplateStore($_GET['emt_email_template_id'], TRUE);
 	} else {
 		$email_template = new EmailTemplateStore(NULL);
 	}

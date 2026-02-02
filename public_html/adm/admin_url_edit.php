@@ -9,10 +9,12 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 		
-	if($_REQUEST['url_url_id']){
-		$url = new Url($_REQUEST['url_url_id'], TRUE);
-	}
-	else{
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$url = new Url($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['url_url_id']) && $_GET['url_url_id']) {
+		$url = new Url($_GET['url_url_id'], TRUE);
+	} else {
 		$url = new Url(NULL);
 	}
 

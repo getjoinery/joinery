@@ -9,10 +9,12 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if($_REQUEST['vid_video_id']){
-		$video = new Video($_REQUEST['vid_video_id'], TRUE);
-	}
-	else{
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$video = new Video($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['vid_video_id']) && $_GET['vid_video_id']) {
+		$video = new Video($_GET['vid_video_id'], TRUE);
+	} else {
 		$video = new Video(NULL);
 	}
 

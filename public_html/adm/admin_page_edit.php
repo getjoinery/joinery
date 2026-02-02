@@ -10,10 +10,12 @@
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance(); 
 
-	if (isset($_REQUEST['pag_page_id'])) {
-		$page = new Page($_REQUEST['pag_page_id'], TRUE);
-	}
-	else {
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$page = new Page($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['pag_page_id'])) {
+		$page = new Page($_GET['pag_page_id'], TRUE);
+	} else {
 		$page = new Page(NULL);
 	}
 
