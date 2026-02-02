@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function index_logic($get_vars, $post_vars) {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('data/posts_class.php'));
     require_once(PathHelper::getIncludePath('data/events_class.php'));
 

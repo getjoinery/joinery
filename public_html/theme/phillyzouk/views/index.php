@@ -169,11 +169,11 @@ End Main Blog List Area -->
                                         <ul>
                                             <li>
                                                 <i class="bx bx-calendar"></i>
-                                                <?php echo date('M d, Y', strtotime($event->get('evt_start_time'))); ?>
+                                                <?php echo LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'), 'M d, Y'); ?>
                                             </li>
                                             <li>
                                                 <i class="bx bx-time"></i>
-                                                <?php echo date('g:i A', strtotime($event->get('evt_start_time'))); ?>
+                                                <?php echo LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'), 'g:i A'); ?>
                                             </li>
                                         </ul>
                                         <a href="<?php echo $event->get_url(); ?>">
