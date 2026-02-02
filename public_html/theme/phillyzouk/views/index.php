@@ -158,13 +158,11 @@ End Main Blog List Area -->
                             ?>
                             <div class="col-lg-6 col-md-6">
                                 <div class="single-featured event-card">
+                                    <?php if ($event->get('evt_image_link')): ?>
                                     <a href="<?php echo $event->get_url(); ?>" class="blog-img">
-                                        <?php if ($event->get('evt_image_link')): ?>
-                                            <img src="<?php echo htmlspecialchars($event->get('evt_image_link')); ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
-                                        <?php else: ?>
-                                            <img src="/theme/phillyzouk/assets/images/home-three/banner-bg.jpg" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
-                                        <?php endif; ?>
+                                        <img src="<?php echo htmlspecialchars($event->get('evt_image_link')); ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
                                     </a>
+                                    <?php endif; ?>
                                     <div class="featured-content">
                                         <ul>
                                             <li>

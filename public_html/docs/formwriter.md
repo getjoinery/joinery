@@ -141,6 +141,87 @@ $formwriter = $page->getFormWriter('form1', 'v2', [
 ]);
 ```
 
+### Edit Forms with edit_primary_key_value
+
+When editing existing records, use `edit_primary_key_value` to pass the record's primary key:
+
+```php
+// View file - editing an existing event
+$formwriter = $page->getFormWriter('form1', 'v2', [
+    'model' => $event,
+    'edit_primary_key_value' => $event->key
+]);
+
+$formwriter->begin_form();
+$formwriter->textinput('evt_name', 'Event Name');
+// ... other fields ...
+$formwriter->submitbutton('btn_submit', 'Save');
+$formwriter->end_form();
+```
+
+**What FormWriter outputs:**
+
+When `edit_primary_key_value` is provided, `begin_form()` automatically outputs a hidden field:
+
+```html
+<input type="hidden" name="edit_primary_key_value" value="123">
+```
+
+**CRITICAL: Logic file must check for this field**
+
+The hidden field is named `edit_primary_key_value` (not the model's column name like `evt_event_id`). Your logic file must check for this field when loading records:
+
+```php
+// Logic file - CORRECT pattern
+function admin_event_edit_logic($get_vars, $post_vars) {
+    // CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+    if (isset($post_vars['edit_primary_key_value'])) {
+        $event = new Event($post_vars['edit_primary_key_value'], TRUE);
+    } elseif (isset($get_vars['evt_event_id'])) {
+        $event = new Event($get_vars['evt_event_id'], TRUE);
+    } else {
+        $event = new Event(NULL);
+    }
+
+    // Process form submission
+    if ($post_vars) {
+        $event->set('evt_name', $post_vars['evt_name']);
+        // ... set other fields ...
+        $event->prepare();
+        $event->save();
+        return LogicResult::redirect('/admin/admin_event?evt_event_id=' . $event->key);
+    }
+
+    return LogicResult::render(['event' => $event]);
+}
+```
+
+**Why this pattern matters:**
+
+1. Initial page load: Record ID comes from GET vars (`?evt_event_id=123`)
+2. Form submission: Record ID comes from POST as `edit_primary_key_value`
+3. If you only check GET vars, form submissions will create NEW records instead of updating existing ones
+
+**Common bug - checking wrong field:**
+
+```php
+// ❌ WRONG - Will create new records on form submission!
+if (isset($get_vars['evt_event_id'])) {
+    $event = new Event($get_vars['evt_event_id'], TRUE);
+} else {
+    $event = new Event(NULL);  // Form submission hits this branch!
+}
+
+// ✅ CORRECT - Check edit_primary_key_value first
+if (isset($post_vars['edit_primary_key_value'])) {
+    $event = new Event($post_vars['edit_primary_key_value'], TRUE);
+} elseif (isset($get_vars['evt_event_id'])) {
+    $event = new Event($get_vars['evt_event_id'], TRUE);
+} else {
+    $event = new Event(NULL);
+}
+```
+
 ### Auto-Detection of Validation
 
 FormWriter automatically detects and applies validation rules from model `field_specifications`:

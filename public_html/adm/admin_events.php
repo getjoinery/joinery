@@ -62,7 +62,7 @@
 
 		$rowvalues = array();
 
-		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time_local'), $session->get_timezone(), $session->get_timezone(), 'M j, Y'));
+		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'M j, Y'));
 
 		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->get('evt_name'). '</strong></a>');
 

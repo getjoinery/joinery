@@ -198,6 +198,33 @@ function form_logic($get_vars, $post_vars) {
 }
 ```
 
+### Edit Form Pattern
+
+When editing existing records with FormWriterV2, check `edit_primary_key_value` from POST first:
+
+```php
+function admin_item_edit_logic($get_vars, $post_vars) {
+    // CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+    if (isset($post_vars['edit_primary_key_value'])) {
+        $item = new Item($post_vars['edit_primary_key_value'], TRUE);
+    } elseif (isset($get_vars['itm_item_id'])) {
+        $item = new Item($get_vars['itm_item_id'], TRUE);
+    } else {
+        $item = new Item(NULL);
+    }
+
+    if ($post_vars) {
+        // Process form...
+        $item->save();
+        return LogicResult::redirect('/admin/admin_item?itm_item_id=' . $item->key);
+    }
+
+    return LogicResult::render(['item' => $item]);
+}
+```
+
+**See [FormWriter Documentation - Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value)** for complete details on why this pattern is required.
+
 ### AJAX Response Pattern
 
 ```php
