@@ -26,6 +26,7 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 		$event = new Event(NULL);
 		$event->set('evt_timezone', 'America/New_York');
 		$event->set('evt_visibility', 1); // Live
+		$event->set('evt_allow_waiting_list', 0); // Off by default
 	}
 
 	// Process POST actions

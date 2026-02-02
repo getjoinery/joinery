@@ -9,8 +9,11 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if (isset($_REQUEST['fil_file_id'])) {
-		$file = new File($_REQUEST['fil_file_id'], TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$file = new File($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['fil_file_id'])) {
+		$file = new File($_GET['fil_file_id'], TRUE);
 	} else {
 		echo 'Must pass a file';
 		exit();

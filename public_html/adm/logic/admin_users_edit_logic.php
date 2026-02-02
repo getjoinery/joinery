@@ -14,9 +14,11 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 
 	// Load or create user
-	if (isset($get_vars['usr_user_id']) || isset($post_vars['usr_user_id'])) {
-		$usr_user_id = isset($post_vars['usr_user_id']) ? $post_vars['usr_user_id'] : $get_vars['usr_user_id'];
-		$user = new User($usr_user_id, TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($post_vars['edit_primary_key_value'])) {
+		$user = new User($post_vars['edit_primary_key_value'], TRUE);
+	} elseif (isset($get_vars['usr_user_id'])) {
+		$user = new User($get_vars['usr_user_id'], TRUE);
 	} else {
 		throw new Exception('User ID is required for editing');
 	}
