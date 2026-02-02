@@ -1141,16 +1141,17 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             }
         }
 
-        foreach ($optionvals as $key => $val) {
-            if ($forcestrict && $value === $val) {
-                // Note: $key contains HTML (image label with <img> tag), do NOT escape it
-                $output .= '<input type="radio" id="' . htmlspecialchars($val) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($val) . '" checked="checked" /><label for="' . htmlspecialchars($val) . '_id"> ' . $key . '</label>';
-            } elseif ($value == $val) {
-                // Note: $key contains HTML (image label with <img> tag), do NOT escape it
-                $output .= '<input type="radio" id="' . htmlspecialchars($val) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($val) . '" checked="checked" /><label for="' . htmlspecialchars($val) . '_id"> ' . $key . '</label>';
+        // Options format: [value => label] where label contains HTML (image with <img> tag)
+        foreach ($optionvals as $optval => $optlabel) {
+            if ($forcestrict && $value === $optval) {
+                // Note: $optlabel contains HTML (image label with <img> tag), do NOT escape it
+                $output .= '<input type="radio" id="' . htmlspecialchars($optval) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($optval) . '" checked="checked" /><label for="' . htmlspecialchars($optval) . '_id"> ' . $optlabel . '</label>';
+            } elseif ($value == $optval) {
+                // Note: $optlabel contains HTML (image label with <img> tag), do NOT escape it
+                $output .= '<input type="radio" id="' . htmlspecialchars($optval) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($optval) . '" checked="checked" /><label for="' . htmlspecialchars($optval) . '_id"> ' . $optlabel . '</label>';
             } else {
-                // Note: $key contains HTML (image label with <img> tag), do NOT escape it
-                $output .= '<input type="radio" id="' . htmlspecialchars($val) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($val) . '" /><label for="' . htmlspecialchars($val) . '_id"> ' . $key . '</label>';
+                // Note: $optlabel contains HTML (image label with <img> tag), do NOT escape it
+                $output .= '<input type="radio" id="' . htmlspecialchars($optval) . '_id" name="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($optval) . '" /><label for="' . htmlspecialchars($optval) . '_id"> ' . $optlabel . '</label>';
             }
         }
 
