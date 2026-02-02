@@ -1079,7 +1079,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      */
     public function imageinput($name, $label = '', $options = []) {
         $optionvals = $options['options'] ?? [];
-        $value = $options['value'] ?? null;
+        $value = $options['value'] ?? ($this->values[$name] ?? null);
         $showdefault = $options['showdefault'] ?? true;
         $forcestrict = $options['forcestrict'] ?? true;
         $id = $name;
