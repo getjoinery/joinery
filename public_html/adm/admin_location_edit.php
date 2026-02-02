@@ -11,10 +11,12 @@
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance(); 
 
-	if (isset($_REQUEST['loc_location_id'])) {
-		$location = new Location($_REQUEST['loc_location_id'], TRUE);
-	} 
-	else {
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$location = new Location($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['loc_location_id'])) {
+		$location = new Location($_GET['loc_location_id'], TRUE);
+	} else {
 		$location = new Location(NULL);
 	}
 

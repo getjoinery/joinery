@@ -22,8 +22,11 @@ $session->set_return();
 $settings = Globalvars::get_instance();
 
 // Load or create component instance
-if (isset($_REQUEST['pac_page_content_id']) && $_REQUEST['pac_page_content_id']) {
-	$content = new PageContent($_REQUEST['pac_page_content_id'], TRUE);
+// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+if (isset($_POST['edit_primary_key_value'])) {
+	$content = new PageContent($_POST['edit_primary_key_value'], TRUE);
+} elseif (isset($_GET['pac_page_content_id']) && $_GET['pac_page_content_id']) {
+	$content = new PageContent($_GET['pac_page_content_id'], TRUE);
 } else {
 	$content = new PageContent(NULL);
 	// Pre-fill page_id if passed from admin_page

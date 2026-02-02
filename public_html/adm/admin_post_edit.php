@@ -11,8 +11,11 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
-	if (isset($_REQUEST['pst_post_id'])) {
-		$post = new Post($_REQUEST['pst_post_id'], TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$post = new Post($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['pst_post_id'])) {
+		$post = new Post($_GET['pst_post_id'], TRUE);
 	} else {
 		$post = new Post(NULL);
 	}

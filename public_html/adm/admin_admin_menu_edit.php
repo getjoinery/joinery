@@ -9,8 +9,11 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
-	if (isset($_REQUEST['amu_admin_menu_id'])) {
-		$admin_menu = new AdminMenu($_REQUEST['amu_admin_menu_id'], TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$admin_menu = new AdminMenu($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['amu_admin_menu_id'])) {
+		$admin_menu = new AdminMenu($_GET['amu_admin_menu_id'], TRUE);
 	} else {
 		$admin_menu = new AdminMenu(NULL);
 	}

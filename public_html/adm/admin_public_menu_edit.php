@@ -11,8 +11,11 @@
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
-	if (isset($_REQUEST['pmu_public_menu_id'])) {
-		$public_menu = new PublicMenu($_REQUEST['pmu_public_menu_id'], TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$public_menu = new PublicMenu($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['pmu_public_menu_id'])) {
+		$public_menu = new PublicMenu($_GET['pmu_public_menu_id'], TRUE);
 	} else {
 		$public_menu = new PublicMenu(NULL);
 	}

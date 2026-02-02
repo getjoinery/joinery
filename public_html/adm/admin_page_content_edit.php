@@ -12,10 +12,12 @@
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance(); 
 
-	if (isset($_REQUEST['pac_page_content_id'])) {
-		$page_content = new PageContent($_REQUEST['pac_page_content_id'], TRUE);
-	}
-	else {
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($_POST['edit_primary_key_value'])) {
+		$page_content = new PageContent($_POST['edit_primary_key_value'], TRUE);
+	} elseif (isset($_GET['pac_page_content_id'])) {
+		$page_content = new PageContent($_GET['pac_page_content_id'], TRUE);
+	} else {
 		$page_content = new PageContent(NULL);
 	}
 
