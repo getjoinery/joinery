@@ -158,9 +158,9 @@ End Main Blog List Area -->
                             ?>
                             <div class="col-lg-6 col-md-6">
                                 <div class="single-featured event-card">
-                                    <?php if ($event->get('evt_image_link')): ?>
+                                    <?php if ($event->get_picture_link()): ?>
                                     <a href="<?php echo $event->get_url(); ?>" class="blog-img">
-                                        <img src="<?php echo htmlspecialchars($event->get('evt_image_link')); ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
+                                        <img src="<?php echo htmlspecialchars($event->get_picture_link()); ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
                                     </a>
                                     <?php endif; ?>
                                     <div class="featured-content">
