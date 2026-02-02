@@ -12,6 +12,11 @@ require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 class FormWriterV2Bootstrap extends FormWriterV2Base {
 
     /**
+     * Track if Trumbowyg script has already been output to prevent double initialization
+     */
+    private static $trumbowyg_script_output = false;
+
+    /**
      * Output a text input field with Bootstrap styling
      *
      * @param string $name Field name
@@ -945,7 +950,8 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $placeholder = $options['placeholder'] ?? '';
         $htmlmode = $options['htmlmode'] ?? 'no';
 
-        if ($htmlmode === 'yes') {
+        if ($htmlmode === 'yes' && !self::$trumbowyg_script_output) {
+            self::$trumbowyg_script_output = true;
             // Load Trumbowyg CSS
             echo '<link rel="stylesheet" href="/assets/vendor/Trumbowyg-2-26/dist/ui/trumbowyg.min.css">';
             // Conditionally load jQuery (if not already present) then load Trumbowyg
