@@ -17,9 +17,11 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 
 	// Load or create event
-	if (isset($get_vars['evt_event_id']) || isset($post_vars['evt_event_id'])) {
-		$evt_event_id = isset($post_vars['evt_event_id']) ? $post_vars['evt_event_id'] : $get_vars['evt_event_id'];
-		$event = new Event($evt_event_id, TRUE);
+	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	if (isset($post_vars['edit_primary_key_value'])) {
+		$event = new Event($post_vars['edit_primary_key_value'], TRUE);
+	} elseif (isset($get_vars['evt_event_id'])) {
+		$event = new Event($get_vars['evt_event_id'], TRUE);
 	} else {
 		$event = new Event(NULL);
 		$event->set('evt_timezone', 'America/New_York');
