@@ -222,8 +222,10 @@
 		mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
 
 		// Copy public_html excluding themes and plugins content
+		// Note: Use anchored patterns (/theme/*, /plugins/*) to only exclude top-level directories,
+		// not subdirectories like assets/vendor/Trumbowyg-2-26/dist/plugins/
 		$rsync_core_cmd = sprintf(
-			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="theme/*" --exclude="plugins/*" %s %s 2>&1',
+			'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
 			escapeshellarg($full_site_dir . '/public_html/'),
 			escapeshellarg($core_temp_dir . '/public_html/')
 		);
@@ -738,8 +740,9 @@
 			mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
 
 			// Copy public_html excluding themes and plugins
+			// Note: Use anchored patterns (/theme/*, /plugins/*) to only exclude top-level directories
 			$rsync_core_cmd = sprintf(
-				'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="theme/*" --exclude="plugins/*" %s %s 2>&1',
+				'rsync -av --exclude=.git --exclude=.gitignore --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
 				escapeshellarg($full_site_dir . '/public_html/'),
 				escapeshellarg($core_temp_dir . '/public_html/')
 			);
