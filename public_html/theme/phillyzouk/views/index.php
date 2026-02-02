@@ -65,7 +65,7 @@ $page->public_header(array(
 				<div class="single-contact-info">
 					<i class="bx bx-music"></i>
 					<h3>Styles</h3>
-					<p>We offer classes in various dance styles including Latin, Ballroom, Contemporary, and more for all skill levels.</p>
+					<p>We offer classes, socials, and weekenders for Brazilian Zouk dancing.</p>
 				</div>
 			</div>
 			<div class="col-lg-3 col-sm-6">

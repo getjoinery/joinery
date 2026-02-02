@@ -238,9 +238,11 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         // Output options - Standard convention: [id => label]
+        // Convert boolean values to int for comparison (PostgreSQL returns boolean as true/false)
+        $compare_value = is_bool($value) ? ($value ? 1 : 0) : $value;
         foreach ($select_options as $opt_value => $opt_label) {
             $html .= '<option value="' . htmlspecialchars($opt_value) . '"';
-            if ((string)$value === (string)$opt_value) {
+            if ((string)$compare_value === (string)$opt_value) {
                 $html .= ' selected';
             }
             $html .= '>' . htmlspecialchars($opt_label) . '</option>';
