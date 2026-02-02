@@ -164,6 +164,23 @@ $page->endtable($pager);
 
 ## Form Handling Best Practices
 
+### Edit Forms with FormWriterV2
+
+When using FormWriterV2 with `edit_primary_key_value`, your logic file must check for this POST field first:
+
+```php
+// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+if (isset($post_vars['edit_primary_key_value'])) {
+    $item = new Item($post_vars['edit_primary_key_value'], TRUE);
+} elseif (isset($get_vars['itm_item_id'])) {
+    $item = new Item($get_vars['itm_item_id'], TRUE);
+} else {
+    $item = new Item(NULL);
+}
+```
+
+**See [FormWriter Documentation - Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value)** for complete details on this pattern and why it's required.
+
 ### Data Processing Pattern
 ```php
 // Process form submission
@@ -171,19 +188,19 @@ if ($_POST) {
     try {
         // Create or load model
         $item = new ItemClass($id ?? NULL, $id ? TRUE : FALSE);
-        
+
         // Set values from form
         $item->set('field_name', $_POST['field_name']);
         $item->set('other_field', $_POST['other_field']);
-        
+
         // Validate and save
         $item->prepare();
         $item->save();
-        
+
         // Redirect on success
         header('Location: /admin/admin_items?message=saved');
         exit;
-        
+
     } catch (Exception $e) {
         $error_message = $e->getMessage();
     }
