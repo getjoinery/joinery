@@ -184,28 +184,49 @@ echo '<div class="row"><div class="col-md-8">';
 // Component type selection
 echo '<div class="mb-3">';
 echo '<label class="form-label">Component Type</label>';
-$type_change_url = '/admin/admin_component_edit?';
-if ($content->key) {
-	$type_change_url .= 'pac_page_content_id=' . $content->key . '&';
-} elseif ($content->get('pac_pag_page_id')) {
-	$type_change_url .= 'pag_page_id=' . $content->get('pac_pag_page_id') . '&';
-}
-echo '<select name="pac_com_component_id" id="pac_com_component_id" class="form-select" onchange="location.href=\'' . $type_change_url . 'component_type=\'+this.value">';
-echo '<option value="">-- Select Component Type --</option>';
-
 $current_type_id = $_GET['component_type'] ?? $content->get('pac_com_component_id');
-foreach ($component_types as $type) {
-	$selected = ($current_type_id == $type->key) ? ' selected' : '';
-	echo '<option value="' . $type->key . '"' . $selected . '>' . htmlspecialchars($type->get('com_title'));
-	$type_key = $type->get('com_type_key');
-	if ($type_key) {
-		echo ' (' . htmlspecialchars($type_key) . ')';
+
+if ($content->key) {
+	// Edit mode - show disabled dropdown with hidden input to preserve value
+	echo '<select class="form-select" disabled>';
+	foreach ($component_types as $type) {
+		$selected = ($current_type_id == $type->key) ? ' selected' : '';
+		echo '<option value="' . $type->key . '"' . $selected . '>' . htmlspecialchars($type->get('com_title'));
+		$type_key = $type->get('com_type_key');
+		if ($type_key) {
+			echo ' (' . htmlspecialchars($type_key) . ')';
+		}
+		echo '</option>';
 	}
-	echo '</option>';
+	echo '</select>';
+	echo '<input type="hidden" name="pac_com_component_id" value="' . htmlspecialchars($current_type_id) . '">';
+} else {
+	// Add mode - show editable dropdown with redirect on change
+	$type_change_url = '/admin/admin_component_edit?';
+	if ($content->get('pac_pag_page_id')) {
+		$type_change_url .= 'pag_page_id=' . $content->get('pac_pag_page_id') . '&';
+	}
+	echo '<select name="pac_com_component_id" id="pac_com_component_id" class="form-select" onchange="location.href=\'' . $type_change_url . 'component_type=\'+this.value">';
+	echo '<option value="">-- Select Component Type --</option>';
+	foreach ($component_types as $type) {
+		$selected = ($current_type_id == $type->key) ? ' selected' : '';
+		echo '<option value="' . $type->key . '"' . $selected . '>' . htmlspecialchars($type->get('com_title'));
+		$type_key = $type->get('com_type_key');
+		if ($type_key) {
+			echo ' (' . htmlspecialchars($type_key) . ')';
+		}
+		echo '</option>';
+	}
+	echo '</select>';
+	echo '<div class="form-text">Select the type of component to create</div>';
 }
-echo '</select>';
-echo '<div class="form-text">Select the type of component to create</div>';
 echo '</div>';
+
+// Assign to Page - right after component type
+$formwriter->dropinput('pac_pag_page_id', 'Assign to Page', [
+	'options' => $pages_dropdown,
+	'help' => 'Optional. Auto-render on this page via get_filled_content()'
+]);
 
 $formwriter->textinput('pac_title', 'Label', [
 	'help' => 'Internal name for identifying this component'
@@ -295,8 +316,8 @@ if ($current_type_id) {
 			$render_field($field, $formwriter, $current_config);
 		}
 
-		// Render advanced fields in collapsible section (includes slug + schema advanced fields)
-		$advanced_count = count($advanced_fields) + 1; // +1 for slug
+		// Render advanced fields in collapsible section (includes slug, order + schema advanced fields)
+		$advanced_count = count($advanced_fields) + 2; // +2 for slug and order
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
 		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
@@ -310,6 +331,11 @@ if ($current_type_id) {
 			'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 		]);
 
+		// Display order (always advanced)
+		$formwriter->textinput('pac_order', 'Display Order', [
+			'help' => 'Order when multiple components on same page (lower = first)'
+		]);
+
 		// Schema-defined advanced fields
 		foreach ($advanced_fields as $field) {
 			$render_field($field, $formwriter, $current_config);
@@ -317,53 +343,43 @@ if ($current_type_id) {
 
 		echo '</div></div></div>';
 	} else {
-		// No component type selected yet, but still show slug in advanced section
+		// No component type selected yet, but still show slug and order in advanced section
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
 		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
-		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (1)';
+		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (2)';
 		echo '</a>';
 		echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 		echo '<div class="mt-3 pt-3 border-top">';
 		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
 			'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 		]);
+		$formwriter->textinput('pac_order', 'Display Order', [
+			'help' => 'Order when multiple components on same page (lower = first)'
+		]);
 		echo '</div></div></div>';
 
 		echo '<div class="alert alert-info mt-3">This component type has no configurable fields.</div>';
 	}
 } else {
-	// No component type selected - show slug in advanced and prompt to select type
+	// No component type selected - show slug and order in advanced and prompt to select type
 	$advanced_id = 'advanced_fields_' . uniqid();
 	echo '<div class="advanced-fields-section mt-4">';
 	echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
-	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (1)';
+	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (2)';
 	echo '</a>';
 	echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 	echo '<div class="mt-3 pt-3 border-top">';
 	$formwriter->textinput('pac_location_name', 'Slug (optional)', [
 		'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 	]);
+	$formwriter->textinput('pac_order', 'Display Order', [
+		'help' => 'Order when multiple components on same page (lower = first)'
+	]);
 	echo '</div></div></div>';
 
 	echo '<div class="alert alert-warning mt-3">Select a component type to configure its settings.</div>';
 }
-
-// Page assignment options
-echo '<div class="card mt-4"><div class="card-body">';
-echo '<h6 class="card-title">Page Assignment</h6>';
-echo '<div class="row">';
-echo '<div class="col-md-6">';
-$formwriter->dropinput('pac_pag_page_id', 'Assign to Page', [
-	'options' => $pages_dropdown,
-	'help' => 'Optional. Auto-render on this page via get_filled_content()'
-]);
-echo '</div><div class="col-md-6">';
-$formwriter->textinput('pac_order', 'Display Order', [
-	'help' => 'Order when multiple components on same page (lower = first)'
-]);
-echo '</div></div>';
-echo '</div></div>';
 
 echo '<hr>';
 $formwriter->submitbutton('btn_submit', 'Save Component');

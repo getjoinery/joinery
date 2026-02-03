@@ -72,15 +72,12 @@ echo ComponentRenderer::render_component($component_instance);
 ### Get Page Components
 
 ```php
-// Get all published components for a page
+// Get all components for a page (excludes deleted)
 $components = ComponentRenderer::get_page_components($page_id);
 
 foreach ($components as $component) {
     echo ComponentRenderer::render_component($component);
 }
-
-// Include unpublished (for admin preview)
-$all_components = ComponentRenderer::get_page_components($page_id, false);
 ```
 
 ### Render Multiple by Slug
@@ -93,7 +90,7 @@ echo ComponentRenderer::render_multiple(['hero', 'features', 'testimonials']);
 ### Check if Renderable
 
 ```php
-// Returns true only if: exists, is a component, and is published
+// Returns true only if: exists, is a component, and is not deleted
 if (ComponentRenderer::exists('promo-banner')) {
     echo ComponentRenderer::render('promo-banner');
 }
@@ -105,7 +102,7 @@ When `debug` setting is enabled, ComponentRenderer outputs HTML comments explain
 
 ```html
 <!-- ComponentRenderer (slug: missing-component): Component not found -->
-<!-- ComponentRenderer (slug: draft-hero): Component exists but is not published -->
+<!-- ComponentRenderer (slug: deleted-hero): Component exists but is deleted -->
 <!-- ComponentRenderer (slug: old-widget): Component type 'legacy_widget' is inactive -->
 ```
 
@@ -216,7 +213,6 @@ Component instances are configured uses of component types. Stored in `pac_page_
 | `pac_title` | varchar(255) | Admin label |
 | `pac_config` | json | Configured values |
 | `pac_order` | int2 | Display order on page |
-| `pac_is_published` | bool | Whether to render |
 
 ### Loading Components
 
@@ -250,12 +246,6 @@ $components = new MultiPageContent(
 // Components for a specific page
 $page_components = new MultiPageContent(
     ['page_id' => $page_id, 'components_only' => true, 'deleted' => false],
-    ['pac_order' => 'ASC']
-);
-
-// Published components only
-$published = new MultiPageContent(
-    ['components_only' => true, 'published' => true, 'deleted' => false],
     ['pac_order' => 'ASC']
 );
 ```
@@ -567,6 +557,7 @@ $all_fields = $component_type->get_default_config(true);
 | `textinput` | Single-line text | - |
 | `textarea` | Multi-line text | - |
 | `textbox` | Alias for textarea | - |
+| `richtext` | WYSIWYG editor (Trumbowyg) | - |
 | `checkboxinput` | Boolean checkbox | - |
 | `dropinput` | Dropdown select | `options` |
 | `radioinput` | Radio buttons | `options` |
@@ -689,8 +680,6 @@ $all_fields = $component_type->get_default_config(true);
 **URL:** `/admin/admin_components`
 
 - List all component instances
-- Filter by published/all
-- Toggle published status inline
 - Add, edit, delete instances
 
 **Permission Level:** 5 (Admin)
@@ -711,7 +700,7 @@ The page edit view includes a Components card showing:
 Dynamic form based on component type:
 1. Select component type (triggers page reload to show fields)
 2. Configure component-specific fields from schema
-3. Set publishing options (published, page assignment, order)
+3. Set page assignment (order is in advanced fields)
 4. Save returns to appropriate list (page or components)
 
 ---
@@ -813,7 +802,7 @@ return $this->get_body_content();
 ```
 
 **Priority order:**
-1. **Components** - If any published components are attached, they render and body content is ignored
+1. **Components** - If any components are attached, they render and body content is ignored
 2. **Body content with placeholders** - Placeholders are substituted
 3. **Plain body content** - Rendered as-is
 
