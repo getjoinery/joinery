@@ -8,7 +8,7 @@
  * Components are identified by pac_location_name (slug) and rendered via ComponentRenderer.
  *
  * @see /specs/page_component_system.md
- * @version 1.1.0
+ * @version 1.2.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -55,8 +55,6 @@ class PageContent extends SystemBase {
 		'pac_body' => array('type'=>'text'),
 		'pac_config' => array('type'=>'json'),
 		'pac_order' => array('type'=>'int2', 'default'=>0),
-		'pac_is_published' => array('type'=>'bool', 'default'=>false),
-		'pac_published_time' => array('type'=>'timestamp(6)'),
 		'pac_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'pac_script_filename' => array('type'=>'varchar(255)'),
 		'pac_delete_time' => array('type'=>'timestamp(6)'),
@@ -123,15 +121,12 @@ class PageContent extends SystemBase {
 	}
 
 	/**
-	 * Check if component is published
+	 * Check if component is visible (not deleted)
 	 *
-	 * @return bool True if published
+	 * @return bool True if visible
 	 */
 	public function is_visible() {
-		if ($this->get('pac_delete_time')) {
-			return false;
-		}
-		return (bool)$this->get('pac_is_published');
+		return !$this->get('pac_delete_time');
 	}
 
 	/**
@@ -140,7 +135,7 @@ class PageContent extends SystemBase {
 	 * @return string Content body or empty string
 	 */
 	function get_content() {
-		if ($this->get('pac_published_time') && !$this->get('pac_delete_time')) {
+		if (!$this->get('pac_delete_time')) {
 			return $this->get('pac_body');
 		}
 		return '';
@@ -267,10 +262,6 @@ class MultiPageContent extends SystemMultiBase {
 
 		if (isset($this->options['deleted'])) {
 			$filters['pac_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
-
-		if (isset($this->options['published'])) {
-			$filters['pac_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
 		}
 
 		return $this->_get_resultsv2('pac_page_contents', $filters, $this->order_by, $only_count, $debug);
