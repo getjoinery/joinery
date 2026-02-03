@@ -14,7 +14,7 @@
  *   echo ComponentRenderer::render_component($page_content);
  *
  * @see /specs/page_component_system.md
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 class ComponentRenderer {
@@ -56,7 +56,7 @@ class ComponentRenderer {
 		}
 
 		if (!$component_instance->is_visible()) {
-			return self::debug_output("Component exists but is not published", $slug);
+			return self::debug_output("Component exists but is deleted", $slug);
 		}
 
 		return self::render_component($component_instance, $slug);
@@ -183,7 +183,7 @@ class ComponentRenderer {
 	 * Useful for conditional rendering in templates
 	 *
 	 * @param string $slug The component slug
-	 * @return bool True if component exists, is a component type, and is published
+	 * @return bool True if component exists, is a component type, and is not deleted
 	 */
 	public static function exists($slug) {
 		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
@@ -205,10 +205,9 @@ class ComponentRenderer {
 	 * Get all components for a page, ordered by pac_order
 	 *
 	 * @param int $page_id Page ID
-	 * @param bool $published_only Only return published components
 	 * @return array Array of PageContent objects
 	 */
-	public static function get_page_components($page_id, $published_only = true) {
+	public static function get_page_components($page_id) {
 		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
 		$options = [
@@ -216,10 +215,6 @@ class ComponentRenderer {
 			'components_only' => true,
 			'deleted' => false
 		];
-
-		if ($published_only) {
-			$options['published'] = true;
-		}
 
 		$components = new MultiPageContent($options, ['pac_order' => 'ASC']);
 		$components->load();

@@ -27,12 +27,12 @@
 		
 		$page_content->set('pac_body', $_POST['pac_body']);
 
-		$editable_fields = array('pac_title', 'pac_is_published', 'pac_location_name', 'pac_pag_page_id');
+		$editable_fields = array('pac_title', 'pac_location_name', 'pac_pag_page_id');
 
 		foreach($editable_fields as $field) {
 			$page_content->set($field, $_POST[$field]);
 		}
-		
+
 		if(!$page_content->get('pac_link') || $_SESSION['permission'] == 10){
 			if($_POST['pac_link']){
 				$page_content->set('pac_link', $page_content->create_url($_POST['pac_link']));
@@ -41,16 +41,7 @@
 				$page_content->set('pac_link', $page_content->create_url($event->get('pac_title')));
 			}
 		}
-		
-		if($_POST['pac_is_published']){
-			if(!$page_content->get('pac_published_time')){
-				$page_content->set('pac_published_time', 'NOW()');
-			}
-		}	
-		else {
-			$page_content->set('pac_published_time', NULL);
-		}
-		
+
 		if(!$page_content->key){
 			$page_content->set('pac_usr_user_id',$session->get_user_id());
 		}	
@@ -136,10 +127,6 @@
 			'validation' => ['required' => true]
 		]);
 	}
-
-	$formwriter->dropinput('pac_is_published', 'Published', [
-		'options' => [0 => 'No', 1 => 'Yes']
-	]);
 
 	$formwriter->textbox('pac_body', 'Content', [
 		'validation' => ['required' => true, 'minlength' => 10],

@@ -80,9 +80,6 @@ if ($_POST && !$loading_version) {
 	// Set order
 	$content->set('pac_order', intval($_POST['pac_order']));
 
-	// Set published status
-	$content->set('pac_is_published', isset($_POST['pac_is_published']));
-
 	// Set user if new
 	if (!$content->key) {
 		$content->set('pac_usr_user_id', $session->get_user_id());
@@ -262,6 +259,9 @@ if ($current_type_id) {
 				$formwriter->checkboxinput($field_name, $field_label, $field_options);
 			} elseif ($field_type === 'textarea' || $field_type === 'textbox') {
 				$formwriter->textarea($field_name, $field_label, $field_options);
+			} elseif ($field_type === 'richtext') {
+				$field_options['htmlmode'] = 'yes';
+				$formwriter->textbox($field_name, $field_label, $field_options);
 			} elseif ($field_type === 'imageselector') {
 				// Pass through any imageselector-specific options from schema
 				$imageselector_options = ['button_text', 'button_class', 'grid_columns',
@@ -349,20 +349,16 @@ if ($current_type_id) {
 	echo '<div class="alert alert-warning mt-3">Select a component type to configure its settings.</div>';
 }
 
-// Publishing options (in main content area so they're part of the form)
+// Page assignment options
 echo '<div class="card mt-4"><div class="card-body">';
-echo '<h6 class="card-title">Publishing</h6>';
+echo '<h6 class="card-title">Page Assignment</h6>';
 echo '<div class="row">';
-echo '<div class="col-md-4">';
-$formwriter->checkboxinput('pac_is_published', 'Published', [
-	'help' => 'Only published components are rendered on the site'
-]);
-echo '</div><div class="col-md-4">';
+echo '<div class="col-md-6">';
 $formwriter->dropinput('pac_pag_page_id', 'Assign to Page', [
 	'options' => $pages_dropdown,
 	'help' => 'Optional. Auto-render on this page via get_filled_content()'
 ]);
-echo '</div><div class="col-md-4">';
+echo '</div><div class="col-md-6">';
 $formwriter->textinput('pac_order', 'Display Order', [
 	'help' => 'Order when multiple components on same page (lower = first)'
 ]);
