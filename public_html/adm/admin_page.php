@@ -35,9 +35,13 @@
 	$numrecords = $page_contents->count_all();
 	$page_contents->load();
 
-	// Load components for this page
+	// Load components for this page (include deleted for superadmins)
+	$component_options = array('page_id' => $page->key, 'components_only' => true);
+	if ($_SESSION['permission'] < 10) {
+		$component_options['deleted'] = false;
+	}
 	$page_components = new MultiPageContent(
-		array('page_id' => $page->key, 'components_only' => true, 'deleted' => false),
+		$component_options,
 		array('pac_order' => 'ASC', 'pac_title' => 'ASC')
 	);
 	$num_components = $page_components->count_all();
@@ -60,6 +64,13 @@
 	else if($_REQUEST['action'] == 'delete_component'){
 		$component = new PageContent($_POST['pac_page_content_id'], TRUE);
 		$component->soft_delete();
+
+		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
+		exit();
+	}
+	else if($_REQUEST['action'] == 'undelete_component'){
+		$component = new PageContent($_POST['pac_page_content_id'], TRUE);
+		$component->undelete();
 
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
@@ -173,7 +184,7 @@
 	// Show legacy content section only if placeholders exist and not using components
 	if ($has_placeholders && !$uses_components):
 
-	$headers = array("Content",  "Published", "Creator", "Status");
+	$headers = array("Content", "Creator", "Status");
 	$altlinks = array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
@@ -194,20 +205,9 @@
 
 		$rowvalues = array();
 		array_push($rowvalues, "<a href='/admin/admin_page_content?pac_page_content_id=$page_content->key'>".$title."</a>");
-		array_push($rowvalues, LibraryFunctions::convert_time($page_content->get('pac_published_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
-		if($page_content->get('pac_delete_time')) {
-			$status = 'Deleted';
-		}
-		else {
-			if($page_content->get('pac_published_time')) {
-				$status = 'Published';
-			}
-			else{
-				$status = 'Unpublished';
-			}
-		}
+		$status = $page_content->get('pac_delete_time') ? 'Deleted' : 'Active';
 		array_push($rowvalues, $status);
 
 		$paget->disprow($rowvalues);
@@ -220,7 +220,7 @@
 	// Check if page has legacy body content (prevents adding components)
 	$has_legacy_body_content = !empty(trim($page->get('pag_body') ?? ''));
 
-	$comp_headers = array("Component", "Type", "Order", "Actions");
+	$comp_headers = array("Component", "Type", "Actions");
 	$comp_altlinks = array();
 	if (!$has_legacy_body_content) {
 		$comp_altlinks['Add Component'] = '/admin/admin_component_edit?pag_page_id='.$page->key;
@@ -245,10 +245,14 @@
 	// Show components if any exist
 	foreach ($page_components as $component) {
 		$rowvalues = array();
+		$is_deleted = (bool)$component->get('pac_delete_time');
 
 		// Component title
 		$title = $component->get('pac_title') ?: '(untitled)';
 		$title_display = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '">' . htmlspecialchars($title) . '</a>';
+		if ($is_deleted) {
+			$title_display .= ' <span class="badge bg-danger">Deleted</span>';
+		}
 		array_push($rowvalues, $title_display);
 
 		// Component type
@@ -259,16 +263,21 @@
 			array_push($rowvalues, '<span class="text-muted">Unknown</span>');
 		}
 
-		// Order
-		array_push($rowvalues, $component->get('pac_order') ?: 0);
-
 		// Actions
 		$actions = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '" class="btn btn-sm btn-outline-primary me-1">Edit</a>';
-		$actions .= '<form method="POST" style="display:inline" onsubmit="return confirm(\'Are you sure you want to delete this component?\');">';
-		$actions .= '<input type="hidden" name="action" value="delete_component">';
-		$actions .= '<input type="hidden" name="pac_page_content_id" value="' . $component->key . '">';
-		$actions .= '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
-		$actions .= '</form>';
+		if ($is_deleted) {
+			$actions .= '<form method="POST" style="display:inline">';
+			$actions .= '<input type="hidden" name="action" value="undelete_component">';
+			$actions .= '<input type="hidden" name="pac_page_content_id" value="' . $component->key . '">';
+			$actions .= '<button type="submit" class="btn btn-sm btn-outline-success">Undelete</button>';
+			$actions .= '</form>';
+		} else {
+			$actions .= '<form method="POST" style="display:inline" onsubmit="return confirm(\'Are you sure you want to delete this component?\');">';
+			$actions .= '<input type="hidden" name="action" value="delete_component">';
+			$actions .= '<input type="hidden" name="pac_page_content_id" value="' . $component->key . '">';
+			$actions .= '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
+			$actions .= '</form>';
+		}
 		array_push($rowvalues, $actions);
 
 		$paget->disprow($rowvalues);

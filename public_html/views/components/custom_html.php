@@ -17,7 +17,6 @@
 
 $html = $component_config['html'] ?? '';
 $container = $component_config['container'] ?? true;
-// admin_note is for admin reference only, not displayed
 
 if (empty($html)) {
 	return;
