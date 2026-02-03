@@ -456,7 +456,7 @@ function index_logic($get_vars, $post_vars) {
 
     // Load upcoming events (6 events for sidebar)
     $upcoming_events = new MultiEvent(
-        array('deleted' => false, 'after_date' => date('Y-m-d H:i:s')),
+        array('deleted' => false, 'upcoming' => true),
         array('evt_start_time' => 'ASC'),
         6, 0
     );
