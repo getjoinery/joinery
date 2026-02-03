@@ -38,7 +38,7 @@
 	)
 	);
 
-	$headers = array("Content",  "Created", "Published", "By", "Status");
+	$headers = array("Content",  "Created", "By", "Status");
 	$altlinks = array('New Content'=>'/admin/admin_page_content_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
@@ -60,19 +60,12 @@
 		$rowvalues = array();
 		array_push($rowvalues, "<a href='/admin/admin_page_content?pac_page_content_id=$page_content->key'>".$title."</a>");
 		array_push($rowvalues, LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()));
-		array_push($rowvalues, LibraryFunctions::convert_time($page_content->get('pac_published_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
 		if($page_content->get('pac_delete_time')) {
 			$status = 'Deleted';
-		}
-		else {
-			if($page_content->get('pac_published_time')) {
-				$status = 'Published';
-			}
-			else{
-				$status = 'Unpublished';
-			}
+		} else {
+			$status = 'Active';
 		}
 		array_push($rowvalues, $status);
 

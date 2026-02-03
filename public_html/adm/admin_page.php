@@ -220,7 +220,7 @@
 	// Check if page has legacy body content (prevents adding components)
 	$has_legacy_body_content = !empty(trim($page->get('pag_body') ?? ''));
 
-	$comp_headers = array("Component", "Type", "Order", "Status", "Actions");
+	$comp_headers = array("Component", "Type", "Order", "Actions");
 	$comp_altlinks = array();
 	if (!$has_legacy_body_content) {
 		$comp_altlinks['Add Component'] = '/admin/admin_component_edit?pag_page_id='.$page->key;
@@ -261,13 +261,6 @@
 
 		// Order
 		array_push($rowvalues, $component->get('pac_order') ?: 0);
-
-		// Status
-		if ($component->get('pac_is_published')) {
-			array_push($rowvalues, '<span class="badge bg-success">Published</span>');
-		} else {
-			array_push($rowvalues, '<span class="badge bg-secondary">Draft</span>');
-		}
 
 		// Actions
 		$actions = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '" class="btn btn-sm btn-outline-primary me-1">Edit</a>';
