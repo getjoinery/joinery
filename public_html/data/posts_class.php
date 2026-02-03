@@ -191,6 +191,14 @@ class MultiPost extends SystemMultiBase {
 			$filters['pst_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
 		}
 
+		if (isset($this->options['after_date'])) {
+			$filters['pst_published_time'] = "> '" . $this->options['after_date'] . "'";
+		}
+
+		if (isset($this->options['before_date'])) {
+			$filters['pst_published_time'] = "< '" . $this->options['before_date'] . "'";
+		}
+
 		return $this->_get_resultsv2('pst_posts', $filters, $this->order_by, $only_count, $debug);
 	}
 

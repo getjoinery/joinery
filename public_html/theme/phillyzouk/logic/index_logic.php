@@ -20,7 +20,7 @@ function index_logic($get_vars, $post_vars) {
 
     // Get upcoming events for sidebar (6 events)
     $upcoming_events = new MultiEvent(
-        array('deleted' => false, 'after_date' => date('Y-m-d H:i:s')),
+        array('deleted' => false, 'upcoming' => true),
         array('evt_start_time' => 'ASC'),
         6, 0
     );
