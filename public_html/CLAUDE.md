@@ -447,6 +447,7 @@ $session->check_permission(5); // Requires permission level 5 (admin minimum)
 - `/tests/functional/products/` - Product-related functionality  
 - `/tests/integration/` - External services (Mailgun, PHPMailer, routing)
 - `/tests/models/` - Data model CRUD operations and validation
+- **Inbound email testing:** Emails sent to `*@inbox.joinerytest.site` are stored via Mailgun webhook in `iem_inbound_emails` — query with `SELECT * FROM iem_inbound_emails WHERE iem_recipient LIKE '%address%' ORDER BY iem_received_time DESC LIMIT 1;`
 
 ### Deployment Scripts
 Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
