@@ -1145,3 +1145,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Mailgun Webhook Signing Key Setting (v79) ==========
+	$migration = array();
+	$migration['database_version'] = '79';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_webhook_signing_key'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('mailgun_webhook_signing_key', '', 1, now(), now(), 'email');";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
