@@ -41,30 +41,27 @@
 
 	$settings = Globalvars::get_instance();
 	$error_log = $settings->get_setting('apache_error_log');
-	$file = file($error_log);
-	if($file){
-		$file = array_reverse($file);
+	if(file_exists($error_log)){
+		$lines = explode("\n", shell_exec("tail -n 500 " . escapeshellarg($error_log)));
+		$lines = array_reverse($lines);
 
 		$linenum = 1;
-		foreach ($file as $line) {
+		foreach ($lines as $line) {
+			if(trim($line) === '') continue;
 			$rowvalues = array();
-			if(strpos($line, '[php7:error]')){
-				array_push($rowvalues, '<span style="color: #a80000">'.$line.'</span>');
+			if(strpos($line, '[php7:error]') !== false || strpos($line, '[php:error]') !== false){
+				array_push($rowvalues, '<span style="color: #a80000">'.htmlspecialchars($line).'</span>');
 			}
 			else{
-				array_push($rowvalues, $line);
+				array_push($rowvalues, htmlspecialchars($line));
 			}
 
 			$page->disprow($rowvalues);
 			$linenum++;
-			if($linenum == 50){
-				break;
-			}
-
 		}
 	}
 	else{
-		echo "No error file found at ".$error_log ;
+		echo "No error file found at ".htmlspecialchars($error_log);
 	}
 
 	$page->endtable($pager);
