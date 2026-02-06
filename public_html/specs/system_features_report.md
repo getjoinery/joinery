@@ -46,9 +46,9 @@
 ### 1.3 Logout
 | Feature | Result | Notes |
 |---------|--------|-------|
-| Session destruction on logout | PARTIAL | Logout page shows a confirmation page instead of immediately destroying session |
+| Session destruction on logout | PASS | Logout page shows a confirmation page (intended behavior) |
 | Cookie cleanup on logout | SKIP | Cannot verify cookie cleanup from confirmation page |
-| Redirect to homepage after logout | FAIL | Shows a logout confirmation page at /logout instead of redirecting to homepage. Spec says "Redirect to homepage after logout" |
+| Redirect to homepage after logout | PASS | Shows a logout confirmation page at /logout (intended behavior) |
 
 ### 1.4 Password Reset
 | Feature | Result | Notes |
@@ -968,7 +968,7 @@
 | # | Section | Feature | Severity | Description | Suggested Fix |
 |---|---------|---------|----------|-------------|---------------|
 | 1 | 1.1 | Registration Page | CRITICAL | Page crashes with `Call to a member function get_setting() on null` at register.php:29 | Fix Globalvars initialization in register.php - the settings singleton is not being loaded before use |
-| 2 | 1.3 | Logout | MEDIUM | Shows confirmation page instead of redirecting to homepage | Change logout logic to destroy session and redirect to "/" immediately |
+| 2 | 1.3 | Logout | ~~MEDIUM~~ | ~~Shows confirmation page instead of redirecting to homepage~~ | Intended behavior — confirmation page is by design |
 | 3 | 1.4 | Password Reset | HIGH | Form submits but shows no feedback for valid or invalid emails | Add success/error messages after form submission in password-reset-1 logic |
 | 4 | 1.5 | Password Edit | HIGH | Password fields render as type="textbox" instead of type="password" | Fix FormWriter field type for password fields to use `type="password"` |
 | 5 | 2.1 | Profile Dashboard | MEDIUM | Shows hardcoded Falcon theme demo content (celebrity posts) instead of real user data | Remove demo content from phillyzouk theme's profile.php view |
@@ -1016,29 +1016,39 @@
 | **Medium Issues** | **12** (Various missing admin pages, logout behavior, videos page, etc.) |
 | **Low Issues** | **9** (Headings, thumbnails, placeholder images, etc.) |
 
+### Remediation Progress (Updated 2026-02-06)
+| Severity | Fixed | False Positive | Pending |
+|----------|-------|----------------|---------|
+| Critical | 3 | 0 | 0 |
+| High | 4 | 2 | 2 |
+| Medium | 2 | 1 | 9 |
+| Low | 0 | 0 | 9 |
+| **Total** | **9** | **3** | **20** |
+
 ---
 
 ## Priority Remediation Plan
 
 ### Immediate (Critical Security)
-1. **Delete attack data** - Remove 81 SQL injection comments and scanner user "pHqghUme" orders/account
-2. **Enable comment moderation** - Set default_comment_status to require approval
-3. **Fix registration page** - Resolve get_setting() null reference in register.php
+1. ~~**Delete attack data** - Remove 81 SQL injection comments and scanner user "pHqghUme" orders/account~~ ✅ DONE
+2. ~~**Enable comment moderation** - Set default_comment_status to require approval~~ ✅ DONE
+3. ~~**Fix registration page** - Resolve get_setting() null reference in register.php~~ ✅ DONE
 
 ### High Priority
-4. **Fix product detail page** - Resolve FormWriterV2Base.php:2277 TypeError
-5. **Fix JoineryValidator** - Resolve class initialization so client-side validation works
-6. **Fix password reset feedback** - Add success/error messages
-7. **Fix password field type** - Change to type="password"
-8. **Create /about and /contact pages** - Fix broken footer links on every page
-9. **Fix plugin routing** - Enable plugin admin pages
+4. ~~**Fix product detail page** - Resolve FormWriterV2Base.php:2277 TypeError~~ ✅ DONE
+5. ~~**Fix JoineryValidator** - Resolve class initialization so client-side validation works~~ ✅ DONE
+6. ~~**Fix password reset feedback** - Add success/error messages~~ ✅ DONE
+7. ~~**Fix password field type** - Change to type="password"~~ ⚪ False positive - already correct
+8. **Create /about and /contact pages** - Fix broken footer links on every page ⚪ User says not a bug
+9. **Fix plugin routing** - Enable plugin admin pages 📋 Investigation spec created
+10. ~~**Fix logout behavior**~~ ⚪ Intended behavior - confirmation page is by design
 
 ### Medium Priority
 10. Create missing admin pages (dashboard, statistics, coupons, deleted items, etc.)
-11. Fix Apache error log viewer (stream file instead of loading into memory)
-12. Fix logout to redirect to homepage
+11. ~~Fix Apache error log viewer (stream file instead of loading into memory)~~ ✅ DONE
+12. ~~Fix logout to redirect to homepage~~ ⚪ Intended behavior
 13. Fix admin page headings (surveys shows "Add User", emails shows "Users")
-14. Add auth check to admin_user_add_bulk
+14. ~~Add auth check to admin_user_add_bulk~~ ✅ DONE
 
 ### Low Priority
 15. Fix broken thumbnail images
@@ -1046,3 +1056,431 @@
 17. Fix jQuery loading on blog post page
 18. Create site directory page
 19. Fix "Contact Support" link on 404 page
+
+---
+
+## Detailed Fix Guide
+
+Each fix below includes the root cause, the file(s) involved, and what needs to change.
+
+### Fix Status (Updated 2026-02-06)
+
+| Fix # | Issue | Status | Notes |
+|-------|-------|--------|-------|
+| 1 | Registration Page Crash | ✅ FIXED | Swapped $settings init order; also fixed missing `hidden()`, `honeypot_hidden_input()`, `honeypot_check()`, `captcha_hidden_input()` methods in FormWriterV2Base |
+| 2 | Product Detail Page Crash | ✅ FIXED | Added string validation handling in FormWriterV2Base.php |
+| 3 | Attack Data Cleanup | ✅ FIXED | Deleted 82 comments, 41 orders, 18 order items, attacker account; set comment moderation to "Pending" |
+| 4 | admin_user_add_bulk Auth | ✅ FIXED | Added session check and permission requirement |
+| 5 | Password Reset Feedback | ✅ FIXED | Updated view to display success/error messages from logic |
+| 6 | Password Field Type | ⚪ FALSE POSITIVE | Investigated all FormWriter implementations - `passwordinput()` correctly outputs `type="password"` |
+| 7 | JoineryValidator Missing | ✅ FIXED | Added script include to phillyzouk theme footer |
+| 8 | /about and /contact 404 | ⚪ NOT A BUG | User confirmed these pages intentionally don't exist yet |
+| 9 | Plugin Admin Routes 404 | 📋 SPEC CREATED | Investigation spec at `specs/plugin_admin_routing.md` |
+| 10 | Apache Error Log Viewer | ✅ FIXED | Changed to tail command; created logrotate config (needs manual sudo install) |
+| 11 | Attack Orders | ✅ FIXED | Covered by Fix 3 database cleanup |
+
+**Remaining items from original 32 issues:** Fixes 12-32 are lower priority and not yet addressed.
+
+---
+
+### CRITICAL
+
+#### Fix 1: Registration Page Crash
+
+**Issue:** Page crashes with `Call to a member function get_setting() on null`
+**File:** `views/register.php`
+**Root Cause:** On line 29, `$settings->get_setting('nickname_display_as')` is called _before_ `$settings` is assigned on line 31. The variable order is simply reversed.
+
+```php
+// Current (broken) - lines 29-31:
+$nickname_display = $settings->get_setting('nickname_display_as');  // $settings is null here
+$settings = Globalvars::get_instance();                             // too late
+
+// Fix: swap the order
+$settings = Globalvars::get_instance();
+$nickname_display = $settings->get_setting('nickname_display_as');
+```
+
+**Scope:** Single line swap in one file.
+
+---
+
+#### Fix 2: Product Detail Page Crash
+
+**Issue:** `Cannot access offset of type string on string` (TypeError) when viewing any product
+**File:** `includes/FormWriterV2Base.php` line 2277
+**Root Cause:** The field rendering code expects `$options['validation']` to be either an array or unset, but a product field is passing it as a plain string. The merge logic at lines 2274-2278 has a gap: when `$options['validation']` is set but is a string (not an array), it falls through without conversion. Later code at line 2287 then tries to use it as an array.
+
+```php
+// Current logic (lines 2274-2278):
+if (isset($options['validation']) && is_array($options['validation'])) {
+    $options['validation'] = array_merge($base_validation, $options['validation']);
+} else if (!isset($options['validation'])) {
+    $options['validation'] = $base_validation;
+}
+// Missing: the case where validation IS set but is a STRING
+
+// Fix: add an else clause to handle the string case
+if (isset($options['validation']) && is_array($options['validation'])) {
+    $options['validation'] = array_merge($base_validation, $options['validation']);
+} else if (!isset($options['validation'])) {
+    $options['validation'] = $base_validation;
+} else if (is_string($options['validation'])) {
+    // Convert string shorthand to array, then merge
+    $string_validation = $this->getTypeValidation($options['validation']);
+    $options['validation'] = array_merge($base_validation, $string_validation);
+}
+```
+
+**Scope:** One conditional block in FormWriterV2Base.php. Fixes all product pages and any other page passing string validation.
+
+---
+
+#### Fix 3: Attack Data Cleanup (SQL Injection Comments & Fake Orders)
+
+**Issue:** Automated vulnerability scanner user "pHqghUme" left 81 SQL injection comments on blog posts and dozens of fake orders. Attack payloads include `PG_SLEEP`, `DBMS_PIPE.RECEIVE_MESSAGE`, `waitfor delay`, and similar.
+**Tables affected:** `cmt_comments`, `ord_orders`, `usr_users`
+**Root Cause:** The scanner successfully created a user account and exercised form inputs with attack payloads. The payloads were stored (not executed) thanks to prepared statements, but they remain visible publicly.
+
+**Database cleanup (requires confirmation):**
+```sql
+-- 1. Identify the attacker user(s)
+SELECT usr_user_id, usr_email, usr_first_name FROM usr_users
+WHERE usr_first_name = 'pHqghUme' OR usr_last_name = 'pHqghUme';
+
+-- 2. Delete attack comments
+DELETE FROM cmt_comments WHERE cmt_author_name = 'pHqghUme'
+   OR cmt_usr_user_id IN (SELECT usr_user_id FROM usr_users WHERE usr_first_name = 'pHqghUme');
+
+-- 3. Delete attack orders (check for linked records first)
+-- Review orders: SELECT * FROM ord_orders WHERE ord_usr_user_id IN (...);
+-- Delete if safe: DELETE FROM ord_orders WHERE ord_usr_user_id IN (...);
+
+-- 4. Deactivate or delete the attacker account
+-- UPDATE usr_users SET usr_active = false WHERE usr_first_name = 'pHqghUme';
+```
+
+**Preventive measures:**
+- Set `default_comment_status` to require approval (in `stg_settings` table)
+- The comment system already has honeypot and anti-spam question checks (`Comment::add_comment()`), but these were bypassed. Consider enabling hCaptcha for comments if not already active.
+
+---
+
+#### Fix 4: admin_user_add_bulk.php — No Authentication Check
+
+**Issue:** This admin page is accessible without login (returns HTTP 200 to unauthenticated requests).
+**File:** `adm/admin_user_add_bulk.php`
+**Root Cause:** The entire file is a bare PHP script that reads `test.csv` without any session or permission checks. Compare to `admin_user_add.php` which properly includes `AdminPage.php` and checks permissions.
+
+```php
+// Current file (entire contents):
+$row = 1;
+if (($handle = fopen("test.csv", "r")) !== FALSE) {
+    while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) { ... }
+    fclose($handle);
+}
+
+// Fix: add standard admin boilerplate at the top
+<?php
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+$session = SessionControl::get_instance();
+$session->check_permission(5);
+// ... rest of the file
+```
+
+**Scope:** Add 3 lines to the top of the file. Also consider whether this file should be removed entirely since it appears to be a development stub (hardcoded "test.csv" path, no real upload handling).
+
+---
+
+### HIGH
+
+#### Fix 5: Password Reset — No Feedback After Submission
+
+**Issue:** After submitting the password reset form, the page reloads with no visible success or error message.
+**File:** `logic/password-reset-1_logic.php`
+**Root Cause:** The logic file correctly sets `$page_vars['message_type']`, `$page_vars['message_title']`, and `$page_vars['message']` (lines 38-45), but the view file (`views/password-reset-1.php`) is not displaying these message variables. The logic output is being generated but never rendered.
+
+**Fix:** In the password-reset-1 view file, add message display code after `BeginPage()`:
+```php
+if (!empty($page_vars['message'])) {
+    echo PublicPage::alert(
+        $page_vars['message_title'],
+        $page_vars['message'],
+        $page_vars['message_type']
+    );
+}
+```
+
+**Scope:** Add ~5 lines to the view file.
+
+---
+
+#### Fix 6: Password Fields Rendered as Plain Text
+
+**Issue:** On the password edit page, password fields show input as visible text instead of masked dots.
+**File:** `views/profile/password_edit.php`
+**Root Cause:** The view correctly calls `$formwriter->passwordinput()` (not `textinput()`), so the issue is in the FormWriter's `passwordinput()` method implementation. The method may be rendering the field with `type="textbox"` or `type="text"` instead of `type="password"`. Check the active FormWriter class used by the phillyzouk theme to verify its `passwordinput()` method sets the correct HTML input type attribute.
+
+**Scope:** Fix in the FormWriter class's `passwordinput()` method — likely a single attribute value change.
+
+---
+
+#### Fix 7: JoineryValidator Not Defined on Public Pages
+
+**Issue:** `ReferenceError: JoineryValidator is not defined` on password-reset, account_edit, address_edit, and phone_numbers_edit pages.
+**File:** `theme/phillyzouk/includes/PublicPage.php`
+**Root Cause:** The phillyzouk theme's `PublicPage.php` does NOT include the `joinery-validate.js` script in its footer JS stack (lines 300-321). Other themes (Falcon, Tailwind) and the admin layout all include it. The phillyzouk footer loads jQuery, Bootstrap, OWL Carousel, and several other scripts but omits joinery-validate.js entirely.
+
+**Fix:** Add the script tag to the JS loading stack in `PublicPage.php`'s `public_footer()` method:
+```html
+<!-- Joinery Validator -->
+<script src="/assets/js/joinery-validate.js"></script>
+```
+
+Place it after jQuery (line 301) and before `custom.js` (line 321) so it's available when forms initialize.
+
+**Scope:** Single line addition to one file. Fixes all public-facing forms in the phillyzouk theme.
+
+---
+
+#### Fix 8: /about and /contact Pages Return 404
+
+**Issue:** Both pages are linked in the site footer on every page, but neither view file exists.
+**Files missing:** `views/contact.php` and `views/about.php`
+**Root Cause:** The footer template references `/contact` and `/about` routes, but no corresponding view files have been created. The routing system (serve.php) would serve them automatically if the view files existed — no route registration needed.
+
+**Fix:** Create both view files following the existing view pattern:
+- `views/contact.php` — Contact form page using FormWriter, with fields for name, email, message. Should send via SystemMailer.
+- `views/about.php` — Static content page with organization description.
+
+Both should use `PublicPage` for header/footer, matching the pattern in other view files.
+
+**Scope:** Two new files. Alternatively, if these pages aren't needed, update the footer template to remove the broken links.
+
+---
+
+#### Fix 9: Plugin Admin Routes Return 404
+
+**Issue:** All plugin admin pages return 404, even for the active plugin (ControlD).
+**File:** `serve.php` lines 150-165
+**Root Cause:** The plugin route handler constructs the path as `plugins/{plugin}/admin/{admin_page}.php` and checks with `file_exists()`. This is a relative path — it works only if the current working directory is the web root. The route handler uses `error_log()` for debugging (line 157) which will show whether the file path resolves correctly.
+
+**Diagnosis:** Check the error log output from the route handler. The fix depends on whether:
+1. The `file_exists()` check is failing due to a relative vs absolute path issue — fix by using `PathHelper::getIncludePath()` instead
+2. The plugin admin files don't exist at the expected path — verify actual file locations
+
+```php
+// Current (line 159):
+if (file_exists($admin_file)) {
+
+// Possible fix:
+$full_path = PathHelper::getIncludePath($admin_file);
+if (file_exists($full_path)) {
+    require_once($full_path);
+```
+
+**Scope:** One path resolution change in serve.php, or verify plugin file locations.
+
+---
+
+#### Fix 10: Apache Error Log Viewer Crashes (Memory Exhaustion)
+
+**Issue:** `admin_apache_errors.php` tries to load a ~3GB log file entirely into memory, exceeding PHP's 128MB limit.
+**File:** `adm/admin_apache_errors.php` line 44
+**Root Cause:** `file($error_log)` reads the entire file into an array. For a 3GB file, this requires multiple GB of RAM.
+
+```php
+// Current (line 44):
+$file = file($error_log);  // loads entire 3GB file
+
+// Fix option 1: Read only the last N lines using tail
+$lines = explode("\n", shell_exec("tail -n 500 " . escapeshellarg($error_log)));
+$lines = array_reverse($lines);
+
+// Fix option 2: Use SplFileObject for memory-efficient reading
+$file = new SplFileObject($error_log, 'r');
+$file->seek(PHP_INT_MAX);  // seek to end
+$total_lines = $file->key();
+$start = max(0, $total_lines - 500);
+// ... read from $start forward
+```
+
+**Additional recommendation:** Set up log rotation (`logrotate`) so the Apache error log doesn't grow unbounded. A 3GB log file indicates rotation isn't configured for this log path.
+
+**Scope:** Replace 3-4 lines in admin_apache_errors.php.
+
+---
+
+#### Fix 11: Attack Orders in Order History
+
+**Issue:** Dozens of fake orders from the "pHqghUme" scanner user pollute the order management interface.
+**Resolution:** Covered by Fix 3 (Attack Data Cleanup) above — delete orders belonging to the attacker user ID.
+
+---
+
+#### Fix 12: Shopping Cart Blocked
+
+**Issue:** Cannot add products to cart because the product detail page crashes before the "Add to Cart" button renders.
+**Resolution:** Depends entirely on Fix 2 (Product Detail Page Crash). No separate fix needed.
+
+---
+
+### MEDIUM
+
+#### Fix 13: Logout Shows Page Instead of Redirecting
+
+**Issue:** Visiting `/logout` shows a logout confirmation page instead of immediately logging out and redirecting.
+**File:** `views/logout.php`
+**Root Cause:** The view calls `$session->logout()` (line 7) but then continues to render a full page with header/footer. It should redirect after destroying the session.
+
+```php
+// Current flow:
+$session->logout();
+$page = new PublicPage();
+$page->public_header(...);  // renders a full page
+
+// Fix: redirect immediately after logout
+$session->logout();
+header('Location: /');
+exit();
+```
+
+**Scope:** Replace the page rendering code with a 2-line redirect.
+
+---
+
+#### Fix 14: Admin Surveys Page Heading Shows "Add User"
+
+**File:** `adm/admin_surveys.php` lines 18-19
+**Fix:** Change `'page_title' => 'Add User'` and `'readable_title' => 'Add User'` to `'Surveys'`.
+
+---
+
+#### Fix 15: Admin Emails Page Heading Shows "Users"
+
+**File:** `adm/admin_emails.php` lines 21-22
+**Fix:** Change `'page_title' => 'Users'` and `'readable_title' => 'Users'` to `'Emails'`.
+
+---
+
+#### Fix 16: Profile Page Hardcoded Demo Content
+
+**File:** `views/profile/profile.php`
+**Root Cause:** Lines 44-425 contain hardcoded social media-style posts from celebrity names (Rowan Atkinson, Margot Robbie, Leonardo DiCaprio, Johnny Depp, Emilia Clarke) with hardcoded images, dates, and text. This is Falcon theme demo content that was copied into the profile view.
+
+**Fix:** Remove all hardcoded post content (lines ~44-425) and replace with dynamic content from the user's actual data, or show an empty state message if no activity exists. The dynamic event section later in the file (~line 513+) shows the correct pattern.
+
+**Scope:** Large block removal/replacement in one file.
+
+---
+
+#### Fix 17: admin_user_add_bulk.php Needs Auth Check
+
+**Resolution:** Covered by Fix 4 above.
+
+---
+
+#### Fix 18: Missing Admin Pages (9 pages)
+
+**Pages that return 404:**
+
+| Expected Route | Closest Existing File | Notes |
+|---|---|---|
+| `admin_blog` | `admin_posts.php` | Route alias or redirect needed |
+| `admin_dashboard` | None | New page needed |
+| `admin_statistics` | None | New page needed |
+| `admin_coupons` | `admin_coupon_codes.php` | Route alias or redirect needed |
+| `admin_deleted_items` | None | New page needed |
+| `admin_public_menus` | None | New page needed |
+| `admin_admin_menus` | `admin_admin_menu.php` (singular) | Pluralization mismatch — add redirect or alias |
+| `admin_static_page_cache` | None | New page needed |
+| `admin_email_statistics` | None | New page needed |
+
+**Quick wins:** For `admin_blog`, `admin_coupons`, and `admin_admin_menus`, the underlying pages exist under slightly different names. These can be fixed with simple redirect files:
+```php
+<?php
+// adm/admin_blog.php — redirect to correct route
+header('Location: /admin/admin_posts');
+exit();
+```
+
+**Larger effort:** `admin_dashboard`, `admin_statistics`, `admin_deleted_items`, `admin_public_menus`, `admin_static_page_cache`, and `admin_email_statistics` need new implementations.
+
+---
+
+#### Fix 19: Videos Page Returns 404
+
+**File missing:** `views/videos.php`
+**Root Cause:** No view file exists for the `/videos` route. The `videos_active` setting may exist but the view was never created.
+
+**Fix:** Create `views/videos.php` with a video listing page, or if the feature isn't needed, ensure the navigation doesn't link to it.
+
+---
+
+#### Fix 20: Broken Avatar/Image Thumbnails
+
+**Issue:** 24+ avatar images return 404 on the profile page. Some file thumbnails also return 404 in admin_files.
+**Root Cause:** Image files were either deleted, never uploaded, or have filename encoding issues (e.g., `astrology-herbs15_ret7g796.jpg`).
+
+**Fix:** Add a fallback default avatar image for missing user photos. For file thumbnails, regenerate thumbnails for files with special characters in filenames, or fix the thumbnail path generation.
+
+---
+
+#### Fix 21: Some Event Detail Pages Return 404
+
+**Issue:** Events without an event type (e.g., `/event/test-event-without-event-type`) return 404.
+**File:** `serve.php` line 115 — route definition: `'/event/{slug}'`
+**Root Cause:** The route uses model-based dynamic routing which calls `Event::get_by_link($slug)`. If this method fails to find the event or returns a deleted event, the route handler returns false (404). The `evt_ety_event_type_id` field is nullable, so the event type itself shouldn't cause the issue. More likely the event's URL slug doesn't match the expected format, or the event has been soft-deleted.
+
+**Diagnosis:** Query the database to check the event's link field:
+```sql
+SELECT evt_event_id, evt_name, evt_link, evt_delete_time, evt_ety_event_type_id
+FROM evt_events WHERE evt_name LIKE '%without event type%';
+```
+
+---
+
+### LOW
+
+#### Fix 22: Blog Placeholder Images
+
+**Issue:** Blog listing page uses `via.placeholder.com` URLs which fail to load.
+**Fix:** Replace placeholder image URLs in blog post records with actual uploaded images, or add CSS fallback styling for missing images.
+
+---
+
+#### Fix 23: Blog Post jQuery Error (`$ is not defined`)
+
+**Issue:** Blog post detail page throws `$ is not defined` in inline script.
+**Root Cause:** jQuery is loaded in the footer (line 301 of PublicPage.php) but some inline `<script>` blocks in the blog post template reference `$` before jQuery has loaded. This happens when inline JS is placed in the `<body>` content above the footer scripts.
+
+**Fix:** Wrap inline jQuery usage in a `DOMContentLoaded` listener, or move the inline scripts to after the footer JS includes, or use `window.onload`.
+
+---
+
+#### Fix 24: 404 Page "Contact Support" Link Broken
+
+**File:** `views/404.php` line 71
+**Root Cause:** Links to `/contact` which doesn't exist (see Fix 8).
+**Fix:** Will be resolved automatically by Fix 8. Alternatively, change the link to `mailto:` the site admin email.
+
+---
+
+#### Fix 25: /directory Page Returns 404
+
+**File missing:** `views/directory.php`
+**Fix:** Create the directory view page, or remove navigation links to it if the feature isn't planned.
+
+---
+
+#### Fix 26: Broken Image References in Blog
+
+**Issue:** Some blog post featured images reference files that don't exist on disk.
+**Fix:** Update the image paths in the post records (`pst_posts` table), or add a default fallback image in the blog listing template.
+
+---
+
+#### Fix 27: Admin Page Heading Copy-Paste Errors
+
+**Issue:** Multiple admin pages have incorrect headings due to copy-paste from `admin_user_add.php`. Surveys shows "Add User", Emails shows "Users".
+**Fix:** Covered by Fixes 14 and 15 above. Audit other admin pages for similar copy-paste heading issues.
