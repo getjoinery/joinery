@@ -2273,6 +2273,9 @@ abstract class FormWriterV2Base {
             // Merge with any provided validation (provided takes precedence)
             if (isset($options['validation']) && is_array($options['validation'])) {
                 $options['validation'] = array_merge($base_validation, $options['validation']);
+            } else if (isset($options['validation']) && is_string($options['validation'])) {
+                $string_validation = $this->getTypeValidation($options['validation']);
+                $options['validation'] = array_merge($base_validation, $string_validation);
             } else if (!isset($options['validation'])) {
                 $options['validation'] = $base_validation;
             }
@@ -3849,7 +3852,7 @@ class AjaxSearchSelect {
 
         if($correct_answer){
             $output = $this->textbox("antispam_question", "Type '".strtolower($correct_answer)."' into this field (to prove you are human)");
-            $output .= $this->hidden("antispam_question_answer", strtolower($correct_answer));
+            $output .= $this->hiddeninput("antispam_question_answer", ['value' => strtolower($correct_answer)]);
             return $output;
         }
         else{
@@ -3905,6 +3908,84 @@ class AjaxSearchSelect {
         }
         else{
             return true;
+        }
+    }
+
+    /**
+     * Output a honeypot hidden input field
+     * Honeypot fields are invisible to humans but filled in by bots.
+     * If the field has a value on submission, the form was submitted by a bot.
+     *
+     * @param string $label Optional label for the hidden field name
+     * @param string $type Optional type prefix for the field name
+     * @return string|void HTML output
+     */
+    public function honeypot_hidden_input($label = '', $type = ''){
+        $settings = Globalvars::get_instance();
+        if($settings->get_setting('use_honeypot') != 'Yes'){
+            return '';
+        }
+        $field_name = 'website_url';
+        if($type){
+            $field_name = $type . '_website_url';
+        }
+        $output = '<div style="position:absolute;left:-9999px;"><label for="' . htmlspecialchars($field_name) . '">Leave this field empty</label>';
+        $output .= '<input type="text" name="' . htmlspecialchars($field_name) . '" id="' . htmlspecialchars($field_name) . '" value="" tabindex="-1" autocomplete="off">';
+        $output .= '</div>';
+        echo $output;
+    }
+
+    /**
+     * Check if the honeypot field was filled in (indicating a bot)
+     *
+     * @param array $data POST data to check
+     * @param string $type Optional type prefix for the field name
+     * @return boolean True if the check passes (not a bot), false if honeypot was filled
+     */
+    public function honeypot_check($data, $type = ''){
+        $settings = Globalvars::get_instance();
+        if($settings->get_setting('use_honeypot') != 'Yes'){
+            return true;
+        }
+        $field_name = 'website_url';
+        if($type){
+            $field_name = $type . '_website_url';
+        }
+        if(isset($data[$field_name]) && $data[$field_name] != ''){
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Output a CAPTCHA widget (hCaptcha or Google reCAPTCHA)
+     *
+     * @param string $type Optional type (e.g., 'blog' to check use_captcha_comments setting)
+     * @return string|void HTML output
+     */
+    public function captcha_hidden_input($type = NULL){
+        $settings = Globalvars::get_instance();
+
+        // Check if captcha is enabled for this context
+        if($type == 'blog'){
+            if($settings->get_setting('use_captcha_comments') != 'Yes'){
+                return '';
+            }
+        } else {
+            if($settings->get_setting('use_captcha') != 'Yes'){
+                return '';
+            }
+        }
+
+        // Prefer hCaptcha, fall back to Google reCAPTCHA
+        if($settings->get_setting('hcaptcha_public') && $settings->get_setting('hcaptcha_private')){
+            $output = "<script src='https://www.hCaptcha.com/1/api.js' async defer></script>";
+            $output .= '<div class="h-captcha" data-sitekey="' . htmlspecialchars($settings->get_setting('hcaptcha_public')) . '"></div>';
+            echo $output;
+        } else if($settings->get_setting('captcha_public') && $settings->get_setting('captcha_private')){
+            $output = '<script src="https://www.google.com/recaptcha/api.js" async defer></script>';
+            $output .= '<div class="g-recaptcha" data-sitekey="' . htmlspecialchars($settings->get_setting('captcha_public')) . '"></div>';
+            echo $output;
         }
     }
 

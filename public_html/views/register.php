@@ -26,9 +26,9 @@
 		}
 	}
 
+	$settings = Globalvars::get_instance();
 	$nickname_display = $settings->get_setting('nickname_display_as');
 
-	$settings = Globalvars::get_instance();
 	$formwriter = $page->getFormWriter('form1');
 
 	$formwriter->begin_form([

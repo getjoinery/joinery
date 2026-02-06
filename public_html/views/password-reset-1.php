@@ -42,20 +42,31 @@ $page_vars = $page_vars->data;
 
 					<div class="card mb-0">
 						<div class="card-body text-center" style="padding: 40px;">
+							<?php if ($page_vars['message_type'] === 'error'): ?>
+							<!-- Error Icon -->
+							<div class="mb-4">
+								<i class="bi-exclamation-circle text-danger" style="font-size: 4rem;"></i>
+							</div>
+							<h3><?php echo htmlspecialchars($page_vars['message_title']); ?></h3>
+							<p class="text-muted mb-4">
+								<?php echo htmlspecialchars($page_vars['message']); ?>
+							</p>
+							<a href="/password-reset-1" class="button button-3d button-black m-0">
+								<i class="bi-arrow-left me-2"></i>Try Again
+							</a>
+							<?php else: ?>
 							<!-- Success Icon -->
 							<div class="mb-4">
 								<i class="bi-envelope-check text-success" style="font-size: 4rem;"></i>
 							</div>
-
-							<!-- Success Message -->
-							<h3>Check Your Email!</h3>
+							<h3><?php echo htmlspecialchars($page_vars['message_title']); ?></h3>
 							<p class="text-muted mb-4">
-								An email has been sent to you. Please click on the included link to reset your password.
+								<?php echo $page_vars['message']; ?>
 							</p>
-
 							<a href="/login" class="button button-3d button-black m-0">
 								<i class="bi-arrow-left me-2"></i>Return to Login
 							</a>
+							<?php endif; ?>
 						</div>
 					</div>
 

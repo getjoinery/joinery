@@ -317,6 +317,8 @@ class PublicPage extends PublicPageBase {
         <script src="/theme/phillyzouk/assets/js/ajaxchimp.min.js"></script>
         <!-- Contact Form JS -->
         <script src="/theme/phillyzouk/assets/js/contact-form-script.js"></script>
+        <!-- Joinery Validator -->
+        <script src="/assets/js/joinery-validate.js"></script>
         <!-- Custom JS -->
         <script src="/theme/phillyzouk/assets/js/custom.js?v=2"></script>
     </body>
