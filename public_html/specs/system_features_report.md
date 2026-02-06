@@ -635,7 +635,7 @@
 | Front controller pattern via serve.php | PASS | All requests routed through serve.php |
 | Dynamic route matching with parameters | PASS | URL parameters work (e.g., ?offset=30) |
 | Static file serving with HTTP caching | PASS | Static assets served correctly |
-| Plugin route integration | FAIL | Plugin admin routes (bookings, items, controld) return 404 |
+| Plugin route integration | PASS | Plugin public routes work for active plugins. Admin pages were intentionally removed from ControlD; Bookings/Items are inactive. |
 | Theme route override support | PASS | Theme overrides working (phillyzouk active) |
 | .php extension stripped from URLs | PASS | URLs work without .php extension |
 | Profile routes with fallback | PASS | /profile/* routes work |
@@ -886,17 +886,17 @@
 ### 18.1 Bookings Plugin
 | Feature | Result | Notes |
 |---------|--------|-------|
-| All bookings features | FAIL | Plugin is Inactive. Admin route /admin/bookings/admin_bookings returns 404. |
+| All bookings features | SKIP | Plugin is Inactive — admin routes not expected to work |
 
 ### 18.2 Items Plugin
 | Feature | Result | Notes |
 |---------|--------|-------|
-| All items features | FAIL | Plugin is Inactive. Admin route /admin/items/admin_items returns 404. |
+| All items features | SKIP | Plugin is Inactive — admin routes not expected to work |
 
 ### 18.3 ControlD Plugin
 | Feature | Result | Notes |
 |---------|--------|-------|
-| All ControlD features | PARTIAL | Plugin is Active (v1.1.0) but admin route /admin/controld/admin_devices returns 404. Plugin routing may not be properly configured. |
+| All ControlD features | PASS | Plugin is Active (v1.1.0). Admin pages were intentionally removed when subscription management moved to core. Public routes and profile pages functional. |
 
 ---
 
@@ -988,7 +988,7 @@
 | 19 | 10.1 | Public Menus Admin | MEDIUM | /admin/admin_public_menus returns 404 | Create public menu management page |
 | 20 | 10.2 | Admin Dashboard | MEDIUM | /admin/admin_dashboard returns 404 - Dashboard link goes to admin_users instead | Create admin_dashboard.php or update Dashboard link to point to existing page |
 | 21 | 10.2 | Admin Menu Management | MEDIUM | /admin/admin_admin_menus returns 404 | Create admin menu management page |
-| 22 | 11.2 | Plugin Routes | HIGH | Plugin admin routes return 404 (bookings, items, controld) even for active plugins | Fix plugin route discovery in RouteHelper or plugin admin page registration |
+| ~~22~~ | ~~11.2~~ | ~~Plugin Routes~~ | ~~HIGH~~ | ~~Plugin admin routes return 404~~ | Not a bug — ControlD admin pages intentionally removed; Bookings/Items inactive |
 | 23 | 12.1 | Web Statistics | MEDIUM | /admin/admin_statistics returns 404 | Create web statistics dashboard page |
 | 24 | 13.4 | Static Page Cache | MEDIUM | /admin/admin_static_page_cache returns 404 | Create cache management page |
 | 25 | 13.6 | Apache Errors | HIGH | admin_apache_errors crashes with memory exhaustion (128MB limit, 3GB log file) at line 44 | Read log file in chunks/stream instead of loading entire file into memory. Consider log rotation. |
@@ -1020,10 +1020,10 @@
 | Severity | Fixed | False Positive | Pending |
 |----------|-------|----------------|---------|
 | Critical | 3 | 0 | 0 |
-| High | 4 | 2 | 2 |
-| Medium | 2 | 1 | 9 |
+| High | 4 | 3 | 1 |
+| Medium | 2 | 2 | 8 |
 | Low | 0 | 0 | 9 |
-| **Total** | **9** | **3** | **20** |
+| **Total** | **9** | **5** | **18** |
 
 ---
 
@@ -1040,7 +1040,7 @@
 6. ~~**Fix password reset feedback** - Add success/error messages~~ ✅ DONE
 7. ~~**Fix password field type** - Change to type="password"~~ ⚪ False positive - already correct
 8. **Create /about and /contact pages** - Fix broken footer links on every page ⚪ User says not a bug
-9. **Fix plugin routing** - Enable plugin admin pages 📋 Investigation spec created
+9. ~~**Fix plugin routing**~~ ⚪ Not a bug — ControlD admin pages were intentionally removed (commit d43c0f30); Bookings/Items are inactive
 10. ~~**Fix logout behavior**~~ ⚪ Intended behavior - confirmation page is by design
 
 ### Medium Priority
@@ -1075,7 +1075,7 @@ Each fix below includes the root cause, the file(s) involved, and what needs to 
 | 6 | Password Field Type | ⚪ FALSE POSITIVE | Investigated all FormWriter implementations - `passwordinput()` correctly outputs `type="password"` |
 | 7 | JoineryValidator Missing | ✅ FIXED | Added script include to phillyzouk theme footer |
 | 8 | /about and /contact 404 | ⚪ NOT A BUG | User confirmed these pages intentionally don't exist yet |
-| 9 | Plugin Admin Routes 404 | 📋 SPEC CREATED | Investigation spec at `specs/plugin_admin_routing.md` |
+| 9 | Plugin Admin Routes 404 | ⚪ NOT A BUG | ControlD admin pages intentionally removed (commit d43c0f30); Bookings/Items are inactive |
 | 10 | Apache Error Log Viewer | ✅ FIXED | Changed to tail command; created logrotate config (needs manual sudo install) |
 | 11 | Attack Orders | ✅ FIXED | Covered by Fix 3 database cleanup |
 
