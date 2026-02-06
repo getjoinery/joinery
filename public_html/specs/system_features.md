@@ -696,7 +696,7 @@
 
 ## 18. Plugins
 
-### 18.1 Bookings Plugin
+### 18.1 Bookings Plugin (Inactive)
 - [ ] Booking creation and management
 - [ ] Booking types with Calendly integration
 - [ ] Booking status workflow (Created > Booked > Completed > Canceled)
@@ -704,7 +704,7 @@
 - [ ] Booking type admin pages
 - [ ] Schedule link configuration
 
-### 18.2 Items Plugin
+### 18.2 Items Plugin (Inactive)
 - [ ] Item creation with name, description, body
 - [ ] URL-safe slug generation with uniqueness
 - [ ] Item relationships (many-to-many)
@@ -713,7 +713,7 @@
 - [ ] Item admin pages (list, view, edit)
 - [ ] Dropdown helper methods for form selectors
 
-### 18.3 ControlD Plugin
+### 18.3 ControlD Plugin (Active)
 - [ ] Device management (add, edit, delete, soft delete)
 - [ ] DNS filtering profile management
 - [ ] Filter configuration (50+ categories: ads, malware, phishing, gambling, etc.)
@@ -726,6 +726,7 @@
 - [ ] Plugin-specific routing and views
 - [ ] Plugin-specific pricing page
 - [ ] Tier-based feature access (`tier_features.json`)
+Note: ControlD admin pages (admin_ctld_account, admin_ctld_accounts) were removed when subscription management was moved to core (commit d43c0f30).
 
 ---
 
