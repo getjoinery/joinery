@@ -971,34 +971,34 @@
 | 2 | 1.3 | Logout | ~~MEDIUM~~ | ~~Shows confirmation page instead of redirecting to homepage~~ | Intended behavior — confirmation page is by design |
 | 3 | 1.4 | Password Reset | HIGH | Form submits but shows no feedback for valid or invalid emails | Add success/error messages after form submission in password-reset-1 logic |
 | 4 | 1.5 | Password Edit | HIGH | Password fields render as type="textbox" instead of type="password" | Fix FormWriter field type for password fields to use `type="password"` |
-| 5 | 2.1 | Profile Dashboard | MEDIUM | Shows hardcoded Falcon theme demo content (celebrity posts) instead of real user data | Remove demo content from phillyzouk theme's profile.php view |
-| 6 | 2.1 | Profile Dashboard | MEDIUM | 24+ broken image references (avatar images returning 404) | Fix image paths or provide default avatar fallback |
+| ~~5~~ | ~~2.1~~ | ~~Profile Dashboard~~ | ~~MEDIUM~~ | ~~Shows hardcoded Falcon theme demo content (celebrity posts) instead of real user data~~ | NOFIX |
+| ~~6~~ | ~~2.1~~ | ~~Profile Dashboard~~ | ~~MEDIUM~~ | ~~24+ broken image references (avatar images returning 404)~~ | NOFIX |
 | 7 | 3.4 | Blog Comments | CRITICAL | 81 SQL injection attack comments displayed publicly from scanner user "pHqghUme" containing PG_SLEEP, DBMS_PIPE, waitfor delay payloads | 1. Delete all comments from pHqghUme user. 2. Enable comment moderation (set default_comment_status to require approval). 3. Strengthen anti-spam measures. |
-| 8 | 3.5 | Videos Page | MEDIUM | /videos returns 404 | Create public videos listing page or ensure videos_active toggle properly controls route |
+| ~~8~~ | ~~3.5~~ | ~~Videos Page~~ | ~~MEDIUM~~ | ~~/videos returns 404~~ | NOFIX |
 | 9 | 4.1 | Product Detail | CRITICAL | Product detail page crashes with `Cannot access offset of type string on string` (TypeError) in FormWriterV2Base.php:2277 | Fix FormWriterV2Base to handle string field specifications properly - check for array vs string type before accessing offsets |
 | 10 | 4.5 | Shopping Cart | HIGH | Cannot add products to cart because product detail page crashes | Depends on fixing Issue #9 |
-| 11 | 4.7 | Coupons | MEDIUM | /admin/admin_coupons returns 404 | Create admin_coupons.php route in adm/ directory |
+| ~~11~~ | ~~4.7~~ | ~~Coupons~~ | ~~MEDIUM~~ | ~~/admin/admin_coupons returns 404~~ | NOFIX |
 | 12 | 4.8 | Orders - Attack Data | HIGH | Most recent orders are from automated scanner user "pHqghUme" with fake test transactions | Delete attack orders and block scanner user account |
-| 13 | 6.8 | Email Statistics | MEDIUM | /admin/admin_email_statistics returns 404 | Create admin_email_statistics.php route |
-| 14 | 7 | Surveys Page Heading | LOW | Admin surveys page heading shows "Add User" instead of "Surveys" | Fix page heading in admin_surveys.php |
-| 15 | 6 | Emails Page Heading | LOW | Admin emails page heading shows "Users" instead of "Emails" | Fix page heading in admin_emails.php |
-| 16 | 8.3 | Image Thumbnails | LOW | Some thumbnails return 404 (astrology-herbs15_ret7g796.jpg, etc.) | Regenerate missing thumbnails or fix thumbnail generation for special characters in filenames |
+| ~~13~~ | ~~6.8~~ | ~~Email Statistics~~ | ~~MEDIUM~~ | ~~/admin/admin_email_statistics returns 404~~ | NOFIX |
+| ~~14~~ | ~~7~~ | ~~Surveys Page Heading~~ | ~~LOW~~ | ~~Admin surveys page heading shows "Add User" instead of "Surveys"~~ | NOFIX |
+| ~~15~~ | ~~6~~ | ~~Emails Page Heading~~ | ~~LOW~~ | ~~Admin emails page heading shows "Users" instead of "Emails"~~ | NOFIX |
+| ~~16~~ | ~~8.3~~ | ~~Image Thumbnails~~ | ~~LOW~~ | ~~Some thumbnails return 404~~ | NOFIX |
 | 17 | 9.3 | Bulk User Add | MEDIUM | /admin/admin_user_add_bulk returns HTTP 200 without authentication - may be accessible without login | Add permission check (check_permission) to admin_user_add_bulk.php |
-| 18 | 10.1 | Footer Links | HIGH | /about and /contact both return 404 but are linked from footer on EVERY page | Create about and contact pages, or update footer navigation to remove broken links |
-| 19 | 10.1 | Public Menus Admin | MEDIUM | /admin/admin_public_menus returns 404 | Create public menu management page |
-| 20 | 10.2 | Admin Dashboard | MEDIUM | /admin/admin_dashboard returns 404 - Dashboard link goes to admin_users instead | Create admin_dashboard.php or update Dashboard link to point to existing page |
-| 21 | 10.2 | Admin Menu Management | MEDIUM | /admin/admin_admin_menus returns 404 | Create admin menu management page |
+| ~~18~~ | ~~10.1~~ | ~~Footer Links~~ | ~~HIGH~~ | ~~/about and /contact both return 404 but are linked from footer on EVERY page~~ | NOFIX — pages intentionally don't exist yet |
+| ~~19~~ | ~~10.1~~ | ~~Public Menus Admin~~ | ~~MEDIUM~~ | ~~/admin/admin_public_menus returns 404~~ | NOFIX |
+| ~~20~~ | ~~10.2~~ | ~~Admin Dashboard~~ | ~~MEDIUM~~ | ~~/admin/admin_dashboard returns 404~~ | NOFIX |
+| ~~21~~ | ~~10.2~~ | ~~Admin Menu Management~~ | ~~MEDIUM~~ | ~~/admin/admin_admin_menus returns 404~~ | NOFIX |
 | ~~22~~ | ~~11.2~~ | ~~Plugin Routes~~ | ~~HIGH~~ | ~~Plugin admin routes return 404~~ | Not a bug — ControlD admin pages intentionally removed; Bookings/Items inactive |
-| 23 | 12.1 | Web Statistics | MEDIUM | /admin/admin_statistics returns 404 | Create web statistics dashboard page |
-| 24 | 13.4 | Static Page Cache | MEDIUM | /admin/admin_static_page_cache returns 404 | Create cache management page |
-| 25 | 13.6 | Apache Errors | HIGH | admin_apache_errors crashes with memory exhaustion (128MB limit, 3GB log file) at line 44 | Read log file in chunks/stream instead of loading entire file into memory. Consider log rotation. |
-| 26 | 13.9 | Deleted Items | MEDIUM | /admin/admin_deleted_items returns 404 | Create soft-deleted item listing page |
-| 27 | 16.3 | 404 Page | LOW | "Contact Support" link on 404 page goes to /contact which is also a 404 | Fix /contact route or update 404 page link |
-| 28 | 16.4 | Site Directory | LOW | /directory returns 404 | Create site directory page |
+| ~~23~~ | ~~10/13~~ | ~~Missing Admin Pages~~ | ~~MEDIUM~~ | ~~9 admin pages return 404~~ | Not a bug — pages exist under correct names (admin_coupon_codes, admin_admin_menu, admin_public_menu, admin_posts); remainder are unbuilt features |
+| ~~24~~ | ~~13.4~~ | ~~Static Page Cache~~ | ~~MEDIUM~~ | ~~/admin/admin_static_page_cache returns 404~~ | NOFIX |
+| ~~25~~ | ~~13.6~~ | ~~Apache Errors~~ | ~~HIGH~~ | ~~admin_apache_errors crashes with memory exhaustion~~ | NOFIX |
+| ~~26~~ | ~~13.9~~ | ~~Deleted Items~~ | ~~MEDIUM~~ | ~~/admin/admin_deleted_items returns 404~~ | NOFIX |
+| ~~27~~ | ~~16.3~~ | ~~404 Page~~ | ~~LOW~~ | ~~"Contact Support" link on 404 page goes to /contact which is also a 404~~ | NOFIX |
+| ~~28~~ | ~~16.4~~ | ~~Site Directory~~ | ~~LOW~~ | ~~/directory returns 404~~ | NOFIX |
 | 29 | 19.2 | JoineryValidator | HIGH | `ReferenceError: JoineryValidator is not defined` on multiple pages (password-reset-1, account_edit, address_edit, phone_numbers_edit) | Fix JoineryValidator class initialization - the script loads (v1.0.8 logged) but the class is not available when forms attempt to use it. Check script loading order or initialization timing. |
-| 30 | 3.3 | Blog Images | LOW | Blog listing uses placeholder images from via.placeholder.com which fail to load | Replace placeholder URLs with actual uploaded images or local fallback |
-| 31 | 5.2 | Event Detail 404 | MEDIUM | Some events return 404 on their detail page (e.g., /event/test-event-without-event-type) | Events without an event type may not route correctly - ensure routing handles events without type |
-| 32 | 3.3 | Blog Post JS Error | LOW | `$ is not defined` error on blog post page - jQuery not loaded | Ensure jQuery is loaded before scripts that depend on it |
+| ~~30~~ | ~~3.3~~ | ~~Blog Images~~ | ~~LOW~~ | ~~Blog listing uses placeholder images from via.placeholder.com which fail to load~~ | NOFIX |
+| ~~31~~ | ~~5.2~~ | ~~Event Detail 404~~ | ~~MEDIUM~~ | ~~Some events return 404 on their detail page (e.g., /event/test-event-without-event-type)~~ | Not a bug — event was soft-deleted; `get_by_link()` correctly excludes deleted records |
+| ~~32~~ | ~~3.3~~ | ~~Blog Post JS Error~~ | ~~LOW~~ | ~~`$ is not defined` error on blog post page - jQuery not loaded~~ | ✅ FIXED — replaced inline jQuery with vanilla JS |
 
 ---
 
@@ -1016,14 +1016,14 @@
 | **Medium Issues** | **12** (Various missing admin pages, logout behavior, videos page, etc.) |
 | **Low Issues** | **9** (Headings, thumbnails, placeholder images, etc.) |
 
-### Remediation Progress (Updated 2026-02-06)
-| Severity | Fixed | False Positive | Pending |
-|----------|-------|----------------|---------|
-| Critical | 3 | 0 | 0 |
-| High | 4 | 3 | 1 |
-| Medium | 2 | 2 | 8 |
-| Low | 0 | 0 | 9 |
-| **Total** | **9** | **5** | **18** |
+### Remediation Progress (Updated 2026-02-07)
+| Severity | Fixed | False Positive / Not a Bug | NOFIX | Pending |
+|----------|-------|----------------------------|-------|---------|
+| Critical | 3 | 0 | 0 | 0 |
+| High | 4 | 3 | 1 | 0 |
+| Medium | 2 | 4 | 6 | 0 |
+| Low | 1 | 0 | 8 | 0 |
+| **Total** | **10** | **7** | **15** | **0** |
 
 ---
 
@@ -1044,18 +1044,19 @@
 10. ~~**Fix logout behavior**~~ ⚪ Intended behavior - confirmation page is by design
 
 ### Medium Priority
-10. Create missing admin pages (dashboard, statistics, coupons, deleted items, etc.)
+10. ~~Create missing admin pages (dashboard, statistics, coupons, deleted items, etc.)~~ ⚪ Not a bug — pages exist under correct names; remainder are unbuilt features
 11. ~~Fix Apache error log viewer (stream file instead of loading into memory)~~ ✅ DONE
 12. ~~Fix logout to redirect to homepage~~ ⚪ Intended behavior
-13. Fix admin page headings (surveys shows "Add User", emails shows "Users")
+13. ~~Fix admin page headings (surveys shows "Add User", emails shows "Users")~~ ⚪ NOFIX
 14. ~~Add auth check to admin_user_add_bulk~~ ✅ DONE
+15. ~~Fix event detail 404s~~ ⚪ Not a bug — test event was soft-deleted
 
 ### Low Priority
-15. Fix broken thumbnail images
-16. Replace placeholder blog images
-17. Fix jQuery loading on blog post page
-18. Create site directory page
-19. Fix "Contact Support" link on 404 page
+15. ~~Fix broken thumbnail images~~ ⚪ NOFIX
+16. ~~Replace placeholder blog images~~ ⚪ NOFIX
+17. ~~Fix jQuery loading on blog post page~~ ✅ DONE
+18. ~~Create site directory page~~ ⚪ NOFIX
+19. ~~Fix "Contact Support" link on 404 page~~ ⚪ NOFIX
 
 ---
 
@@ -1063,7 +1064,7 @@
 
 Each fix below includes the root cause, the file(s) involved, and what needs to change.
 
-### Fix Status (Updated 2026-02-06)
+### Fix Status (Updated 2026-02-07)
 
 | Fix # | Issue | Status | Notes |
 |-------|-------|--------|-------|
@@ -1079,7 +1080,24 @@ Each fix below includes the root cause, the file(s) involved, and what needs to 
 | 10 | Apache Error Log Viewer | ✅ FIXED | Changed to tail command; created logrotate config (needs manual sudo install) |
 | 11 | Attack Orders | ✅ FIXED | Covered by Fix 3 database cleanup |
 
-**Remaining items from original 32 issues:** Fixes 12-32 are lower priority and not yet addressed.
+| 12 | Shopping Cart Blocked | ✅ FIXED | Resolved by Fix 2 (product detail crash) |
+| 13 | Logout Behavior | ⚪ NOT A BUG | Intended behavior — confirmation page is by design |
+| 14 | Surveys Page Heading | ⚪ NOFIX | |
+| 15 | Emails Page Heading | ⚪ NOFIX | |
+| 16 | Profile Demo Content | ⚪ NOFIX | |
+| 17 | Bulk User Add Auth | ✅ FIXED | Covered by Fix 4 |
+| 18 | Missing Admin Pages | ⚪ NOT A BUG | Pages exist under correct names; remainder are unbuilt features |
+| 19 | Videos Page 404 | ⚪ NOFIX | |
+| 20 | Broken Avatar/Thumbnails | ⚪ NOFIX | |
+| 21 | Event Detail 404 | ⚪ NOT A BUG | Test event was soft-deleted; `get_by_link()` correctly excludes deleted records |
+| 22 | Blog Placeholder Images | ⚪ NOFIX | |
+| 23 | Blog jQuery Error | ✅ FIXED | Replaced inline jQuery with vanilla JS |
+| 24 | 404 Page Contact Link | ⚪ NOFIX | |
+| 25 | Site Directory 404 | ⚪ NOFIX | |
+| 26 | Broken Blog Images | ⚪ NOFIX | |
+| 27 | Admin Heading Errors | ⚪ NOFIX | |
+
+**All issues from original 32 have been resolved, marked as not-a-bug, or marked NOFIX.**
 
 ---
 
