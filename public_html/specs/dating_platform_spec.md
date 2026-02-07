@@ -25,39 +25,21 @@ These are new core features that fill gaps in the platform for ANY interactive/s
 
 **Problem:** Users currently have only name, email, photo, phone, timezone. Any community or membership platform needs richer profiles.
 
-**New Core Fields on User (or a linked `user_profiles` table):**
-- `bio` (text) - Free-form about me, 500 char limit
-- `date_of_birth` (date) - Stored securely, displayed as age only in public contexts
-- `gender` (varchar) - Open text or constrained list (site-configurable)
-- `city` (varchar) - Display-level location
-- `state_region` (varchar)
-- `country` (varchar)
-- `latitude` / `longitude` (decimal) - For distance calculations, derived from city or user-provided
-- `profile_visibility` (varchar) - 'public', 'members_only', 'private'
+**New fields on `usr_users`** (via `$field_specifications` in `data/users_class.php`):
+- `usr_bio` (text) - Free-form about me, 500 char limit
+- `usr_date_of_birth` (date) - Stored securely, displayed as age only in public contexts
+- `usr_gender` (varchar(30)) - Open text or constrained list (site-configurable)
+- `usr_profile_visibility` (varchar(20)) - 'public', 'members_only', 'private'
 
-**Approach Decision: Extend User vs. Separate Table**
+These are core user attributes. The `usr_users` table already has profile-type fields (`usr_nickname`, `usr_organization_name`, `usr_pic_picture_id`, `usr_timezone`), so this extends the existing pattern.
 
-Option A: Add fields to `usr_users` via `$field_specifications` - simpler, fewer joins.
-Option B: Create `upr_user_profiles` table linked 1:1 - cleaner separation, doesn't bloat user model.
+**Location & Geography:** Address data (city, state, country) and geocoded coordinates (lat/lng, PostGIS geography column) live on the existing `usa_users_addrs` table, not on `usr_users`. Users already have addresses; geocoding extends that existing data. See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for full details.
 
-**Recommendation:** Option B (separate `upr_user_profiles` table). Keeps the core user model lean and auth-focused. The profile table is opt-in per site. A site that doesn't need profiles (e.g., a pure e-commerce site) doesn't carry the extra columns.
+**Principle:** Core features go in core tables. Plugin-specific fields (dating preferences, relationship goals, etc.) go in plugin tables. Address and geography data stays in the address table where it belongs.
 
 ### 1.2 Multi-Photo Profiles
 
-**Problem:** Users currently get one profile picture (`usr_pic_picture_id`). Any social, marketplace, or membership platform benefits from multiple photos.
-
-**Approach:** The files system already handles uploads, image resizing, and access control. The missing piece is a **user photo gallery** concept.
-
-**New Model: `user_photos` (or leverage existing `files` with conventions)**
-- `uph_user_photo_id` (serial, primary key)
-- `uph_usr_user_id` (int4, FK to users)
-- `uph_fil_file_id` (int4, FK to files)
-- `uph_sort_order` (int2) - Display ordering
-- `uph_is_primary` (bool) - Primary/avatar photo
-- `uph_caption` (varchar 255)
-- `uph_create_time` / `uph_delete_time` (timestamps)
-
-**Limits:** Configurable max photos per user (setting: `max_profile_photos`, default 6).
+See **[Pictures Refactor Spec](pictures_refactor_spec.md)** for full details. New generic `entity_photos` model supporting multi-photo galleries for any entity type (users, events, locations, etc.). Existing `usr_pic_picture_id` stays as a denormalized avatar pointer.
 
 ### 1.3 Notification Center
 
@@ -77,7 +59,7 @@ Option B: Create `upr_user_profiles` table linked 1:1 - cleaner separation, does
 - `ntf_source_id` (int4, nullable) - Entity ID
 - `ntf_create_time` / `ntf_delete_time` (timestamps)
 
-**UI:** Bell icon in header with unread count. Dropdown panel showing recent notifications. Link to full notification list page.
+**Existing UI Scaffolding:** The page header templates already have notification UI in place -- bell icon, unread count badge, and dropdown panel -- wired to `$menu_data['notifications']` in `PublicPageBase::get_menu_data()`. Currently disabled via `enabled => false` placeholder. Implementation needs to: create the data model, populate `get_menu_data()` with real counts/items, and fill in the dropdown content. The Falcon theme (`PublicPageFalcon.php`) and Tailwind theme (`PublicPageTailwind.php`) both have rendering code ready.
 
 **Delivery:** Notifications are always created in-app. Email delivery is controlled per-user via notification preferences (new setting per notification type).
 
@@ -105,12 +87,7 @@ Option B: Create `upr_user_profiles` table linked 1:1 - cleaner separation, does
 - `member_directory_requires_login` (bool, default true)
 - `member_directory_fields` (json) - Which profile fields appear as filters
 
-**Geolocation Support:**
-- See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for full details
-- PostGIS geography column on user_profiles with GiST spatial index
-- Geocoding via OpenStreetMap Nominatim (city -> lat/lng on profile save)
-- `ST_DWithin` for index-assisted proximity queries
-- `GeoHelper` class for distance calculations and geocoding
+**Geolocation Support:** See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for PostGIS setup, geocoding, spatial indexing on the address table, and distance queries.
 
 ### 1.5 Like / Favorite System
 
@@ -224,7 +201,7 @@ These features only make sense for a dating site. Built as a standard Joinery pl
 - `dtp_create_time` / `dtp_update_time` / `dtp_delete_time` (timestamps)
 
 **Profile Prompts System:**
-Instead of a free-form bio only (which is already in core `user_profiles`), dating sites use guided prompts like:
+Instead of a free-form bio only (which is already in core `usr_users` as `usr_bio`), dating sites use guided prompts like:
 - "A perfect first date for me is..."
 - "I'm looking for someone who..."
 - "My most controversial opinion is..."
@@ -287,22 +264,23 @@ This is the core dating experience -- "who should I see next?"
 **SQL Approach (using PostGIS):**
 ```sql
 -- Core discovery query (simplified)
-SELECT u.*, up.*, dp.*,
-  ST_Distance(up.upr_geography, ST_SetSRID(ST_MakePoint(:my_lng, :my_lat), 4326)::geography) / 1000 AS distance_km
+-- Geography lives on the address table; join through user's default address
+SELECT u.*, dp.*,
+  ST_Distance(a.usa_geography, ST_SetSRID(ST_MakePoint(:my_lng, :my_lat), 4326)::geography) / 1000 AS distance_km
 FROM usr_users u
-JOIN upr_user_profiles up ON u.usr_user_id = up.upr_usr_user_id
 JOIN dtp_dating_profiles dp ON u.usr_user_id = dp.dtp_usr_user_id
-WHERE ST_DWithin(up.upr_geography, ST_SetSRID(ST_MakePoint(:my_lng, :my_lat), 4326)::geography, :max_distance_meters)
+JOIN usa_users_addrs a ON a.usa_usr_user_id = u.usr_user_id AND a.usa_is_default = TRUE
+WHERE ST_DWithin(a.usa_geography, ST_SetSRID(ST_MakePoint(:my_lng, :my_lat), 4326)::geography, :max_distance_meters)
   AND u.usr_user_id NOT IN (SELECT ulk_target_id FROM ulk_user_likes WHERE ulk_usr_user_id = :user_id AND ulk_target_type = 'user')
   AND u.usr_user_id NOT IN (SELECT ubl_blocked_usr_user_id FROM ubl_user_blocks WHERE ubl_usr_user_id = :user_id)
   AND dp.dtp_is_active = true
   AND dp.dtp_looking_for IN (:my_gender, 'everyone')
-  -- age filters on up.upr_date_of_birth
+  -- age filters on u.usr_date_of_birth
 ORDER BY distance_km ASC, dp.dtp_last_active_time DESC
 LIMIT 20 OFFSET :offset;
 ```
 
-`ST_DWithin` uses the GiST spatial index to eliminate far-away users before computing exact distances -- critical for performance as the user base grows.
+`ST_DWithin` uses the GiST spatial index on the address table to eliminate far-away users before computing exact distances. See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for full details on PostGIS setup and distance queries.
 
 **Views:**
 - Card-based browse view (one profile at a time, swipe-style)
@@ -356,7 +334,7 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 ### What Ships First
 
 **Core features (Phase 1):**
-1. Extended User Profiles (1.1) - bio, DOB, gender, location, lat/lng
+1. Extended User Profiles (1.1) - bio, DOB, gender, profile visibility
 2. Multi-Photo Profiles (1.2) - upload up to 6 photos, set primary
 3. Like System (1.5) - like/pass on users
 4. Block System (1.6) - block users
@@ -391,7 +369,7 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 
 ### MVP User Flow
 
-1. **Register** (existing) -> **Complete Profile** (new: bio, DOB, gender, city, photos)
+1. **Register** (existing) -> **Complete Profile** (new: bio, DOB, gender, address, photos)
 2. **Set Dating Preferences** (age range, distance, looking for)
 3. **Discover** -> Browse profiles one at a time or in grid
 4. **Like or Pass** -> Like sends to match engine
@@ -417,10 +395,9 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 ### Directory Structure
 
 ```
-# Core additions
+# Core additions (profile fields in users_class.php, geo fields in address_class.php)
 data/
-  user_profiles_class.php          # Extended profile fields
-  user_photos_class.php            # Multi-photo gallery
+  entity_photos_class.php          # Multi-photo gallery for all entities (see pictures_refactor_spec.md)
   notifications_class.php          # In-app notifications
   notification_preferences_class.php
   user_likes_class.php             # Generic like/favorite
@@ -492,9 +469,9 @@ plugins/dating/
 - Match detection (plugin-only logic triggered by like events)
 - Dating profile fields (plugin data model)
 
-### Database Extensions for Geolocation
+### Geolocation
 
-See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for complete details on PostGIS setup, geography columns, geocoding, spatial indexing, legacy code cleanup, and deployment.
+See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for PostGIS setup, geography columns on the address table, geocoding, spatial indexing, and legacy code cleanup.
 
 ---
 
@@ -519,7 +496,7 @@ Ordered roughly by impact and user demand:
 
 1. **Gender model:** Simple 3-option (man/woman/nonbinary) or flexible (free text, multiple select)? This has significant UI and filtering implications.
 
-2. **Photo moderation:** MVP has manual admin review via reports. Do we want proactive photo screening before display? Could add a `uph_is_approved` flag with admin approval queue.
+2. **Photo moderation:** MVP has manual admin review via reports. See **[Pictures Refactor Spec](pictures_refactor_spec.md)** open questions for `uph_is_approved` discussion.
 
 3. **Mobile:** Is the MVP web-only, or do we need to consider a mobile app from the start? The existing API could support a mobile client, but the discovery UX is very different on mobile vs. desktop.
 

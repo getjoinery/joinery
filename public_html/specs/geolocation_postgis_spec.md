@@ -4,8 +4,9 @@
 
 **Last Updated:** 2026-02-06
 
-**Depends on:** Core `user_profiles` table (see `dating_platform_spec.md` section 1.1)
 **Used by:** Dating plugin discovery engine, member directory, event proximity (future)
+
+**Tables affected:** `usa_users_addrs` (adding geo fields to existing address table), `loc_locations` (adding optional geo fields)
 
 ---
 
@@ -15,7 +16,7 @@ The platform previously had extensive geo infrastructure (PostGIS, GeoIP, Google
 
 **What we're building:**
 1. PostGIS extension for spatial queries and indexing
-2. Geography column on user profiles with GiST spatial index
+2. Geography columns on `usa_users_addrs` and `loc_locations` with GiST spatial index
 3. Geocoding service to convert addresses into coordinates (full address when available, graceful degradation to city-level)
 4. Helper class for geo operations (geocoding, distance, bounding box, privacy-safe display)
 5. Cleanup of legacy dead code
@@ -53,17 +54,19 @@ SELECT PostGIS_Version();
 -- Should return something like "3.4 USE_GEOS=1 USE_PROJ=1 USE_STATS=1"
 ```
 
-### 2.2 Geography Column on User Profiles
+### 2.2 Geography Column on Addresses
 
-The `user_profiles` table (defined in `dating_platform_spec.md` section 1.1) stores `latitude` and `longitude` as decimal fields. The geography column is derived from these.
+Geography fields are added to the existing `usa_users_addrs` table (via `$field_specifications` in `data/address_class.php`). Address data (city, state, zip, country) already lives here, so geocoded coordinates belong here too. Proximity queries join through the user's default address (`usa_is_default = TRUE`).
 
-**Schema addition:**
+**Target schema (handled automatically by DatabaseUpdater once extended):**
 ```sql
--- Add geography column (derived from lat/lng, not user-entered)
-ALTER TABLE upr_user_profiles ADD COLUMN upr_geography geography(Point, 4326);
+-- These columns are added via $field_specifications, not manually
+-- usa_latitude numeric(10,7)
+-- usa_longitude numeric(10,7)
+-- usa_geography geography(Point, 4326)
 
--- Create spatial index
-CREATE INDEX idx_user_profiles_geography ON upr_user_profiles USING GIST (upr_geography);
+-- Spatial index via migration (can't be expressed in $field_specifications)
+CREATE INDEX idx_addresses_geography ON usa_users_addrs USING GIST (usa_geography);
 ```
 
 **SRID 4326** = WGS 84, the standard GPS coordinate system. The `geography` type (not `geometry`) handles distance calculations on the earth's curved surface in meters.
@@ -79,29 +82,38 @@ Since `SystemBase::set()` treats values as literal data for prepared statements,
 Note: `prepare()` is not guaranteed to be called, so this must live in `save()`.
 
 ```php
+// In Address model (data/address_class.php) -- geography fields are on usa_users_addrs
+// The same pattern applies to Location model (data/locations_class.php)
 public function save($debug = false) {
     // Let parent save handle all normal fields
     $result = parent::save($debug);
 
     // Then update geography from lat/lng
     $dblink = DbConnector::get_instance()->get_db_link();
-    if ($this->get('upr_latitude') && $this->get('upr_longitude')) {
-        $sql = "UPDATE upr_user_profiles
-                SET upr_geography = ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
-                WHERE upr_user_profile_id = ?";
+    $table = static::$tablename;
+    $pkey = static::$pkey_column;
+
+    $lat = $this->get('usa_latitude');  // or loc_latitude for Location
+    $lng = $this->get('usa_longitude'); // or loc_longitude for Location
+    $geo_field = 'usa_geography';       // or loc_geography for Location
+
+    if ($lat && $lng) {
+        $sql = "UPDATE {$table}
+                SET {$geo_field} = ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
+                WHERE {$pkey} = ?";
         $q = $dblink->prepare($sql);
-        $q->execute([$this->get('upr_longitude'), $this->get('upr_latitude'), $this->get('upr_user_profile_id')]);
+        $q->execute([$lng, $lat, $this->get($pkey)]);
     } else {
-        $sql = "UPDATE upr_user_profiles SET upr_geography = NULL WHERE upr_user_profile_id = ?";
+        $sql = "UPDATE {$table} SET {$geo_field} = NULL WHERE {$pkey} = ?";
         $q = $dblink->prepare($sql);
-        $q->execute([$this->get('upr_user_profile_id')]);
+        $q->execute([$this->get($pkey)]);
     }
 
     return $result;
 }
 ```
 
-The same pattern applies to the `Location` model when geo fields are added there.
+This pattern applies to any model that has lat/lng/geography fields: the `Address` model (`usa_users_addrs`) and the `Location` model (`loc_locations`).
 
 ### 2.4 Integration with Data Model System
 
@@ -140,21 +152,35 @@ else if($data_type == 'USER-DEFINED'){
 
 **Important note on `information_schema`:** PostgreSQL reports PostGIS types as `USER-DEFINED` in `information_schema.columns.data_type`. The actual type name (`geography`) is in the `udt_name` column. The `translateDataTypes` query (line 473) currently only selects `data_type` -- it would need to also select `udt_name` to properly identify geography columns.
 
-**Column specification:**
+**Column specification examples:**
 ```php
-// In UserProfile $field_specifications:
-'upr_latitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
-'upr_longitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
-'upr_geography' => array('type' => 'geography(Point, 4326)', 'is_nullable' => true),
+// In data/address_class.php $field_specifications:
+'usa_latitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
+'usa_longitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
+'usa_geography' => array('type' => 'geography(Point, 4326)', 'is_nullable' => true),
+
+// In data/locations_class.php $field_specifications:
+'loc_latitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
+'loc_longitude' => array('type' => 'numeric(10,7)', 'is_nullable' => true),
+'loc_geography' => array('type' => 'geography(Point, 4326)', 'is_nullable' => true),
 ```
 
 **GiST spatial index:** Since `$field_specifications` doesn't support index type selection, the spatial index is created via migration. This is reasonable -- it's an index, not a column or table, and it's analogous to installing the PostGIS extension itself.
 
 ```php
+// GiST index for loc_locations:
 $migration = array();
 $migration['database_version'] = '0.XX';
-$migration['test'] = "SELECT count(1) as count FROM pg_indexes WHERE indexname = 'idx_user_profiles_geography'";
-$migration['migration_sql'] = 'CREATE INDEX idx_user_profiles_geography ON upr_user_profiles USING GIST (upr_geography);';
+$migration['test'] = "SELECT count(1) as count FROM pg_indexes WHERE indexname = 'idx_locations_geography'";
+$migration['migration_sql'] = 'CREATE INDEX idx_locations_geography ON loc_locations USING GIST (loc_geography);';
+$migration['migration_file'] = NULL;
+$migrations[] = $migration;
+
+// GiST index for usa_users_addrs:
+$migration = array();
+$migration['database_version'] = '0.XX';
+$migration['test'] = "SELECT count(1) as count FROM pg_indexes WHERE indexname = 'idx_addresses_geography'";
+$migration['migration_sql'] = 'CREATE INDEX idx_addresses_geography ON usa_users_addrs USING GIST (usa_geography);';
 $migration['migration_file'] = NULL;
 $migrations[] = $migration;
 ```
@@ -186,14 +212,14 @@ $migrations[] = $migration;
 
 ### 3.2 Geocoding Flow
 
-**When:** On save, whenever address/location fields change. Works for any entity with location data (user profiles, event locations, etc.).
+**When:** On address save, whenever address fields change. The Address model's `save()` override calls `GeoHelper::geocode_address()` and stores the result. Works for any entity with location data (addresses, event locations, etc.).
 
 **Full address example (most precise):**
 ```
-User address: "123 Main St, Nashville, Tennessee, US"
+Address saved: "123 Main St, Nashville, Tennessee, US"
            |
            v
-  GeoHelper::geocode(street: "123 Main St", city: "Nashville", state: "Tennessee", country: "US")
+  GeoHelper::geocode_address($address)  -- pulls fields from Address model
            |
            v
   Nominatim API: GET /search?street=123+Main+St&city=Nashville&state=Tennessee&countrycodes=US&format=json&limit=1
@@ -202,13 +228,13 @@ User address: "123 Main St, Nashville, Tennessee, US"
   Response: { "lat": "36.1627", "lon": "-86.7816", "display_name": "123 Main St, Nashville, ..." }
            |
            v
-  Store: upr_latitude = 36.1627, upr_longitude = -86.7816
-  Model save() updates: upr_geography = ST_SetSRID(ST_MakePoint(-86.7816, 36.1627), 4326)::geography
+  Store on address: usa_latitude = 36.1627, usa_longitude = -86.7816
+  Address save() updates: usa_geography = ST_SetSRID(ST_MakePoint(-86.7816, 36.1627), 4326)::geography
 ```
 
 **City-only example (graceful degradation):**
 ```
-User only enters city: "Nashville", state: "Tennessee"
+Address with only city: "Nashville", state: "Tennessee"
            |
            v
   GeoHelper::geocode(city: "Nashville", state: "Tennessee", country: "US")
@@ -277,7 +303,7 @@ class GeoHelper {
 }
 ```
 
-**`geocode_address()` integration:** The existing `Address` model already stores `address1`, `address2`, `city`, `state`, and zip code. This convenience method pulls those fields and passes them to `geocode()`, making it easy to geocode any address in the system without manual field mapping.
+**`geocode_address()` integration:** The existing `Address` model (`data/address_class.php`, table `usa_users_addrs`) already stores `usa_address1`, `usa_address2`, `usa_city`, `usa_state`, `usa_zip_code_id`, and `usa_cco_country_code_id`. This convenience method pulls those fields and passes them to `geocode()`, making it easy to geocode any address in the system without manual field mapping.
 
 ### 3.4 Nominatim API Details
 
@@ -332,10 +358,10 @@ Full-address geocoding produces precise coordinates (within meters of the actual
 1. **Coordinates are internal data.** Latitude, longitude, and the geography column are never included in API responses, JSON exports, or public profile views.
 2. **Distance is the public output.** Other users only see approximate distance: "3 miles away", "12 km away". Never exact coordinates.
 3. **Display rounding:** Distances are rounded for display -- under 1km show "< 1 km", 1-10km round to nearest integer, 10+ km round to nearest 5. This prevents triangulation.
-4. **`export_as_array()` exclusion:** The `UserProfile` model's `export_as_array()` and `get_json()` methods must exclude `upr_latitude`, `upr_longitude`, and `upr_geography` from output. Distance is computed at query time and included as a computed field, not as stored coordinates.
+4. **`export_as_array()` exclusion:** Any model with geography fields must exclude latitude, longitude, and geography columns from `export_as_array()` and `get_json()` output. Distance is computed at query time and included as a computed field, not as stored coordinates.
 5. **API exclusion:** The REST API must not return coordinate fields for user profiles. A `distance_km` computed field may be included when the requesting user's location is known.
 
-**Address fields themselves** (street, city, state) follow the existing `profile_visibility` setting. If a user's profile is 'members_only', their city is only visible to logged-in members. Street address is never displayed publicly regardless of visibility setting -- it's only used for geocoding.
+**Address fields themselves** (street, city, state) follow the existing `profile_visibility` setting and the address table's own privacy field (`usa_privacy`). Street address is never displayed publicly regardless of visibility setting -- it's only used for geocoding.
 
 ---
 
@@ -344,19 +370,35 @@ Full-address geocoding produces precise coordinates (within meters of the actual
 ### 4.1 Core Pattern: ST_DWithin + ST_Distance
 
 ```sql
--- Find users within X km of a point, sorted by distance
+-- Example: Find event locations within X km of a point (loc_locations exists today)
+SELECT loc.loc_location_id, loc.loc_name,
+  ST_Distance(
+    loc.loc_geography,
+    ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography
+  ) / 1000 AS distance_km
+FROM loc_locations loc
+WHERE loc.loc_geography IS NOT NULL
+  AND ST_DWithin(
+    loc.loc_geography,
+    ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+    :radius_meters  -- e.g., 50000 for 50km
+  )
+ORDER BY distance_km ASC;
+
+-- Example: Find users within X km (geography on address table, join through default address)
 SELECT u.usr_user_id, u.usr_first_name, u.usr_last_name,
   ST_Distance(
-    up.upr_geography,
+    a.usa_geography,
     ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography
   ) / 1000 AS distance_km
 FROM usr_users u
-JOIN upr_user_profiles up ON u.usr_user_id = up.upr_usr_user_id
-WHERE up.upr_geography IS NOT NULL
+JOIN usa_users_addrs a ON a.usa_usr_user_id = u.usr_user_id
+  AND a.usa_is_default = TRUE
+WHERE a.usa_geography IS NOT NULL
   AND ST_DWithin(
-    up.upr_geography,
+    a.usa_geography,
     ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-    :radius_meters  -- e.g., 50000 for 50km
+    :radius_meters
   )
 ORDER BY distance_km ASC;
 ```
@@ -369,6 +411,7 @@ ORDER BY distance_km ASC;
 **Performance notes:**
 - The GiST index makes `ST_DWithin` fast even on millions of rows
 - `ST_Distance` is only computed for the rows that pass the `ST_DWithin` filter
+- The JOIN to `usa_users_addrs` is cheap -- the spatial index on `usa_geography` does the heavy filtering first, and the join condition on `usa_usr_user_id` + `usa_is_default` uses existing indexes
 - For very large result sets, add `LIMIT`/`OFFSET` or cursor-based pagination
 
 ### 4.2 Distance in PHP (fallback / display)
@@ -404,14 +447,16 @@ Setting: `distance_unit` with values `km` or `mi`, default based on site locale.
 
 ## 5. Locations Table Enhancement
 
-The existing `loc_locations` table (event venues, offices) has no coordinate fields. As part of this work, add optional geo support:
+The existing `loc_locations` table (event venues, offices) exists today with these columns: `loc_location_id`, `loc_name`, `loc_link`, `loc_address` (text), `loc_website`, `loc_description`, `loc_short_description`, `loc_fil_file_id`, `loc_is_published`, `loc_create_time`, `loc_delete_time`. It has no coordinate fields.
 
-**New fields on `loc_locations`:**
-- `loc_latitude` (decimal, nullable)
-- `loc_longitude` (decimal, nullable)
-- `loc_geography` (geography(Point, 4326), nullable) -- updated in model `save()` override, same pattern as user_profiles
+**New fields to add via `$field_specifications` in `data/locations_class.php`:**
+- `loc_latitude` (numeric(10,7), nullable)
+- `loc_longitude` (numeric(10,7), nullable)
+- `loc_geography` (geography(Point, 4326), nullable) -- updated in model `save()` override
 
-This enables "events near me" queries in the future without a separate implementation.
+**GiST index via migration** (same pattern as section 2.4).
+
+This is an early implementation target since it already exists with no geo columns. It enables "events near me" queries and serves as the proof-of-concept for the PostGIS + DatabaseUpdater integration alongside the `usa_users_addrs` geo fields.
 
 ---
 
@@ -458,7 +503,7 @@ What's dead is the old `zips.zip_codes` **lookup table** (a separate schema with
 
 **`data/users_class.php`:**
 - Line 378: `$address->update_coordinates()` commented out
-- **Action:** **Remove** commented line
+- **Action:** **Remove** commented line (geocoding now handled in Address model save() override)
 
 **`logic/register_logic.php`:**
 - Line 101: References non-existent `zips.zip_codes` table
@@ -490,14 +535,16 @@ These schemas/tables were either never deployed to this database or were cleaned
 ## 7. Implementation Order
 
 1. **Install PostGIS extension** on database
-2. **Create GeoHelper class** with geocode() and distance methods
-3. **Add geography column + spatial index** to user_profiles table (via migration)
-4. **Add geo fields to locations table** (via $field_specifications for lat/lng, migration for geography column)
-5. **Wire geocoding into profile save** -- when city/state/country changes, call GeoHelper::geocode()
-6. **Clean up legacy code** -- remove dead functions, commented code, missing references
-7. **Add distance queries** to member directory / dating discovery
+2. **Extend DatabaseUpdater** -- add geography type support (translateDataTypes, regex, udt_name)
+3. **Create GeoHelper class** (`includes/GeoHelper.php`) with geocode() and distance methods
+4. **Add geo fields to `loc_locations`** (existing table -- via $field_specifications + GiST index migration). This proves out the PostGIS + DatabaseUpdater integration on a real table.
+5. **Wire geocoding into Location model save** -- when address changes, call GeoHelper::geocode()
+6. **Add geo fields to `usa_users_addrs`** (via $field_specifications in `data/address_class.php` + GiST index migration)
+7. **Wire geocoding into Address model save** -- when address fields change, call GeoHelper::geocode_address()
+8. **Clean up legacy code** -- remove dead functions, commented code, missing references
+9. **Add distance queries** to member directory / dating discovery (join through default address)
 
-Steps 1-5 are prerequisite for the dating plugin discovery engine. Step 6 is cleanup that can happen in parallel. Step 7 is the consumer -- it lives in the dating spec.
+Steps 1-5 can be done immediately. Steps 4-5 deliver working geo on event locations. Steps 6-7 add user proximity (via default address) for member directory and dating discovery.
 
 ---
 
@@ -581,10 +628,18 @@ assert($result !== false);
 $result = GeoHelper::geocode(['city' => 'Notarealcity', 'state' => 'Notastate', 'country' => 'XX']);
 assert($result === false);
 
-// geocode_address() convenience method
+// geocode_address() convenience method -- primary integration point
 $address = new Address($address_id, TRUE);
 $result = GeoHelper::geocode_address($address);
 assert($result !== false || $address->get('usa_city') === null);  // FALSE only if no city
+
+// Verify save() triggers geocoding and updates geography
+$address->set('usa_city', 'Nashville');
+$address->set('usa_state', 'TN');
+$address->save();
+$address->load();
+assert($address->get('usa_latitude') !== null);
+assert($address->get('usa_longitude') !== null);
 ```
 
 ### 9.3 Distance Calculation Tests
