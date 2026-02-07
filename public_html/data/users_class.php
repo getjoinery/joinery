@@ -878,7 +878,7 @@ private static function UcName($string) {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
 		// Clear old primary
-		$old = new MultiEntityPhoto(['entity_type' => 'user', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old = new MultiEntityPhoto(['entity_type' => 'user', 'entity_id' => $this->key, 'is_primary' => true]);
 		$old->load();
 		foreach ($old as $p) {
 			$p->set('eph_is_primary', false);
@@ -901,7 +901,7 @@ private static function UcName($string) {
 	function clear_primary_photo() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
-		$old = new MultiEntityPhoto(['entity_type' => 'user', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old = new MultiEntityPhoto(['entity_type' => 'user', 'entity_id' => $this->key, 'is_primary' => true]);
 		$old->load();
 		foreach ($old as $p) {
 			$p->set('eph_is_primary', false);
@@ -920,7 +920,7 @@ private static function UcName($string) {
 	function get_photos() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 		$photos = new MultiEntityPhoto(
-			['entity_type' => 'user', 'entity_id' => $this->get_key(), 'deleted' => false],
+			['entity_type' => 'user', 'entity_id' => $this->key, 'deleted' => false],
 			['eph_sort_order' => 'ASC']
 		);
 		$photos->load();
@@ -934,7 +934,7 @@ private static function UcName($string) {
 	 */
 	function get_primary_photo() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
-		return EntityPhoto::get_primary('user', $this->get_key());
+		return EntityPhoto::get_primary('user', $this->key);
 	}
 
 	/**
