@@ -250,8 +250,45 @@
 
 		<!-- RIGHT COLUMN: Media & Settings -->
 		<div class="col-xxl-6">
-			<!-- Event Photos Card -->
+			<!-- Display Settings Card -->
 			<div class="card">
+				<div class="card-header bg-body-tertiary">
+					<h6 class="mb-0"><span class="fas fa-cog me-2"></span>Display Settings</h6>
+				</div>
+				<div class="card-body">
+					<table class="table table-borderless fs-9 fw-medium mb-0">
+						<tbody>
+							<?php if($event->get('evt_session_display_type') !== null): ?>
+							<tr>
+								<td class="p-1" style="width: 35%;">Session Display:</td>
+								<td class="p-1 text-600">
+									<?php
+									switch($event->get('evt_session_display_type')){
+										case 0: echo 'Standard View'; break;
+										case 1: echo 'Condensed View'; break;
+										default: echo 'Type ' . $event->get('evt_session_display_type');
+									}
+									?>
+								</td>
+							</tr>
+							<?php endif; ?>
+							<tr>
+								<td class="p-1" style="width: 35%;">Show Calendar Link:</td>
+								<td class="p-1">
+									<?php if($event->get('evt_show_add_to_calendar_link')): ?>
+										<span class="badge rounded-pill badge-subtle-success"><span>Enabled</span></span>
+									<?php else: ?>
+										<span class="badge rounded-pill badge-subtle-secondary"><span>Disabled</span></span>
+									<?php endif; ?>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<!-- Event Photos Card -->
+			<div class="card mt-3">
 				<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
 					<h6 class="mb-0"><span class="fas fa-images me-2"></span>Event Photos</h6>
 					<?php if(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
@@ -271,27 +308,28 @@
 						<?php endif; ?>
 						<?php foreach($event_photos as $photo): ?>
 							<?php $photo_file = new File($photo->get('eph_fil_file_id'), TRUE); ?>
-							<div class="col-4 col-md-3 photo-item" data-photo-id="<?php echo $photo->key; ?>">
+							<div class="col-4 col-md-3 photo-item" data-photo-id="<?php echo $photo->key; ?>" draggable="true"
+								 style="cursor: grab;">
 								<div class="position-relative">
 									<img src="<?php echo htmlspecialchars($photo_file->get_url('profile_card')); ?>"
 										 class="img-fluid rounded" alt=""
-										 style="width:100%; aspect-ratio:4/5; object-fit:cover;">
+										 style="width:100%; aspect-ratio:4/5; object-fit:cover; pointer-events:none;">
 									<?php if($photo->get('eph_is_primary')): ?>
 										<span class="position-absolute top-0 start-0 m-1 text-warning" title="Primary photo"
-											  style="text-shadow: 0 0 3px rgba(0,0,0,0.5);">
+											  style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
 											<span class="fas fa-star"></span>
 										</span>
 									<?php elseif(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
 										<a href="#" class="position-absolute top-0 start-0 m-1 text-white set-primary-btn"
 										   data-photo-id="<?php echo $photo->key; ?>" title="Set as primary"
-										   style="text-shadow: 0 0 3px rgba(0,0,0,0.5); opacity:0.6;">
+										   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
 											<span class="far fa-star"></span>
 										</a>
 									<?php endif; ?>
 									<?php if(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
 									<a href="#" class="position-absolute top-0 end-0 m-1 text-white delete-photo-btn"
 									   data-photo-id="<?php echo $photo->key; ?>" title="Remove photo"
-									   style="text-shadow: 0 0 3px rgba(0,0,0,0.5); opacity:0.6;">
+									   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
 										<span class="fas fa-times-circle"></span>
 									</a>
 									<?php endif; ?>
@@ -331,42 +369,6 @@
 			</div>
 			<?php endif; ?>
 
-			<!-- Display Settings Card -->
-			<div class="card mt-3">
-				<div class="card-header bg-body-tertiary">
-					<h6 class="mb-0"><span class="fas fa-cog me-2"></span>Display Settings</h6>
-				</div>
-				<div class="card-body">
-					<table class="table table-borderless fs-9 fw-medium mb-0">
-						<tbody>
-							<?php if($event->get('evt_session_display_type') !== null): ?>
-							<tr>
-								<td class="p-1" style="width: 35%;">Session Display:</td>
-								<td class="p-1 text-600">
-									<?php
-									switch($event->get('evt_session_display_type')){
-										case 0: echo 'Standard View'; break;
-										case 1: echo 'Condensed View'; break;
-										default: echo 'Type ' . $event->get('evt_session_display_type');
-									}
-									?>
-								</td>
-							</tr>
-							<?php endif; ?>
-							<tr>
-								<td class="p-1" style="width: 35%;">Show Calendar Link:</td>
-								<td class="p-1">
-									<?php if($event->get('evt_show_add_to_calendar_link')): ?>
-										<span class="badge rounded-pill badge-subtle-success"><span>Enabled</span></span>
-									<?php else: ?>
-										<span class="badge rounded-pill badge-subtle-secondary"><span>Disabled</span></span>
-									<?php endif; ?>
-								</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-			</div>
 		</div>
 	</div>
 	<?php
@@ -800,6 +802,103 @@
 			})
 			.catch(function(err) {
 				alert('Delete failed: ' + err.message);
+			});
+		});
+
+		// Drag-and-drop reorder
+		var dragItem = null;
+		var grid = document.getElementById('photo-grid');
+
+		grid.addEventListener('dragstart', function(e) {
+			dragItem = e.target.closest('.photo-item');
+			if (!dragItem) return;
+			dragItem.style.opacity = '0.4';
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', dragItem.dataset.photoId);
+		});
+
+		grid.addEventListener('dragend', function(e) {
+			if (dragItem) {
+				dragItem.style.opacity = '1';
+				dragItem = null;
+			}
+			// Remove all drag-over indicators
+			grid.querySelectorAll('.photo-item').forEach(function(item) {
+				item.style.borderLeft = '';
+				item.style.borderRight = '';
+			});
+		});
+
+		grid.addEventListener('dragover', function(e) {
+			e.preventDefault();
+			e.dataTransfer.dropEffect = 'move';
+			var target = e.target.closest('.photo-item');
+			if (!target || target === dragItem) return;
+
+			// Clear all indicators
+			grid.querySelectorAll('.photo-item').forEach(function(item) {
+				item.style.borderLeft = '';
+				item.style.borderRight = '';
+			});
+
+			// Show indicator on the side closest to cursor
+			var rect = target.getBoundingClientRect();
+			var midX = rect.left + rect.width / 2;
+			if (e.clientX < midX) {
+				target.style.borderLeft = '3px solid #2c7be5';
+			} else {
+				target.style.borderRight = '3px solid #2c7be5';
+			}
+		});
+
+		grid.addEventListener('drop', function(e) {
+			e.preventDefault();
+			var target = e.target.closest('.photo-item');
+			if (!target || !dragItem || target === dragItem) return;
+
+			// Determine insert position based on cursor side
+			var rect = target.getBoundingClientRect();
+			var midX = rect.left + rect.width / 2;
+			if (e.clientX < midX) {
+				grid.insertBefore(dragItem, target);
+			} else {
+				grid.insertBefore(dragItem, target.nextSibling);
+			}
+
+			// Clear indicators
+			grid.querySelectorAll('.photo-item').forEach(function(item) {
+				item.style.borderLeft = '';
+				item.style.borderRight = '';
+			});
+
+			// Collect new order and POST to server
+			var photoIds = [];
+			grid.querySelectorAll('.photo-item').forEach(function(item) {
+				photoIds.push(item.dataset.photoId);
+			});
+
+			var formData = new FormData();
+			formData.append('action', 'reorder');
+			formData.append('entity_type', 'event');
+			formData.append('entity_id', eventId);
+			photoIds.forEach(function(id) {
+				formData.append('photo_ids[]', id);
+			});
+
+			fetch('/ajax/entity_photos_ajax', {
+				method: 'POST',
+				body: formData
+			})
+			.then(function(resp) { return resp.json(); })
+			.then(function(data) {
+				if (data.error) {
+					alert('Reorder failed: ' + data.error);
+					window.location.reload();
+				}
+			})
+			.catch(function(err) {
+				alert('Reorder failed: ' + err.message);
+				window.location.reload();
 			});
 		});
 	})();
