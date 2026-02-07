@@ -206,10 +206,12 @@ $page_vars = $page_vars->data;
 						</div>
 						<div class="card-body p-0">
 							<script>
-							$(document).ready(function(){
-								$('.commentbutton').click(function(){
-									var cid = $(this).attr('id');
-									$('#' + cid + 'container').toggle(500);
+							document.addEventListener('DOMContentLoaded', function(){
+								document.querySelectorAll('.commentbutton').forEach(function(btn){
+									btn.addEventListener('click', function(){
+										var container = document.getElementById(this.id + 'container');
+										if(container) container.style.display = container.style.display === 'none' ? '' : 'none';
+									});
 								});
 							});
 							</script>
