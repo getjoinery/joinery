@@ -356,7 +356,7 @@ function get_subscribed_users($return='object'){
 	function set_primary_photo($photo_id) {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
-		$old = new MultiEntityPhoto(['entity_type' => 'mailing_list', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old = new MultiEntityPhoto(['entity_type' => 'mailing_list', 'entity_id' => $this->key, 'is_primary' => true]);
 		$old->load();
 		foreach ($old as $p) {
 			$p->set('eph_is_primary', false);
@@ -377,7 +377,7 @@ function get_subscribed_users($return='object'){
 	function clear_primary_photo() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
-		$old = new MultiEntityPhoto(['entity_type' => 'mailing_list', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old = new MultiEntityPhoto(['entity_type' => 'mailing_list', 'entity_id' => $this->key, 'is_primary' => true]);
 		$old->load();
 		foreach ($old as $p) {
 			$p->set('eph_is_primary', false);
@@ -396,7 +396,7 @@ function get_subscribed_users($return='object'){
 	function get_photos() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 		$photos = new MultiEntityPhoto(
-			['entity_type' => 'mailing_list', 'entity_id' => $this->get_key(), 'deleted' => false],
+			['entity_type' => 'mailing_list', 'entity_id' => $this->key, 'deleted' => false],
 			['eph_sort_order' => 'ASC']
 		);
 		$photos->load();
@@ -410,7 +410,7 @@ function get_subscribed_users($return='object'){
 	 */
 	function get_primary_photo() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
-		return EntityPhoto::get_primary('mailing_list', $this->get_key());
+		return EntityPhoto::get_primary('mailing_list', $this->key);
 	}
 
 	/**

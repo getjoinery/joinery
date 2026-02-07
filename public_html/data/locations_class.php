@@ -69,7 +69,7 @@ function authenticate_write($data) {
 	function set_primary_photo($photo_id) {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
-		$old = new MultiEntityPhoto(['entity_type' => 'location', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old = new MultiEntityPhoto(['entity_type' => 'location', 'entity_id' => $this->key, 'is_primary' => true]);
 		$old->load();
 		foreach ($old as $p) {
 			$p->set('eph_is_primary', false);
@@ -90,7 +90,7 @@ function authenticate_write($data) {
 	function clear_primary_photo() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
-		$old = new MultiEntityPhoto(['entity_type' => 'location', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old = new MultiEntityPhoto(['entity_type' => 'location', 'entity_id' => $this->key, 'is_primary' => true]);
 		$old->load();
 		foreach ($old as $p) {
 			$p->set('eph_is_primary', false);
@@ -109,7 +109,7 @@ function authenticate_write($data) {
 	function get_photos() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 		$photos = new MultiEntityPhoto(
-			['entity_type' => 'location', 'entity_id' => $this->get_key(), 'deleted' => false],
+			['entity_type' => 'location', 'entity_id' => $this->key, 'deleted' => false],
 			['eph_sort_order' => 'ASC']
 		);
 		$photos->load();
@@ -123,7 +123,7 @@ function authenticate_write($data) {
 	 */
 	function get_primary_photo() {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
-		return EntityPhoto::get_primary('location', $this->get_key());
+		return EntityPhoto::get_primary('location', $this->key);
 	}
 
 	/**
