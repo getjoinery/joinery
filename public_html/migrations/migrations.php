@@ -1153,3 +1153,20 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Entity Photos System (v80) ==========
+	// Add max_entity_photos setting
+	$migration = array();
+	$migration['database_version'] = '80';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'max_entity_photos'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('max_entity_photos', '{\"user\": 6, \"event\": 10, \"location\": 10, \"mailing_list\": 10}', 1, now(), now(), 'general');";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// Migrate existing FK data into eph_entity_photos
+	$migration = array();
+	$migration['database_version'] = '80';
+	$migration['test'] = "SELECT count(1) as count FROM eph_entity_photos";
+	$migration['migration_file'] = 'migrate_entity_photos.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
