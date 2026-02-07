@@ -90,7 +90,7 @@ $page_vars = $page_vars->data;
 						<article class="portfolio-item col-md-4 col-sm-6 col-12">
 							<div class="grid-inner">
 								<div class="portfolio-image">
-									<?php if($pic = $event->get_picture_link('lthumbnail')){ ?>
+									<?php if($pic = $event->get_picture_link('profile_card')){ ?>
 										<a href="<?php echo $event->get_url(); ?>">
 											<img src="<?php echo $pic; ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
 										</a>

@@ -51,7 +51,7 @@ function get_link_to_append(){
 		}
 		else if($this->get('prq_fil_file_id')){
 			$file = new File($this->get('prq_fil_file_id'), TRUE);
-			return $file->get_url('standard', 'full');
+			return $file->get_url('original', 'full');
 		}
 	}
 

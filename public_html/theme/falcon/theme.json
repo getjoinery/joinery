@@ -1,7 +1,7 @@
 {
   "name": "falcon",
   "display_name": "Falcon Theme",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Bootstrap 5 based responsive theme with modern UI components",
   "author": "Joinery Team",
   "is_stock": true,
@@ -12,5 +12,12 @@
   },
   "cssFramework": "bootstrap",
   "formWriterBase": "FormWriterBootstrap",
-  "publicPageBase": "PublicPageFalcon"
+  "publicPageBase": "PublicPageFalcon",
+  "image_sizes": {
+    "avatar": { "width": 80, "height": 80, "crop": true },
+    "profile_card": { "width": 400, "height": 500, "crop": true },
+    "content": { "width": 800, "height": 0, "crop": false },
+    "hero": { "width": 1200, "height": 0, "crop": false },
+    "og_image": { "width": 1200, "height": 630, "crop": true }
+  }
 }

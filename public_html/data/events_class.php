@@ -129,10 +129,16 @@ function get_leader() {
 		}
 	}	
 	
-	function get_picture_link($type='standard'){
+	/**
+	 * Get picture URL for display
+	 *
+	 * @param string $size_key Image size key (default 'original')
+	 * @return string|false URL or false if no picture
+	 */
+	function get_picture_link($size_key='original'){
 		if($this->get('evt_fil_file_id')){
 			$file = new File($this->get('evt_fil_file_id'), TRUE);
-			return $file->get_url($type, 'full');
+			return $file->get_url($size_key, 'full');
 		}
 		else if($this->get('evt_picture_link')){
 			return $this->get('evt_picture_link');
@@ -542,6 +548,73 @@ function get_leader() {
 		$event->load();
 
 		return $event;
+	}
+
+	// ===== Entity Photo Methods =====
+
+	/**
+	 * Set a photo as the primary photo for this event
+	 *
+	 * @param int $photo_id EntityPhoto ID to set as primary
+	 */
+	function set_primary_photo($photo_id) {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+
+		$old = new MultiEntityPhoto(['entity_type' => 'event', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old->load();
+		foreach ($old as $p) {
+			$p->set('eph_is_primary', false);
+			$p->save();
+		}
+
+		$photo = new EntityPhoto($photo_id, TRUE);
+		$photo->set('eph_is_primary', true);
+		$photo->save();
+
+		$this->set('evt_fil_file_id', $photo->get('eph_fil_file_id'));
+		$this->save();
+	}
+
+	/**
+	 * Clear the primary photo for this event
+	 */
+	function clear_primary_photo() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+
+		$old = new MultiEntityPhoto(['entity_type' => 'event', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old->load();
+		foreach ($old as $p) {
+			$p->set('eph_is_primary', false);
+			$p->save();
+		}
+
+		$this->set('evt_fil_file_id', NULL);
+		$this->save();
+	}
+
+	/**
+	 * Get all photos for this event
+	 *
+	 * @return MultiEntityPhoto
+	 */
+	function get_photos() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'event', 'entity_id' => $this->get_key(), 'deleted' => false],
+			['eph_sort_order' => 'ASC']
+		);
+		$photos->load();
+		return $photos;
+	}
+
+	/**
+	 * Get the primary photo EntityPhoto object
+	 *
+	 * @return EntityPhoto|null
+	 */
+	function get_primary_photo() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		return EntityPhoto::get_primary('event', $this->get_key());
 	}
 
 }

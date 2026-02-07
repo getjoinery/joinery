@@ -164,8 +164,8 @@
           <div class="uk-card-media-top uk-inline uk-light">
             
 			<?php
-				if($event->get_picture_link('small')){
-					echo '<img src="'.$event->get_picture_link('small'). '" alt="'.$event->get('evt_name').'" height="380">';
+				if($event->get_picture_link('content')){
+					echo '<img src="'.$event->get_picture_link('content'). '" alt="'.$event->get('evt_name').'" height="380">';
 				}	
 				else{
 					echo '<img src="https://source.unsplash.com/gMsnXqILjp4/640x380" alt="Course Title">';

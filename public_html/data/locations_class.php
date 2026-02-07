@@ -54,11 +54,93 @@ function authenticate_write($data) {
 	function save($debug=false) {
 		if ($this->key) {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			ContentVersion::NewVersion(ContentVersion::TYPE_LOCATION, $this->key, $this->get('loc_description'), $this->get('loc_name'), $this->get('loc_name'));			
+			ContentVersion::NewVersion(ContentVersion::TYPE_LOCATION, $this->key, $this->get('loc_description'), $this->get('loc_name'), $this->get('loc_name'));
 		}
 		parent::save($debug);
 	}
-	
+
+	// ===== Entity Photo Methods =====
+
+	/**
+	 * Set a photo as the primary photo for this location
+	 *
+	 * @param int $photo_id EntityPhoto ID to set as primary
+	 */
+	function set_primary_photo($photo_id) {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+
+		$old = new MultiEntityPhoto(['entity_type' => 'location', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old->load();
+		foreach ($old as $p) {
+			$p->set('eph_is_primary', false);
+			$p->save();
+		}
+
+		$photo = new EntityPhoto($photo_id, TRUE);
+		$photo->set('eph_is_primary', true);
+		$photo->save();
+
+		$this->set('loc_fil_file_id', $photo->get('eph_fil_file_id'));
+		$this->save();
+	}
+
+	/**
+	 * Clear the primary photo for this location
+	 */
+	function clear_primary_photo() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+
+		$old = new MultiEntityPhoto(['entity_type' => 'location', 'entity_id' => $this->get_key(), 'is_primary' => true]);
+		$old->load();
+		foreach ($old as $p) {
+			$p->set('eph_is_primary', false);
+			$p->save();
+		}
+
+		$this->set('loc_fil_file_id', NULL);
+		$this->save();
+	}
+
+	/**
+	 * Get all photos for this location
+	 *
+	 * @return MultiEntityPhoto
+	 */
+	function get_photos() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'location', 'entity_id' => $this->get_key(), 'deleted' => false],
+			['eph_sort_order' => 'ASC']
+		);
+		$photos->load();
+		return $photos;
+	}
+
+	/**
+	 * Get the primary photo EntityPhoto object
+	 *
+	 * @return EntityPhoto|null
+	 */
+	function get_primary_photo() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		return EntityPhoto::get_primary('location', $this->get_key());
+	}
+
+	/**
+	 * Get picture URL for display
+	 *
+	 * @param string $size_key Image size key (default 'content')
+	 * @return string|false URL or false if no picture
+	 */
+	function get_picture_link($size_key = 'content') {
+		$file_id = $this->get('loc_fil_file_id');
+		if (!$file_id) {
+			return false;
+		}
+		$file = new File($file_id, TRUE);
+		return $file->get_url($size_key);
+	}
+
 }
 
 class MultiLocation extends SystemMultiBase {

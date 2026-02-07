@@ -22,8 +22,8 @@ $page_vars = $page_vars->data;
 	if($event->get('evt_short_description')){
 		$page_options['meta_description'] = $event->get('evt_short_description');
 	}
-	if($event->get_picture_link('large')){
-		$page_options['preview_image_url'] = $event->get_picture_link('large');
+	if($event->get_picture_link('hero')){
+		$page_options['preview_image_url'] = $event->get_picture_link('hero');
 	}
 	$page->public_header($page_options);
 ?>
@@ -86,7 +86,7 @@ $page_vars = $page_vars->data;
 							</div>
 
 							<!-- Event Image -->
-							<?php if($picture_link = $event->get_picture_link('medium')){ ?>
+							<?php if($picture_link = $event->get_picture_link('content')){ ?>
 								<div class="mb-5">
 									<img src="<?php echo $picture_link; ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>" class="w-100 rounded-4 shadow-sm">
 								</div>

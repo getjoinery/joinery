@@ -83,7 +83,7 @@
 				<div class="flex flex-col rounded-lg shadow-lg overflow-hidden">
 				  <div class="flex-shrink-0">
 				  <?php
-					if($pic = $event->get_picture_link('small')){
+					if($pic = $event->get_picture_link('content')){
 						echo '<img class="h-48 w-full object-cover" src="'.$pic.'" alt="">';
 					}
 					?>

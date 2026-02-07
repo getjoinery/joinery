@@ -33,10 +33,10 @@ $page_vars = $page_vars->data;
 
 <div class="uk-container uk-container-large">
 		<?php
-			if($event->get_picture_link('large')){
+			if($event->get_picture_link('hero')){
 				echo '		<div class="uk-box-shadow-small uk-overflow-hidden uk-border-rounded uk-inline uk-background-center-center 
 		uk-background-cover uk-background-norepeat uk-background-blend-overlay uk-overlay-blend" 
-		style="background-image: url('.$event->get_picture_link('large'). ');">';
+		style="background-image: url('.$event->get_picture_link('hero'). ');">';
 			}	
 			else{
 				echo '<div class="uk-box-shadow-small uk-overflow-hidden uk-border-rounded uk-inline uk-background-center-center 

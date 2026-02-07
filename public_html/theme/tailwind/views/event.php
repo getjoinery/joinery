@@ -16,8 +16,8 @@
 	if($event->get('evt_short_description')){
 		$page_options['meta_description'] = $event->get('evt_short_description');
 	}
-	if($event->get_picture_link('large')){
-		$page_options['preview_image_url'] = $event->get_picture_link('large');
+	if($event->get_picture_link('hero')){
+		$page_options['preview_image_url'] = $event->get_picture_link('hero');
 	}
 	$page->public_header($page_options);
 	
@@ -151,7 +151,7 @@
           <section aria-labelledby="quick-links-title">
             <div class="rounded-lg bg-white overflow-hidden shadow p-6">
 
-				<?php if($picture_link = $event->get_picture_link('medium')){ ?>
+				<?php if($picture_link = $event->get_picture_link('content')){ ?>
 					<div class="mb-5">
 					<img src="<?php echo $picture_link; ?>">
 					</div>

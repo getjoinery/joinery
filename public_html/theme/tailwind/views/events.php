@@ -88,7 +88,7 @@
 		<div class="bg-white rounded-lg shadow-md overflow-hidden flex flex-col h-full">
 		  <div class="p-6 flex flex-col items-center flex-grow">
 				<?php
-				if($pic = $event->get_picture_link('lthumbnail')){
+				if($pic = $event->get_picture_link('profile_card')){
 					echo '<img class="rounded-full mb-4" src="'.htmlspecialchars($pic).'" alt="" style="width: 128px; height: 128px; object-fit: cover;">';
 				}
 				?>
