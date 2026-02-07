@@ -115,7 +115,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$page_vars['location_object'] = $location;
 		if($location->get('loc_fil_file_id')){
 			$file = new File($location->get('loc_fil_file_id'), true);
-			$page_vars['location_picture'] = $file->get_url('small','full');
+			$page_vars['location_picture'] = $file->get_url('content','full');
 		}
 	}
 	else{

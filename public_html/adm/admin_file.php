@@ -34,7 +34,7 @@
 					<h5 class="mb-0">File Preview</h5>
 				</div>
 				<div class="card-body text-center">
-					<img src="/uploads/medium/<?php echo htmlspecialchars($file->get('fil_name')); ?>" alt="File Preview" class="img-fluid rounded" style="max-height: 400px;">
+					<img src="/uploads/content/<?php echo htmlspecialchars($file->get('fil_name')); ?>" alt="File Preview" class="img-fluid rounded" style="max-height: 400px;">
 				</div>
 			</div>
 			<?php endif; ?>
@@ -162,39 +162,39 @@
 					<table class="table table-borderless mb-0" style="font-size: 0.875rem;">
 						<tbody>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold" style="width: 140px;">Full Size</td>
+								<td class="p-1 text-800 fw-semi-bold" style="width: 140px;">Original</td>
 								<td class="p-1">
-									<a href="<?php echo htmlspecialchars($file->get_url('standard')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('standard','short')); ?></a>
+									<a href="<?php echo htmlspecialchars($file->get_url('original')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('original','short')); ?></a>
 								</td>
 							</tr>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Large</td>
+								<td class="p-1 text-800 fw-semi-bold">Hero</td>
 								<td class="p-1">
-									<a href="<?php echo htmlspecialchars($file->get_url('large')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('large','short')); ?></a>
+									<a href="<?php echo htmlspecialchars($file->get_url('hero')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('hero','short')); ?></a>
 								</td>
 							</tr>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Medium</td>
+								<td class="p-1 text-800 fw-semi-bold">Content</td>
 								<td class="p-1">
-									<a href="<?php echo htmlspecialchars($file->get_url('medium')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('medium','short')); ?></a>
+									<a href="<?php echo htmlspecialchars($file->get_url('content')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('content','short')); ?></a>
 								</td>
 							</tr>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Small</td>
+								<td class="p-1 text-800 fw-semi-bold">Profile Card</td>
 								<td class="p-1">
-									<a href="<?php echo htmlspecialchars($file->get_url('small')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('small','short')); ?></a>
+									<a href="<?php echo htmlspecialchars($file->get_url('profile_card')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('profile_card','short')); ?></a>
 								</td>
 							</tr>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Large Thumb</td>
+								<td class="p-1 text-800 fw-semi-bold">OG Image</td>
 								<td class="p-1">
-									<a href="<?php echo htmlspecialchars($file->get_url('lthumbnail')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('lthumbnail','short')); ?></a>
+									<a href="<?php echo htmlspecialchars($file->get_url('og_image')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('og_image','short')); ?></a>
 								</td>
 							</tr>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Thumbnail</td>
+								<td class="p-1 text-800 fw-semi-bold">Avatar</td>
 								<td class="p-1">
-									<a href="<?php echo htmlspecialchars($file->get_url('thumbnail')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('thumbnail','short')); ?></a>
+									<a href="<?php echo htmlspecialchars($file->get_url('avatar')); ?>" target="_blank"><?php echo htmlspecialchars($file->get_url('avatar','short')); ?></a>
 								</td>
 							</tr>
 						</tbody>

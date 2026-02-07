@@ -45,7 +45,6 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_usr_user_id' => array('type'=>'int4'),
 	    'fil_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'fil_delete_time' => array('type'=>'timestamp(6)'),
-	    'fil_gal_gallery_id' => array('type'=>'int4'),
 	    'fil_min_permission' => array('type'=>'int2'),
 	    'fil_grp_group_id' => array('type'=>'int4'),
 	    'fil_evt_event_id' => array('type'=>'int4'),
@@ -97,246 +96,182 @@ public static function get_by_name($name) {
 		}
 	}
 
-	//TAKES A SIZE ARGUMENT, AND ALSO EITHER 'SHORT' OR 'FULL'
-	function get_url($size='standard', $format='short') {
+	/**
+	 * Get URL for a specific image size
+	 *
+	 * @param string $size_key Size key from ImageSizeRegistry, or 'original' for full size
+	 * @param string $format 'short' for relative URL, 'full' for absolute URL
+	 * @return string
+	 */
+	function get_url($size_key='original', $format='short') {
 
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
-		
-		if($size == 'thumbnail'){
-			$file_path = $upload_web_dir.'/thumbnail/'.$this->get('fil_name');
+
+		if ($size_key === 'original') {
+			$file_path = $upload_web_dir . '/' . $this->get('fil_name');
+		} else {
+			$file_path = $upload_web_dir . '/' . $size_key . '/' . $this->get('fil_name');
 		}
-		if($size == 'lthumbnail'){
-			$file_path = $upload_web_dir.'/lthumbnail/'.$this->get('fil_name');
+
+		// Ensure leading slash
+		if ($file_path[0] !== '/') {
+			$file_path = '/' . $file_path;
 		}
-		if($size == 'small'){
-			$file_path = $upload_web_dir.'/small/'.$this->get('fil_name');
-		}		
-		if($size == 'medium'){
-			$file_path = $upload_web_dir.'/medium/'.$this->get('fil_name');
-		}	
-		if($size == 'large'){
-			$file_path = $upload_web_dir.'/large/'.$this->get('fil_name');
-		}
-		if($size == 'standard'){
-			$file_path = $upload_web_dir.'/'.$this->get('fil_name');
-		}		
-		//IF NO LEADING SLASH, ADD A SLASH
-		if($file_path[0] == '/'){
-			$file_path = $file_path;
-		}
-		else{
-			$file_path = '/'.$file_path;
-		}
-		
-		if($format == 'full'){
+
+		if ($format == 'full') {
 			return LibraryFunctions::get_absolute_url($file_path);
 		} else {
 			return $file_path;
 		}
-		
 	}	
 
 	function permanent_delete($debug=false){
 		$settings = Globalvars::get_instance();
 		$upload_dir = $settings->get_setting('upload_dir');
-		
+
 		$file_path = $upload_dir.'/'.$this->get('fil_name');
-		if (!unlink($file_path)) { 		
+		if (!unlink($file_path)) {
 			//echo ("$file_path cannot be deleted due to an error");
 			//return false;
-		}  
-		
+		}
+
 		$this->delete_resized();
-		
+
+		// Clean up all entity_photos rows referencing this file
+		$dbconnector = DbConnector::get_instance();
+		$dblink = $dbconnector->get_db_link();
+		$sql = "DELETE FROM eph_entity_photos WHERE eph_fil_file_id = ?";
+		try {
+			$q = $dblink->prepare($sql);
+			$q->execute([$this->key]);
+		} catch (PDOException $e) {
+			// Table may not exist yet during initial setup
+			error_log('EntityPhoto cleanup on file delete: ' . $e->getMessage());
+		}
+
 		parent::permanent_delete($debug);
-		return true;		
+		return true;
 	}
 	
-	//SIZE CAN BE thumbnail, lthumbnail, small, medium, large
-	function delete_resized($size = 'all'){
+	/**
+	 * Delete resized versions of this image
+	 *
+	 * @param string $size_key Specific size key to delete, or 'all' for all sizes
+	 */
+	function delete_resized($size_key = 'all'){
 		if (!$this->is_image()) {
 			return false;
 		}
-		
+
 		$settings = Globalvars::get_instance();
 		$upload_dir = $settings->get_setting('upload_dir');
-		
-		if($size == 'all' || $size == 'small'){
-			$file_path = $upload_dir.'/small/'.$this->get('fil_name');
-			if (!unlink($file_path)) { 		
-				//echo ("$file_path cannot be deleted due to an error");  
-				//return false;
-			}  
-		}
-		
-		if($size == 'all' || $size == 'medium'){
-			$file_path = $upload_dir.'/medium/'.$this->get('fil_name');
-			if (!unlink($file_path)) { 		
-				//echo ("$file_path cannot be deleted due to an error");
-				//return false;			
-			}  
- 		}
-		
-		if($size == 'all' || $size == 'large'){
-			$file_path = $upload_dir.'/large/'.$this->get('fil_name');
-			if (!unlink($file_path)) { 		
-				//echo ("$file_path cannot be deleted due to an error");
-				//return false;			
-			}  
-		}
-		if($size == 'all' || $size == 'thumbnail'){
-			$file_path = $upload_dir.'/thumbnail/'.$this->get('fil_name');
-			if (!unlink($file_path)) { 		
-				//echo ("$file_path cannot be deleted due to an error");
-				//return false;			
-			} 		
-		}	
 
-		if($size == 'all' || $size == 'lthumbnail'){
-			$file_path = $upload_dir.'/lthumbnail/'.$this->get('fil_name');
-			if (!unlink($file_path)) { 		
-				//echo ("$file_path cannot be deleted due to an error");
-				//return false;			
-			} 		
-		}		
+		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+		$sizes = ImageSizeRegistry::get_sizes();
+
+		foreach ($sizes as $key => $config) {
+			if ($size_key !== 'all' && $size_key !== $key) {
+				continue;
+			}
+			$file_path = $upload_dir . '/' . $key . '/' . $this->get('fil_name');
+			if (file_exists($file_path)) {
+				@unlink($file_path);
+			}
+		}
 	}
 	
-	//SIZE CAN BE thumbnail, lthumbnail, small, medium, large
-	function resize($size='all'){
+	/**
+	 * Generate resized versions using ImageSizeRegistry
+	 *
+	 * @param string $size_key Specific size key to generate, or 'all' for all registered sizes
+	 */
+	function resize($size_key='all'){
+		if (!$this->is_image()) {
+			return false;
+		}
+
 		$settings = Globalvars::get_instance();
 		$upload_dir = $settings->get_setting('upload_dir');
+		$old_path = $upload_dir . '/' . $this->get('fil_name');
 
-		if ($this->is_image()) {
+		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+		$sizes = ImageSizeRegistry::get_sizes();
 
-			//RESIZE THE PICTURE
-			$old_path = $upload_dir.'/'.$this->get('fil_name');
-
-			// Ensure all resize subdirectories exist
-			$resize_dirs = ['thumbnail', 'lthumbnail', 'small', 'medium', 'large'];
-			foreach ($resize_dirs as $dir) {
-				$dir_path = $upload_dir . '/' . $dir;
-				if (!is_dir($dir_path)) {
-					if (!mkdir($dir_path, 0777, true)) {
-						error_log("Failed to create resize directory: $dir_path");
-					}
-				}
+		// Ensure all resize subdirectories exist
+		foreach ($sizes as $key => $config) {
+			if ($size_key !== 'all' && $size_key !== $key) {
+				continue;
 			}
-
-			//THUMBNAIL SIZE
-			if($size == 'all' || $size == 'thumbnail'){
-				try
-				{
-					$width = 80;
-					$height = 80;
-					$img = new Imagick($old_path);
-					$new_path = $upload_dir.'/thumbnail/'.$this->get('fil_name');
-					
-					// get the current image dimensions
-					$geo = $img->getImageGeometry();
-
-					// crop the image
-					if(($geo['width']/$width) < ($geo['height']/$height))
-					{
-						$img->cropImage($geo['width'], floor($height*$geo['width']/$width), 0, (($geo['height']-($height*$geo['width']/$width))/2));
-					}
-					else
-					{
-						$img->cropImage(ceil($width*$geo['height']/$height), $geo['height'], (($geo['width']-($width*$geo['height']/$height))/2), 0);
-					}				
-					
-					$img->thumbnailImage($width , $height , TRUE);
-					$img->writeImage($new_path);
-					
-				}
-				catch(Exception $e)
-				{
-					error_log('File thumbnail generation failed: ' . $e->getMessage());
-				}
-			}
-
-			//LARGE THUMBNAIL SIZE
-			if($size == 'all' || $size == 'lthumbnail'){
-				try
-				{
-					$width = 256;
-					$height = 256;
-					$img = new Imagick($old_path);
-					$new_path = $upload_dir.'/lthumbnail/'.$this->get('fil_name');
-					
-					// get the current image dimensions
-					$geo = $img->getImageGeometry();
-
-					// crop the image
-					if(($geo['width']/$width) < ($geo['height']/$height))
-					{
-						$img->cropImage($geo['width'], floor($height*$geo['width']/$width), 0, (($geo['height']-($height*$geo['width']/$width))/2));
-					}
-					else
-					{
-						$img->cropImage(ceil($width*$geo['height']/$height), $geo['height'], (($geo['width']-($width*$geo['height']/$height))/2), 0);
-					}				
-					
-					$img->thumbnailImage($width , $height , TRUE);
-					$img->writeImage($new_path);
-					
-				}
-				catch(Exception $e)
-				{
-					error_log('File lthumbnail generation failed: ' . $e->getMessage());
-				}
-			}
-
-			//SMALL SIZE
-			if($size == 'all' || $size == 'small'){
-				try
-				{
-					$img = new Imagick($old_path);
-					$new_path = $upload_dir.'/small/'.$this->get('fil_name');
-					$img->thumbnailImage(500 , 300 , TRUE);
-					$img->writeImage($new_path);
-					
-				}
-				catch(Exception $e)
-				{
-					error_log('File small thumbnail generation failed: ' . $e->getMessage());
-				}
-			}
-
-			//MEDIUM SIZE
-			if($size == 'all' || $size == 'medium'){
-				try
-				{
-					$img = new Imagick($old_path);
-					$new_path = $upload_dir.'/medium/'.$this->get('fil_name');
-					$img->thumbnailImage(800 , 600 , TRUE);
-					$img->writeImage($new_path);
-					
-				}
-				catch(Exception $e)
-				{
-					error_log('File medium thumbnail generation failed: ' . $e->getMessage());
-				}
-			}
-
-			//LARGE SIZE
-			if($size == 'all' || $size == 'large'){
-				try
-				{
-					$img = new Imagick($old_path);
-					$new_path = $upload_dir.'/large/'.$this->get('fil_name');
-					$img->thumbnailImage(1200 , 1000 , TRUE);
-					$img->writeImage($new_path);
-					
-				}
-				catch(Exception $e)
-				{
-					error_log('File large thumbnail generation failed: ' . $e->getMessage());
+			$dir_path = $upload_dir . '/' . $key;
+			if (!is_dir($dir_path)) {
+				if (!mkdir($dir_path, 0777, true)) {
+					error_log("Failed to create resize directory: $dir_path");
 				}
 			}
 		}
-		else{
-			return false;
+
+		foreach ($sizes as $key => $config) {
+			if ($size_key !== 'all' && $size_key !== $key) {
+				continue;
+			}
+			$new_path = $upload_dir . '/' . $key . '/' . $this->get('fil_name');
+			$this->generate_resized($old_path, $new_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
+		}
+	}
+
+	/**
+	 * Generate a single resized version of an image
+	 *
+	 * @param string $old_path Source image path
+	 * @param string $new_path Destination path
+	 * @param int $width Target width (0 = auto from height)
+	 * @param int $height Target height (0 = auto from width)
+	 * @param bool $crop Whether to center-crop to exact dimensions
+	 * @param int $quality JPEG quality (1-100)
+	 */
+	private function generate_resized($old_path, $new_path, $width, $height, $crop, $quality = 85) {
+		try {
+			$img = new Imagick($old_path);
+			$img->setImageCompressionQuality($quality);
+
+			if ($crop && $width > 0 && $height > 0) {
+				// Center crop then resize to exact dimensions
+				$geo = $img->getImageGeometry();
+
+				if (($geo['width'] / $width) < ($geo['height'] / $height)) {
+					$img->cropImage(
+						$geo['width'],
+						floor($height * $geo['width'] / $width),
+						0,
+						(($geo['height'] - ($height * $geo['width'] / $width)) / 2)
+					);
+				} else {
+					$img->cropImage(
+						ceil($width * $geo['height'] / $height),
+						$geo['height'],
+						(($geo['width'] - ($width * $geo['height'] / $height)) / 2),
+						0
+					);
+				}
+
+				$img->thumbnailImage($width, $height, true);
+			} else {
+				// Aspect-fit resize within bounds
+				if ($width > 0 && $height > 0) {
+					$img->thumbnailImage($width, $height, true);
+				} elseif ($width > 0) {
+					// Width only - auto-calculate height
+					$img->thumbnailImage($width, 0, false);
+				} elseif ($height > 0) {
+					// Height only - auto-calculate width
+					$img->thumbnailImage(0, $height, false);
+				}
+			}
+
+			$img->writeImage($new_path);
+		} catch (Exception $e) {
+			error_log('File resize generation failed for ' . basename($new_path) . ': ' . $e->getMessage());
 		}
 	}
 
@@ -442,7 +377,7 @@ class MultiFile extends SystemMultiBase {
 	function get_image_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $file) {
-			$items[$file->key] = '<span class="dropimagewidth"><img loading="lazy" src="'.$file->get_url('thumbnail').'"></span>('.$file->key.') '.$file->get('fil_title');
+			$items[$file->key] = '<span class="dropimagewidth"><img loading="lazy" src="'.$file->get_url('avatar').'"></span>('.$file->key.') '.$file->get('fil_title');
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
@@ -483,10 +418,6 @@ class MultiFile extends SystemMultiBase {
 
 		if (isset($this->options['filename_like'])) {
 			$filters['fil_name'] = 'ILIKE \'%'.$this->options['filename_like'].'%\'';
-		}
-
-		if (isset($this->options['in_gallery'])) {
-			$filters['fil_gal_gallery_id'] = $this->options['in_gallery'] ? "IS NOT NULL" : "IS NULL";
 		}
 
 		return $this->_get_resultsv2('fil_files', $filters, $this->order_by, $only_count, $debug);

@@ -47,8 +47,8 @@ $images = [];
 foreach ($files as $file) {
     $images[] = [
         'id' => $file->key,
-        'url' => $file->get_url('standard'),
-        'thumbnail' => $file->get_url('thumbnail'),
+        'url' => $file->get_url('original'),
+        'thumbnail' => $file->get_url('avatar'),
         'title' => $file->get('fil_title') ?: $file->get('fil_name'),
         'filename' => $file->get('fil_name')
     ];
