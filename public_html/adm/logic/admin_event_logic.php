@@ -20,6 +20,7 @@ function admin_event_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('data/surveys_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
+	require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
@@ -57,6 +58,20 @@ function admin_event_logic($get_vars, $post_vars) {
 
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
+	}
+
+	if($post_vars['action'] == 'set_primary_photo'){
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->set_primary_photo((int)$post_vars['photo_id']);
+
+		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
+	}
+
+	if($post_vars['action'] == 'clear_primary_photo'){
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->clear_primary_photo();
+
+		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
 	}
 
 	//REGISTRANTS
@@ -145,6 +160,7 @@ function admin_event_logic($get_vars, $post_vars) {
 	$event_group = $event->get('evt_grp_group_id') ? new Group($event->get('evt_grp_group_id'), TRUE) : null;
 	$event_survey = $event->get('evt_svy_survey_id') ? new Survey($event->get('evt_svy_survey_id'), TRUE) : null;
 	$event_image = $event->get('evt_fil_file_id') ? new File($event->get('evt_fil_file_id'), TRUE) : null;
+	$event_photos = $event->get_photos();
 
 	//MESSAGES
 	$mnumperpage = 20;
@@ -188,6 +204,7 @@ function admin_event_logic($get_vars, $post_vars) {
 		'event_group' => $event_group,
 		'event_survey' => $event_survey,
 		'event_image' => $event_image,
+		'event_photos' => $event_photos,
 		'event_registrants' => $event_registrants,
 		'numregistrants' => $numregistrants,
 		'rpager' => $rpager,
