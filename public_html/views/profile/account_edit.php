@@ -26,6 +26,13 @@
 
 	echo PublicPage::tab_menu($page_vars['tab_menus'],'Edit Account');
 
+	// Photo grid
+	require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
+	PhotoHelper::render_photo_card('grid', 'user', $page_vars['user']->key, $page_vars['user_photos'], [
+		'set_primary_url' => '/profile/account_edit',
+		'card_title' => 'My Photos',
+	]);
+
 	$settings = Globalvars::get_instance();
 	$formwriter = $page->getFormWriter('form1', [
 		'model' => $page_vars['user'],
@@ -56,6 +63,13 @@
 
 	$formwriter->end_form();
 
-	echo PublicPage::EndPage();	
+	echo PublicPage::EndPage();
+
+	// Photo grid scripts
+	PhotoHelper::render_photo_scripts('grid', 'user', $page_vars['user']->key, [
+		'set_primary_url' => '/profile/account_edit',
+		'confirm_delete_msg' => 'Remove this photo?',
+	]);
+
 	$page->public_footer($foptions=array('track'=>TRUE));
 ?>

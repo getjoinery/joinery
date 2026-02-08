@@ -35,17 +35,23 @@ if (!$entity_type || !$entity_id) {
 
 /**
  * Check if current user has permission to manage this photo
- * Admin (perm >= 5) or file owner
+ * Admin (perm >= 5), file owner, or self-service entity owner
  */
-function check_photo_permission($session, $file_id = null) {
+function check_photo_permission($session, $file_id = null, $entity_type = null, $entity_id = null) {
+	// Admin always allowed
 	if ($session->get_permission() >= 5) {
 		return true;
 	}
+	// File owner check (for delete, update_caption)
 	if ($file_id) {
 		$file = new File($file_id, TRUE);
 		if ($file->get('fil_usr_user_id') == $session->get_user_id()) {
 			return true;
 		}
+	}
+	// Self-service: user can manage photos on their own entity
+	if ($entity_type === 'user' && $entity_id == $session->get_user_id()) {
+		return true;
 	}
 	return false;
 }
@@ -60,8 +66,8 @@ switch ($action) {
 			exit;
 		}
 
-		// Check permission - admin or own upload
-		if (!check_photo_permission($session)) {
+		// Check permission - admin, file owner, or self-service entity owner
+		if (!check_photo_permission($session, null, $entity_type, $entity_id)) {
 			http_response_code(403);
 			echo json_encode(['error' => 'Permission denied']);
 			exit;
@@ -154,7 +160,7 @@ switch ($action) {
 			exit;
 		}
 
-		if (!check_photo_permission($session, $photo->get('eph_fil_file_id'))) {
+		if (!check_photo_permission($session, $photo->get('eph_fil_file_id'), $entity_type, $entity_id)) {
 			http_response_code(403);
 			echo json_encode(['error' => 'Permission denied']);
 			exit;
@@ -172,7 +178,7 @@ switch ($action) {
 			exit;
 		}
 
-		if (!check_photo_permission($session)) {
+		if (!check_photo_permission($session, null, $entity_type, $entity_id)) {
 			http_response_code(403);
 			echo json_encode(['error' => 'Permission denied']);
 			exit;
@@ -212,7 +218,7 @@ switch ($action) {
 			exit;
 		}
 
-		if (!check_photo_permission($session, $photo->get('eph_fil_file_id'))) {
+		if (!check_photo_permission($session, $photo->get('eph_fil_file_id'), $entity_type, $entity_id)) {
 			http_response_code(403);
 			echo json_encode(['error' => 'Permission denied']);
 			exit;

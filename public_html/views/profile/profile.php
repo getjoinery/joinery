@@ -76,7 +76,7 @@
                 <div class="card-header bg-body-tertiary overflow-hidden">
                   <div class="d-flex align-items-center">
                     <div class="avatar avatar-m">
-                      <img class="rounded-circle" src="../../assets/img/team/1.jpg" alt="" />
+                      <img class="rounded-circle" src="<?php echo htmlspecialchars($page_vars['user']->get_picture_link('avatar')); ?>" alt="" />
 
                     </div>
                     <div class="flex-1 ms-2">

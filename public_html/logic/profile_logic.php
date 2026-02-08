@@ -11,6 +11,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
 	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/files_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
