@@ -2,7 +2,7 @@
 
 **Purpose:** Define what's needed to build a dating site on Joinery, separated into reusable core platform features vs. dating-specific plugin features. MVP-focused.
 
-**Last Updated:** 2026-02-06
+**Last Updated:** 2026-02-07
 
 ---
 
@@ -37,11 +37,7 @@ These are core user attributes. The `usr_users` table already has profile-type f
 
 **Principle:** Core features go in core tables. Plugin-specific fields (dating preferences, relationship goals, etc.) go in plugin tables. Address and geography data stays in the address table where it belongs.
 
-### 1.2 Multi-Photo Profiles
-
-See **[Pictures Refactor Spec](pictures_refactor_spec.md)** for full details. New generic `entity_photos` model supporting multi-photo galleries for any entity type (users, events, locations, etc.). Existing `usr_pic_picture_id` stays as a denormalized avatar pointer.
-
-### 1.3 Notification Center
+### 1.2 Notification Center
 
 **Problem:** The platform sends emails but has no in-app notification system. Every interactive platform needs this.
 
@@ -70,7 +66,7 @@ See **[Pictures Refactor Spec](pictures_refactor_spec.md)** for full details. Ne
 - `ntp_email_enabled` (bool, default true)
 - `ntp_in_app_enabled` (bool, default true)
 
-### 1.4 User Discovery / Member Directory
+### 1.3 User Discovery / Member Directory
 
 **Problem:** No way to browse or search other users. Membership orgs, professional networks, and community platforms all need a member directory.
 
@@ -89,7 +85,7 @@ See **[Pictures Refactor Spec](pictures_refactor_spec.md)** for full details. Ne
 
 **Geolocation Support:** See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for PostGIS setup, geocoding, spatial indexing on the address table, and distance queries.
 
-### 1.5 Like / Favorite System
+### 1.4 Like / Favorite System
 
 **Problem:** No way for users to express interest in other users, bookmark content, or favorite items. Useful across social, marketplace, and community platforms.
 
@@ -104,7 +100,7 @@ See **[Pictures Refactor Spec](pictures_refactor_spec.md)** for full details. Ne
 
 This is a **generic** like system. The dating plugin adds semantics on top (mutual = match, pass = don't show again, super_like = premium feature).
 
-### 1.6 Block System
+### 1.5 Block System
 
 **Problem:** Any platform where users interact needs the ability to block other users. Blocked users can't see your profile, message you, or appear in your results.
 
@@ -122,7 +118,7 @@ This is a **generic** like system. The dating plugin adds semantics on top (mutu
 - Profile viewing (404 or "user not found")
 - Notification generation (suppress)
 
-### 1.7 Report System
+### 1.6 Report System
 
 **Problem:** Any platform with user-generated content or user interaction needs content/user reporting and admin moderation. This is non-negotiable for safety.
 
@@ -143,7 +139,7 @@ This is a **generic** like system. The dating plugin adds semantics on top (mutu
 - Action buttons: dismiss, warn user, disable user, permanent ban
 - Report statistics dashboard
 
-### 1.8 Messaging Enhancements
+### 1.7 Messaging Enhancements
 
 **Problem:** The existing messaging model is functional but minimal. Interactive platforms need conversation threading and read status.
 
@@ -228,7 +224,7 @@ Prompts are stored in a settings/config table. Users pick 3 prompts and write an
 
 ### 2.3 Match System
 
-**Core like system** (1.5) handles the raw like/pass data. The dating plugin adds match detection.
+**Core like system** (1.4) handles the raw like/pass data. The dating plugin adds match detection.
 
 **New Model: `dating_matches`** (plugin data model)
 - `dtm_dating_match_id` (serial, primary key)
@@ -335,16 +331,15 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 
 **Core features (Phase 1):**
 1. Extended User Profiles (1.1) - bio, DOB, gender, profile visibility
-2. Multi-Photo Profiles (1.2) - upload up to 6 photos, set primary
-3. Like System (1.5) - like/pass on users
-4. Block System (1.6) - block users
-5. Report System (1.7) - report users with admin queue
-6. Messaging Enhancements (1.8) - conversations, read status
-7. Notification Center (1.3) - basic in-app notifications
+2. Like System (1.4) - like/pass on users
+3. Block System (1.5) - block users
+4. Report System (1.6) - report users with admin queue
+5. Messaging Enhancements (1.7) - conversations, read status
+6. Notification Center (1.2) - basic in-app notifications
 
 **Core features deferred to Phase 2:**
-- User Discovery as a standalone core feature (1.4) - in Phase 1, discovery is dating-plugin-only; generalized member directory comes later
-- Notification preferences per type (1.3 partial) - Phase 1 just sends all notifications
+- User Discovery as a standalone core feature (1.3) - in Phase 1, discovery is dating-plugin-only; generalized member directory comes later
+- Notification preferences per type (1.2 partial) - Phase 1 just sends all notifications
 
 **Dating plugin (Phase 1):**
 1. Dating Profile (2.1) - dating-specific fields, prompts
@@ -397,7 +392,6 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 ```
 # Core additions (profile fields in users_class.php, geo fields in address_class.php)
 data/
-  entity_photos_class.php          # Multi-photo gallery for all entities (see pictures_refactor_spec.md)
   notifications_class.php          # In-app notifications
   notification_preferences_class.php
   user_likes_class.php             # Generic like/favorite
@@ -414,7 +408,6 @@ views/
 logic/
   notifications_logic.php
   conversations_logic.php
-  profile_photos_logic.php
 
 adm/
   admin_reports.php                # Report moderation queue
@@ -496,7 +489,7 @@ Ordered roughly by impact and user demand:
 
 1. **Gender model:** Simple 3-option (man/woman/nonbinary) or flexible (free text, multiple select)? This has significant UI and filtering implications.
 
-2. **Photo moderation:** MVP has manual admin review via reports. See **[Pictures Refactor Spec](pictures_refactor_spec.md)** open questions for `uph_is_approved` discussion.
+2. **Photo moderation:** MVP has manual admin review via reports. See **[Pictures Refactor Spec](implemented/pictures_refactor_spec.md)** open questions for `uph_is_approved` discussion.
 
 3. **Mobile:** Is the MVP web-only, or do we need to consider a mobile app from the start? The existing API could support a mobile client, but the discovery UX is very different on mobile vs. desktop.
 
