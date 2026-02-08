@@ -288,64 +288,24 @@
 			</div>
 
 			<!-- Event Photos Card -->
+			<?php
+			require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
+			$photo_editable = !$event->get('evt_delete_time') && $_SESSION['permission'] > 7;
+			PhotoHelper::render_photo_card('grid', 'event', $event->key, $event_photos, [
+				'set_primary_url' => '/admin/admin_event?evt_event_id=' . $event->key,
+				'card_title' => 'Event Photos',
+				'editable' => $photo_editable,
+			]);
+			?>
+			<?php if(count($event_photos) == 0 && $event->get('evt_picture_link')): ?>
+			<!-- Legacy external image fallback -->
 			<div class="card mt-3">
-				<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
-					<h6 class="mb-0"><span class="fas fa-images me-2"></span>Event Photos</h6>
-					<?php if(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
-					<button type="button" class="btn btn-falcon-primary btn-sm" id="btn-upload-photo">
-						<span class="fas fa-plus me-1"></span>Upload
-					</button>
-					<input type="file" id="photo-upload-input" accept="image/*" style="display:none;">
-					<?php endif; ?>
-				</div>
-				<div class="card-body">
-					<div id="photo-grid" class="row g-2">
-						<?php if(count($event_photos) == 0 && !$event->get('evt_picture_link')): ?>
-							<div id="no-photos-msg" class="col-12 text-center text-muted py-4">
-								<span class="fas fa-image fa-3x mb-2 d-block opacity-25"></span>
-								No photos yet
-							</div>
-						<?php endif; ?>
-						<?php foreach($event_photos as $photo): ?>
-							<?php $photo_file = new File($photo->get('eph_fil_file_id'), TRUE); ?>
-							<div class="col-4 col-md-3 photo-item" data-photo-id="<?php echo $photo->key; ?>" draggable="true"
-								 style="cursor: grab;">
-								<div class="position-relative">
-									<img src="<?php echo htmlspecialchars($photo_file->get_url('profile_card')); ?>"
-										 class="img-fluid rounded" alt=""
-										 style="width:100%; aspect-ratio:4/5; object-fit:cover; pointer-events:none;">
-									<?php if($photo->get('eph_is_primary')): ?>
-										<span class="position-absolute top-0 start-0 m-1 text-warning" title="Primary photo"
-											  style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
-											<span class="fas fa-star"></span>
-										</span>
-									<?php elseif(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
-										<a href="#" class="position-absolute top-0 start-0 m-1 text-white set-primary-btn"
-										   data-photo-id="<?php echo $photo->key; ?>" title="Set as primary"
-										   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
-											<span class="far fa-star"></span>
-										</a>
-									<?php endif; ?>
-									<?php if(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
-									<a href="#" class="position-absolute top-0 end-0 m-1 text-white delete-photo-btn"
-									   data-photo-id="<?php echo $photo->key; ?>" title="Remove photo"
-									   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
-										<span class="fas fa-times-circle"></span>
-									</a>
-									<?php endif; ?>
-								</div>
-							</div>
-						<?php endforeach; ?>
-						<?php if(count($event_photos) == 0 && $event->get('evt_picture_link')): ?>
-							<!-- Legacy external image fallback -->
-							<div class="col-12 text-center">
-								<img src="<?php echo htmlspecialchars($event->get('evt_picture_link')); ?>" alt="Event Image" class="img-fluid rounded" style="max-height: 300px;">
-								<div class="mt-2 text-muted fs-10">External image link</div>
-							</div>
-						<?php endif; ?>
-					</div>
+				<div class="card-body text-center">
+					<img src="<?php echo htmlspecialchars($event->get('evt_picture_link')); ?>" alt="Event Image" class="img-fluid rounded" style="max-height: 300px;">
+					<div class="mt-2 text-muted fs-10">External image link</div>
 				</div>
 			</div>
+			<?php endif; ?>
 
 			<!-- Event Description Card -->
 			<?php if($event->get('evt_description') || $event->get('evt_short_description')): ?>
@@ -684,225 +644,11 @@
 */
 
 	?>
-	<?php if(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
-	<script>
-	(function() {
-		var eventId = <?php echo (int)$event->key; ?>;
-
-		// Upload button
-		var btnUpload = document.getElementById('btn-upload-photo');
-		var fileInput = document.getElementById('photo-upload-input');
-		if (btnUpload && fileInput) {
-			btnUpload.addEventListener('click', function() {
-				fileInput.click();
-			});
-			fileInput.addEventListener('change', function() {
-				if (!this.files || !this.files[0]) return;
-				var file = this.files[0];
-				btnUpload.disabled = true;
-				btnUpload.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading...';
-
-				var formData = new FormData();
-				formData.append('action', 'upload');
-				formData.append('entity_type', 'event');
-				formData.append('entity_id', eventId);
-				formData.append('file', file);
-
-				fetch('/ajax/entity_photos_ajax', {
-					method: 'POST',
-					body: formData
-				})
-				.then(function(resp) { return resp.json(); })
-				.then(function(data) {
-					if (data.error) {
-						alert('Upload failed: ' + data.error);
-						btnUpload.disabled = false;
-						btnUpload.innerHTML = '<span class="fas fa-plus me-1"></span>Upload';
-						return;
-					}
-					// Reload page to show new photo
-					window.location.reload();
-				})
-				.catch(function(err) {
-					alert('Upload failed: ' + err.message);
-					btnUpload.disabled = false;
-					btnUpload.innerHTML = '<span class="fas fa-plus me-1"></span>Upload';
-				});
-
-				// Reset file input so same file can be re-selected
-				this.value = '';
-			});
-		}
-
-		// Set primary - event delegation
-		document.addEventListener('click', function(e) {
-			var btn = e.target.closest('.set-primary-btn');
-			if (!btn) return;
-			e.preventDefault();
-			var photoId = btn.getAttribute('data-photo-id');
-
-			var form = document.createElement('form');
-			form.method = 'POST';
-			form.action = '/admin/admin_event?evt_event_id=' + eventId;
-			form.style.display = 'none';
-
-			var actionInput = document.createElement('input');
-			actionInput.type = 'hidden';
-			actionInput.name = 'action';
-			actionInput.value = 'set_primary_photo';
-			form.appendChild(actionInput);
-
-			var photoInput = document.createElement('input');
-			photoInput.type = 'hidden';
-			photoInput.name = 'photo_id';
-			photoInput.value = photoId;
-			form.appendChild(photoInput);
-
-			document.body.appendChild(form);
-			form.submit();
-		});
-
-		// Delete photo - event delegation
-		document.addEventListener('click', function(e) {
-			var btn = e.target.closest('.delete-photo-btn');
-			if (!btn) return;
-			e.preventDefault();
-			if (!confirm('Remove this photo from the event?')) return;
-
-			var photoId = btn.getAttribute('data-photo-id');
-			var photoItem = btn.closest('.photo-item');
-
-			var formData = new FormData();
-			formData.append('action', 'delete');
-			formData.append('entity_type', 'event');
-			formData.append('entity_id', eventId);
-			formData.append('photo_id', photoId);
-
-			fetch('/ajax/entity_photos_ajax', {
-				method: 'POST',
-				body: formData
-			})
-			.then(function(resp) { return resp.json(); })
-			.then(function(data) {
-				if (data.error) {
-					alert('Delete failed: ' + data.error);
-					return;
-				}
-				// Remove from DOM
-				if (photoItem) photoItem.remove();
-				// Show empty message if no photos left
-				var remaining = document.querySelectorAll('.photo-item');
-				if (remaining.length === 0) {
-					var grid = document.getElementById('photo-grid');
-					if (grid) {
-						grid.innerHTML = '<div id="no-photos-msg" class="col-12 text-center text-muted py-4">' +
-							'<span class="fas fa-image fa-3x mb-2 d-block opacity-25"></span>No photos yet</div>';
-					}
-				}
-			})
-			.catch(function(err) {
-				alert('Delete failed: ' + err.message);
-			});
-		});
-
-		// Drag-and-drop reorder
-		var dragItem = null;
-		var grid = document.getElementById('photo-grid');
-
-		grid.addEventListener('dragstart', function(e) {
-			dragItem = e.target.closest('.photo-item');
-			if (!dragItem) return;
-			dragItem.style.opacity = '0.4';
-			e.dataTransfer.effectAllowed = 'move';
-			e.dataTransfer.setData('text/plain', dragItem.dataset.photoId);
-		});
-
-		grid.addEventListener('dragend', function(e) {
-			if (dragItem) {
-				dragItem.style.opacity = '1';
-				dragItem = null;
-			}
-			// Remove all drag-over indicators
-			grid.querySelectorAll('.photo-item').forEach(function(item) {
-				item.style.borderLeft = '';
-				item.style.borderRight = '';
-			});
-		});
-
-		grid.addEventListener('dragover', function(e) {
-			e.preventDefault();
-			e.dataTransfer.dropEffect = 'move';
-			var target = e.target.closest('.photo-item');
-			if (!target || target === dragItem) return;
-
-			// Clear all indicators
-			grid.querySelectorAll('.photo-item').forEach(function(item) {
-				item.style.borderLeft = '';
-				item.style.borderRight = '';
-			});
-
-			// Show indicator on the side closest to cursor
-			var rect = target.getBoundingClientRect();
-			var midX = rect.left + rect.width / 2;
-			if (e.clientX < midX) {
-				target.style.borderLeft = '3px solid #2c7be5';
-			} else {
-				target.style.borderRight = '3px solid #2c7be5';
-			}
-		});
-
-		grid.addEventListener('drop', function(e) {
-			e.preventDefault();
-			var target = e.target.closest('.photo-item');
-			if (!target || !dragItem || target === dragItem) return;
-
-			// Determine insert position based on cursor side
-			var rect = target.getBoundingClientRect();
-			var midX = rect.left + rect.width / 2;
-			if (e.clientX < midX) {
-				grid.insertBefore(dragItem, target);
-			} else {
-				grid.insertBefore(dragItem, target.nextSibling);
-			}
-
-			// Clear indicators
-			grid.querySelectorAll('.photo-item').forEach(function(item) {
-				item.style.borderLeft = '';
-				item.style.borderRight = '';
-			});
-
-			// Collect new order and POST to server
-			var photoIds = [];
-			grid.querySelectorAll('.photo-item').forEach(function(item) {
-				photoIds.push(item.dataset.photoId);
-			});
-
-			var formData = new FormData();
-			formData.append('action', 'reorder');
-			formData.append('entity_type', 'event');
-			formData.append('entity_id', eventId);
-			photoIds.forEach(function(id) {
-				formData.append('photo_ids[]', id);
-			});
-
-			fetch('/ajax/entity_photos_ajax', {
-				method: 'POST',
-				body: formData
-			})
-			.then(function(resp) { return resp.json(); })
-			.then(function(data) {
-				if (data.error) {
-					alert('Reorder failed: ' + data.error);
-					window.location.reload();
-				}
-			})
-			.catch(function(err) {
-				alert('Reorder failed: ' + err.message);
-				window.location.reload();
-			});
-		});
-	})();
-	</script>
+	<?php if($photo_editable): ?>
+	<?php PhotoHelper::render_photo_scripts('grid', 'event', $event->key, [
+		'set_primary_url' => '/admin/admin_event?evt_event_id=' . $event->key,
+		'confirm_delete_msg' => 'Remove this photo from the event?',
+	]); ?>
 	<?php endif; ?>
 	<?php
 

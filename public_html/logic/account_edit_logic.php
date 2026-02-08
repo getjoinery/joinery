@@ -7,6 +7,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
 	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
+	require_once(PathHelper::getIncludePath('data/files_class.php'));
+	require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 	
 	$page_vars = array();
 	
@@ -20,7 +22,29 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	if (!empty($post_vars)) {
 
-		
+		// Photo management actions
+		if (isset($post_vars['action']) && $post_vars['action'] == 'set_primary_photo') {
+			$user = new User($session->get_user_id(), TRUE);
+			$user->set_primary_photo((int)$post_vars['photo_id']);
+
+			$msgtxt = 'Your profile picture has been updated.';
+			$message = new DisplayMessage($msgtxt, 'Photo updated', '/\/profile\/account_edit.*/',
+				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+			$session->save_message($message);
+			return LogicResult::redirect('/profile/account_edit');
+		}
+
+		if (isset($post_vars['action']) && $post_vars['action'] == 'clear_primary_photo') {
+			$user = new User($session->get_user_id(), TRUE);
+			$user->clear_primary_photo();
+
+			$msgtxt = 'Your profile picture has been removed.';
+			$message = new DisplayMessage($msgtxt, 'Photo removed', '/\/profile\/account_edit.*/',
+				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+			$session->save_message($message);
+			return LogicResult::redirect('/profile/account_edit');
+		}
+
 		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
 		if($session->get_user_id()){ 
 			$user = new User($session->get_user_id(), TRUE);
@@ -80,6 +104,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	);
 	
 	$page_vars['user'] = $user;
+	$page_vars['user_photos'] = $user->get_photos();
 	return LogicResult::render($page_vars);
 }
 ?>

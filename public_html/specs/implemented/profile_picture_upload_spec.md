@@ -29,7 +29,7 @@
 - `User::clear_primary_photo()` -- clears all primaries, nulls FK
 - `User::get_photos()` -- returns MultiEntityPhoto for entity_type='user'
 - `User::get_primary_photo()` -- returns EntityPhoto or null
-- `User::get_picture_link($size_key='avatar')` -- returns URL from `usr_pic_picture_id`, defaults to `/img/default_avatar.png`
+- `User::get_picture_link($size_key='avatar')` -- returns URL from `usr_pic_picture_id`, defaults to `/assets/images/blank-avatar.png`
 
 **Entity photos AJAX** (`ajax/entity_photos_ajax.php`):
 - upload, delete, reorder, update_caption actions
@@ -49,7 +49,7 @@
 1. **No way for users to upload a profile picture** -- the account edit page has no photo field
 2. **Profile page shows hardcoded placeholder** -- doesn't use `User::get_picture_link()`
 3. **AJAX endpoint auth blocks regular users for upload** -- `check_photo_permission()` requires admin OR file owner, but on upload there's no file_id yet, so non-admins are blocked
-4. **No default avatar image exists** -- `User::get_picture_link()` returns `/img/default_avatar.png` but that file doesn't exist on disk
+4. **Default avatar not wired up** -- `User::get_picture_link()` needs to return a path that the static file handler can serve (use existing `/assets/images/blank-avatar.png`)
 
 ---
 
@@ -308,7 +308,7 @@ case 'delete':
 
 ### 2.7 Default Avatar
 
-Ensure a default avatar image exists at `/img/default_avatar.png`. This is what `User::get_picture_link()` returns when `usr_pic_picture_id` is NULL. Create a simple neutral silhouette placeholder (~200x200px).
+Use the existing default avatar at `/assets/images/blank-avatar.png` (already in the codebase). `User::get_picture_link()` returns this path when `usr_pic_picture_id` is NULL. The `/assets/` route is served by the static file handler, so the image is accessible at the URL `/assets/images/blank-avatar.png`.
 
 ---
 
@@ -330,7 +330,6 @@ Ensure a default avatar image exists at `/img/default_avatar.png`. This is what 
 | File | Purpose |
 |------|---------|
 | `includes/PhotoHelper.php` | Static utility class for rendering entity photo management UI |
-| `img/default_avatar.png` | Default avatar placeholder (simple silhouette, ~200x200) |
 
 ### 3.3 PhotoHelper Implementation Detail
 
@@ -457,7 +456,7 @@ function check_photo_permission($session, $file_id = null, $entity_type = null, 
 4. **Update `logic/account_edit_logic.php`** -- add requires, POST handlers, user_photos in page_vars
 5. **Update `views/profile/account_edit.php`** -- add PhotoHelper grid card
 6. **Update profile page** -- replace hardcoded avatar, add files_class require
-7. **Create default avatar** -- `/img/default_avatar.png`
+7. **Wire up default avatar** -- point `User::get_picture_link()` fallback to existing `/assets/images/blank-avatar.png`
 8. **Implement `single` mode** (optional, can defer) -- add private render methods for single-photo display
 
 Steps 1-2 are a safe refactor with no behavior change. Steps 3-7 add the new feature. Step 8 is independent and can be done later when a location or mailing list admin page needs it.
