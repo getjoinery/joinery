@@ -946,7 +946,7 @@ private static function UcName($string) {
 	function get_picture_link($size_key = 'avatar') {
 		$file_id = $this->get('usr_pic_picture_id');
 		if (!$file_id) {
-			return '/img/default_avatar.png';
+			return '/assets/images/blank-avatar.png';
 		}
 		$file = new File($file_id, TRUE);
 		return $file->get_url($size_key);
