@@ -235,37 +235,47 @@ public static function get_by_name($name) {
 			$img = new Imagick($old_path);
 			$img->setImageCompressionQuality($quality);
 
-			if ($crop && $width > 0 && $height > 0) {
-				// Center crop then resize to exact dimensions
-				$geo = $img->getImageGeometry();
+			$geo = $img->getImageGeometry();
+			$src_w = $geo['width'];
+			$src_h = $geo['height'];
 
-				if (($geo['width'] / $width) < ($geo['height'] / $height)) {
+			if ($crop && $width > 0 && $height > 0) {
+				// Center crop to target aspect ratio
+				if (($src_w / $width) < ($src_h / $height)) {
 					$img->cropImage(
-						$geo['width'],
-						floor($height * $geo['width'] / $width),
+						$src_w,
+						floor($height * $src_w / $width),
 						0,
-						(($geo['height'] - ($height * $geo['width'] / $width)) / 2)
+						(($src_h - ($height * $src_w / $width)) / 2)
 					);
 				} else {
 					$img->cropImage(
-						ceil($width * $geo['height'] / $height),
-						$geo['height'],
-						(($geo['width'] - ($width * $geo['height'] / $height)) / 2),
+						ceil($width * $src_h / $height),
+						$src_h,
+						(($src_w - ($width * $src_h / $height)) / 2),
 						0
 					);
 				}
 
-				$img->thumbnailImage($width, $height, true);
-			} else {
-				// Aspect-fit resize within bounds
-				if ($width > 0 && $height > 0) {
+				// Only downscale after crop, never upscale
+				$cropped = $img->getImageGeometry();
+				if ($cropped['width'] > $width || $cropped['height'] > $height) {
 					$img->thumbnailImage($width, $height, true);
+				}
+			} else {
+				// Aspect-fit resize — only downscale, never upscale
+				if ($width > 0 && $height > 0) {
+					if ($src_w > $width || $src_h > $height) {
+						$img->thumbnailImage($width, $height, true);
+					}
 				} elseif ($width > 0) {
-					// Width only - auto-calculate height
-					$img->thumbnailImage($width, 0, false);
+					if ($src_w > $width) {
+						$img->thumbnailImage($width, 0, false);
+					}
 				} elseif ($height > 0) {
-					// Height only - auto-calculate width
-					$img->thumbnailImage(0, $height, false);
+					if ($src_h > $height) {
+						$img->thumbnailImage(0, $height, false);
+					}
 				}
 			}
 
