@@ -1,10 +1,10 @@
 # Profile Picture Upload Spec
 
-**Purpose:** Add profile picture upload and management to the public-facing account edit page, allowing users to upload, view, and change their profile picture. This exercises the EntityPhoto system, entity_photos AJAX endpoint, `User::set_primary_photo()`, and the `File::resize()` pipeline from the user-facing side.
+**Purpose:** Add multi-photo upload and management to the public-facing account edit page, and introduce a reusable `PhotoHelper` class that centralizes all entity photo UI rendering. This eliminates duplicated photo grid code across pages, exercises the EntityPhoto system from the user-facing side, and prepares the foundation for dating profiles.
 
 **Last Updated:** 2026-02-07
 
-**Depends on:** [Pictures Refactor Spec](implemented/pictures_refactor_spec.md) (implemented)
+**Depends on:** [Pictures Refactor Spec](implemented/pictures_refactor_spec.md) (implemented), [Admin Event Photo Manager](implemented/admin_event_photo_manager_spec.md) (implemented -- provides the UI pattern to extract into PhotoHelper)
 
 ---
 
@@ -36,12 +36,20 @@
 - Auth: session user must be admin (perm >= 5) OR file owner
 - Currently only admin users can upload via this endpoint (the `check_photo_permission` function requires perm >= 5 for upload since no file_id exists yet)
 
+**Admin event photo grid** (`adm/admin_event.php`):
+- Working multi-photo grid with upload, delete, set primary, drag-and-drop reorder
+- ~230 lines of inline HTML (~60) and JavaScript (~170)
+- Uses `entity_photos_ajax.php` for upload/delete/reorder
+- Uses form POST for set_primary_photo/clear_primary_photo
+- Photo items display at `profile_card` size with overlay icons (star for primary, X to delete)
+- Icons use dark semi-transparent backgrounds for visibility on any image
+
 ### Problems
 
 1. **No way for users to upload a profile picture** -- the account edit page has no photo field
 2. **Profile page shows hardcoded placeholder** -- doesn't use `User::get_picture_link()`
 3. **AJAX endpoint auth blocks regular users for upload** -- `check_photo_permission()` requires admin OR file owner, but on upload there's no file_id yet, so non-admins are blocked
-4. **No default avatar image exists** -- `User::get_picture_link()` returns `/img/default_avatar.png` but that file may not exist
+4. **No default avatar image exists** -- `User::get_picture_link()` returns `/img/default_avatar.png` but that file doesn't exist on disk
 
 ---
 
@@ -49,16 +57,149 @@
 
 ### 2.1 Overview
 
-Add a "Profile Picture" section to the account edit page that allows users to:
-- View their current profile picture (or a default avatar)
-- Upload a new profile picture
-- Remove their profile picture
+Two deliverables:
 
-The upload uses the existing `entity_photos_ajax.php` endpoint after fixing its auth to allow self-service uploads.
+1. **PhotoHelper class** (`includes/PhotoHelper.php`) -- a static utility class that renders entity photo management UI. Supports multiple display modes (`grid` for multi-photo, `single` for single-photo) so any page can add photo management with two method calls. Extracted from the working admin_event.php implementation.
 
-### 2.2 Account Edit Page Changes
+2. **Account edit page photo upload** -- add a "My Photos" grid to the account edit page using PhotoHelper, with auth fix so non-admin users can upload their own photos.
 
-Add a profile picture section above the existing form fields in `views/profile/account_edit.php`.
+### 2.2 PhotoHelper Class
+
+**File:** `includes/PhotoHelper.php`
+
+A static utility class with no state. Two public methods render the HTML card and the JavaScript separately (since JS typically goes at the bottom of the page or in a script block).
+
+#### API
+
+```php
+require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
+
+// Render the photo card HTML
+PhotoHelper::render_photo_card($mode, $entity_type, $entity_id, $photos, $options);
+
+// Render the associated JavaScript
+PhotoHelper::render_photo_scripts($mode, $entity_type, $entity_id, $options);
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$mode` | string | Display mode: `'grid'` or `'single'` |
+| `$entity_type` | string | Entity type for EntityPhoto system (e.g., `'event'`, `'user'`, `'location'`) |
+| `$entity_id` | int | Entity primary key |
+| `$photos` | MultiEntityPhoto | Photo collection from `$entity->get_photos()` |
+| `$options` | array | Configuration options (see below) |
+
+**Options array:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `set_primary_url` | string | *(required)* | URL the set-primary form POSTs to (e.g., `/admin/admin_event?evt_event_id=123`) |
+| `card_title` | string | `'Photos'` | Card header text |
+| `image_size` | string | `'profile_card'` | ImageSizeRegistry key for display |
+| `confirm_delete_msg` | string | `'Remove this photo?'` | Confirm dialog text for delete |
+| `editable` | bool | `true` | Show upload/delete/reorder/set-primary controls. When false, display-only. |
+| `aspect_ratio` | string | `'4/5'` | CSS aspect-ratio for photo display |
+| `empty_message` | string | `'No photos yet'` | Text shown when no photos exist |
+
+#### Display Modes
+
+**`grid` mode** (multi-photo):
+- Bootstrap card with photo grid inside
+- Upload button in card header
+- Photos in `.row.g-2` layout, each in `.col-4.col-md-3`
+- Drag-and-drop reorder between photos
+- Primary star icon (solid gold = current primary, outline = click to set)
+- Delete X icon on each photo
+- Empty state with muted icon and message
+- All interactions via AJAX (`entity_photos_ajax.php`) except set-primary (form POST)
+
+**`single` mode** (single-photo, for future use):
+- Bootstrap card with single centered photo
+- Upload/Change button in card header (label changes based on whether photo exists)
+- One photo displayed at configurable size
+- No reorder (only one photo)
+- No primary star (the one photo IS the primary)
+- Delete button to remove
+- Empty state with placeholder icon
+- Upload auto-sets as primary; delete auto-clears primary
+
+#### What Varies Between Callers
+
+Only 5 parameters change between instances -- everything else is identical:
+
+| Parameter | admin_event.php | account_edit.php | Future: admin_location.php |
+|-----------|----------------|-----------------|---------------------------|
+| `entity_type` | `'event'` | `'user'` | `'location'` |
+| `entity_id` | `$event->key` | `$user->key` | `$location->key` |
+| `set_primary_url` | `/admin/admin_event?evt_event_id=X` | `/profile/account_edit` | `/admin/admin_location?loc_location_id=X` |
+| `card_title` | `'Event Photos'` | `'My Photos'` | `'Location Photo'` |
+| `editable` | `!$deleted && $perm > 7` | `true` | `!$deleted && $perm > 7` |
+
+#### Element ID Namespacing
+
+All HTML element IDs are namespaced with `joinery-photo-{entity_type}-{entity_id}` to avoid collisions with other frameworks and to support multiple PhotoHelper instances on the same page.
+
+| Current (admin_event.php) | PhotoHelper ID |
+|--------------------------|----------------|
+| `photo-grid` | `joinery-photo-grid-event-123` |
+| `btn-upload-photo` | `joinery-photo-upload-btn-event-123` |
+| `photo-upload-input` | `joinery-photo-upload-input-event-123` |
+| `no-photos-msg` | `joinery-photo-empty-event-123` |
+
+CSS classes that are used for event delegation (`.joinery-photo-item`, `.joinery-photo-set-primary-btn`, `.joinery-photo-delete-btn`) are also joinery-namespaced but do not need entity suffixes since the JS scopes queries to the grid container.
+
+PhotoHelper generates the ID prefix internally:
+```php
+$prefix = 'joinery-photo-' . $entity_type . '-' . $entity_id;
+// e.g., "joinery-photo-event-123", "joinery-photo-user-45"
+```
+
+#### Internal Requires
+
+PhotoHelper handles its own `require_once` calls for `data/files_class.php` and `data/entity_photos_class.php` so callers don't need to load them separately.
+
+#### Internal Structure
+
+Both methods output HTML directly (like FormWriter methods). The `render_photo_card()` method handles:
+
+1. Card wrapper with header (title + upload button if editable)
+2. Hidden file input for upload
+3. Photo loop: for each photo, render the image with overlay icons
+4. Empty state when no photos
+5. Hidden form for set-primary POST
+
+The `render_photo_scripts()` method outputs a `<script>` block with:
+
+1. Upload handler (file input → FormData → fetch to entity_photos_ajax)
+2. Set-primary handler (click star → submit hidden form)
+3. Delete handler (click X → confirm → fetch to entity_photos_ajax → remove from DOM)
+4. Drag-and-drop reorder handler (dragstart/dragover/dragend/drop → fetch to entity_photos_ajax)
+
+For `single` mode, the script omits the reorder handler and the upload handler auto-sets primary after upload.
+
+### 2.3 Account Edit Page Changes
+
+Add a "My Photos" grid above the existing form in `views/profile/account_edit.php` using PhotoHelper:
+
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
+PhotoHelper::render_photo_card('grid', 'user', $page_vars['user']->key, $page_vars['user_photos'], [
+    'set_primary_url' => '/profile/account_edit',
+    'card_title' => 'My Photos',
+]);
+?>
+
+<!-- ...existing form... -->
+
+<?php
+PhotoHelper::render_photo_scripts('grid', 'user', $page_vars['user']->key, [
+    'confirm_delete_msg' => 'Remove this photo?',
+]);
+?>
+```
 
 **Layout:**
 ```
@@ -68,11 +209,12 @@ Add a profile picture section above the existing form fields in `views/profile/a
 | [Tab: Edit Account] [Tab: Change Password] ...   |
 +--------------------------------------------------+
 |                                                   |
-|    +----------+                                   |
-|    |          |   [Change Photo]                  |
-|    |  avatar  |   [Remove Photo]                  |
-|    |          |                                   |
-|    +----------+                                   |
+| My Photos                          [+ Upload]    |
+| +--------+ +--------+ +--------+                 |
+| | *    x | | *    x | | *    x |                 |
+| | photo1 | | photo2 | | photo3 |                 |
+| |        | |        | |        |                 |
+| +--------+ +--------+ +--------+                 |
 |                                                   |
 |    First Name: [___________]                      |
 |    Last Name:  [___________]                      |
@@ -82,15 +224,44 @@ Add a profile picture section above the existing form fields in `views/profile/a
 +--------------------------------------------------+
 ```
 
-**Current photo display:**
-- Shows the user's current profile picture at `profile_card` size (400x500) in a rounded container
-- If no photo, shows a default avatar placeholder
-- "Change Photo" button triggers file upload
-- "Remove Photo" button (only shown when a photo exists) clears the primary photo
+### 2.4 Admin Event Page Refactor
 
-### 2.3 Auth Fix for Self-Service Upload
+Replace the inline photo grid HTML and JS in `adm/admin_event.php` with PhotoHelper calls. This is the extraction source -- after refactoring, the behavior should be identical.
 
-**`ajax/entity_photos_ajax.php`** -- The `check_photo_permission()` function needs adjustment for the upload case:
+**Before** (~230 lines inline):
+```php
+<!-- Event Photos Card -->
+<div class="card mt-3">
+    <!-- ...60 lines of HTML... -->
+</div>
+<!-- ...170 lines of JavaScript... -->
+```
+
+**After** (~10 lines):
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
+$photo_editable = !$event->get('evt_delete_time') && $_SESSION['permission'] > 7;
+PhotoHelper::render_photo_card('grid', 'event', $event->key, $event_photos, [
+    'set_primary_url' => '/admin/admin_event?evt_event_id=' . $event->key,
+    'card_title' => 'Event Photos',
+    'editable' => $photo_editable,
+]);
+?>
+
+<!-- later, in the script section: -->
+<?php if($photo_editable): ?>
+<?php PhotoHelper::render_photo_scripts('grid', 'event', $event->key, [
+    'confirm_delete_msg' => 'Remove this photo from the event?',
+]); ?>
+<?php endif; ?>
+```
+
+The legacy external image fallback (`evt_picture_link`) stays inline in admin_event.php since it's event-specific and will be removed eventually.
+
+### 2.5 Auth Fix for Self-Service Upload
+
+**`ajax/entity_photos_ajax.php`** -- The `check_photo_permission()` function needs adjustment for self-service use:
 
 Current logic:
 ```php
@@ -101,12 +272,7 @@ function check_photo_permission($session, $file_id = null) {
 }
 ```
 
-For upload, a non-admin user should be allowed to upload photos for their **own** entity. The fix is to also check entity ownership:
-
-- If `entity_type == 'user'` and `entity_id == session user_id`, allow upload
-- This is safe because the user can only attach photos to their own profile
-
-Add a new parameter for entity context:
+Add entity ownership check:
 
 ```php
 function check_photo_permission($session, $file_id = null, $entity_type = null, $entity_id = null) {
@@ -121,48 +287,28 @@ function check_photo_permission($session, $file_id = null, $entity_type = null, 
 }
 ```
 
-Update the upload case to pass entity context:
+Update all action cases to pass entity context where needed:
 ```php
 case 'upload':
     if (!check_photo_permission($session, null, $entity_type, $entity_id)) { ... }
+case 'reorder':
+    if (!check_photo_permission($session, null, $entity_type, $entity_id)) { ... }
+case 'delete':
+    if (!check_photo_permission($session, $photo->get('eph_fil_file_id'), $entity_type, $entity_id)) { ... }
 ```
-
-### 2.4 Profile Picture Flow
-
-**Upload:**
-1. User clicks "Change Photo"
-2. Hidden `<input type="file" accept="image/*">` opens file picker
-3. On file select, POST to `entity_photos_ajax.php` with `action=upload`, `entity_type=user`, `entity_id={usr_user_id}`, `file=...`
-4. AJAX creates File record, resizes, creates EntityPhoto
-5. On success, POST to account_edit with `action=set_primary_photo` and `photo_id` from AJAX response
-6. Page reloads showing new photo
-
-**Simplified alternative:** Instead of two-step AJAX+form, the upload AJAX response can trigger a second AJAX call or form submission to set_primary_photo. For MVP, a page reload after upload is acceptable.
-
-**Remove:**
-1. User clicks "Remove Photo"
-2. `confirm()` dialog
-3. POST to account_edit with `action=clear_primary_photo`
-4. Page reloads showing default avatar
-
-### 2.5 Single Photo Simplification
-
-For user profile pictures, the multi-photo gallery (reorder, captions) is not needed in the MVP. Users upload one photo at a time -- a new upload replaces the previous one as the primary. The old photo stays in entity_photos (not deleted) but is not primary.
-
-Future: A full photo gallery for user profiles (like dating sites need) is a separate feature.
 
 ### 2.6 Profile Page Changes
 
 **`views/profile/profile.php`:**
 - Replace the hardcoded placeholder avatar (`../../assets/img/team/1.jpg`) with `$page_vars['user']->get_picture_link('profile_card')`
-- Show the user's actual profile picture or the default avatar
+- Show the user's actual primary photo or the default avatar
 
 **`logic/profile_logic.php`:**
 - Add `require_once` for `data/files_class.php` (needed by `get_picture_link()`)
 
 ### 2.7 Default Avatar
 
-Ensure a default avatar image exists at `/img/default_avatar.png` (or `/assets/img/default_avatar.png`). This is what `User::get_picture_link()` returns when `usr_pic_picture_id` is NULL.
+Ensure a default avatar image exists at `/img/default_avatar.png`. This is what `User::get_picture_link()` returns when `usr_pic_picture_id` is NULL. Create a simple neutral silhouette placeholder (~200x200px).
 
 ---
 
@@ -172,9 +318,10 @@ Ensure a default avatar image exists at `/img/default_avatar.png` (or `/assets/i
 
 | File | Changes |
 |------|---------|
-| `ajax/entity_photos_ajax.php` | Fix `check_photo_permission()` to allow self-service upload for own entity |
-| `logic/account_edit_logic.php` | Add set_primary_photo/clear_primary_photo POST handlers, load files_class |
-| `views/profile/account_edit.php` | Add profile picture section with upload/remove UI, inline JS |
+| `ajax/entity_photos_ajax.php` | Fix `check_photo_permission()` to allow self-service upload/reorder for own entity |
+| `adm/admin_event.php` | Replace inline photo grid HTML+JS (~230 lines) with PhotoHelper calls (~10 lines) |
+| `logic/account_edit_logic.php` | Add `set_primary_photo` / `clear_primary_photo` POST handlers, load entity_photos and files classes, pass `user_photos` to page_vars |
+| `views/profile/account_edit.php` | Add PhotoHelper photo grid card above existing form |
 | `logic/profile_logic.php` | Add files_class require |
 | `views/profile/profile.php` | Replace hardcoded avatar with `get_picture_link()` |
 
@@ -182,82 +329,102 @@ Ensure a default avatar image exists at `/img/default_avatar.png` (or `/assets/i
 
 | File | Purpose |
 |------|---------|
+| `includes/PhotoHelper.php` | Static utility class for rendering entity photo management UI |
 | `img/default_avatar.png` | Default avatar placeholder (simple silhouette, ~200x200) |
 
-### 3.3 Logic Changes Detail
+### 3.3 PhotoHelper Implementation Detail
+
+**`includes/PhotoHelper.php`:**
+
+```php
+<?php
+/**
+ * PhotoHelper - Renders entity photo management UI components
+ *
+ * Static utility class that outputs HTML and JavaScript for managing
+ * entity photos (upload, delete, reorder, set primary). Supports
+ * multiple display modes for different use cases.
+ *
+ * Usage:
+ *   require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
+ *   PhotoHelper::render_photo_card('grid', 'event', $id, $photos, $options);
+ *   PhotoHelper::render_photo_scripts('grid', 'event', $id, $options);
+ *
+ * @version 1.0.0
+ */
+class PhotoHelper {
+
+    public static function render_photo_card($mode, $entity_type, $entity_id, $photos, $options = []) {
+        // Merge defaults
+        // Switch on $mode to call private render method
+    }
+
+    public static function render_photo_scripts($mode, $entity_type, $entity_id, $options = []) {
+        // Merge defaults
+        // Switch on $mode to call private render method
+    }
+
+    // --- Private renderers ---
+
+    private static function render_grid_card($entity_type, $entity_id, $photos, $options) {
+        // Card wrapper, upload button, photo loop, empty state
+        // Extracted from admin_event.php lines 290-348
+    }
+
+    private static function render_grid_scripts($entity_type, $entity_id, $options) {
+        // Upload, set-primary, delete, drag-and-drop JS
+        // Extracted from admin_event.php lines 688-905
+    }
+
+    private static function render_single_card($entity_type, $entity_id, $photos, $options) {
+        // Single photo display with upload/change/delete
+    }
+
+    private static function render_single_scripts($entity_type, $entity_id, $options) {
+        // Upload (auto-set-primary), delete (auto-clear-primary) JS
+    }
+}
+```
+
+### 3.4 Logic Changes Detail
 
 **`logic/account_edit_logic.php`** additions:
 
 ```php
 // At top with other requires:
 require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
 // In POST handling, before existing post handling:
-if ($post_vars['action'] == 'set_primary_photo') {
+if (isset($post_vars['action']) && $post_vars['action'] == 'set_primary_photo') {
     $user = new User($session->get_user_id(), TRUE);
     $user->set_primary_photo((int)$post_vars['photo_id']);
 
     $msgtxt = 'Your profile picture has been updated.';
-    $message = new DisplayMessage($msgtxt, 'Photo updated', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+    $message = new DisplayMessage($msgtxt, 'Photo updated', '/\/profile\/account_edit.*/',
+        DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
     $session->save_message($message);
     return LogicResult::redirect('/profile/account_edit');
 }
 
-if ($post_vars['action'] == 'clear_primary_photo') {
+if (isset($post_vars['action']) && $post_vars['action'] == 'clear_primary_photo') {
     $user = new User($session->get_user_id(), TRUE);
     $user->clear_primary_photo();
 
     $msgtxt = 'Your profile picture has been removed.';
-    $message = new DisplayMessage($msgtxt, 'Photo removed', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+    $message = new DisplayMessage($msgtxt, 'Photo removed', '/\/profile\/account_edit.*/',
+        DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
     $session->save_message($message);
     return LogicResult::redirect('/profile/account_edit');
 }
+
+// In page_vars setup (after loading user):
+$page_vars['user_photos'] = $user->get_photos();
 ```
 
-### 3.4 View Changes Detail
+### 3.5 AJAX Auth Fix Detail
 
-**`views/profile/account_edit.php`** -- Add before the existing form fields:
-
-```php
-<!-- Profile Picture Section -->
-<div class="mb-4 text-center">
-    <div class="mb-3">
-        <img src="<?php echo htmlspecialchars($page_vars['user']->get_picture_link('profile_card')); ?>"
-             alt="Profile Picture"
-             class="rounded-circle" style="width: 150px; height: 150px; object-fit: cover;"
-             id="current-avatar">
-    </div>
-    <button type="button" class="btn btn-falcon-default btn-sm me-2" id="btn-change-photo">
-        Change Photo
-    </button>
-    <?php if($page_vars['user']->get('usr_pic_picture_id')): ?>
-    <button type="button" class="btn btn-falcon-default btn-sm text-danger" id="btn-remove-photo">
-        Remove Photo
-    </button>
-    <?php endif; ?>
-    <input type="file" id="photo-upload-input" accept="image/*" style="display:none;">
-</div>
-```
-
-### 3.5 JavaScript Detail
-
-Inline `<script>` in account_edit.php:
-
-**Change Photo:**
-1. `btn-change-photo` click → trigger `photo-upload-input` click
-2. On file select, create FormData: `action=upload`, `entity_type=user`, `entity_id=<?php echo $page_vars['user']->key; ?>`, `file=...`
-3. POST to `/ajax/entity_photos_ajax`
-4. On success, create and submit a hidden form: `action=set_primary_photo`, `photo_id={response.photo.photo_id}` → POST to `/profile/account_edit`
-5. Page reloads with new photo and success message
-
-**Remove Photo:**
-1. `btn-remove-photo` click → `confirm('Remove your profile picture?')`
-2. Create and submit hidden form: `action=clear_primary_photo` → POST to `/profile/account_edit`
-3. Page reloads with default avatar and success message
-
-### 3.6 AJAX Auth Fix Detail
-
-**`ajax/entity_photos_ajax.php`** -- Update `check_photo_permission()`:
+**`ajax/entity_photos_ajax.php`** -- Update `check_photo_permission()` signature and add entity ownership check:
 
 ```php
 function check_photo_permission($session, $file_id = null, $entity_type = null, $entity_id = null) {
@@ -280,36 +447,61 @@ function check_photo_permission($session, $file_id = null, $entity_type = null, 
 }
 ```
 
-Update the upload case call:
-```php
-case 'upload':
-    // ...
-    if (!check_photo_permission($session, null, $entity_type, $entity_id)) {
-```
+---
+
+## 4. Implementation Order
+
+1. **Create `includes/PhotoHelper.php`** with `grid` mode -- extract HTML and JS from admin_event.php into the static methods
+2. **Refactor `adm/admin_event.php`** to use PhotoHelper -- replace inline code with method calls, verify identical behavior
+3. **Fix `ajax/entity_photos_ajax.php`** auth -- add entity ownership check to `check_photo_permission()`
+4. **Update `logic/account_edit_logic.php`** -- add requires, POST handlers, user_photos in page_vars
+5. **Update `views/profile/account_edit.php`** -- add PhotoHelper grid card
+6. **Update profile page** -- replace hardcoded avatar, add files_class require
+7. **Create default avatar** -- `/img/default_avatar.png`
+8. **Implement `single` mode** (optional, can defer) -- add private render methods for single-photo display
+
+Steps 1-2 are a safe refactor with no behavior change. Steps 3-7 add the new feature. Step 8 is independent and can be done later when a location or mailing list admin page needs it.
 
 ---
 
-## 4. Pictures Refactor Coverage
+## 5. Pictures Refactor Coverage
 
-This feature exercises the following untested parts of the pictures refactor:
+This feature exercises the following parts of the pictures refactor from the user-facing side:
 
 | Component | How It's Tested |
 |-----------|----------------|
-| `entity_photos_ajax.php` upload (non-admin) | User uploads their own profile picture |
-| `User::set_primary_photo()` | Setting uploaded photo as primary |
-| `User::clear_primary_photo()` | Removing profile picture |
-| `User::get_picture_link()` | Displaying current avatar on profile and edit pages |
-| `User::get_photos()` | (Implicitly, via set_primary_photo clearing old primaries) |
+| `entity_photos_ajax.php` upload (non-admin) | User uploads their own profile photos |
+| `entity_photos_ajax.php` delete (non-admin) | User deletes their own photos |
+| `entity_photos_ajax.php` reorder (non-admin) | User reorders their photos via drag-and-drop |
+| `User::set_primary_photo()` | Setting a photo as primary via star icon |
+| `User::clear_primary_photo()` | Removing primary (when last photo deleted) |
+| `User::get_photos()` | Loading photo grid on page load |
+| `User::get_picture_link()` | Displaying current avatar on profile page |
 | `File::resize()` via AJAX upload | New profile photos get all registered sizes |
 | `EntityPhoto::save()` limit enforcement | Upload when at max_entity_photos user limit (6) |
 | `max_entity_photos` setting | User photo count checked against limit |
 
 ---
 
-## 5. Not In Scope
+## 6. Future Uses of PhotoHelper
 
-- **Multi-photo gallery for users** -- MVP is single profile picture only; multi-photo is for dating plugin
+Pages that will use PhotoHelper once the `single` and `grid` modes are available:
+
+| Page | Mode | Entity Type | Notes |
+|------|------|-------------|-------|
+| `adm/admin_event.php` | `grid` | event | **This spec** -- refactored from inline code |
+| `views/profile/account_edit.php` | `grid` | user | **This spec** -- new feature |
+| `adm/admin_location.php` | `single` | location | Future -- replace read-only image display |
+| `adm/admin_mailing_list.php` | `single` | mailing_list | Future -- replace file dropdown with visual upload |
+| Dating profile edit | `grid` | user | Future -- dating spec section 1.1 |
+
+---
+
+## 7. Not In Scope
+
 - **Photo cropping UI** -- server-side crop via ImageSizeRegistry is sufficient
 - **Admin user page photo management** -- separate feature, admin can use file management tools
 - **Profile picture display in navigation/header** -- separate UI feature
 - **Social features** (likes, comments on photos) -- dating plugin scope
+- **Captions on user photos** -- the AJAX endpoint supports it, but no UI needed yet
+- **`single` mode implementation** -- defined in design, but can be deferred until a page needs it
