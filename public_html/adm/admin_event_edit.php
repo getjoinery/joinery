@@ -106,6 +106,93 @@ $formwriter->datetimeinput('evt_start_time', 'Event start time ('. ($event->get(
 
 $formwriter->datetimeinput('evt_end_time', 'Event end time ('. ($event->get('evt_timezone') ? $event->get('evt_timezone') : 'local'). ' timezone)');
 
+// Recurrence section - only show for parent events and new events, NOT for materialized instances
+if (!$event->is_instance()) {
+	echo '</div></div></div>';
+	echo '<div class="card mt-3">';
+	echo '<div class="card-header bg-body-tertiary">';
+	echo '<h6 class="mb-0"><span class="fas fa-sync me-2"></span>Recurrence</h6>';
+	echo '</div>';
+	echo '<div class="card-body">';
+	echo '<div class="row"><div class="col-md-8"><div class="p-3">';
+
+	$recurrence_options = array('' => 'None', 'daily' => 'Daily', 'weekly' => 'Weekly', 'monthly' => 'Monthly', 'yearly' => 'Yearly');
+	$formwriter->dropinput('evt_recurrence_type', 'Repeat', [
+		'options' => $recurrence_options,
+		'empty_option' => false,
+		'visibility_rules' => array(
+			'' => array('show' => array(), 'hide' => array('evt_recurrence_interval', 'recurrence_days_of_week_group', 'recurrence_monthly_group', 'recurrence_end_group')),
+			'daily' => array('show' => array('evt_recurrence_interval', 'recurrence_end_group'), 'hide' => array('recurrence_days_of_week_group', 'recurrence_monthly_group')),
+			'weekly' => array('show' => array('evt_recurrence_interval', 'recurrence_days_of_week_group', 'recurrence_end_group'), 'hide' => array('recurrence_monthly_group')),
+			'monthly' => array('show' => array('evt_recurrence_interval', 'recurrence_monthly_group', 'recurrence_end_group'), 'hide' => array('recurrence_days_of_week_group')),
+			'yearly' => array('show' => array('evt_recurrence_interval', 'recurrence_end_group'), 'hide' => array('recurrence_days_of_week_group', 'recurrence_monthly_group')),
+		)
+	]);
+
+	$formwriter->textinput('evt_recurrence_interval', 'Every N intervals (e.g., 1 = every, 2 = every other)', [
+		'validation' => ['min' => 1]
+	]);
+
+	// Days of week checkboxes (for weekly)
+	echo '<div id="recurrence_days_of_week_group_container"' . ($event->get('evt_recurrence_type') !== 'weekly' ? ' style="display:none;"' : '') . '>';
+	echo '<label class="form-label">Repeat on</label>';
+	echo '<div class="mb-3">';
+	$day_names = array('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat');
+	$current_days = $event->get('evt_recurrence_days_of_week') ? explode(',', $event->get('evt_recurrence_days_of_week')) : array();
+	foreach ($day_names as $i => $day_name) {
+		$checked = in_array((string)$i, $current_days) ? ' checked' : '';
+		echo '<div class="form-check form-check-inline">';
+		echo '<input class="form-check-input recurrence-dow-check" type="checkbox" name="recurrence_dow_' . $i . '" id="recurrence_dow_' . $i . '" value="' . $i . '"' . $checked . '>';
+		echo '<label class="form-check-label" for="recurrence_dow_' . $i . '">' . $day_name . '</label>';
+		echo '</div>';
+	}
+	echo '</div></div>';
+
+	// Monthly options (for monthly)
+	echo '<div id="recurrence_monthly_group_container"' . ($event->get('evt_recurrence_type') !== 'monthly' ? ' style="display:none;"' : '') . '>';
+	$month_by_week = ($event->get('evt_recurrence_week_of_month') !== null && $event->get('evt_recurrence_week_of_month') !== '');
+	echo '<div class="mb-3">';
+	echo '<div class="form-check">';
+	echo '<input class="form-check-input" type="radio" name="monthly_type" id="monthly_by_date" value="by_date"' . (!$month_by_week ? ' checked' : '') . '>';
+	echo '<label class="form-check-label" for="monthly_by_date">On the same day each month</label>';
+	echo '</div>';
+	echo '<div class="form-check">';
+	echo '<input class="form-check-input" type="radio" name="monthly_type" id="monthly_by_week" value="by_week"' . ($month_by_week ? ' checked' : '') . '>';
+	echo '<label class="form-check-label" for="monthly_by_week">On a specific weekday of the month</label>';
+	echo '</div>';
+	echo '<div id="week_of_month_select"' . (!$month_by_week ? ' style="display:none;"' : '') . ' class="mt-2">';
+	$wom_options = array(1 => '1st', 2 => '2nd', 3 => '3rd', 4 => '4th', -1 => 'Last');
+	$formwriter->dropinput('evt_recurrence_week_of_month', 'Which week', [
+		'options' => $wom_options,
+		'empty_option' => '-- Select --'
+	]);
+	echo '</div>';
+	echo '</div></div>';
+
+	// End group
+	echo '<div id="recurrence_end_group_container"' . (!$event->get('evt_recurrence_type') ? ' style="display:none;"' : '') . '>';
+	$has_end_date = !empty($event->get('evt_recurrence_end_date'));
+	echo '<div class="mb-3">';
+	echo '<label class="form-label">Ends</label>';
+	echo '<div class="form-check">';
+	echo '<input class="form-check-input" type="radio" name="recurrence_end_type" id="end_never" value="never"' . (!$has_end_date ? ' checked' : '') . '>';
+	echo '<label class="form-check-label" for="end_never">Never</label>';
+	echo '</div>';
+	echo '<div class="form-check">';
+	echo '<input class="form-check-input" type="radio" name="recurrence_end_type" id="end_on_date" value="on_date"' . ($has_end_date ? ' checked' : '') . '>';
+	echo '<label class="form-check-label" for="end_on_date">On date</label>';
+	echo '</div>';
+	echo '<div id="recurrence_end_date_input"' . (!$has_end_date ? ' style="display:none;"' : '') . ' class="mt-2">';
+	$formwriter->dateinput('evt_recurrence_end_date', 'End date');
+	echo '</div>';
+	echo '</div></div>';
+
+	echo '</div></div>';
+	echo '</div>';
+	echo '</div>';
+	echo '<div class="row"><div class="col-md-8"><div class="p-3">';
+} // end recurrence section
+
 $formwriter->textbox('evt_description', 'Event Description', [
 	'rows' => 10,
 	'cols' => 80,
@@ -200,6 +287,40 @@ echo '	</div>
 </div>';
 
 $page->end_box();
+
+if (!$event->is_instance()) {
+	echo '<script>
+document.addEventListener("DOMContentLoaded", function() {
+	// Monthly type radio toggle
+	var monthlyByDate = document.getElementById("monthly_by_date");
+	var monthlyByWeek = document.getElementById("monthly_by_week");
+	var weekOfMonthSelect = document.getElementById("week_of_month_select");
+
+	if (monthlyByDate && monthlyByWeek && weekOfMonthSelect) {
+		monthlyByDate.addEventListener("change", function() {
+			if (this.checked) weekOfMonthSelect.style.display = "none";
+		});
+		monthlyByWeek.addEventListener("change", function() {
+			if (this.checked) weekOfMonthSelect.style.display = "";
+		});
+	}
+
+	// End type radio toggle
+	var endNever = document.getElementById("end_never");
+	var endOnDate = document.getElementById("end_on_date");
+	var endDateInput = document.getElementById("recurrence_end_date_input");
+
+	if (endNever && endOnDate && endDateInput) {
+		endNever.addEventListener("change", function() {
+			if (this.checked) endDateInput.style.display = "none";
+		});
+		endOnDate.addEventListener("change", function() {
+			if (this.checked) endDateInput.style.display = "";
+		});
+	}
+});
+</script>';
+}
 
 $page->admin_footer();
 

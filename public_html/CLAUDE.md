@@ -131,6 +131,30 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 
 For complete details on themes, plugins, and routing: **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)**
 
+### Documentation Index
+
+See `/docs/` for detailed guides on specific subsystems:
+
+- [Admin Pages](docs/admin_pages.md) - Admin interface development patterns
+- [Admin Page Reference](docs/admin_page_reference.md) - Quick reference for admin pages
+- [Component System](docs/component_system.md) - Reusable component architecture
+- [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
+- [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
+- [Deploy and Upgrade](docs/deploy_and_upgrade.md) - Deployment and upgrade procedures
+- [Email System](docs/email_system.md) - Email sending and templates
+- [FormWriter](docs/formwriter.md) - Form generation system
+- [jQuery Removal Analysis](docs/jquery_removal_analysis.md) - jQuery dependency analysis
+- [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
+- [Photo System](docs/photo_system.md) - Photo management and uploads
+- [Plugin Developer Guide](docs/plugin_developer_guide.md) - Plugin development, routing, themes
+- [Product Purchase Hooks](docs/product_purchase_hooks.md) - Purchase event hooks
+- [Publish/Upgrade System Analysis](docs/publish_upgrade_system_analysis.md) - Publishing workflow
+- [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
+- [Settings](docs/settings.md) - System settings management
+- [Subscription Tiers](docs/subscription_tiers.md) - Subscription and tier system
+- [Theme Integration Instructions](docs/theme_integration_instructions.md) - Theme setup and integration
+- [Validation](docs/validation.md) - Input validation patterns
+
 ## Database & Configuration
 
 **Database:** PostgreSQL with PDO prepared statements

@@ -85,17 +85,40 @@ $page_vars = $page_vars->data;
 					<?php
 					foreach ($page_vars['events'] as $event){
 						$now = LibraryFunctions::get_current_time_obj('UTC');
-						$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
+						$is_virtual = (is_object($event) && isset($event->is_virtual) && $event->is_virtual);
+
+						// Unified field accessor
+						$evt_name = $is_virtual ? $event->evt_name : $event->get('evt_name');
+						$evt_start_time = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
+						$evt_link = $is_virtual ? $event->evt_link : $event->get('evt_link');
+						$evt_leader_id = $is_virtual ? $event->evt_usr_user_id_leader : $event->get('evt_usr_user_id_leader');
+
+						// Build URL
+						if ($is_virtual) {
+							$event_url = '/event/' . $evt_link . '/' . $event->instance_date;
+							$pic = null; // Virtual instances use parent's picture
+							if ($event->evt_fil_file_id) {
+								$pic_file = new File($event->evt_fil_file_id, TRUE);
+								$pic = $pic_file->get_url('profile_card', 'full');
+							} elseif ($event->evt_picture_link) {
+								$pic = $event->evt_picture_link;
+							}
+						} else {
+							$event_url = $event->get_url();
+							$pic = $event->get_picture_link('profile_card');
+						}
+
+						$event_time = $evt_start_time ? LibraryFunctions::get_time_obj($evt_start_time, 'UTC') : null;
 						?>
 						<article class="portfolio-item col-md-4 col-sm-6 col-12">
 							<div class="grid-inner">
 								<div class="portfolio-image">
-									<?php if($pic = $event->get_picture_link('profile_card')){ ?>
-										<a href="<?php echo $event->get_url(); ?>">
-											<img src="<?php echo $pic; ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
+									<?php if($pic){ ?>
+										<a href="<?php echo $event_url; ?>">
+											<img src="<?php echo $pic; ?>" alt="<?php echo htmlspecialchars($evt_name); ?>">
 										</a>
 									<?php } else { ?>
-										<a href="<?php echo $event->get_url(); ?>">
+										<a href="<?php echo $event_url; ?>">
 											<div class="d-flex align-items-center justify-content-center bg-light" style="height: 250px;">
 												<i class="uil uil-calendar-alt" style="font-size: 64px; color: #DDD;"></i>
 											</div>
@@ -103,36 +126,40 @@ $page_vars = $page_vars->data;
 									<?php } ?>
 									<div class="bg-overlay">
 										<div class="bg-overlay-content dark" data-hover-animate="fadeIn">
-											<a href="<?php echo $event->get_url(); ?>" class="overlay-trigger-icon bg-light text-dark" data-hover-animate="fadeInDownSmall" data-hover-animate-out="fadeOutUpSmall" data-hover-speed="350"><i class="uil uil-plus"></i></a>
-											<a href="<?php echo $event->get_url(); ?>" class="overlay-trigger-icon bg-light text-dark" data-hover-animate="fadeInDownSmall" data-hover-animate-out="fadeOutUpSmall" data-hover-speed="350"><i class="uil uil-ellipsis-h"></i></a>
+											<a href="<?php echo $event_url; ?>" class="overlay-trigger-icon bg-light text-dark" data-hover-animate="fadeInDownSmall" data-hover-animate-out="fadeOutUpSmall" data-hover-speed="350"><i class="uil uil-plus"></i></a>
+											<a href="<?php echo $event_url; ?>" class="overlay-trigger-icon bg-light text-dark" data-hover-animate="fadeInDownSmall" data-hover-animate-out="fadeOutUpSmall" data-hover-speed="350"><i class="uil uil-ellipsis-h"></i></a>
 										</div>
 										<div class="bg-overlay-bg dark" data-hover-animate="fadeIn"></div>
 									</div>
 								</div>
 								<div class="portfolio-desc">
-									<h3><a href="<?php echo $event->get_url(); ?>"><?php echo $event->get('evt_name'); ?></a></h3>
+									<h3><a href="<?php echo $event_url; ?>"><?php echo htmlspecialchars($evt_name); ?></a></h3>
 									<span>
 										<?php
 										$date_str = '';
 										$instructor_str = '';
-										
+
 										// Get date
-										if($event->get('evt_start_time') && $event_time > $now){				
-											$date_str = $event->get_event_start_time($tz, 'M j, Y');
+										if($evt_start_time && $event_time && $event_time > $now){
+											if ($is_virtual) {
+												$date_str = date('M j, Y', strtotime($evt_start_time));
+											} else {
+												$date_str = $event->get_event_start_time($tz, 'M j, Y');
+											}
 										}
-										else if($next_session = $event->get_next_session()){
-											$date_str = $next_session->get_start_time($tz, 'M j, Y'); 
+										else if(!$is_virtual && ($next_session = $event->get_next_session())){
+											$date_str = $next_session->get_start_time($tz, 'M j, Y');
 										}
-										
+
 										// Get instructor
-										if($event->get('evt_usr_user_id_leader')){
-											$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
+										if($evt_leader_id){
+											$leader = new User($evt_leader_id, TRUE);
 											$instructor_str = $leader->display_name();
 										}
 										else{
 											$instructor_str = 'Various instructors';
 										}
-										
+
 										// Display like portfolio categories
 										if($date_str) {
 											echo '<a href="#">'.$date_str.'</a>';
@@ -147,7 +174,7 @@ $page_vars = $page_vars->data;
 							</div>
 						</article>
 					<?php
-					}	
+					}
 					?>
 
 				</div><!-- #portfolio end -->

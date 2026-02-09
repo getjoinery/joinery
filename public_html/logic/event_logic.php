@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function event_logic($get_vars, $post_vars, $event){
+function event_logic($get_vars, $post_vars, $event, $instance_date = null){
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -14,17 +14,69 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
-	
+	$page_vars['is_virtual'] = false;
 
 	if(!$event){
+		require_once(LibraryFunctions::display_404_page());
+	}
+
+	// Handle recurring event instance resolution
+	if ($instance_date && $event->is_recurring_parent()) {
+		// Check if a materialized instance exists for this date
+		$materialized = $event->_get_materialized_instance_for_date($instance_date);
+		if ($materialized) {
+			// Use the materialized instance as the event
+			$event = $materialized;
+		} else if ($event->date_matches_pattern($instance_date)) {
+			// Create a virtual instance for display
+			$virtual = $event->create_virtual_instance($instance_date);
+			$page_vars['event'] = $virtual;
+			$page_vars['is_virtual'] = true;
+			$page_vars['registration_message'] = 'Registration is not yet open for this date.';
+			$page_vars['view_course_link'] = '';
+			$page_vars['register_link'] = '';
+			$page_vars['waiting_list_link'] = '';
+			$page_vars['if_registered_message'] = '';
+			$page_vars['is_registered'] = 0;
+			$page_vars['register_urls'] = array();
+			$page_vars['show_sessions_block'] = false;
+			$page_vars['location_string'] = $virtual->evt_location;
+
+			if ($virtual->evt_loc_location_id) {
+				$location = new Location($virtual->evt_loc_location_id, true);
+				$page_vars['location_object'] = $location;
+				if ($location->get('loc_fil_file_id')) {
+					$file = new File($location->get('loc_fil_file_id'), true);
+					$page_vars['location_picture'] = $file->get_url('content','full');
+				}
+			} else {
+				$page_vars['location_object'] = null;
+				$page_vars['location_picture'] = null;
+			}
+
+			return LogicResult::render($page_vars);
+		} else {
+			// Date doesn't match pattern — 404
+			require_once(LibraryFunctions::display_404_page());
+		}
+	} else if ($instance_date && !$event->is_recurring_parent()) {
+		// Slug belongs to a non-recurring event but date was provided — 404
+		require_once(LibraryFunctions::display_404_page());
+	} else if (!$instance_date && $event->is_recurring_parent()) {
+		// Bare parent URL — redirect to next upcoming instance
+		$next_dates = $event->compute_occurrence_dates(date('Y-m-d'), 1);
+		if (!empty($next_dates)) {
+			return LogicResult::redirect('/event/' . $event->get('evt_link') . '/' . $next_dates[0]);
+		}
+		// No upcoming instances — 404
 		require_once(LibraryFunctions::display_404_page());
 	}
 
 	$page_vars['event'] = $event;
 	if(!$event->get('evt_visibility') || $event->get('evt_delete_time')){
 		if($session->get_permission() < 5){
-			require_once(LibraryFunctions::display_404_page());	
-		}			
+			require_once(LibraryFunctions::display_404_page());
+		}
 	}
 
 		
