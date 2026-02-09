@@ -112,6 +112,7 @@ $routes = [
         // Model-based content routes
         '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active'],
         '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class', 'check_setting' => 'page_contents_active'],
+        '/event/{slug}/{date}' => ['model' => 'Event', 'model_file' => 'data/events_class', 'check_setting' => 'events_active', 'view' => 'views/event'],
         '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class', 'check_setting' => 'events_active'],
         '/location/{slug}' => ['model' => 'Location', 'model_file' => 'data/locations_class', 'check_setting' => 'events_active'],
         '/product/{slug}' => ['model' => 'Product', 'model_file' => 'data/products_class', 'check_setting' => 'products_active'],

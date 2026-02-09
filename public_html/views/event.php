@@ -3,8 +3,11 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	
-	$page_vars = event_logic($_GET, $_POST, $event);
+
+	// Handle recurring event date parameter from /event/{slug}/{date} route
+	$instance_date = isset($params['date']) ? $params['date'] : null;
+
+	$page_vars = event_logic($_GET, $_POST, $event, $instance_date);
 	// Handle LogicResult return format
 if ($page_vars->redirect) {
     LibraryFunctions::redirect($page_vars->redirect);
@@ -12,17 +15,26 @@ if ($page_vars->redirect) {
 }
 $page_vars = $page_vars->data;
 	$event = $page_vars['event'];
+	$is_virtual_event = !empty($page_vars['is_virtual']);
 	$settings = Globalvars::get_instance();
-	
+
+	// Helper to get field value from either Event object or virtual stdClass
+	$evt_get = function($field) use ($event, $is_virtual_event) {
+		if ($is_virtual_event) {
+			return isset($event->$field) ? $event->$field : null;
+		}
+		return $event->get($field);
+	};
+
 	$page = new PublicPage();
 	$page_options = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => $event->get('evt_name')
+		'title' => $evt_get('evt_name')
 	);
-	if($event->get('evt_short_description')){
-		$page_options['meta_description'] = $event->get('evt_short_description');
+	if($evt_get('evt_short_description')){
+		$page_options['meta_description'] = $evt_get('evt_short_description');
 	}
-	if($event->get_picture_link('hero')){
+	if(!$is_virtual_event && $event->get_picture_link('hero')){
 		$page_options['preview_image_url'] = $event->get_picture_link('hero');
 	}
 	$page->public_header($page_options);
@@ -63,32 +75,57 @@ $page_vars = $page_vars->data;
 
 							<!-- Event Header -->
 							<div class="bg-white rounded-4 shadow-sm p-4 mb-4">
-								<h2 class="mb-3"><?php echo htmlspecialchars($event->get('evt_name')); ?></h2>
-								
-								<?php 
-								if($time_string = $event->get_time_string()){
-									echo '<p class="fs-5 text-muted mb-2"><i class="bi-calendar4-event me-2"></i>'.$time_string.'</p>';
+								<h2 class="mb-3"><?php echo htmlspecialchars($evt_get('evt_name')); ?></h2>
+
+								<?php
+								if ($is_virtual_event) {
+									// Virtual instance: format times from raw values
+									if ($evt_get('evt_start_time')) {
+										$tz = $evt_get('evt_timezone') ?: 'America/New_York';
+										$start_str = LibraryFunctions::convert_time($evt_get('evt_start_time'), 'UTC', $tz, 'M j, Y g:i a T');
+										echo '<p class="fs-5 text-muted mb-2"><i class="bi-calendar4-event me-2"></i>' . $start_str;
+										if ($evt_get('evt_end_time')) {
+											$end_str = LibraryFunctions::convert_time($evt_get('evt_end_time'), 'UTC', $tz, 'g:i a T');
+											echo ' - ' . $end_str;
+										}
+										echo '</p>';
+									}
+								} else {
+									if ($time_string = $event->get_time_string()) {
+										echo '<p class="fs-5 text-muted mb-2"><i class="bi-calendar4-event me-2"></i>'.$time_string.'</p>';
+									}
+									if ($evt_get('evt_timezone') != $page_vars['session']->get_timezone()) {
+										echo '<p class="text-muted mb-2"><i class="bi-clock me-2"></i>'.$event->get_time_string($page_vars['session']->get_timezone()).'</p>';
+									}
 								}
-								
-								if($event->get('evt_timezone') != $page_vars['session']->get_timezone()){
-									echo '<p class="text-muted mb-2"><i class="bi-clock me-2"></i>'.$event->get_time_string($page_vars['session']->get_timezone()).'</p>';
+
+								if($evt_get('evt_location')){
+									echo '<p class="text-muted mb-2"><i class="bi-geo-alt me-2"></i>'.htmlspecialchars($evt_get('evt_location')).'</p>';
 								}
-								
-								if($event->get('evt_location')){
-									echo '<p class="text-muted mb-2"><i class="bi-geo-alt me-2"></i>'.$event->get('evt_location').'</p>';
-								}
-								
-								if($event->get('evt_usr_user_id_leader')){
-									$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
+
+								if($evt_get('evt_usr_user_id_leader')){
+									$leader = new User($evt_get('evt_usr_user_id_leader'), TRUE);
 									echo '<p class="text-muted"><i class="bi-person me-2"></i>Led by: '.$leader->display_name().'</p>';
 								}
 								?>
 							</div>
 
 							<!-- Event Image -->
-							<?php if($picture_link = $event->get_picture_link('content')){ ?>
+							<?php
+							if ($is_virtual_event) {
+								$picture_link = null;
+								if ($evt_get('evt_fil_file_id')) {
+									$pic_file = new File($evt_get('evt_fil_file_id'), TRUE);
+									$picture_link = $pic_file->get_url('content', 'full');
+								} elseif ($evt_get('evt_picture_link')) {
+									$picture_link = $evt_get('evt_picture_link');
+								}
+							} else {
+								$picture_link = $event->get_picture_link('content');
+							}
+							if ($picture_link) { ?>
 								<div class="mb-5">
-									<img src="<?php echo $picture_link; ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>" class="w-100 rounded-4 shadow-sm">
+									<img src="<?php echo $picture_link; ?>" alt="<?php echo htmlspecialchars($evt_get('evt_name')); ?>" class="w-100 rounded-4 shadow-sm">
 								</div>
 							<?php } ?>
 
@@ -96,7 +133,7 @@ $page_vars = $page_vars->data;
 							<div class="bg-white rounded-4 shadow-sm p-4 mb-4">
 								<h3 class="mb-3">Description</h3>
 								<div class="entry-content">
-									<?php echo $event->get('evt_description'); ?>
+									<?php echo $evt_get('evt_description'); ?>
 								</div>
 							</div>
 
@@ -134,9 +171,10 @@ $page_vars = $page_vars->data;
 					<aside class="sidebar col-lg-4">
 						
 						<!-- Registration Widget -->
+						<?php if (empty($page_vars['is_virtual'])): ?>
 						<div class="widget bg-white rounded-4 shadow-sm p-4 mb-4">
 							<h4 class="mb-3">Registration</h4>
-							
+
 							<?php
 							if($page_vars['registration_message']){
 								echo '<p class="mb-3">'.$page_vars['registration_message'].'</p>';
@@ -148,16 +186,22 @@ $page_vars = $page_vars->data;
 								echo '<a href="'.$register_url['link'].'" class="button button-3d button-rounded button-dirtygreen">'.$register_url['label'].'</a>';
 								echo '</div>';
 							}
-							
+
 							if($page_vars['if_registered_message']){
 								echo '<p class="text-muted small mt-3 mb-0">'.$page_vars['if_registered_message'].'</p>';
 							}
 							?>
 						</div>
+						<?php else: ?>
+						<div class="widget bg-white rounded-4 shadow-sm p-4 mb-4">
+							<h4 class="mb-3">Registration</h4>
+							<p class="mb-0 text-muted">Registration is not yet open for this date.</p>
+						</div>
+						<?php endif; ?>
 
 						<!-- Sessions Widget -->
 						<?php
-						if($page_vars['show_sessions_block'] || $page_vars['numsessions'] > 0 || $page_vars['future_numsessions'] > 0 || $page_vars['past_numsessions'] > 0){
+						if(!$is_virtual_event && ($page_vars['show_sessions_block'] || (isset($page_vars['numsessions']) && $page_vars['numsessions'] > 0) || (isset($page_vars['future_numsessions']) && $page_vars['future_numsessions'] > 0) || (isset($page_vars['past_numsessions']) && $page_vars['past_numsessions'] > 0))){
 						?>
 						<div class="widget bg-white rounded-4 shadow-sm p-4">
 							<h4 class="mb-3">Sessions</h4>

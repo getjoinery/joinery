@@ -90,6 +90,50 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 			$event->set('evt_end_time', $end_time);
 		}
 
+		// Handle recurrence fields (only if not editing a materialized instance)
+		if (!$event->is_instance()) {
+			$rec_type = isset($post_vars['evt_recurrence_type']) ? $post_vars['evt_recurrence_type'] : '';
+			if ($rec_type === '') {
+				// "None" selected — clear all recurrence fields
+				$event->set('evt_recurrence_type', NULL);
+				$event->set('evt_recurrence_interval', 1);
+				$event->set('evt_recurrence_days_of_week', NULL);
+				$event->set('evt_recurrence_week_of_month', NULL);
+				$event->set('evt_recurrence_end_date', NULL);
+			} else {
+				$event->set('evt_recurrence_type', $rec_type);
+				$event->set('evt_recurrence_interval', max(1, (int)($post_vars['evt_recurrence_interval'] ?? 1)));
+
+				// Days of week (weekly only)
+				if ($rec_type === 'weekly') {
+					$selected_days = [];
+					for ($i = 0; $i <= 6; $i++) {
+						if (isset($post_vars['recurrence_dow_' . $i])) {
+							$selected_days[] = $i;
+						}
+					}
+					$event->set('evt_recurrence_days_of_week', !empty($selected_days) ? implode(',', $selected_days) : NULL);
+				} else {
+					$event->set('evt_recurrence_days_of_week', NULL);
+				}
+
+				// Week of month (monthly only)
+				if ($rec_type === 'monthly' && isset($post_vars['monthly_type']) && $post_vars['monthly_type'] === 'by_week') {
+					$wom = isset($post_vars['evt_recurrence_week_of_month']) ? (int)$post_vars['evt_recurrence_week_of_month'] : NULL;
+					$event->set('evt_recurrence_week_of_month', $wom);
+				} else {
+					$event->set('evt_recurrence_week_of_month', NULL);
+				}
+
+				// End date
+				if (isset($post_vars['recurrence_end_type']) && $post_vars['recurrence_end_type'] === 'on_date' && !empty($post_vars['evt_recurrence_end_date'])) {
+					$event->set('evt_recurrence_end_date', $post_vars['evt_recurrence_end_date']);
+				} else {
+					$event->set('evt_recurrence_end_date', NULL);
+				}
+			}
+		}
+
 		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_collect_extra_info', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required','evt_loc_location_id');
 		$integer_fields = array('evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_loc_location_id');
 

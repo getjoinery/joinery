@@ -333,6 +333,124 @@
 	</div>
 	<?php
 
+	// ===== Series Occurrences Card (only for recurring parents) =====
+	if ($event->is_recurring_parent()):
+		$recurrence_desc = $event->get_recurrence_description();
+		$occurrence_dates = $event->compute_occurrence_dates(date('Y-m-d'), 20);
+		$materialized_instances = $event->get_materialized_instances();
+		$materialized_by_date = [];
+		if (is_array($materialized_instances)) {
+			foreach ($materialized_instances as $mi) {
+				$materialized_by_date[$mi->get('evt_materialized_instance_date')] = $mi;
+			}
+		} else {
+			foreach ($materialized_instances as $mi) {
+				$materialized_by_date[$mi->get('evt_materialized_instance_date')] = $mi;
+			}
+		}
+	?>
+	<div class="card mb-3">
+		<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
+			<h6 class="mb-0"><span class="fas fa-sync me-2"></span>Series Occurrences</h6>
+			<div>
+				<a href="/admin/admin_event_edit?evt_event_id=<?php echo $event->key; ?>" class="btn btn-sm btn-falcon-default me-2">Edit Series</a>
+				<form method="POST" action="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="d-inline">
+					<input type="hidden" name="action" value="end_series">
+					<button type="submit" class="btn btn-sm btn-falcon-danger" onclick="return confirm('End this recurring series? Future virtual instances will stop appearing.');">End Series</button>
+				</form>
+			</div>
+		</div>
+		<div class="card-body">
+			<p class="mb-3 text-600"><strong>Pattern:</strong> <?php echo htmlspecialchars($recurrence_desc); ?></p>
+
+			<?php if (!empty($occurrence_dates)): ?>
+			<div class="table-responsive">
+				<table class="table table-sm table-hover fs-9 mb-0">
+					<thead>
+						<tr>
+							<th>Date</th>
+							<th>Status</th>
+							<th>Registrants</th>
+							<th>Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ($occurrence_dates as $occ_date):
+							$is_materialized = isset($materialized_by_date[$occ_date]);
+							$mat_instance = $is_materialized ? $materialized_by_date[$occ_date] : null;
+							$is_cancelled = $mat_instance && $mat_instance->get('evt_status') == Event::STATUS_CANCELED;
+						?>
+						<tr>
+							<td><?php echo date('M j, Y (D)', strtotime($occ_date)); ?></td>
+							<td>
+								<?php if ($is_cancelled): ?>
+									<span class="badge badge-subtle-danger">Cancelled</span>
+								<?php elseif ($is_materialized): ?>
+									<span class="badge badge-subtle-success">Materialized</span>
+								<?php else: ?>
+									<span class="badge badge-subtle-secondary">Virtual</span>
+								<?php endif; ?>
+							</td>
+							<td>
+								<?php if ($is_materialized && !$is_cancelled):
+									$inst_regs = new MultiEventRegistrant(['event_id' => $mat_instance->key, 'expired' => false]);
+									$inst_reg_count = $inst_regs->count_all();
+									$max = $mat_instance->get('evt_max_signups');
+									echo $max ? $inst_reg_count . '/' . $max : $inst_reg_count;
+								else:
+									echo '—';
+								endif; ?>
+							</td>
+							<td>
+								<?php if ($is_cancelled): ?>
+									—
+								<?php elseif ($is_materialized): ?>
+									<a href="/admin/admin_event?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-falcon-default py-0 px-2">View</a>
+									<a href="/admin/admin_event_edit?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-falcon-default py-0 px-2">Edit</a>
+								<?php else: ?>
+									<form method="POST" action="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="d-inline">
+										<input type="hidden" name="action" value="materialize_instance">
+										<input type="hidden" name="instance_date" value="<?php echo $occ_date; ?>">
+										<button type="submit" class="btn btn-sm btn-falcon-primary py-0 px-2">Materialize</button>
+									</form>
+									<form method="POST" action="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="d-inline">
+										<input type="hidden" name="action" value="cancel_instance">
+										<input type="hidden" name="instance_date" value="<?php echo $occ_date; ?>">
+										<button type="submit" class="btn btn-sm btn-falcon-danger py-0 px-2" onclick="return confirm('Cancel this occurrence?');">Cancel</button>
+									</form>
+								<?php endif; ?>
+							</td>
+						</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+			<?php else: ?>
+				<p class="text-muted mb-0">No upcoming occurrences.</p>
+			<?php endif; ?>
+		</div>
+	</div>
+	<?php endif; ?>
+
+	<?php
+	// ===== Instance Parent Link (only for materialized instances) =====
+	if ($event->is_instance()):
+		$parent_event = $event->get_parent_event();
+		if ($parent_event):
+	?>
+	<div class="card mb-3">
+		<div class="card-body">
+			<span class="fas fa-sync me-2 text-muted"></span>
+			This event is a materialized instance (<?php echo date('M j, Y', strtotime($event->get('evt_materialized_instance_date'))); ?>) of the recurring series
+			<a href="/admin/admin_event?evt_event_id=<?php echo $parent_event->key; ?>"><strong><?php echo htmlspecialchars($parent_event->get('evt_name')); ?></strong></a>.
+		</div>
+	</div>
+	<?php
+		endif;
+	endif;
+	?>
+
+	<?php
 	$headers = array("Registrant", "Registered on", "Order", "Email Verified",  "Expires", "Action");
 	$altlinks = array();
 	if(!$event->get('evt_delete_time')) {

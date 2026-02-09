@@ -42,6 +42,27 @@ function admin_event_logic($get_vars, $post_vars) {
 		return LogicResult::redirect('/admin/admin_events');
 	}
 
+	// Recurring event actions
+	if($post_vars['action'] == 'materialize_instance'){
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$instance = $event->materialize_instance($post_vars['instance_date']);
+		return LogicResult::redirect('/admin/admin_event_edit?evt_event_id='.$instance->key);
+	}
+
+	if($post_vars['action'] == 'cancel_instance'){
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$instance = $event->materialize_instance($post_vars['instance_date']);
+		$instance->set('evt_status', Event::STATUS_CANCELED);
+		$instance->save();
+		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
+	}
+
+	if($post_vars['action'] == 'end_series'){
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->end_series();
+		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
+	}
+
 	if($post_vars['action'] == 'remove_from_event'){
 
 		$eventregistrant = new EventRegistrant($post_vars['evr_event_registrant_id'], TRUE);

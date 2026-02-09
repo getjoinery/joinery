@@ -39,10 +39,15 @@ function admin_events_logic($get_vars, $post_vars) {
 	if($filter == 'all'){
 		$breadcrumb_array = array('Events'=>'All Events');
 	}
+	else if($filter == 'series'){
+		$breadcrumb_array = array('Events'=>'/admin/admin_events', 'Recurring Series'=>'');
+		$searches['only_recurring_parents'] = true;
+	}
 	else{
 		$breadcrumb_array = array('Events'=>'/admin/admin_events', 'Future Events'=>'');
 		$searches['past'] = FALSE;
 		$searches['status'] = 1;
+		$searches['exclude_recurring_parents'] = true;
 	}
 
 	$events = new MultiEvent(

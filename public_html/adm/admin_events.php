@@ -38,7 +38,7 @@
 
 	$table_options = array(
 		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Time'=>'start_time'),
-		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all"),
+		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all", "Series"=>"series"),
 		'altlinks' => $altlinks,
 		'title' => 'Events',
 		'search_on' => TRUE
@@ -64,7 +64,11 @@
 
 		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'M j, Y'));
 
-		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->get('evt_name'). '</strong></a>');
+		$event_name_display = '<a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->get('evt_name'). '</strong></a>';
+		if ($event->is_recurring_parent()) {
+			$event_name_display .= ' <span class="fas fa-sync fs-11 text-muted ms-1" title="Recurring series"></span>';
+		}
+		array_push($rowvalues, $event_name_display);
 
 		if($event->get('evt_delete_time')){
 			array_push($rowvalues, '<b>Deleted</b>');

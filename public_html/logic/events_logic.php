@@ -49,15 +49,45 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		
 	}
 
+	// Exclude recurring parents from public listings
+	$searches['exclude_recurring_parents'] = true;
+
 	$events = new MultiEvent(
 		$searches,
 		array($swasort=>$swasdirection),
 		$numperpage,
 		$swaoffset,
 		'AND');
-	$events->load();	
-	$page_vars['events'] = $events;
-	$numeventsrecords = $events->count_all();
+	$events->load();
+	$all_events = iterator_to_array($events);
+
+	// Merge virtual instances from recurring parents (only for future/active listings)
+	if (!isset($get_vars['type']) || $get_vars['type'] == 'future' || (!isset($get_vars['type']))) {
+		$parent_searches = array('deleted' => FALSE, 'visibility' => 1, 'only_recurring_parents' => true, 'status' => Event::STATUS_ACTIVE);
+		$parents = new MultiEvent($parent_searches, []);
+		$parents->load();
+
+		$range_end = date('Y-m-d', strtotime('+6 months'));
+		foreach ($parents as $parent) {
+			$instances = $parent->get_instances_for_range(date('Y-m-d'), $range_end);
+			foreach ($instances as $instance) {
+				// Only add virtual instances; materialized ones are already in the main query
+				if (is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual) {
+					$all_events[] = $instance;
+				}
+			}
+		}
+
+		// Sort merged array by start time
+		usort($all_events, function($a, $b) {
+			$a_time = (is_object($a) && isset($a->is_virtual) && $a->is_virtual) ? $a->evt_start_time : $a->get('evt_start_time');
+			$b_time = (is_object($b) && isset($b->is_virtual) && $b->is_virtual) ? $b->evt_start_time : $b->get('evt_start_time');
+			return strcmp($a_time, $b_time);
+		});
+	}
+
+	$page_vars['events'] = $all_events;
+	$numeventsrecords = count($all_events);
 	$page_vars['numeventsrecords'] = $numeventsrecords;	
 	
 	
