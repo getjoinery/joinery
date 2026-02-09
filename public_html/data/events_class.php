@@ -68,7 +68,13 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	
 	const VISIBILITY_PRIVATE = 0;
 	const VISIBILITY_PUBLIC = 1;
-	const VISIBILITY_PUBLIC_UNLISTED = 2;	
+	const VISIBILITY_PUBLIC_UNLISTED = 2;
+
+	// Fields to skip when copying parent to materialized instance
+	const RECURRENCE_FIELDS = [
+		'evt_recurrence_type', 'evt_recurrence_interval', 'evt_recurrence_days_of_week',
+		'evt_recurrence_week_of_month', 'evt_recurrence_end_date'
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules
@@ -117,6 +123,17 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_svy_survey_id' => array('type'=>'int4'),
 	    'evt_survey_required' => array('type'=>'int2'),
 	    'evt_loc_location_id' => array('type'=>'int4'),
+
+	    // Recurrence pattern fields (set on parent events)
+	    'evt_recurrence_type' => array('type'=>'varchar(20)', 'is_nullable'=>true),
+	    'evt_recurrence_interval' => array('type'=>'integer', 'default'=>1),
+	    'evt_recurrence_days_of_week' => array('type'=>'varchar(20)', 'is_nullable'=>true),
+	    'evt_recurrence_week_of_month' => array('type'=>'integer', 'is_nullable'=>true),
+	    'evt_recurrence_end_date' => array('type'=>'date', 'is_nullable'=>true),
+
+	    // Instance relationship fields (set on materialized instances)
+	    'evt_parent_event_id' => array('type'=>'integer', 'is_nullable'=>true),
+	    'evt_materialized_instance_date' => array('type'=>'date', 'is_nullable'=>true),
 	); 
 
 function get_leader() {
@@ -617,6 +634,594 @@ function get_leader() {
 		return EntityPhoto::get_primary('event', $this->key);
 	}
 
+	// ===== Recurring Event Methods =====
+
+	/**
+	 * Check if this is the parent/template of a recurring series
+	 *
+	 * @return bool
+	 */
+	public function is_recurring_parent() {
+		return !empty($this->get('evt_recurrence_type'));
+	}
+
+	/**
+	 * Check if this event is a materialized instance of a recurring series
+	 *
+	 * @return bool
+	 */
+	public function is_instance() {
+		return !empty($this->get('evt_parent_event_id'));
+	}
+
+	/**
+	 * Get the parent event if this is a materialized instance
+	 *
+	 * @return Event|null
+	 */
+	public function get_parent_event() {
+		if (!$this->is_instance()) {
+			return null;
+		}
+		$parent = new Event($this->get('evt_parent_event_id'), TRUE);
+		return $parent;
+	}
+
+	/**
+	 * Check if a specific date matches the recurrence pattern
+	 *
+	 * @param string $date Date to check (Y-m-d)
+	 * @return bool
+	 */
+	public function date_matches_pattern($date) {
+		if (!$this->is_recurring_parent()) {
+			return false;
+		}
+
+		$tz = $this->get('evt_timezone') ?: 'America/New_York';
+		$start_date = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'Y-m-d');
+		$check_date = date('Y-m-d', strtotime($date));
+
+		// Can't be before start date
+		if ($check_date < $start_date) {
+			return false;
+		}
+
+		// Can't be after end date
+		$end_date = $this->get('evt_recurrence_end_date');
+		if ($end_date && $check_date > $end_date) {
+			return false;
+		}
+
+		$type = $this->get('evt_recurrence_type');
+		$interval = (int) $this->get('evt_recurrence_interval') ?: 1;
+
+		$start_dt = new DateTime($start_date);
+		$check_dt = new DateTime($check_date);
+
+		switch ($type) {
+			case 'daily':
+				$diff_days = (int) $start_dt->diff($check_dt)->days;
+				return ($diff_days % $interval) === 0;
+
+			case 'weekly':
+				$days_of_week = $this->get('evt_recurrence_days_of_week');
+				$check_dow = (int) $check_dt->format('w'); // 0=Sun, 6=Sat
+
+				if ($days_of_week) {
+					$allowed_days = array_map('intval', explode(',', $days_of_week));
+					if (!in_array($check_dow, $allowed_days)) {
+						return false;
+					}
+				} else {
+					// Default to the same day of week as start
+					$start_dow = (int) $start_dt->format('w');
+					if ($check_dow !== $start_dow) {
+						return false;
+					}
+				}
+
+				// Check interval: weeks since start
+				$diff_days = (int) $start_dt->diff($check_dt)->days;
+				$start_week = (int) floor($start_dt->format('U') / (7 * 86400));
+				$check_week = (int) floor($check_dt->format('U') / (7 * 86400));
+				// Use ISO week calculation for proper interval checking
+				$start_week_num = (int) ($start_dt->diff(new DateTime('1970-01-05'))->days / 7);
+				$check_week_num = (int) ($check_dt->diff(new DateTime('1970-01-05'))->days / 7);
+				$week_diff = abs($check_week_num - $start_week_num);
+				return ($week_diff % $interval) === 0;
+
+			case 'monthly':
+				$week_of_month = $this->get('evt_recurrence_week_of_month');
+
+				if ($week_of_month !== null && $week_of_month !== '') {
+					// By week: e.g., 2nd Tuesday
+					$start_dow = (int) $start_dt->format('w');
+					$check_dow = (int) $check_dt->format('w');
+					if ($check_dow !== $start_dow) {
+						return false;
+					}
+
+					$check_wom = $this->_get_week_of_month($check_dt);
+					$target_wom = (int) $week_of_month;
+
+					// Handle -1 (last)
+					if ($target_wom === -1) {
+						// Check if this is the last occurrence of this weekday in the month
+						$next_week = clone $check_dt;
+						$next_week->modify('+7 days');
+						if ($next_week->format('m') === $check_dt->format('m')) {
+							return false; // Not the last one
+						}
+					} else {
+						if ($check_wom !== $target_wom) {
+							return false;
+						}
+					}
+				} else {
+					// By date: same day of month as start
+					$start_day = (int) $start_dt->format('j');
+					$check_day = (int) $check_dt->format('j');
+					$days_in_month = (int) $check_dt->format('t');
+
+					// Handle months shorter than start day
+					$target_day = min($start_day, $days_in_month);
+					if ($check_day !== $target_day) {
+						return false;
+					}
+				}
+
+				// Check interval: months since start
+				$month_diff = ((int) $check_dt->format('Y') - (int) $start_dt->format('Y')) * 12
+					+ ((int) $check_dt->format('n') - (int) $start_dt->format('n'));
+				return ($month_diff % $interval) === 0;
+
+			case 'yearly':
+				$start_month = (int) $start_dt->format('n');
+				$start_day = (int) $start_dt->format('j');
+				$check_month = (int) $check_dt->format('n');
+				$check_day = (int) $check_dt->format('j');
+
+				if ($check_month !== $start_month) {
+					return false;
+				}
+
+				// Handle leap year: Feb 29 -> Feb 28 in non-leap years
+				$days_in_month = (int) $check_dt->format('t');
+				$target_day = min($start_day, $days_in_month);
+				if ($check_day !== $target_day) {
+					return false;
+				}
+
+				$year_diff = (int) $check_dt->format('Y') - (int) $start_dt->format('Y');
+				return ($year_diff % $interval) === 0;
+
+			default:
+				return false;
+		}
+	}
+
+	/**
+	 * Get the week-of-month number for a date (1=first, 2=second, etc.)
+	 *
+	 * @param DateTime $dt
+	 * @return int
+	 */
+	private function _get_week_of_month($dt) {
+		$day = (int) $dt->format('j');
+		return (int) ceil($day / 7);
+	}
+
+	/**
+	 * Compute the next N occurrence dates from a starting point
+	 *
+	 * @param string $from_date Starting date (Y-m-d)
+	 * @param int $count Number of dates to compute
+	 * @return array Array of date strings (Y-m-d)
+	 */
+	public function compute_occurrence_dates($from_date, $count) {
+		if (!$this->is_recurring_parent() || $count <= 0) {
+			return [];
+		}
+
+		$dates = [];
+		$type = $this->get('evt_recurrence_type');
+		$interval = (int) $this->get('evt_recurrence_interval') ?: 1;
+		$end_date = $this->get('evt_recurrence_end_date');
+		$tz = $this->get('evt_timezone') ?: 'America/New_York';
+		$start_date = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'Y-m-d');
+
+		// Start from whichever is later: from_date or start_date
+		$current = new DateTime(max($from_date, $start_date));
+		$max_iterations = $count * 50; // Safety limit
+		$iterations = 0;
+
+		while (count($dates) < $count && $iterations < $max_iterations) {
+			$iterations++;
+			$date_str = $current->format('Y-m-d');
+
+			// Check end date
+			if ($end_date && $date_str > $end_date) {
+				break;
+			}
+
+			if ($this->date_matches_pattern($date_str)) {
+				$dates[] = $date_str;
+			}
+
+			// Advance by one day for daily/weekly, or strategically for monthly/yearly
+			if ($type === 'daily') {
+				$current->modify('+1 day');
+			} elseif ($type === 'weekly') {
+				$current->modify('+1 day');
+			} elseif ($type === 'monthly') {
+				$current->modify('+1 day');
+			} elseif ($type === 'yearly') {
+				// Jump months at a time for yearly
+				if (count($dates) > 0) {
+					$current->modify('+11 months');
+				} else {
+					$current->modify('+1 day');
+				}
+			} else {
+				$current->modify('+1 day');
+			}
+		}
+
+		return $dates;
+	}
+
+	/**
+	 * Create a virtual instance object for a given date
+	 *
+	 * @param string $instance_date The occurrence date (Y-m-d)
+	 * @return stdClass Virtual event object
+	 */
+	public function create_virtual_instance($instance_date) {
+		$virtual = new stdClass();
+		$virtual->is_virtual = true;
+		$virtual->parent_event_id = $this->key;
+		$virtual->instance_date = $instance_date;
+		$virtual->evt_event_id = null;
+
+		// Copy all display fields from parent
+		foreach (self::$field_specifications as $field => $spec) {
+			$virtual->$field = $this->get($field);
+		}
+
+		// Adjust start/end times to the instance date (timezone-aware)
+		if ($this->get('evt_start_time')) {
+			$tz = $this->get('evt_timezone') ?: 'America/New_York';
+			$event_tz = new DateTimeZone($tz);
+			$utc_tz = new DateTimeZone('UTC');
+
+			// Convert parent start to event timezone to extract local time-of-day
+			$parent_start = new DateTime($this->get('evt_start_time'), $utc_tz);
+			$parent_start->setTimezone($event_tz);
+			$parent_local_date = $parent_start->format('Y-m-d');
+			$parent_local_time = $parent_start->format('H:i:s');
+
+			// Build instance start in event timezone, then convert to UTC
+			$inst_start = new DateTime($instance_date . ' ' . $parent_local_time, $event_tz);
+			$inst_start->setTimezone($utc_tz);
+			$virtual->evt_start_time = $inst_start->format('Y-m-d H:i:s');
+
+			if ($this->get('evt_end_time')) {
+				$parent_end = new DateTime($this->get('evt_end_time'), $utc_tz);
+				$parent_end->setTimezone($event_tz);
+				$day_diff = (new DateTime($parent_local_date))->diff(new DateTime($parent_end->format('Y-m-d')))->days;
+				$end_date = new DateTime($instance_date);
+				if ($day_diff > 0) {
+					$end_date->modify('+' . $day_diff . ' days');
+				}
+				$inst_end = new DateTime($end_date->format('Y-m-d') . ' ' . $parent_end->format('H:i:s'), $event_tz);
+				$inst_end->setTimezone($utc_tz);
+				$virtual->evt_end_time = $inst_end->format('Y-m-d H:i:s');
+			}
+		}
+
+		// Set the parent slug for URL generation
+		$virtual->evt_link = $this->get('evt_link');
+
+		// Clear recurrence fields on virtual instance
+		foreach (self::RECURRENCE_FIELDS as $field) {
+			$virtual->$field = null;
+		}
+
+		// Set parent reference
+		$virtual->evt_parent_event_id = $this->key;
+		$virtual->evt_materialized_instance_date = $instance_date;
+
+		return $virtual;
+	}
+
+	/**
+	 * Get all materialized instances from the database
+	 *
+	 * @param string $start_date Optional start filter (Y-m-d)
+	 * @param string $end_date Optional end filter (Y-m-d)
+	 * @return MultiEvent
+	 */
+	public function get_materialized_instances($start_date = null, $end_date = null) {
+		$options = ['parent_event_id' => $this->key, 'deleted' => false];
+		$instances = new MultiEvent($options, ['evt_materialized_instance_date' => 'ASC']);
+		$instances->load();
+
+		// Filter by date range if specified
+		if ($start_date || $end_date) {
+			$filtered = [];
+			foreach ($instances as $instance) {
+				$inst_date = $instance->get('evt_materialized_instance_date');
+				if ($start_date && $inst_date < $start_date) continue;
+				if ($end_date && $inst_date > $end_date) continue;
+				$filtered[] = $instance;
+			}
+			return $filtered;
+		}
+
+		return $instances;
+	}
+
+	/**
+	 * Compute virtual instances for a date range, merged with materialized instances
+	 *
+	 * @param string $start_date Start of range (Y-m-d)
+	 * @param string $end_date End of range (Y-m-d)
+	 * @return array Array of Event objects (materialized) and stdClass objects (virtual)
+	 */
+	public function get_instances_for_range($start_date, $end_date) {
+		if (!$this->is_recurring_parent()) {
+			return [];
+		}
+
+		// 1. Compute all occurrence dates in the range
+		$dates = [];
+		$current = new DateTime($start_date);
+		$end_dt = new DateTime($end_date);
+		$tz = $this->get('evt_timezone') ?: 'America/New_York';
+		$event_start = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'Y-m-d');
+
+		// Don't generate dates before event creation
+		if ($current->format('Y-m-d') < $event_start) {
+			$current = new DateTime($event_start);
+		}
+
+		$max_iterations = 1000; // Safety limit
+		$iterations = 0;
+		while ($current <= $end_dt && $iterations < $max_iterations) {
+			$iterations++;
+			$date_str = $current->format('Y-m-d');
+
+			// Check end date
+			$rec_end = $this->get('evt_recurrence_end_date');
+			if ($rec_end && $date_str > $rec_end) {
+				break;
+			}
+
+			if ($this->date_matches_pattern($date_str)) {
+				$dates[] = $date_str;
+			}
+			$current->modify('+1 day');
+		}
+
+		// 2. Load materialized instances in this range
+		$materialized_list = $this->get_materialized_instances($start_date, $end_date);
+		$materialized_by_date = [];
+		if (is_array($materialized_list)) {
+			foreach ($materialized_list as $instance) {
+				$materialized_by_date[$instance->get('evt_materialized_instance_date')] = $instance;
+			}
+		} else {
+			foreach ($materialized_list as $instance) {
+				$materialized_by_date[$instance->get('evt_materialized_instance_date')] = $instance;
+			}
+		}
+
+		// 3. Merge: use materialized if exists, otherwise virtual
+		$instances = [];
+		foreach ($dates as $date) {
+			if (isset($materialized_by_date[$date])) {
+				$instance = $materialized_by_date[$date];
+				// Skip cancelled instances
+				if ($instance->get('evt_status') != Event::STATUS_CANCELED) {
+					$instances[] = $instance;
+				}
+			} else {
+				$instances[] = $this->create_virtual_instance($date);
+			}
+		}
+
+		return $instances;
+	}
+
+	/**
+	 * Materialize a virtual instance into a real database record
+	 *
+	 * @param string $instance_date The occurrence date to materialize (Y-m-d)
+	 * @return Event The materialized Event object
+	 */
+	public function materialize_instance($instance_date) {
+		if (!$this->is_recurring_parent()) {
+			throw new EventException('Cannot materialize: this event is not a recurring parent.');
+		}
+
+		// Check if already materialized
+		$existing = $this->_get_materialized_instance_for_date($instance_date);
+		if ($existing) {
+			return $existing;
+		}
+
+		// Verify date matches pattern
+		if (!$this->date_matches_pattern($instance_date)) {
+			throw new EventException('Date does not match recurrence pattern: ' . $instance_date);
+		}
+
+		// Copy all parent fields except recurrence fields (same pattern as Event::copy())
+		$instance = new Event(NULL);
+		foreach (self::$field_specifications as $field => $spec) {
+			if (in_array($field, self::RECURRENCE_FIELDS)) {
+				continue;
+			}
+			if ($field === 'evt_event_id' || $field === 'evt_create_time' || $field === 'evt_delete_time') {
+				continue;
+			}
+			$instance->set($field, $this->get($field));
+		}
+
+		// Explicitly clear recurrence fields (avoid empty string vs NULL issues)
+		foreach (self::RECURRENCE_FIELDS as $rf) {
+			$instance->set($rf, null);
+		}
+
+		// Set instance-specific fields
+		$instance->set('evt_parent_event_id', $this->key);
+		$instance->set('evt_materialized_instance_date', $instance_date);
+
+		// Adjust start/end times to the instance date (timezone-aware)
+		if ($this->get('evt_start_time')) {
+			$tz = $this->get('evt_timezone') ?: 'America/New_York';
+			$event_tz = new DateTimeZone($tz);
+			$utc_tz = new DateTimeZone('UTC');
+
+			// Convert parent start to event timezone to extract local time-of-day
+			$parent_start = new DateTime($this->get('evt_start_time'), $utc_tz);
+			$parent_start->setTimezone($event_tz);
+			$parent_local_date = $parent_start->format('Y-m-d');
+			$parent_local_time = $parent_start->format('H:i:s');
+
+			// Build instance start in event timezone, then convert to UTC
+			$inst_start = new DateTime($instance_date . ' ' . $parent_local_time, $event_tz);
+			$inst_start->setTimezone($utc_tz);
+			$instance->set('evt_start_time', $inst_start->format('Y-m-d H:i:s'));
+
+			if ($this->get('evt_end_time')) {
+				$parent_end = new DateTime($this->get('evt_end_time'), $utc_tz);
+				$parent_end->setTimezone($event_tz);
+				$day_diff = (new DateTime($parent_local_date))->diff(new DateTime($parent_end->format('Y-m-d')))->days;
+				$end_date = new DateTime($instance_date);
+				if ($day_diff > 0) {
+					$end_date->modify('+' . $day_diff . ' days');
+				}
+				$inst_end = new DateTime($end_date->format('Y-m-d') . ' ' . $parent_end->format('H:i:s'), $event_tz);
+				$inst_end->setTimezone($utc_tz);
+				$instance->set('evt_end_time', $inst_end->format('Y-m-d H:i:s'));
+			}
+		}
+
+		// Generate unique link for the instance
+		$instance->set('evt_link', $instance->create_url($this->get('evt_name') . '-' . $instance_date));
+
+		$instance->prepare();
+		$instance->save();
+		$instance->load();
+
+		return $instance;
+	}
+
+	/**
+	 * Get a materialized instance for a specific date
+	 *
+	 * @param string $date Y-m-d
+	 * @return Event|null
+	 */
+	public function _get_materialized_instance_for_date($date) {
+		$dbconnector = DbConnector::get_instance();
+		$dblink = $dbconnector->get_db_link();
+		$sql = "SELECT evt_event_id FROM evt_events WHERE evt_parent_event_id = ? AND evt_materialized_instance_date = ? AND evt_delete_time IS NULL LIMIT 1";
+		$q = $dblink->prepare($sql);
+		$q->execute([$this->key, $date]);
+		$result = $q->fetch(PDO::FETCH_ASSOC);
+		if ($result) {
+			return new Event($result['evt_event_id'], TRUE);
+		}
+		return null;
+	}
+
+	/**
+	 * End the recurring series from a given date forward
+	 *
+	 * @param string $end_date Stop generating instances on/after this date (Y-m-d). NULL = today
+	 */
+	public function end_series($end_date = null) {
+		if (!$this->is_recurring_parent()) {
+			return;
+		}
+		if ($end_date === null) {
+			$end_date = date('Y-m-d');
+		}
+		$this->set('evt_recurrence_end_date', $end_date);
+		$this->save();
+	}
+
+	/**
+	 * Get a human-readable description of the recurrence pattern
+	 *
+	 * @return string
+	 */
+	public function get_recurrence_description() {
+		if (!$this->is_recurring_parent()) {
+			return '';
+		}
+
+		$type = $this->get('evt_recurrence_type');
+		$interval = (int) $this->get('evt_recurrence_interval') ?: 1;
+		$parts = [];
+
+		switch ($type) {
+			case 'daily':
+				$parts[] = ($interval === 1) ? 'Every day' : 'Every ' . $interval . ' days';
+				break;
+
+			case 'weekly':
+				$prefix = ($interval === 1) ? 'Every week' : 'Every ' . $interval . ' weeks';
+				$days_of_week = $this->get('evt_recurrence_days_of_week');
+				if ($days_of_week) {
+					$day_names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+					$day_nums = array_map('intval', explode(',', $days_of_week));
+					$day_labels = array_map(function($d) use ($day_names) { return $day_names[$d]; }, $day_nums);
+
+					if (count($day_labels) > 1) {
+						$last = array_pop($day_labels);
+						$parts[] = $prefix . ' on ' . implode(', ', $day_labels) . ' and ' . $last;
+					} else {
+						$parts[] = $prefix . ' on ' . $day_labels[0];
+					}
+				} else {
+					$start_dow = date('l', strtotime($this->get('evt_start_time')));
+					$parts[] = $prefix . ' on ' . $start_dow;
+				}
+				break;
+
+			case 'monthly':
+				$prefix = ($interval === 1) ? 'Every month' : 'Every ' . $interval . ' months';
+				$week_of_month = $this->get('evt_recurrence_week_of_month');
+				if ($week_of_month !== null && $week_of_month !== '') {
+					$ordinals = [1 => '1st', 2 => '2nd', 3 => '3rd', 4 => '4th', -1 => 'last'];
+					$ordinal = isset($ordinals[(int)$week_of_month]) ? $ordinals[(int)$week_of_month] : $week_of_month . 'th';
+					$dow = date('l', strtotime($this->get('evt_start_time')));
+					$parts[] = $prefix . ' on the ' . $ordinal . ' ' . $dow;
+				} else {
+					$day = date('jS', strtotime($this->get('evt_start_time')));
+					$parts[] = $prefix . ' on the ' . $day;
+				}
+				break;
+
+			case 'yearly':
+				$prefix = ($interval === 1) ? 'Every year' : 'Every ' . $interval . ' years';
+				$date_str = date('F jS', strtotime($this->get('evt_start_time')));
+				$parts[] = $prefix . ' on ' . $date_str;
+				break;
+		}
+
+		// Add end date
+		$end_date = $this->get('evt_recurrence_end_date');
+		if ($end_date) {
+			$parts[] = 'until ' . date('M j, Y', strtotime($end_date));
+		}
+
+		return implode(' ', $parts);
+	}
+
 }
 
 class MultiEvent extends SystemMultiBase {
@@ -671,11 +1276,15 @@ class MultiEvent extends SystemMultiBase {
         }
 
         if (isset($this->options['upcoming']) && $this->options['upcoming']) {
-            $filters['evt_start_time'] = "> now()";
+            $filters['(evt_end_time'] = "> now() OR (evt_end_time IS NULL AND evt_start_time > now()))";
         }
 
         if (isset($this->options['past'])) {
-            $filters['evt_end_time'] = ($this->options['past'] ? '< now() OR evt_end_time IS NULL' : '> now() OR evt_end_time IS NULL');
+            if ($this->options['past']) {
+                $filters['(evt_end_time'] = "< now() OR (evt_end_time IS NULL AND evt_start_time < now()))";
+            } else {
+                $filters['(evt_end_time'] = "> now() OR (evt_end_time IS NULL AND evt_start_time > now()) OR (evt_end_time IS NULL AND evt_start_time IS NULL))";
+            }
         }
         
         if (isset($this->options['name'])) {
@@ -684,6 +1293,18 @@ class MultiEvent extends SystemMultiBase {
     
         if (isset($this->options['visibility'])) {
             $filters['evt_visibility'] = [$this->options['visibility'], PDO::PARAM_INT];
+        }
+
+        if (isset($this->options['parent_event_id'])) {
+            $filters['evt_parent_event_id'] = [$this->options['parent_event_id'], PDO::PARAM_INT];
+        }
+
+        if (isset($this->options['exclude_recurring_parents']) && $this->options['exclude_recurring_parents']) {
+            $filters['(evt_recurrence_type'] = "IS NULL OR evt_recurrence_type = '')";
+        }
+
+        if (isset($this->options['only_recurring_parents']) && $this->options['only_recurring_parents']) {
+            $filters['evt_recurrence_type'] = "IS NOT NULL AND evt_recurrence_type != ''";
         }
 
         return $this->_get_resultsv2('evt_events', $filters, $this->order_by, $only_count, $debug);
