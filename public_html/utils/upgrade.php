@@ -886,6 +886,18 @@
 		}
 
 		// ============================================
+		// OPCACHE RESET
+		// ============================================
+		// After file swap, PHP opcache may still serve old bytecode for model classes.
+		// This caused missing database columns on upgrades (e.g. evt_recurrence_type)
+		// because update_database loaded stale field_specifications from opcache.
+		if (!$dry_run && function_exists('opcache_reset')) {
+			opcache_reset();
+			clearstatcache(true);
+			upgrade_echo('Cleared PHP opcache and stat cache after file deployment<br>');
+		}
+
+		// ============================================
 		// DATABASE MIGRATION
 		// ============================================
 		upgrade_echo('<br><h3>Running Database Migrations</h3>');
