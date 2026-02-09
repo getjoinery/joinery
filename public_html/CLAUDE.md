@@ -500,6 +500,8 @@ Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 
 **🚨 CRITICAL RULE: NEVER MODIFY FILES IN `/specs/implemented/`**
 
+**Historical Reference:** When discussing past work or previously implemented features, consult `specs/implemented/` for detailed requirements and git history (`git log`) for implementation details and context.
+
 ### Database Schema Management
 
 **IMPORTANT:** Database tables, columns, and constraints are managed automatically by the `update_database` system based on data class specifications. **DO NOT add columns or table structure changes via migrations.**
