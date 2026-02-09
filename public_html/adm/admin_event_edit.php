@@ -108,13 +108,6 @@ $formwriter->datetimeinput('evt_end_time', 'Event end time ('. ($event->get('evt
 
 // Recurrence section - only show for parent events and new events, NOT for materialized instances
 if (!$event->is_instance()) {
-	echo '</div></div></div>';
-	echo '<div class="card mt-3">';
-	echo '<div class="card-header bg-body-tertiary">';
-	echo '<h6 class="mb-0"><span class="fas fa-sync me-2"></span>Recurrence</h6>';
-	echo '</div>';
-	echo '<div class="card-body">';
-	echo '<div class="row"><div class="col-md-8"><div class="p-3">';
 
 	$recurrence_options = array('' => 'None', 'daily' => 'Daily', 'weekly' => 'Weekly', 'monthly' => 'Monthly', 'yearly' => 'Yearly');
 	$formwriter->dropinput('evt_recurrence_type', 'Repeat', [
@@ -187,10 +180,6 @@ if (!$event->is_instance()) {
 	echo '</div>';
 	echo '</div></div>';
 
-	echo '</div></div>';
-	echo '</div>';
-	echo '</div>';
-	echo '<div class="row"><div class="col-md-8"><div class="p-3">';
 } // end recurrence section
 
 $formwriter->textbox('evt_description', 'Event Description', [
