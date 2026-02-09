@@ -20,7 +20,7 @@ function admin_events_logic($get_vars, $post_vars) {
 	$sort = LibraryFunctions::fetch_variable('sort', 'start_time', 0, '', $get_vars);
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '', $get_vars);
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '', $get_vars);
-	$filter = LibraryFunctions::fetch_variable('filter', '', 0, '', $get_vars);
+	$filter = LibraryFunctions::fetch_variable('filter', 'all', 0, '', $get_vars);
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
 	if($_SESSION['permission'] < 10){
@@ -47,7 +47,6 @@ function admin_events_logic($get_vars, $post_vars) {
 		$breadcrumb_array = array('Events'=>'/admin/admin_events', 'Future Events'=>'');
 		$searches['past'] = FALSE;
 		$searches['status'] = 1;
-		$searches['exclude_recurring_parents'] = true;
 	}
 
 	$events = new MultiEvent(

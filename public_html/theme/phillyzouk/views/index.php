@@ -151,36 +151,43 @@ End Main Blog List Area -->
                 </div>
                 <div class="row">
                     <?php
-                    if ($page_vars['upcoming_events']->count() > 0) {
+                    if (count($page_vars['upcoming_events']) > 0) {
                         $count = 0;
                         foreach ($page_vars['upcoming_events'] as $event) {
                             if ($count >= 6) break;
+                            $is_virtual = is_object($event) && isset($event->is_virtual) && $event->is_virtual;
+                            $evt_name = $is_virtual ? $event->evt_name : $event->get('evt_name');
+                            $evt_start = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
+                            $evt_tz = $is_virtual ? ($event->evt_timezone ?: 'America/New_York') : ($event->get('evt_timezone') ?: 'America/New_York');
+                            $evt_short = $is_virtual ? $event->evt_short_description : $event->get('evt_short_description');
+                            $evt_url = $is_virtual ? '/event/' . $event->evt_link : $event->get_url();
+                            $evt_pic = $is_virtual ? ($event->_picture_link ?: null) : $event->get_picture_link();
                             ?>
                             <div class="col-lg-6 col-md-6">
                                 <div class="single-featured event-card">
-                                    <?php if ($event->get_picture_link()): ?>
-                                    <a href="<?php echo $event->get_url(); ?>" class="blog-img">
-                                        <img src="<?php echo htmlspecialchars($event->get_picture_link()); ?>" alt="<?php echo htmlspecialchars($event->get('evt_name')); ?>">
+                                    <?php if ($evt_pic): ?>
+                                    <a href="<?php echo $evt_url; ?>" class="blog-img">
+                                        <img src="<?php echo htmlspecialchars($evt_pic); ?>" alt="<?php echo htmlspecialchars($evt_name); ?>">
                                     </a>
                                     <?php endif; ?>
                                     <div class="featured-content">
                                         <ul>
                                             <li>
                                                 <i class="bx bx-calendar"></i>
-                                                <?php echo LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'), 'M d, Y'); ?>
+                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'M d, Y'); ?>
                                             </li>
                                             <li>
                                                 <i class="bx bx-time"></i>
-                                                <?php echo LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $event->get('evt_timezone'), 'g:i A'); ?>
+                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'g:i A'); ?>
                                             </li>
                                         </ul>
-                                        <a href="<?php echo $event->get_url(); ?>">
-                                            <h3><?php echo htmlspecialchars($event->get('evt_name')); ?></h3>
+                                        <a href="<?php echo $evt_url; ?>">
+                                            <h3><?php echo htmlspecialchars($evt_name); ?></h3>
                                         </a>
-                                        <?php if ($event->get('evt_short_description')): ?>
-                                        <p><?php echo htmlspecialchars(substr($event->get('evt_short_description'), 0, 120)); ?>...</p>
+                                        <?php if ($evt_short): ?>
+                                        <p><?php echo htmlspecialchars(substr($evt_short, 0, 120)); ?>...</p>
                                         <?php endif; ?>
-                                        <a href="<?php echo $event->get_url(); ?>" class="read-more">View Event</a>
+                                        <a href="<?php echo $evt_url; ?>" class="read-more">View Event</a>
                                     </div>
                                 </div>
                             </div>
