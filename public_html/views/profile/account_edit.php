@@ -31,6 +31,7 @@
 	PhotoHelper::render_photo_card('grid', 'user', $page_vars['user']->key, $page_vars['user_photos'], [
 		'set_primary_url' => '/profile/account_edit',
 		'card_title' => 'My Photos',
+		'primary_file_id' => $page_vars['user']->get('usr_pic_picture_id'),
 	]);
 
 	$settings = Globalvars::get_instance();

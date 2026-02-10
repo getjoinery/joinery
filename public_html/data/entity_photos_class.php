@@ -24,31 +24,10 @@ class EntityPhoto extends SystemBase {
 		'eph_entity_id' => array('type'=>'int4', 'is_nullable'=>false, 'required'=>true),
 		'eph_fil_file_id' => array('type'=>'int4', 'is_nullable'=>false, 'required'=>true, 'unique_with'=>array('eph_entity_type', 'eph_entity_id')),
 		'eph_sort_order' => array('type'=>'int2', 'default'=>0),
-		'eph_is_primary' => array('type'=>'bool', 'default'=>'false'),
 		'eph_caption' => array('type'=>'varchar(255)'),
 		'eph_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'eph_delete_time' => array('type'=>'timestamp(6)'),
 	);
-
-	/**
-	 * Get the primary photo for an entity
-	 *
-	 * @param string $entity_type Entity type string (e.g. 'user', 'event')
-	 * @param int $entity_id Entity primary key
-	 * @return EntityPhoto|null
-	 */
-	public static function get_primary($entity_type, $entity_id) {
-		$photos = new MultiEntityPhoto(
-			['entity_type' => $entity_type, 'entity_id' => $entity_id, 'is_primary' => true, 'deleted' => false],
-			['eph_sort_order' => 'ASC'],
-			1
-		);
-		$photos->load();
-		if ($photos->count() > 0) {
-			return $photos->get(0);
-		}
-		return null;
-	}
 
 	/**
 	 * Override save to enforce per-entity-type photo limits and validate file exists
@@ -112,10 +91,6 @@ class MultiEntityPhoto extends SystemMultiBase {
 
 		if (isset($this->options['file_id'])) {
 			$filters['eph_fil_file_id'] = [$this->options['file_id'], PDO::PARAM_INT];
-		}
-
-		if (isset($this->options['is_primary'])) {
-			$filters['eph_is_primary'] = $this->options['is_primary'] ? "= true" : "= false";
 		}
 
 		if (isset($this->options['deleted'])) {
