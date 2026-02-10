@@ -295,6 +295,7 @@
 				'set_primary_url' => '/admin/admin_event?evt_event_id=' . $event->key,
 				'card_title' => 'Event Photos',
 				'editable' => $photo_editable,
+				'primary_file_id' => $event->get('evt_fil_file_id'),
 			]);
 			?>
 			<?php if(count($event_photos) == 0 && $event->get('evt_picture_link')): ?>

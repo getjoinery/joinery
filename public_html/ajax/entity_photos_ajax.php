@@ -109,6 +109,9 @@ switch ($action) {
 			$next_order = (int) $existing->get(0)->get('eph_sort_order') + 1;
 		}
 
+		// Auto-set as primary if this is the first photo for the entity
+		$is_first_photo = ($existing->count() == 0);
+
 		// Create EntityPhoto record
 		try {
 			$photo = new EntityPhoto(NULL);
@@ -116,8 +119,25 @@ switch ($action) {
 			$photo->set('eph_entity_id', $entity_id);
 			$photo->set('eph_fil_file_id', $file->key);
 			$photo->set('eph_sort_order', $next_order);
-			$photo->set('eph_is_primary', false);
 			$photo->save();
+
+			// If first photo, set as primary via entity model (syncs legacy FK column)
+			if ($is_first_photo) {
+				$entity_class_map = [
+					'event' => ['class' => 'Event', 'file' => 'data/events_class.php'],
+					'user' => ['class' => 'User', 'file' => 'data/users_class.php'],
+					'location' => ['class' => 'Location', 'file' => 'data/locations_class.php'],
+					'mailing_list' => ['class' => 'MailingList', 'file' => 'data/mailing_lists_class.php'],
+				];
+				if (isset($entity_class_map[$entity_type])) {
+					$map = $entity_class_map[$entity_type];
+					require_once(PathHelper::getIncludePath($map['file']));
+					$entity = new $map['class']($entity_id, TRUE);
+					if (method_exists($entity, 'set_primary_photo')) {
+						$entity->set_primary_photo($photo->key);
+					}
+				}
+			}
 
 			echo json_encode([
 				'success' => true,
@@ -127,7 +147,6 @@ switch ($action) {
 					'url' => $file->get_url('original'),
 					'avatar' => $file->get_url('avatar'),
 					'sort_order' => $next_order,
-					'is_primary' => false,
 					'caption' => null
 				]
 			]);
