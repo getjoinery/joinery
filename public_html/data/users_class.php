@@ -877,20 +877,7 @@ private static function UcName($string) {
 	function set_primary_photo($photo_id) {
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
-		// Clear old primary
-		$old = new MultiEntityPhoto(['entity_type' => 'user', 'entity_id' => $this->key, 'is_primary' => true]);
-		$old->load();
-		foreach ($old as $p) {
-			$p->set('eph_is_primary', false);
-			$p->save();
-		}
-
-		// Set new primary
 		$photo = new EntityPhoto($photo_id, TRUE);
-		$photo->set('eph_is_primary', true);
-		$photo->save();
-
-		// Sync FK
 		$this->set('usr_pic_picture_id', $photo->get('eph_fil_file_id'));
 		$this->save();
 	}
@@ -899,15 +886,6 @@ private static function UcName($string) {
 	 * Clear the primary photo for this user
 	 */
 	function clear_primary_photo() {
-		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
-
-		$old = new MultiEntityPhoto(['entity_type' => 'user', 'entity_id' => $this->key, 'is_primary' => true]);
-		$old->load();
-		foreach ($old as $p) {
-			$p->set('eph_is_primary', false);
-			$p->save();
-		}
-
 		$this->set('usr_pic_picture_id', NULL);
 		$this->save();
 	}
@@ -933,8 +911,15 @@ private static function UcName($string) {
 	 * @return EntityPhoto|null
 	 */
 	function get_primary_photo() {
+		$file_id = $this->get('usr_pic_picture_id');
+		if (!$file_id) return null;
 		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
-		return EntityPhoto::get_primary('user', $this->key);
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'user', 'entity_id' => $this->key, 'file_id' => $file_id, 'deleted' => false],
+			[], 1
+		);
+		$photos->load();
+		return $photos->count() > 0 ? $photos->get(0) : null;
 	}
 
 	/**

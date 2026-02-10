@@ -132,7 +132,7 @@ class PhotoHelper {
 								<img src="<?php echo htmlspecialchars($photo_file->get_url($image_size)); ?>"
 									 class="img-fluid rounded" alt=""
 									 style="width:100%; aspect-ratio:<?php echo $aspect_ratio; ?>; object-fit:cover; pointer-events:none;">
-								<?php if ($photo->get('eph_is_primary')): ?>
+								<?php if (isset($options['primary_file_id']) && $photo->get('eph_fil_file_id') == $options['primary_file_id']): ?>
 									<span class="position-absolute top-0 start-0 m-1 text-warning" title="Primary photo"
 										  style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
 										<span class="fas fa-star"></span>
