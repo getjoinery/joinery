@@ -650,7 +650,7 @@ sudo systemctl restart apache2
 4. Test changes locally (web server is available)
 5. Check error logs for any issues
 
-**Quick Log Check:** `tail /var/www/html/joinerytest/logs/error.log` - Shows recent Apache error.log entries
+**Quick Log Check:** `tail /var/www/html/joinerytest/logs/error.log` - Shows recent Apache error.log entries. Note: logs are very verbose (routing debug output); always `grep` for specific keywords (e.g., `Fatal`, `error`, `resize`) rather than relying on `tail` alone.
 
 ## Plugin Development
 
