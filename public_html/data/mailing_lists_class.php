@@ -30,7 +30,8 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	public static $url_namespace = 'list';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [
-		'mlt_emt_email_template_id' => ['action' => 'prevent', 'message' => 'Cannot delete email template - mailing lists exist']
+		'mlt_emt_email_template_id' => ['action' => 'prevent', 'message' => 'Cannot delete email template - mailing lists exist'],
+		'mlt_fil_file_id' => ['action' => 'null'],
 	];
 	
 	const VISIBILITY_PRIVATE = 0;  //NOT LISTED ANYWHERE FOR SUBSCRIPTION, MUST BE SIGNED UP BY AN ADMIN

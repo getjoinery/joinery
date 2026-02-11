@@ -1,20 +1,10 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+	require_once(PathHelper::getIncludePath('adm/logic/admin_file_delete_logic.php'));
 
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-
-	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/files_class.php'));
-	require_once(PathHelper::getIncludePath('data/events_class.php'));
-	require_once(PathHelper::getIncludePath('data/event_sessions_class.php'));
-
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
-	$session->set_return();
-
-	$file = new File($_GET['fil_file_id'], TRUE);
-	$user = new User($file->get('fil_usr_user_id'), TRUE);
+	$page_vars = process_logic(admin_file_delete_logic($_GET, $_POST));
+	extract($page_vars);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -30,12 +20,12 @@
 	)
 	);
 
-	$options['title'] = 'File delete confirm';
-	$options['altlinks'] = array();
-
-	$page->begin_box($options);
+	$pageoptions['title'] = 'Delete File: ' . $file->get('fil_name');
+	$pageoptions['altlinks'] = array();
+	$page->begin_box($pageoptions);
 
 	$formwriter = $page->getFormWriter('form1');
+	echo $formwriter->begin_form();
 
 	if($file->is_image()){
 		echo '<div style="float:left; margin-right:30px; margin-bottom:30px;"><img src="/uploads/profile_card/'.$file->get('fil_name').'"/></div>';
@@ -44,19 +34,20 @@
 	echo '<strong>Title:</strong> '.$file->get('fil_title') .'<br />';
 
 	if($file->get('fil_delete_time')) {
-		echo 'Soft Deleted';
+		echo '<br /><span class="badge bg-danger">Soft Deleted</span>';
 	}
 
-	echo '<br /><br /><div>';
-	$formwriter = $page->getFormWriter('form2');
-	echo $formwriter->begin_form();
-	$formwriter->hiddeninput('action', ['value' => 'remove']);
-	$formwriter->submitbutton('btn_delete', 'Delete this file permanently', ['class' => 'btn-secondary']);
+	echo '<br /><br />';
+	echo '<p>WARNING: This will permanently delete this file ('.$file->get('fil_name').').</p>';
+
+	$formwriter->hiddeninput('confirm', ['value' => 1]);
+	$formwriter->hiddeninput('fil_file_id', ['value' => $fil_file_id]);
+
+	$formwriter->submitbutton('btn_delete', 'Delete this file permanently', ['class' => 'btn-danger']);
+
 	echo $formwriter->end_form();
-	echo '</div>';
 
 	$page->end_box();
 
 	$page->admin_footer();
 ?>
-
