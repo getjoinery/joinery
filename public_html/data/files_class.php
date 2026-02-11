@@ -205,7 +205,9 @@ public static function get_by_name($name) {
 			}
 			$dir_path = $upload_dir . '/' . $key;
 			if (!is_dir($dir_path)) {
-				if (!mkdir($dir_path, 0777, true)) {
+				if (mkdir($dir_path, 0777, true)) {
+					chmod($dir_path, 0777);
+				} else {
 					error_log("Failed to create resize directory: $dir_path");
 				}
 			}
