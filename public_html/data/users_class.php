@@ -28,6 +28,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
 
+	protected static $foreign_key_actions = [
+		'usr_pic_picture_id' => ['action' => 'null'],
+	];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

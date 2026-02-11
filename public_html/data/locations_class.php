@@ -15,6 +15,10 @@ class Location extends SystemBase {	public static $prefix = 'loc';
 	public static $pkey_column = 'loc_location_id';
 	public static $url_namespace = 'location';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
+	protected static $foreign_key_actions = [
+		'loc_fil_file_id' => ['action' => 'null'],
+	];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
