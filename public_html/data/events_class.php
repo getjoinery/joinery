@@ -56,7 +56,8 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 		'evt_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'evt_usr_user_id_leader' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'evt_ety_event_type_id' => ['action' => 'prevent', 'message' => 'Cannot delete event type - events exist'],
-		'evt_loc_location_id' => ['action' => 'null']
+		'evt_loc_location_id' => ['action' => 'null'],
+		'evt_fil_file_id' => ['action' => 'null'],
 	];
 
 	const STATUS_ACTIVE = 1;
