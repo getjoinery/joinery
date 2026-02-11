@@ -60,6 +60,7 @@ foreach ($sizes as $key => $config) {
 	$dir_path = $upload_dir . '/' . $key;
 	if (!is_dir($dir_path)) {
 		if (mkdir($dir_path, 0777, true)) {
+			chmod($dir_path, 0777);
 			output("Created directory: {$key}/", $is_cli);
 		} else {
 			output("ERROR: Failed to create directory: {$dir_path}", $is_cli);
