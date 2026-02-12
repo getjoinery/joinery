@@ -140,8 +140,11 @@ Shows two sections:
 
 **File:** `cron/process_scheduled_tasks.php`
 
+A single cron entry hits this one file. It is the sole timing source for all scheduled tasks — no complex cron configs. The file itself decides what's due and runs it.
+
 - Bootstraps the application via `PathHelper`
 - Rejects non-CLI access
+- Updates `scheduled_tasks_last_cron_run` setting to current timestamp
 - Loads all active, non-deleted `ScheduledTask` records
 - For each where `is_due()` is true:
   - Resolves the task class from `/tasks/` or `/plugins/*/tasks/`
@@ -149,10 +152,16 @@ Shows two sections:
   - Updates `sct_last_run_time` and `sct_last_run_status`
 - Outputs timestamped results to stdout
 
-**Crontab:**
+**Crontab (one line per site):**
 ```
-*/15 * * * * php /var/www/html/joinerytest/public_html/cron/process_scheduled_tasks.php >> /var/www/html/joinerytest/logs/cron_scheduled_tasks.log 2>&1
+*/15 * * * * php /var/www/html/{sitename}/public_html/cron/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
 ```
+
+### Cron Installation
+
+**New installs:** `_site_init.sh` adds the crontab entry automatically during site setup.
+
+**Existing sites:** The Scheduled Tasks admin page checks the `scheduled_tasks_last_cron_run` setting. If missing or older than 30 minutes, it displays a warning with the crontab line to copy/paste. Admins install it manually.
 
 ## First Task: WeeklyEventsDigest
 
@@ -179,7 +188,9 @@ The existing send pipeline (`admin_emails_send.php`) handles delivery.
 
 ## Migration
 
-The migration inserts an **admin menu item**: "Scheduled Tasks" under the System parent menu, pointing to `admin_scheduled_tasks`, permission level 10.
+The migration inserts:
+1. An **admin menu item**: "Scheduled Tasks" under the System parent menu, pointing to `admin_scheduled_tasks`, permission level 10
+2. A **setting**: `scheduled_tasks_last_cron_run` (initially empty) — updated by the cron runner on each execution, checked by the admin page to detect whether cron is active
 
 ## Files to Create
 
@@ -199,6 +210,7 @@ The migration inserts an **admin menu item**: "Scheduled Tasks" under the System
 |------|--------|
 | `migrations/migrations.php` | Add migration entry |
 | `data/plugins_class.php` | Add scheduled task cleanup to `uninstall()` |
+| `maintenance_scripts/install_tools/_site_init.sh` | Add crontab entry for new site installs |
 
 ## Plugin Uninstall Cleanup
 
