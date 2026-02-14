@@ -1,0 +1,10 @@
+{
+    "name": "Weekly Events Digest",
+    "description": "Emails upcoming events for the next 7 days to a mailing list",
+    "default_frequency": "weekly",
+    "default_day_of_week": 1,
+    "default_time": "09:00:00",
+    "config_fields": {
+        "mailing_list_id": {"type": "mailing_list", "label": "Mailing List", "required": true}
+    }
+}

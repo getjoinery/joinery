@@ -158,37 +158,38 @@
 	curl_close($curl);
 
 	// Validate cURL request succeeded
-	if ($curl_errno !== 0) {
-		if (!$is_cli) {
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Connection Error:</strong> Unable to reach upgrade server.<br>';
-			echo 'Error: ' . htmlspecialchars($curl_error) . '<br>';
-			echo 'Server: ' . htmlspecialchars($upgrade_source) . '<br>';
-			echo '</div>';
-		} else {
-			echo "ERROR: Unable to reach upgrade server: $curl_error\n";
-		}
-		exit(1);
-	}
+	$upgrade_server_error = null;
+	$decode_response = null;
 
-	// Validate JSON response
-	$decode_response = json_decode($response, true);
-	if (json_last_error() !== JSON_ERROR_NONE) {
-		if (!$is_cli) {
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Invalid Response:</strong> Upgrade server returned invalid data.<br>';
-			echo 'JSON Error: ' . htmlspecialchars(json_last_error_msg()) . '<br>';
-			echo '</div>';
-		} else {
-			echo "ERROR: Invalid JSON response from upgrade server: " . json_last_error_msg() . "\n";
+	if ($curl_errno !== 0) {
+		if ($is_cli) {
+			echo "ERROR: Unable to reach upgrade server: $curl_error\n";
+			exit(1);
 		}
-		exit(1);
+		$upgrade_server_error = 'Unable to reach upgrade server. Error: ' . htmlspecialchars($curl_error) . ' — Server: ' . htmlspecialchars($upgrade_source);
+	} else {
+		// Validate JSON response
+		$decode_response = json_decode($response, true);
+		if (json_last_error() !== JSON_ERROR_NONE) {
+			if ($is_cli) {
+				echo "ERROR: Invalid JSON response from upgrade server: " . json_last_error_msg() . "\n";
+				exit(1);
+			}
+			$upgrade_server_error = 'Upgrade server returned invalid data. JSON Error: ' . htmlspecialchars(json_last_error_msg());
+			$decode_response = null;
+		}
 	}
 
 	// Validate required fields in response
 	$sourceFile = $decode_response['upgrade_location'] ?? null;
 
 	if (($_POST && $_POST['confirm']) || $is_cli){
+
+		// Abort if upgrade server connection failed
+		if ($upgrade_server_error) {
+			echo '<div class="alert alert-danger"><strong>Connection Error:</strong> ' . $upgrade_server_error . '</div>';
+			exit(1);
+		}
 
 		// Check ownership (relaxed for test/debug environments)
 		$current_owner = posix_getpwuid(fileowner($live_directory))['name'];
@@ -1040,6 +1041,11 @@
 		)
 		);
 
+		// Show upgrade server error if connection failed
+		if ($upgrade_server_error) {
+			echo '<div class="alert alert-danger"><strong>Connection Error:</strong> ' . $upgrade_server_error . '</div>';
+		}
+
 		$pageoptions['title'] = 'System Upgrades';
 		$page->begin_box($pageoptions);
 
@@ -1051,14 +1057,13 @@
 
 		echo '<fieldset><h4>Confirm Upgrade</h4>';
 			echo '<div class="fields full">';
-			echo '<p><b>Checking upgrade source: '.$settings->get_setting('upgrade_source').'</b></p>';
-			if(!$decode_response['system_version']){
-				echo '<p>Unable to get the latest upgrade.  Response:</p>';
-				print_r($response);
+			echo '<p><b>Checking upgrade source: '.htmlspecialchars($settings->get_setting('upgrade_source')).'</b></p>';
+			if(!$decode_response || !isset($decode_response['system_version']) || !$decode_response['system_version']){
+				echo '<div class="alert alert-danger">Unable to get the latest upgrade from the server.</div>';
 			}
-			else if($decode_response['system_version'] > $settings->get_setting('system_version')){
+			else if(version_compare($decode_response['system_version'], $settings->get_setting('system_version'), '>')){
 				$friendly_date = date('F j, Y', strtotime($decode_response['release_date']));
-				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . ' ('.$decode_response['upgrade_name'].') released on '. $friendly_date .' - '.$decode_response['release_notes'].' </p>';
+				echo '<div class="alert alert-info"><strong>Upgrade available:</strong> '. htmlspecialchars($decode_response['system_version']) . ' ('.htmlspecialchars($decode_response['upgrade_name']).') released on '. $friendly_date .' — '.htmlspecialchars($decode_response['release_notes']).'</div>';
 				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
 
 				echo '<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;">';
@@ -1072,10 +1077,10 @@
 				$formwriter->submitbutton('submit', 'Submit');
 
 			}
-			else if($decode_response['system_version'] == $settings->get_setting('system_version')){
+			else if(version_compare($decode_response['system_version'], $settings->get_setting('system_version'), '==')){
 				$friendly_date = date('F j, Y', strtotime($decode_response['release_date']));
-				echo '<p>Latest upgrade available: '. $decode_response['system_version'] . ' ('.$decode_response['upgrade_name'].') released on '. $friendly_date .' - '.$decode_response['release_notes'].' </p>';
-				echo 'Your version '. $settings->get_setting('system_version'). ' is up to date.  No upgrade needed.  ';
+				echo '<div class="alert alert-success"><strong>Up to date.</strong> Version '. htmlspecialchars($settings->get_setting('system_version')). ' is the latest version.</div>';
+				echo '<p>Latest release: '. htmlspecialchars($decode_response['system_version']) . ' ('.htmlspecialchars($decode_response['upgrade_name']).') released on '. $friendly_date .' — '.htmlspecialchars($decode_response['release_notes']).'</p>';
 				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
 
 				echo '<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;">';
@@ -1090,7 +1095,7 @@
 
 			}
 			else{
-				echo 'Your version '. $decode_response['system_version']. ' is up to date.  ';
+				echo '<div class="alert alert-success"><strong>Up to date.</strong> Version '. htmlspecialchars($settings->get_setting('system_version')). ' is current.</div>';
 			}
 
 			echo '</div>';

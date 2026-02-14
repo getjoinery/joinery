@@ -181,46 +181,94 @@ if (isset($post_vars['edit_primary_key_value'])) {
 
 **See [FormWriter Documentation - Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value)** for complete details on this pattern and why it's required.
 
-### Data Processing Pattern
+### Data Processing Pattern (Logic File)
+
+Admin pages that handle POST actions should use the logic file pattern with session-based messages. **Never pass messages via URL query parameters.**
+
 ```php
-// Process form submission
-if ($_POST) {
-    try {
-        // Create or load model
-        $item = new ItemClass($id ?? NULL, $id ? TRUE : FALSE);
+// In adm/logic/admin_items_logic.php
+function admin_items_logic($get_vars, $post_vars) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-        // Set values from form
-        $item->set('field_name', $_POST['field_name']);
-        $item->set('other_field', $_POST['other_field']);
+    $session = SessionControl::get_instance();
+    $session->check_permission(5);
 
-        // Validate and save
-        $item->prepare();
-        $item->save();
+    // Regex matching the admin page URL (used to target messages)
+    $page_regex = '/\/admin\/admin_items/';
 
-        // Redirect on success
-        header('Location: /admin/admin_items?message=saved');
-        exit;
+    if ($post_vars && isset($post_vars['action'])) {
+        $message = null;
+        $error = null;
 
-    } catch (Exception $e) {
-        $error_message = $e->getMessage();
+        try {
+            $item = new ItemClass($post_vars['item_id'] ?? NULL,
+                                  isset($post_vars['item_id']) ? TRUE : FALSE);
+            $item->set('field_name', $post_vars['field_name']);
+            $item->prepare();
+            $item->save();
+            $message = 'Item saved successfully.';
+        } catch (Exception $e) {
+            $error = $e->getMessage();
+        }
+
+        // Store messages in session (displayed after redirect)
+        if ($message) {
+            $session->save_message(new DisplayMessage(
+                $message, 'Success', $page_regex,
+                DisplayMessage::MESSAGE_ANNOUNCEMENT,
+                DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+            ));
+        }
+        if ($error) {
+            $session->save_message(new DisplayMessage(
+                $error, 'Error', $page_regex,
+                DisplayMessage::MESSAGE_ERROR,
+                DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+            ));
+        }
+
+        // Always redirect after POST to prevent form resubmission
+        return LogicResult::redirect('/admin/admin_items');
     }
+
+    // Retrieve session messages for display
+    $display_messages = $session->get_messages('/admin/admin_items');
+
+    return LogicResult::render(array(
+        'session' => $session,
+        'display_messages' => $display_messages,
+    ));
 }
 ```
 
-### Error Display
-```php
-<?php if (isset($error_message)): ?>
-    <div class="alert alert-danger">
-        <?= htmlspecialchars($error_message) ?>
-    </div>
-<?php endif; ?>
+### Displaying Session Messages (View File)
 
-<?php if (isset($_GET['message']) && $_GET['message'] === 'saved'): ?>
-    <div class="alert alert-success">
-        Item saved successfully!
-    </div>
+```php
+<?php if (!empty($display_messages)): ?>
+    <?php foreach ($display_messages as $msg): ?>
+        <?php
+        $alert_class = 'alert-info';
+        if ($msg->display_type == DisplayMessage::MESSAGE_ERROR) {
+            $alert_class = 'alert-danger';
+        } elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING) {
+            $alert_class = 'alert-warning';
+        } elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
+            $alert_class = 'alert-success';
+        }
+        ?>
+        <div class="alert <?= $alert_class ?> alert-dismissible fade show" role="alert">
+            <?php if ($msg->message_title): ?>
+                <strong><?= htmlspecialchars($msg->message_title) ?>:</strong>
+            <?php endif; ?>
+            <?= htmlspecialchars($msg->message) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    <?php endforeach; ?>
+    <?php $session->clear_clearable_messages(); ?>
 <?php endif; ?>
 ```
+
+**Important:** Never pass confirmation or error messages via URL query parameters (e.g., `?message=saved`). Always use the `DisplayMessage` + `$session->save_message()` pattern shown above. This prevents messages from persisting on page refresh and follows the established session message architecture.
 
 ## Advanced Patterns
 
@@ -230,20 +278,7 @@ Admin pages use a built-in options dropdown system. Two patterns:
 
 #### Content Pages - Use `begin_box()` / `end_box()`
 ```php
-// Handle actions
-$action = $_POST['action'] ?? $_GET['action'] ?? null;
-if ($action) {
-    switch ($action) {
-        case 'enable': $message = 'Enabled.'; break;
-        case 'disable': $message = 'Disabled.'; break;
-    }
-    if (isset($_GET['action'])) {
-        header('Location: /admin/admin_page_name?msg=' . urlencode($message));
-        exit();
-    }
-}
-
-// Setup dropdown
+// Setup dropdown links for actions
 $altlinks = array();
 $altlinks['Enable'] = '/admin/admin_page_name?action=enable';
 $altlinks['Disable'] = '/admin/admin_page_name?action=disable';
@@ -252,6 +287,8 @@ $page->begin_box(array('altlinks' => $altlinks));
 // Your content here
 $page->end_box();
 ```
+
+**Note:** Action handling and confirmation messages should be in the logic file using the `DisplayMessage` session pattern (see "Data Processing Pattern" above). Do not handle actions inline or pass messages via URL.
 
 #### Table Pages - Use `tableheader()` with `altlinks`
 ```php
