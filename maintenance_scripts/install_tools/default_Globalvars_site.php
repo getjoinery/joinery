@@ -5,7 +5,7 @@
 //SETTINGS
 $this->settings['baseDir'] = '/var/www/html/';  //PATH FROM ROOT TO INSTALLATION DIRECTORY (/)
 $this->settings['site_template'] = '{{SITE_NAME}}'; //ACTIVE SITE TEMPLATE.  "default" OR THE DIRECTORY OF YOUR SITE TEMPLATE, NO LEADING OR FOLLOWING SLASH
-$this->settings['webDir'] = '{{DOMAIN_NAME}}';	//WEB PATH TO THE WEBSITE ROOT DIRECTORY INCLUDING HTTP://, LEAVE OFF FINAL SLASH
+$this->settings['webDir'] = '{{DOMAIN_NAME}}';	//DOMAIN NAME OF THE WEBSITE (no protocol, no trailing slash)
 
 //DEFAULT DIRECTORIES, GENERALLY LEAVE THESE ALONE
 $this->settings['siteDir'] = $this->settings['baseDir'] . $this->settings['site_template']. '/public_html';  //PATH FROM COMPUTER ROOT DIRECTORY TO LOCATION OF WEB ROOT (/), LEAVE OFF THE FINAL SLASH

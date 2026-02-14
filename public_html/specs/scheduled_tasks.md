@@ -201,8 +201,9 @@ The migration inserts:
 | `tasks/WeeklyEventsDigest.php` | Events digest task class |
 | `tasks/WeeklyEventsDigest.json` | Events digest task config |
 | `cron/process_scheduled_tasks.php` | Cron runner |
-| `migrations/migration_scheduled_tasks_init.php` | Admin menu item |
+| `migrations/migration_scheduled_tasks_init.php` | Admin menu item + setting |
 | `adm/admin_scheduled_tasks.php` | Admin page |
+| `docs/scheduled_tasks.md` | Developer documentation |
 
 ## Files to Modify
 
@@ -211,6 +212,7 @@ The migration inserts:
 | `migrations/migrations.php` | Add migration entry |
 | `data/plugins_class.php` | Add scheduled task cleanup to `uninstall()` |
 | `maintenance_scripts/install_tools/_site_init.sh` | Add crontab entry for new site installs |
+| `CLAUDE.md` | Add link to `docs/scheduled_tasks.md` in documentation index |
 
 ## Plugin Uninstall Cleanup
 
