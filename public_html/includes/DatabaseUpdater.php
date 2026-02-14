@@ -1691,6 +1691,9 @@ class DatabaseUpdater {
         else if($data_type == 'character'){
             return 'character';
         }
+        else if($data_type == 'time without time zone'){
+            return 'time';
+        }
         else{
             echo 'ERROR: Unrecognized data type '.$data_type;
         }

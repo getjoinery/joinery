@@ -1170,3 +1170,12 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Scheduled Tasks System (v81) ==========
+	// Add admin menu item and cron heartbeat setting
+	$migration = array();
+	$migration['database_version'] = '81';
+	$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_menudisplay = 'Scheduled Tasks'";
+	$migration['migration_file'] = 'migration_scheduled_tasks_init.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
