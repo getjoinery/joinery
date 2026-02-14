@@ -451,6 +451,24 @@ function authenticate_write($data) {
 			$plugin_helper = PluginHelper::getInstance($plugin_name);
 			$plugin_helper->removePluginDeletionRules();
 
+			// Remove scheduled tasks that belong to this plugin
+			$plugin_tasks_dir = PathHelper::getIncludePath('plugins/' . $plugin_name . '/tasks');
+			if (is_dir($plugin_tasks_dir)) {
+				$task_jsons = glob($plugin_tasks_dir . '/*.json');
+				if (!empty($task_jsons)) {
+					require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+					foreach ($task_jsons as $json_file) {
+						$task_class_name = basename($json_file, '.json');
+						$existing_tasks = new MultiScheduledTask(array('task_class' => $task_class_name));
+						$existing_tasks->load();
+						foreach ($existing_tasks as $sct) {
+							$sct->permanent_delete();
+						}
+					}
+					$results['messages'][] = 'Removed scheduled tasks';
+				}
+			}
+
 			$results['success'] = true;
 			$results['messages'][] = "Plugin '{$plugin_name}' uninstalled successfully";
 			

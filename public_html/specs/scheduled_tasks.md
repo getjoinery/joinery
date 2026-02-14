@@ -1,5 +1,9 @@
 # Scheduled Tasks
 
+**Phase 1: COMPLETE** (2026-02-14)
+
+---
+
 ## Overview
 
 A general-purpose system for running tasks on a schedule. Each task is a PHP class paired with a JSON config file, stored in `/tasks/` or `/plugins/{plugin}/tasks/`. The admin page discovers available tasks by scanning these directories, and admins can activate, deactivate, and configure schedules. A single cron runner executes active tasks when due.
@@ -48,7 +52,7 @@ plugins/bookings/tasks/
 
 ```
 Cron (every 15 min)
-  → cron/process_scheduled_tasks.php
+  → utils/process_scheduled_tasks.php
     → Load active ScheduledTask records from DB
     → For each task where is_due():
       1. Resolve and instantiate the task class
@@ -68,10 +72,11 @@ public static $tablename = 'sct_scheduled_tasks';
 public static $pkey_column = 'sct_scheduled_task_id';
 
 public static $field_specifications = array(
-    'sct_scheduled_task_id'    => array('type'=>'bigserial', 'is_nullable'=>false, 'is_pkey'=>true),
+    'sct_scheduled_task_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
     'sct_name'                 => array('type'=>'varchar(255)', 'is_nullable'=>false),
     'sct_task_class'           => array('type'=>'varchar(255)', 'is_nullable'=>false),
     'sct_is_active'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'true'),
+    'sct_frequency'            => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>"'daily'"),
     'sct_schedule_day_of_week' => array('type'=>'int4', 'is_nullable'=>true),
     'sct_schedule_time'        => array('type'=>'time', 'is_nullable'=>false, 'default'=>"'09:00:00'"),
     'sct_task_config'          => array('type'=>'jsonb', 'is_nullable'=>true),
@@ -84,16 +89,17 @@ public static $field_specifications = array(
 
 **Field notes:**
 - `sct_task_class` — Class name (e.g., `WeeklyEventsDigest`). Resolved by searching `/tasks/` then `/plugins/*/tasks/`
+- `sct_frequency` — `every_run` (every 15 min), `hourly`, `daily`, `weekly`
 - `sct_task_config` — JSONB for task-specific configuration (e.g., `{"mailing_list_id": 3}`). Populated from admin form based on `config_fields` in the task's JSON file
-- `sct_schedule_day_of_week` — 0=Sunday through 6=Saturday; NULL means daily
-- `sct_schedule_time` — Time of day, in site timezone
+- `sct_schedule_day_of_week` — 0=Sunday through 6=Saturday; only used for `weekly` frequency
+- `sct_schedule_time` — Time of day in site timezone; only used for `daily` and `weekly` frequencies
 - `sct_last_run_status` — `success`, `error`, `skipped`
 
-**Key method: `is_due()`** — Returns true when:
-1. Task is active
-2. Current time is past `sct_schedule_time` today (site timezone)
-3. If `sct_schedule_day_of_week` is set, today matches that day
-4. `sct_last_run_time` is not already today
+**Key method: `is_due()`** — Behavior depends on `sct_frequency`:
+- `every_run` — Always due (runs every cron invocation, ~15 min)
+- `hourly` — Due if not already run in the current hour
+- `daily` — Due if past schedule time and not already run today
+- `weekly` — Due if correct day of week, past schedule time, and not run today
 
 **MultiScheduledTask** — Filters: `active`, `deleted`.
 
@@ -138,7 +144,7 @@ Shows two sections:
 
 ## Cron Runner
 
-**File:** `cron/process_scheduled_tasks.php`
+**File:** `utils/process_scheduled_tasks.php`
 
 A single cron entry hits this one file. It is the sole timing source for all scheduled tasks — no complex cron configs. The file itself decides what's due and runs it.
 
@@ -154,7 +160,7 @@ A single cron entry hits this one file. It is the sole timing source for all sch
 
 **Crontab (one line per site):**
 ```
-*/15 * * * * php /var/www/html/{sitename}/public_html/cron/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
+*/15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
 ```
 
 ### Cron Installation
@@ -200,7 +206,7 @@ The migration inserts:
 | `includes/ScheduledTaskInterface.php` | Task interface |
 | `tasks/WeeklyEventsDigest.php` | Events digest task class |
 | `tasks/WeeklyEventsDigest.json` | Events digest task config |
-| `cron/process_scheduled_tasks.php` | Cron runner |
+| `utils/process_scheduled_tasks.php` | Cron runner |
 | `migrations/migration_scheduled_tasks_init.php` | Admin menu item + setting |
 | `adm/admin_scheduled_tasks.php` | Admin page |
 | `docs/scheduled_tasks.md` | Developer documentation |
