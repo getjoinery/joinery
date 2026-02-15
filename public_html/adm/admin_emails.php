@@ -77,12 +77,18 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach($emails as $email) {
-		$user = new User($email->get('eml_usr_user_id'), TRUE);
-		
+		$author_user_id = $email->get('eml_usr_user_id');
+		if ($author_user_id) {
+			$user = new User($author_user_id, TRUE);
+			$author_name = $user->display_name();
+		} else {
+			$author_name = '(System)';
+		}
+
 		$rowvalues = array();
 		array_push($rowvalues, '<a href="/admin/admin_email?eml_email_id='.$email->key.'">Email '.$email->key.' - '.$email->get('eml_subject').'</a>');
 		array_push($rowvalues, $email->get('eml_subject'));
-		array_push($rowvalues, $user->display_name());
+		array_push($rowvalues, $author_name);
 		
 		if($email->get('eml_delete_time')) {
 			$status = 'Deleted';
