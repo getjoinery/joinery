@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 2.0 - Updated to use _site_init.sh for first-run initialization
+# VERSION 2.1 - Added cron for scheduled tasks
 #
 # Usage:
 #   docker build \
@@ -38,6 +38,9 @@ COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
 RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh && \
     cd /var/www/html/${SITENAME}/maintenance_scripts/install_tools && \
     ./install.sh server
+
+# Install cron for scheduled tasks
+RUN apt-get update -qq && apt-get install -y -qq cron > /dev/null 2>&1
 
 # Create VirtualHost configuration during build (persists across restarts)
 # Note: Composer install and 000-default disable are handled by _site_init.sh
@@ -83,4 +86,8 @@ CMD set +H && \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
+    echo "*/15 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
+    chmod 644 /etc/cron.d/scheduled-tasks && \
+    echo "" >> /etc/cron.d/scheduled-tasks && \
+    service cron start && \
     apache2ctl -D FOREGROUND
