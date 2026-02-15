@@ -5,7 +5,7 @@
  * Handles task discovery, activation, deactivation, configuration,
  * and run-now functionality.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -280,14 +280,29 @@ function _handle_run_now($task_id) {
 		$config = $task->get_task_config();
 		$result = $task_instance->run($config);
 
+		// Parse result (supports string or array with status+message)
+		if (is_array($result)) {
+			$status = $result['status'] ?? 'error';
+			$run_message = $result['message'] ?? null;
+		} else {
+			$status = $result;
+			$run_message = null;
+		}
+
 		$task->set('sct_last_run_time', 'now()');
-		$task->set('sct_last_run_status', $result);
+		$task->set('sct_last_run_status', $status);
+		$task->set('sct_last_run_message', $run_message);
 		$task->save();
 
-		return array('message' => 'Task "' . $task->get('sct_name') . '" ran with result: ' . $result);
+		$display = 'Task "' . $task->get('sct_name') . '" ran with result: ' . $status;
+		if ($run_message) {
+			$display .= ' — ' . $run_message;
+		}
+		return array('message' => $display);
 	} catch (Exception $e) {
 		$task->set('sct_last_run_time', 'now()');
 		$task->set('sct_last_run_status', 'error');
+		$task->set('sct_last_run_message', substr($e->getMessage(), 0, 500));
 		$task->save();
 		return array('error' => 'Task error: ' . $e->getMessage());
 	}

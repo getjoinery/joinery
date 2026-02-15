@@ -8,7 +8,7 @@
  * Crontab (one line per site):
  * STAR/15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
  *
- * @version 1.0
+ * @version 1.1
  */
 
 // Reject non-CLI access
@@ -74,6 +74,7 @@ foreach ($tasks as $task) {
 		echo "[$timestamp]   ERROR: Could not resolve class file for $task_class\n";
 		$task->set('sct_last_run_time', 'now()');
 		$task->set('sct_last_run_status', 'error');
+		$task->set('sct_last_run_message', 'Could not resolve class file');
 		$task->save();
 		$tasks_errored++;
 		continue;
@@ -97,16 +98,26 @@ foreach ($tasks as $task) {
 		$config = $task->get_task_config();
 		$result = $task_instance->run($config);
 
+		// Parse result (supports string or array with status+message)
+		if (is_array($result)) {
+			$status = $result['status'] ?? 'error';
+			$message = $result['message'] ?? null;
+		} else {
+			$status = $result;
+			$message = null;
+		}
+
 		// Update task record
 		$task->set('sct_last_run_time', 'now()');
-		$task->set('sct_last_run_status', $result);
+		$task->set('sct_last_run_status', $status);
+		$task->set('sct_last_run_message', $message);
 		$task->save();
 
-		echo "[$timestamp]   Result: $result\n";
+		echo "[$timestamp]   Result: $status" . ($message ? " — $message" : "") . "\n";
 
-		if ($result === 'success') {
+		if ($status === 'success') {
 			$tasks_run++;
-		} elseif ($result === 'skipped') {
+		} elseif ($status === 'skipped') {
 			$tasks_skipped++;
 		} else {
 			$tasks_errored++;
@@ -115,6 +126,7 @@ foreach ($tasks as $task) {
 		echo "[$timestamp]   EXCEPTION: " . $e->getMessage() . "\n";
 		$task->set('sct_last_run_time', 'now()');
 		$task->set('sct_last_run_status', 'error');
+		$task->set('sct_last_run_message', substr($e->getMessage(), 0, 500));
 		$task->save();
 		$tasks_errored++;
 	}
