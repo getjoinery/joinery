@@ -502,6 +502,21 @@ else
 fi
 
 # =============================================================================
+# CRON SETUP
+# =============================================================================
+
+log "Setting up cron jobs..."
+
+# Add scheduled tasks cron entry (runs every 15 minutes)
+CRON_CMD="*/15 * * * * php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1"
+
+# Check if cron entry already exists before adding
+( crontab -l -u www-data 2>/dev/null | grep -v "process_scheduled_tasks.php.*${SITENAME}"; echo "$CRON_CMD" ) | crontab -u www-data - 2>/dev/null || {
+    log_error "Warning: Could not install crontab entry for scheduled tasks (non-fatal)"
+}
+log "Scheduled tasks cron entry installed"
+
+# =============================================================================
 # COMPLETE
 # =============================================================================
 

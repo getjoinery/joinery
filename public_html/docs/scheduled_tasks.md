@@ -145,12 +145,21 @@ Returns `sct_task_config` as an associative array.
 - Runs due tasks and updates their status
 - Outputs timestamped results to stdout (logged by cron)
 
-**Crontab entry:**
+### Setup
+
+**Standard server** — Add to the `www-data` user's crontab (`sudo crontab -e -u www-data`):
 ```
 */15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
 ```
 
-New installs get this automatically via `_site_init.sh`. Existing sites see a warning on the admin page with the line to copy/paste.
+**Docker container** — Ensure `cron` is installed and running, then create `/etc/cron.d/scheduled-tasks`:
+```
+*/15 * * * * www-data php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
+```
+
+Note: Docker containers may not have `cron` installed by default. Install with `apt-get install -y cron` and start the daemon with `cron`. The cron daemon must also be started after container restart (add to entrypoint if needed).
+
+**New installs** get the crontab entry automatically via `_site_init.sh`. **Existing sites** see a warning on the admin page with setup instructions if cron hasn't run in 30+ minutes.
 
 ## Admin Page
 
