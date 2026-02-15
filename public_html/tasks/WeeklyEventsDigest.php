@@ -5,7 +5,7 @@
  * Scheduled task that queries upcoming events for the next 7 days,
  * builds an HTML email, and queues it through the existing bulk email pipeline.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -23,18 +23,18 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 	 * Run the weekly events digest.
 	 *
 	 * @param array $config  Task-specific configuration (expects 'mailing_list_id')
-	 * @return string  'success', 'error', or 'skipped'
+	 * @return array  Status array with 'status' and 'message'
 	 */
-	public function run(array $config): string {
+	public function run(array $config) {
 		// 1. Read mailing_list_id from config
 		$mailing_list_id = $config['mailing_list_id'] ?? null;
 		if (!$mailing_list_id) {
-			return 'skipped';
+			return array('status' => 'skipped', 'message' => 'Mailing list not configured');
 		}
 
 		// Verify mailing list exists
 		if (!MailingList::check_if_exists($mailing_list_id)) {
-			return 'skipped';
+			return array('status' => 'skipped', 'message' => 'Mailing list ID ' . $mailing_list_id . ' not found');
 		}
 
 		$mailing_list = new MailingList($mailing_list_id, true);
@@ -75,9 +75,9 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			}
 		}
 
-		// 4. If none, return skipped
+		// 4. If none, return success with message
 		if (empty($upcoming_events)) {
-			return 'skipped';
+			return array('status' => 'success', 'message' => 'No upcoming events in the next 7 days');
 		}
 
 		// 5. Build HTML for each event
@@ -150,10 +150,10 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 		if ($recipient_count === 0) {
 			// No recipients - clean up the email record
 			$email->permanent_delete();
-			return 'skipped';
+			return array('status' => 'skipped', 'message' => 'Mailing list has no subscribers with email addresses');
 		}
 
 		// 9. Return success
-		return 'success';
+		return array('status' => 'success', 'message' => 'Queued digest with ' . $event_count . ' event(s) to ' . $recipient_count . ' recipient(s)');
 	}
 }

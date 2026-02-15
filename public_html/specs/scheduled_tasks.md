@@ -82,6 +82,7 @@ public static $field_specifications = array(
     'sct_task_config'          => array('type'=>'jsonb', 'is_nullable'=>true),
     'sct_last_run_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
     'sct_last_run_status'      => array('type'=>'varchar(50)', 'is_nullable'=>true),
+    'sct_last_run_message'     => array('type'=>'varchar(500)', 'is_nullable'=>true),
     'sct_create_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true, 'default'=>'now()'),
     'sct_delete_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 );
@@ -93,7 +94,8 @@ public static $field_specifications = array(
 - `sct_task_config` — JSONB for task-specific configuration (e.g., `{"mailing_list_id": 3}`). Populated from admin form based on `config_fields` in the task's JSON file
 - `sct_schedule_day_of_week` — 0=Sunday through 6=Saturday; only used for `weekly` frequency
 - `sct_schedule_time` — Time of day in site timezone; only used for `daily` and `weekly` frequencies
-- `sct_last_run_status` — `success`, `error`, `skipped`
+- `sct_last_run_status` — `success` (ran and completed), `skipped` (couldn't run, misconfigured), `error` (failed)
+- `sct_last_run_message` — Human-readable detail about the last run result
 
 **Key method: `is_due()`** — Behavior depends on `sct_frequency`:
 - `every_run` — Always due (runs every cron invocation, ~15 min)
@@ -111,9 +113,9 @@ public static $field_specifications = array(
 interface ScheduledTaskInterface {
     /**
      * @param array $config  Task-specific configuration from sct_task_config
-     * @return string  'success', 'error', or 'skipped'
+     * @return string|array  Status string, or array('status'=>'...', 'message'=>'...')
      */
-    public function run(array $config): string;
+    public function run(array $config);
 }
 ```
 
