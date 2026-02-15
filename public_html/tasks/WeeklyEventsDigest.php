@@ -5,7 +5,7 @@
  * Scheduled task that queries upcoming events for the next 7 days,
  * builds an HTML email, and queues it through the existing bulk email pipeline.
  *
- * @version 1.1
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -40,6 +40,9 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 		$mailing_list = new MailingList($mailing_list_id, true);
 
 		// 2. Query upcoming events
+		// Note: The 'upcoming' filter includes events where evt_end_time > now()
+		// even if evt_start_time is in the past. We load without a limit so
+		// the PHP-level 7-day filter below can find the correct events.
 		$events = new MultiEvent(
 			array(
 				'upcoming' => true,
@@ -48,8 +51,7 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 				'exclude_recurring_parents' => true,
 				'visibility' => 1,
 			),
-			array('evt_start_time' => 'ASC'),
-			20
+			array('evt_start_time' => 'ASC')
 		);
 		$events->load();
 
@@ -59,9 +61,9 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 		if (!$site_tz_string) {
 			$site_tz_string = 'America/New_York';
 		}
-		$site_tz = new DateTimeZone($site_tz_string);
-		$now = new DateTime('now', $site_tz);
-		$cutoff = new DateTime('+7 days', $site_tz);
+		$utc_tz = new DateTimeZone('UTC');
+		$now = new DateTime('now', $utc_tz);
+		$cutoff = new DateTime('+7 days', $utc_tz);
 
 		$upcoming_events = array();
 		foreach ($events as $event) {
@@ -69,8 +71,9 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			if (!$start_time_raw) {
 				continue;
 			}
-			$event_start = new DateTime($start_time_raw);
-			if ($event_start <= $cutoff) {
+			// DB timestamps are stored in UTC
+			$event_start = new DateTime($start_time_raw, $utc_tz);
+			if ($event_start >= $now && $event_start <= $cutoff) {
 				$upcoming_events[] = $event;
 			}
 		}
@@ -123,9 +126,11 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 		$email = new Email(null);
 		$email->set('eml_subject', 'Upcoming Events This Week');
 		$email->set('eml_message_html', $html);
+		$email->set('eml_message_template_html', 'blank_template');
 		$email->set('eml_status', Email::EMAIL_QUEUED);
 		$email->set('eml_type', Email::TYPE_MARKETING);
 		$email->set('eml_mlt_mailing_list_id', $mailing_list_id);
+		$email->set('eml_scheduled_time', 'now()');
 		$email->save();
 
 		// 8. Populate EmailRecipient records from mailing list subscribers

@@ -408,6 +408,32 @@
 		echo "#Failed: ".$migration_fail_count."<br>\n";
 		echo "#Skipped: ".$migration_skip_count."<br>\n";
 
+		// Step 5: Sync all serial sequences to their max values
+		// This prevents primary key collisions after data imports or migrations
+		echo "-----SEQUENCE SYNC-----<br>\n";
+		$seq_sync_count = 0;
+		foreach ($classes as $class) {
+			if (!isset($class::$tablename) || !isset($class::$pkey_column)) {
+				continue;
+			}
+			$pkey = $class::$pkey_column;
+			if (!isset($class::$field_specifications[$pkey]['serial']) || !$class::$field_specifications[$pkey]['serial']) {
+				continue;
+			}
+			$table = $class::$tablename;
+			$seq_name = $table . '_' . $pkey . '_seq';
+			try {
+				$sync_sql = "SELECT setval('{$seq_name}', COALESCE((SELECT MAX({$pkey}) FROM {$table}), 1), true)";
+				$dbhelper->get_db_link()->exec($sync_sql);
+				$seq_sync_count++;
+			} catch (Exception $e) {
+				if ($verbose) {
+					echo "⚠ Could not sync sequence {$seq_name}: " . $e->getMessage() . "<br>\n";
+				}
+			}
+		}
+		echo "✓ Synced {$seq_sync_count} sequences<br>\n";
+
 		// Display last 5 migrations
 		echo "<br>\n<strong>Last 5 Migrations:</strong><br>\n";
 		$display_migrations = array_slice($last_migrations, -5);

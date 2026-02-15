@@ -68,16 +68,29 @@
 
 			$count = 0;
 			foreach ($recipients as $recipient){
-				$user = new User($recipient->get('erc_usr_user_id'), TRUE);
+				$recipient_user_id = $recipient->get('erc_usr_user_id');
+				if ($recipient_user_id) {
+					$user = new User($recipient_user_id, TRUE);
+				} else {
+					$user = null;
+				}
 				//CHECK UNSUBSCRIBE AGAIN
 				/*
-				if($user->is_unsubscribed_to_contact_type($email->get('eml_ctt_contact_type_id'))){
+				if($user && $user->is_unsubscribed_to_contact_type($email->get('eml_ctt_contact_type_id'))){
 					$recipient->set('erc_status', EmailRecipient::UNSUBSCRIBED);
-					$recipient->save();	
+					$recipient->save();
 					echo 'Skipping '. $user->display_name(). ', not subscribed<br>';
 					continue;
 				}
 				*/
+
+				// Build recipient data from user object or email recipient record
+				$recipient_email = $user ? $user->get('usr_email') : $recipient->get('erc_email');
+				$recipient_name = $user ? $user->display_name() : $recipient->get('erc_name');
+				$recipient_data = $user ? $user->export_as_array() : array(
+					'usr_email' => $recipient->get('erc_email'),
+					'usr_first_name' => $recipient->get('erc_name'),
+				);
 
 				$message = EmailMessage::fromTemplate($email->get('eml_message_template_html'), [
 					'subject' => $email->get('eml_subject'),
@@ -88,11 +101,11 @@
 					'utm_content' => urlencode($email->get('eml_subject')),
 					'mailing_list_id' => $mailing_list_id,
 					'mailing_list_string' => $mailing_list_string,
-					'recipient' => $user->export_as_array()
+					'recipient' => $recipient_data
 				]);
 
 				$message->subject($email->get('eml_subject'))
-						->to($user->get('usr_email'), $user->display_name());
+						->to($recipient_email, $recipient_name);
 
 				// Only set custom from if different from defaults
 				$settings = Globalvars::get_instance();
@@ -109,13 +122,13 @@
 						$recipient->set('erc_sent_time', 'now()');
 						$recipient->set('erc_status', EmailRecipient::EMAIL_SENT);
 						$recipient->save();	
-						echo 'Sent to : '. $user->display_name().'<br>';
-						$count++;				
+						echo 'Sent to : '. htmlspecialchars($recipient_name).'<br>';
+						$count++;
 					}
-					else{	
+					else{
 						$recipient->set('erc_status', EmailRecipient::ERROR);
-						$recipient->save();	
-						echo '<b>Failed to send to : '. $user->display_name().'</b><br>';
+						$recipient->save();
+						echo '<b>Failed to send to : '. htmlspecialchars($recipient_name).'</b><br>';
 					}				
 				}
 
@@ -127,29 +140,37 @@
 			$email->save();
 		}
 
-		$sender = new User($email->get('eml_usr_user_id'), TRUE);		
-		//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-		$test_message = EmailMessage::fromTemplate($email->get('eml_message_template_html'), array(
-				'subject' => 'COPY: '.$email->get('eml_subject'),
-				'preview_text' => $email->get('eml_preview_text'),
-				'body' => $email->get('eml_message_html'),
-				'utm_medium' => 'email',
-				'utm_campaign' => $mailing_list_string, 
-				'utm_content' => urlencode($email->get('eml_subject')), 
-				'mailing_list_id' => $mailing_list_id,
-				'mailing_list_string' => $mailing_list_string,
-				'recipient' => $sender->export_as_array()
-		));
-		$test_message->subject('COPY: '.$email->get('eml_subject'))
-			->from($email->get('eml_from_address'), $email->get('eml_from_name'));
+		// Send a copy to the email author (if one exists)
+		$sender_user_id = $email->get('eml_usr_user_id');
+		$sender = $sender_user_id ? new User($sender_user_id, TRUE) : null;
 
-		if($send_test){		
-			if(!$session->send_emails()){
+		if ($sender) {
+			//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
+			$test_message = EmailMessage::fromTemplate($email->get('eml_message_template_html'), array(
+					'subject' => 'COPY: '.$email->get('eml_subject'),
+					'preview_text' => $email->get('eml_preview_text'),
+					'body' => $email->get('eml_message_html'),
+					'utm_medium' => 'email',
+					'utm_campaign' => $mailing_list_string,
+					'utm_content' => urlencode($email->get('eml_subject')),
+					'mailing_list_id' => $mailing_list_id,
+					'mailing_list_string' => $mailing_list_string,
+					'recipient' => $sender->export_as_array()
+			));
+			$test_message->subject('COPY: '.$email->get('eml_subject'))
+				->from($email->get('eml_from_address'), $email->get('eml_from_name'));
+		}
+
+		if($send_test){
+			if (!$sender) {
+				echo '<p><b>Cannot send test: no author user set on this email.</b></p>';
+			}
+			elseif(!$session->send_emails()){
 				echo '<p><b>Email sending is disabled, so the email is available <a href="/ajax/email_preview_ajax?eml_email_id='.$test_email->key.'">on the preview page</a></b></p>';
 			}
 			else{
 				echo '<p><b>Sending test email to '.$sender->display_name().'</b></p>';
-				
+
 				$message = EmailMessage::fromTemplate($test_email->get('eml_message_template_html'), [
 					'subject' => $test_email->get('eml_subject'),
 					'preview_text' => $test_email->get('eml_preview_text'),

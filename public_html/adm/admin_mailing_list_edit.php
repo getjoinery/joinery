@@ -60,14 +60,14 @@
 	$formwriter->textinput('mlt_description', 'Description');
 
 	$formwriter->dropinput('mlt_is_active', 'Active?', [
-		'options' => ['Disabled' => 0, 'Active' => 1]
+		'options' => [0 => 'Disabled', 1 => 'Active']
 	]);
 
 	$formwriter->dropinput('mlt_visibility', 'Visibility', [
 		'options' => [
-			'Hidden (Only admins can add people)' => 0,
-			'Public (Open for registration and listed)' => 1,
-			'Public but unlisted (Can only register with the link)' => 2
+			0 => 'Hidden (Only admins can add people)',
+			1 => 'Public (Open for registration and listed)',
+			2 => 'Public but unlisted (Can only register with the link)'
 		]
 	]);
 
