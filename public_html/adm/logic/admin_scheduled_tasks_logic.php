@@ -223,9 +223,7 @@ function _handle_activate($post_vars) {
 	$task->set('sct_is_active', true);
 
 	// Set defaults from JSON
-	if (isset($json_data['default_frequency'])) {
-		$task->set('sct_frequency', $json_data['default_frequency']);
-	}
+	$task->set('sct_frequency', $json_data['default_frequency'] ?? 'daily');
 	if (isset($json_data['default_day_of_week'])) {
 		$task->set('sct_schedule_day_of_week', $json_data['default_day_of_week']);
 	}

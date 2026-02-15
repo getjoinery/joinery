@@ -134,6 +134,8 @@ if (empty($active_tasks)) {
 			$schedule_display = 'Hourly';
 		} elseif ($frequency === 'weekly' && $dow !== null && $dow !== '') {
 			$schedule_display = ($day_labels[(int)$dow] ?? 'Day ' . $dow) . ' at ' . $time . ' ' . htmlspecialchars($site_timezone);
+		} elseif ($frequency === 'weekly') {
+			$schedule_display = 'Weekly at ' . $time . ' ' . htmlspecialchars($site_timezone);
 		} else {
 			$schedule_display = 'Daily at ' . $time . ' ' . htmlspecialchars($site_timezone);
 		}
