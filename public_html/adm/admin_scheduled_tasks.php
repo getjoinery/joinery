@@ -5,7 +5,7 @@
  * Shows active tasks and available (discovered) tasks.
  * Supports activate, deactivate, configure, and run-now actions.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -144,15 +144,19 @@ if (empty($active_tasks)) {
 
 		// Status badge
 		$status = $task->get('sct_last_run_status');
+		$run_message = $task->get('sct_last_run_message');
 		$status_display = '';
 		if ($status === 'success') {
 			$status_display = '<span class="badge bg-success" style="background-color: #28a745; color: #fff; padding: 3px 8px; border-radius: 3px;">Success</span>';
 		} elseif ($status === 'error') {
 			$status_display = '<span class="badge bg-danger" style="background-color: #dc3545; color: #fff; padding: 3px 8px; border-radius: 3px;">Error</span>';
 		} elseif ($status === 'skipped') {
-			$status_display = '<span class="badge bg-secondary" style="background-color: #6c757d; color: #fff; padding: 3px 8px; border-radius: 3px;">Skipped</span>';
+			$status_display = '<span class="badge bg-warning" style="background-color: #ffc107; color: #000; padding: 3px 8px; border-radius: 3px;">Skipped</span>';
 		} else {
 			$status_display = '<span style="color: #999;">—</span>';
+		}
+		if ($run_message) {
+			$status_display .= '<br><small class="text-muted">' . htmlspecialchars($run_message) . '</small>';
 		}
 
 		// Active toggle

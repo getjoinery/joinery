@@ -72,13 +72,17 @@ Place in `/tasks/` (core) or `/plugins/{plugin}/tasks/` (plugin).
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
 class MyTaskName implements ScheduledTaskInterface {
-    public function run(array $config): string {
+    public function run(array $config) {
         // $config contains values from sct_task_config (set via admin form)
 
         // Do work here...
 
-        // Return status: 'success', 'error', or 'skipped'
-        return 'success';
+        // Return an array with status and human-readable message
+        // Status meanings:
+        //   'success'  — Ran and completed (with or without work to do)
+        //   'skipped'  — Could not run (misconfigured, missing prerequisite)
+        //   'error'    — Attempted to run but failed
+        return array('status' => 'success', 'message' => 'Processed 5 items');
     }
 }
 ```
@@ -103,6 +107,7 @@ Navigate to **Admin > System > Scheduled Tasks**. The task appears under "Availa
 | `sct_task_config` | jsonb | Task-specific configuration |
 | `sct_last_run_time` | timestamp | When task last ran |
 | `sct_last_run_status` | varchar(50) | success/error/skipped |
+| `sct_last_run_message` | varchar(500) | Human-readable result detail |
 | `sct_create_time` | timestamp | Row creation time |
 | `sct_delete_time` | timestamp | Soft delete time |
 

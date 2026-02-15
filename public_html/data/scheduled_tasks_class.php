@@ -5,7 +5,7 @@
  * Data model for the scheduled tasks system. Rows are created when
  * an admin activates a discovered task, not via migrations.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -28,6 +28,7 @@ class ScheduledTask extends SystemBase {
 		'sct_task_config'          => array('type'=>'jsonb', 'is_nullable'=>true),
 		'sct_last_run_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'sct_last_run_status'      => array('type'=>'varchar(50)', 'is_nullable'=>true),
+		'sct_last_run_message'     => array('type'=>'varchar(500)', 'is_nullable'=>true),
 		'sct_create_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true, 'default'=>'now()'),
 		'sct_delete_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
