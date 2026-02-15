@@ -108,8 +108,16 @@
 			$version_string = $upgrade_to_delete->get('upg_major_version').'.'.$upgrade_to_delete->get('upg_minor_version');
 			$upgrade_to_delete->permanent_delete();
 
-			// Redirect to clean URL with success message
-			header('Location: /utils/publish_upgrade?deleted=' . urlencode($version_string));
+			// Store success message in session and redirect to clean URL
+			$page_regex = '/\/utils\/publish_upgrade/';
+			$session->save_message(new DisplayMessage(
+				'Upgrade version ' . $version_string . ' has been deleted.',
+				'Success',
+				$page_regex,
+				DisplayMessage::MESSAGE_ANNOUNCEMENT,
+				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: /utils/publish_upgrade');
 			exit;
 		}
 	}
@@ -390,13 +398,31 @@
 		)
 		);
 		
+		// Display session messages
+		$display_messages = $session->get_messages('/utils/publish_upgrade');
+		if (!empty($display_messages)) {
+			foreach ($display_messages as $msg) {
+				$alert_class = 'alert-info';
+				if ($msg->display_type == DisplayMessage::MESSAGE_ERROR) {
+					$alert_class = 'alert-danger';
+				} elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING) {
+					$alert_class = 'alert-warning';
+				} elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
+					$alert_class = 'alert-success';
+				}
+				echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show" role="alert">';
+				if ($msg->message_title) {
+					echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
+				}
+				echo htmlspecialchars($msg->message);
+				echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+				echo '</div>';
+			}
+			$session->clear_clearable_messages();
+		}
+
 		$pageoptions['title'] = "Publish Upgrade";
 		$page->begin_box($pageoptions);
-
-		// Display delete result message if redirected after delete
-		if(isset($_REQUEST['deleted'])){
-			echo '<div class="alert alert-success">Upgrade version '.htmlspecialchars($_REQUEST['deleted']).' has been deleted.</div>';
-		}
 
 		echo '<h4>Upgrade History</h4>';
 		
