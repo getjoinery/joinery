@@ -1,0 +1,6 @@
+{
+    "name": "Send Queued Emails",
+    "description": "Sends bulk emails that are queued and past their scheduled send date",
+    "default_frequency": "every_run",
+    "config_fields": {}
+}

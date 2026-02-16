@@ -16,7 +16,9 @@
 	
 	$session = SessionControl::get_instance();
 	//$session->set_return();
-	$session->check_permission(8);
+	if (!defined('SCHEDULED_TASK_CONTEXT')) {
+		$session->check_permission(8);
+	}
 
 	//IF IT IS A TEST EMAIL
 	$send_test = LibraryFunctions::fetch_variable('send_test', false, 0, '');
@@ -31,19 +33,21 @@
 		$emails->load();
 	}
 
-	$page = new AdminPage();
-	$page->admin_header(	
-	array(
-		'menu-id'=> 'emails-list',
-		'breadcrumbs' => array(
-			'Emails'=>'/admin/admin_emails',
-		),
-		'session' => $session,
-	)
-	);	
-	
-	$pageoptions['title'] = "Send Emails";
-	$page->begin_box($pageoptions);
+	if (!defined('SCHEDULED_TASK_CONTEXT')) {
+		$page = new AdminPage();
+		$page->admin_header(
+		array(
+			'menu-id'=> 'emails-list',
+			'breadcrumbs' => array(
+				'Emails'=>'/admin/admin_emails',
+			),
+			'session' => $session,
+		)
+		);
+
+		$pageoptions['title'] = "Send Emails";
+		$page->begin_box($pageoptions);
+	}
 
 	$settings = Globalvars::get_instance();
 
@@ -202,10 +206,11 @@
 		
 	}
 
-	echo '<br /><p><strong>All mail was successfully sent.  <a href="/admin/admin_emails">Return to the emails page</a></strong></p>';
-
-	$page->end_box();
-	$page->admin_footer();
-	exit();		
+	if (!defined('SCHEDULED_TASK_CONTEXT')) {
+		echo '<br /><p><strong>All mail was successfully sent.  <a href="/admin/admin_emails">Return to the emails page</a></strong></p>';
+		$page->end_box();
+		$page->admin_footer();
+		exit();
+	}		
 
 ?>
