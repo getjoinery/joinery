@@ -58,6 +58,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_timezone' => array('type'=>'varchar(32)', 'required'=>true, 'default'=>'America/New_York'),
 	    'usr_email_is_verified' => array('type'=>'bool', 'default'=>false),
 	    'usr_email_is_verified_time' => array('type'=>'timestamp(6)'),
+	    'usr_email_bounce_unverify_time' => array('type'=>'timestamp(6)'),
 	    'usr_is_activated' => array('type'=>'bool', 'default'=>false),
 	    'usr_is_disabled' => array('type'=>'bool', 'default'=>false),
 	    'usr_lastlogin_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
