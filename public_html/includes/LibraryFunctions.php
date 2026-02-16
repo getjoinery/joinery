@@ -336,7 +336,20 @@ class LibraryFunctions {
 	}
 
 	static function IsValidEmail($email) {
-		return preg_match('/^[A-Z0-9._%+\\-\\#!$%&\'*\/=?^_`{}|~]+@[A-Z0-9.-]+\.[A-Z]{2,10}$/i', $email) > 0;
+		if (preg_match('/^[A-Z0-9._%+\\-\\#!$%&\'*\/=?^_`{}|~]+@[A-Z0-9.-]+\.[A-Z]{2,10}$/i', $email) === 0) {
+			return false;
+		}
+		// DNS MX check (fail-open: if lookup fails, still return true)
+		$domain = substr($email, strrpos($email, '@') + 1);
+		$mx_records = @dns_get_record($domain, DNS_MX);
+		if (is_array($mx_records) && empty($mx_records)) {
+			// No MX — check A record fallback
+			$a_records = @dns_get_record($domain, DNS_A);
+			if (is_array($a_records) && empty($a_records)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	
