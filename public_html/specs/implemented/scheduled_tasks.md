@@ -1,6 +1,7 @@
 # Scheduled Tasks
 
 **Phase 1: COMPLETE** (2026-02-14)
+**Phase 2: SKIPPED** (2026-02-16) — Not needed; file-based tasks sufficient
 
 ---
 
@@ -253,9 +254,11 @@ When a plugin is uninstalled, scan the plugin's `/tasks/` directory for task cla
 
 ---
 
-# Phase 2: Configurable Task Types (UI-Created Tasks)
+# Phase 2: Configurable Task Types (UI-Created Tasks) — SKIPPED
 
-## Overview
+Phase 2 was reviewed and intentionally skipped. The file-based task system from Phase 1 covers all current needs. Phase 2 would only be needed if non-technical admins need to create tasks entirely through the UI.
+
+## Overview (original spec preserved below for reference)
 
 Phase 1 requires dropping PHP + JSON files on disk to add tasks. Phase 2 adds **built-in task types** that admins can configure entirely through the UI — no files, no code. An admin picks a task type, fills in parameters (data source, recipients, schedule), and saves.
 
