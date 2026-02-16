@@ -64,7 +64,7 @@ if (!$cron_is_active) {
 	echo '<div style="border: 2px solid #856404; padding: 15px; margin-bottom: 20px; background-color: #fff3cd; color: #856404; border-radius: 4px;">';
 	echo '<strong>Cron Not Detected</strong> — ';
 	if ($last_cron_run) {
-		echo 'Last run: ' . htmlspecialchars($last_cron_run) . '. ';
+		echo 'Last run: ' . htmlspecialchars(LibraryFunctions::convert_time($last_cron_run, 'UTC', $session->get_timezone())) . '. ';
 	} else {
 		echo 'The cron runner has never executed. ';
 	}
@@ -142,7 +142,7 @@ if (empty($active_tasks)) {
 
 		// Last run display
 		$last_run = $task->get('sct_last_run_time');
-		$last_run_display = $last_run ? htmlspecialchars($last_run) : '<em>Never</em>';
+		$last_run_display = $last_run ? htmlspecialchars($task->get_timezone_corrected_time('sct_last_run_time', $session, 'M j, Y g:i A T')) : '<em>Never</em>';
 
 		// Status badge
 		$status = $task->get('sct_last_run_status');
