@@ -1030,9 +1030,28 @@ abstract class SystemBase {
 
 						case 'email':
 							if ($rule_param === true && !is_null($field_value) && $field_value !== '') {
+								// Step 1: Format validation
 								if (!filter_var($field_value, FILTER_VALIDATE_EMAIL)) {
 									$is_valid = false;
 									$error_message = $custom_messages['email'] ?? "Field '$field_name' must be a valid email address.";
+								}
+								// Step 2: DNS MX record check (fail-open)
+								else {
+									$domain = substr($field_value, strrpos($field_value, '@') + 1);
+									$mx_records = @dns_get_record($domain, DNS_MX);
+									if ($mx_records === false) {
+										// DNS lookup failed — pass the email (fail-open)
+									} elseif (empty($mx_records)) {
+										// No MX records — check for A record fallback (RFC 5321)
+										$a_records = @dns_get_record($domain, DNS_A);
+										if ($a_records === false) {
+											// DNS lookup failed — pass the email (fail-open)
+										} elseif (empty($a_records)) {
+											// Lookup succeeded, definitively no MX or A records
+											$is_valid = false;
+											$error_message = $custom_messages['email_mx'] ?? "The email domain '$domain' does not appear to accept email.";
+										}
+									}
 								}
 							}
 							break;
