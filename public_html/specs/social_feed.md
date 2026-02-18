@@ -1,10 +1,11 @@
-# Social Feed Plugin
+# Social Feed Component
 
 Display recent social media posts on public-facing pages as a unified timeline. A thin PHP proxy keeps access tokens server-side while JavaScript handles all rendering. Supports Instagram and Facebook Pages via the same Meta App.
 
 **Key design decisions:**
 - **No database tables** — no post caching, no data models. The proxy calls the platform API on each request.
 - **No dedicated admin page** — Meta App credentials go on the existing settings page. OAuth is handled by a small ajax endpoint. Everything else lives in the component config.
+- **No plugin** — this is part of the core system, not a plugin.
 - **Fully self-contained component** — each instance stores its own social account connection and display settings in `pac_config`.
 - **JavaScript rendering** — the component template outputs a container div and a script that fetches from the proxy and renders the grid client-side.
 - **Multi-platform** — Instagram and Facebook Pages share the same Meta App, OAuth flow, and proxy endpoint. The proxy normalizes responses to a common JSON shape.
@@ -25,17 +26,14 @@ Per-component prerequisites depend on the platform:
 ## Architecture Overview
 
 ```
-Plugin: /plugins/social_feed/
-  ├── plugin.json
-  ├── includes/
-  │   └── SocialApiClient.php              # API wrapper class (Instagram + Facebook)
-  └── ajax/
-      ├── social_feed_proxy.php            # Public: adds token, auto-refreshes, calls API, returns JSON
-      └── social_feed_oauth.php            # Admin-only: handles OAuth redirect + callback
+Core system files:
+  /includes/SocialApiClient.php              # API wrapper class (Instagram + Facebook)
+  /ajax/social_feed_proxy.php                # Public: adds token, auto-refreshes, calls API, returns JSON
+  /ajax/social_feed_oauth.php                # Admin-only: handles OAuth redirect + callback
 
 Component type: social_feed
-  ├── /views/components/social_feed.json   # Component type definition + config schema
-  └── /views/components/social_feed.php    # Component template (outputs JS)
+  /views/components/social_feed.json         # Component type definition + config schema
+  /views/components/social_feed.php          # Component template (outputs JS)
 ```
 
 ### How It Works
@@ -268,7 +266,7 @@ A thin PHP proxy that keeps access tokens server-side. Public visitors never see
 
 ### `ajax/social_feed_oauth.php`
 
-Handles the OAuth flow for both Instagram and Facebook. This is the only admin-facing code in the plugin — no dedicated admin page needed.
+Handles the OAuth flow for both Instagram and Facebook. No dedicated admin page needed.
 
 **Route:** `/ajax/social_feed_oauth?action={authorize|callback|disconnect}`
 **Permission:** Level 10 (superadmin) — checked on every request
