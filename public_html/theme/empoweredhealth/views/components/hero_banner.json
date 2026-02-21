@@ -1,15 +1,45 @@
 {
-  "title": "Hero Banner",
-  "description": "Full-width hero section with background image overlay, heading, subheading, and CTA button",
-  "category": "hero",
-  "css_framework": "bootstrap",
-  "config_schema": {
-    "fields": [
-      {"name": "heading", "label": "Heading", "type": "textinput", "default": "Empowering You to Be Healthy"},
-      {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "Bringing old-school service to modern holistic medicine in Knoxville, TN."},
-      {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Learn More"},
-      {"name": "button_url", "label": "Button URL", "type": "textinput", "default": "/about"},
-      {"name": "height", "label": "Banner Height (px)", "type": "textinput", "default": "493", "advanced": true}
-    ]
-  }
+    "title": "Hero Banner",
+    "description": "Full-width hero section with background image overlay, heading, subheading, and CTA button",
+    "category": "hero",
+    "css_framework": "bootstrap",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput",
+                "default": "Empowering You to Be Healthy"
+            },
+            {
+                "name": "subheading",
+                "label": "Subheading",
+                "type": "textarea",
+                "default": "Bringing old-school service to modern holistic medicine in Knoxville, TN."
+            },
+            {
+                "name": "button_text",
+                "label": "Button Text",
+                "type": "textinput",
+                "default": "Learn More"
+            },
+            {
+                "name": "button_url",
+                "label": "Button URL",
+                "type": "textinput",
+                "default": "/about"
+            },
+            {
+                "name": "height",
+                "label": "Banner Height (px)",
+                "type": "textinput",
+                "default": "493",
+                "advanced": true
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }

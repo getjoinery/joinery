@@ -1,35 +1,95 @@
 {
-  "title": "Linka Editor's Choice",
-  "description": "Editor's choice layout with main featured article and sidebar articles",
-  "category": "blog",
-  "css_framework": "bootstrap",
-  "config_schema": {
-    "fields": [
-      {"name": "section_title", "label": "Section Title", "type": "textinput", "default": "Editor Choice"},
-      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "e.g., #f5f5f5 or leave empty", "default": ""},
-      {
-        "name": "main_article",
-        "label": "Main Featured Article",
-        "type": "group",
+    "title": "Linka Editor's Choice",
+    "description": "Editor's choice layout with main featured article and sidebar articles",
+    "category": "blog",
+    "css_framework": "bootstrap",
+    "config_schema": {
         "fields": [
-          {"name": "image", "label": "Image URL", "type": "textinput", "default": "/theme/linka-reference/assets/images/home-one/editor-img/1.jpg"},
-          {"name": "title", "label": "Title", "type": "textinput", "default": "The City of London Wants to Have It Brexit Cake In it Just To"},
-          {"name": "excerpt", "label": "Excerpt", "type": "textarea", "default": "Lorem ipsum dolor sit amet consectetur adipisicing elit. Sed asperiores, sequi earum inventore consequuntur voluptates voluptatibus sint fugiat quaerat possimus pariatur voluptatem qui quasi quo."},
-          {"name": "date", "label": "Date", "type": "textinput", "default": "25 Mar 2024"},
-          {"name": "link", "label": "Link", "type": "textinput", "default": "#"}
+            {
+                "name": "section_title",
+                "label": "Section Title",
+                "type": "textinput",
+                "default": "Editor Choice"
+            },
+            {
+                "name": "background_color",
+                "label": "Background Color",
+                "type": "textinput",
+                "help": "e.g., #f5f5f5 or leave empty",
+                "default": ""
+            },
+            {
+                "name": "main_article",
+                "label": "Main Featured Article",
+                "type": "group",
+                "fields": [
+                    {
+                        "name": "image",
+                        "label": "Image URL",
+                        "type": "textinput",
+                        "default": "/theme/linka-reference/assets/images/home-one/editor-img/1.jpg"
+                    },
+                    {
+                        "name": "title",
+                        "label": "Title",
+                        "type": "textinput",
+                        "default": "The City of London Wants to Have It Brexit Cake In it Just To"
+                    },
+                    {
+                        "name": "excerpt",
+                        "label": "Excerpt",
+                        "type": "textarea",
+                        "default": "Lorem ipsum dolor sit amet consectetur adipisicing elit. Sed asperiores, sequi earum inventore consequuntur voluptates voluptatibus sint fugiat quaerat possimus pariatur voluptatem qui quasi quo."
+                    },
+                    {
+                        "name": "date",
+                        "label": "Date",
+                        "type": "textinput",
+                        "default": "25 Mar 2024"
+                    },
+                    {
+                        "name": "link",
+                        "label": "Link",
+                        "type": "textinput",
+                        "default": "#"
+                    }
+                ]
+            },
+            {
+                "name": "sidebar_articles",
+                "label": "Sidebar Articles",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "image",
+                        "label": "Image URL",
+                        "type": "textinput",
+                        "default": "/theme/linka-reference/assets/images/home-one/editor-img/2.jpg"
+                    },
+                    {
+                        "name": "title",
+                        "label": "Title",
+                        "type": "textinput",
+                        "default": "Advantage & Disadvantages of having Matchbook"
+                    },
+                    {
+                        "name": "date",
+                        "label": "Date",
+                        "type": "textinput",
+                        "default": "25 Mar 2024"
+                    },
+                    {
+                        "name": "link",
+                        "label": "Link",
+                        "type": "textinput",
+                        "default": "#"
+                    }
+                ]
+            }
         ]
-      },
-      {
-        "name": "sidebar_articles",
-        "label": "Sidebar Articles",
-        "type": "repeater",
-        "fields": [
-          {"name": "image", "label": "Image URL", "type": "textinput", "default": "/theme/linka-reference/assets/images/home-one/editor-img/2.jpg"},
-          {"name": "title", "label": "Title", "type": "textinput", "default": "Advantage & Disadvantages of having Matchbook"},
-          {"name": "date", "label": "Date", "type": "textinput", "default": "25 Mar 2024"},
-          {"name": "link", "label": "Link", "type": "textinput", "default": "#"}
-        ]
-      }
-    ]
-  }
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }

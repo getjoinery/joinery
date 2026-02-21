@@ -276,6 +276,11 @@ Inside a component template, these variables are available:
 | `$component` | PageContent | The component instance object |
 | `$component_type_record` | Component | The component type definition |
 | `$component_slug` | string | The component's slug |
+| `$container_class` | string | CSS class for layout container (e.g., `"container"`) |
+| `$container_style` | string | Inline style for container width (e.g., `""`, `"max-width:720px"`) |
+| `$max_height_style` | string | Inline style for max height (e.g., `""`, `"max-height:400px;overflow:hidden"`) |
+
+> **Layout Controls:** Container width and max height are controlled automatically by the renderer via a wrapper div with CSS custom properties. Most templates don't need to use the layout variables above -- they exist for component types that opt out of auto-wrapping via `skip_wrapper: true` in their `layout_defaults`.
 
 ### Basic Template Example
 
@@ -702,6 +707,59 @@ Dynamic form based on component type:
 2. Configure component-specific fields from schema
 3. Set page assignment (order is in advanced fields)
 4. Save returns to appropriate list (page or components)
+
+---
+
+## Layout Controls
+
+Component instances have per-instance layout controls: **Width** and **Height**. These appear in the advanced fields section of the admin component edit form.
+
+### How It Works
+
+Layout values are stored as CSS values directly (`pac_max_width`, `pac_max_height`). NULL means no restriction. When a value is set, `ComponentRenderer` wraps the template output in a lightweight `<div class="component-layout">` with CSS custom properties:
+
+```html
+<div class="component-layout" data-maxw style="--cl-max-width: 720px">
+    <!-- Template output unchanged -->
+    <section class="hero-static">
+        <div class="container">...</div>
+    </section>
+</div>
+```
+
+When both values are NULL, **no wrapper is added** -- zero impact on existing pages.
+
+### Admin Text Inputs
+
+Width and Height are plain text inputs in the advanced fields section. Empty = no restriction (NULL). Any CSS value (e.g., `720px`, `80%`) is stored directly.
+
+### Layout Defaults
+
+Component types can specify default sizing in their JSON definition. These values pre-fill the text inputs when creating a new component instance:
+
+```json
+{
+  "title": "Newsletter Signup",
+  "layout_defaults": {
+    "container_width": "400px"
+  },
+  "config_schema": { ... }
+}
+```
+
+### Developer Opt-Out (skip_wrapper)
+
+Component types that need full control over their own layout can set `skip_wrapper: true` in their `layout_defaults`. This skips the auto-wrapper and hides the layout text inputs in the admin form:
+
+```json
+{
+  "title": "Custom Widget",
+  "layout_defaults": {
+    "skip_wrapper": true
+  },
+  "config_schema": { ... }
+}
+```
 
 ---
 

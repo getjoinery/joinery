@@ -1,11 +1,20 @@
 {
-  "title": "Custom HTML",
-  "description": "Raw HTML for advanced users",
-  "category": "custom",
-  "config_schema": {
-    "fields": [
-      {"name": "html", "label": "HTML Content", "type": "richtext", "help": "Enter your content using the rich text editor.", "default": "<div class=\"alert alert-info\">\n  <h4>Custom Content Block</h4>\n  <p>Replace this with your own content.</p>\n</div>"},
-      {"name": "container", "label": "Wrap in Container", "type": "checkboxinput", "help": "Wraps content in a standard container for consistent width", "default": true}
-    ]
-  }
+    "title": "Custom HTML",
+    "description": "Raw HTML for advanced users",
+    "category": "custom",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "html",
+                "label": "HTML Content",
+                "type": "richtext",
+                "help": "Enter your content using the rich text editor.",
+                "default": "<div class=\"alert alert-info\">\n  <h4>Custom Content Block</h4>\n  <p>Replace this with your own content.</p>\n</div>"
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }

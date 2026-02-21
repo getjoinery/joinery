@@ -1,22 +1,59 @@
 {
-  "title": "Linka Page Title",
-  "description": "Linka-styled page title area with breadcrumb navigation and overlay background",
-  "category": "layout",
-  "css_framework": "bootstrap",
-  "config_schema": {
-    "fields": [
-      {"name": "title", "label": "Title", "type": "textinput", "default": "Contact"},
-      {"name": "background_class", "label": "Background Class", "type": "dropinput", "default": "bg-9", "options": {"bg-9": "Style 1", "bg-12": "Style 2", "bg-1": "Style 3", "bg-2": "Style 4"}, "help": "Linka background styles"},
-      {"name": "background_image", "label": "Background Image URL", "type": "textinput", "help": "Custom background image (overrides class)", "default": ""},
-      {
-        "name": "breadcrumbs",
-        "label": "Breadcrumb Items",
-        "type": "repeater",
+    "title": "Linka Page Title",
+    "description": "Linka-styled page title area with breadcrumb navigation and overlay background",
+    "category": "layout",
+    "css_framework": "bootstrap",
+    "config_schema": {
         "fields": [
-          {"name": "text", "label": "Text", "type": "textinput", "default": "Home"},
-          {"name": "link", "label": "Link", "type": "textinput", "default": "/"}
+            {
+                "name": "title",
+                "label": "Title",
+                "type": "textinput",
+                "default": "Contact"
+            },
+            {
+                "name": "background_class",
+                "label": "Background Class",
+                "type": "dropinput",
+                "default": "bg-9",
+                "options": {
+                    "bg-9": "Style 1",
+                    "bg-12": "Style 2",
+                    "bg-1": "Style 3",
+                    "bg-2": "Style 4"
+                },
+                "help": "Linka background styles"
+            },
+            {
+                "name": "background_image",
+                "label": "Background Image URL",
+                "type": "textinput",
+                "help": "Custom background image (overrides class)",
+                "default": ""
+            },
+            {
+                "name": "breadcrumbs",
+                "label": "Breadcrumb Items",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "text",
+                        "label": "Text",
+                        "type": "textinput",
+                        "default": "Home"
+                    },
+                    {
+                        "name": "link",
+                        "label": "Link",
+                        "type": "textinput",
+                        "default": "/"
+                    }
+                ]
+            }
         ]
-      }
-    ]
-  }
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }

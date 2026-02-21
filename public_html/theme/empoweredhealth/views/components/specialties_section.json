@@ -1,18 +1,56 @@
 {
-  "title": "Specialties Section",
-  "description": "Four-column grid of specialties/features with icons, titles, and descriptions",
-  "category": "features",
-  "css_framework": "bootstrap",
-  "config_schema": {
-    "fields": [
-      {"name": "heading", "label": "Heading", "type": "textinput", "default": "Our Specialties"},
-      {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "Come to Empowered Health not just to fix a health problem, but to improve your overall health and wellness."},
-      {"name": "specialties", "label": "Specialties", "type": "repeater", "fields": [
-        {"name": "icon", "label": "Icon Class (lnr-*)", "type": "textinput", "help": "Linearicons class like lnr-rocket, lnr-heart, lnr-bug, lnr-users"},
-        {"name": "title", "label": "Title", "type": "textinput"},
-        {"name": "description", "label": "Description", "type": "textarea"},
-        {"name": "url", "label": "Link URL (optional)", "type": "textinput", "default": "#", "advanced": true}
-      ]}
-    ]
-  }
+    "title": "Specialties Section",
+    "description": "Four-column grid of specialties/features with icons, titles, and descriptions",
+    "category": "features",
+    "css_framework": "bootstrap",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput",
+                "default": "Our Specialties"
+            },
+            {
+                "name": "subheading",
+                "label": "Subheading",
+                "type": "textarea",
+                "default": "Come to Empowered Health not just to fix a health problem, but to improve your overall health and wellness."
+            },
+            {
+                "name": "specialties",
+                "label": "Specialties",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "icon",
+                        "label": "Icon Class (lnr-*)",
+                        "type": "textinput",
+                        "help": "Linearicons class like lnr-rocket, lnr-heart, lnr-bug, lnr-users"
+                    },
+                    {
+                        "name": "title",
+                        "label": "Title",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "description",
+                        "label": "Description",
+                        "type": "textarea"
+                    },
+                    {
+                        "name": "url",
+                        "label": "Link URL (optional)",
+                        "type": "textinput",
+                        "default": "#",
+                        "advanced": true
+                    }
+                ]
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }
