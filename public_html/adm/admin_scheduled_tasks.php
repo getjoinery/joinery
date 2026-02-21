@@ -5,7 +5,7 @@
  * Shows active tasks and available (discovered) tasks.
  * Supports activate, deactivate, configure, and run-now actions.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -114,7 +114,7 @@ if (empty($active_tasks)) {
 } else {
 	echo '<table class="table table-striped">';
 	echo '<thead><tr>';
-	echo '<th>Name</th><th>Schedule</th><th>Last Run</th><th>Status</th><th>Active</th><th>Actions</th>';
+	echo '<th>Name</th><th>Schedule</th><th>Last Run</th><th>Next Run</th><th>Status</th><th>Active</th><th>Actions</th>';
 	echo '</tr></thead>';
 	echo '<tbody>';
 
@@ -128,21 +128,55 @@ if (empty($active_tasks)) {
 		$time = $task->get('sct_schedule_time');
 		$freq_label = $frequency_labels[$frequency] ?? $frequency;
 
+		// Format schedule time to match other columns (e.g., "12:15 PM EST")
+		$formatted_time = $time;
+		if ($time) {
+			try {
+				$tz_obj = new DateTimeZone($site_timezone);
+				$time_dt = new DateTime('today ' . $time, $tz_obj);
+				$formatted_time = $time_dt->format('g:i A T');
+			} catch (Exception $e) {
+				$formatted_time = htmlspecialchars($time) . ' ' . htmlspecialchars($site_timezone);
+			}
+		}
+
 		if ($frequency === 'every_run') {
 			$schedule_display = 'Every 15 min';
 		} elseif ($frequency === 'hourly') {
 			$schedule_display = 'Hourly';
 		} elseif ($frequency === 'weekly' && $dow !== null && $dow !== '') {
-			$schedule_display = ($day_labels[(int)$dow] ?? 'Day ' . $dow) . ' at ' . $time . ' ' . htmlspecialchars($site_timezone);
+			$schedule_display = ($day_labels[(int)$dow] ?? 'Day ' . $dow) . ' at ' . $formatted_time;
 		} elseif ($frequency === 'weekly') {
-			$schedule_display = 'Weekly at ' . $time . ' ' . htmlspecialchars($site_timezone);
+			$schedule_display = 'Weekly at ' . $formatted_time;
 		} else {
-			$schedule_display = 'Daily at ' . $time . ' ' . htmlspecialchars($site_timezone);
+			$schedule_display = 'Daily at ' . $formatted_time;
 		}
 
 		// Last run display
 		$last_run = $task->get('sct_last_run_time');
 		$last_run_display = $last_run ? htmlspecialchars($task->get_timezone_corrected_time('sct_last_run_time', $session, 'M j, Y g:i A T')) : '<em>Never</em>';
+
+		// Next run display
+		$next_run_dt = $task->get_next_run_time();
+		$next_run_display = '';
+		$is_overdue = false;
+		if (!$is_active) {
+			$next_run_display = '<span style="color: #999;">—</span>';
+		} elseif ($next_run_dt === null) {
+			// every_run tasks
+			$next_run_display = '<em>Next cron run</em>';
+		} else {
+			$next_run_display = htmlspecialchars($next_run_dt->format('M j, Y g:i A T'));
+			// Check if overdue (next run is in the past by more than 30 minutes grace period)
+			$settings_inst = Globalvars::get_instance();
+			$tz_string = $settings_inst->get_setting('default_timezone') ?: 'America/New_York';
+			$now_dt = new DateTime('now', new DateTimeZone($tz_string));
+			$grace_seconds = 1800; // 30 minutes
+			if ($now_dt->getTimestamp() - $next_run_dt->getTimestamp() > $grace_seconds) {
+				$is_overdue = true;
+				$next_run_display .= ' <span class="badge bg-danger" style="background-color: #dc3545; color: #fff; padding: 3px 8px; border-radius: 3px;">Overdue</span>';
+			}
+		}
 
 		// Status badge
 		$status = $task->get('sct_last_run_status');
@@ -170,6 +204,7 @@ if (empty($active_tasks)) {
 		echo '<td><strong>' . htmlspecialchars($task->get('sct_name')) . '</strong><br><small class="text-muted">' . htmlspecialchars($task_class) . '</small></td>';
 		echo '<td>' . $schedule_display . '</td>';
 		echo '<td>' . $last_run_display . '</td>';
+		echo '<td>' . $next_run_display . '</td>';
 		echo '<td>' . $status_display . '</td>';
 		echo '<td>' . $active_display . '</td>';
 		echo '<td>';

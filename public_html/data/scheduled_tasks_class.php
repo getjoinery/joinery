@@ -5,7 +5,7 @@
  * Data model for the scheduled tasks system. Rows are created when
  * an admin activates a discovered task, not via migrations.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -107,6 +107,99 @@ class ScheduledTask extends SystemBase {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Calculate the next scheduled run time for this task.
+	 *
+	 * Uses the same scheduling logic as is_due() to determine when the
+	 * task will next be eligible to run.
+	 *
+	 * @return DateTime|null  Next run time in site timezone, or null for every_run tasks
+	 */
+	public function get_next_run_time() {
+		$frequency = $this->get('sct_frequency') ?: 'daily';
+
+		// every_run tasks don't have a meaningful "next run"
+		if ($frequency === 'every_run') {
+			return null;
+		}
+
+		// Get site timezone
+		$settings = Globalvars::get_instance();
+		$site_tz_string = $settings->get_setting('default_timezone') ?: 'America/New_York';
+		$site_tz = new DateTimeZone($site_tz_string);
+		$now = new DateTime('now', $site_tz);
+
+		$schedule_time = $this->get('sct_schedule_time') ?: '09:00:00';
+		$last_run = $this->get('sct_last_run_time');
+		$last_run_dt = null;
+		if ($last_run) {
+			$last_run_dt = new DateTime($last_run);
+			$last_run_dt->setTimezone($site_tz);
+		}
+
+		if ($frequency === 'hourly') {
+			$current_hour = new DateTime($now->format('Y-m-d H:00:00'), $site_tz);
+			if ($last_run_dt && $last_run_dt->format('Y-m-d H') === $now->format('Y-m-d H')) {
+				// Already ran this hour, next is start of next hour
+				$next = clone $current_hour;
+				$next->modify('+1 hour');
+				return $next;
+			}
+			// Due this hour
+			return $current_hour;
+		}
+
+		if ($frequency === 'daily') {
+			$today_at = new DateTime($now->format('Y-m-d') . ' ' . $schedule_time, $site_tz);
+			if ($last_run_dt && $last_run_dt->format('Y-m-d') === $now->format('Y-m-d')) {
+				// Already ran today, next is tomorrow
+				$next = clone $today_at;
+				$next->modify('+1 day');
+				return $next;
+			}
+			// Due today (may be in the past if overdue, or future if not yet time)
+			return $today_at;
+		}
+
+		if ($frequency === 'weekly') {
+			$dow = $this->get('sct_schedule_day_of_week');
+
+			if ($dow === null || $dow === '') {
+				// No specific day set — behave like daily
+				$today_at = new DateTime($now->format('Y-m-d') . ' ' . $schedule_time, $site_tz);
+				if ($last_run_dt && $last_run_dt->format('Y-m-d') === $now->format('Y-m-d')) {
+					$next = clone $today_at;
+					$next->modify('+1 day');
+					return $next;
+				}
+				return $today_at;
+			}
+
+			$target_dow = (int)$dow;
+			$today_dow = (int)$now->format('w'); // 0=Sunday
+
+			if ($today_dow === $target_dow) {
+				// Today is the scheduled day
+				$today_at = new DateTime($now->format('Y-m-d') . ' ' . $schedule_time, $site_tz);
+				if ($last_run_dt && $last_run_dt->format('Y-m-d') === $now->format('Y-m-d')) {
+					// Already ran today, next is in 7 days
+					$next = clone $today_at;
+					$next->modify('+7 days');
+					return $next;
+				}
+				return $today_at;
+			}
+
+			// Calculate days until next occurrence of target day
+			$days_until = ($target_dow - $today_dow + 7) % 7;
+			$next = new DateTime($now->format('Y-m-d') . ' ' . $schedule_time, $site_tz);
+			$next->modify('+' . $days_until . ' days');
+			return $next;
+		}
+
+		return null;
 	}
 
 	/**
