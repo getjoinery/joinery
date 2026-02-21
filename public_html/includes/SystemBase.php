@@ -315,10 +315,7 @@ abstract class SystemBase {
 	}
 	
 	function get($key) {
-		if (isset($this->data->$key)) {
-			return $this->data->$key;
-		}
-		return NULL;
+		return $this->data->$key ?? NULL;
 	}
 
 
@@ -1129,19 +1126,210 @@ abstract class SystemBase {
 			unset($rowdata[static::$pkey_column]);
 		}
 
-
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-		
-		try {
-			$p_keys_return = LibraryFunctions::edit_table(
-				$dbhelper, $dblink, static::$tablename, $p_keys, $rowdata, FALSE, $debug);
-		} catch (PDOException $e) {
-			// Use the existing handle_query_error method
-			$dbhelper->handle_query_error($e);
+
+		// Build column metadata from field_specifications
+		// Maps spec types to the same data_type/is_nullable strings that
+		// information_schema.columns returns, so the binding code below
+		// (copied verbatim from edit_table) works identically.
+		$column_meta = array();
+		foreach (static::$field_specifications as $col_name => $spec) {
+			$spec_type = strtolower(preg_replace('/\(.*\)/', '', $spec['type'] ?? 'varchar'));
+			switch ($spec_type) {
+				case 'int4':
+				case 'integer':
+				case 'serial':
+					$data_type = 'integer';
+					break;
+				case 'int2':
+				case 'smallint':
+					$data_type = 'smallint';
+					break;
+				case 'int8':
+				case 'bigint':
+				case 'bigserial':
+					$data_type = 'bigint';
+					break;
+				case 'bool':
+				case 'boolean':
+					$data_type = 'boolean';
+					break;
+				case 'json':
+					$data_type = 'json';
+					break;
+				case 'jsonb':
+					$data_type = 'jsonb';
+					break;
+				default:
+					$data_type = 'character varying';
+					break;
+			}
+			$column_meta[$col_name]['data_type'] = $data_type;
+			// Default to 'YES' (nullable) — PostgreSQL columns are nullable unless
+			// explicitly declared NOT NULL. Only field_specifications with
+			// 'is_nullable' => false map to 'NO'. This matches information_schema behavior.
+			$column_meta[$col_name]['is_nullable'] = (isset($spec['is_nullable']) && $spec['is_nullable'] === false) ? 'NO' : 'YES';
 		}
 
-		$this->key = $p_keys_return[static::$pkey_column];
+		// --- BEGIN: SQL generation and execution (from edit_table) ---
+
+		if(count($rowdata) == 0){
+			return FALSE;
+		}
+
+		if(is_null($p_keys)){
+			$op = 'add';
+			$sql = 'INSERT INTO ' . static::$tablename . ' ';
+
+			$colphrase="";
+			$valphrase="";
+			foreach($rowdata as $column_name=>$column_val){
+				if((string)$column_val != "-NOUPDATE-"){
+					$colphrase .= $column_name . ',';
+						$valphrase .= ':' . $column_name . ',';
+
+				}
+			}
+
+			$colphrase[strlen($colphrase)-1] = ' ';
+			$valphrase[strlen($valphrase)-1] = ' ';
+
+			$sql .= '(' . $colphrase . ') VALUES (' . $valphrase . ') ';
+		}
+		else{
+			$op = 'edit';
+			$sql = 'UPDATE ' . static::$tablename . ' SET ';
+
+			foreach($rowdata as $column_name=>$column_val){
+				if((string)$column_val != "-NOUPDATE-"){
+						$sql .= $column_name . '=:' . $column_name . ',';
+				}
+			}
+
+			$sql[strlen($sql)-1] = ' ';
+
+			//ADD WHERE CLAUSE
+			$sql .= 'WHERE ';
+			foreach($p_keys as $pname=>$pvalue){
+				$sql .= $pname . '=:' . $pname . ' ';
+				$sql .= ' AND ';
+			}
+			//REMOVE THE LAST ' AND '
+			$sql = substr($sql, 0, strlen($sql)-5);
+		}
+
+		//BIND VALUES AND PREPARE STATEMENT
+		$dbhelper->prepare_query($sql);
+
+		foreach($rowdata as $column_name=>$column_val){
+			if((string)$column_val != "-NOUPDATE-"){
+				if($column_meta[$column_name]['data_type'] == 'integer' || $column_meta[$column_name]['data_type'] == 'smallint'){
+					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_INT);
+				}
+				else if($column_meta[$column_name]['data_type'] == 'boolean'){
+					if($column_val===NULL){
+						if($column_meta[$column_name]['is_nullable'] == 'YES') {
+							$dbhelper->bind_value(":$column_name", NULL, PDO::PARAM_BOOL);
+						} else {
+							$dbhelper->bind_value(":$column_name", FALSE, PDO::PARAM_BOOL);
+						}
+					}
+					else if($column_val==TRUE){
+						$dbhelper->bind_value(":$column_name", TRUE, PDO::PARAM_BOOL);
+					}
+					else if($column_val==FALSE){
+						$dbhelper->bind_value(":$column_name", FALSE, PDO::PARAM_BOOL);
+					}
+				}
+				else if($column_meta[$column_name]['data_type'] == 'json' || $column_meta[$column_name]['data_type'] == 'jsonb'){
+					// JSON columns - auto-encode arrays/objects
+					if (is_array($column_val) || is_object($column_val)) {
+						$column_val = json_encode($column_val);
+					}
+					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_STR);
+				}
+				else{
+					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_STR);
+				}
+			}
+		}
+
+		if($op == 'edit'){
+			foreach($p_keys as $pname=>$pvalue){
+				if($column_meta[$pname]['data_type'] == 'integer' || $column_meta[$pname]['data_type'] == 'smallint'){
+					$dbhelper->bind_value(":$pname", $pvalue, PDO::PARAM_INT);
+				}
+				else{
+					$dbhelper->bind_value(":$pname", $pvalue, PDO::PARAM_STR);
+				}
+			}
+		}
+
+		if($debug){
+			$error_var_statement = '<pre>';
+			$error_var_statement .= "Table: " . static::$tablename . "\n";
+			foreach ($rowdata as $col=>$val){
+				$error_var_statement .= "[$col]=>";
+				if(is_null($val)) {
+					$error_var_statement .= 'NULL';
+				}
+				else if($val === '') {
+					$error_var_statement .= "''";
+				}
+				else if($val === FALSE) {
+					$error_var_statement .= "FALSE";
+				}
+				else if($val === TRUE) {
+					$error_var_statement .= "TRUE";
+				}
+				else  {
+					$error_var_statement .= "$val";
+				}
+				$error_var_statement .= "\n";
+			}
+			if(is_null($p_keys)){
+				$error_var_statement .= 'pkeys is null ' . "\n";
+			}
+			$error_var_statement .= 'Number of Keys: '. count($p_keys) . "\n";
+			echo $error_var_statement;
+			echo '</pre>';
+		}
+
+		try {
+			$dbhelper->execute_query();
+		} catch (PDOException $e) {
+			// Add context about the operation
+			$operation = $op == 'add' ? 'INSERT' : 'UPDATE';
+			$context = "Database $operation failed on table '" . static::$tablename . "'";
+
+			if ($op == 'edit' && $p_keys) {
+				$context .= " for record: " . json_encode($p_keys);
+			}
+
+			$dbhelper->handle_query_error(
+				new PDOException($context . " - " . $e->getMessage(), (int)$e->getCode(), $e)
+			);
+		}
+
+		if($op == 'edit'){
+			if($debug){
+				exit;
+			}
+			$this->key = $p_keys[static::$pkey_column];
+		}
+		else{
+			$seq = static::$tablename . '_' . static::$pkey_column . '_seq';
+
+			if($debug){
+				echo "Sequence: $seq\n";
+				exit;
+			}
+
+			$this->key = $dblink->lastInsertId($seq);
+		}
+
+		// --- END: SQL generation and execution ---
 
 		// AUTO CACHE INVALIDATION - Simple approach
 		// Only invalidate the model's own URL if it has one

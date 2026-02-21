@@ -86,26 +86,6 @@ function get_order() {
 		}
 	}
 
-	protected function _unsafe_edit() {
-		$rowdata = array();
-		foreach(array_keys(self::$field_specifications) as $field) {
-			$rowdata[$field] = $this->get($field);
-		}
-
-		if (!$this->key) {
-			throw new OrderItemException('Cannot create an order item this way');
-		}
-
-		$p_keys = array('odi_order_item_id' => $this->key);
-
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$p_keys_return = LibraryFunctions::edit_table(
-			$dbhelper, $dblink, 'odi_order_items', $p_keys, $rowdata, FALSE, 0);
-
-		$this->key = $p_keys_return['odi_order_item_id'];
-	}
-
 	function get_data() {
 		$data = unserialize(base64_decode($this->get('odi_product_info')));
 		$clean_data = array();
