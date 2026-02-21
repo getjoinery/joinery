@@ -322,6 +322,13 @@ class ThemeManager extends AbstractExtensionManager {
                     $changed = true;
                 }
 
+                // Check layout_defaults
+                $existing_layout = $existing->get('com_layout_defaults');
+                if (json_encode($existing_layout) !== json_encode($def['layout_defaults'])) {
+                    $existing->set('com_layout_defaults', $def['layout_defaults']);
+                    $changed = true;
+                }
+
                 // Reactivate if needed
                 if (!$existing->get('com_is_active')) {
                     $existing->set('com_is_active', true);
@@ -352,6 +359,7 @@ class ThemeManager extends AbstractExtensionManager {
                 $component->set('com_logic_function', $def['logic_function']);
                 $component->set('com_requires_plugin', $def['requires_plugin']);
                 $component->set('com_css_framework', $def['css_framework']);
+                $component->set('com_layout_defaults', $def['layout_defaults']);
                 $component->set('com_is_active', true);
                 $component->save();
                 $summary['created']++;
@@ -460,6 +468,7 @@ class ThemeManager extends AbstractExtensionManager {
                 'logic_function' => $metadata['logic_function'] ?? null,
                 'requires_plugin' => $metadata['requires_plugin'] ?? null,
                 'css_framework' => $component_framework,
+                'layout_defaults' => $metadata['layout_defaults'] ?? null,
             );
         }
 

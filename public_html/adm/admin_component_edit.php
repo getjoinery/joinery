@@ -80,6 +80,10 @@ if ($_POST && !$loading_version) {
 	// Set order
 	$content->set('pac_order', intval($_POST['pac_order']));
 
+	// Set layout fields — empty = no restriction (NULL), any CSS value = stored directly
+	$content->set('pac_max_width', trim($_POST['pac_max_width'] ?? '') ?: null);
+	$content->set('pac_max_height', trim($_POST['pac_max_height'] ?? '') ?: null);
+
 	// Set user if new
 	if (!$content->key) {
 		$content->set('pac_usr_user_id', $session->get_user_id());
@@ -167,6 +171,24 @@ if ($version_notice) {
 	echo '</div>';
 }
 
+// Pre-fill layout fields from component type defaults for new instances
+if (!$content->key && $component_type) {
+	$ld_raw = $component_type->get('com_layout_defaults');
+	if (is_string($ld_raw)) {
+		$prefill_defaults = json_decode($ld_raw, true) ?: [];
+	} elseif (is_array($ld_raw)) {
+		$prefill_defaults = $ld_raw;
+	} else {
+		$prefill_defaults = [];
+	}
+	if (!empty($prefill_defaults['container_width'])) {
+		$content->set('pac_max_width', $prefill_defaults['container_width']);
+	}
+	if (!empty($prefill_defaults['max_height'])) {
+		$content->set('pac_max_height', $prefill_defaults['max_height']);
+	}
+}
+
 $formwriter = $page->getFormWriter('form1', [
 	'model' => $content,
 	'edit_primary_key_value' => $content->key
@@ -236,6 +258,13 @@ $formwriter->textinput('pac_title', 'Label', [
 if ($current_type_id) {
 	$component_type = new Component($current_type_id, TRUE);
 	$schema_fields = $component_type->get_config_schema();
+
+	// Check if component type opts out of layout wrapping
+	$type_layout_defaults = $component_type->get('com_layout_defaults');
+	if (is_string($type_layout_defaults)) {
+		$type_layout_defaults = json_decode($type_layout_defaults, true) ?: [];
+	}
+	$type_skip_wrapper = !empty($type_layout_defaults['skip_wrapper']);
 
 	if (!empty($schema_fields)) {
 		echo '<hr><h5>Component Configuration</h5>';
@@ -316,8 +345,9 @@ if ($current_type_id) {
 			$render_field($field, $formwriter, $current_config);
 		}
 
-		// Render advanced fields in collapsible section (includes slug, order + schema advanced fields)
-		$advanced_count = count($advanced_fields) + 2; // +2 for slug and order
+		// Render advanced fields in collapsible section
+		$layout_field_count = $type_skip_wrapper ? 0 : 2;
+		$advanced_count = count($advanced_fields) + $layout_field_count + 2; // + slug + order
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
 		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
@@ -325,6 +355,13 @@ if ($current_type_id) {
 		echo '</a>';
 		echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 		echo '<div class="mt-3 pt-3 border-top">';
+
+		if (!$type_skip_wrapper) {
+			// Layout controls (hidden when component type opts out via skip_wrapper)
+			$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
+			$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+			echo '<hr>';
+		}
 
 		// Slug field (always advanced)
 		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
@@ -343,14 +380,22 @@ if ($current_type_id) {
 
 		echo '</div></div></div>';
 	} else {
-		// No component type selected yet, but still show slug and order in advanced section
+		// No schema fields - show layout + slug and order in advanced section
+		$layout_field_count = $type_skip_wrapper ? 0 : 2;
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
 		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
-		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (2)';
+		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (' . ($layout_field_count + 2) . ')';
 		echo '</a>';
 		echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 		echo '<div class="mt-3 pt-3 border-top">';
+
+		if (!$type_skip_wrapper) {
+			$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
+			$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+			echo '<hr>';
+		}
+
 		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
 			'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 		]);
@@ -362,14 +407,19 @@ if ($current_type_id) {
 		echo '<div class="alert alert-info mt-3">This component type has no configurable fields.</div>';
 	}
 } else {
-	// No component type selected - show slug and order in advanced and prompt to select type
+	// No component type selected - show layout + slug and order in advanced
 	$advanced_id = 'advanced_fields_' . uniqid();
 	echo '<div class="advanced-fields-section mt-4">';
 	echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
-	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (2)';
+	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (4)';
 	echo '</a>';
 	echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 	echo '<div class="mt-3 pt-3 border-top">';
+
+	$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
+	$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+	echo '<hr>';
+
 	$formwriter->textinput('pac_location_name', 'Slug (optional)', [
 		'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 	]);

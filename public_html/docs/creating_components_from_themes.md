@@ -417,6 +417,8 @@ Components attached to a page render automatically when using `ComponentRenderer
    - `<article>` for self-contained content
    - Proper heading hierarchy
 
+6. **Container width and max height are controlled automatically by the renderer.** Templates should continue using `<div class="container">` as normal. Admins can override the width/height per component instance without template changes. If a component type needs to manage its own layout entirely, set `"skip_wrapper": true` in the type's `layout_defaults` JSON -- the renderer will skip auto-wrapping and the template can use `$container_class`, `$container_style`, and `$max_height_style` variables directly.
+
 ### Schema Guidelines
 
 1. **Use clear labels:**

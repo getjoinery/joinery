@@ -11,23 +11,21 @@
  *   $component - PageContent object (the instance)
  *   $component_type_record - Component object (the type definition)
  *   $component_slug - The component's slug
+ *   $container_class - CSS class for container (from layout system)
+ *   $container_style - Inline style for container (from layout system)
+ *   $max_height_style - Inline style for max height (from layout system)
  *
  * @see /specs/page_component_system.md
  */
 
 $html = $component_config['html'] ?? '';
-$container = $component_config['container'] ?? true;
 
 if (empty($html)) {
 	return;
 }
-
-if ($container): ?>
+?>
 <section class="custom-html py-4">
 	<div class="container">
 		<?php echo $html; // Note: HTML is not escaped - intentionally allows raw HTML ?>
 	</div>
 </section>
-<?php else: ?>
-<?php echo $html; // Note: HTML is not escaped - intentionally allows raw HTML ?>
-<?php endif; ?>
