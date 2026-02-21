@@ -1179,3 +1179,13 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Component Layout Controls (v82) ==========
+	// Set pac_max_width='none' on custom_html instances that had container=false,
+	// preserving their edge-to-edge layout now that the template always outputs a container.
+	$migration = array();
+	$migration['database_version'] = '82';
+	$migration['test'] = "SELECT count(1) as count FROM pac_page_contents pac INNER JOIN com_components com ON pac.pac_com_component_id = com.com_component_id WHERE com.com_type_key = 'custom_html' AND pac.pac_config::text LIKE '%\"container\":false%' AND pac.pac_max_width IS NULL";
+	$migration['migration_sql'] = "UPDATE pac_page_contents SET pac_max_width = 'none' FROM com_components WHERE pac_com_component_id = com_component_id AND com_type_key = 'custom_html' AND pac_config::text LIKE '%\"container\":false%'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

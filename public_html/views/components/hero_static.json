@@ -1,20 +1,94 @@
 {
-  "title": "Hero Static",
-  "description": "Single hero section with heading, subheading, background, and CTA",
-  "category": "hero",
-  "css_framework": "bootstrap",
-  "config_schema": {
-    "fields": [
-      {"name": "heading", "label": "Heading", "type": "textinput", "default": "Welcome to Our Platform"},
-      {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "We help businesses grow with innovative solutions. Discover how we can transform your digital presence today."},
-      {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "default": "center", "options": {"left": "Left", "center": "Center", "right": "Right"}},
-      {"name": "background_image", "label": "Background Image", "type": "textinput", "help": "Path to image file, e.g., /images/hero.jpg", "default": ""},
-      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color, e.g., #f8f9fa", "default": "#1a1a2e"},
-      {"name": "text_color", "label": "Text Color", "type": "textinput", "help": "Hex color, e.g., #212529", "default": "#ffffff"},
-      {"name": "height", "label": "Section Height", "type": "dropinput", "default": "large", "options": {"small": "Small", "medium": "Medium", "large": "Large", "fullscreen": "Full Screen"}},
-      {"name": "cta_text", "label": "Button Text", "type": "textinput", "default": "Get Started"},
-      {"name": "cta_link", "label": "Button Link", "type": "textinput", "default": "/contact"},
-      {"name": "cta_style", "label": "Button Style", "type": "dropinput", "default": "light", "options": {"primary": "Primary", "secondary": "Secondary", "outline-primary": "Outline", "light": "Light"}}
-    ]
-  }
+    "title": "Hero Static",
+    "description": "Single hero section with heading, subheading, background, and CTA",
+    "category": "hero",
+    "css_framework": "bootstrap",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput",
+                "default": "Welcome to Our Platform"
+            },
+            {
+                "name": "subheading",
+                "label": "Subheading",
+                "type": "textarea",
+                "default": "We help businesses grow with innovative solutions. Discover how we can transform your digital presence today."
+            },
+            {
+                "name": "alignment",
+                "label": "Text Alignment",
+                "type": "dropinput",
+                "default": "center",
+                "options": {
+                    "left": "Left",
+                    "center": "Center",
+                    "right": "Right"
+                }
+            },
+            {
+                "name": "background_image",
+                "label": "Background Image",
+                "type": "textinput",
+                "help": "Path to image file, e.g., /images/hero.jpg",
+                "default": ""
+            },
+            {
+                "name": "background_color",
+                "label": "Background Color",
+                "type": "textinput",
+                "help": "Hex color, e.g., #f8f9fa",
+                "default": "#1a1a2e"
+            },
+            {
+                "name": "text_color",
+                "label": "Text Color",
+                "type": "textinput",
+                "help": "Hex color, e.g., #212529",
+                "default": "#ffffff"
+            },
+            {
+                "name": "height",
+                "label": "Section Height",
+                "type": "dropinput",
+                "default": "large",
+                "options": {
+                    "small": "Small",
+                    "medium": "Medium",
+                    "large": "Large",
+                    "fullscreen": "Full Screen"
+                }
+            },
+            {
+                "name": "cta_text",
+                "label": "Button Text",
+                "type": "textinput",
+                "default": "Get Started"
+            },
+            {
+                "name": "cta_link",
+                "label": "Button Link",
+                "type": "textinput",
+                "default": "/contact"
+            },
+            {
+                "name": "cta_style",
+                "label": "Button Style",
+                "type": "dropinput",
+                "default": "light",
+                "options": {
+                    "primary": "Primary",
+                    "secondary": "Secondary",
+                    "outline-primary": "Outline",
+                    "light": "Light"
+                }
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }

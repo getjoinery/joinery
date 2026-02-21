@@ -12,7 +12,7 @@
  *   /utils/component_preview?category=hero - Filter by category
  *   /utils/component_preview?theme=flavor - Override active theme
  *
- * @version 1.5.0
+ * @version 1.6.0
  */
 
 // Require login with minimum admin level (5)
@@ -277,6 +277,11 @@ class ComponentPreviewer {
         $component_config = $data;
         $component_data = [];  // No dynamic data in preview
         $component_slug = 'preview-' . $componentType['type_key'];
+
+        // Layout variables (default values for preview - no wrapping needed)
+        $container_class = 'container';
+        $container_style = '';
+        $max_height_style = '';
 
         try {
             require($template_path);

@@ -6,7 +6,7 @@
  * Each component type has a template file, config schema, and optional logic function.
  *
  * @see /specs/page_component_system.md
- * @version 1.2.0
+ * @version 1.3.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -53,11 +53,12 @@ class Component extends SystemBase {
 		'com_css_framework' => array('type'=>'varchar(32)'),
 		'com_published_time' => array('type'=>'timestamp(6)'),
 		'com_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'com_layout_defaults' => array('type'=>'json', 'is_nullable'=>true),
 		'com_script_filename' => array('type'=>'varchar(255)'), // Legacy, keep for compatibility
 		'com_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	public static $json_vars = array('com_config_schema');
+	public static $json_vars = array('com_config_schema', 'com_layout_defaults');
 
 	/**
 	 * Get config schema as parsed array

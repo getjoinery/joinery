@@ -1,25 +1,74 @@
 {
-  "title": "Page Title",
-  "description": "Page title with optional subtitle and breadcrumb navigation",
-  "category": "layout",
-  "css_framework": "bootstrap",
-  "config_schema": {
-    "fields": [
-      {"name": "title", "label": "Title", "type": "textinput", "default": "Page Title"},
-      {"name": "subtitle", "label": "Subtitle", "type": "textarea", "default": "A brief description of what this page contains and its purpose."},
-      {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "default": "left", "options": {"left": "Left", "center": "Center", "right": "Right"}},
-      {"name": "show_breadcrumbs", "label": "Show Breadcrumbs", "type": "checkboxinput", "default": true},
-      {
-        "name": "breadcrumbs",
-        "label": "Breadcrumb Items",
-        "type": "repeater",
+    "title": "Page Title",
+    "description": "Page title with optional subtitle and breadcrumb navigation",
+    "category": "layout",
+    "css_framework": "bootstrap",
+    "config_schema": {
         "fields": [
-          {"name": "text", "label": "Text", "type": "textinput"},
-          {"name": "link", "label": "Link", "type": "textinput"}
+            {
+                "name": "title",
+                "label": "Title",
+                "type": "textinput",
+                "default": "Page Title"
+            },
+            {
+                "name": "subtitle",
+                "label": "Subtitle",
+                "type": "textarea",
+                "default": "A brief description of what this page contains and its purpose."
+            },
+            {
+                "name": "alignment",
+                "label": "Text Alignment",
+                "type": "dropinput",
+                "default": "left",
+                "options": {
+                    "left": "Left",
+                    "center": "Center",
+                    "right": "Right"
+                }
+            },
+            {
+                "name": "show_breadcrumbs",
+                "label": "Show Breadcrumbs",
+                "type": "checkboxinput",
+                "default": true
+            },
+            {
+                "name": "breadcrumbs",
+                "label": "Breadcrumb Items",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "text",
+                        "label": "Text",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "link",
+                        "label": "Link",
+                        "type": "textinput"
+                    }
+                ]
+            },
+            {
+                "name": "background_color",
+                "label": "Background Color",
+                "type": "textinput",
+                "help": "Hex color, e.g., #f8f9fa",
+                "default": "#f8f9fa"
+            },
+            {
+                "name": "text_color",
+                "label": "Text Color",
+                "type": "textinput",
+                "help": "Hex color, e.g., #212529",
+                "default": "#212529"
+            }
         ]
-      },
-      {"name": "background_color", "label": "Background Color", "type": "textinput", "help": "Hex color, e.g., #f8f9fa", "default": "#f8f9fa"},
-      {"name": "text_color", "label": "Text Color", "type": "textinput", "help": "Hex color, e.g., #212529", "default": "#212529"}
-    ]
-  }
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }

@@ -1,28 +1,100 @@
 {
-  "title": "Feature Grid",
-  "description": "Grid of icon + title + description items",
-  "category": "features",
-  "css_framework": "bootstrap",
-  "config_schema": {
-    "fields": [
-      {"name": "heading", "label": "Section Heading", "type": "textinput", "default": "Why Choose Us"},
-      {"name": "subheading", "label": "Section Subheading", "type": "textarea", "default": "Discover the benefits that set us apart from the competition."},
-      {"name": "columns", "label": "Columns", "type": "dropinput", "default": "3", "options": {"2": "2 Columns", "3": "3 Columns", "4": "4 Columns"}},
-      {
-        "name": "features",
-        "label": "Features",
-        "type": "repeater",
+    "title": "Feature Grid",
+    "description": "Grid of icon + title + description items",
+    "category": "features",
+    "css_framework": "bootstrap",
+    "config_schema": {
         "fields": [
-          {"name": "icon", "label": "Icon", "type": "textinput"},
-          {"name": "title", "label": "Title", "type": "textinput"},
-          {"name": "description", "label": "Description", "type": "textarea"},
-          {"name": "link", "label": "Link (optional)", "type": "textinput"}
+            {
+                "name": "heading",
+                "label": "Section Heading",
+                "type": "textinput",
+                "default": "Why Choose Us"
+            },
+            {
+                "name": "subheading",
+                "label": "Section Subheading",
+                "type": "textarea",
+                "default": "Discover the benefits that set us apart from the competition."
+            },
+            {
+                "name": "columns",
+                "label": "Columns",
+                "type": "dropinput",
+                "default": "3",
+                "options": {
+                    "2": "2 Columns",
+                    "3": "3 Columns",
+                    "4": "4 Columns"
+                }
+            },
+            {
+                "name": "features",
+                "label": "Features",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "icon",
+                        "label": "Icon",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "title",
+                        "label": "Title",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "description",
+                        "label": "Description",
+                        "type": "textarea"
+                    },
+                    {
+                        "name": "link",
+                        "label": "Link (optional)",
+                        "type": "textinput"
+                    }
+                ]
+            },
+            {
+                "name": "style",
+                "label": "Display Style",
+                "type": "dropinput",
+                "default": "centered",
+                "options": {
+                    "centered": "Centered (icon above)",
+                    "left": "Left Aligned (icon left)",
+                    "card": "Cards with Shadow"
+                }
+            },
+            {
+                "name": "icon_style",
+                "label": "Icon Style",
+                "type": "dropinput",
+                "default": "circle",
+                "options": {
+                    "plain": "Plain Icon",
+                    "circle": "Circle Background",
+                    "square": "Square Background"
+                }
+            },
+            {
+                "name": "icon_color",
+                "label": "Icon Color",
+                "type": "textinput",
+                "help": "Hex color, e.g., #007bff",
+                "default": "#007bff"
+            },
+            {
+                "name": "background_color",
+                "label": "Section Background",
+                "type": "textinput",
+                "help": "Hex color, e.g., #ffffff",
+                "default": "#f8f9fa"
+            }
         ]
-      },
-      {"name": "style", "label": "Display Style", "type": "dropinput", "default": "centered", "options": {"centered": "Centered (icon above)", "left": "Left Aligned (icon left)", "card": "Cards with Shadow"}},
-      {"name": "icon_style", "label": "Icon Style", "type": "dropinput", "default": "circle", "options": {"plain": "Plain Icon", "circle": "Circle Background", "square": "Square Background"}},
-      {"name": "icon_color", "label": "Icon Color", "type": "textinput", "help": "Hex color, e.g., #007bff", "default": "#007bff"},
-      {"name": "background_color", "label": "Section Background", "type": "textinput", "help": "Hex color, e.g., #ffffff", "default": "#f8f9fa"}
-    ]
-  }
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
 }
