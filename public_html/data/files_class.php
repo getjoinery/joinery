@@ -97,6 +97,194 @@ public static function get_by_name($name) {
 	}
 
 	/**
+	 * Get the fast-serve directory path, derived from existing upload_dir setting.
+	 * Public files (no permission restrictions) are served from this directory.
+	 *
+	 * @return string Filesystem path to static_files/uploads directory
+	 */
+	private static function get_fast_serve_dir() {
+		$settings = Globalvars::get_instance();
+		return dirname($settings->get_setting('upload_dir')) . '/static_files/uploads';
+	}
+
+	/**
+	 * Determine whether this file should be in the public (fast-serve) directory.
+	 * A file is public when it has no permission restrictions and is not deleted.
+	 *
+	 * @return bool
+	 */
+	function is_public() {
+		if ($this->get('fil_delete_time')) return false;
+		if ($this->get('fil_min_permission')) return false;
+		if ($this->get('fil_grp_group_id')) return false;
+		if ($this->get('fil_evt_event_id')) return false;
+		return true;
+	}
+
+	/**
+	 * Get the actual filesystem path for this file, checking both directories.
+	 * Checks fast-serve directory first since most files are public.
+	 *
+	 * @param string $size_key Size key from ImageSizeRegistry, or 'original'
+	 * @return string Filesystem path (may not exist if file is missing from disk)
+	 */
+	function get_filesystem_path($size_key = 'original') {
+		$settings = Globalvars::get_instance();
+		$filename = $this->get('fil_name');
+
+		$dirs = [
+			self::get_fast_serve_dir(),
+			$settings->get_setting('upload_dir')
+		];
+
+		foreach ($dirs as $dir) {
+			if ($size_key === 'original') {
+				$path = $dir . '/' . $filename;
+			} else {
+				$path = $dir . '/' . $size_key . '/' . $filename;
+			}
+			if (file_exists($path)) {
+				return $path;
+			}
+		}
+
+		// Fallback: return expected path in normal upload_dir
+		$fallback_dir = $settings->get_setting('upload_dir');
+		if ($size_key === 'original') {
+			return $fallback_dir . '/' . $filename;
+		}
+		return $fallback_dir . '/' . $size_key . '/' . $filename;
+	}
+
+	/**
+	 * Move the file (and all resized versions) to the correct directory based
+	 * on current permissions. Public files go to static_files/uploads/,
+	 * restricted files go to uploads/.
+	 *
+	 * @throws FileException on duplicate filenames or move failures
+	 */
+	function move_to_correct_directory() {
+		$settings = Globalvars::get_instance();
+		$filename = $this->get('fil_name');
+
+		$fast_dir = self::get_fast_serve_dir();
+		$normal_dir = $settings->get_setting('upload_dir');
+
+		$in_fast = file_exists($fast_dir . '/' . $filename);
+		$in_normal = file_exists($normal_dir . '/' . $filename);
+
+		// Safety check: if file exists in BOTH directories, there are duplicate
+		// filenames across different records. Do not move — this would cause data loss.
+		if ($in_fast && $in_normal) {
+			throw new FileException("Cannot move file '$filename': duplicate filename exists in both upload directories.");
+		}
+
+		// Determine target based on permissions
+		$target_dir = $this->is_public() ? $fast_dir : $normal_dir;
+
+		// Determine source directory (where file actually is)
+		$source_dir = null;
+		if ($in_fast) {
+			$source_dir = $fast_dir;
+		} elseif ($in_normal) {
+			$source_dir = $normal_dir;
+		}
+
+		if (!$source_dir || $source_dir === $target_dir) {
+			return; // Already in correct location or file not found
+		}
+
+		// Ensure .htaccess exists in fast-serve directory for Tier 1 fallback
+		if ($target_dir === $fast_dir) {
+			$htaccess_path = $fast_dir . '/.htaccess';
+			if (!file_exists($htaccess_path)) {
+				if (!is_dir($fast_dir)) {
+					mkdir($fast_dir, 0777, true);
+				}
+				file_put_contents($htaccess_path, "RewriteEngine On\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteRule ^(.*)$ /uploads/\$1 [R=302,L]\n");
+			}
+		}
+
+		// Move original file
+		if (!$this->move_single_file($source_dir, $target_dir, $filename)) {
+			return; // Original failed to move, don't move resized versions
+		}
+
+		// Move all resized versions
+		if ($this->is_image()) {
+			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+			$sizes = ImageSizeRegistry::get_sizes();
+			foreach ($sizes as $key => $config) {
+				$this->move_single_file(
+					$source_dir . '/' . $key,
+					$target_dir . '/' . $key,
+					$filename
+				);
+			}
+		}
+	}
+
+	/**
+	 * Move a single file from source to target directory.
+	 *
+	 * @param string $source_dir Source directory
+	 * @param string $target_dir Target directory
+	 * @param string $filename File name
+	 * @return bool True on success or if nothing to move
+	 * @throws FileException on move failure or if target already exists
+	 */
+	private function move_single_file($source_dir, $target_dir, $filename) {
+		$source = $source_dir . '/' . $filename;
+		$target = $target_dir . '/' . $filename;
+
+		if (!file_exists($source)) return true; // Nothing to move, not an error
+
+		// Don't overwrite an existing file at the target
+		if (file_exists($target)) {
+			throw new FileException("Cannot move file '$filename': file already exists at target '$target'.");
+		}
+
+		// Ensure target directory exists
+		if (!is_dir($target_dir)) {
+			mkdir($target_dir, 0777, true);
+		}
+
+		if (!rename($source, $target)) {
+			throw new FileException("Failed to move file '$filename' from '$source' to '$target'.");
+		}
+
+		return true;
+	}
+
+	/**
+	 * Save the file record and move to the correct directory based on permissions.
+	 */
+	function save($debug = false) {
+		$result = parent::save($debug);
+		$this->move_to_correct_directory();
+		return $result;
+	}
+
+	/**
+	 * Soft delete and move to restricted directory since deleted files
+	 * should not be publicly accessible.
+	 */
+	function soft_delete() {
+		$result = parent::soft_delete();
+		$this->move_to_correct_directory();
+		return $result;
+	}
+
+	/**
+	 * Undelete and re-evaluate which directory the file belongs in.
+	 */
+	function undelete() {
+		$result = parent::undelete();
+		$this->move_to_correct_directory();
+		return $result;
+	}
+
+	/**
 	 * Get URL for a specific image size
 	 *
 	 * @param string $size_key Size key from ImageSizeRegistry, or 'original' for full size
@@ -127,13 +315,9 @@ public static function get_by_name($name) {
 	}	
 
 	function permanent_delete($debug=false){
-		$settings = Globalvars::get_instance();
-		$upload_dir = $settings->get_setting('upload_dir');
-
-		$file_path = $upload_dir.'/'.$this->get('fil_name');
-		if (!unlink($file_path)) {
-			//echo ("$file_path cannot be deleted due to an error");
-			//return false;
+		$file_path = $this->get_filesystem_path('original');
+		if (file_exists($file_path)) {
+			@unlink($file_path);
 		}
 
 		$this->delete_resized();
@@ -164,9 +348,6 @@ public static function get_by_name($name) {
 			return false;
 		}
 
-		$settings = Globalvars::get_instance();
-		$upload_dir = $settings->get_setting('upload_dir');
-
 		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
 		$sizes = ImageSizeRegistry::get_sizes();
 
@@ -174,7 +355,7 @@ public static function get_by_name($name) {
 			if ($size_key !== 'all' && $size_key !== $key) {
 				continue;
 			}
-			$file_path = $upload_dir . '/' . $key . '/' . $this->get('fil_name');
+			$file_path = $this->get_filesystem_path($key);
 			if (file_exists($file_path)) {
 				@unlink($file_path);
 			}
@@ -191,9 +372,13 @@ public static function get_by_name($name) {
 			return false;
 		}
 
-		$settings = Globalvars::get_instance();
-		$upload_dir = $settings->get_setting('upload_dir');
-		$old_path = $upload_dir . '/' . $this->get('fil_name');
+		$old_path = $this->get_filesystem_path('original');
+		if (!file_exists($old_path)) {
+			return false;
+		}
+
+		// Derive the base directory from where the original actually lives
+		$upload_dir = dirname($old_path);
 
 		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
 		$sizes = ImageSizeRegistry::get_sizes();

@@ -78,7 +78,7 @@
 		
 		$rowvalues = array();
 		if (strpos($file->get('fil_type'), 'image/') !== false) { 
-			array_push($rowvalues, '<img loading="lazy" src="/uploads/avatar/'.$file->get('fil_name').'">');
+			array_push($rowvalues, '<img loading="lazy" src="'.htmlspecialchars($file->get_url('avatar')).'">');
 		}
 		else if (strpos($file->get('fil_type'), 'application/pdf') !== false) { 
 			array_push($rowvalues, '<img loading="lazy" src="/assets/images/pdf_icon_80px.png">');

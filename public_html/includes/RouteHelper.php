@@ -1075,8 +1075,28 @@ class RouteHelper {
                 error_log("Static route matched but handler failed");
             }
         }
-        error_log("No static routes matched - loading core dependencies");
-        
+        error_log("No static routes matched");
+
+        // STEP 1.5: Fast-serve check for uploads
+        // If the file exists in static_files/uploads/, serve it without loading dependencies.
+        // The file's presence there means it has no permission restrictions.
+        if (strpos($full_path, '/uploads/') === 0) {
+            $base_path = dirname(dirname(__DIR__));  // project root (parent of public_html)
+            $fast_dir = $base_path . '/static_files/uploads';
+            $fast_path = $fast_dir . substr($full_path, 8);  // strip '/uploads' prefix
+
+            // Security: verify resolved path is within the fast-serve directory
+            $real_path = realpath($fast_path);
+            $real_dir = realpath($fast_dir);
+            if ($real_path && $real_dir && strpos($real_path, $real_dir . '/') === 0) {
+                error_log("Fast-serve hit: " . $full_path);
+                self::serveStaticFile($real_path, 43200);
+                exit();
+            }
+        }
+
+        error_log("Loading core dependencies");
+
         // STEP 2: Not a static route - now load core dependencies
         // Load core files first using require_once
         error_log("Loading core dependencies...");

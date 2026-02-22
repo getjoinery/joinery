@@ -28,7 +28,7 @@
 	echo $formwriter->begin_form();
 
 	if($file->is_image()){
-		echo '<div style="float:left; margin-right:30px; margin-bottom:30px;"><img src="/uploads/profile_card/'.$file->get('fil_name').'"/></div>';
+		echo '<div style="float:left; margin-right:30px; margin-bottom:30px;"><img src="'.htmlspecialchars($file->get_url('profile_card')).'"/></div>';
 	}
 	echo '<strong>Name:</strong> '.$file->get('fil_name') .'<br />';
 	echo '<strong>Title:</strong> '.$file->get('fil_title') .'<br />';

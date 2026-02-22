@@ -46,6 +46,26 @@ The photo system provides multi-photo management for any entity (users, events, 
 
 ---
 
+## File Storage Directories
+
+Files live in one of two directories based on their permission settings:
+
+| Directory | Contents | Serving Speed |
+|-----------|----------|---------------|
+| `static_files/uploads/` | Public files (no permission restrictions) | ~1.5ms (pre-bootstrap fast path) |
+| `uploads/` | Restricted files (have group, event, or permission restrictions) | ~20ms (full PHP auth) |
+
+Both directories maintain the same internal structure (`original`, `thumb/`, `avatar/`, etc.). `File::save()` automatically moves files between directories when permissions change. `File::get_url()` always returns `/uploads/...` URLs regardless of which directory the file is in — RouteHelper checks `static_files/uploads/` first and serves the file without loading the PHP bootstrap if found there.
+
+Key methods:
+- `File::is_public()` — checks if a file has no permission restrictions
+- `File::get_filesystem_path($size_key)` — finds the file in whichever directory it lives in
+- `File::move_to_correct_directory()` — moves file to the correct directory (called by `save()`)
+
+See `specs/implemented/fast_serve_uploads.md` for the full specification.
+
+---
+
 ## EntityPhoto Data Model
 
 **Table:** `eph_entity_photos`
