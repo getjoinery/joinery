@@ -17,7 +17,7 @@
     "avatar": { "width": 80, "height": 80, "crop": true },
     "profile_card": { "width": 400, "height": 500, "crop": true },
     "content": { "width": 800, "height": 0, "crop": false },
-    "hero": { "width": 1200, "height": 0, "crop": false },
+    "hero": { "width": 1920, "height": 1080, "crop": true },
     "og_image": { "width": 1200, "height": 630, "crop": true }
   }
 }
