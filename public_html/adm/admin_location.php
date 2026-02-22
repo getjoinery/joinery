@@ -147,7 +147,7 @@
 					<h5 class="mb-0">Location Image</h5>
 				</div>
 				<div class="card-body text-center">
-					<img src="<?php echo LibraryFunctions::get_absolute_url('/uploads/content/'.$file->get('fil_name')); ?>" alt="Location Image" class="img-fluid rounded" style="max-height: 300px;">
+					<img src="<?php echo htmlspecialchars($file->get_url('content', 'full')); ?>" alt="Location Image" class="img-fluid rounded" style="max-height: 300px;">
 				</div>
 			</div>
 			<?php endif; ?>

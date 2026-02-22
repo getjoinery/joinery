@@ -34,7 +34,7 @@
 					<h5 class="mb-0">File Preview</h5>
 				</div>
 				<div class="card-body text-center">
-					<img src="/uploads/content/<?php echo htmlspecialchars($file->get('fil_name')); ?>" alt="File Preview" class="img-fluid rounded" style="max-height: 400px;">
+					<img src="<?php echo htmlspecialchars($file->get_url('content')); ?>" alt="File Preview" class="img-fluid rounded" style="max-height: 400px;">
 				</div>
 			</div>
 			<?php endif; ?>

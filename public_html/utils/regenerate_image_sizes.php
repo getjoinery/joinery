@@ -54,19 +54,8 @@ foreach ($sizes as $key => $config) {
 }
 output("", $is_cli);
 
-// Ensure directories exist
-$upload_dir = $settings->get_setting('upload_dir');
-foreach ($sizes as $key => $config) {
-	$dir_path = $upload_dir . '/' . $key;
-	if (!is_dir($dir_path)) {
-		if (mkdir($dir_path, 0777, true)) {
-			chmod($dir_path, 0777);
-			output("Created directory: {$key}/", $is_cli);
-		} else {
-			output("ERROR: Failed to create directory: {$dir_path}", $is_cli);
-		}
-	}
-}
+// Note: resize subdirectories are created automatically by File::resize()
+// based on where each file actually lives (uploads/ or static_files/uploads/)
 
 // Get all image files
 $files = new MultiFile(
@@ -101,7 +90,7 @@ while ($offset < $total) {
 	foreach ($batch as $file) {
 		$processed++;
 		$file_name = $file->get('fil_name');
-		$source_path = $upload_dir . '/' . $file_name;
+		$source_path = $file->get_filesystem_path('original');
 
 		if (!file_exists($source_path)) {
 			output("[{$processed}/{$total}] SKIP - File not on disk: {$file_name}", $is_cli);
