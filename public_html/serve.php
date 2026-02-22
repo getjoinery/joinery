@@ -238,13 +238,21 @@ $routes = [
             if(!$settings->get_setting('files_active')) return false;
 
             $upload_dir = $settings->get_setting('upload_dir');
+            $fast_dir = dirname($upload_dir) . '/static_files/uploads';
             // Build the full path from all params after "uploads"
             // params[0] is empty, params[1] is "uploads", params[2+] is the subpath
             $subpath_parts = array_slice($params, 2);
             $subpath = implode('/', $subpath_parts);
-            $file = $upload_dir . '/' . $subpath;
 
-            if(file_exists($file)){
+            // Check both directories for the file
+            $file = null;
+            if (file_exists($upload_dir . '/' . $subpath)) {
+                $file = $upload_dir . '/' . $subpath;
+            } elseif (file_exists($fast_dir . '/' . $subpath)) {
+                $file = $fast_dir . '/' . $subpath;
+            }
+
+            if($file){
                 require_once(PathHelper::getIncludePath('data/files_class.php'));
                 $file_obj = File::get_by_name(basename($file));
 
