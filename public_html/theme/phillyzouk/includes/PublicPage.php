@@ -142,7 +142,7 @@ class PublicPage extends PublicPageBase {
         <footer class="footer-top-area pt-100 pb-70">
             <div class="container">
                 <div class="row">
-                    <div class="col-lg-3 col-md-6">
+                    <div class="col-lg-6 col-md-6">
                         <div class="single-widget">
                             <?php if ($logo_url = $settings->get_setting('logo_link', true, true)): ?>
                                 <a href="/">
@@ -198,59 +198,7 @@ class PublicPage extends PublicPageBase {
                         </div>
                     </div>
 
-                    <div class="col-lg-3 col-md-6">
-                        <div class="single-widget">
-                            <h3>Important Links</h3>
-                            <ul>
-                                <li>
-                                    <a href="/">
-                                        <i class="bx bx-chevrons-right"></i>
-                                        Home
-                                    </a>
-                                </li>
-                                <li>
-                                    <a href="/about">
-                                        <i class="bx bx-chevrons-right"></i>
-                                        About
-                                    </a>
-                                </li>
-                                <li>
-                                    <a href="/contact">
-                                        <i class="bx bx-chevrons-right"></i>
-                                        Contact
-                                    </a>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-
-                    <div class="col-lg-3 col-md-6">
-                        <div class="single-widget">
-                            <h3>Categories</h3>
-                            <ul>
-                                <li>
-                                    <a href="#">
-                                        <i class="bx bx-chevrons-right"></i>
-                                        Blog
-                                    </a>
-                                </li>
-                                <li>
-                                    <a href="#">
-                                        <i class="bx bx-chevrons-right"></i>
-                                        Gallery
-                                    </a>
-                                </li>
-                                <li>
-                                    <a href="#">
-                                        <i class="bx bx-chevrons-right"></i>
-                                        Videos
-                                    </a>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-
-                    <div class="col-lg-3 col-md-6">
+                    <div class="col-lg-6 col-md-6">
                         <div class="single-widget contact">
                             <h3>Get In Touch</h3>
                             <ul>

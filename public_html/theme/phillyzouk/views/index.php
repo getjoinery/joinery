@@ -20,23 +20,12 @@ $page->public_header(array(
 <!-- Start Hero Area -->
 <section class="main-blog-area pt-100 pb-70">
     <div class="container">
-        <div class="main-blog-slider-item-wrap owl-carousel owl-theme">
-            <div class="single-main-blog-item">
-                <img src="/theme/phillyzouk/assets/images/home-three/banner-bg.jpg" alt="Dance Community">
-                <div class="main-blog-content">
-                    <a href="#">
-                        <h3>Welcome to Philly Zouk</h3>
-                    </a>
-                </div>
-            </div>
-
-            <div class="single-main-blog-item">
-                <img src="/theme/phillyzouk/assets/images/home-three/banner-bg.jpg" alt="Dance Events">
-                <div class="main-blog-content">
-                    <a href="/events">
-                        <h3>Discover Upcoming Events & Workshops</h3>
-                    </a>
-                </div>
+        <div class="single-main-blog-item">
+            <img src="/uploads/hero/DSC02831-edited_6uit40q2_xdnz67g0.jpg" alt="Philly Zouk">
+            <div class="main-blog-content">
+                <a href="#">
+                    <h3>Welcome to Philly Zouk</h3>
+                </a>
             </div>
         </div>
     </div>
