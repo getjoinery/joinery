@@ -65,7 +65,9 @@ $page->public_header(array(
 		<?php } else { ?>
 			<div class="row">
 				<?php
+				$event_count = 0;
 				foreach ($page_vars['events'] as $event){
+					if ($event_count >= 20) break;
 					$now = LibraryFunctions::get_current_time_obj('UTC');
 					$is_virtual = (is_object($event) && isset($event->is_virtual) && $event->is_virtual);
 
@@ -74,6 +76,8 @@ $page->public_header(array(
 					$evt_start_time = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
 					$evt_link = $is_virtual ? $event->evt_link : $event->get('evt_link');
 					$evt_leader_id = $is_virtual ? $event->evt_usr_user_id_leader : $event->get('evt_usr_user_id_leader');
+					$evt_short = $is_virtual ? $event->evt_short_description : $event->get('evt_short_description');
+					$evt_tz = $is_virtual ? ($event->evt_timezone ?: 'America/New_York') : ($event->get('evt_timezone') ?: 'America/New_York');
 
 					// Build URL
 					if ($is_virtual) {
@@ -87,22 +91,22 @@ $page->public_header(array(
 						}
 					} else {
 						$event_url = $event->get_url();
-						$pic = $event->get_picture_link('profile_card');
+						$pic = $event->get_picture_link();
 					}
-
-					$event_time = $evt_start_time ? LibraryFunctions::get_time_obj($evt_start_time, 'UTC') : null;
 
 					// Get date string
 					$date_str = '';
-					if($evt_start_time && $event_time && $event_time > $now){
-						if ($is_virtual) {
-							$date_str = date('M j, Y', strtotime($evt_start_time));
-						} else {
-							$date_str = $event->get_event_start_time($tz, 'M j, Y');
-						}
+					if($evt_start_time){
+						$date_str = LibraryFunctions::convert_time($evt_start_time, 'UTC', $evt_tz, 'M j, Y');
 					}
 					else if(!$is_virtual && ($next_session = $event->get_next_session())){
 						$date_str = $next_session->get_start_time($tz, 'M j, Y');
+					}
+
+					// Get time string
+					$time_str = '';
+					if($evt_start_time){
+						$time_str = LibraryFunctions::convert_time($evt_start_time, 'UTC', $evt_tz, 'g:i A');
 					}
 
 					// Get instructor
@@ -110,43 +114,47 @@ $page->public_header(array(
 					if($evt_leader_id){
 						$leader = new User($evt_leader_id, TRUE);
 						$instructor_str = $leader->display_name();
-					} else {
-						$instructor_str = 'Various instructors';
 					}
 					?>
 
 					<div class="col-lg-4 col-md-6 col-12 mb-4">
-						<div class="event-card bg-white rounded shadow-sm overflow-hidden h-100">
-							<a href="<?php echo $event_url; ?>">
+						<div class="single-featured event-card">
+							<a href="<?php echo $event_url; ?>" class="blog-img">
 								<?php if($pic){ ?>
-									<img src="<?php echo $pic; ?>" alt="<?php echo htmlspecialchars($evt_name); ?>" class="w-100" style="height: 200px; object-fit: cover;">
+									<img src="<?php echo $pic; ?>" alt="<?php echo htmlspecialchars($evt_name); ?>">
 								<?php } else { ?>
-									<div class="d-flex align-items-center justify-content-center bg-light" style="height: 200px;">
-										<i class="bx bx-calendar-event" style="font-size: 64px; color: #ddd;"></i>
-									</div>
+									<img src="/theme/phillyzouk/assets/images/home-three/blog-item/1.jpg" alt="<?php echo htmlspecialchars($evt_name); ?>">
 								<?php } ?>
 							</a>
-							<div class="p-3">
-								<h5 class="mb-2">
-									<a href="<?php echo $event_url; ?>" style="color: #333; text-decoration: none;"><?php echo htmlspecialchars($evt_name); ?></a>
-								</h5>
-								<?php if($date_str){ ?>
-									<p class="mb-1 small text-muted">
-										<i class="bx bx-calendar" style="color: #d80650;"></i>
+							<div class="featured-content">
+								<ul>
+									<?php if($date_str){ ?>
+									<li>
+										<i class="bx bx-calendar"></i>
 										<?php echo $date_str; ?>
-									</p>
-								<?php } ?>
+									</li>
+									<?php } ?>
+									<?php if($time_str){ ?>
+									<li>
+										<i class="bx bx-time"></i>
+										<?php echo $time_str; ?>
+									</li>
+									<?php } ?>
+								</ul>
+								<a href="<?php echo $event_url; ?>">
+									<h3><?php echo htmlspecialchars($evt_name); ?></h3>
+								</a>
 								<?php if($instructor_str){ ?>
-									<p class="mb-0 small text-muted">
-										<i class="bx bx-user" style="color: #d80650;"></i>
-										<?php echo htmlspecialchars($instructor_str); ?>
-									</p>
+									<p class="mb-1"><i class="bx bx-user" style="color: #d80650;"></i> <?php echo htmlspecialchars($instructor_str); ?></p>
 								<?php } ?>
+								<a href="<?php echo $event_url; ?>" class="read-more">View Event</a>
 							</div>
 						</div>
 					</div>
 
-				<?php } ?>
+				<?php
+					$event_count++;
+				} ?>
 			</div>
 		<?php } ?>
 	</div>
