@@ -233,6 +233,141 @@ $routes = [
             return true; // Handled
         },
         
+        // Single event .ics download: /event/{slug}.ics or /event/{slug}/{date}.ics
+        '/event/*.ics' => function($params, $settings, $session) {
+            if(!$settings->get_setting('events_active')) return false;
+
+            require_once(PathHelper::getIncludePath('data/events_class.php'));
+            require_once(PathHelper::getIncludePath('data/locations_class.php'));
+            require_once(PathHelper::getIncludePath('includes/IcsHelper.php'));
+            require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+            // $params = ['', 'event', 'my-slug.ics'] or ['', 'event', 'my-slug', '2026-03-15.ics']
+            // Reconstruct the inner path after /event/ and strip .ics suffix
+            $inner_parts = array_slice($params, 2);
+            $inner = implode('/', $inner_parts);
+            // Strip .ics suffix
+            $inner = preg_replace('/\.ics$/', '', $inner);
+            if (empty($inner)) {
+                return false;
+            }
+
+            // Parse as {slug} or {slug}/{date}
+            $slug_parts = explode('/', $inner);
+            $slug = $slug_parts[0];
+            $date = isset($slug_parts[1]) ? $slug_parts[1] : null;
+
+            // Load event by slug
+            $event = Event::get_by_link($slug);
+            if (!$event) {
+                require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                LibraryFunctions::display_404_page();
+                return true;
+            }
+
+            // Must be public
+            if ($event->get('evt_visibility') != Event::VISIBILITY_PUBLIC) {
+                LibraryFunctions::display_404_page();
+                return true;
+            }
+
+            $instance_date = null;
+            $target_event = $event;
+
+            if ($event->is_recurring_parent()) {
+                if ($date) {
+                    // Resolve to materialized instance or virtual
+                    $materialized = $event->_get_materialized_instance_for_date($date);
+                    if ($materialized) {
+                        $target_event = $materialized;
+                        $instance_date = $date;
+                    } else {
+                        $target_event = $event->create_virtual_instance($date);
+                        $instance_date = $date;
+                    }
+                } else {
+                    // No date: get next upcoming instance
+                    $next_dates = $event->compute_occurrence_dates(date('Y-m-d'), 1);
+                    if (!empty($next_dates)) {
+                        $next_date = $next_dates[0];
+                        $materialized = $event->_get_materialized_instance_for_date($next_date);
+                        if ($materialized) {
+                            $target_event = $materialized;
+                        } else {
+                            $target_event = $event->create_virtual_instance($next_date);
+                        }
+                        $instance_date = $next_date;
+                    }
+                }
+            }
+
+            $vevent = IcsHelper::generateVevent($target_event, $instance_date);
+            $ics = IcsHelper::wrapInVcalendar($vevent);
+            $filename = $slug . ($instance_date ? '-' . $instance_date : '') . '.ics';
+            IcsHelper::outputIcs($ics, $filename, false);
+            return true; // outputIcs calls exit(), but just in case
+        },
+
+        // Public calendar feed: /events/calendar.ics
+        '/events/calendar.ics' => function($params, $settings, $session) {
+            if(!$settings->get_setting('events_active')) return false;
+
+            require_once(PathHelper::getIncludePath('data/events_class.php'));
+            require_once(PathHelper::getIncludePath('data/locations_class.php'));
+            require_once(PathHelper::getIncludePath('includes/IcsHelper.php'));
+            require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+            $vevents = [];
+
+            // Load upcoming non-recurring public events
+            $events = new MultiEvent([
+                'visibility' => Event::VISIBILITY_PUBLIC,
+                'deleted' => false,
+                'upcoming' => true,
+                'exclude_recurring_parents' => true
+            ], ['evt_start_time' => 'ASC']);
+            $events->load();
+
+            foreach ($events as $evt) {
+                $vevent = IcsHelper::generateVevent($evt);
+                if ($vevent) {
+                    $vevents[] = $vevent;
+                }
+            }
+
+            // Load recurring parents and expand to instances for next 6 months
+            $parents = new MultiEvent([
+                'visibility' => Event::VISIBILITY_PUBLIC,
+                'deleted' => false,
+                'only_recurring_parents' => true
+            ]);
+            $parents->load();
+
+            $range_start = date('Y-m-d');
+            $range_end = date('Y-m-d', strtotime('+6 months'));
+
+            foreach ($parents as $parent) {
+                $instances = $parent->get_instances_for_range($range_start, $range_end);
+                foreach ($instances as $instance) {
+                    $inst_date = null;
+                    if ($instance instanceof SystemBase) {
+                        $inst_date = $instance->get('evt_materialized_instance_date');
+                    } elseif (isset($instance->instance_date)) {
+                        $inst_date = $instance->instance_date;
+                    }
+                    $vevent = IcsHelper::generateVevent($instance, $inst_date);
+                    if ($vevent) {
+                        $vevents[] = $vevent;
+                    }
+                }
+            }
+
+            $vevents_string = implode("\r\n", $vevents);
+            $ics = IcsHelper::wrapInVcalendar($vevents_string, true);
+            IcsHelper::outputIcs($ics, 'calendar.ics', true);
+            return true;
+        },
+
         // Uploads with authentication
         '/uploads/*' => function($params, $settings, $session) {
             if(!$settings->get_setting('files_active')) return false;
