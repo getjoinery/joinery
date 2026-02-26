@@ -171,22 +171,40 @@ function get_leader() {
 		$calendar_links = array();
 
 		//CALENDAR LINKS
-		//FROM https://github.com/spatie/calendar-links	
+		//FROM https://github.com/spatie/calendar-links
 		if($this->get('evt_start_time') && $this->get('evt_show_add_to_calendar_link')){
-			$start_time_obj = LibraryFunctions::get_time_obj($this->get_event_start_time($session->get_timezone()), $session->get_timezone());	
+			$start_time_obj = LibraryFunctions::get_time_obj($this->get_event_start_time($session->get_timezone()), $session->get_timezone());
 			$end_time_obj = LibraryFunctions::get_time_obj($this->get_event_end_time($session->get_timezone()), $session->get_timezone());
-			$settings = Globalvars::get_instance();
-			$cal_link = LibraryFunctions::get_absolute_url('/profile/event_sessions?evt_event_id='.$this->key);
+
+			// Build location: physical location first, fallback to event URL
+			$address = '';
+			if ($this->get('evt_location')) {
+				$address = $this->get('evt_location');
+			}
+			if ($this->get('evt_loc_location_id')) {
+				require_once(PathHelper::getIncludePath('data/locations_class.php'));
+				if (Location::check_if_exists($this->get('evt_loc_location_id'))) {
+					$loc = new Location($this->get('evt_loc_location_id'), TRUE);
+					$loc_addr = $loc->get('loc_address');
+					if ($loc_addr) {
+						$address = $address ? $address . ', ' . $loc_addr : $loc_addr;
+					}
+				}
+			}
+			if (!$address) {
+				$address = LibraryFunctions::get_absolute_url($this->get_url());
+			}
+
 			$link = Link::create($this->get('evt_name'), $start_time_obj, $end_time_obj)
 				->description($this->get('evt_short_description'))
-				->address($cal_link);
-				//->address('Kruikstraat 22, 2018 Antwerpen');
+				->address($address);
 			$calendar_links['google'] =  $link->google();
 			$calendar_links['yahoo'] = $link->yahoo();
 			$calendar_links['outlook'] = $link->webOutlook();
-			$calendar_links['ics'] = $link->ics();	
-		}	
-		
+			// Use downloadable .ics endpoint instead of Spatie data URI
+			$calendar_links['ics'] = '/event/' . $this->get('evt_link') . '.ics';
+		}
+
 		return $calendar_links;
 	}
 	
