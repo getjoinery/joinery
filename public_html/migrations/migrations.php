@@ -1189,3 +1189,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Add AVIF and WebP upload support (v83) ==========
+	$migration = array();
+	$migration['database_version'] = '83';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'allowed_upload_extensions' AND stg_value LIKE '%avif%'";
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = stg_value || ',avif,webp' WHERE stg_name = 'allowed_upload_extensions' AND stg_value NOT LIKE '%avif%'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
