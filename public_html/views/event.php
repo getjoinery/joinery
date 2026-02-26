@@ -199,6 +199,55 @@ $page_vars = $page_vars->data;
 						</div>
 						<?php endif; ?>
 
+						<!-- Add to Calendar Widget -->
+						<?php
+						$show_calendar_link = $evt_get('evt_show_add_to_calendar_link');
+						if ($show_calendar_link && $evt_get('evt_start_time')) {
+							$calendar_links = [];
+							if (!$is_virtual_event) {
+								$calendar_links = $event->get_add_to_calendar_links();
+							}
+							// For virtual events or if calendar links are available, show widget
+							$evt_link = $evt_get('evt_link');
+							$ics_url = '/event/' . $evt_link;
+							if ($is_virtual_event && isset($event->instance_date)) {
+								$ics_url .= '/' . $event->instance_date;
+							}
+							$ics_url .= '.ics';
+						?>
+						<div class="widget bg-white rounded-4 shadow-sm p-4 mb-4">
+							<h4 class="mb-3">Add to Calendar</h4>
+							<div class="row g-2">
+								<?php if (!empty($calendar_links['google'])) { ?>
+								<div class="col-6">
+									<a href="<?php echo $calendar_links['google']; ?>" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary w-100">
+										<i class="bi-google me-1"></i> Google
+									</a>
+								</div>
+								<?php } ?>
+								<?php if (!empty($calendar_links['outlook'])) { ?>
+								<div class="col-6">
+									<a href="<?php echo $calendar_links['outlook']; ?>" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary w-100">
+										<i class="bi-microsoft me-1"></i> Outlook
+									</a>
+								</div>
+								<?php } ?>
+								<?php if (!empty($calendar_links['yahoo'])) { ?>
+								<div class="col-6">
+									<a href="<?php echo $calendar_links['yahoo']; ?>" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary w-100">
+										<i class="bi-calendar-plus me-1"></i> Yahoo
+									</a>
+								</div>
+								<?php } ?>
+								<div class="col-6">
+									<a href="<?php echo $ics_url; ?>" class="btn btn-sm btn-outline-secondary w-100">
+										<i class="bi-download me-1"></i> Download
+									</a>
+								</div>
+							</div>
+						</div>
+						<?php } ?>
+
 						<!-- Sessions Widget -->
 						<?php
 						if(!$is_virtual_event && ($page_vars['show_sessions_block'] || (isset($page_vars['numsessions']) && $page_vars['numsessions'] > 0) || (isset($page_vars['future_numsessions']) && $page_vars['future_numsessions'] > 0) || (isset($page_vars['past_numsessions']) && $page_vars['past_numsessions'] > 0))){

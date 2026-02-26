@@ -66,6 +66,10 @@ $page_vars = $page_vars->data;
 
 				</div>
 
+				<div class="text-end mb-3 d-none d-sm-block">
+					<a href="/events/calendar.ics" class="text-muted small"><i class="bi-calendar-plus me-1"></i>Subscribe to Calendar</a>
+				</div>
+
 				<!-- Mobile Dropdown for Categories -->
 				<div class="d-block d-sm-none mb-4">
 					<select id="event_category_select" class="form-select" onchange="window.location.href=this.value;">
