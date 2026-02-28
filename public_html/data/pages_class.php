@@ -68,7 +68,7 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 			$output = '';
 			$components->load();
 			foreach ($components as $component) {
-				$output .= ComponentRenderer::render_component($component);
+				$output .= ComponentRenderer::render($component->get('pac_location_name'));
 			}
 			return $output;
 		}
