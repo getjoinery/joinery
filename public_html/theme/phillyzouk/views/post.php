@@ -45,12 +45,15 @@ $page->public_header($hoptions);
                         <!-- Title -->
                         <h3><?php echo htmlspecialchars($post->get('pst_title')); ?></h3>
 
-                        <!-- Featured Image -->
-                        <?php if ($post->get('pst_image_link')): ?>
-                        <div class="article-image">
-                            <img src="<?php echo htmlspecialchars($post->get('pst_image_link')); ?>" alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
-                        </div>
-                        <?php endif; ?>
+                        <!-- Post Images -->
+                        <?php
+                        require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+                        echo ComponentRenderer::render(null, 'image_gallery', [
+                            'photos' => $post->get_photos(),
+                            'primary_file_id' => $post->get('pst_fil_file_id'),
+                            'alt_text' => $post->get('pst_title'),
+                        ]);
+                        ?>
 
                         <!-- Post Content -->
                         <div class="post-body-content">
@@ -390,8 +393,8 @@ $page->public_header($hoptions);
                         ?>
                         <div class="item">
                             <a href="<?php echo $recent_post->get_url(); ?>" class="thumb">
-                                <?php if ($recent_post->get('pst_image_link')): ?>
-                                    <span class="fullimage cover" style="background-image: url('<?php echo htmlspecialchars($recent_post->get('pst_image_link')); ?>');"></span>
+                                <?php if ($recent_post->get_picture_link('thumbnail')): ?>
+                                    <span class="fullimage cover" style="background-image: url('<?php echo htmlspecialchars($recent_post->get_picture_link('thumbnail')); ?>');"></span>
                                 <?php else: ?>
                                     <span class="fullimage cover" style="background-image: url('https://via.placeholder.com/80x80/f8f9fa/6c757d?text=Post');"></span>
                                 <?php endif; ?>

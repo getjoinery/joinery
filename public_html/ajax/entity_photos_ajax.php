@@ -128,6 +128,7 @@ switch ($action) {
 					'user' => ['class' => 'User', 'file' => 'data/users_class.php'],
 					'location' => ['class' => 'Location', 'file' => 'data/locations_class.php'],
 					'mailing_list' => ['class' => 'MailingList', 'file' => 'data/mailing_lists_class.php'],
+					'post' => ['class' => 'Post', 'file' => 'data/posts_class.php'],
 				];
 				if (isset($entity_class_map[$entity_type])) {
 					$map = $entity_class_map[$entity_type];
