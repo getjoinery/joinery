@@ -1,11 +1,5 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-$settings = Globalvars::get_instance();
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
@@ -459,13 +453,13 @@ function get_leader() {
 			}
 			
 			echo $formwriter->dropinput(
-				'Registration product for this event',
 				'evt_pro_product_id',
-				'ctrlHolder',
-				$version_dropdown,
-				$currentvalue,
-				'',
-				TRUE);
+				'Registration product for this event',
+				array(
+					'options' => $version_dropdown,
+					'value' => $currentvalue,
+					'required' => TRUE
+				));
 		}
 
 		/*
