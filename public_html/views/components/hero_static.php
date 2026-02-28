@@ -28,8 +28,8 @@ $cta_style = $component_config['cta_style'] ?? 'primary';
 // Height classes
 $height_classes = [
 	'small' => 'py-5',
-	'medium' => 'py-5 my-5',
-	'large' => 'py-5 my-5',
+	'medium' => 'py-5',
+	'large' => 'py-5',
 	'fullscreen' => 'min-vh-100 d-flex align-items-center'
 ];
 $height_class = $height_classes[$height] ?? $height_classes['medium'];

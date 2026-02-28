@@ -17,7 +17,7 @@
  *   echo ComponentRenderer::render(null, 'image_gallery', ['photos' => $photos]);
  *
  * @see /specs/page_component_system.md
- * @version 1.4.0
+ * @version 1.5.0
  */
 
 class ComponentRenderer {
@@ -153,6 +153,7 @@ class ComponentRenderer {
 		$skip_wrapper = true; // Default for type_key mode (no instance)
 		$container_width = null;
 		$max_height = null;
+		$vertical_margin = null;
 
 		if ($component_instance) {
 			$layout_defaults = $component_type->get('com_layout_defaults');
@@ -162,9 +163,13 @@ class ComponentRenderer {
 			$skip_wrapper = !empty($layout_defaults['skip_wrapper']);
 			$container_width = $component_instance->get('pac_max_width');
 			$max_height = $component_instance->get('pac_max_height');
+			$vertical_margin = $component_instance->get('pac_vertical_margin');
+			if (!$vertical_margin) {
+				$vertical_margin = $layout_defaults['vertical_margin'] ?? null;
+			}
 		}
 
-		$layout_vars = self::get_layout_vars($container_width, $max_height);
+		$layout_vars = self::get_layout_vars($container_width, $max_height, $vertical_margin);
 		$container_class = $layout_vars['container_class'];
 		$container_style = $layout_vars['container_style'];
 		$max_height_style = $layout_vars['max_height_style'];
@@ -206,15 +211,17 @@ class ComponentRenderer {
 	 *
 	 * @param string|null $width CSS max-width value or null
 	 * @param string|null $max_height CSS max-height value or null
+	 * @param string|null $vertical_margin Margin keyword (none, sm, md, lg, xl) or null
 	 * @return array Layout variables
 	 */
-	protected static function get_layout_vars($width, $max_height) {
+	protected static function get_layout_vars($width, $max_height, $vertical_margin = null) {
 		$vars = [
 			'container_class' => 'container',
 			'container_style' => '',
 			'max_height_style' => '',
 			'cl_max_width' => null,
 			'cl_max_height' => null,
+			'cl_vertical_margin' => null,
 		];
 
 		if (!empty($width)) {
@@ -225,6 +232,13 @@ class ComponentRenderer {
 		if (!empty($max_height)) {
 			$vars['cl_max_height'] = $max_height;
 			$vars['max_height_style'] = 'max-height:' . $max_height . ';overflow:hidden';
+		}
+
+		if (!empty($vertical_margin)) {
+			$valid_margins = ['none', 'sm', 'md', 'lg', 'xl'];
+			if (in_array($vertical_margin, $valid_margins)) {
+				$vars['cl_vertical_margin'] = $vertical_margin;
+			}
 		}
 
 		return $vars;
@@ -244,9 +258,10 @@ class ComponentRenderer {
 	protected static function wrap_with_layout($html, $layout_vars) {
 		$has_width = ($layout_vars['cl_max_width'] !== null);
 		$has_height = ($layout_vars['cl_max_height'] !== null);
+		$has_margin = ($layout_vars['cl_vertical_margin'] !== null);
 
-		// No wrapper needed when both are default
-		if (!$has_width && !$has_height) {
+		// No wrapper needed when all are default
+		if (!$has_width && !$has_height && !$has_margin) {
 			return $html;
 		}
 
@@ -261,6 +276,9 @@ class ComponentRenderer {
 		if ($has_height) {
 			$attrs .= ' data-maxh';
 			$styles[] = '--cl-max-height: ' . $layout_vars['cl_max_height'];
+		}
+		if ($has_margin) {
+			$attrs .= ' data-vmargin="' . htmlspecialchars($layout_vars['cl_vertical_margin']) . '"';
 		}
 
 		if (!empty($styles)) {
@@ -304,6 +322,12 @@ class ComponentRenderer {
 	max-height: var(--cl-max-height);
 	overflow: hidden;
 }
+/* Vertical Margin Controls */
+.component-layout[data-vmargin="none"] { margin-top: 0; margin-bottom: 0; }
+.component-layout[data-vmargin="sm"] { margin-top: 1rem; margin-bottom: 1rem; }
+.component-layout[data-vmargin="md"] { margin-top: 2rem; margin-bottom: 2rem; }
+.component-layout[data-vmargin="lg"] { margin-top: 3rem; margin-bottom: 3rem; }
+.component-layout[data-vmargin="xl"] { margin-top: 5rem; margin-bottom: 5rem; }
 </style>
 ';
 	}

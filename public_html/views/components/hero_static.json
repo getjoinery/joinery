@@ -89,6 +89,7 @@
     },
     "layout_defaults": {
         "container_width": "standard",
-        "max_height": "default"
+        "max_height": "default",
+        "vertical_margin": "lg"
     }
 }

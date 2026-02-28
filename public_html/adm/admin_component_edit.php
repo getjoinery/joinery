@@ -83,6 +83,7 @@ if ($_POST && !$loading_version) {
 	// Set layout fields — empty = no restriction (NULL), any CSS value = stored directly
 	$content->set('pac_max_width', trim($_POST['pac_max_width'] ?? '') ?: null);
 	$content->set('pac_max_height', trim($_POST['pac_max_height'] ?? '') ?: null);
+	$content->set('pac_vertical_margin', trim($_POST['pac_vertical_margin'] ?? '') ?: null);
 
 	// Set user if new
 	if (!$content->key) {
@@ -186,6 +187,9 @@ if (!$content->key && $component_type) {
 	}
 	if (!empty($prefill_defaults['max_height'])) {
 		$content->set('pac_max_height', $prefill_defaults['max_height']);
+	}
+	if (!empty($prefill_defaults['vertical_margin'])) {
+		$content->set('pac_vertical_margin', $prefill_defaults['vertical_margin']);
 	}
 }
 
@@ -346,7 +350,7 @@ if ($current_type_id) {
 		}
 
 		// Render advanced fields in collapsible section
-		$layout_field_count = $type_skip_wrapper ? 0 : 2;
+		$layout_field_count = $type_skip_wrapper ? 0 : 3;
 		$advanced_count = count($advanced_fields) + $layout_field_count + 2; // + slug + order
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
@@ -360,6 +364,10 @@ if ($current_type_id) {
 			// Layout controls (hidden when component type opts out via skip_wrapper)
 			$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
 			$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+			$formwriter->dropinput('pac_vertical_margin', 'Vertical Margin', [
+				'options' => ['' => 'Default', 'none' => 'None', 'sm' => 'Small', 'md' => 'Medium', 'lg' => 'Large', 'xl' => 'Extra Large'],
+				'help' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
+			]);
 			echo '<hr>';
 		}
 
@@ -381,7 +389,7 @@ if ($current_type_id) {
 		echo '</div></div></div>';
 	} else {
 		// No schema fields - show layout + slug and order in advanced section
-		$layout_field_count = $type_skip_wrapper ? 0 : 2;
+		$layout_field_count = $type_skip_wrapper ? 0 : 3;
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
 		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
@@ -393,6 +401,10 @@ if ($current_type_id) {
 		if (!$type_skip_wrapper) {
 			$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
 			$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+			$formwriter->dropinput('pac_vertical_margin', 'Vertical Margin', [
+				'options' => ['' => 'Default', 'none' => 'None', 'sm' => 'Small', 'md' => 'Medium', 'lg' => 'Large', 'xl' => 'Extra Large'],
+				'help' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
+			]);
 			echo '<hr>';
 		}
 
@@ -411,13 +423,17 @@ if ($current_type_id) {
 	$advanced_id = 'advanced_fields_' . uniqid();
 	echo '<div class="advanced-fields-section mt-4">';
 	echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
-	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (4)';
+	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (5)';
 	echo '</a>';
 	echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 	echo '<div class="mt-3 pt-3 border-top">';
 
 	$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
 	$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+	$formwriter->dropinput('pac_vertical_margin', 'Vertical Margin', [
+		'options' => ['' => 'Default', 'none' => 'None', 'sm' => 'Small', 'md' => 'Medium', 'lg' => 'Large', 'xl' => 'Extra Large'],
+		'help' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
+	]);
 	echo '<hr>';
 
 	$formwriter->textinput('pac_location_name', 'Slug (optional)', [
