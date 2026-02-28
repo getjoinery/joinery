@@ -67,8 +67,36 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$user = User::CreateNew($data);	
 		}
 		
-		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['mlt_mailing_list_id_subscribe']);
-				
+		$messages = [];
+		if (isset($_POST['mlt_mailing_list_id_subscribe'])) {
+			if ($mailing_list->is_user_in_list($user->key)) {
+				$messages[] = [
+					'message_type' => 'warn',
+					'message_title' => 'Notice',
+					'message' => 'You are already subscribed to ' . htmlspecialchars($mailing_list->get('mlt_name')),
+				];
+			} else {
+				$status = $mailing_list->add_registrant($user->key);
+				$messages[] = $status
+					? ['message_type' => 'success', 'message_title' => 'Success', 'message' => 'You are now subscribed to ' . htmlspecialchars($mailing_list->get('mlt_name'))]
+					: ['message_type' => 'error', 'message_title' => 'Error', 'message' => 'There was an error subscribing you to ' . htmlspecialchars($mailing_list->get('mlt_name'))];
+			}
+		} elseif (isset($_POST['mlt_mailing_list_id_unsubscribe'])) {
+			if (!$mailing_list->is_user_in_list($user->key)) {
+				$messages[] = [
+					'message_type' => 'warn',
+					'message_title' => 'Notice',
+					'message' => 'You are not subscribed to ' . htmlspecialchars($mailing_list->get('mlt_name')),
+				];
+			} else {
+				$status = $mailing_list->remove_registrant($user->key);
+				$messages[] = $status
+					? ['message_type' => 'success', 'message_title' => 'Success', 'message' => 'You have been unsubscribed from ' . htmlspecialchars($mailing_list->get('mlt_name'))]
+					: ['message_type' => 'error', 'message_title' => 'Error', 'message' => 'There was an error unsubscribing you from ' . htmlspecialchars($mailing_list->get('mlt_name'))];
+			}
+		}
+		$page_vars['messages'] = $messages;
+
 	}
 	
 	

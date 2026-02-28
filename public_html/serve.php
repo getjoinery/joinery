@@ -116,7 +116,7 @@ $routes = [
         '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class', 'check_setting' => 'events_active'],
         '/location/{slug}' => ['model' => 'Location', 'model_file' => 'data/locations_class', 'check_setting' => 'events_active'],
         '/product/{slug}' => ['model' => 'Product', 'model_file' => 'data/products_class', 'check_setting' => 'products_active'],
-        '/list/{slug}' => ['model' => 'MailingList', 'model_file' => 'data/mailing_lists_class'],
+        '/list/{slug}' => ['model' => 'MailingList', 'model_file' => 'data/mailing_lists_class', 'view' => 'views/list', 'var_name' => 'mailing_list'],
 		'/video/{slug}' => ['model' => 'Video', 'model_file' => 'data/videos_class', 'check_setting' => 'videos_active'],
         
         // Simple view routes (explicit view files)
