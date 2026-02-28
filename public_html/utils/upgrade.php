@@ -442,7 +442,7 @@
 		}
 
 		//CLEAR OLD STAGED FILES
-		upgrade_echo('Clearing staging area: '.$stage_location.'<br>');
+		if($verbose) upgrade_echo('Clearing staging area: '.$stage_location.'<br>');
 		if(file_exists($stage_location)){
 			exec("chmod -R 770 $stage_location");
 			exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
@@ -454,7 +454,7 @@
 				exit;
 			}
 			else{
-				upgrade_echo('Staging area cleared<br>');
+				if($verbose) upgrade_echo('Staging area cleared<br>');
 			}
 		}
 		else{
@@ -472,7 +472,7 @@
 
 		if ($is_tar_gz) {
 			// Extract tar.gz archive
-			upgrade_echo('Extracting tar.gz archive...<br>');
+			if($verbose) upgrade_echo('Extracting tar.gz archive...<br>');
 			$tar_cmd = sprintf(
 				'tar -xzf %s -C %s 2>&1',
 				escapeshellarg($file_download_location),
@@ -487,7 +487,7 @@
 				echo 'Error: ' . implode('<br>', $tar_output) . '<br>';
 				exit;
 			}
-			upgrade_echo('Upgrade at '.$file_download_location. ' extracted to '.$stage_location.'<br>');
+			if($verbose) upgrade_echo('Upgrade at '.$file_download_location. ' extracted to '.$stage_location.'<br>');
 		}
 		else {
 			// Extract legacy zip archive
@@ -719,7 +719,7 @@
 		}
 		else{
 			//CLEAR OR CREATE BACKUP AREA
-			echo 'Clearing backup area: '.$backup_directory.'<br>';
+			if($verbose) echo 'Clearing backup area: '.$backup_directory.'<br>';
 			if (!is_dir($backup_directory)) {
 				if (!mkdir($backup_directory, 0770, true)) {
 					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
@@ -727,14 +727,14 @@
 					echo '</div>';
 					exit(1);
 				}
-				echo 'Backup area created<br>';
+				if($verbose) echo 'Backup area created<br>';
 			} else {
 				exec ("rm -rf $backup_directory".'/*');
 				exec ("rm -rf $backup_directory".'/.git');  //REMOVE LATENT GIT FILES
 				exec ("rm -rf $backup_directory".'/.gitignore');  //REMOVE LATENT GIT FILES
 			}
 			if(is_dir_empty($backup_directory)){
-				echo 'Backup area cleared<br>';
+				if($verbose) echo 'Backup area cleared<br>';
 			}
 			else{
 				echo "Failed to remove old backup files...aborting.<br>";
@@ -752,12 +752,12 @@
 			}
 
 			//SET PERMISSIONS FOR NEW FILES
-			echo 'Setting '.$stage_location.' to 770<br>';
+			if($verbose) echo 'Setting '.$stage_location.' to 770<br>';
 			exec("chmod -R 770 $stage_location");
-			echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
+			if($verbose) echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
 
-			echo 'Moving '.$live_directory. ' to '. $backup_directory.'<br>';
-			echo 'Moving '.$stage_directory. ' to '. $live_directory.'<br>';
+			if($verbose) echo 'Moving '.$live_directory. ' to '. $backup_directory.'<br>';
+			if($verbose) echo 'Moving '.$stage_directory. ' to '. $live_directory.'<br>';
 
 			// Move live to backup
 			$mv_output = [];
@@ -789,7 +789,7 @@
 			// Fix permissions using centralized script (production mode)
 			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
 			if(file_exists($fix_permissions_script)) {
-				echo 'Setting permissions using fix_permissions.sh --production<br>';
+				if($verbose) echo 'Setting permissions using fix_permissions.sh --production<br>';
 				exec("$fix_permissions_script " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
 				if($perm_exit !== 0) {
 					echo 'Warning: fix_permissions.sh failed, falling back to chmod<br>';
@@ -831,7 +831,7 @@
 			echo '</div>';
 		}
 		else{
-			echo 'Clearing staging area: '.$stage_location.'...<br>';
+			if($verbose) echo 'Clearing staging area: '.$stage_location.'...<br>';
 			exec("chmod -R 770 $stage_location");
 			if(file_exists($stage_location)){
 				exec ("rm -rf $stage_location".'/*');
@@ -843,7 +843,7 @@
 					exit;
 				}
 				else{
-					echo 'Staging area cleared<br>';
+					if($verbose) echo 'Staging area cleared<br>';
 				}
 			}
 		}
@@ -895,7 +895,7 @@
 		if (!$dry_run && function_exists('opcache_reset')) {
 			opcache_reset();
 			clearstatcache(true);
-			upgrade_echo('Cleared PHP opcache and stat cache after file deployment<br>');
+			if($verbose) upgrade_echo('Cleared PHP opcache and stat cache after file deployment<br>');
 		}
 
 		// ============================================
