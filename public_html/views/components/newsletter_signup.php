@@ -14,11 +14,21 @@
  *   $component_type_record - Component object (the type definition)
  *   $component_slug - The component's slug
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
-// If mailing lists feature is disabled or no lists resolved, render nothing
+// Show configuration errors to admins, render nothing for regular visitors
+$config_errors = $component_data['config_errors'] ?? [];
 if (empty($component_data['is_active']) || empty($component_data['mailing_lists'])) {
+	if (!empty($config_errors) && isset($_SESSION['permission']) && $_SESSION['permission'] >= 5) {
+		echo '<div style="border: 2px dashed #dc3545; background: #fff3f3; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 6px; font-size: 0.9rem;">';
+		echo '<strong style="color: #dc3545;">Newsletter Signup Component — Configuration Issue</strong>';
+		echo '<ul style="margin: 0.5rem 0 0; padding-left: 1.5rem; color: #555;">';
+		foreach ($config_errors as $err) {
+			echo '<li>' . $err . '</li>';
+		}
+		echo '</ul></div>';
+	}
 	return;
 }
 
