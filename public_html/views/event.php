@@ -112,7 +112,15 @@ $page_vars = $page_vars->data;
 
 							<!-- Event Image -->
 							<?php
-							if ($is_virtual_event) {
+							require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+							if (!$is_virtual_event) {
+								echo ComponentRenderer::render(null, 'image_gallery', [
+									'photos' => $event->get_photos(),
+									'primary_file_id' => $event->get('evt_fil_file_id'),
+									'alt_text' => $event->get('evt_name'),
+								]);
+							} else {
+								// Virtual recurring instances — no entity photos, show primary image only
 								$picture_link = null;
 								if ($evt_get('evt_fil_file_id')) {
 									$pic_file = new File($evt_get('evt_fil_file_id'), TRUE);
@@ -120,14 +128,11 @@ $page_vars = $page_vars->data;
 								} elseif ($evt_get('evt_picture_link')) {
 									$picture_link = $evt_get('evt_picture_link');
 								}
-							} else {
-								$picture_link = $event->get_picture_link('content');
+								if ($picture_link) {
+									echo '<div class="mb-5"><img src="' . htmlspecialchars($picture_link) . '" alt="' . htmlspecialchars($evt_get('evt_name')) . '" class="w-100 rounded-4 shadow-sm"></div>';
+								}
 							}
-							if ($picture_link) { ?>
-								<div class="mb-5">
-									<img src="<?php echo $picture_link; ?>" alt="<?php echo htmlspecialchars($evt_get('evt_name')); ?>" class="w-100 rounded-4 shadow-sm">
-								</div>
-							<?php } ?>
+							?>
 
 							<!-- Event Description -->
 							<div class="bg-white rounded-4 shadow-sm p-4 mb-4">
