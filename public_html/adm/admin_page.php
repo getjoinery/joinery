@@ -8,6 +8,7 @@
 	require_once(PathHelper::getIncludePath('/data/pages_class.php'));
 	require_once(PathHelper::getIncludePath('/data/page_contents_class.php'));
 	require_once(PathHelper::getIncludePath('/data/components_class.php'));
+	require_once(PathHelper::getIncludePath('/includes/PhotoHelper.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -71,6 +72,18 @@
 	else if($_REQUEST['action'] == 'undelete_component'){
 		$component = new PageContent($_POST['pac_page_content_id'], TRUE);
 		$component->undelete();
+
+		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
+		exit();
+	}
+	else if($_REQUEST['action'] == 'set_primary_photo'){
+		$page->set_primary_photo((int)$_POST['photo_id']);
+
+		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
+		exit();
+	}
+	else if($_REQUEST['action'] == 'clear_primary_photo'){
+		$page->clear_primary_photo();
 
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
@@ -290,6 +303,25 @@
 
 	$paget->endtable(NULL);
 	?>
+
+	<!-- Page Photos Card -->
+	<?php
+	$page_photos = $page->get_photos();
+	$photo_editable = !$page->get('pag_delete_time') && $_SESSION['permission'] > 4;
+	PhotoHelper::render_photo_card('grid', 'page', $page->key, $page_photos, [
+		'set_primary_url' => '/admin/admin_page?pag_page_id=' . $page->key,
+		'card_title' => 'Page Photos',
+		'editable' => $photo_editable,
+		'primary_file_id' => $page->get('pag_fil_file_id'),
+	]);
+	?>
+
+	<?php if($photo_editable): ?>
+	<?php PhotoHelper::render_photo_scripts('grid', 'page', $page->key, [
+		'set_primary_url' => '/admin/admin_page?pag_page_id=' . $page->key,
+		'confirm_delete_msg' => 'Remove this photo from this page?',
+	]); ?>
+	<?php endif; ?>
 
 	<!-- Page Preview Card (Full Width) -->
 	<div class="card mt-3">

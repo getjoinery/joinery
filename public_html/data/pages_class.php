@@ -41,8 +41,13 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	    'pag_published_time' => array('type'=>'timestamp(6)'),
 	    'pag_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'pag_script_filename' => array('type'=>'varchar(255)'),
+	    'pag_fil_file_id' => array('type'=>'int4'),
 	    'pag_delete_time' => array('type'=>'timestamp(6)'),
 	);
+
+	protected static $foreign_key_actions = [
+		'pag_fil_file_id' => ['action' => 'null']
+	];
 
 /**
 	 * Get page content with component rendering support
@@ -118,6 +123,56 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 		return $content_out;
 	}
 	
+	/**
+	 * Get picture URL for display
+	 *
+	 * @param string $size_key Image size key (default 'original')
+	 * @return string|false URL or false if no picture
+	 */
+	function get_picture_link($size_key='original'){
+		if($this->get('pag_fil_file_id')){
+			require_once(PathHelper::getIncludePath('data/files_class.php'));
+			$file = new File($this->get('pag_fil_file_id'), TRUE);
+			return $file->get_url($size_key, 'full');
+		}
+		return false;
+	}
+
+	/**
+	 * Set a photo as the primary photo for this page
+	 *
+	 * @param int $photo_id EntityPhoto ID to set as primary
+	 */
+	function set_primary_photo($photo_id) {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photo = new EntityPhoto($photo_id, TRUE);
+		$this->set('pag_fil_file_id', $photo->get('eph_fil_file_id'));
+		$this->save();
+	}
+
+	/**
+	 * Clear the primary photo for this page
+	 */
+	function clear_primary_photo() {
+		$this->set('pag_fil_file_id', NULL);
+		$this->save();
+	}
+
+	/**
+	 * Get all photos for this page
+	 *
+	 * @return MultiEntityPhoto
+	 */
+	function get_photos() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'page', 'entity_id' => $this->key, 'deleted' => false],
+			['eph_sort_order' => 'ASC']
+		);
+		$photos->load();
+		return $photos;
+	}
+
 	function save($debug=false) {
 		
 		//CHECK FOR DUPLICATES

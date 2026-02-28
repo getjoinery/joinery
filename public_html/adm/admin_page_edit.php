@@ -5,6 +5,7 @@
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('/data/pages_class.php'));
+	require_once(PathHelper::getIncludePath('/data/files_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -47,6 +48,13 @@
 			$page->set('pag_published_time', NULL);
 		} 
 		
+		if($_POST['pag_fil_file_id']){
+			$page->set('pag_fil_file_id', (int)$_POST['pag_fil_file_id']);
+		}
+		else if(empty($_POST['pag_fil_file_id'])){
+			$page->set('pag_fil_file_id', NULL);
+		}
+
 		$page->set('pag_body', $_POST['pag_body']);
 
 		if(!$page->key){
@@ -103,6 +111,12 @@
 		'pag_is_published' => $is_published
 	];
 
+	$files = new MultiFile(
+		array('deleted'=>false, 'picture'=>true),
+		array('file_id' => 'DESC'),
+		NULL, NULL);
+	$files->load();
+
 	$formwriter = $paget->getFormWriter('form1', [
 		'model' => $page,
 		'values' => $override_values,
@@ -113,6 +127,11 @@
 
 	$formwriter->textinput('pag_title', 'Page title', [
 		'validation' => ['required' => true]
+	]);
+
+	$optionvals = $files->get_image_dropdown_array();
+	$formwriter->imageinput('pag_fil_file_id', 'Main image', [
+		'options' => $optionvals
 	]);
 
 	if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
