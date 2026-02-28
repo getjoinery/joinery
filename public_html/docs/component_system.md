@@ -62,12 +62,44 @@ if (ComponentRenderer::exists('sidebar-promo')) {
 }
 ```
 
-### Render Component Object
+### Render by Slug with Config Overrides
 
 ```php
-// When you already have a PageContent object
-echo ComponentRenderer::render_component($component_instance);
+// Override specific config values at render time
+echo ComponentRenderer::render('homepage-hero', null, ['heading' => 'Custom Title']);
 ```
+
+The `$overrides` array is merged on top of the database-stored config, so overrides win.
+
+### Render by Type Key (Programmatic)
+
+Render a component template directly by its type key, without needing a database instance. Useful for reusable UI patterns called from PHP code with runtime data.
+
+```php
+// Render image gallery with runtime data — no database component instance needed
+echo ComponentRenderer::render(null, 'image_gallery', [
+    'photos' => $post->get_photos(),
+    'primary_file_id' => $post->get('pst_fil_file_id'),
+]);
+```
+
+**Full signature:** `render($slug, $type_key = null, $overrides = [])`
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$slug` | string\|null | Component slug (loads from database) |
+| `$type_key` | string\|null | Component type key (renders directly, no database instance) |
+| `$overrides` | array | Config values — merged with database config (slug mode) or used as full config (type_key mode) |
+
+**Behavior:**
+- `render('slug')` — Existing behavior, loads from database
+- `render('slug', null, $overrides)` — Loads from database, merges overrides into config
+- `render(null, 'type_key', $config)` — Renders template by type key with provided config
+
+When rendering by type key:
+- `$component_config` = the config array passed by the caller
+- `$component` = `null` (no PageContent instance)
+- Layout wrapper is skipped (the calling view controls layout)
 
 ### Get Page Components
 
@@ -76,7 +108,7 @@ echo ComponentRenderer::render_component($component_instance);
 $components = ComponentRenderer::get_page_components($page_id);
 
 foreach ($components as $component) {
-    echo ComponentRenderer::render_component($component);
+    echo ComponentRenderer::render($component->get('pac_location_name'));
 }
 ```
 
@@ -768,7 +800,14 @@ Component types that need full control over their own layout can set `skip_wrapp
 ### Render a Component
 
 ```php
+// By slug (from database)
 echo ComponentRenderer::render('my-component-slug');
+
+// By slug with config overrides
+echo ComponentRenderer::render('my-component-slug', null, ['heading' => 'Override']);
+
+// By type key (programmatic, no database instance)
+echo ComponentRenderer::render(null, 'image_gallery', ['photos' => $photos]);
 ```
 
 ### Check Before Rendering
@@ -850,7 +889,7 @@ $components = new MultiPageContent(['page_id' => $this->key, 'components_only' =
 if ($components->count_all() > 0) {
     // Has components - render them, ignore page body entirely
     foreach ($components as $component) {
-        $output .= ComponentRenderer::render_component($component);
+        $output .= ComponentRenderer::render($component->get('pac_location_name'));
     }
     return $output;
 }

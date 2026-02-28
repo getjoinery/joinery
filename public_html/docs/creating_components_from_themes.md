@@ -374,6 +374,20 @@ If the component preview shows "Template file not found" but the file exists, th
 echo ComponentRenderer::render('homepage-hero');
 ```
 
+**By slug with overrides:**
+```php
+echo ComponentRenderer::render('homepage-hero', null, ['heading' => 'Custom Title']);
+```
+
+**By type key (programmatic, no database instance):**
+```php
+// Useful for components rendered from code with runtime data
+echo ComponentRenderer::render(null, 'image_gallery', [
+    'photos' => $entity->get_photos(),
+    'primary_file_id' => $entity->get('evt_fil_file_id'),
+]);
+```
+
 **Automatic (page-attached):**
 Components attached to a page render automatically when using `ComponentRenderer::get_page_components()`.
 

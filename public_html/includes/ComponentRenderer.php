@@ -1,20 +1,23 @@
 <?php
 /**
- * ComponentRenderer - Renders page components by slug
+ * ComponentRenderer - Renders page components
  *
- * Provides static methods to render component instances either by slug
- * or by PageContent object. Handles template resolution, logic function
+ * Provides static methods to render component instances by slug or
+ * component type key. Handles template resolution, logic function
  * execution, layout wrapping, and debug output for troubleshooting.
  *
  * Usage:
- *   // Render by slug (explicit call in template)
+ *   // Render by slug
  *   echo ComponentRenderer::render('homepage-hero');
  *
- *   // Render PageContent object directly (used by Page::get_filled_content())
- *   echo ComponentRenderer::render_component($page_content);
+ *   // Render by slug with config overrides
+ *   echo ComponentRenderer::render('homepage-hero', null, ['heading' => 'Custom']);
+ *
+ *   // Render by type key (programmatic, no database instance)
+ *   echo ComponentRenderer::render(null, 'image_gallery', ['photos' => $photos]);
  *
  * @see /specs/page_component_system.md
- * @version 1.3.0
+ * @version 1.4.0
  */
 
 class ComponentRenderer {
@@ -40,134 +43,151 @@ class ComponentRenderer {
 	}
 
 	/**
-	 * Render a component by its slug
+	 * Render a component by slug, type key, or both
 	 *
-	 * @param string $slug The component's slug (pac_location_name)
+	 * Three modes:
+	 *   render('slug')                         - Load from database by slug
+	 *   render('slug', null, $overrides)        - Load from database, merge overrides into config
+	 *   render(null, 'type_key', $config)       - Render by type key with provided config (no database instance)
+	 *
+	 * @param string|null $slug The component's slug (pac_location_name), or null for type_key mode
+	 * @param string|null $type_key The component type key (com_type_key), used when $slug is null
+	 * @param array $overrides Config values merged into database config (slug mode) or used as full config (type_key mode)
 	 * @return string Rendered HTML (includes debug comments for admins on errors)
 	 */
-	public static function render($slug) {
-		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
+	public static function render($slug, $type_key = null, $overrides = []) {
+		$component_instance = null;
+		$component_type = null;
+		$debug_label = $slug ?: $type_key ?: '';
 
-		$component_instance = PageContent::get_by_slug($slug);
+		// --- Resolve component type ---
 
-		if (!$component_instance) {
-			return self::debug_output("Component not found", $slug);
-		}
+		if (!empty($slug)) {
+			// Slug mode: load instance from database
+			require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
-		if (!$component_instance->is_component()) {
-			return self::debug_output("Record exists but is not a component (no pac_com_component_id)", $slug);
-		}
+			$component_instance = PageContent::get_by_slug($slug);
 
-		if (!$component_instance->is_visible()) {
-			return self::debug_output("Component exists but is deleted", $slug);
-		}
+			if (!$component_instance) {
+				return self::debug_output("Component not found", $debug_label);
+			}
+			if (!$component_instance->is_component()) {
+				return self::debug_output("Record exists but is not a component (no pac_com_component_id)", $debug_label);
+			}
+			if (!$component_instance->is_visible()) {
+				return self::debug_output("Component exists but is deleted", $debug_label);
+			}
 
-		return self::render_component($component_instance, $slug);
-	}
+			$component_type = $component_instance->get_component_type();
+			if (!$component_type) {
+				return self::debug_output("Component type not found (pac_com_component_id may reference deleted type)", $debug_label);
+			}
 
-	/**
-	 * Render a single component instance
-	 *
-	 * @param PageContent $component_instance The component instance
-	 * @param string $slug For debug output (optional, extracted from instance if not provided)
-	 * @return string Rendered HTML
-	 */
-	public static function render_component($component_instance, $slug = '') {
-		if (empty($slug)) {
-			$slug = $component_instance->get('pac_location_name');
-		}
+		} elseif (!empty($type_key)) {
+			// Type key mode: look up component type directly
+			require_once(PathHelper::getIncludePath('data/components_class.php'));
 
-		$component_type = $component_instance->get_component_type();
+			$component_type = Component::get_by_type_key($type_key);
+			if (!$component_type) {
+				return self::debug_output("Component type '{$type_key}' not found", $debug_label);
+			}
 
-		if (!$component_type) {
-			return self::debug_output("Component type not found (pac_com_component_id may reference deleted type)", $slug);
+		} else {
+			return '';
 		}
 
 		if (!$component_type->is_available()) {
-			$type_key = $component_type->get('com_type_key');
-			return self::debug_output("Component type '{$type_key}' is inactive", $slug);
+			$tk = $component_type->get('com_type_key');
+			return self::debug_output("Component type '{$tk}' is inactive", $debug_label);
 		}
 
 		// Check if component requires a plugin
 		$required_plugin = $component_type->get('com_requires_plugin');
 		if ($required_plugin) {
 			if (!class_exists('PluginHelper') || !PluginHelper::isPluginActive($required_plugin)) {
-				return self::debug_output("Required plugin '{$required_plugin}' is not active", $slug);
+				return self::debug_output("Required plugin '{$required_plugin}' is not active", $debug_label);
 			}
 		}
 
-		$config = $component_instance->get_config();
-		$data = array();
+		// --- Build config ---
 
-		// Load dynamic data if needed
+		if ($component_instance) {
+			$config = $component_instance->get_config();
+			if (!empty($overrides)) {
+				$config = array_merge($config, $overrides);
+			}
+		} else {
+			$config = $overrides;
+		}
+
+		// --- Load dynamic data ---
+
+		$data = array();
 		$logic_function = $component_type->get('com_logic_function');
 		if ($logic_function) {
 			try {
-				$data = self::load_component_data($logic_function, $config, $slug);
+				$data = self::load_component_data($logic_function, $config, $debug_label);
 			} catch (Exception $e) {
-				return self::debug_output("Logic function '{$logic_function}' threw exception: " . $e->getMessage(), $slug);
+				return self::debug_output("Logic function '{$logic_function}' threw exception: " . $e->getMessage(), $debug_label);
 			}
 		}
 
-		// Render template
+		// --- Resolve template ---
+
 		$template_file = $component_type->get('com_template_file');
 		if (!$template_file) {
-			return self::debug_output("Component type has no template file configured", $slug);
+			return self::debug_output("Component type has no template file configured", $debug_label);
 		}
 
-		// Use theme-aware path resolution
-		// Template files can be stored as:
-		// - Full relative path: 'theme/linka-reference/views/components/component.php' or 'views/components/component.php'
-		// - Filename only (legacy): 'component.php'
 		if (strpos($template_file, '/') !== false) {
-			// Full relative path - use directly
 			$template_path = PathHelper::getIncludePath($template_file);
 		} else {
-			// Filename only - look in views/components with theme override support
 			$template_path = PathHelper::getThemeFilePath($template_file, 'views/components');
 		}
 		if (!file_exists($template_path)) {
-			return self::debug_output("Template file not found: {$template_file} (resolved to: {$template_path})", $slug);
+			return self::debug_output("Template file not found: {$template_file} (resolved to: {$template_path})", $debug_label);
 		}
 
-		// Check if component type opts out of layout wrapping
-		$layout_defaults = $component_type->get('com_layout_defaults');
-		if (is_string($layout_defaults)) {
-			$layout_defaults = json_decode($layout_defaults, true) ?: [];
-		}
-		$skip_wrapper = !empty($layout_defaults['skip_wrapper']);
+		// --- Layout ---
 
-		// Compute layout variables for this component instance
-		// NULL = no restriction; any CSS value = used as max-width/max-height
-		$container_width = $component_instance->get('pac_max_width');
-		$max_height = $component_instance->get('pac_max_height');
+		$skip_wrapper = true; // Default for type_key mode (no instance)
+		$container_width = null;
+		$max_height = null;
+
+		if ($component_instance) {
+			$layout_defaults = $component_type->get('com_layout_defaults');
+			if (is_string($layout_defaults)) {
+				$layout_defaults = json_decode($layout_defaults, true) ?: [];
+			}
+			$skip_wrapper = !empty($layout_defaults['skip_wrapper']);
+			$container_width = $component_instance->get('pac_max_width');
+			$max_height = $component_instance->get('pac_max_height');
+		}
 
 		$layout_vars = self::get_layout_vars($container_width, $max_height);
-
-		// Template variables for layout (available to all templates)
 		$container_class = $layout_vars['container_class'];
 		$container_style = $layout_vars['container_style'];
 		$max_height_style = $layout_vars['max_height_style'];
 
+		// --- Render template ---
+
 		ob_start();
 
-		// Make variables available to template
 		$component_config = $config;
 		$component_data = $data;
-		$component = $component_instance;
+		$component = $component_instance; // null in type_key mode
 		$component_type_record = $component_type;
-		$component_slug = $slug;
+		$component_slug = $slug ?: '';
 
 		try {
 			require($template_path);
 		} catch (Exception $e) {
 			ob_end_clean();
-			return self::debug_output("Template threw exception: " . $e->getMessage(), $slug);
+			return self::debug_output("Template threw exception: " . $e->getMessage(), $debug_label);
 		}
 
 		$html = ob_get_clean();
 
-		// Conditionally wrap output with layout div (skip if component type opts out)
 		if (!$skip_wrapper && trim($html) !== '') {
 			$html = self::wrap_with_layout($html, $layout_vars);
 		}
