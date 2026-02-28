@@ -35,7 +35,7 @@ Joinery uses a custom **JoineryValidation** library - pure JavaScript with no jQ
 
 ### Library File
 - Location: `/assets/js/joinery-validate.js`
-- Version: 1.0.4
+- Version: 1.0.8
 - Dependencies: None (standalone)
 
 ### Built-in Validators
@@ -50,7 +50,7 @@ Joinery uses a custom **JoineryValidation** library - pure JavaScript with no jQ
 | `maxlength` | Maximum character length | Value is character count |
 | `min` | Minimum numeric value | Numeric comparison |
 | `max` | Maximum numeric value | Numeric comparison |
-| `equalTo` | Must match another field | Value = selector (e.g., '#password') |
+| `equalTo` | Must match another field | Value = field name (e.g., 'password') |
 | `time` | Valid time format HH:MM | 24-hour format |
 | `date` | Valid date format | Various formats supported |
 | `pattern` | Regex pattern match | Value = regex pattern |
@@ -737,13 +737,26 @@ $rules['field_name']['required']['value'] = 'true';
 
 ### Email Signup Form
 
+**FormWriter V2 (preferred):**
+
+```php
+$formwriter->textinput('email', 'Email', ['validation' => 'email', 'required' => true]);
+$formwriter->passwordinput('password', 'Password', ['required' => true, 'validation' => ['minlength' => 8]]);
+$formwriter->passwordinput('password_confirm', 'Confirm Password', [
+    'required' => true,
+    'validation' => ['matches' => 'password']  // Field name, not selector
+]);
+```
+
+**Legacy V1 `set_validate()` (still works):**
+
 ```php
 $rules['email']['required']['value'] = 'true';
 $rules['email']['email']['value'] = 'true';
 $rules['password']['required']['value'] = 'true';
 $rules['password']['minlength']['value'] = '8';
 $rules['password_confirm']['required']['value'] = 'true';
-$rules['password_confirm']['equalTo']['value'] = '"#password"';  // Selector
+$rules['password_confirm']['equalTo']['value'] = '"#password"';  // V1 uses CSS selector
 ```
 
 ### Product Creation Form
@@ -807,8 +820,9 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';  // Digits, dash, 
 ### "equalTo" not working
 
 **Problem:** Password confirm field doesn't validate against password
-- **Check:** Value must be CSS selector: `"#password"` not `"password"`
-- **Check:** IDs must match: if input is `id="password"`, use `"#password"`
+- **Check:** In FormWriter V2, use the `matches` key with a **field name** (not a CSS selector): `'matches' => 'password'`
+- **Check:** The target field must have a matching `name` attribute in the form
+- **Check:** In legacy V1 `set_validate()`, the value was a quoted CSS selector: `'"#password"'`
 
 ### Pattern validation failing
 

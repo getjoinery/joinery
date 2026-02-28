@@ -1076,19 +1076,41 @@ $formwriter->textinput('email', 'Email', [
 
 ### Available Validation Rules
 
-| Rule | Usage | Example |
-|------|-------|---------|
-| `required` | Field must have value | `'required' => true` |
-| `email` | Valid email format | `'validation' => 'email'` |
-| `url` | Valid URL format | `'validation' => 'url'` |
-| `phone` | Valid phone number | `'validation' => 'phone'` |
-| `number` | Numeric value only | `'validation' => 'number'` |
-| `minlength` | Min character length | `'minlength' => 8` |
-| `maxlength` | Max character length | `'maxlength' => 255` |
-| `min` | Min numeric value | `'min' => 0` |
-| `max` | Max numeric value | `'max' => 100` |
-| `equalTo` | Must match field | `'equalTo' => 'password'` |
-| `pattern` | Regex match | `'pattern' => '/^[A-Z0-9]+$/'` |
+| PHP Rule Key | JS Rule | Usage | Example |
+|------|------|-------|---------|
+| `required` | `required` | Field must have value | `'required' => true` |
+| `email` | `email` | Valid email format | `'validation' => 'email'` |
+| `url` | `url` | Valid URL format | `'validation' => 'url'` |
+| `phone` | `phone` | Valid phone number | `'validation' => 'phone'` |
+| `number` | `number` | Numeric value only | `'validation' => 'number'` |
+| `minlength` | `minlength` | Min character length | `'minlength' => 8` |
+| `maxlength` | `maxlength` | Max character length | `'maxlength' => 255` |
+| `min` | `min` | Min numeric value | `'min' => 0` |
+| `max` | `max` | Max numeric value | `'max' => 100` |
+| `matches` | `equalTo` | Must match another field | `'matches' => 'password'` |
+| `pattern` | `pattern` | Regex match | `'pattern' => '/^[A-Z0-9]+$/'` |
+
+**Note:** The `matches` rule value is a **field name** (e.g., `'password'`), not a CSS selector. FormWriter outputs it as `equalTo` in JavaScript, where `form.elements[name]` looks up the target field.
+
+### Custom Error Messages
+
+Add a `messages` sub-array alongside your validation rules:
+
+```php
+$formwriter->textinput('antispam_question', 'Verification', [
+    'required' => true,
+    'validation' => [
+        'required' => true,
+        'matches' => 'antispam_question_answer',
+        'messages' => [
+            'required' => 'This field is required.',
+            'matches' => 'You must type the correct word here',
+        ],
+    ],
+]);
+```
+
+Message keys correspond to the PHP rule keys (e.g., `'matches'` not `'equalTo'`). FormWriter maps them to the correct JS rule names automatically.
 
 ### Common Validation Patterns
 
@@ -1105,7 +1127,7 @@ $formwriter->passwordinput('password', 'Password', [
 ]);
 $formwriter->passwordinput('password_confirm', 'Confirm Password', [
     'required' => true,
-    'validation' => ['equalTo' => 'password']
+    'validation' => ['matches' => 'password']
 ]);
 ```
 
@@ -1128,6 +1150,26 @@ $formwriter->textinput('sku', 'SKU', [
     'validation' => ['pattern' => '/^[A-Z0-9\-]+$/']
 ]);
 ```
+
+### Anti-Spam & Bot Protection
+
+FormWriter provides three built-in methods for protecting public forms from bots. These are typically used together on forms accessible to non-logged-in users.
+
+```php
+if (!$is_logged_in) {
+    $formwriter->antispam_question_input();  // Human verification question
+    $formwriter->honeypot_hidden_input();    // Hidden field trap for bots
+    $formwriter->captcha_hidden_input();     // CAPTCHA integration
+}
+```
+
+**`antispam_question_input($type)`** — Renders a text field asking the user to type a specific word (configured in Settings as `anti_spam_answer`). Automatically registers `required` and `matches` validation rules so `end_form()` outputs the JS validation. Pass `'blog'` for comment forms (uses `anti_spam_answer_comments` setting).
+
+**`honeypot_hidden_input()`** — Renders a hidden field that bots tend to fill in. Server-side logic rejects submissions where this field has a value.
+
+**`captcha_hidden_input()`** — Renders CAPTCHA integration if configured in settings.
+
+**Skip for logged-in users:** These protections are unnecessary for authenticated users — wrap them in a `!$is_logged_in` check.
 
 ### Server-Side Validation
 
