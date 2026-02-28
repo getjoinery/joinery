@@ -20,7 +20,8 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 	public static $url_namespace = 'post';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [
-		'pst_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'pst_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'pst_fil_file_id' => ['action' => 'null']
 	];
 
 		/**
@@ -50,6 +51,7 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 	    'pst_is_pinned' => array('type'=>'bool'),
 	    'pst_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'pst_short_description' => array('type'=>'varchar(255)'),
+	    'pst_fil_file_id' => array('type'=>'int4'),
 	    'pst_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
@@ -80,6 +82,73 @@ function prepare() {
 		parent::save($debug);
 	}
 	
+	/**
+	 * Get picture URL for display
+	 *
+	 * @param string $size_key Image size key (default 'original')
+	 * @return string|false URL or false if no picture
+	 */
+	function get_picture_link($size_key='original'){
+		if($this->get('pst_fil_file_id')){
+			require_once(PathHelper::getIncludePath('data/files_class.php'));
+			$file = new File($this->get('pst_fil_file_id'), TRUE);
+			return $file->get_url($size_key, 'full');
+		}
+		return false;
+	}
+
+	/**
+	 * Set a photo as the primary photo for this post
+	 *
+	 * @param int $photo_id EntityPhoto ID to set as primary
+	 */
+	function set_primary_photo($photo_id) {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photo = new EntityPhoto($photo_id, TRUE);
+		$this->set('pst_fil_file_id', $photo->get('eph_fil_file_id'));
+		$this->save();
+	}
+
+	/**
+	 * Clear the primary photo for this post
+	 */
+	function clear_primary_photo() {
+		$this->set('pst_fil_file_id', NULL);
+		$this->save();
+	}
+
+	/**
+	 * Get all photos for this post
+	 *
+	 * @return MultiEntityPhoto
+	 */
+	function get_photos() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'post', 'entity_id' => $this->key, 'deleted' => false],
+			['eph_sort_order' => 'ASC']
+		);
+		$photos->load();
+		return $photos;
+	}
+
+	/**
+	 * Get the primary photo EntityPhoto object
+	 *
+	 * @return EntityPhoto|null
+	 */
+	function get_primary_photo() {
+		$file_id = $this->get('pst_fil_file_id');
+		if (!$file_id) return null;
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'post', 'entity_id' => $this->key, 'file_id' => $file_id, 'deleted' => false],
+			[], 1
+		);
+		$photos->load();
+		return $photos->count() > 0 ? $photos->get(0) : null;
+	}
+
 	function permanent_delete($debug=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -95,7 +164,17 @@ function prepare() {
 		foreach($groups as $group){
 			$group->remove_member($this->key);
 		}
-		
+
+		//DELETE ENTITY PHOTOS
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'post', 'entity_id' => $this->key]
+		);
+		$photos->load();
+		foreach($photos as $photo){
+			$photo->permanent_delete();
+		}
+
 		parent::permanent_delete($debug);
 		
 		if($this_transaction){
