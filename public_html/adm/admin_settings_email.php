@@ -619,7 +619,7 @@
 	$templates->load();
 	$numtemplates = $templates->count_all();
 	$outer_optionvals = array('all' => 'All Lists');
-	$outer_optionvals = array_merge($outer_optionvals, $templates->get_dropdown_array());
+	$outer_optionvals += $templates->get_dropdown_array();
 	
 	if($settings->get_setting('default_mailing_list')){
 		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
