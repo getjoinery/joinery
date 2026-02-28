@@ -1,0 +1,57 @@
+{
+    "title": "Image Gallery",
+    "description": "Large image with thumbnail strip. Supports any entity with photos.",
+    "category": "media",
+    "css_framework": "bootstrap",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "photos",
+                "label": "Photos",
+                "type": "hiddeninput",
+                "help": "MultiEntityPhoto object or array of photo data — passed programmatically",
+                "default": ""
+            },
+            {
+                "name": "primary_file_id",
+                "label": "Primary File ID",
+                "type": "hiddeninput",
+                "help": "File ID to show first",
+                "default": ""
+            },
+            {
+                "name": "large_size",
+                "label": "Large Image Size",
+                "type": "textinput",
+                "default": "content"
+            },
+            {
+                "name": "thumbnail_size",
+                "label": "Thumbnail Size",
+                "type": "textinput",
+                "default": "avatar"
+            },
+            {
+                "name": "alt_text",
+                "label": "Default Alt Text",
+                "type": "textinput",
+                "default": ""
+            },
+            {
+                "name": "show_captions",
+                "label": "Show Captions",
+                "type": "checkboxinput",
+                "default": true
+            },
+            {
+                "name": "css_class",
+                "label": "Extra CSS Class",
+                "type": "textinput",
+                "default": ""
+            }
+        ]
+    },
+    "layout_defaults": {
+        "skip_wrapper": true
+    }
+}

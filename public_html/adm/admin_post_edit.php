@@ -7,6 +7,7 @@
 	require_once(PathHelper::getIncludePath('/data/posts_class.php'));
 	require_once(PathHelper::getIncludePath('/data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('/data/content_versions_class.php'));
+	require_once(PathHelper::getIncludePath('/data/files_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -26,6 +27,13 @@
 
 		foreach($editable_fields as $field) {
 			$post->set($field, $_POST[$field]);
+		}
+
+		if($_POST['pst_fil_file_id']){
+			$post->set('pst_fil_file_id', (int)$_POST['pst_fil_file_id']);
+		}
+		else if(empty($_POST['pst_fil_file_id'])){
+			$post->set('pst_fil_file_id', NULL);
 		}
 
 		if(!$post->get('pst_link') || $_SESSION['permission'] == 10){
@@ -116,6 +124,12 @@
 		$override_values['pst_is_on_homepage'] = $pst_is_on_homepage;
 	}
 
+	$files = new MultiFile(
+		array('deleted'=>false, 'picture'=>true),
+		array('file_id' => 'DESC'),
+		NULL, NULL);
+	$files->load();
+
 	$formwriter = $page->getFormWriter('form1', [
 		'model' => $post,
 		'values' => $override_values,
@@ -126,6 +140,11 @@
 
 	$formwriter->textinput('pst_title', 'Post title', [
 		'validation' => ['required' => true, 'minlength' => 10]
+	]);
+
+	$optionvals = $files->get_image_dropdown_array();
+	$formwriter->imageinput('pst_fil_file_id', 'Main image', [
+		'options' => $optionvals
 	]);
 
 	$formwriter->textinput('pst_short_description', 'Short description (optional)');

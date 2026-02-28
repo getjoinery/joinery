@@ -6,6 +6,7 @@
 
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
 	require_once(PathHelper::getIncludePath('/data/posts_class.php'));
+	require_once(PathHelper::getIncludePath('/includes/PhotoHelper.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -26,6 +27,20 @@
 		$post->undelete();
 
 		header("Location: /admin/admin_posts");
+		exit();
+	}
+	else if($_REQUEST['action'] == 'set_primary_photo'){
+		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$post->set_primary_photo((int)$_POST['photo_id']);
+
+		header("Location: /admin/admin_post?pst_post_id=" . $post->key);
+		exit();
+	}
+	else if($_REQUEST['action'] == 'clear_primary_photo'){
+		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$post->clear_primary_photo();
+
+		header("Location: /admin/admin_post?pst_post_id=" . $post->key);
 		exit();
 	}
 
@@ -148,6 +163,25 @@
 			<iframe src="<?php echo htmlspecialchars($post->get_url()); ?>" width="100%" height="500" style="border:none;"></iframe>
 		</div>
 	</div>
+
+	<!-- Post Photos Card -->
+	<?php
+	$post_photos = $post->get_photos();
+	$photo_editable = !$post->get('pst_delete_time') && $_SESSION['permission'] > 4;
+	PhotoHelper::render_photo_card('grid', 'post', $post->key, $post_photos, [
+		'set_primary_url' => '/admin/admin_post?pst_post_id=' . $post->key,
+		'card_title' => 'Post Photos',
+		'editable' => $photo_editable,
+		'primary_file_id' => $post->get('pst_fil_file_id'),
+	]);
+	?>
+
+	<?php if($photo_editable): ?>
+	<?php PhotoHelper::render_photo_scripts('grid', 'post', $post->key, [
+		'set_primary_url' => '/admin/admin_post?pst_post_id=' . $post->key,
+		'confirm_delete_msg' => 'Remove this photo from this post?',
+	]); ?>
+	<?php endif; ?>
 
 	<?php
 

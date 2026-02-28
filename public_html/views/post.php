@@ -64,6 +64,16 @@ $page_vars = $page_vars->data;
 								</div>
 							</div>
 
+							<!-- Post Images -->
+							<?php
+							require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+							echo ComponentRenderer::render(null, 'image_gallery', [
+								'photos' => $post->get_photos(),
+								'primary_file_id' => $post->get('pst_fil_file_id'),
+								'alt_text' => $post->get('pst_title'),
+							]);
+							?>
+
 							<!-- Entry Content -->
 							<div class="entry-content">
 								<div class="mb-5">
