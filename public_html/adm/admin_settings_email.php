@@ -632,7 +632,7 @@
 		$first_template = $templates->get(0);
 		$formwriter->dropinput('default_mailing_list', 'Default mailing list', [
 			'options' => $outer_optionvals,
-			'value' => $first_template,
+			'value' => $first_template->key,
 			'empty_option' => true
 		]);
 	}
