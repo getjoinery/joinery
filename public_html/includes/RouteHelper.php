@@ -552,7 +552,7 @@ class RouteHelper {
         // Extract model and parameters to view scope
         global $is_valid_page;
         if ($model_instance) {
-            $var_name = strtolower($route['model']);
+            $var_name = $route['var_name'] ?? strtolower($route['model']);
             extract([
                 $var_name => $model_instance,
                 'params' => $route_params,
@@ -564,15 +564,15 @@ class RouteHelper {
                 'is_valid_page' => $is_valid_page
             ], EXTR_SKIP);
         }
-        
+
         // Prepare view variables
         $viewVariables = ['params' => $route_params, 'is_valid_page' => $is_valid_page];
 
         if ($model_instance) {
-            // Add model instance with its class name as key (lowercase)
-            // Views expect the variable name to match the lowercase model name
-            // e.g., Page model -> $page, Product model -> $product
-            $modelKey = strtolower($route['model']);
+            // Add model instance with its class name as key
+            // Use var_name if specified, otherwise lowercase model name
+            // e.g., Page model -> $page, MailingList model -> $mailing_list (via var_name)
+            $modelKey = $route['var_name'] ?? strtolower($route['model']);
             $viewVariables[$modelKey] = $model_instance;
         }
 
