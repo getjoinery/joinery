@@ -116,6 +116,14 @@ $page_vars = $page_vars->data;
     <div class="uk-grid-large" data-uk-grid>
       <div class="uk-width-expand@m">
         <div class="uk-article">
+          <?php
+          require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+          echo ComponentRenderer::render(null, 'image_gallery', [
+              'photos' => $event->get_photos(),
+              'primary_file_id' => $event->get('evt_fil_file_id'),
+              'alt_text' => $event->get('evt_name'),
+          ]);
+          ?>
           <h3>Description</h3>
           <?php echo $event->get('evt_description'); ?>
 

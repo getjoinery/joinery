@@ -151,11 +151,14 @@
           <section aria-labelledby="quick-links-title">
             <div class="rounded-lg bg-white overflow-hidden shadow p-6">
 
-				<?php if($picture_link = $event->get_picture_link('content')){ ?>
-					<div class="mb-5">
-					<img src="<?php echo $picture_link; ?>">
-					</div>
-				<?php } ?>
+				<?php
+				require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+				echo ComponentRenderer::render(null, 'image_gallery', [
+					'photos' => $event->get_photos(),
+					'primary_file_id' => $event->get('evt_fil_file_id'),
+					'alt_text' => $event->get('evt_name'),
+				]);
+				?>
 			<h2 class="text-base font-medium text-gray-900" id="description-title">Description</h2>
               <?php echo '<div class="prose">'.$event->get('evt_description').'</div>'; ?>
 

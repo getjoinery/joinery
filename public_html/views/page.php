@@ -49,6 +49,14 @@ $page_vars = $page_vars->data;
 				<div class="row gx-5">
 					<div class="col-lg-12">
 						<div class="bg-white rounded-4 shadow-sm p-4">
+							<?php
+							require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+							echo ComponentRenderer::render(null, 'image_gallery', [
+								'photos' => $page->get_photos(),
+								'primary_file_id' => $page->get('pag_fil_file_id'),
+								'alt_text' => $page->get('pag_title'),
+							]);
+							?>
 							<div class="entry-content">
 								<?php echo $page->get_filled_content(); ?>
 							</div>
