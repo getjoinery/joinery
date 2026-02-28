@@ -60,6 +60,7 @@ class PageContent extends SystemBase {
 		'pac_delete_time' => array('type'=>'timestamp(6)'),
 		'pac_max_width' => array('type'=>'varchar(50)', 'is_nullable'=>true),
 		'pac_max_height' => array('type'=>'varchar(50)', 'is_nullable'=>true),
+		'pac_vertical_margin' => array('type'=>'varchar(20)', 'is_nullable'=>true),
 	);
 
 	public static $json_vars = array('pac_config');

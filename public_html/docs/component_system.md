@@ -211,7 +211,9 @@ The JSON file defines the component metadata and config schema:
 | `title` | Yes | Display name |
 | `description` | No | Description for admins |
 | `category` | No | Grouping category (see categories table above) |
-| `css_framework` | No | Required framework: `bootstrap`, `tailwind`, or omit for universal |
+| `css_framework` | No | Required framework: `bootstrap`, `tailwind`, or omit/`null` for universal |
+| `logic_function` | No | Name of logic function (see [Logic Functions](#6-logic-functions)) |
+| `layout_defaults` | No | Default layout settings (see [Layout Controls](#layout-controls)) |
 | `config_schema` | Yes | Field definitions object |
 
 Component types are automatically discovered during theme sync operations. The JSON file is the single source of truth - component types cannot be created or edited via the admin interface.
@@ -245,6 +247,9 @@ Component instances are configured uses of component types. Stored in `pac_page_
 | `pac_title` | varchar(255) | Admin label |
 | `pac_config` | json | Configured values |
 | `pac_order` | int2 | Display order on page |
+| `pac_max_width` | varchar(50) | Layout: max width CSS value (e.g., `720px`) |
+| `pac_max_height` | varchar(50) | Layout: max height CSS value |
+| `pac_vertical_margin` | varchar(20) | Layout: vertical margin keyword (`none`, `sm`, `md`, `lg`, `xl`) |
 
 ### Loading Components
 
@@ -475,9 +480,48 @@ function recent_posts_logic($config) {
 
 ### Configuring Logic Function
 
-In the component type's config:
-- Set **Logic Function** field to the function name (e.g., `recent_posts_logic`)
-- The corresponding file `logic/components/recent_posts_logic.php` must exist
+In the component type's JSON definition, set the `logic_function` field:
+
+```json
+{
+  "title": "Newsletter Signup",
+  "logic_function": "newsletter_signup_logic",
+  "config_schema": { ... }
+}
+```
+
+ThemeManager syncs this value to `com_logic_function` during theme sync. The corresponding file `logic/components/newsletter_signup_logic.php` must exist.
+
+### Real-World Example: Newsletter Signup
+
+The `newsletter_signup` component demonstrates a logic function that loads data from existing models, checks user state, and returns everything the template needs:
+
+```php
+function newsletter_signup_logic($config) {
+    // Check if feature is enabled
+    $settings = Globalvars::get_instance();
+    if (!$settings->get_setting('mailing_lists_active')) {
+        return ['is_active' => false];
+    }
+
+    // Load mailing list(s) based on config
+    require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
+    $list_mode = $config['list_mode'] ?? 'default';
+
+    // ... resolve lists, check subscriptions, build form action ...
+
+    return [
+        'is_active' => true,
+        'mailing_lists' => $mailing_lists,
+        'form_action' => $form_action,
+        'session' => $session,
+        'user_subscribed_list' => $user_subscribed_list,
+        // ...
+    ];
+}
+```
+
+Key pattern: the logic function returns data — it does **not** handle form submission. The newsletter form posts to the existing `/list/{slug}` or `/lists` endpoints, reusing all existing subscription logic.
 
 ### Error Handling
 
@@ -744,14 +788,23 @@ Dynamic form based on component type:
 
 ## Layout Controls
 
-Component instances have per-instance layout controls: **Width** and **Height**. These appear in the advanced fields section of the admin component edit form.
+Component instances have per-instance layout controls: **Width**, **Height**, and **Vertical Margin**. These appear in the advanced fields section of the admin component edit form.
+
+### Spacing Principle
+
+Components and the layout system have distinct responsibilities:
+
+- **Components own padding** — Internal spacing within the component (e.g., `py-4`, `p-3`) is the template's responsibility
+- **The layout system owns margin** — External spacing between components is controlled by the layout wrapper via the Vertical Margin field
+
+This separation keeps templates focused on their content while giving admins consistent control over how components are spaced on a page.
 
 ### How It Works
 
-Layout values are stored as CSS values directly (`pac_max_width`, `pac_max_height`). NULL means no restriction. When a value is set, `ComponentRenderer` wraps the template output in a lightweight `<div class="component-layout">` with CSS custom properties:
+Layout values are stored on the component instance (`pac_max_width`, `pac_max_height`, `pac_vertical_margin`). When any layout value is set, `ComponentRenderer` wraps the template output in a lightweight `<div class="component-layout">` with CSS custom properties and data attributes:
 
 ```html
-<div class="component-layout" data-maxw style="--cl-max-width: 720px">
+<div class="component-layout" data-maxw data-vmargin="md" style="--cl-max-width: 720px">
     <!-- Template output unchanged -->
     <section class="hero-static">
         <div class="container">...</div>
@@ -759,29 +812,52 @@ Layout values are stored as CSS values directly (`pac_max_width`, `pac_max_heigh
 </div>
 ```
 
-When both values are NULL, **no wrapper is added** -- zero impact on existing pages.
+When all values are NULL/default, **no wrapper is added** — zero impact on existing pages.
 
-### Admin Text Inputs
+### Width and Height
 
 Width and Height are plain text inputs in the advanced fields section. Empty = no restriction (NULL). Any CSS value (e.g., `720px`, `80%`) is stored directly.
 
+### Vertical Margin
+
+Vertical Margin is a dropdown that controls the space above and below the component. It applies the same margin to both top and bottom. There are no side margin controls — side margins are handled by the component template's container.
+
+| Keyword | Value | Typical Use |
+|---------|-------|-------------|
+| Default | (none) | Uses the component type's preferred spacing from `layout_defaults` |
+| None | `0` | No vertical margin |
+| Small | `1rem` (16px) | Tight spacing between related components |
+| Medium | `2rem` (32px) | Standard spacing between sections |
+| Large | `3rem` (48px) | Generous spacing (matches Bootstrap `py-5`) |
+| Extra Large | `5rem` (80px) | Maximum spacing for visual separation |
+
+These values use `rem` units, which are standard CSS and work with any framework or plain HTML5.
+
 ### Layout Defaults
 
-Component types can specify default sizing in their JSON definition. These values pre-fill the text inputs when creating a new component instance:
+Component types can specify default layout values in their JSON definition. These pre-fill the admin fields when creating a new component instance:
 
 ```json
 {
   "title": "Newsletter Signup",
   "layout_defaults": {
-    "container_width": "400px"
+    "container_width": "600px",
+    "vertical_margin": "md"
   },
   "config_schema": { ... }
 }
 ```
 
+| `layout_defaults` Key | Description |
+|------------------------|-------------|
+| `container_width` | Pre-fills Width field |
+| `container_height` | Pre-fills Height field |
+| `vertical_margin` | Pre-fills Vertical Margin dropdown (keyword) |
+| `skip_wrapper` | Opts out of the layout wrapper entirely (see below) |
+
 ### Developer Opt-Out (skip_wrapper)
 
-Component types that need full control over their own layout can set `skip_wrapper: true` in their `layout_defaults`. This skips the auto-wrapper and hides the layout text inputs in the admin form:
+Component types that need full control over their own layout can set `skip_wrapper: true` in their `layout_defaults`. This skips the auto-wrapper and hides the layout fields in the admin form:
 
 ```json
 {
@@ -920,3 +996,5 @@ For sites using legacy content:
 - [FormWriter Documentation](formwriter.md) - Repeater field details
 - [Admin Pages Documentation](admin_pages.md) - Admin interface patterns
 - [Implemented Spec](/specs/implemented/page_component_system.md) - Full specification
+- [Vertical Margin Spec](/specs/implemented/component_vertical_margin.md) - Vertical margin system
+- [Newsletter Signup Spec](/specs/implemented/newsletter_signup_component.md) - Newsletter component (first logic function example)

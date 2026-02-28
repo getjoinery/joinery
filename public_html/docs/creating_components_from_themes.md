@@ -28,55 +28,38 @@ Do not create components for:
 - **Login/registration forms** - Require authentication systems
 - **E-commerce forms** (add to cart, checkout) - Require payment processing
 - **File upload forms** - Require server-side file handling
-- **Any form that submits data** - Unless it links to an existing handler
+- **Any form that submits data** - Unless it posts to an existing route (see Newsletter example below)
 
-### Newsletter Components - Special Case
+### Newsletter Components - Use Built-in Component
 
-Newsletter/subscription sections are common in themes. Instead of embedding a form that requires a subscription handler, **convert these to call-to-action links** that point to the existing list signup page:
+Newsletter/subscription sections are common in themes. **Do not create custom newsletter components** — use the built-in `newsletter_signup` component instead. It renders a functional signup form that posts to existing `/list/{slug}` or `/lists` endpoints, handling all subscription logic including user registration, email validation, and anti-spam protection.
 
-**Original theme HTML (with embedded form):**
-```html
-<section class="newsletter-area">
-    <h3>Subscribe to Newsletter</h3>
-    <form action="/subscribe" method="POST">
-        <input type="email" name="email" placeholder="Enter email">
-        <button type="submit">Subscribe</button>
-    </form>
-</section>
-```
+When extracting a newsletter section from a theme, replace it with a `newsletter_signup` component render call:
 
-**Convert to presentation-only (with link):**
 ```php
-<?php
-$title = $component_config['title'] ?? 'Subscribe to Newsletter';
-$signup_url = $component_config['signup_url'] ?? '/list/newsletter';
-$button_text = $component_config['button_text'] ?? 'Subscribe Now';
-?>
-
-<section class="newsletter-area">
-    <h3><?php echo htmlspecialchars($title); ?></h3>
-    <a href="<?php echo htmlspecialchars($signup_url); ?>" class="btn btn-primary">
-        <?php echo htmlspecialchars($button_text); ?>
-    </a>
-</section>
+// Replace theme newsletter HTML with the built-in component
+echo ComponentRenderer::render(null, 'newsletter_signup', [
+    'heading' => 'Subscribe to Newsletter',
+    'list_mode' => 'default',
+    'compact_mode' => true,
+    'button_text' => 'Subscribe',
+]);
 ```
 
-**JSON schema for newsletter CTA:**
-```json
-{
-  "fields": [
-    {"name": "title", "label": "Title", "type": "textinput", "default": "Subscribe to Newsletter"},
-    {"name": "signup_url", "label": "Signup Page URL", "type": "textinput", "help": "URL to mailing list signup page (e.g., /list/newsletter)", "default": "/list/newsletter"},
-    {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Subscribe Now"}
-  ]
-}
+Or create a database instance via the admin interface and render by slug:
+
+```php
+echo ComponentRenderer::render('homepage-newsletter');
 ```
 
-The existing `/list/{slug}` page handles all subscription logic including:
-- User registration (for new visitors)
-- Email validation
-- Anti-spam protection
-- Subscribe/unsubscribe functionality
+The `newsletter_signup` component supports:
+- **Three list modes:** `default` (site default list), `specific` (choose a list), `all` (show all lists with checkboxes)
+- **Compact mode:** Inline email + button layout
+- **Standard mode:** Full form with name, email, timezone, and privacy consent
+- **Anti-spam:** Automatic captcha/honeypot for non-logged-in users
+- **Background styling:** Solid color or gradient options
+
+See the [Newsletter Signup Spec](/specs/implemented/newsletter_signup_component.md) for full details.
 
 ### Safe Component Types
 
@@ -93,6 +76,7 @@ These are generally safe to create as presentation-only:
 - **Social links** - Icon links to social profiles
 - **Page titles/breadcrumbs** - Navigation displays
 - **Call-to-action sections** - Text + link buttons
+- **Newsletter signup** - Use the built-in `newsletter_signup` component (see above)
 
 ---
 
@@ -431,7 +415,7 @@ Components attached to a page render automatically when using `ComponentRenderer
    - `<article>` for self-contained content
    - Proper heading hierarchy
 
-6. **Container width and max height are controlled automatically by the renderer.** Templates should continue using `<div class="container">` as normal. Admins can override the width/height per component instance without template changes. If a component type needs to manage its own layout entirely, set `"skip_wrapper": true` in the type's `layout_defaults` JSON -- the renderer will skip auto-wrapping and the template can use `$container_class`, `$container_style`, and `$max_height_style` variables directly.
+6. **Layout controls (width, height, vertical margin) are handled by the renderer.** Templates should continue using `<div class="container">` as normal. Components own their internal padding (e.g., `py-4`); the layout system owns external margin between components via the Vertical Margin control. Admins can override width, height, and margin per instance without template changes. If a component type needs to manage its own layout entirely, set `"skip_wrapper": true` in the type's `layout_defaults` JSON — the renderer will skip auto-wrapping and the template can use `$container_class`, `$container_style`, and `$max_height_style` variables directly.
 
 ### Schema Guidelines
 
@@ -654,9 +638,19 @@ function recent_posts_logic($config) {
 }
 ```
 
-### Step 2: Set Logic Function in Component Type
+### Step 2: Set Logic Function in JSON Definition
 
-In admin, set **Logic Function** field to: `recent_posts_logic`
+Add `logic_function` to the component's JSON file:
+
+```json
+{
+  "title": "Recent Posts",
+  "logic_function": "recent_posts_logic",
+  "config_schema": { ... }
+}
+```
+
+ThemeManager syncs this to `com_logic_function` during theme sync.
 
 ### Step 3: Access Data in Template
 

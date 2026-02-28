@@ -3851,7 +3851,17 @@ class AjaxSearchSelect {
         }
 
         if($correct_answer){
-            $output = $this->textbox("antispam_question", "Type '".strtolower($correct_answer)."' into this field (to prove you are human)");
+            $output = $this->textinput("antispam_question", "Type '".strtolower($correct_answer)."' into this field (to prove you are human)", [
+                'required' => true,
+                'validation' => [
+                    'required' => true,
+                    'matches' => 'antispam_question_answer',
+                    'messages' => [
+                        'required' => 'This field is required.',
+                        'matches' => 'You must type the correct word here',
+                    ],
+                ],
+            ]);
             $output .= $this->hiddeninput("antispam_question_answer", ['value' => strtolower($correct_answer)]);
             return $output;
         }

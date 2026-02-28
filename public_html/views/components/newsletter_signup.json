@@ -1,0 +1,114 @@
+{
+    "title": "Newsletter Signup",
+    "description": "Mailing list signup form with captcha support",
+    "category": "conversion",
+    "css_framework": null,
+    "logic_function": "newsletter_signup_logic",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput",
+                "default": "Stay in Touch"
+            },
+            {
+                "name": "subheading",
+                "label": "Supporting Text",
+                "type": "textarea",
+                "default": "Sign up for our newsletter to get the latest updates."
+            },
+            {
+                "name": "list_mode",
+                "label": "List Mode",
+                "type": "dropinput",
+                "default": "default",
+                "options": {
+                    "default": "Default Mailing List",
+                    "specific": "Specific List (by ID)",
+                    "all": "Show All Public Lists"
+                },
+                "help": "'Default' uses the system default_mailing_list setting. 'Specific' uses the List ID below. 'All' shows checkboxes for every public list."
+            },
+            {
+                "name": "mailing_list_id",
+                "label": "Mailing List ID",
+                "type": "textinput",
+                "default": "",
+                "help": "Only used when List Mode is 'Specific'. Enter the mailing list ID number."
+            },
+            {
+                "name": "button_text",
+                "label": "Button Text",
+                "type": "textinput",
+                "default": "Subscribe"
+            },
+            {
+                "name": "show_name_fields",
+                "label": "Show Name Fields",
+                "type": "checkboxinput",
+                "default": true,
+                "help": "Show first/last name fields for non-logged-in users. If unchecked, only email is shown."
+            },
+            {
+                "name": "compact_mode",
+                "label": "Compact Layout",
+                "type": "checkboxinput",
+                "default": false,
+                "help": "Renders a single-row inline form (email + button only). Overrides Show Name Fields."
+            },
+            {
+                "name": "background_type",
+                "label": "Background",
+                "type": "dropinput",
+                "default": "none",
+                "options": {
+                    "none": "None (transparent)",
+                    "color": "Solid Color",
+                    "gradient": "Gradient"
+                }
+            },
+            {
+                "name": "background_color",
+                "label": "Background Color",
+                "type": "textinput",
+                "help": "Hex color for solid background",
+                "default": "#f8f9fa"
+            },
+            {
+                "name": "gradient_start",
+                "label": "Gradient Start",
+                "type": "textinput",
+                "default": "#667eea"
+            },
+            {
+                "name": "gradient_end",
+                "label": "Gradient End",
+                "type": "textinput",
+                "default": "#764ba2"
+            },
+            {
+                "name": "text_color",
+                "label": "Text Color",
+                "type": "textinput",
+                "help": "Hex color for heading/body text. Leave empty for default.",
+                "default": ""
+            },
+            {
+                "name": "text_align",
+                "label": "Text Alignment",
+                "type": "dropinput",
+                "default": "center",
+                "options": {
+                    "left": "Left",
+                    "center": "Center",
+                    "right": "Right"
+                }
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "600px",
+        "max_height": "default"
+    }
+}

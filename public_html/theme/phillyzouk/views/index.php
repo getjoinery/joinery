@@ -130,6 +130,24 @@ $page->public_header(array(
 </section>
 End Main Blog List Area -->
 
+<!-- Newsletter Signup -->
+<div class="container" style="margin-top: 3rem; margin-bottom: 3rem;">
+<?php
+require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+echo ComponentRenderer::render(null, 'newsletter_signup', [
+	'heading' => 'Stay in the Loop',
+	'subheading' => 'Sign up for our newsletter to get the latest updates on events, classes, and socials.',
+	'list_mode' => 'default',
+	'background_type' => 'color',
+	'background_color' => '#f5f3f3',
+	'text_color' => '',
+	'button_text' => 'Subscribe',
+	'compact_mode' => true,
+]);
+?>
+</div>
+<!-- End Newsletter Signup -->
+
 <!-- Start Events Section -->
 <section class="latest-project-area pb-70">
     <div class="container">

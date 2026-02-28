@@ -688,9 +688,11 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      */
     protected function outputHiddenInput($name, $options) {
         $value = $options['value'] ?? '';
+        $id = $options['id'] ?? $name;
 
         $html = '<input type="hidden"';
         $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
         $html .= '>';
 
