@@ -15,7 +15,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	if($get_vars['hash']){
 		$user = new User($get_vars['user'], TRUE);
 
-		if(!$get_vars['hash'] == $user->get('usr_authhash')){
+		if($get_vars['hash'] !== $user->get('usr_authhash')){
 			echo "Users don't match.  You cannot edit someone else's info.";
 			exit;
 		}

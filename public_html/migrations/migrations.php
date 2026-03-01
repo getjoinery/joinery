@@ -1197,3 +1197,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Fix unsubscribe URL in email footer template (v84) ==========
+	$migration = array();
+	$migration['database_version'] = '84';
+	$migration['test'] = "SELECT count(1) as count FROM emt_email_templates WHERE emt_body LIKE '%/profile/mailing_lists_preferences%'";
+	$migration['migration_sql'] = "UPDATE emt_email_templates SET emt_body = replace(emt_body, '/profile/mailing_lists_preferences', '/profile/contact_preferences') WHERE emt_body LIKE '%/profile/mailing_lists_preferences%'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

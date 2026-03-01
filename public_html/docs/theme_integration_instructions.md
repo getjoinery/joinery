@@ -216,6 +216,24 @@ class PublicPage extends PublicPageBase {
         <?php
     }
 
+    // CRITICAL: Override BeginPage/EndPage for content containers
+    // See "Content Container Pattern" section below for details
+    public static function BeginPage($title = '', $options = array()) {
+        // Use your theme's container classes here
+        $output = '<section class="content-area"><div class="container">';
+        if ($title) {
+            $output .= '<h2>' . $title . '</h2>';
+            if (isset($options['subtitle']) && $options['subtitle']) {
+                $output .= '<p>' . $options['subtitle'] . '</p>';
+            }
+        }
+        return $output;
+    }
+
+    public static function EndPage($options = array()) {
+        return '</div></section>';
+    }
+
     public function public_footer($options = array()) {
         $settings = Globalvars::get_instance();
         ?>
@@ -237,6 +255,29 @@ class PublicPage extends PublicPageBase {
 }
 ?>
 ```
+
+#### Content Container Pattern (BeginPage / EndPage)
+
+Base views (in `/views/`) call `PublicPage::BeginPage()` and `PublicPage::EndPage()` to wrap their content. These methods provide the content container — margins, max-width, padding — that gives standard pages a reasonable layout. Theme-specific views (in `/theme/*/views/`) manage their own full-width sections and do **not** call `BeginPage`/`EndPage`.
+
+**How it works:**
+- `public_header()` / `public_footer()` — Output the HTML skeleton, navbar, and footer. No content container.
+- `BeginPage()` / `EndPage()` — Output the content container wrapper. Called by base views only.
+
+**Why this separation matters:**
+- Base views (profile pages, list pages, cart, etc.) automatically get proper margins from `BeginPage`/`EndPage` without needing theme-specific overrides for each page.
+- Theme-specific views (homepage, blog, events) use their own `<section>` and `<div class="container">` elements for full-width layouts, hero images, etc.
+
+**What to override:**
+Your theme's `BeginPage`/`EndPage` should use your CSS framework's container classes. Examples:
+
+| Framework | BeginPage output | EndPage output |
+|-----------|-----------------|----------------|
+| Bootstrap | `<section class="pt-100 pb-70"><div class="container">` | `</div></section>` |
+| UIKit | `<div class="uk-section"><div class="uk-container">` | `</div></div>` |
+| Tailwind | `<div class="max-w-7xl mx-auto px-4 py-16">` | `</div>` |
+
+**Fallback:** `PublicPageBase` provides a basic default container (`max-width: 1140px; margin: 0 auto; padding: 2rem 1rem`) so pages are never completely unstyled, but themes should always override with framework-appropriate markup.
 
 ### Step 7: Extract and Create Homepage Template
 
@@ -261,6 +302,8 @@ $page->public_header(array(
 
 <!-- PASTE ACTUAL HTML FROM SOURCE TEMPLATE HERE -->
 <!-- Example from index-3.html lines 271-700 -->
+<!-- Theme views manage their own <section> and container markup -->
+<!-- Do NOT call BeginPage/EndPage here — those are for base views only -->
 
 <!-- CRITICAL: Update all image paths -->
 <!-- FROM: assets/img/home-three/blog-item/1.jpg -->
@@ -270,6 +313,8 @@ $page->public_header(array(
 $page->public_footer();
 ?>
 ```
+
+**Note:** Theme-specific views (homepage, blog, events, posts) use their own `<section>` wrappers with full-width layouts. They call `public_header()` / `public_footer()` but do **not** call `BeginPage()` / `EndPage()`. The `BeginPage`/`EndPage` container is only used by base views in `/views/` (profile pages, cart, lists, etc.) that don't have theme-specific overrides. See the "Content Container Pattern" section in Step 6.
 
 ### Step 8: Set File Permissions (CRITICAL!)
 
@@ -457,6 +502,7 @@ Before declaring theme complete:
 - [ ] FormWriter.php extends correct base class
 - [ ] PublicPage.php extends PublicPageBase
 - [ ] PublicPage implements getTableClasses() method
+- [ ] PublicPage overrides BeginPage()/EndPage() with theme-appropriate container markup
 - [ ] public_header() uses get_menu_data() for navigation
 - [ ] **public_header() includes user menu (login/logout/profile links)**
 - [ ] **public_header() includes shopping cart icon with item count**
