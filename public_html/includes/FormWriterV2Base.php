@@ -3932,7 +3932,7 @@ class AjaxSearchSelect {
      */
     public function honeypot_hidden_input($label = '', $type = ''){
         $settings = Globalvars::get_instance();
-        if($settings->get_setting('use_honeypot') != 'Yes'){
+        if(!$settings->get_setting('use_honeypot')){
             return '';
         }
         $field_name = 'website_url';
@@ -3954,7 +3954,7 @@ class AjaxSearchSelect {
      */
     public function honeypot_check($data, $type = ''){
         $settings = Globalvars::get_instance();
-        if($settings->get_setting('use_honeypot') != 'Yes'){
+        if(!$settings->get_setting('use_honeypot')){
             return true;
         }
         $field_name = 'website_url';
@@ -3964,6 +3964,69 @@ class AjaxSearchSelect {
         if(isset($data[$field_name]) && $data[$field_name] != ''){
             return false;
         }
+        return true;
+    }
+
+    /**
+     * Verify a CAPTCHA response (hCaptcha or Google reCAPTCHA)
+     *
+     * @param array $data POST data containing captcha response
+     * @param string $type Optional type (e.g., 'blog' to check use_captcha_comments setting)
+     * @return boolean True if CAPTCHA verification passes or captcha is disabled
+     */
+    public function captcha_check($data, $type = NULL) {
+        $settings = Globalvars::get_instance();
+
+        if ($type == 'blog') {
+            $use_captcha = $settings->get_setting('use_captcha_comments');
+        } else {
+            $use_captcha = $settings->get_setting('use_captcha');
+        }
+
+        if (!$use_captcha) {
+            return true;
+        }
+
+        if ($settings->get_setting('hcaptcha_public') && $settings->get_setting('hcaptcha_private')) {
+            $captcha_response = $data['h-captcha-response'] ?? '';
+            if (empty($captcha_response)) {
+                return false;
+            }
+
+            $verify = curl_init();
+            curl_setopt($verify, CURLOPT_URL, "https://hcaptcha.com/siteverify");
+            curl_setopt($verify, CURLOPT_POST, true);
+            curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query([
+                'secret' => $settings->get_setting('hcaptcha_private'),
+                'response' => $captcha_response,
+            ]));
+            curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
+            $response = curl_exec($verify);
+            curl_close($verify);
+            $responseData = json_decode($response);
+            return !empty($responseData->success);
+        } elseif ($settings->get_setting('captcha_public') && $settings->get_setting('captcha_private')) {
+            $captcha_response = $data['g-recaptcha-response'] ?? '';
+            if (empty($captcha_response)) {
+                return false;
+            }
+
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, "https://www.google.com/recaptcha/api/siteverify");
+            curl_setopt($ch, CURLOPT_HEADER, 0);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+            curl_setopt($ch, CURLOPT_POST, 1);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, [
+                'secret' => $settings->get_setting('captcha_private'),
+                'response' => $captcha_response,
+                'remoteip' => $_SERVER['REMOTE_ADDR'],
+            ]);
+            $resp = json_decode(curl_exec($ch));
+            curl_close($ch);
+            return !empty($resp->success);
+        }
+
+        // No captcha provider configured
         return true;
     }
 
@@ -3978,11 +4041,11 @@ class AjaxSearchSelect {
 
         // Check if captcha is enabled for this context
         if($type == 'blog'){
-            if($settings->get_setting('use_captcha_comments') != 'Yes'){
+            if(!$settings->get_setting('use_captcha_comments')){
                 return '';
             }
         } else {
-            if($settings->get_setting('use_captcha') != 'Yes'){
+            if(!$settings->get_setting('use_captcha')){
                 return '';
             }
         }

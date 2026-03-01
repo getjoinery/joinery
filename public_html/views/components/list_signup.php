@@ -1,6 +1,6 @@
 <?php
 /**
- * Newsletter Signup Component
+ * List Signup Component
  *
  * Renders a mailing list signup form that posts to the existing
  * /list/{slug} or /lists endpoints. Uses no framework-specific CSS
@@ -9,12 +9,12 @@
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
- *   $component_data - Data from newsletter_signup_logic()
+ *   $component_data - Data from list_signup_logic()
  *   $component - PageContent object (the instance)
  *   $component_type_record - Component object (the type definition)
  *   $component_slug - The component's slug
  *
- * @version 1.2.0
+ * @version 1.4.0
  */
 
 // Show configuration errors to admins, render nothing for regular visitors
@@ -22,7 +22,7 @@ $config_errors = $component_data['config_errors'] ?? [];
 if (empty($component_data['is_active']) || empty($component_data['mailing_lists'])) {
 	if (!empty($config_errors) && isset($_SESSION['permission']) && $_SESSION['permission'] >= 5) {
 		echo '<div style="border: 2px dashed #dc3545; background: #fff3f3; padding: 1rem 1.5rem; margin: 1rem 0; border-radius: 6px; font-size: 0.9rem;">';
-		echo '<strong style="color: #dc3545;">Newsletter Signup Component — Configuration Issue</strong>';
+		echo '<strong style="color: #dc3545;">List Signup Component — Configuration Issue</strong>';
 		echo '<ul style="margin: 0.5rem 0 0; padding-left: 1.5rem; color: #555;">';
 		foreach ($config_errors as $err) {
 			echo '<li>' . $err . '</li>';
@@ -76,13 +76,20 @@ $already_subscribed = ($list_mode !== 'all') && $is_logged_in && $member_of_list
 
 // FormWriter setup
 require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
-$form_id = 'newsletter_signup' . ($component_slug ? '_' . $component_slug : '_' . uniqid());
-$formwriter = new FormWriter($form_id);
+$form_id = 'list_signup' . ($component_slug ? '_' . $component_slug : '_' . uniqid());
+$form_options = [
+	'method' => 'POST',
+	'action' => $form_action,
+];
+if ($compact_mode) {
+	$form_options['class'] = 'lsu-compact';
+}
+$formwriter = new FormWriter($form_id, $form_options);
 
 $settings = Globalvars::get_instance();
 ?>
 
-<section class="newsletter-signup" style="padding: 1.5rem 0; <?php echo $bg_style; ?>">
+<section class="list-signup" style="padding: 1.5rem 0; <?php echo $bg_style; ?>">
 	<div style="max-width: 600px; margin: 0 auto; padding: 0 1rem; text-align: <?php echo $align; ?>;">
 		<?php if ($heading): ?>
 			<h2 style="margin: 0 0 0.5rem;"><?php echo htmlspecialchars($heading); ?></h2>
@@ -96,48 +103,69 @@ $settings = Globalvars::get_instance();
 			<p>You are already subscribed.</p>
 		<?php elseif ($compact_mode): ?>
 			<style>
-			.nsu-compact .form-group,
-			.nsu-compact .mb-3 { margin-bottom: 0 !important; }
-			.nsu-compact-row { display: flex; gap: 0.5rem; justify-content: <?php echo $align; ?>; flex-wrap: wrap; }
-			.nsu-compact-row .nsu-email-wrap { flex: 1; max-width: 300px; min-width: 200px; }
-			.nsu-antispam { text-align: center; margin-top: 0.5rem; }
-			.nsu-antispam .form-group,
-			.nsu-antispam .mb-3 { margin: 0 !important; display: inline-block; }
-			.nsu-antispam input[type="text"] { width: 140px !important; padding: 0.25rem 0.5rem; font-size: 0.85em; }
+			.lsu-compact .form-group,
+			.lsu-compact .mb-3 { margin-bottom: 0 !important; }
+			.lsu-compact-row { display: flex; gap: 0.5rem; justify-content: <?php echo $align; ?>; flex-wrap: wrap; align-items: center; }
+			.lsu-compact-row .lsu-email-wrap { flex: 1; max-width: 300px; min-width: 200px; }
+			.lsu-antispam { text-align: center; margin-top: 0.5rem; }
+			.lsu-antispam .form-group,
+			.lsu-antispam .mb-3 { margin: 0 !important; display: inline-block; }
+			.lsu-antispam input[type="text"] { width: 140px !important; padding: 0.25rem 0.5rem; font-size: 0.85em; }
+			.lsu-list-name { margin: 0; opacity: 0.85; font-size: 0.95em; }
+			.lsu-compact .lsu-checkbox-list { text-align: left; display: inline-block; margin-bottom: 0.5rem; }
+			.lsu-compact .lsu-checkbox-list .form-group,
+			.lsu-compact .lsu-checkbox-list .mb-3,
+			.lsu-compact .lsu-checkbox-list .form-check { margin-bottom: 0.25rem !important; }
 			</style>
 			<?php
-			$formwriter->begin_form([
-				'method' => 'POST',
-				'action' => $form_action,
-				'class' => 'nsu-compact',
-			]);
+			$formwriter->begin_form();
 
-			if ($list_mode !== 'all' && $mailing_lists) {
-				$formwriter->hiddeninput('mlt_mailing_list_id', ['value' => $mailing_lists->key]);
-				$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', ['value' => 1]);
-			}
-			?>
-			<div class="nsu-compact-row">
-				<div class="nsu-email-wrap">
+			if ($is_logged_in): ?>
+				<?php if ($list_mode === 'all'): ?>
+					<div class="lsu-checkbox-list">
+					<?php
+					$formwriter->checkboxList('new_list_subscribes', 'Choose your lists:', [
+						'options' => $list_options,
+						'checked' => $user_subscribed_list,
+					]);
+					$formwriter->hiddeninput('form_submitted', ['value' => 1]);
+					?>
+					</div>
+				<?php else: ?>
+					<p class="lsu-list-name">Subscribe to <strong><?php echo htmlspecialchars($mailing_lists->get('mlt_name')); ?></strong></p>
+					<?php
+					$formwriter->hiddeninput('mlt_mailing_list_id', ['value' => $mailing_lists->key]);
+					$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', ['value' => 1]);
+					?>
+				<?php endif; ?>
+				<div class="lsu-compact-row">
+					<?php $formwriter->submitbutton('submit_button', $button_text); ?>
+				</div>
+			<?php else: ?>
 				<?php
-				$formwriter->textinput('usr_email', '', [
-					'maxlength' => 64,
-					'required' => true,
-					'type' => 'email',
-					'placeholder' => 'Your email address',
-				]);
+				if ($list_mode !== 'all' && $mailing_lists) {
+					$formwriter->hiddeninput('mlt_mailing_list_id', ['value' => $mailing_lists->key]);
+					$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', ['value' => 1]);
+				}
 				?>
+				<div class="lsu-compact-row">
+					<div class="lsu-email-wrap">
+					<?php
+					$formwriter->textinput('usr_email', '', [
+						'maxlength' => 64,
+						'required' => true,
+						'type' => 'email',
+						'placeholder' => 'Your email address',
+					]);
+					?>
+					</div>
+					<?php $formwriter->submitbutton('submit_button', $button_text); ?>
 				</div>
 				<?php
-				$formwriter->submitbutton('submit_button', $button_text);
-				?>
-			</div>
-			<?php
-			if (!$is_logged_in) {
 				// Render antispam inline with placeholder instead of label
 				$antispam_answer = strtolower($settings->get_setting('anti_spam_answer') ?: '');
 				if ($antispam_answer) {
-					echo '<div class="nsu-antispam">';
+					echo '<div class="lsu-antispam">';
 					$formwriter->textinput('antispam_question', '', [
 						'placeholder' => "Type '" . $antispam_answer . "' here",
 						'required' => true,
@@ -155,17 +183,19 @@ $settings = Globalvars::get_instance();
 				}
 				$formwriter->honeypot_hidden_input();
 				$formwriter->captcha_hidden_input();
-			}
+				?>
+			<?php endif;
 
 			$formwriter->end_form();
 			?>
 		<?php else: ?>
 			<?php
-			$formwriter->begin_form([
-				'method' => 'POST',
-				'action' => $form_action,
-			]);
+			$formwriter->begin_form();
 			?>
+
+			<?php if ($is_logged_in && $list_mode !== 'all' && $mailing_lists): ?>
+				<p>Subscribe to <strong><?php echo htmlspecialchars($mailing_lists->get('mlt_name')); ?></strong></p>
+			<?php endif; ?>
 
 			<?php if (!$is_logged_in): ?>
 				<?php if ($show_name_fields): ?>
