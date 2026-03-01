@@ -561,6 +561,12 @@ The config schema is a JSON object defining the admin form fields for a componen
 | `options` | For dropinput/radioinput | Key-value pairs for selection fields |
 | `fields` | For repeater | Nested field definitions |
 | `advanced` | No | If `true`, field is hidden behind "Show advanced fields" toggle |
+| `placeholder` | No | Example text shown in empty text/number fields |
+| `required` | No | If `true`, field must have a value to save. Adds `*` to label. |
+| `min` | For numberinput/repeater | Minimum value (numberinput) or minimum rows (repeater) |
+| `max` | For numberinput/repeater | Maximum value (numberinput) or maximum rows (repeater) |
+| `step` | For numberinput | Step increment for number input |
+| `item_label` | For repeater | Label for each row (e.g., "Feature" → "Feature 1", "Feature 2") |
 
 ### Default Values
 
@@ -615,6 +621,55 @@ Fields that users rarely need to change can be marked as `"advanced": true`. The
 - Keep content fields (text, images, main links) as regular
 - If a field has a sensible default that works 80%+ of the time, consider marking it advanced
 
+### Field Validation
+
+The `required` property prevents saving components with empty essential fields:
+
+```json
+{
+  "fields": [
+    {"name": "heading", "label": "Heading", "type": "textinput", "required": true},
+    {"name": "columns", "label": "Columns", "type": "numberinput", "min": 1, "max": 6, "step": 1, "default": 3}
+  ]
+}
+```
+
+**How validation works:**
+- `required` adds an HTML `required` attribute for client-side browser validation plus server-side validation before save
+- Required fields display `*` after the label
+- `numberinput` `min`/`max`/`step` provide browser-native range validation via HTML5
+- Validation errors prevent save and re-display the form with entered values preserved
+- `required` on a repeater means at least one item must exist
+- `required` on a checkbox is ignored (false is a valid state)
+
+### Repeater Options
+
+Repeaters support `item_label`, `min`, and `max` properties for better admin UX:
+
+```json
+{
+  "name": "features",
+  "label": "Features",
+  "type": "repeater",
+  "item_label": "Feature",
+  "min": 1,
+  "max": 12,
+  "fields": [
+    {"name": "title", "label": "Title", "type": "textinput", "required": true, "placeholder": "Feature name"},
+    {"name": "description", "label": "Description", "type": "textarea"},
+    {"name": "count", "label": "Count", "type": "numberinput", "min": 0, "max": 100}
+  ]
+}
+```
+
+| Property | Description |
+|----------|-------------|
+| `item_label` | Label for each row (e.g., "Feature 1", "Feature 2"). Omit for no label. |
+| `min` | Minimum number of rows. Pre-populates empty rows on new instances. Disables remove at limit. |
+| `max` | Maximum number of rows. Disables add button at limit. |
+
+Sub-fields within repeaters support the same schema properties as top-level fields: `help`, `default`, `placeholder`, `required`, `advanced`, and type-specific options like `min`/`max`/`step` for `numberinput`.
+
 ### Accessing Defaults Programmatically
 
 For testing and utility scripts, the `Component` class provides a method to extract defaults:
@@ -648,9 +703,10 @@ $all_fields = $component_type->get_default_config(true);
 | `fileinput` | File upload | - |
 | `imageinput` | Image upload | - |
 | `imageselector` | Image picker with gallery | `button_text`, `grid_columns`, etc. |
+| `numberinput` | Numeric input with constraints | `min`, `max`, `step` |
 | `colorpicker` | Color picker with theme swatches | `max_swatches`, `sort`, etc. |
 | `hiddeninput` | Hidden field | - |
-| `repeater` | Repeatable field group | `fields` |
+| `repeater` | Repeatable field group | `fields`, `item_label`, `min`, `max` |
 
 ### Field Options
 

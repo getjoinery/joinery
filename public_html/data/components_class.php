@@ -6,7 +6,7 @@
  * Each component type has a template file, config schema, and optional logic function.
  *
  * @see /specs/page_component_system.md
- * @version 1.3.0
+ * @version 1.4.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -200,6 +200,8 @@ class Component extends SystemBase {
 			'fileinput' => 'File Upload',
 			'imageinput' => 'Image Upload',
 			'imageselector' => 'Image Selector (picker)',
+			'colorpicker' => 'Color Picker',
+			'numberinput' => 'Number Input',
 			'hiddeninput' => 'Hidden Field',
 			'repeater' => 'Repeater (grouped fields)',
 		);
