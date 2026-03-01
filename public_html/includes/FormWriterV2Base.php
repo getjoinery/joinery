@@ -3843,12 +3843,7 @@ class AjaxSearchSelect {
      */
     public function antispam_question_input($type=NULL){
         $settings = Globalvars::get_instance();
-        if($type == 'blog'){
-            $correct_answer = $settings->get_setting('anti_spam_answer_comments');
-        }
-        else{
-            $correct_answer = $settings->get_setting('anti_spam_answer');
-        }
+        $correct_answer = $settings->get_setting('anti_spam_answer');
 
         if($correct_answer){
             $output = $this->textinput("antispam_question", "Type '".strtolower($correct_answer)."' into this field (to prove you are human)", [
@@ -3878,12 +3873,7 @@ class AjaxSearchSelect {
      */
     public function antispam_question_validate($validation_rules, $type=NULL){
         $settings = Globalvars::get_instance();
-        if($type == 'blog'){
-            $correct_answer = $settings->get_setting('anti_spam_answer_comments');
-        }
-        else{
-            $correct_answer = $settings->get_setting('anti_spam_answer');
-        }
+        $correct_answer = $settings->get_setting('anti_spam_answer');
 
         if($correct_answer){
             $validation_rules['antispam_question']['required']['value'] = 'true';
@@ -3901,12 +3891,7 @@ class AjaxSearchSelect {
      */
     public static function antispam_question_check($postvars, $type=NULL){
         $settings = Globalvars::get_instance();
-        if($type == 'blog'){
-            $correct_answer = $settings->get_setting('anti_spam_answer_comments');
-        }
-        else{
-            $correct_answer = $settings->get_setting('anti_spam_answer');
-        }
+        $correct_answer = $settings->get_setting('anti_spam_answer');
 
         if($correct_answer){
             if(strtolower($postvars['antispam_question']) == strtolower($correct_answer)){
