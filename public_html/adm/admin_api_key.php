@@ -106,10 +106,10 @@
 	else if(!$api_key->get('apk_is_active')){
 		echo '<strong>Status:</strong> <b>Inactive</b>';
 	}
-	else if($api_key->get('apk_expires_time') && $api_key->get('apk_expires_time') < $now){
+	else if($api_key->get('apk_expires_time') && $api_key->get('apk_expires_time') < $now_utc){
 		echo '<strong>Status:</strong> <b>Expired</b>';
 	}
-	else if($api_key->get('apk_start_time') && $api_key->get('apk_start_time') > $now){
+	else if($api_key->get('apk_start_time') && $api_key->get('apk_start_time') > $now_utc){
 		echo '<strong>Status:</strong> <b>Scheduled</b>';
 	}
 	else{

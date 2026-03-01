@@ -154,7 +154,7 @@ if (empty($active_tasks)) {
 
 		// Last run display
 		$last_run = $task->get('sct_last_run_time');
-		$last_run_display = $last_run ? htmlspecialchars($task->get_timezone_corrected_time('sct_last_run_time', $session, 'M j, Y g:i A T')) : '<em>Never</em>';
+		$last_run_display = $last_run ? htmlspecialchars(LibraryFunctions::convert_time($task->get('sct_last_run_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T')) : '<em>Never</em>';
 
 		// Next run display
 		$next_run_dt = $task->get_next_run_time();

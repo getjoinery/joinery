@@ -667,23 +667,6 @@ abstract class SystemBase {
 		$this->set($field, $this->get($field) & ~$flag);
 	}
 
-	function get_timezone_corrected_time($key, $session, $format='Y-m-d h:i A T') {
-		$date = new DateTime($this->get($key), new DateTimeZone('UTC'));
-		$date->setTimeZone(new DateTimeZone($session->get_timezone()));
-		return $date->format($format);
-	}
-
-	function get_timezone_corrected_datetime($key, $session, $format='Y-m-d h:i A T') {
-		$date = new DateTime($this->get($key), new DateTimeZone('UTC'));
-		$date->setTimeZone(new DateTimeZone($session->get_timezone()));
-		return $date;
-	}
-
-	function get_timezone_agnostic_date($key, $session, $format='Y-m-d h:i A T') { 
-		$date = new DateTime($this->get($key, $session), new DateTimeZone($session->get_timezone()));
-		return $date->format($format);
-	}
-
 	function call_and_cache($method_name, $args=array()) { 
 		if (!isset($this->cached_references[$method_name])) { 
 			$this->cached_references[$method_name] = call_user_func_array(array('self', $method_name), $args);

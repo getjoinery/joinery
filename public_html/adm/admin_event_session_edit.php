@@ -105,15 +105,15 @@
 			}
 
 			if($latest_session->get('evs_start_time')){
-				$start_time = LibraryFunctions::time_shift($latest_session->get('evs_start_time'), $_POST['num_days'], 'c');
-				$start_time_local = LibraryFunctions::time_shift($latest_session->get('evs_start_time_local'), $_POST['num_days'], 'c');
+				$start_time = LibraryFunctions::time_shift($latest_session->get('evs_start_time'), $_POST['num_days'] . ' days', 'c');
+				$start_time_local = LibraryFunctions::time_shift($latest_session->get('evs_start_time_local'), $_POST['num_days'] . ' days', 'c');
 				$event_session->set('evs_start_time', $start_time);
 				$event_session->set('evs_start_time_local', $start_time_local);
 			}
 
 			if($latest_session->get('evs_end_time')){
-				$end_time = LibraryFunctions::time_shift($latest_session->get('evs_end_time'), $_POST['num_days'], 'c');
-				$end_time_local = LibraryFunctions::time_shift($latest_session->get('evs_end_time_local'), $_POST['num_days'], 'c');
+				$end_time = LibraryFunctions::time_shift($latest_session->get('evs_end_time'), $_POST['num_days'] . ' days', 'c');
+				$end_time_local = LibraryFunctions::time_shift($latest_session->get('evs_end_time_local'), $_POST['num_days'] . ' days', 'c');
 				$event_session->set('evs_end_time', $end_time);
 				$event_session->set('evs_end_time_local', $end_time_local);
 			}

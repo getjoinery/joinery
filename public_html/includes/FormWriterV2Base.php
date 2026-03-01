@@ -3134,14 +3134,15 @@ class AjaxSearchSelect {
             return NULL;
         }
 
-        // Combine hour, minute, ampm into time string
+        // Convert hour, minute, ampm directly to 24h format
         $hour = intval($post_vars[$hour_field]);
         $minute = str_pad($post_vars[$minute_field], 2, '0', STR_PAD_LEFT);
-        $ampm = $post_vars[$ampm_field];
-        $time_string = $hour . ':' . $minute . $ampm;
+        $ampm = strtolower($post_vars[$ampm_field]);
+        $hour24 = ($ampm === 'pm') ? ($hour == 12 ? 12 : $hour + 12) : ($hour == 12 ? 0 : $hour);
+        $time_db = sprintf('%02d:%s:00', $hour24, $minute);
 
         // Combine date and time
-        $time_combined = $post_vars[$date_field] . ' ' . LibraryFunctions::toDBTime($time_string);
+        $time_combined = $post_vars[$date_field] . ' ' . $time_db;
 
         // Convert to UTC if requested
         if($to_utc){
