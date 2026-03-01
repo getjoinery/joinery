@@ -92,7 +92,7 @@ function get_discount($full_price){
 			return false;
 		}
 		
-		$current_time = LibraryFunctions::get_current_time('UTC');
+		$current_time = gmdate('Y-m-d H:i:s');
 		if($this->get('ccd_start_time') && $this->get('ccd_start_time') < $current_time){
 			return false;
 		}

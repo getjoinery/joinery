@@ -222,11 +222,6 @@ class TableName extends SystemBase {
     function create_url($input_url); // Create URL-safe slug
     function get_url($format = 'short'); // Get record's URL
     
-    // Timezone Methods
-    function get_timezone_corrected_time($key, $session, $format = 'Y-m-d h:i A T');
-    function get_timezone_corrected_datetime($key, $session, $format = 'Y-m-d h:i A T');
-    function get_timezone_agnostic_date($key, $session, $format = 'Y-m-d h:i A T');
-    
     // Authentication & Security
     function authenticate_read($data);
     function authenticate_write($data);
@@ -388,6 +383,24 @@ For complete guidance on creating admin interface pages, including required setu
 
 
 ## Common Tasks & Quick Reference
+
+### Time/Date Handling
+
+**All times in the database are stored in UTC.** Use `convert_time()` for all display formatting:
+
+```php
+// Display a DB time in user's timezone
+LibraryFunctions::convert_time($obj->get('field'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T')
+
+// Shift a time by any interval (accepts any DateTime::modify string)
+LibraryFunctions::time_shift($time_string, '7 days', $format)  // also: '30 minutes', '-2 hours', '1 year'
+
+// Compare times — use string comparison (DB times are ISO-formatted UTC)
+$now_utc = gmdate('Y-m-d H:i:s');
+if ($obj->get('start_time') > $now_utc) { /* future */ }
+```
+
+**Do NOT use `new DateTime()` directly** except when a third-party library requires DateTime objects (e.g., Spatie calendar-links).
 
 ### File Loading Methods
 

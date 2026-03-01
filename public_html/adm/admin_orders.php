@@ -28,14 +28,14 @@
 	
 	if($startdate){
 		$display_startdate = $startdate;	
-		$time_combined = $startdate . ' ' . LibraryFunctions::toDBTime('12:01:00 am');
+		$time_combined = $startdate . ' 00:01:00';
 		$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
 		$search_criteria['created_after'] = $utc_time;
 	}
 
 	if($enddate){
 		$display_enddate = $enddate;
-		$time_combined = $enddate . ' ' . LibraryFunctions::toDBTime('12:59:59 pm');
+		$time_combined = $enddate . ' 12:59:59';
 		$utc_time = LibraryFunctions::convert_time($time_combined, $session->get_timezone(),  'UTC', 'c');
 		$search_criteria['created_before'] = $utc_time;		
 	}	

@@ -89,21 +89,6 @@ class LibraryFunctions {
 		}
 	}
 
-	static function datetoISO8601($date){
-		$datearr = explode('/',$date);
-
-		if(count($datearr) == 1){
-			$datearr = explode('-',$date);
-		}
-
-		if(count($datearr) == 1){
-			return FALSE;
-		}
-
-		$newdate = $datearr[2]. '-' .$datearr[0]. '-' .$datearr[1];
-		return $newdate;
-	}
-	
 	static function display_404_page(){
 		$settings = Globalvars::get_instance();
 
@@ -374,10 +359,6 @@ class LibraryFunctions {
 			}
 		}
 		return $arr;
-	}
-
-	static function DatetimeIntoDaysAgo($dt) {
-		return intval(time() / 86400) - intval($dt->format('U') / 86400);
 	}
 
 	static function VariableLengthHash($str, $len, $salt=NULL) {
@@ -655,76 +636,6 @@ class LibraryFunctions {
 		return sprintf("%d:%02d %s", $hours, $minutes, $period);
 	}
 
-	//converts display time (HH:MM am/pm) to server time (HH:MM, 24 hour)
-	static function toDBTime($timeconv){
-
-		if(is_null($timeconv) || $timeconv == ""){
-			return("00:00:00");
-		}
-
-		$amsnip = "";
-		$pmsnip = "";
-
-		$timeconv = str_replace("AM", "am", $timeconv);
-		$timeconv = str_replace("PM", "pm", $timeconv);
-
-		//FIX FOR 12 AM AND 12 PM
-		if($timeconv == "12:00 am" || $timeconv == "12:00am"){
-			return ("00:00:00");
-		}
-
-		if($timeconv == "12:00 pm" || $timeconv == "12:00pm"){
-			return ("12:00:00");
-		}
-
-		$amsnip = strstr($timeconv, "am");
-		$pmsnip = strstr($timeconv, "pm");
-
-		if($amsnip == "am"){
-			$timeconv = str_replace($amsnip, "", $timeconv);
-
-			$hours = trim(strtok($timeconv, ":"));
-			$mins = trim(strtok(":"));
-
-			if($hours < 10){
-				$hours = '0'.$hours;
-			}
-			$timeconv = $hours . ":" . $mins . ":00";
-		}
-		else if($pmsnip == "pm"){
-			$timeconv = str_replace($pmsnip, "", $timeconv);
-			$timeconv = trim($timeconv);
-
-			$hours = trim(strtok($timeconv, ":"));
-			if($hours != 12){
-				$hours = $hours + 12;
-			}
-			$mins = trim(strtok(":"));
-
-			$timeconv = $hours . ":" . $mins . ":00";
-		}
-		else{
-			return FALSE;
-		}
-
-		return $timeconv;
-	}
-
-	static function getTimezoneFromPoint($lat, $long){
-
-		$ch =curl_init();
-		$url =  "http://www.earthtools.org/timezone/$lat/$long";
-		curl_setopt($ch, CURLOPT_TIMEOUT, 3000);
-		curl_setopt($ch, CURLOPT_URL, $url);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		$data = curl_exec($ch);
-		curl_close($ch);
-		$pattern = '/<offset>(.*)<\/offset>/';
-		preg_match($pattern, $data, $matches);
-		return($matches[1]);
-
-	}
-
 	static function TransformLatLonToProjected($lat, $lon) {
 		$sql = 'SELECT
 		x(ST_Transform(ST_SetSRID(ST_MakePoint(?, ?),4269),2163)),
@@ -771,105 +682,6 @@ class LibraryFunctions {
 		return FALSE;
 	}
 
-	//GET CURRENT TIME OBJECT IN SPECIFIED TIMEZONE
-	static function get_current_time_obj($tz){
-		
-		$dt = new DateTime('now', new DateTimeZone($tz)); //first argument "must" be a string
-		
-		/*
-		require_once("Date.php");
-		date_default_timezone_set($tz);
-		$d = new Date();
-		*/
-
-		return ($dt);
-
-	}
-
-	//GET TIME OBJECT IN SPECIFIED TIMEZONE
-	static function get_time_obj($time, $tz){
-		
-		$dt = new DateTime($time, new DateTimeZone($tz)); //first argument "must" be a string
-		
-		/*
-		require_once("Date.php");
-		date_default_timezone_set($tz);
-		$d = new Date();
-		*/
-
-		return $dt;
-
-	}
-
-	//GET CURRENT TIMEZONE ABBREVIATION FOR GIVEN TIME AND TIMEZONE
-	static function get_time_abbr($tz, $time){
-		
-		$dt = new DateTime($time, new DateTimeZone($tz)); //first argument "must" be a string
-		
-		return $dt->format('T') ;
-		/*
-		require_once("Date.php");
-
-		$d = new Date();
-		$d->setDate($time);
-		$t = new Date_TimeZone($tz);
-		$abbr = $t->getShortName($d);
-
-		return ($abbr);
-		*/
-
-	}
-
-	//GET CURRENT TIME IN SPECIFIED TIMEZONE
-	static function get_current_time($tz, $format='Y-m-d, H:i:s'){
-		
-		$dt = new DateTime('now', new DateTimeZone($tz)); //first argument "must" be a string
-		
-		return $dt->format($format) ;		
-		
-		/*
-		require_once("Date.php");
-		date_default_timezone_set($tz);
-		$d = new Date();
-
-		return ($d->format($format));
-		*/
-
-	}
-
-	//GET TIME IN NEW FORMAT
-	static function reformat_time($time, $format='Y-m-d, H:i:s'){
-		if(is_null($time)){
-			return FALSE;
-		}
-
-		$dt = new DateTime($time, new DateTimeZone('UTC')); //first argument "must" be a string
-		
-		return $dt->format($format) ;	
-
-		/*
-		require_once("Date.php");
-
-		$d = new Date();
-		$d->setDate($time);
-
-		return ($d->format($format));
-		*/
-
-	}
-
-	static function format_date_and_time($date, $time, $session) {
-		if ($date && $time) {
-			return LibraryFunctions::convert_time(
-				LibraryFunctions::datetoISO8601($date) . ' ' . LibraryFunctions::toDBTime($time),
-				$session->get_timezone(), 'UTC');
-		} else if ($date) {
-			return LibraryFunctions::convert_time(
-				LibraryFunctions::datetoISO8601($date) . ' ' . LibraryFunctions::toDBTime('12:00am'),
-				$session->get_timezone(), 'UTC');
-		}
-	}
-
 	//CONVERT TIME FROM ONE TIMEZONE TO ANOTHER
 	static function convert_time($starttime, $fromtz, $totz, $format='M j, Y g:i a T'){
 		if(is_null($starttime)){
@@ -893,32 +705,18 @@ class LibraryFunctions {
 		return $dt->format($format) ;
 	}
 	
-	//RETURN NEW TIME X DAYS FROM INPUT TIME
-	static function time_shift($starttime, $days=7, $format='M j, Y g:i a T'){ 
+	//RETURN NEW TIME SHIFTED BY INTERVAL FROM INPUT TIME
+	static function time_shift($starttime, $interval='7 days', $format='M j, Y g:i a T'){
 		if(is_null($starttime)){
 			return FALSE;
 		}
-		
-		$dt = new DateTime($starttime); //first argument "must" be a string
-		$interval = 'P'.$days.'D';
-		$dt->add(new DateInterval($interval));
-		
-		return $dt->format($format) ;		
-		
+
+		$dt = new DateTime($starttime);
+		$dt->modify($interval);
+
+		return $dt->format($format);
 	}	
 	
-
-	//RETURN DIFFERENCE BETWEEN TWO DATES
-	/*
-	static function diff_mins($starttime, $endtime, $format = '%h'){
-
-		$s = new DateTime($starttime,new DateTimeZone('UTC'));
-		$e = new DateTime($endtime,new DateTimeZone('UTC'));
-		$diff = $s->diff($e, TRUE);
-		return $diff->format($format);
-
-	}
-	*/
 
 	//RETURN LAT/LONG FOR CURRENT USER
 	static function get_current_lat_lon(){

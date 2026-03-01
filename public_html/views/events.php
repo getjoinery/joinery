@@ -88,7 +88,7 @@ $page_vars = $page_vars->data;
 
 					<?php
 					foreach ($page_vars['events'] as $event){
-						$now = LibraryFunctions::get_current_time_obj('UTC');
+						$now_utc = gmdate('Y-m-d H:i:s');
 						$is_virtual = (is_object($event) && isset($event->is_virtual) && $event->is_virtual);
 
 						// Unified field accessor
@@ -112,7 +112,6 @@ $page_vars = $page_vars->data;
 							$pic = $event->get_picture_link('profile_card');
 						}
 
-						$event_time = $evt_start_time ? LibraryFunctions::get_time_obj($evt_start_time, 'UTC') : null;
 						?>
 						<article class="portfolio-item col-md-4 col-sm-6 col-12">
 							<div class="grid-inner">
@@ -144,7 +143,7 @@ $page_vars = $page_vars->data;
 										$instructor_str = '';
 
 										// Get date
-										if($evt_start_time && $event_time && $event_time > $now){
+										if($evt_start_time && $evt_start_time > $now_utc){
 											if ($is_virtual) {
 												$date_str = date('M j, Y', strtotime($evt_start_time));
 											} else {

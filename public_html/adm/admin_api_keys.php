@@ -37,7 +37,7 @@ $page->tableheader($headers, $table_options, $pager);
 
 foreach ($api_keys as $api_key){
 	$owner = new User($api_key->get('apk_usr_user_id'), TRUE);
-	$now = LibraryFunctions::get_current_time_obj('UTC');
+	$now_utc = gmdate('Y-m-d H:i:s');
 	$rowvalues = array();
 
 	array_push($rowvalues,  " <a href='/admin/admin_api_key?apk_api_key_id=$api_key->key'>".$api_key->get('apk_name')."</a>");
@@ -54,10 +54,10 @@ foreach ($api_keys as $api_key){
 	else if(!$api_key->get('apk_is_active')){
 		array_push($rowvalues, '<b>Inactive</b>');
 	}
-	else if($api_key->get('apk_expires_time') && $api_key->get('apk_expires_time') < $now){
+	else if($api_key->get('apk_expires_time') && $api_key->get('apk_expires_time') < $now_utc){
 		array_push($rowvalues, '<b>Expired</b>');
 	}
-	else if($api_key->get('apk_start_time') && $api_key->get('apk_start_time') > $now){
+	else if($api_key->get('apk_start_time') && $api_key->get('apk_start_time') > $now_utc){
 		array_push($rowvalues, '<b>Scheduled</b>');
 	}
 	else{
