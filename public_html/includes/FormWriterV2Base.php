@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.3.0
+ * @version 2.4.0
+ * @changelog 2.4.0 - Added numberinput(), repeater min/max/item_label, sub-field schema passthrough
  * @changelog 2.3.0 - Added colorpicker() method with theme color extraction and custom picker
  * @changelog 2.2.0 - Added imageselector() method for visual image picker with modal
  * @changelog 2.1.0 - Added automatic edit_primary_key_value hidden field support
@@ -777,6 +778,18 @@ abstract class FormWriterV2Base {
     public function textinput($name, $label = '', $options = []) {
         $this->registerField($name, 'text', $label, $options);
         $this->outputTextInput($name, $label, $options);
+    }
+
+    /**
+     * Create a number input field
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options (supports min, max, step, placeholder, required)
+     */
+    public function numberinput($name, $label = '', $options = []) {
+        $this->registerField($name, 'number', $label, $options);
+        $this->outputNumberInput($name, $label, $options);
     }
 
     /**
@@ -4078,14 +4091,27 @@ class AjaxSearchSelect {
         $items = $options['value'] ?? [];
         $subfields = $options['fields'] ?? [];
         $add_label = $options['add_label'] ?? '+ Add Item';
+        $item_label = $options['item_label'] ?? null;
+        $min = isset($options['min']) ? intval($options['min']) : null;
+        $max = isset($options['max']) ? intval($options['max']) : null;
 
         // Ensure items is an array
         if (!is_array($items)) {
             $items = [];
         }
 
+        // Pre-populate minimum rows for new instances with no data
+        if (empty($items) && $min !== null && $min > 0) {
+            for ($i = 0; $i < $min; $i++) {
+                $items[] = [];
+            }
+        }
+
         // Repeater container - data-name used by JavaScript for targeting
-        echo '<div class="repeater mb-4" data-name="' . htmlspecialchars($name) . '">';
+        echo '<div class="repeater mb-4" data-name="' . htmlspecialchars($name) . '"';
+        if ($min !== null) echo ' data-min="' . $min . '"';
+        if ($max !== null) echo ' data-max="' . $max . '"';
+        echo '>';
         echo '<label class="form-label fw-bold">' . htmlspecialchars($label) . '</label>';
 
         // Help text if provided
@@ -4097,7 +4123,7 @@ class AjaxSearchSelect {
 
         // Render existing rows from saved data
         foreach ($items as $index => $item) {
-            $this->repeater_row($name, $index, $subfields, $item);
+            $this->repeater_row($name, $index, $subfields, $item, $item_label);
         }
 
         echo '</div>';
@@ -4109,7 +4135,7 @@ class AjaxSearchSelect {
 
         // Hidden template for JavaScript cloning - __INDEX__ replaced with actual index
         echo '<template class="repeater-template">';
-        $this->repeater_row($name, '__INDEX__', $subfields, []);
+        $this->repeater_row($name, '__INDEX__', $subfields, [], $item_label);
         echo '</template>';
 
         echo '</div>';
@@ -4127,29 +4153,74 @@ class AjaxSearchSelect {
         if (!$repeater_js_loaded) {
             echo '<script type="text/javascript">
 document.addEventListener("DOMContentLoaded", function() {
-    // Add row - delegated to handle dynamically added repeaters
+    // Update button disabled states and row numbering
+    function updateRepeaterState(repeater) {
+        var items = repeater.querySelector(".repeater-items");
+        var count = items.querySelectorAll(".repeater-row").length;
+        var min = repeater.dataset.min ? parseInt(repeater.dataset.min) : null;
+        var max = repeater.dataset.max ? parseInt(repeater.dataset.max) : null;
+
+        // Disable add button at max
+        var addBtn = repeater.querySelector(".repeater-add");
+        if (addBtn) {
+            addBtn.disabled = (max !== null && count >= max);
+        }
+
+        // Disable remove buttons at min
+        var removeBtns = items.querySelectorAll(".repeater-remove");
+        removeBtns.forEach(function(btn) {
+            btn.disabled = (min !== null && count <= min);
+        });
+
+        // Re-number row labels (if item_label is used)
+        var labels = items.querySelectorAll(".repeater-row-number");
+        labels.forEach(function(label, i) {
+            label.textContent = " " + (i + 1);
+        });
+    }
+
+    // Add row - with max enforcement
     document.addEventListener("click", function(e) {
         if (e.target.classList.contains("repeater-add")) {
             var repeater = e.target.closest(".repeater");
-            var template = repeater.querySelector(".repeater-template");
             var items = repeater.querySelector(".repeater-items");
-            var nextIndex = items.querySelectorAll(".repeater-row").length;
+            var max = repeater.dataset.max;
+            var currentCount = items.querySelectorAll(".repeater-row").length;
 
-            // Clone template and replace __INDEX__ with actual index
+            if (max && currentCount >= parseInt(max)) {
+                return;
+            }
+
+            var template = repeater.querySelector(".repeater-template");
+            var nextIndex = currentCount;
             var clone = template.content.cloneNode(true);
             var row = clone.querySelector(".repeater-row");
             var html = row.outerHTML.replace(/__INDEX__/g, nextIndex);
 
             items.insertAdjacentHTML("beforeend", html);
+            updateRepeaterState(repeater);
         }
     });
 
-    // Remove row - delegated for dynamically added rows
+    // Remove row - with min enforcement
     document.addEventListener("click", function(e) {
         if (e.target.classList.contains("repeater-remove")) {
+            var repeater = e.target.closest(".repeater");
+            var items = repeater.querySelector(".repeater-items");
+            var min = repeater.dataset.min;
+            var currentCount = items.querySelectorAll(".repeater-row").length;
+
+            if (min && currentCount <= parseInt(min)) {
+                return;
+            }
+
             e.target.closest(".repeater-row").remove();
+            updateRepeaterState(repeater);
         }
     });
+
+    // Initialize button states on page load for repeaters with min/max
+    document.querySelectorAll(".repeater[data-min], .repeater[data-max]").forEach(updateRepeaterState);
 });
 </script>';
             $repeater_js_loaded = true;
@@ -4162,15 +4233,16 @@ document.addEventListener("DOMContentLoaded", function() {
      * Each row contains all sub-fields defined in the schema plus a remove button.
      * Called by repeater() for each existing item and once for the JS template.
      *
-     * @param string     $name      Parent repeater field name
-     * @param int|string $index     Row index (integer for real rows, '__INDEX__' for template)
-     * @param array      $subfields Sub-field definitions from schema (type uses FormWriter method names)
-     * @param array      $values    Current values for this row (empty for template)
+     * @param string      $name       Parent repeater field name
+     * @param int|string  $index      Row index (integer for real rows, '__INDEX__' for template)
+     * @param array       $subfields  Sub-field definitions from schema (type uses FormWriter method names)
+     * @param array       $values     Current values for this row (empty for template)
+     * @param string|null $item_label Optional label for row numbering (e.g., "Feature" → "Feature 1")
      * @return void
      *
      * @see Page Component System spec: /specs/page_component_system.md
      */
-    protected function repeater_row($name, $index, $subfields, $values) {
+    protected function repeater_row($name, $index, $subfields, $values, $item_label = null) {
         // Separate regular and advanced fields
         $regular_fields = [];
         $advanced_fields = [];
@@ -4183,13 +4255,26 @@ document.addEventListener("DOMContentLoaded", function() {
         }
 
         echo '<div class="repeater-row card card-body mb-2" data-index="' . htmlspecialchars($index) . '">';
+
+        // Show item label if provided (e.g., "Feature 1", "Feature 2")
+        if ($item_label) {
+            $display_number = ($index === '__INDEX__') ? '' : ' ' . ($index + 1);
+            echo '<div class="d-flex justify-content-between align-items-center mb-2">';
+            echo '<small class="fw-semibold text-muted repeater-row-label">'
+                . htmlspecialchars($item_label)
+                . '<span class="repeater-row-number">' . $display_number . '</span>'
+                . '</small>';
+            echo '</div>';
+        }
+
         echo '<div class="row align-items-end">';
 
         // Helper to render a field
         $render_subfield = function($subfield, $name, $index, $values, $col_class) {
             $field_name = $name . '[' . $index . '][' . $subfield['name'] . ']';
-            $field_value = $values[$subfield['name']] ?? '';
+            $field_value = $values[$subfield['name']] ?? ($subfield['default'] ?? '');
             $method = $subfield['type'] ?? 'textinput';
+            $subfield_label = $subfield['label'] ?? '';
 
             echo '<div class="' . $col_class . '">';
 
@@ -4199,6 +4284,25 @@ document.addEventListener("DOMContentLoaded", function() {
                 'model' => false,
                 'validation' => false
             ];
+
+            // Pass through common schema properties
+            $passthrough_props = ['placeholder', 'required', 'min', 'max', 'step'];
+            foreach ($passthrough_props as $prop) {
+                if (isset($subfield[$prop])) {
+                    $field_options[$prop] = $subfield[$prop];
+                }
+            }
+
+            // Map help to helptext for FormWriter compatibility
+            if (isset($subfield['help'])) {
+                $field_options['help'] = $subfield['help'];
+                $field_options['helptext'] = $subfield['help'];
+            }
+
+            // Add required indicator to label
+            if (!empty($subfield['required'])) {
+                $subfield_label .= ' *';
+            }
 
             // Merge in any options from the schema
             if (isset($subfield['options'])) {
@@ -4212,9 +4316,9 @@ document.addEventListener("DOMContentLoaded", function() {
 
             // Call the appropriate FormWriter method
             if (method_exists($this, $method)) {
-                $this->$method($field_name, $subfield['label'] ?? '', $field_options);
+                $this->$method($field_name, $subfield_label, $field_options);
             } else {
-                $this->textinput($field_name, $subfield['label'] ?? '', $field_options);
+                $this->textinput($field_name, $subfield_label, $field_options);
             }
 
             echo '</div>';

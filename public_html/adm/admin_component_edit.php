@@ -118,20 +118,48 @@ if ($_POST && !$loading_version) {
 
 	$content->set_config($config);
 
-	try {
-		$content->prepare();
-		$content->save();
+	// Validate required fields
+	$validation_errors = [];
+	if ($component_type_id && !empty($schema_fields)) {
+		foreach ($schema_fields as $field) {
+			if (!empty($field['required'])) {
+				$field_name = $field['name'];
+				$field_type = $field['type'] ?? 'textinput';
+				$value = $config[$field_name] ?? '';
 
-		// Redirect based on context: back to page if attached, otherwise to components list
-		$page_id = $content->get('pac_pag_page_id');
-		if ($page_id) {
-			LibraryFunctions::redirect('/admin/admin_page?pag_page_id=' . $page_id);
-		} else {
-			LibraryFunctions::redirect('/admin/admin_components');
+				if ($field_type === 'repeater') {
+					if (empty($value) || !is_array($value) || count($value) === 0) {
+						$validation_errors[] = ($field['label'] ?? $field_name) . ' is required';
+					}
+				} elseif ($field_type === 'checkboxinput') {
+					// Checkboxes always valid (false is a valid value)
+				} else {
+					if (is_string($value) && trim($value) === '') {
+						$validation_errors[] = ($field['label'] ?? $field_name) . ' is required';
+					}
+				}
+			}
 		}
-		exit();
-	} catch (Exception $e) {
-		$error_message = $e->getMessage();
+	}
+
+	if (!empty($validation_errors)) {
+		$error_message = implode('; ', $validation_errors);
+	} else {
+		try {
+			$content->prepare();
+			$content->save();
+
+			// Redirect based on context: back to page if attached, otherwise to components list
+			$page_id = $content->get('pac_pag_page_id');
+			if ($page_id) {
+				LibraryFunctions::redirect('/admin/admin_page?pag_page_id=' . $page_id);
+			} else {
+				LibraryFunctions::redirect('/admin/admin_components');
+			}
+			exit();
+		} catch (Exception $e) {
+			$error_message = $e->getMessage();
+		}
 	}
 }
 
@@ -297,15 +325,36 @@ if ($current_type_id) {
 			$field_options = [
 				'value' => $current_config[$field_name] ?? $field_default,
 				'help' => $field_help,
+				'helptext' => $field_help,
 				'model' => false,
 				'validation' => false
 			];
 
+			// Pass through common schema properties
+			if (isset($field['placeholder'])) {
+				$field_options['placeholder'] = $field['placeholder'];
+			}
+			if (!empty($field['required'])) {
+				$field_options['required'] = true;
+				$field_label .= ' *';
+			}
+
 			// Handle different field types
 			if ($field_type === 'repeater') {
 				$field_options['fields'] = $field['fields'] ?? [];
-				$field_options['add_label'] = '+ Add ' . $field_label;
+				$field_options['add_label'] = '+ Add ' . ($field['item_label'] ?? $field_label);
+				if (isset($field['item_label'])) $field_options['item_label'] = $field['item_label'];
+				if (isset($field['min'])) $field_options['min'] = $field['min'];
+				if (isset($field['max'])) $field_options['max'] = $field['max'];
 				$formwriter->repeater($field_name, $field_label, $field_options);
+			} elseif ($field_type === 'numberinput') {
+				$number_options = ['min', 'max', 'step'];
+				foreach ($number_options as $opt) {
+					if (isset($field[$opt])) {
+						$field_options[$opt] = $field[$opt];
+					}
+				}
+				$formwriter->numberinput($field_name, $field_label, $field_options);
 			} elseif ($field_type === 'dropinput' && isset($field['options'])) {
 				$field_options['options'] = $field['options'];
 				$formwriter->dropinput($field_name, $field_label, $field_options);

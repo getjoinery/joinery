@@ -4,7 +4,7 @@
  *
  * Bootstrap-themed form field output
  *
- * @version 2.0.0
+ * @version 2.1.0
  */
 
 require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
@@ -75,6 +75,9 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         if (!empty($options['onchange'])) {
             $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
         }
+        if (!empty($options['required'])) {
+            $html .= ' required';
+        }
 
         $html .= '>';
 
@@ -82,6 +85,86 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         if ($prepend) {
             $html .= '</div>';  // Close input-group
         }
+
+        // Display any errors for this field
+        if ($has_errors) {
+            foreach ($this->errors[$name] as $error) {
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        // Display help text if provided
+        if (!empty($options['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        }
+
+        $html .= '</div>';
+
+        // Either echo immediately or store for deferred output
+        if ($this->use_deferred_output) {
+            $this->deferred_output[$name] = $html;
+        } else {
+            echo $html;
+        }
+    }
+
+    /**
+     * Output a number input field with Bootstrap styling
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options (supports min, max, step, placeholder, required, helptext)
+     */
+    protected function outputNumberInput($name, $label, $options) {
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $placeholder = $options['placeholder'] ?? '';
+        $class = $options['class'] ?? 'form-control';
+        $id = $options['id'] ?? $name;
+
+        // Determine if field has errors
+        $has_errors = isset($this->errors[$name]);
+        if ($has_errors) {
+            $class .= ' is-invalid';
+        }
+
+        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
+
+        // Output label
+        if ($label) {
+            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        }
+
+        // Output input
+        $html .= '<input type="number"';
+        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' inputmode="numeric"';
+
+        if ($placeholder && !$value) {
+            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        }
+        if (isset($options['min'])) {
+            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
+        }
+        if (isset($options['max'])) {
+            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
+        }
+        if (isset($options['step'])) {
+            $html .= ' step="' . htmlspecialchars($options['step']) . '"';
+        }
+        if (!empty($options['readonly'])) {
+            $html .= ' readonly';
+        }
+        if (!empty($options['disabled'])) {
+            $html .= ' disabled';
+        }
+        if (!empty($options['required'])) {
+            $html .= ' required';
+        }
+
+        $html .= '>';
 
         // Display any errors for this field
         if ($has_errors) {
