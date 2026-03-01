@@ -355,20 +355,18 @@ abstract class PublicPageBase {
 	}
 	
 	public static function BeginPage($title='', $options=array()) {
-		$output = '';
+		$output = '<div style="max-width: 1140px; margin: 0 auto; padding: 2rem 1rem;">';
 		if($title){
 			$output .= '<h2>'.$title.'</h2>';
-			if($options['subtitle']){
+			if(isset($options['subtitle']) && $options['subtitle']){
 				$output .= '<p>'.$options['subtitle'].'</p>';
 			}
-			$output .= '';
 		}
 		return $output;
-	}	
+	}
 
 	public static function EndPage($options=array()) {
-		$output = ''; 
-		return $output;
+		return '</div>';
 	}	
 
 	public static function BeginPanel($options=array()) {

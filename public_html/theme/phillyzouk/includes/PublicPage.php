@@ -134,6 +134,21 @@ class PublicPage extends PublicPageBase {
         <?php
     }
 
+    public static function BeginPage($title = '', $options = array()) {
+        $output = '<section class="main-content-area pt-100 pb-70"><div class="container">';
+        if ($title) {
+            $output .= '<h2>' . $title . '</h2>';
+            if (isset($options['subtitle']) && $options['subtitle']) {
+                $output .= '<p>' . $options['subtitle'] . '</p>';
+            }
+        }
+        return $output;
+    }
+
+    public static function EndPage($options = array()) {
+        return '</div></section>';
+    }
+
     public function public_footer($options = array()) {
         $settings = Globalvars::get_instance();
         ?>
