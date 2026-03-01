@@ -86,7 +86,6 @@
 				'comments_unregistered_users_container',
 				'default_comment_status_container',
 				'comment_notification_emails_container',
-				'anti_spam_answer_comments_container',
 				'use_captcha_comments_container',
 				'blog_footer_text_container'
 			];
@@ -918,10 +917,6 @@
 
 	$formwriter->textinput('comment_notification_emails', 'Emails to receive comment notifications (separate with comma)', [
 		'value' => $settings->get_setting('comment_notification_emails')
-	]);
-
-	$formwriter->textinput('anti_spam_answer_comments', 'Comment anti spam word (blank for none)', [
-		'value' => $settings->get_setting('anti_spam_answer')
 	]);
 
 	$formwriter->dropinput('use_captcha_comments', 'Use captcha on comments', [
