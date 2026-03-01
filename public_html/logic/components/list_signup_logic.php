@@ -1,15 +1,15 @@
 <?php
 /**
- * Newsletter Signup Component Logic
+ * List Signup Component Logic
  *
  * Resolves mailing list(s) based on config and checks subscription status.
  * Called by ComponentRenderer at render time.
  *
  * @param array $config Component configuration
  * @return array Data for the template
- * @version 1.1.0
+ * @version 1.2.0
  */
-function newsletter_signup_logic($config) {
+function list_signup_logic($config) {
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
