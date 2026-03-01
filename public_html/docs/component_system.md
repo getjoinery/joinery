@@ -176,6 +176,29 @@ Built-in categories (from `Component::get_categories()`):
 | `layout` | Layout & Spacing |
 | `custom` | Custom & Freeform |
 
+### Core Component Types
+
+Built-in component types available in `/views/components/`:
+
+| Type Key | Category | Description | Framework |
+|----------|----------|-------------|-----------|
+| `hero_static` | hero | Hero section with heading, subheading, background, CTA | Bootstrap |
+| `feature_grid` | features | Grid of icon + title + description items | Bootstrap |
+| `cta_banner` | conversion | Full-width call-to-action banner | Bootstrap |
+| `list_signup` | conversion | Newsletter/mailing list signup with logic function | Bootstrap |
+| `custom_html` | custom | Raw HTML for advanced users | None |
+| `page_title` | layout | Page title with optional breadcrumbs | Bootstrap |
+| `image_gallery` | media | Image gallery (programmatic rendering) | Bootstrap |
+| `text_block` | content | Heading with rich text content | HTML5 |
+| `text_with_image` | content | Text alongside image with flexbox layout | HTML5 |
+| `accordion` | content | Collapsible sections using `<details>`/`<summary>` | HTML5 |
+| `tabs` | content | Tabbed content with ARIA markup | HTML5 |
+| `video_embed` | media | Responsive YouTube/Vimeo embed | HTML5 |
+| `spacer` | layout | Vertical spacing between components | HTML5 |
+| `divider` | layout | Horizontal divider line | HTML5 |
+
+Themes can add additional component types prefixed with the theme name (e.g., `linka_featured_card`). These are discovered automatically during theme sync.
+
 ### Creating a Component Type
 
 **Method 1: JSON Definition Files (Recommended)**

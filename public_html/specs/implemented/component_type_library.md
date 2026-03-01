@@ -4,9 +4,22 @@ This document defines the planned component types for the page builder system. E
 
 **Related:**
 - [Component System Documentation](/docs/component_system.md)
-- [Component Field Enhancements](/specs/component_field_enhancements.md)
+- [Component Field Enhancements](/specs/implemented/component_field_enhancements.md)
 
-**Last Updated:** March 2026 - Trimmed to high-value types. Removed hero_slider, stats_counter, testimonial_slider, logo_wall, pricing_table, image_gallery (admin), recent_posts, upcoming_events.
+**Last Updated:** March 2026 - Updated for pure HTML5 templates (no framework dependencies). Trimmed to high-value types.
+
+---
+
+## Design Principles
+
+All new components use **pure HTML5 with inline styles** — no Bootstrap or other framework classes. This ensures components render correctly regardless of the active theme's CSS framework.
+
+- Use semantic HTML5 elements (`<section>`, `<details>`, `<figure>`, etc.)
+- Use inline `style` attributes for configurable properties (colors, alignment, sizing)
+- Use a scoped `<style>` block per template for layout rules (flexbox, responsive breakpoints)
+- Use `max-width` + `margin: 0 auto` for content centering instead of `.container`
+- All text output through `htmlspecialchars()` except richtext fields (already sanitized by Trumbowyg)
+- Existing components (hero_static, feature_grid, etc.) remain Bootstrap-based; no changes needed
 
 ---
 
@@ -14,20 +27,20 @@ This document defines the planned component types for the page builder system. E
 
 | Type | Category | Status |
 |------|----------|--------|
-| `hero_static` | hero | [x] Done |
-| `feature_grid` | features | [x] Done |
-| `cta_banner` | conversion | [x] Done |
+| `hero_static` | hero | [x] Done (Bootstrap) |
+| `feature_grid` | features | [x] Done (Bootstrap) |
+| `cta_banner` | conversion | [x] Done (Bootstrap) |
 | `custom_html` | custom | [x] Done |
-| `page_title` | layout | [x] Done |
+| `page_title` | layout | [x] Done (Bootstrap) |
 | `image_gallery` | media | [x] Done (programmatic) |
-| `list_signup` | conversion | [x] Done |
-| `text_block` | content | [ ] **To build** |
-| `text_with_image` | content | [ ] **To build** |
-| `accordion` | content | [ ] **To build** |
-| `tabs` | content | [ ] **To build** |
-| `video_embed` | media | [ ] **To build** |
-| `spacer` | layout | [ ] **To build** |
-| `divider` | layout | [ ] **To build** |
+| `list_signup` | conversion | [x] Done (Bootstrap) |
+| `text_block` | content | [x] Done (HTML5) |
+| `text_with_image` | content | [x] Done (HTML5) |
+| `accordion` | content | [x] Done (HTML5) |
+| `tabs` | content | [x] Done (HTML5) |
+| `video_embed` | media | [x] Done (HTML5) |
+| `spacer` | layout | [x] Done (HTML5) |
+| `divider` | layout | [x] Done (HTML5) |
 
 ---
 
@@ -54,8 +67,11 @@ This document defines the planned component types for the page builder system. E
 
 **Template Notes:**
 - Heading is optional — if empty, just show content
+- Render heading using the selected level (`<h2>`, `<h3>`, or `<h4>`) via a variable
 - Use `pac_max_width` for width control instead of a per-component width field
-- Background color wraps the full section; text sits in a container
+- Background color applied via `style` on the `<section>`; content centered with `max-width` + `margin: 0 auto`
+- `text-align` set via inline style from `$alignment`
+- Content is richtext — output with `echo` (not `htmlspecialchars`), already sanitized by editor
 
 ---
 
@@ -83,16 +99,20 @@ This document defines the planned component types for the page builder system. E
 ```
 
 **Template Notes:**
-- Bootstrap row/col layout with responsive stacking on mobile
-- Image column width based on `image_size` (col-4/col-6/col-8)
-- Column order flip via `order-` classes for `image_left`
+- CSS flexbox layout: `display: flex; gap: 2rem; align-items: center`
+- `flex-direction` controls image position: default `row` for image_right, `row-reverse` for image_left
+- Image sizing via `flex` shorthand: small = `0 0 33%`, medium = `0 0 50%`, large = `0 0 66%`
+- Responsive stacking: scoped `<style>` with `@media (max-width: 768px) { flex-direction: column }` and `flex: 0 0 100%` on image
+- Image rendered as `<img>` with `width: 100%; height: auto; object-fit: cover`
+- CTA button styled with inline styles (padding, background-color, border, etc.) — simple `<a>` tag
+- Content centered with `max-width: 1100px; margin: 0 auto; padding: 0 1rem`
 
 ---
 
 ### `accordion`
 
 **Category:** content
-**Description:** Collapsible FAQ-style content sections. Uses Bootstrap 5 accordion.
+**Description:** Collapsible FAQ-style content sections using native HTML5 `<details>`/`<summary>`.
 
 **Schema:**
 ```json
@@ -110,24 +130,28 @@ This document defines the planned component types for the page builder system. E
         {"name": "is_open", "label": "Open by Default", "type": "checkboxinput"}
       ]
     },
-    {"name": "allow_multiple", "label": "Allow Multiple Open", "type": "checkboxinput"},
-    {"name": "style", "label": "Style", "type": "dropinput", "options": {"default": "Default", "flush": "Flush (No Borders)"}, "default": "default"}
+    {"name": "allow_multiple", "label": "Allow Multiple Open", "type": "checkboxinput", "default": true},
+    {"name": "style", "label": "Style", "type": "dropinput", "options": {"default": "Default (bordered)", "flush": "Flush (no borders)"}, "default": "default"}
   ]
 }
 ```
 
 **Template Notes:**
-- Use Bootstrap 5 `accordion` component with `data-bs-parent` for single-open mode
-- Skip `data-bs-parent` when `allow_multiple` is true
-- Each item gets a unique ID based on component slug + index
-- `is_open` adds `show` class and removes `collapsed` from button
+- Use native `<details>` / `<summary>` elements — no JavaScript needed for basic open/close
+- `is_open` adds the `open` attribute to `<details>`
+- `allow_multiple` defaults to true (native `<details>` behavior). When false, a small inline `<script>` closes other `<details>` siblings on `toggle` event
+- Scoped `<style>` block for `<summary>` styling: cursor pointer, padding, font-weight, border-bottom
+- "Flush" style removes the outer border; "Default" adds a 1px border around each item
+- Content div gets padding inside `<details>` below the `<summary>`
+- Content is richtext — output with `echo` (already sanitized)
+- Give each `<details>` a `name` attribute matching a group identifier — this is the HTML5-native way to create exclusive accordions (single-open). `name` attribute on `<details>` is supported in modern browsers. When `allow_multiple` is false, set `name="accordion-{slug}"`; when true, omit `name`
 
 ---
 
 ### `tabs`
 
 **Category:** content
-**Description:** Tabbed content sections. Uses Bootstrap 5 tabs.
+**Description:** Tabbed content sections with accessible ARIA markup.
 
 **Schema:**
 ```json
@@ -143,16 +167,20 @@ This document defines the planned component types for the page builder system. E
         {"name": "content", "label": "Tab Content", "type": "richtext"}
       ]
     },
-    {"name": "tab_style", "label": "Tab Style", "type": "dropinput", "options": {"tabs": "Tabs", "pills": "Pills"}, "default": "tabs"},
+    {"name": "tab_style", "label": "Tab Style", "type": "dropinput", "options": {"underline": "Underline", "pills": "Pills"}, "default": "underline"},
     {"name": "alignment", "label": "Tab Alignment", "type": "dropinput", "options": {"start": "Left", "center": "Center"}, "default": "start", "advanced": true}
   ]
 }
 ```
 
 **Template Notes:**
-- Use Bootstrap 5 `nav-tabs` / `nav-pills` with `tab-content` / `tab-pane`
-- First tab is active by default
-- Unique IDs from component slug + index
+- Tab buttons rendered as `<button>` elements inside a `<div role="tablist">`
+- Tab panels rendered as `<div role="tabpanel">` with `id` and `aria-labelledby` attributes
+- First tab active by default; active tab button gets `aria-selected="true"`
+- Inline `<script>` handles tab switching: hides all panels, shows selected, updates `aria-selected`
+- Scoped `<style>` for tab button styling: underline style uses `border-bottom` on active; pills style uses `border-radius` + background-color on active
+- Unique IDs from `$component_slug` + index (e.g., `tab-{slug}-0`, `panel-{slug}-0`)
+- Tab content is richtext — output with `echo`
 
 ---
 
@@ -174,10 +202,16 @@ This document defines the planned component types for the page builder system. E
 ```
 
 **Template Notes:**
-- Parse YouTube URLs (`youtube.com/watch?v=`, `youtu.be/`) and Vimeo URLs (`vimeo.com/`) to extract video IDs
-- Use Bootstrap `ratio` component: `<div class="ratio ratio-16x9"><iframe ...></iframe></div>`
-- Add `loading="lazy"` and `allowfullscreen` to iframe
-- Sanitize: only allow youtube.com and vimeo.com embed domains
+- PHP parses the URL to extract video ID:
+  - YouTube: match `youtube.com/watch?v=ID`, `youtu.be/ID`, `youtube.com/embed/ID`
+  - Vimeo: match `vimeo.com/ID`
+  - If no match, render nothing (with optional admin message)
+- Use CSS `aspect-ratio` property on the wrapper div: `aspect-ratio: 16/9` (or `4/3`, `21/9`)
+- Iframe set to `width: 100%; height: 100%; border: 0`
+- Add `loading="lazy"`, `allowfullscreen`, and `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"` on iframe
+- Sanitize: only allow `youtube.com/embed/` and `player.vimeo.com/video/` as iframe src domains
+- Caption rendered as `<p>` below the video if set
+- Content centered with `max-width: 1100px; margin: 0 auto`
 
 ---
 
@@ -206,9 +240,11 @@ This document defines the planned component types for the page builder system. E
 ```
 
 **Template Notes:**
-- Single empty `<div>` with height from CSS class or inline style
-- No container needed — skip_wrapper is true
-- Vertical margin set to none since the spacer IS the spacing
+- Single `<div>` with inline `style="height: Xrem"` based on selected option
+- Height map: sm=1rem, md=2rem, lg=4rem, xl=6rem
+- `aria-hidden="true"` since it's purely decorative
+- No container needed — `skip_wrapper` is true
+- Vertical margin set to "none" since the spacer IS the spacing
 
 ---
 
@@ -229,9 +265,11 @@ This document defines the planned component types for the page builder system. E
 ```
 
 **Template Notes:**
-- Use `<hr>` element with inline styles for border-style, width, and color
-- Center the `<hr>` with `margin-left: auto; margin-right: auto` when not full width
-- Render inside a container div
+- Use `<hr>` element with all styling via inline `style` attribute
+- `border-style` from the style field; `border-width: 1px 0 0 0`; `border-color` from the color field (default: `#dee2e6`)
+- `width` from the width field: full=100%, medium=50%, short=25%
+- Center with `margin-left: auto; margin-right: auto` when not full width
+- Render inside a container div with `max-width: 1100px; margin: 0 auto; padding: 0 1rem`
 
 ---
 
@@ -239,13 +277,13 @@ This document defines the planned component types for the page builder system. E
 
 These types are complete and their JSON + PHP template files exist in `/views/components/`:
 
-- **`hero_static`** — Hero with heading, subheading, background, CTA
-- **`feature_grid`** — Grid of icon + title + description items
-- **`cta_banner`** — Full-width call-to-action banner
+- **`hero_static`** — Hero with heading, subheading, background, CTA (Bootstrap)
+- **`feature_grid`** — Grid of icon + title + description items (Bootstrap)
+- **`cta_banner`** — Full-width call-to-action banner (Bootstrap)
 - **`custom_html`** — Raw HTML for advanced users
-- **`page_title`** — Page title with optional breadcrumbs
+- **`page_title`** — Page title with optional breadcrumbs (Bootstrap)
 - **`image_gallery`** — Image gallery (programmatic rendering mode)
-- **`list_signup`** — Newsletter/mailing list signup with logic function
+- **`list_signup`** — Newsletter/mailing list signup with logic function (Bootstrap)
 
 ---
 
@@ -272,13 +310,14 @@ Each new component type requires two files:
   "title": "Component Title",
   "description": "What this component does",
   "category": "content",
-  "css_framework": "bootstrap",
   "config_schema": {
     "fields": [...]
   },
   "layout_defaults": {}
 }
 ```
+
+Note: `css_framework` is omitted for framework-independent components. Only set it when a template requires a specific framework.
 
 ### 2. PHP Template (`/views/components/{type_key}.php`)
 
@@ -293,13 +332,14 @@ Each new component type requires two files:
 
 $heading = $component_config['heading'] ?? '';
 ?>
-<section class="component-name py-5">
-  <div class="container">
-    <?php if (!empty($heading)): ?>
-      <h2><?= htmlspecialchars($heading) ?></h2>
-    <?php endif; ?>
-    <!-- component content -->
-  </div>
+<style>
+.text-block-<?php echo htmlspecialchars($component_slug); ?> { max-width: 1100px; margin: 0 auto; padding: 3rem 1rem; }
+</style>
+<section class="text-block-<?php echo htmlspecialchars($component_slug); ?>">
+  <?php if (!empty($heading)): ?>
+    <h2><?php echo htmlspecialchars($heading); ?></h2>
+  <?php endif; ?>
+  <!-- component content -->
 </section>
 ```
 

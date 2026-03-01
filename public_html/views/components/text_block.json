@@ -1,0 +1,53 @@
+{
+    "title": "Text Block",
+    "description": "Heading with rich text content",
+    "category": "content",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput"
+            },
+            {
+                "name": "heading_level",
+                "label": "Heading Level",
+                "type": "dropinput",
+                "default": "h2",
+                "options": {
+                    "h2": "H2",
+                    "h3": "H3",
+                    "h4": "H4"
+                }
+            },
+            {
+                "name": "content",
+                "label": "Content",
+                "type": "richtext"
+            },
+            {
+                "name": "alignment",
+                "label": "Text Alignment",
+                "type": "dropinput",
+                "default": "left",
+                "options": {
+                    "left": "Left",
+                    "center": "Center",
+                    "right": "Right"
+                }
+            },
+            {
+                "name": "background_color",
+                "label": "Background Color",
+                "type": "colorpicker",
+                "advanced": true
+            },
+            {
+                "name": "text_color",
+                "label": "Text Color",
+                "type": "colorpicker",
+                "advanced": true
+            }
+        ]
+    }
+}

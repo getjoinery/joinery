@@ -1,0 +1,74 @@
+{
+    "title": "Text with Image",
+    "description": "Text content alongside an image, side by side",
+    "category": "content",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput"
+            },
+            {
+                "name": "content",
+                "label": "Content",
+                "type": "richtext"
+            },
+            {
+                "name": "image_url",
+                "label": "Image",
+                "type": "imageselector"
+            },
+            {
+                "name": "image_alt",
+                "label": "Image Alt Text",
+                "type": "textinput"
+            },
+            {
+                "name": "layout",
+                "label": "Layout",
+                "type": "dropinput",
+                "default": "image_right",
+                "options": {
+                    "image_right": "Image Right",
+                    "image_left": "Image Left"
+                }
+            },
+            {
+                "name": "image_size",
+                "label": "Image Size",
+                "type": "dropinput",
+                "default": "medium",
+                "options": {
+                    "small": "Small (1/3)",
+                    "medium": "Medium (1/2)",
+                    "large": "Large (2/3)"
+                }
+            },
+            {
+                "name": "show_cta",
+                "label": "Show Button",
+                "type": "checkboxinput",
+                "advanced": true
+            },
+            {
+                "name": "cta_text",
+                "label": "Button Text",
+                "type": "textinput",
+                "advanced": true
+            },
+            {
+                "name": "cta_url",
+                "label": "Button URL",
+                "type": "textinput",
+                "advanced": true
+            },
+            {
+                "name": "background_color",
+                "label": "Background Color",
+                "type": "colorpicker",
+                "advanced": true
+            }
+        ]
+    }
+}
