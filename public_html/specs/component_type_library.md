@@ -2,137 +2,97 @@
 
 This document defines the planned component types for the page builder system. Each component type includes a config schema that defines admin-editable fields.
 
-**Prerequisites:**
-- [Component Field Enhancements](/specs/component_field_enhancements.md) - Some components require field types not yet implemented
+**Related:**
+- [Component System Documentation](/docs/component_system.md)
+- [Component Field Enhancements](/specs/component_field_enhancements.md)
 
-**Note:** Schemas marked with `*` require field types from Phase 2/3 enhancements. Simplified versions can be created using currently available field types.
-
-**Last Updated:** January 2026 - Updated implementation status for hero_static, feature_grid, cta_banner, custom_html, page_title. Added theme-specific components section.
-
----
-
-## Implementation Status Key
-
-| Symbol | Meaning |
-|--------|---------|
-| `[x]` | Component type created and seeded |
-| `[ ]` | Not yet created |
-| `*` | Requires enhanced field types |
+**Last Updated:** March 2026 - Trimmed to high-value types. Removed hero_slider, stats_counter, testimonial_slider, logo_wall, pricing_table, image_gallery (admin), recent_posts, upcoming_events.
 
 ---
 
-## Hero Components
+## Implementation Status
 
-### `hero_static` [x]
-
-**Category:** hero
-**Description:** Single hero section with heading, subheading, background, and CTA
-
-**Simplified Schema (Current Capabilities):**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Heading", "type": "textinput"},
-    {"name": "subheading", "label": "Subheading", "type": "textarea"},
-    {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "options": {"left": "Left", "center": "Center", "right": "Right"}},
-    {"name": "background_color", "label": "Background Color (hex)", "type": "textinput", "help": "e.g., #f8f9fa"},
-    {"name": "background_image_url", "label": "Background Image URL", "type": "textinput"},
-    {"name": "text_color", "label": "Text Color (hex)", "type": "textinput", "help": "e.g., #212529"},
-    {"name": "height", "label": "Section Height", "type": "dropinput", "options": {"small": "Small", "medium": "Medium", "large": "Large", "fullscreen": "Full Screen"}},
-    {"name": "show_cta", "label": "Show CTA Button", "type": "checkboxinput"},
-    {"name": "cta_text", "label": "Button Text", "type": "textinput"},
-    {"name": "cta_url", "label": "Button URL", "type": "textinput"},
-    {"name": "cta_style", "label": "Button Style", "type": "dropinput", "options": {"primary": "Primary", "secondary": "Secondary", "outline": "Outline"}}
-  ]
-}
-```
+| Type | Category | Status |
+|------|----------|--------|
+| `hero_static` | hero | [x] Done |
+| `feature_grid` | features | [x] Done |
+| `cta_banner` | conversion | [x] Done |
+| `custom_html` | custom | [x] Done |
+| `page_title` | layout | [x] Done |
+| `image_gallery` | media | [x] Done (programmatic) |
+| `list_signup` | conversion | [x] Done |
+| `text_block` | content | [ ] **To build** |
+| `text_with_image` | content | [ ] **To build** |
+| `accordion` | content | [ ] **To build** |
+| `tabs` | content | [ ] **To build** |
+| `video_embed` | media | [ ] **To build** |
+| `spacer` | layout | [ ] **To build** |
+| `divider` | layout | [ ] **To build** |
 
 ---
 
-### `hero_slider` [ ] *
+## Components To Build
 
-**Category:** hero
-**Description:** Rotating hero slides with auto-play
-
-**Simplified Schema:**
-```json
-{
-  "fields": [
-    {
-      "name": "slides",
-      "label": "Slides",
-      "type": "repeater",
-      "fields": [
-        {"name": "heading", "label": "Heading", "type": "textinput"},
-        {"name": "subheading", "label": "Subheading", "type": "textarea"},
-        {"name": "background_image_url", "label": "Background Image URL", "type": "textinput"},
-        {"name": "cta_text", "label": "Button Text", "type": "textinput"},
-        {"name": "cta_url", "label": "Button URL", "type": "textinput"}
-      ]
-    },
-    {"name": "autoplay", "label": "Auto-play slides", "type": "checkboxinput"},
-    {"name": "interval", "label": "Slide Duration (seconds)", "type": "textinput", "help": "e.g., 5"},
-    {"name": "show_arrows", "label": "Show Navigation Arrows", "type": "checkboxinput"},
-    {"name": "show_dots", "label": "Show Navigation Dots", "type": "checkboxinput"},
-    {"name": "height", "label": "Slider Height", "type": "dropinput", "options": {"medium": "Medium", "large": "Large", "fullscreen": "Full Screen"}}
-  ]
-}
-```
-
----
-
-## Content Components
-
-### `text_block` [ ] *
+### `text_block`
 
 **Category:** content
-**Description:** Heading with text content
+**Description:** Heading with rich text content. The most basic content component.
 
-**Simplified Schema:**
+**Schema:**
 ```json
 {
   "fields": [
     {"name": "heading", "label": "Heading", "type": "textinput"},
-    {"name": "heading_level", "label": "Heading Level", "type": "dropinput", "options": {"h2": "H2", "h3": "H3", "h4": "H4"}},
-    {"name": "content", "label": "Content", "type": "textarea", "help": "HTML is allowed"},
-    {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "options": {"left": "Left", "center": "Center", "right": "Right"}},
-    {"name": "max_width", "label": "Content Width", "type": "dropinput", "options": {"narrow": "Narrow", "medium": "Medium", "wide": "Wide", "full": "Full Width"}},
-    {"name": "background_color", "label": "Background Color (hex)", "type": "textinput"},
-    {"name": "padding", "label": "Vertical Padding", "type": "dropinput", "options": {"none": "None", "small": "Small", "medium": "Medium", "large": "Large"}}
+    {"name": "heading_level", "label": "Heading Level", "type": "dropinput", "options": {"h2": "H2", "h3": "H3", "h4": "H4"}, "default": "h2"},
+    {"name": "content", "label": "Content", "type": "richtext"},
+    {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "options": {"left": "Left", "center": "Center", "right": "Right"}, "default": "left"},
+    {"name": "background_color", "label": "Background Color", "type": "colorpicker", "advanced": true},
+    {"name": "text_color", "label": "Text Color", "type": "colorpicker", "advanced": true}
   ]
 }
 ```
 
+**Template Notes:**
+- Heading is optional — if empty, just show content
+- Use `pac_max_width` for width control instead of a per-component width field
+- Background color wraps the full section; text sits in a container
+
 ---
 
-### `text_with_image` [ ] *
+### `text_with_image`
 
 **Category:** content
-**Description:** Text content alongside an image
+**Description:** Text content alongside an image, side by side.
 
-**Simplified Schema:**
+**Schema:**
 ```json
 {
   "fields": [
     {"name": "heading", "label": "Heading", "type": "textinput"},
-    {"name": "content", "label": "Content", "type": "textarea"},
-    {"name": "image_url", "label": "Image URL", "type": "textinput"},
+    {"name": "content", "label": "Content", "type": "richtext"},
+    {"name": "image_url", "label": "Image", "type": "imageselector"},
     {"name": "image_alt", "label": "Image Alt Text", "type": "textinput"},
-    {"name": "layout", "label": "Layout", "type": "dropinput", "options": {"image_left": "Image Left", "image_right": "Image Right"}},
-    {"name": "image_size", "label": "Image Size", "type": "dropinput", "options": {"small": "Small (1/3)", "medium": "Medium (1/2)", "large": "Large (2/3)"}},
-    {"name": "show_cta", "label": "Show Button", "type": "checkboxinput"},
-    {"name": "cta_text", "label": "Button Text", "type": "textinput"},
-    {"name": "cta_url", "label": "Button URL", "type": "textinput"}
+    {"name": "layout", "label": "Layout", "type": "dropinput", "options": {"image_right": "Image Right", "image_left": "Image Left"}, "default": "image_right"},
+    {"name": "image_size", "label": "Image Size", "type": "dropinput", "options": {"small": "Small (1/3)", "medium": "Medium (1/2)", "large": "Large (2/3)"}, "default": "medium"},
+    {"name": "show_cta", "label": "Show Button", "type": "checkboxinput", "advanced": true},
+    {"name": "cta_text", "label": "Button Text", "type": "textinput", "advanced": true},
+    {"name": "cta_url", "label": "Button URL", "type": "textinput", "advanced": true},
+    {"name": "background_color", "label": "Background Color", "type": "colorpicker", "advanced": true}
   ]
 }
 ```
 
+**Template Notes:**
+- Bootstrap row/col layout with responsive stacking on mobile
+- Image column width based on `image_size` (col-4/col-6/col-8)
+- Column order flip via `order-` classes for `image_left`
+
 ---
 
-### `accordion` [ ]
+### `accordion`
 
 **Category:** content
-**Description:** Collapsible FAQ-style content sections
+**Description:** Collapsible FAQ-style content sections. Uses Bootstrap 5 accordion.
 
 **Schema:**
 ```json
@@ -146,22 +106,28 @@ This document defines the planned component types for the page builder system. E
       "type": "repeater",
       "fields": [
         {"name": "title", "label": "Title/Question", "type": "textinput"},
-        {"name": "content", "label": "Content/Answer", "type": "textarea"},
+        {"name": "content", "label": "Content/Answer", "type": "richtext"},
         {"name": "is_open", "label": "Open by Default", "type": "checkboxinput"}
       ]
     },
     {"name": "allow_multiple", "label": "Allow Multiple Open", "type": "checkboxinput"},
-    {"name": "style", "label": "Accordion Style", "type": "dropinput", "options": {"bordered": "Bordered", "minimal": "Minimal", "filled": "Filled Background"}}
+    {"name": "style", "label": "Style", "type": "dropinput", "options": {"default": "Default", "flush": "Flush (No Borders)"}, "default": "default"}
   ]
 }
 ```
 
+**Template Notes:**
+- Use Bootstrap 5 `accordion` component with `data-bs-parent` for single-open mode
+- Skip `data-bs-parent` when `allow_multiple` is true
+- Each item gets a unique ID based on component slug + index
+- `is_open` adds `show` class and removes `collapsed` from button
+
 ---
 
-### `tabs` [ ]
+### `tabs`
 
 **Category:** content
-**Description:** Tabbed content sections
+**Description:** Tabbed content sections. Uses Bootstrap 5 tabs.
 
 **Schema:**
 ```json
@@ -174,428 +140,182 @@ This document defines the planned component types for the page builder system. E
       "type": "repeater",
       "fields": [
         {"name": "title", "label": "Tab Title", "type": "textinput"},
-        {"name": "content", "label": "Tab Content", "type": "textarea"}
+        {"name": "content", "label": "Tab Content", "type": "richtext"}
       ]
     },
-    {"name": "tab_style", "label": "Tab Style", "type": "dropinput", "options": {"default": "Default", "pills": "Pills", "underline": "Underline"}}
+    {"name": "tab_style", "label": "Tab Style", "type": "dropinput", "options": {"tabs": "Tabs", "pills": "Pills"}, "default": "tabs"},
+    {"name": "alignment", "label": "Tab Alignment", "type": "dropinput", "options": {"start": "Left", "center": "Center"}, "default": "start", "advanced": true}
   ]
 }
 ```
 
----
-
-## Feature Components
-
-### `feature_grid` [x]
-
-**Category:** features
-**Description:** Grid of icon + title + description items
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {"name": "subheading", "label": "Section Subheading", "type": "textarea"},
-    {"name": "columns", "label": "Columns", "type": "dropinput", "options": {"2": "2 Columns", "3": "3 Columns", "4": "4 Columns"}},
-    {
-      "name": "features",
-      "label": "Features",
-      "type": "repeater",
-      "fields": [
-        {"name": "icon_class", "label": "Icon Class", "type": "textinput", "help": "e.g., bx bx-check"},
-        {"name": "title", "label": "Title", "type": "textinput"},
-        {"name": "description", "label": "Description", "type": "textarea"},
-        {"name": "link_url", "label": "Link URL (optional)", "type": "textinput"}
-      ]
-    },
-    {"name": "style", "label": "Display Style", "type": "dropinput", "options": {"centered": "Centered", "left": "Left Aligned", "card": "Cards with Shadow"}},
-    {"name": "icon_color", "label": "Icon Color (hex)", "type": "textinput"}
-  ]
-}
-```
+**Template Notes:**
+- Use Bootstrap 5 `nav-tabs` / `nav-pills` with `tab-content` / `tab-pane`
+- First tab is active by default
+- Unique IDs from component slug + index
 
 ---
 
-### `stats_counter` [ ]
+### `video_embed`
 
-**Category:** features
-**Description:** Animated number counters with labels
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {
-      "name": "stats",
-      "label": "Statistics",
-      "type": "repeater",
-      "fields": [
-        {"name": "number", "label": "Number", "type": "textinput"},
-        {"name": "prefix", "label": "Prefix (e.g., $)", "type": "textinput"},
-        {"name": "suffix", "label": "Suffix (e.g., +, %)", "type": "textinput"},
-        {"name": "label", "label": "Label", "type": "textinput"}
-      ]
-    },
-    {"name": "animate", "label": "Animate Numbers on Scroll", "type": "checkboxinput"},
-    {"name": "background_style", "label": "Background", "type": "dropinput", "options": {"light": "Light", "dark": "Dark", "primary": "Primary Color"}}
-  ]
-}
-```
-
----
-
-## Testimonial Components
-
-### `testimonial_slider` [ ]
-
-**Category:** testimonials
-**Description:** Rotating testimonial quotes
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {
-      "name": "testimonials",
-      "label": "Testimonials",
-      "type": "repeater",
-      "fields": [
-        {"name": "quote", "label": "Quote", "type": "textarea"},
-        {"name": "author_name", "label": "Author Name", "type": "textinput"},
-        {"name": "author_title", "label": "Author Title/Company", "type": "textinput"},
-        {"name": "author_image_url", "label": "Author Photo URL", "type": "textinput"},
-        {"name": "rating", "label": "Star Rating (1-5)", "type": "textinput"}
-      ]
-    },
-    {"name": "autoplay", "label": "Auto-rotate", "type": "checkboxinput"},
-    {"name": "interval", "label": "Rotation Interval (seconds)", "type": "textinput"},
-    {"name": "show_rating", "label": "Show Star Rating", "type": "checkboxinput"},
-    {"name": "style", "label": "Display Style", "type": "dropinput", "options": {"centered": "Centered", "card": "Card Style", "minimal": "Minimal"}}
-  ]
-}
-```
-
----
-
-### `logo_wall` [ ]
-
-**Category:** testimonials
-**Description:** Grid of client/partner logos
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {
-      "name": "logos",
-      "label": "Logos",
-      "type": "repeater",
-      "fields": [
-        {"name": "image_url", "label": "Logo Image URL", "type": "textinput"},
-        {"name": "name", "label": "Company Name (alt text)", "type": "textinput"},
-        {"name": "link_url", "label": "Link URL (optional)", "type": "textinput"}
-      ]
-    },
-    {"name": "columns", "label": "Logos Per Row", "type": "dropinput", "options": {"4": "4", "5": "5", "6": "6"}},
-    {"name": "grayscale", "label": "Grayscale (color on hover)", "type": "checkboxinput"}
-  ]
-}
-```
-
----
-
-## Conversion Components
-
-### `cta_banner` [x]
-
-**Category:** conversion
-**Description:** Full-width call-to-action banner
+**Category:** media
+**Description:** Responsive YouTube or Vimeo video embed.
 
 **Schema:**
 ```json
 {
   "fields": [
     {"name": "heading", "label": "Heading", "type": "textinput"},
-    {"name": "subheading", "label": "Supporting Text", "type": "textarea"},
-    {"name": "cta_text", "label": "Button Text", "type": "textinput"},
-    {"name": "cta_url", "label": "Button URL", "type": "textinput"},
-    {"name": "background_color", "label": "Background Color (hex)", "type": "textinput"},
-    {"name": "text_color", "label": "Text Color (hex)", "type": "textinput"},
-    {"name": "show_secondary", "label": "Show Secondary Button", "type": "checkboxinput"},
-    {"name": "secondary_text", "label": "Secondary Button Text", "type": "textinput"},
-    {"name": "secondary_url", "label": "Secondary Button URL", "type": "textinput"}
-  ]
-}
-```
-
----
-
-### `pricing_table` [ ]
-
-**Category:** conversion
-**Description:** Pricing plan comparison
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {"name": "subheading", "label": "Section Subheading", "type": "textarea"},
-    {
-      "name": "plans",
-      "label": "Plans",
-      "type": "repeater",
-      "fields": [
-        {"name": "name", "label": "Plan Name", "type": "textinput"},
-        {"name": "price", "label": "Price", "type": "textinput"},
-        {"name": "period", "label": "Period (e.g., /month)", "type": "textinput"},
-        {"name": "description", "label": "Short Description", "type": "textinput"},
-        {"name": "features", "label": "Features (one per line)", "type": "textarea"},
-        {"name": "cta_text", "label": "Button Text", "type": "textinput"},
-        {"name": "cta_url", "label": "Button URL", "type": "textinput"},
-        {"name": "is_featured", "label": "Featured/Recommended", "type": "checkboxinput"},
-        {"name": "badge_text", "label": "Badge Text", "type": "textinput"}
-      ]
-    }
-  ]
-}
-```
-
----
-
-## Layout Components
-
-### `page_title` [x]
-
-**Category:** layout
-**Description:** Page title with optional subtitle and breadcrumbs
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "title", "label": "Page Title", "type": "textinput"},
-    {"name": "subtitle", "label": "Subtitle", "type": "textinput"},
-    {"name": "alignment", "label": "Text Alignment", "type": "dropinput", "options": {"left": "Left", "center": "Center"}},
-    {"name": "show_breadcrumbs", "label": "Show Breadcrumbs", "type": "checkboxinput"},
-    {"name": "background_color", "label": "Background Color (hex)", "type": "textinput"}
-  ]
-}
-```
-
----
-
-### `spacer` [ ]
-
-**Category:** layout
-**Description:** Vertical spacing
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "height", "label": "Spacer Height", "type": "dropinput", "options": {"small": "Small (20px)", "medium": "Medium (40px)", "large": "Large (80px)", "xlarge": "Extra Large (120px)"}},
-    {"name": "mobile_height", "label": "Mobile Height", "type": "dropinput", "options": {"same": "Same as Desktop", "half": "Half", "none": "None"}}
-  ]
-}
-```
-
----
-
-### `divider` [ ]
-
-**Category:** layout
-**Description:** Horizontal divider line
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "style", "label": "Divider Style", "type": "dropinput", "options": {"solid": "Solid Line", "dashed": "Dashed Line", "dotted": "Dotted Line"}},
-    {"name": "width", "label": "Width", "type": "dropinput", "options": {"full": "Full Width", "medium": "Medium (50%)", "short": "Short (20%)"}},
-    {"name": "color", "label": "Line Color (hex)", "type": "textinput"},
-    {"name": "margin", "label": "Vertical Margin", "type": "dropinput", "options": {"small": "Small", "medium": "Medium", "large": "Large"}}
-  ]
-}
-```
-
----
-
-## Media Components
-
-### `image_gallery` [ ]
-
-**Category:** media
-**Description:** Grid of images with optional lightbox
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {
-      "name": "images",
-      "label": "Images",
-      "type": "repeater",
-      "fields": [
-        {"name": "image_url", "label": "Image URL", "type": "textinput"},
-        {"name": "caption", "label": "Caption", "type": "textinput"},
-        {"name": "link_url", "label": "Link URL (optional)", "type": "textinput"}
-      ]
-    },
-    {"name": "columns", "label": "Columns", "type": "dropinput", "options": {"2": "2", "3": "3", "4": "4", "5": "5"}},
-    {"name": "gap", "label": "Gap Between Images", "type": "dropinput", "options": {"none": "None", "small": "Small", "medium": "Medium"}},
-    {"name": "lightbox", "label": "Enable Lightbox", "type": "checkboxinput"},
-    {"name": "show_captions", "label": "Show Captions", "type": "checkboxinput"}
-  ]
-}
-```
-
----
-
-### `video_embed` [ ]
-
-**Category:** media
-**Description:** YouTube or Vimeo video embed
-
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
     {"name": "video_url", "label": "Video URL", "type": "textinput", "help": "YouTube or Vimeo URL"},
-    {"name": "aspect_ratio", "label": "Aspect Ratio", "type": "dropinput", "options": {"16:9": "16:9 (Standard)", "4:3": "4:3", "21:9": "21:9 (Cinematic)"}},
-    {"name": "max_width", "label": "Maximum Width", "type": "dropinput", "options": {"small": "Small", "medium": "Medium", "large": "Large", "full": "Full Width"}}
+    {"name": "aspect_ratio", "label": "Aspect Ratio", "type": "dropinput", "options": {"16x9": "16:9 (Standard)", "4x3": "4:3", "21x9": "21:9 (Cinematic)"}, "default": "16x9"},
+    {"name": "caption", "label": "Caption", "type": "textinput", "advanced": true}
   ]
 }
 ```
 
+**Template Notes:**
+- Parse YouTube URLs (`youtube.com/watch?v=`, `youtu.be/`) and Vimeo URLs (`vimeo.com/`) to extract video IDs
+- Use Bootstrap `ratio` component: `<div class="ratio ratio-16x9"><iframe ...></iframe></div>`
+- Add `loading="lazy"` and `allowfullscreen` to iframe
+- Sanitize: only allow youtube.com and vimeo.com embed domains
+
 ---
 
-## Custom Components
+### `spacer`
 
-### `custom_html` [x]
-
-**Category:** custom
-**Description:** Raw HTML for advanced users
+**Category:** layout
+**Description:** Vertical spacing between components.
 
 **Schema:**
 ```json
 {
   "fields": [
-    {"name": "html", "label": "HTML Code", "type": "textarea", "help": "Enter custom HTML. Be careful with scripts."},
-    {"name": "container", "label": "Wrap in Container", "type": "checkboxinput"},
-    {"name": "admin_note", "label": "Admin Notes", "type": "textarea", "help": "Notes for administrators (not displayed)"}
+    {"name": "height", "label": "Height", "type": "dropinput", "options": {"sm": "Small (1rem)", "md": "Medium (2rem)", "lg": "Large (4rem)", "xl": "Extra Large (6rem)"}, "default": "md"}
   ]
 }
 ```
 
+**Layout Defaults:**
+```json
+{
+  "layout_defaults": {
+    "skip_wrapper": true,
+    "vertical_margin": "none"
+  }
+}
+```
+
+**Template Notes:**
+- Single empty `<div>` with height from CSS class or inline style
+- No container needed — skip_wrapper is true
+- Vertical margin set to none since the spacer IS the spacing
+
 ---
 
-## Dynamic Components
+### `divider`
 
-These components require logic functions to fetch data.
-
-### `recent_posts` [ ]
-
-**Category:** dynamic
-**Logic Function:** `recent_posts_logic`
+**Category:** layout
+**Description:** Horizontal divider line.
 
 **Schema:**
 ```json
 {
   "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {"name": "post_count", "label": "Number of Posts", "type": "textinput", "help": "e.g., 3"},
-    {"name": "columns", "label": "Columns", "type": "dropinput", "options": {"2": "2", "3": "3", "4": "4"}},
-    {"name": "show_image", "label": "Show Featured Image", "type": "checkboxinput"},
-    {"name": "show_excerpt", "label": "Show Excerpt", "type": "checkboxinput"},
-    {"name": "show_date", "label": "Show Date", "type": "checkboxinput"},
-    {"name": "show_view_all", "label": "Show View All Link", "type": "checkboxinput"},
-    {"name": "view_all_url", "label": "View All URL", "type": "textinput"}
+    {"name": "style", "label": "Line Style", "type": "dropinput", "options": {"solid": "Solid", "dashed": "Dashed", "dotted": "Dotted"}, "default": "solid"},
+    {"name": "width", "label": "Width", "type": "dropinput", "options": {"full": "Full Width", "medium": "Medium (50%)", "short": "Short (25%)"}, "default": "full"},
+    {"name": "color", "label": "Line Color", "type": "colorpicker", "advanced": true}
   ]
 }
 ```
+
+**Template Notes:**
+- Use `<hr>` element with inline styles for border-style, width, and color
+- Center the `<hr>` with `margin-left: auto; margin-right: auto` when not full width
+- Render inside a container div
 
 ---
 
-### `upcoming_events` [ ]
+## Already Implemented
 
-**Category:** dynamic
-**Logic Function:** `upcoming_events_logic`
-**Requires Plugin:** events
+These types are complete and their JSON + PHP template files exist in `/views/components/`:
 
-**Schema:**
-```json
-{
-  "fields": [
-    {"name": "heading", "label": "Section Heading", "type": "textinput"},
-    {"name": "event_count", "label": "Number of Events", "type": "textinput"},
-    {"name": "layout", "label": "Layout", "type": "dropinput", "options": {"list": "List", "grid": "Grid"}},
-    {"name": "show_image", "label": "Show Event Image", "type": "checkboxinput"},
-    {"name": "show_time", "label": "Show Event Time", "type": "checkboxinput"},
-    {"name": "show_location", "label": "Show Location", "type": "checkboxinput"}
-  ]
-}
-```
+- **`hero_static`** — Hero with heading, subheading, background, CTA
+- **`feature_grid`** — Grid of icon + title + description items
+- **`cta_banner`** — Full-width call-to-action banner
+- **`custom_html`** — Raw HTML for advanced users
+- **`page_title`** — Page title with optional breadcrumbs
+- **`image_gallery`** — Image gallery (programmatic rendering mode)
+- **`list_signup`** — Newsletter/mailing list signup with logic function
 
 ---
 
 ## Theme-Specific Components
 
-Themes can define their own component types by prefixing the type key with the theme name. These components are specific to that theme and include both the database record and template file within the theme directory.
+Themes define their own component types prefixed with the theme name. These are discovered automatically during theme sync.
 
 **Naming Convention:** `{theme}_{component_name}`
 
-**Example (linka-reference theme):**
-- `linka_hero` - Theme-specific hero variant
-- `linka_featured_card` - Card component for blog features
-- `linka_featured_grid` - Grid layout for featured content
-- `linka_editor_choice` - Editor's choice showcase
-- `linka_inspiration` - Inspiration section
-- `linka_contact_info` - Contact information display
-- `linka_newsletter` - Newsletter signup form
-- `linka_social_follow` - Social media follow buttons
-- `linka_page_title` - Theme-styled page title
+**Example (linka theme):** `linka_hero`, `linka_featured_card`, `linka_featured_grid`, `linka_editor_choice`, `linka_page_title`, etc.
 
-**Template Location:**
-```
-/theme/{theme}/views/components/{component_template}.php
-```
-
-Theme-specific components should set `com_css_framework` to indicate compatibility (e.g., 'bootstrap', 'tailwind').
+**Template Location:** `/theme/{theme}/views/components/{type_key}.php`
 
 ---
 
-## Implementation Notes
+## Implementation Guide
 
-### Creating a Component Type
+Each new component type requires two files:
 
-1. Go to `/admin/admin_component_types` (superadmin required)
-2. Click "Add Component Type"
-3. Enter:
-   - **Type Key**: e.g., `hero_static`
-   - **Title**: e.g., "Static Hero"
-   - **Category**: Select from dropdown
-   - **Template File**: e.g., `hero_static.php`
-   - **Config Schema**: Paste JSON from above
-4. Create template file in `/views/components/`
-5. Activate the component type
+### 1. JSON Definition (`/views/components/{type_key}.json`)
 
-### Template File Location
-
-```
-/views/components/{template_file}.php
-/theme/{theme}/views/components/{template_file}.php  (override)
+```json
+{
+  "title": "Component Title",
+  "description": "What this component does",
+  "category": "content",
+  "css_framework": "bootstrap",
+  "config_schema": {
+    "fields": [...]
+  },
+  "layout_defaults": {}
+}
 ```
 
-### Available Template Variables
+### 2. PHP Template (`/views/components/{type_key}.php`)
 
-- `$component_config` - The configured values
-- `$component_data` - Data from logic function (if any)
-- `$component` - The PageContent instance
-- `$component_type_record` - The Component type definition
+```php
+<?php
+// Available variables:
+// $component_config - configured field values
+// $component_data - data from logic function (if any)
+// $component - PageContent instance
+// $component_type_record - Component type definition
+// $component_slug - component location name
+
+$heading = $component_config['heading'] ?? '';
+?>
+<section class="component-name py-5">
+  <div class="container">
+    <?php if (!empty($heading)): ?>
+      <h2><?= htmlspecialchars($heading) ?></h2>
+    <?php endif; ?>
+    <!-- component content -->
+  </div>
+</section>
+```
+
+After creating both files, run theme sync to register the component type in the database.
+
+---
+
+## Removed from Original Spec
+
+| Type | Reason |
+|------|--------|
+| `hero_slider` | Complex carousel JavaScript; `hero_static` covers most needs |
+| `stats_counter` | Animated scroll counters require significant custom JS |
+| `testimonial_slider` | Already have `testimonials_carousel` component |
+| `logo_wall` | Niche use case; achievable with `custom_html` |
+| `pricing_table` | Already have `pricing_section` component |
+| `image_gallery` (admin) | Already have programmatic `image_gallery`; admin-configurable version adds complexity for low usage |
+| `recent_posts` | Requires logic function + ties to specific content model |
+| `upcoming_events` | Requires logic function + events plugin dependency |
