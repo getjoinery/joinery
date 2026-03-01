@@ -1,9 +1,9 @@
 {
-    "title": "Newsletter Signup",
+    "title": "List Signup",
     "description": "Mailing list signup form with captcha support",
     "category": "conversion",
     "css_framework": null,
-    "logic_function": "newsletter_signup_logic",
+    "logic_function": "list_signup_logic",
     "config_schema": {
         "fields": [
             {
