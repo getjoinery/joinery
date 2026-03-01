@@ -5,7 +5,7 @@
  * Scheduled task that queries upcoming events for the next 7 days,
  * builds an HTML email, and queues it through the existing bulk email pipeline.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -39,10 +39,7 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 
 		$mailing_list = new MailingList($mailing_list_id, true);
 
-		// 2. Query upcoming events
-		// Note: The 'upcoming' filter includes events where evt_end_time > now()
-		// even if evt_start_time is in the past. We load without a limit so
-		// the PHP-level 7-day filter below can find the correct events.
+		// 2. Query upcoming non-recurring events
 		$events = new MultiEvent(
 			array(
 				'upcoming' => true,
@@ -71,12 +68,47 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			if (!$start_time_raw) {
 				continue;
 			}
-			// DB timestamps are stored in UTC
 			$event_start = new DateTime($start_time_raw, $utc_tz);
 			if ($event_start >= $now && $event_start <= $cutoff) {
 				$upcoming_events[] = $event;
 			}
 		}
+
+		// 4. Merge virtual instances from recurring parents
+		$parents = new MultiEvent(
+			array(
+				'deleted' => false,
+				'visibility' => 1,
+				'only_recurring_parents' => true,
+				'status' => Event::STATUS_ACTIVE,
+			),
+			array()
+		);
+		$parents->load();
+
+		$range_start = date('Y-m-d');
+		$range_end = date('Y-m-d', strtotime('+7 days'));
+		foreach ($parents as $parent) {
+			$instances = $parent->get_instances_for_range($range_start, $range_end);
+			foreach ($instances as $instance) {
+				$is_virtual = is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual;
+				$start_raw = $is_virtual ? $instance->evt_start_time : $instance->get('evt_start_time');
+				if (!$start_raw) continue;
+				$inst_start = new DateTime($start_raw, $utc_tz);
+				if ($inst_start >= $now && $inst_start <= $cutoff) {
+					$upcoming_events[] = $instance;
+				}
+			}
+		}
+
+		// Sort all events by start time
+		usort($upcoming_events, function($a, $b) {
+			$a_virtual = is_object($a) && isset($a->is_virtual) && $a->is_virtual;
+			$b_virtual = is_object($b) && isset($b->is_virtual) && $b->is_virtual;
+			$a_time = $a_virtual ? $a->evt_start_time : $a->get('evt_start_time');
+			$b_time = $b_virtual ? $b->evt_start_time : $b->get('evt_start_time');
+			return strcmp($a_time, $b_time);
+		});
 
 		// 4. If none, return success with message
 		if (empty($upcoming_events)) {
@@ -88,14 +120,37 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 		$event_blocks = array();
 
 		foreach ($upcoming_events as $event) {
-			$name = htmlspecialchars($event->get('evt_name'));
-			$event_url = $event->get_url('full');
+			$is_virtual = is_object($event) && isset($event->is_virtual) && $event->is_virtual;
+
+			$name = htmlspecialchars($is_virtual ? $event->evt_name : $event->get('evt_name'));
+
+			if ($is_virtual) {
+				// Virtual instances link to the parent event
+				$event_url = $site_url . '/event/' . ($event->evt_link ?: $event->parent_event_id);
+			} else {
+				$event_url = $event->get_url('full');
+			}
 
 			// Format date/time in site timezone
-			$date_time = $event->get_time_string($site_tz_string);
+			if ($is_virtual) {
+				$start_raw = $event->evt_start_time;
+				$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'M j, g:i a T');
+				if ($event->evt_end_time) {
+					$end_time = LibraryFunctions::convert_time($event->evt_end_time, 'UTC', $site_tz_string, 'g:i a');
+					$end_day = LibraryFunctions::convert_time($event->evt_end_time, 'UTC', $site_tz_string, 'M j,');
+					$start_day = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'M j,');
+					if ($start_day == $end_day) {
+						$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'M j, g:i a')
+							. ' - ' . $end_time . ' '
+							. LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'T');
+					}
+				}
+			} else {
+				$date_time = $event->get_time_string($site_tz_string);
+			}
 
-			$location = $event->get('evt_location');
-			$short_desc = $event->get('evt_short_description');
+			$location = $is_virtual ? ($event->evt_location ?? '') : $event->get('evt_location');
+			$short_desc = $is_virtual ? ($event->evt_short_description ?? '') : $event->get('evt_short_description');
 
 			$block = '<div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 4px;">';
 			$block .= '<h3 style="margin: 0 0 8px 0;"><a href="' . htmlspecialchars($event_url) . '" style="color: #2563eb; text-decoration: none;">' . $name . '</a></h3>';
@@ -116,7 +171,7 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 		// 6. Wrap in heading, intro, and "View All Events" button
 		$event_count = count($upcoming_events);
 		$html = '<h2 style="margin-bottom: 16px;">Upcoming Events This Week</h2>';
-		$html .= '<p style="margin-bottom: 20px;">Here are ' . $event_count . ' upcoming event' . ($event_count !== 1 ? 's' : '') . ' for the next 7 days:</p>';
+		$html .= '<p style="margin-bottom: 20px;">Here are the upcoming events for the next 7 days:</p>';
 		$html .= implode('', $event_blocks);
 		$html .= '<div style="text-align: center; margin-top: 24px;">';
 		$html .= '<a href="' . htmlspecialchars($site_url) . '/events" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">View All Events</a>';
