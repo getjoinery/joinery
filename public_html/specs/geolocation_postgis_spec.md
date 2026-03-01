@@ -477,7 +477,7 @@ What's dead is the old `zips.zip_codes` **lookup table** (a separate schema with
 | `GetLocationData($zip, $city, $state)` | 448-498 | Returns FALSE | **Remove** -- replaced by GeoHelper::geocode() |
 | `getCityStateFromIP($ip)` | 530-560 | Returns FALSE | **Remove** -- not replacing IP geolocation |
 | `GetTimezoneFromZipCode($zip)` | 741-759 | Would error (no table) | **Remove** -- references non-existent `zips.zip_codes` table |
-| `getTimezoneFromPoint($lat, $lng)` | 700-713 | Active but unused | **Remove** -- earthtools.org API, unused |
+| `getTimezoneFromPoint($lat, $lng)` | ~~700-713~~ | Removed | **Done** -- removed in time function consolidation |
 
 **`data/address_class.php`:**
 | Code | Lines | Status | Action |
