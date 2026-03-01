@@ -72,8 +72,6 @@
 			<?php
 			$numdisplayed = 0;
 			foreach ($events as $event){
-				$now = LibraryFunctions::get_current_time_obj('UTC');
-				$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
 				$numdisplayed++;
 				if($numdisplayed == 4){
 					break;

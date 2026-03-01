@@ -167,8 +167,8 @@ function get_leader() {
 		//CALENDAR LINKS
 		//FROM https://github.com/spatie/calendar-links
 		if($this->get('evt_start_time') && $this->get('evt_show_add_to_calendar_link')){
-			$start_time_obj = LibraryFunctions::get_time_obj($this->get_event_start_time($session->get_timezone()), $session->get_timezone());
-			$end_time_obj = LibraryFunctions::get_time_obj($this->get_event_end_time($session->get_timezone()), $session->get_timezone());
+			$start_time_obj = new DateTime($this->get_event_start_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
+			$end_time_obj = new DateTime($this->get_event_end_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
 
 			// Build location: physical location first, fallback to event URL
 			$address = '';

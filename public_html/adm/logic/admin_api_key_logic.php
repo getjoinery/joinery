@@ -50,13 +50,13 @@ function admin_api_key_logic($get_vars, $post_vars) {
 	}
 
 	$owner = new User($api_key->get('apk_usr_user_id'), TRUE);
-	$now = LibraryFunctions::get_current_time_obj('UTC');
+	$now_utc = gmdate('Y-m-d H:i:s');
 
 	$page_vars = array(
 		'session' => $session,
 		'api_key' => $api_key,
 		'owner' => $owner,
-		'now' => $now,
+		'now_utc' => $now_utc,
 	);
 
 	return LogicResult::render($page_vars);

@@ -161,8 +161,8 @@ public static function GetBySessionNumber($event_id, $session_number){
 		//CALENDAR LINKS
 		//FROM https://github.com/spatie/calendar-links	
 		if($this->get('evs_start_time')){
-			$start_time_obj = LibraryFunctions::get_time_obj($this->get_start_time($session->get_timezone()), $session->get_timezone());	
-			$end_time_obj = LibraryFunctions::get_time_obj($this->get_end_time($session->get_timezone()), $session->get_timezone());
+			$start_time_obj = new DateTime($this->get_start_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
+			$end_time_obj = new DateTime($this->get_end_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
 			$settings = Globalvars::get_instance();
 			$cal_link = LibraryFunctions::get_absolute_url('/profile/event_sessions?evt_event_id='.$this->get('evs_evt_event_id'));
 			$link = Link::create($this->get('evs_title'), $start_time_obj, $end_time_obj)

@@ -68,7 +68,6 @@ $page->public_header(array(
 				$event_count = 0;
 				foreach ($page_vars['events'] as $event){
 					if ($event_count >= 20) break;
-					$now = LibraryFunctions::get_current_time_obj('UTC');
 					$is_virtual = (is_object($event) && isset($event->is_virtual) && $event->is_virtual);
 
 					// Unified field accessor

@@ -43,7 +43,7 @@
 		}
 
 		if($_POST['bkn_start_time_date'] && $_POST['bkn_start_time_time']){
-			$time_combined = $_POST['bkn_start_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['bkn_start_time_time']);
+			$time_combined = $_POST['bkn_start_time_date'] . ' ' . (new DateTime($_POST['bkn_start_time_time']))->format('H:i:s');
 			$utc_time = LibraryFunctions::convert_time($time_combined, $booking->get('bkn_timezone'),  'UTC', 'c');
 			$booking->set('bkn_start_time', $utc_time);
 			$booking->set('bkn_start_time_local', $time_combined);
@@ -51,7 +51,7 @@
 
 		/*
 		if($_POST['bkn_end_time_date'] && $_POST['bkn_end_time_time']){
-			$time_combined = $_POST['bkn_end_time_date'] . ' ' . LibraryFunctions::toDBTime($_POST['bkn_end_time_time']);
+			$time_combined = $_POST['bkn_end_time_date'] . ' ' . (new DateTime($_POST['bkn_end_time_time']))->format('H:i:s');
 			$utc_time = LibraryFunctions::convert_time($time_combined, $booking->get('bkn_timezone'),  'UTC', 'c');
 			$booking->set('bkn_end_time', $utc_time);
 			$booking->set('bkn_end_time_local', $time_combined);

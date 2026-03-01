@@ -82,8 +82,7 @@
 			<?php
 
 	foreach ($page_vars['events'] as $event){
-		$now = LibraryFunctions::get_current_time_obj('UTC');
-		$event_time = LibraryFunctions::get_time_obj($event->get('evt_start_time'), 'UTC');
+		$now_utc = gmdate('Y-m-d H:i:s');
 		?>
 		<div class="bg-white rounded-lg shadow-md overflow-hidden flex flex-col h-full">
 		  <div class="p-6 flex flex-col items-center flex-grow">
@@ -97,7 +96,7 @@
 				<div class="sr-only">Led by</div>
 				<p class="text-gray-500 text-sm text-center">
 				<?php
-				if($event->get('evt_start_time') && $event_time > $now){
+				if($event->get('evt_start_time') && $event->get('evt_start_time') > $now_utc){
 					echo htmlspecialchars($event->get_event_start_time($tz, 'M'). ' ' . $event->get_event_start_time($tz, 'd'));
 				}
 				else if($next_session = $event->get_next_session()){

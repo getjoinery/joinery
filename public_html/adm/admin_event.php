@@ -46,11 +46,11 @@
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Start Date:</td>
-								<td class="p-1 text-600"><?php echo $event->get('evt_start_time') ? $event->get_timezone_corrected_time('evt_start_time', $session, 'M j, Y g:i A T') : '—'; ?></td>
+								<td class="p-1 text-600"><?php echo $event->get('evt_start_time') ? LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T') : '—'; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">End Date:</td>
-								<td class="p-1 text-600"><?php echo $event->get('evt_end_time') ? $event->get_timezone_corrected_time('evt_end_time', $session, 'M j, Y g:i A T') : '—'; ?></td>
+								<td class="p-1 text-600"><?php echo $event->get('evt_end_time') ? LibraryFunctions::convert_time($event->get('evt_end_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T') : '—'; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Timezone:</td>

@@ -420,8 +420,7 @@ private static function UcName($string) {
 	public function export_as_array() {
 		$user_data = parent::export_as_array();
 
-		$user_data['usr_day_since_register'] = LibraryFunctions::DatetimeIntoDaysAgo(
-			date_create($this->get('usr_signup_date')));
+		$user_data['usr_day_since_register'] = intval(time() / 86400) - intval(date_create($this->get('usr_signup_date'))->format('U') / 86400);
 
 		unset($user_data['usr_password']);
 
@@ -450,8 +449,7 @@ private static function UcName($string) {
 			*/
 
 		if ($last_recurring_email_date) {
-			$user_data['usr_days_since_last_email'] = LibraryFunctions::DatetimeIntoDaysAgo(
-				date_create($last_recurring_email_date));
+			$user_data['usr_days_since_last_email'] = intval(time() / 86400) - intval(date_create($last_recurring_email_date)->format('U') / 86400);
 		} else {
 			$user_data['usr_days_since_last_email'] = $user_data['usr_day_since_register'];
 		}
