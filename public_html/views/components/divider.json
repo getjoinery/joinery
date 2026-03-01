@@ -1,0 +1,38 @@
+{
+    "title": "Divider",
+    "description": "Horizontal divider line",
+    "category": "layout",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "style",
+                "label": "Line Style",
+                "type": "dropinput",
+                "default": "solid",
+                "options": {
+                    "solid": "Solid",
+                    "dashed": "Dashed",
+                    "dotted": "Dotted"
+                }
+            },
+            {
+                "name": "width",
+                "label": "Width",
+                "type": "dropinput",
+                "default": "full",
+                "options": {
+                    "full": "Full Width",
+                    "medium": "Medium (50%)",
+                    "short": "Short (25%)"
+                }
+            },
+            {
+                "name": "color",
+                "label": "Line Color",
+                "type": "colorpicker",
+                "default": "#dee2e6",
+                "advanced": true
+            }
+        ]
+    }
+}

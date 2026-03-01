@@ -1,0 +1,25 @@
+{
+    "title": "Spacer",
+    "description": "Vertical spacing between components",
+    "category": "layout",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "height",
+                "label": "Height",
+                "type": "dropinput",
+                "default": "md",
+                "options": {
+                    "sm": "Small (1rem)",
+                    "md": "Medium (2rem)",
+                    "lg": "Large (4rem)",
+                    "xl": "Extra Large (6rem)"
+                }
+            }
+        ]
+    },
+    "layout_defaults": {
+        "skip_wrapper": true,
+        "vertical_margin": "none"
+    }
+}

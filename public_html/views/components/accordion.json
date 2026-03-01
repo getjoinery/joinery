@@ -1,0 +1,58 @@
+{
+    "title": "Accordion",
+    "description": "Collapsible FAQ-style content sections",
+    "category": "content",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Section Heading",
+                "type": "textinput"
+            },
+            {
+                "name": "subheading",
+                "label": "Section Subheading",
+                "type": "textarea"
+            },
+            {
+                "name": "items",
+                "label": "Accordion Items",
+                "type": "repeater",
+                "item_label": "Item",
+                "fields": [
+                    {
+                        "name": "title",
+                        "label": "Title/Question",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "content",
+                        "label": "Content/Answer",
+                        "type": "richtext"
+                    },
+                    {
+                        "name": "is_open",
+                        "label": "Open by Default",
+                        "type": "checkboxinput"
+                    }
+                ]
+            },
+            {
+                "name": "allow_multiple",
+                "label": "Allow Multiple Open",
+                "type": "checkboxinput",
+                "default": true
+            },
+            {
+                "name": "style",
+                "label": "Style",
+                "type": "dropinput",
+                "default": "default",
+                "options": {
+                    "default": "Default (bordered)",
+                    "flush": "Flush (no borders)"
+                }
+            }
+        ]
+    }
+}

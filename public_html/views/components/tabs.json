@@ -1,0 +1,53 @@
+{
+    "title": "Tabs",
+    "description": "Tabbed content sections",
+    "category": "content",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Section Heading",
+                "type": "textinput"
+            },
+            {
+                "name": "tabs",
+                "label": "Tabs",
+                "type": "repeater",
+                "item_label": "Tab",
+                "fields": [
+                    {
+                        "name": "title",
+                        "label": "Tab Title",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "content",
+                        "label": "Tab Content",
+                        "type": "richtext"
+                    }
+                ]
+            },
+            {
+                "name": "tab_style",
+                "label": "Tab Style",
+                "type": "dropinput",
+                "default": "underline",
+                "options": {
+                    "underline": "Underline",
+                    "pills": "Pills"
+                }
+            },
+            {
+                "name": "alignment",
+                "label": "Tab Alignment",
+                "type": "dropinput",
+                "default": "start",
+                "advanced": true,
+                "options": {
+                    "start": "Left",
+                    "center": "Center"
+                }
+            }
+        ]
+    }
+}
