@@ -78,6 +78,9 @@ $page_vars = $page_vars->data;
 								<h2 class="mb-3"><?php echo htmlspecialchars($evt_get('evt_name')); ?></h2>
 
 								<?php
+								$is_cancelled = (!$is_virtual_event && $event->get('evt_status') == Event::STATUS_CANCELED);
+								$cancelled_badge = $is_cancelled ? ' <span class="badge bg-danger ms-2">Cancelled</span>' : '';
+
 								if ($is_virtual_event) {
 									// Virtual instance: format times from raw values
 									if ($evt_get('evt_start_time')) {
@@ -92,7 +95,7 @@ $page_vars = $page_vars->data;
 									}
 								} else {
 									if ($time_string = $event->get_time_string()) {
-										echo '<p class="fs-5 text-muted mb-2"><i class="bi-calendar4-event me-2"></i>'.$time_string.'</p>';
+										echo '<p class="fs-5 text-muted mb-2"><i class="bi-calendar4-event me-2"></i>'.$time_string.$cancelled_badge.'</p>';
 									}
 									if ($evt_get('evt_timezone') != $page_vars['session']->get_timezone()) {
 										echo '<p class="text-muted mb-2"><i class="bi-clock me-2"></i>'.$event->get_time_string($page_vars['session']->get_timezone()).'</p>';
