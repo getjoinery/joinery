@@ -34,6 +34,11 @@ $formwriter = $page->getFormWriter('form1', [
 
 $formwriter->begin_form();
 
+if ($parent_event_id && $instance_date) {
+	$formwriter->hiddeninput('parent_event_id', '', ['value' => $parent_event_id]);
+	$formwriter->hiddeninput('instance_date', '', ['value' => $instance_date]);
+}
+
 $formwriter->textinput('evt_name', 'Event name', [
 	'validation' => ['required' => true, 'maxlength' => 255]
 ]);

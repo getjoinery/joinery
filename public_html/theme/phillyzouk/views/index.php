@@ -163,6 +163,7 @@ echo ComponentRenderer::render(null, 'list_signup', [
                         foreach ($page_vars['upcoming_events'] as $event) {
                             if ($count >= 6) break;
                             $is_virtual = is_object($event) && isset($event->is_virtual) && $event->is_virtual;
+                            $is_cancelled = (!$is_virtual && $event instanceof Event && $event->get('evt_status') == Event::STATUS_CANCELED);
                             $evt_name = $is_virtual ? $event->evt_name : $event->get('evt_name');
                             $evt_start = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
                             $evt_tz = $is_virtual ? ($event->evt_timezone ?: 'America/New_York') : ($event->get('evt_timezone') ?: 'America/New_York');
@@ -178,6 +179,9 @@ echo ComponentRenderer::render(null, 'list_signup', [
                                     </a>
                                     <?php endif; ?>
                                     <div class="featured-content">
+                                        <?php if($is_cancelled){ ?>
+                                        <div class="mb-2"><span class="badge bg-danger">Cancelled</span></div>
+                                        <?php } ?>
                                         <ul>
                                             <li>
                                                 <i class="bx bx-calendar"></i>

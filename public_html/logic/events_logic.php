@@ -68,8 +68,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		foreach ($parents as $parent) {
 			$instances = $parent->get_instances_for_range(date('Y-m-d'), $range_end);
 			foreach ($instances as $instance) {
-				// Only add virtual instances; materialized ones are already in the main query
 				if (is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual) {
+					// Virtual instances are never in the main query
+					$all_events[] = $instance;
+				} else if ($instance instanceof Event && $instance->get('evt_status') == Event::STATUS_CANCELED) {
+					// Cancelled materialized instances are excluded by the main query's status filter
 					$all_events[] = $instance;
 				}
 			}

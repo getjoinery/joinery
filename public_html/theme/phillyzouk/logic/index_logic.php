@@ -41,6 +41,9 @@ function index_logic($get_vars, $post_vars) {
             if (is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual) {
                 $instance->_picture_link = $parent_pic;
                 $all_events[] = $instance;
+            } else if ($instance instanceof Event && $instance->get('evt_status') == Event::STATUS_CANCELED) {
+                // Cancelled materialized instances are excluded by the main query
+                $all_events[] = $instance;
             }
         }
     }

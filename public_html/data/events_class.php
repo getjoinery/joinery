@@ -1022,11 +1022,7 @@ function get_leader() {
 		$instances = [];
 		foreach ($dates as $date) {
 			if (isset($materialized_by_date[$date])) {
-				$instance = $materialized_by_date[$date];
-				// Skip cancelled instances
-				if ($instance->get('evt_status') != Event::STATUS_CANCELED) {
-					$instances[] = $instance;
-				}
+				$instances[] = $materialized_by_date[$date];
 			} else {
 				$instances[] = $this->create_virtual_instance($date);
 			}

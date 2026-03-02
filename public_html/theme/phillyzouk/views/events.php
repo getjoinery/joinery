@@ -69,6 +69,7 @@ $page->public_header(array(
 				foreach ($page_vars['events'] as $event){
 					if ($event_count >= 20) break;
 					$is_virtual = (is_object($event) && isset($event->is_virtual) && $event->is_virtual);
+					$is_cancelled = (!$is_virtual && $event instanceof Event && $event->get('evt_status') == Event::STATUS_CANCELED);
 
 					// Unified field accessor
 					$evt_name = $is_virtual ? $event->evt_name : $event->get('evt_name');
@@ -126,6 +127,9 @@ $page->public_header(array(
 								<?php } ?>
 							</a>
 							<div class="featured-content">
+								<?php if($is_cancelled){ ?>
+								<div class="mb-2"><span class="badge bg-danger">Cancelled</span></div>
+								<?php } ?>
 								<ul>
 									<?php if($date_str){ ?>
 									<li>
