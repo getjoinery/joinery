@@ -17,10 +17,14 @@ $page_vars = $page_vars->data;
 	$settings = Globalvars::get_instance();
 
 	$page = new PublicPage();
-	$page->public_header(array(
+	$product_header_options = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => $product->get('pro_name')
-	));
+	);
+	if ($product->get('pro_short_description')) {
+		$product_header_options['meta_description'] = strip_tags($product->get('pro_short_description'));
+	}
+	$page->public_header($product_header_options);
 
 	if(!$product->get('pro_is_active')){
 		PublicPage::OutputGenericPublicPage('Product not available', 'Product not available', '<p>Sorry, this item is currently not available for purchase/registration.</p>');
