@@ -16,12 +16,60 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
+	// Detect virtual instance editing (parent_event_id + instance_date)
+	$parent_event_id = isset($post_vars['parent_event_id']) ? $post_vars['parent_event_id'] : (isset($get_vars['parent_event_id']) ? $get_vars['parent_event_id'] : null);
+	$instance_date = isset($post_vars['instance_date']) ? $post_vars['instance_date'] : (isset($get_vars['instance_date']) ? $get_vars['instance_date'] : null);
+	$is_virtual_edit = ($parent_event_id && $instance_date);
+
 	// Load or create event
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
-	if (isset($post_vars['edit_primary_key_value'])) {
+	if (isset($post_vars['edit_primary_key_value']) && $post_vars['edit_primary_key_value']) {
 		$event = new Event($post_vars['edit_primary_key_value'], TRUE);
 	} elseif (isset($get_vars['evt_event_id'])) {
 		$event = new Event($get_vars['evt_event_id'], TRUE);
+	} elseif ($is_virtual_edit && !$post_vars) {
+		// GET request for editing a virtual instance: pre-populate from parent
+		$parent = new Event($parent_event_id, TRUE);
+		$parent->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+
+		$event = new Event(NULL);
+		foreach (Event::$field_specifications as $field => $spec) {
+			if (in_array($field, Event::RECURRENCE_FIELDS)) continue;
+			if ($field === 'evt_event_id' || $field === 'evt_create_time' || $field === 'evt_delete_time') continue;
+			$event->set($field, $parent->get($field));
+		}
+		foreach (Event::RECURRENCE_FIELDS as $rf) {
+			$event->set($rf, null);
+		}
+
+		// Adjust start/end times for the instance date
+		if ($parent->get('evt_start_time')) {
+			$tz = $parent->get('evt_timezone') ?: 'America/New_York';
+			$event_tz = new DateTimeZone($tz);
+			$utc_tz = new DateTimeZone('UTC');
+
+			$parent_start = new DateTime($parent->get('evt_start_time'), $utc_tz);
+			$parent_start->setTimezone($event_tz);
+			$parent_local_date = $parent_start->format('Y-m-d');
+			$parent_local_time = $parent_start->format('H:i:s');
+
+			$inst_start = new DateTime($instance_date . ' ' . $parent_local_time, $event_tz);
+			$inst_start->setTimezone($utc_tz);
+			$event->set('evt_start_time', $inst_start->format('Y-m-d H:i:s'));
+
+			if ($parent->get('evt_end_time')) {
+				$parent_end = new DateTime($parent->get('evt_end_time'), $utc_tz);
+				$parent_end->setTimezone($event_tz);
+				$day_diff = (new DateTime($parent_local_date))->diff(new DateTime($parent_end->format('Y-m-d')))->days;
+				$end_date = new DateTime($instance_date);
+				if ($day_diff > 0) {
+					$end_date->modify('+' . $day_diff . ' days');
+				}
+				$inst_end = new DateTime($end_date->format('Y-m-d') . ' ' . $parent_end->format('H:i:s'), $event_tz);
+				$inst_end->setTimezone($utc_tz);
+				$event->set('evt_end_time', $inst_end->format('Y-m-d H:i:s'));
+			}
+		}
 	} else {
 		$event = new Event(NULL);
 		$event->set('evt_timezone', 'America/New_York');
@@ -31,6 +79,13 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 
 	// Process POST actions
 	if($post_vars){
+
+		// If editing a virtual instance, materialize it first
+		if ($is_virtual_edit && !$post_vars['edit_primary_key_value']) {
+			$parent = new Event($parent_event_id, TRUE);
+			$parent->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$event = $parent->materialize_instance($instance_date);
+		}
 
 		if($post_vars['evt_short_description']){
 				$post_vars['evt_short_description'] = $post_vars['evt_short_description'];
@@ -246,6 +301,8 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 		'num_event_types' => $num_event_types,
 		'content_versions' => $content_versions,
 		'session' => $session,
+		'parent_event_id' => $parent_event_id,
+		'instance_date' => $instance_date,
 	));
 }
 

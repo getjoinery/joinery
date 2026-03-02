@@ -43,12 +43,6 @@ function admin_event_logic($get_vars, $post_vars) {
 	}
 
 	// Recurring event actions
-	if($post_vars['action'] == 'materialize_instance'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$instance = $event->materialize_instance($post_vars['instance_date']);
-		return LogicResult::redirect('/admin/admin_event_edit?evt_event_id='.$instance->key);
-	}
-
 	if($post_vars['action'] == 'cancel_instance'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$instance = $event->materialize_instance($post_vars['instance_date']);

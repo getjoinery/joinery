@@ -387,9 +387,9 @@
 								<?php if ($is_cancelled): ?>
 									<span class="badge badge-subtle-danger">Cancelled</span>
 								<?php elseif ($is_materialized): ?>
-									<span class="badge badge-subtle-success">Materialized</span>
+									<span class="badge badge-subtle-success">Customized</span>
 								<?php else: ?>
-									<span class="badge badge-subtle-secondary">Virtual</span>
+									<span class="badge badge-subtle-secondary">Scheduled</span>
 								<?php endif; ?>
 							</td>
 							<td>
@@ -409,11 +409,7 @@
 									<a href="/admin/admin_event?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-falcon-default py-0 px-2">View</a>
 									<a href="/admin/admin_event_edit?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-falcon-default py-0 px-2">Edit</a>
 								<?php else: ?>
-									<form method="POST" action="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="d-inline">
-										<input type="hidden" name="action" value="materialize_instance">
-										<input type="hidden" name="instance_date" value="<?php echo $occ_date; ?>">
-										<button type="submit" class="btn btn-sm btn-falcon-primary py-0 px-2">Materialize</button>
-									</form>
+									<a href="/admin/admin_event_edit?parent_event_id=<?php echo $event->key; ?>&instance_date=<?php echo $occ_date; ?>" class="btn btn-sm btn-falcon-primary py-0 px-2">Edit</a>
 									<form method="POST" action="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="d-inline">
 										<input type="hidden" name="action" value="cancel_instance">
 										<input type="hidden" name="instance_date" value="<?php echo $occ_date; ?>">
@@ -442,7 +438,7 @@
 	<div class="card mb-3">
 		<div class="card-body">
 			<span class="fas fa-sync me-2 text-muted"></span>
-			This event is a materialized instance (<?php echo date('M j, Y', strtotime($event->get('evt_materialized_instance_date'))); ?>) of the recurring series
+			This is a customized occurrence (<?php echo date('M j, Y', strtotime($event->get('evt_materialized_instance_date'))); ?>) of the recurring series
 			<a href="/admin/admin_event?evt_event_id=<?php echo $parent_event->key; ?>"><strong><?php echo htmlspecialchars($parent_event->get('evt_name')); ?></strong></a>.
 		</div>
 	</div>

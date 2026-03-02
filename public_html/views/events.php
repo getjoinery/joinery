@@ -90,6 +90,7 @@ $page_vars = $page_vars->data;
 					foreach ($page_vars['events'] as $event){
 						$now_utc = gmdate('Y-m-d H:i:s');
 						$is_virtual = (is_object($event) && isset($event->is_virtual) && $event->is_virtual);
+						$is_cancelled = (!$is_virtual && $event instanceof Event && $event->get('evt_status') == Event::STATUS_CANCELED);
 
 						// Unified field accessor
 						$evt_name = $is_virtual ? $event->evt_name : $event->get('evt_name');
@@ -137,6 +138,9 @@ $page_vars = $page_vars->data;
 								</div>
 								<div class="portfolio-desc">
 									<h3><a href="<?php echo $event_url; ?>"><?php echo htmlspecialchars($evt_name); ?></a></h3>
+									<?php if($is_cancelled){ ?>
+									<span class="badge bg-danger mb-2">Cancelled</span><br>
+									<?php } ?>
 									<span>
 										<?php
 										$date_str = '';
