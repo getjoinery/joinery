@@ -458,23 +458,52 @@ abstract class PublicPageBase {
 
 	public function global_includes_top($options=array()){
 		$settings = Globalvars::get_instance();
+		$webDir = $settings->get_setting('webDir');
 
 		// Output canonical tag for SEO
-		echo '<link rel="canonical" href="' . htmlspecialchars($this->get_canonical_url(), ENT_QUOTES, 'UTF-8') . '">' . "\n";
+		$canonical_url = $this->get_canonical_url();
+		echo '<link rel="canonical" href="' . htmlspecialchars($canonical_url, ENT_QUOTES, 'UTF-8') . '">' . "\n";
 
-		//CHECK TO SEE IF WE PASSED IN A PREVIEW IMAGE
-		if(isset($options['preview_image_url']) && $options['preview_image_url']){
-			//IF NO INCREMENT IS PROVIDED, USE 1
-			if(!isset($options['preview_image_increment'])){
-				!$options['preview_image_increment'] = 1;
+		// Open Graph meta tags
+		$og_title = !empty($options['title']) ? $options['title'] : $settings->get_setting('site_name');
+		$og_description = !empty($options['meta_description']) ? $options['meta_description'] : $settings->get_setting('site_description');
+		$og_type = !empty($options['og_type']) ? $options['og_type'] : 'website';
+		$og_site_name = $settings->get_setting('site_name');
+
+		// Strip HTML and truncate description
+		if ($og_description) {
+			$og_description = strip_tags($og_description);
+			if (mb_strlen($og_description) > 200) {
+				$og_description = mb_substr($og_description, 0, 197) . '...';
 			}
-			echo '<meta property="og:image" content="'.$options['preview_image_url'].'?'.$options['preview_image_increment'].'" />';
+		}
+
+		echo '<meta property="og:title" content="' . htmlspecialchars($og_title, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		if ($og_description) {
+			echo '<meta property="og:description" content="' . htmlspecialchars($og_description, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		}
+		echo '<meta property="og:url" content="' . htmlspecialchars($canonical_url, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		echo '<meta property="og:type" content="' . htmlspecialchars($og_type, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		if ($og_site_name) {
+			echo '<meta property="og:site_name" content="' . htmlspecialchars($og_site_name, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		}
+
+		// og:image - page-specific or site default
+		if(isset($options['preview_image_url']) && $options['preview_image_url']){
+			$og_image = $options['preview_image_url'];
+			if (strpos($og_image, 'http') !== 0) {
+				$og_image = 'https://' . $webDir . $og_image;
+			}
+			$increment = isset($options['preview_image_increment']) ? $options['preview_image_increment'] : 1;
+			echo '<meta property="og:image" content="' . htmlspecialchars($og_image, ENT_QUOTES, 'UTF-8') . '?' . htmlspecialchars($increment, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
 		else{
-			//IF NOT, USE THE DEFAULT ONE
 			$preview_image_url = $settings->get_setting('preview_image');
 			if($preview_image_url){
-				echo '<meta property="og:image" content="'.$settings->get_setting('preview_image').'?'.$settings->get_setting('preview_image_increment').'" />';
+				if (strpos($preview_image_url, 'http') !== 0) {
+					$preview_image_url = 'https://' . $webDir . $preview_image_url;
+				}
+				echo '<meta property="og:image" content="' . htmlspecialchars($preview_image_url, ENT_QUOTES, 'UTF-8') . '?' . htmlspecialchars($settings->get_setting('preview_image_increment'), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 			}
 		}
 

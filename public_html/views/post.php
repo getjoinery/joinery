@@ -18,6 +18,12 @@ $page_vars = $page_vars->data;
 		'is_valid_page' => $is_valid_page,
 		'title' => $post->get('pst_title')
 	);
+	if ($post->get_picture_link('hero')) {
+		$hoptions['preview_image_url'] = $post->get_picture_link('hero');
+	}
+	if ($post->get('pst_short_description')) {
+		$hoptions['meta_description'] = $post->get('pst_short_description');
+	}
 	$page->public_header($hoptions);
 
 	echo PublicPage::BeginPage();
