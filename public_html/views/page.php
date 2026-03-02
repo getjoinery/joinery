@@ -13,10 +13,14 @@ $page_vars = $page_vars->data;
 	$page = $page_vars['page'];
 
 	$paget = new PublicPage();
-	$paget->public_header(array(
+	$page_header_options = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => $page->get('pag_title')
-	));
+	);
+	if ($page->get_picture_link('hero')) {
+		$page_header_options['preview_image_url'] = $page->get_picture_link('hero');
+	}
+	$paget->public_header($page_header_options);
 ?>
 
 	<!-- Page Title
