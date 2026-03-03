@@ -537,6 +537,8 @@ public static $field_specifications = array(
 ```
 
 #### When to Use Migrations
+Migrations are executed by running `update_database` from the admin utilities page — they do not run automatically on page load.
+
 Migrations in `/migrations/migrations.php` are ONLY for:
 - **Data migrations** (updating existing data)
 - **Settings insertions** (adding configuration values)  

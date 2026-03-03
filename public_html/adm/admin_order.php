@@ -233,12 +233,37 @@
 					                    $order->get('ord_stripe_charge_id') ||
 					                    $order->get('ord_stripe_session_id') ||
 					                    $order->get('ord_stripe_invoice_id') ||
+					                    $order->get('ord_paypal_order_id') ||
+					                    $order->get('ord_payment_method') ||
 					                    $order->get('ord_stripe_mode') == 'test';
 
 					if($has_payment_info):
 					?>
 					<table class="table table-borderless fs-9 fw-medium mb-0">
 						<tbody>
+							<?php if($order->get('ord_payment_method')):
+								$method_labels = array(
+									'paypal' => 'PayPal',
+									'venmo' => 'Venmo',
+									'stripe' => 'Stripe',
+									'stripe_checkout' => 'Stripe',
+									'card' => 'PayPal (Card)',
+									'free' => 'Free',
+								);
+								$pm = $order->get('ord_payment_method');
+								$pm_label = isset($method_labels[$pm]) ? $method_labels[$pm] : ucfirst($pm);
+							?>
+							<tr>
+								<td class="p-1" style="width: 40%;">Payment Method:</td>
+								<td class="p-1 text-600"><strong><?php echo htmlspecialchars($pm_label); ?></strong></td>
+							</tr>
+							<?php endif; ?>
+							<?php if($order->get('ord_paypal_order_id')): ?>
+							<tr>
+								<td class="p-1" style="width: 40%;">PayPal Order ID:</td>
+								<td class="p-1 text-600"><?php echo htmlspecialchars($order->get('ord_paypal_order_id')); ?></td>
+							</tr>
+							<?php endif; ?>
 							<?php if($order->get('ord_stripe_payment_intent_id')): ?>
 							<tr>
 								<td class="p-1" style="width: 40%;">Payment Intent ID:</td>
