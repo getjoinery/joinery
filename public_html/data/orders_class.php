@@ -61,6 +61,8 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 	    'ord_stripe_invoice_id' => array('type'=>'varchar(64)'),
 	    'ord_test_mode' => array('type'=>'bool', 'default'=>false),
 	    'ord_stripe_subscription_id_temp' => array('type'=>'varchar(255)'),
+	    'ord_paypal_order_id' => array('type'=>'varchar(64)', 'is_nullable'=>true),
+	    'ord_payment_method' => array('type'=>'varchar(32)', 'is_nullable'=>true),
 	);
 
 function is_stripe_order(){

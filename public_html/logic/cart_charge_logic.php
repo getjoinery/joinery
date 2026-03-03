@@ -152,17 +152,27 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$payment_id=$_GET['id'];
 			$paypal=new PaypalHelper();
 			$payment=$paypal->validatePayment($payment_id);
-			
-			if($_GET['subscription']){	
-				$order->set('ord_status', Order::STATUS_PAID);	
-				$order->save();
-				
-				$payment_service = 'paypal';				
-			}
-			else if($payment['status']=='COMPLETED'){	
+
+			// Determine funding source (paypal, venmo, card, etc.)
+			$funding_source = isset($_GET['funding']) ? $_GET['funding'] : 'paypal';
+			$valid_sources = array('paypal', 'venmo', 'card', 'paylater');
+			$payment_method = in_array($funding_source, $valid_sources) ? $funding_source : 'paypal';
+
+			if($_GET['subscription']){
 				$order->set('ord_status', Order::STATUS_PAID);
+				$order->set('ord_payment_method', $payment_method);
+				$order->set('ord_raw_response', json_encode($payment));
 				$order->save();
-				
+
+				$payment_service = 'paypal';
+			}
+			else if($payment['status']=='COMPLETED'){
+				$order->set('ord_status', Order::STATUS_PAID);
+				$order->set('ord_paypal_order_id', $payment_id);
+				$order->set('ord_payment_method', $payment_method);
+				$order->set('ord_raw_response', json_encode($payment));
+				$order->save();
+
 				$payment_service = 'paypal';
 			}
 			else{
@@ -171,15 +181,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->save();
 				throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no paypal transaction ID returned.");
-				exit();		
-			}	
+				exit();
+			}
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
-			
+
 			$order->set('ord_status', Order::STATUS_PAID);
+			$order->set('ord_payment_method', 'stripe_checkout');
 			$order->save();
-				
-				
+
+
 			$payment_service = 'stripe_checkout';
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
@@ -198,6 +209,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}	
 
 			$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
+			$order->set('ord_payment_method', 'stripe');
+			$order->save();
 			$payment_service = 'stripe_regular';
 		}
 		else{		
@@ -207,9 +220,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	else{
 		
-		$order->set('ord_status', Order::STATUS_PAID);	
-		$order->save();	
-		$payment_service = 'none';		
+		$order->set('ord_status', Order::STATUS_PAID);
+		$order->set('ord_payment_method', 'free');
+		$order->save();
+		$payment_service = 'none';
 	}
 	
 	//REFRESH THE ORDER 

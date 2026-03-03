@@ -84,7 +84,8 @@
 			const value = controlField ? controlField.value : '';
 
 			const containers = ['paypal_api_key_container', 'paypal_api_secret_container',
-			                   'paypal_api_key_test_container', 'paypal_api_secret_test_container'];
+			                   'paypal_api_key_test_container', 'paypal_api_secret_test_container',
+			                   'use_venmo_checkout_container'];
 			const display = (value == 0 || value == '') ? 'none' : 'block';
 
 			containers.forEach(function(containerId) {
@@ -397,6 +398,12 @@
 		$formwriter->dropinput('use_paypal_checkout', 'Enable Paypal Checkout', [
 			'options' => $optionvals,
 			'value' => $settings->get_setting('use_paypal_checkout'),
+			'empty_option' => false
+		]);
+
+		$formwriter->dropinput('use_venmo_checkout', 'Enable Venmo at Checkout', [
+			'options' => array(1 => "Yes", 0 => 'No'),
+			'value' => $settings->get_setting('use_venmo_checkout'),
 			'empty_option' => false
 		]);
 

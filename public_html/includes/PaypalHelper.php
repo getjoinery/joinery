@@ -71,17 +71,25 @@ class PaypalHelper{
 		
 	}
 	
-	public function output_paypal_checkout_code($data){ 
+	public function output_paypal_checkout_code($data){
 		if(!$data){
 			return false;
 		}
+
+		$settings = Globalvars::get_instance();
+		$venmo_param = '';
+		if ($settings->get_setting('use_venmo_checkout') && strtoupper($settings->get_setting('site_currency')) === 'USD') {
+			$venmo_param = '&enable-funding=venmo';
+		}
+
 		$output = '
 		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
 			<div id="paypal-button-container"></div>
 		  </div></div>
 
-		  <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&enable-funding=venmo&disable-funding=paylater"></script>
+		  <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.$venmo_param.'&disable-funding=paylater"></script>
 		  <script>
+			var selectedFundingSource = "paypal";
 			let paypalData = '. json_encode($data) .';
 			paypal.Buttons({
 			  createOrder: function(data, actions) {
@@ -90,10 +98,13 @@ class PaypalHelper{
 				  return orderID;
 				});
 			  },
+			  onClick: function(data) {
+				selectedFundingSource = data.fundingSource || "paypal";
+			  },
 			  onApprove: function(data, actions) {
 				return actions.order.capture().then(function(details) {
-				  // Pass the captured ID to the return URL page
-				  window.location.href = "'.$this->return_url.'?id=" + details.id;
+				  var fundingSource = data.paymentSource || selectedFundingSource || "paypal";
+				  window.location.href = "'.$this->return_url.'?id=" + details.id + "&funding=" + encodeURIComponent(fundingSource);
 				});
 			  },
 			  onError: function(err) {
@@ -102,7 +113,7 @@ class PaypalHelper{
 			}).render("#paypal-button-container");
 		  </script>	';
 		  return $output;
-		
+
 	}
 	
 	public function output_paypal_subscription_checkout_code($plan_id){ 
@@ -111,7 +122,7 @@ class PaypalHelper{
 		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
 			<div id="paypal-button-container"></div>
 		  </div></div>
- <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&enable-funding=venmo&intent=subscription&vault=true&disable-funding=paylater">
+ <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&intent=subscription&vault=true&disable-funding=paylater">
    </script>
  
    <script>
