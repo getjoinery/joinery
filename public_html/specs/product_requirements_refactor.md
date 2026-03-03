@@ -134,11 +134,6 @@ Each requirement type is a PHP class in its own file implementing a standard int
 ```php
 interface ProductRequirementInterface {
     /**
-     * Return the requirement type ID from rqt_requirement_types
-     */
-    public function get_type_id(): int;
-
-    /**
      * Return the display label (may be overridden by prq_title)
      */
     public function get_label(): string;
@@ -294,10 +289,10 @@ The current `cart_charge_logic.php` contains scattered field-name checks that tr
 
 | Current Code (cart_charge_logic.php) | Moves To |
 |------|----------|
-| `if(isset($data['record_terms'])){ $event_registrant->set('evr_recording_consent', TRUE); }` (lines 460-462, 493-495) | Removed entirely — consent stored in `oir_order_item_requirements` via `save_cart_data()` |
-| `if(isset($data['comment'])){ $order_item->set('odi_comment', $data['comment']); }` (line 317-318) | `CommentRequirement::post_purchase()` |
-| User creation from `$data['email']`, `$data['full_name_first']`, `$data['full_name_last']` (lines 282-288) | `FullNameRequirement::post_purchase()` and `EmailRequirement::post_purchase()` — or keep in cart_charge_logic since user creation is a checkout concern, not a requirement concern (see note below) |
-| Receipt name from `$data['full_name_first'] . ' ' . $data['full_name_last']` (line 537) | Keep in cart_charge_logic — receipt assembly is a checkout concern |
+| `if(isset($data['record_terms'])){ $event_registrant->set('evr_recording_consent', TRUE); }` (lines 474-477, 507-509) | Removed entirely — consent stored in `oir_order_item_requirements` via `save_cart_data()` |
+| `if(isset($data['comment'])){ $order_item->set('odi_comment', $data['comment']); }` (lines 331-333) | `CommentRequirement::post_purchase()` |
+| User creation from `$data['email']`, `$data['full_name_first']`, `$data['full_name_last']` (lines 296-305) | `FullNameRequirement::post_purchase()` and `EmailRequirement::post_purchase()` — or keep in cart_charge_logic since user creation is a checkout concern, not a requirement concern (see note below) |
+| Receipt name from `$data['full_name_first'] . ' ' . $data['full_name_last']` (line 551) | Keep in cart_charge_logic — receipt assembly is a checkout concern |
 
 **Note on user creation:** The `email` and `full_name` fields are used by `cart_charge_logic.php` to look up or create users. This is arguably a checkout-level concern rather than a requirement side effect. The `post_purchase()` hook is best suited for effects that are specific to the requirement type (recording consent on event registrants, storing comments on order items, subscribing to newsletters). User creation should remain in `cart_charge_logic.php` — it just reads from `$data` keys that were populated by the requirement validation.
 
@@ -422,7 +417,7 @@ This means a site can set global defaults for a type, override per-requirement r
 ### Product Edit Page (`admin_product_edit.php`)
 
 **Before:** Two separate checkbox sections
-- "Basic Requirements" — checkboxes for 10 hardcoded types (summed into bitmask)
+- "Basic Requirements" — checkboxes for 9 of the 10 hardcoded types (summed into bitmask; GDPRNoticeRequirement/ID=16 exists in code but is not shown in the admin UI)
 - "Additional Requirements" — checkboxes for database question requirements
 
 **After:** Single unified "Requirements" section with checkboxes for all available requirements, grouped by type:
@@ -572,13 +567,13 @@ The event extra info system is removed entirely. Any information previously coll
 |------|--------|
 | `data/events_class.php` | Remove `evt_collect_extra_info` from `$field_specifications` |
 | `data/event_registrants_class.php` | Remove `evr_recording_consent`, `evr_first_event`, `evr_other_events`, `evr_health_notes`, `evr_extra_info_completed` from `$field_specifications` |
-| `logic/cart_charge_logic.php` | Remove `more_info_required` flag logic (lines 465-469) |
-| `adm/admin_event_edit.php` | Remove `evt_collect_extra_info` hidden input (line 247) |
-| `adm/logic/admin_event_edit_logic.php` | Remove `evt_collect_extra_info` from `$editable_fields` (line 137) |
-| `adm/admin_event.php` | Remove "Collect Extra Info" display row (lines 228-229); remove commented-out extra info display block (lines 514-543) |
+| `logic/cart_charge_logic.php` | Remove `more_info_required` flag logic (lines 480-483) |
+| `adm/admin_event_edit.php` | Remove `evt_collect_extra_info` hidden input (line 252) |
+| `adm/logic/admin_event_edit_logic.php` | Remove `evt_collect_extra_info` from `$editable_fields` (line 192) |
+| `adm/admin_event.php` | Remove "Collect Extra Info" display row (lines 228-229); remove commented-out extra info display block (lines 510-539) |
 | `logic/profile_logic.php` | Remove commented-out extra info reminder (lines 98-103) |
 | `views/profile/profile.php` | Remove commented-out extra info reminder (lines 27-41) |
-| `views/profile/event_sessions.php` | Remove commented-out extra info reminder (lines 556-571) |
+| `views/profile/event_sessions.php` | Remove commented-out extra info reminder (lines 559-571) |
 | `plugins/controld/views/profile/profile.php` | Remove commented-out extra info reminder (lines 29-43) |
 
 ### Files Deleted
@@ -637,32 +632,32 @@ All of the following are deleted with no replacement or backward-compatible shim
 | `UserPriceRequirement` class | `products_class.php` | 481-532 |
 | `NewsletterSignupRequirement` class | `products_class.php` | 534-572 |
 | `CommentRequirement` class | `products_class.php` | 574-607 |
-| `BasicProductRequirementException` class | `products_class.php` | ~608 |
-| `$REQUIREMENT_IDS` static array | `products_class.php` | 30-41 |
+| `BasicProductRequirementException` class | `products_class.php` | 23 |
+| `$REQUIREMENT_IDS` static array | `products_class.php` | 28-39 |
 | `pro_requirements` field spec | `products_class.php` | 654 |
 | `pro_requirements` column | `pro_products` table | — |
 | Bitmask checkbox UI | `admin_product_edit.php` | 134-159 |
-| Bitmask summation logic | `admin_product_edit_logic.php` | 46-51 |
-| Scattered field-name checks in checkout | `cart_charge_logic.php` | 317-318, 460-462, 493-495 |
-| `more_info_required` email flag logic | `cart_charge_logic.php` | 465-469 |
+| Bitmask summation logic | `admin_product_edit_logic.php` | 46-52 |
+| Scattered field-name checks in checkout | `cart_charge_logic.php` | 331-333, 474-477, 507-509 |
+| `more_info_required` email flag logic | `cart_charge_logic.php` | 480-483 |
 | `evt_collect_extra_info` field spec | `events_class.php` | 105 |
 | `evr_recording_consent` field spec | `event_registrants_class.php` | 65 |
 | `evr_first_event` field spec | `event_registrants_class.php` | 66 |
-| `evr_other_events` field spec | `event_registrants_class.php` | 67 |
-| `evr_health_notes` field spec | `event_registrants_class.php` | 68 |
-| `evr_extra_info_completed` field spec | `event_registrants_class.php` | 69 |
-| `evt_collect_extra_info` hidden input | `admin_event_edit.php` | 247 |
-| `evt_collect_extra_info` in editable_fields | `admin_event_edit_logic.php` | 137 |
+| `evr_other_events` field spec | `event_registrants_class.php` | 68 |
+| `evr_health_notes` field spec | `event_registrants_class.php` | 69 |
+| `evr_extra_info_completed` field spec | `event_registrants_class.php` | 70 |
+| `evt_collect_extra_info` hidden input | `admin_event_edit.php` | 252 |
+| `evt_collect_extra_info` in editable_fields | `admin_event_edit_logic.php` | 192 |
 | "Collect Extra Info" display row | `admin_event.php` | 228-229 |
-| Commented-out extra info display block | `admin_event.php` | 514-543 |
+| Commented-out extra info display block | `admin_event.php` | 510-539 |
 | Commented-out extra info reminder | `profile_logic.php` | 98-103 |
 | Commented-out extra info reminder | `views/profile/profile.php` | 27-41 |
-| Commented-out extra info reminder | `views/profile/event_sessions.php` | 556-571 |
+| Commented-out extra info reminder | `views/profile/event_sessions.php` | 559-571 |
 | Commented-out extra info reminder | `plugins/controld/views/profile/profile.php` | 29-43 |
 | Entire file | `logic/event_register_finish_logic.php` | all |
 | Entire file | `views/profile/event_register_finish.php` | all |
 
-**Note:** `BasicProductRequirementException` should be preserved (or renamed to `ProductRequirementException`) since it's used in the validation flow and caught by `product_logic.php:88`.
+**Note:** `BasicProductRequirementException` should be preserved (or renamed to `ProductRequirementException`) since it's used in the validation flow and caught by `product_logic.php:87`.
 
 ---
 
@@ -688,6 +683,8 @@ All of the following are deleted with no replacement or backward-compatible shim
 | `views/profile/profile.php` | Remove commented-out extra info reminder |
 | `views/profile/event_sessions.php` | Remove commented-out extra info reminder |
 | `plugins/controld/views/profile/profile.php` | Remove commented-out extra info reminder |
+| `tests/functional/products/products_to_test.json` | Update `pro_requirements` bitmask format and `additional_pro_requirements` to new instance-based format |
+| `tests/functional/products/products_to_test_subscription.json` | Update `pro_requirements` bitmask format and `additional_pro_requirements` to new instance-based format |
 
 ## Files Created
 
@@ -728,3 +725,21 @@ All of the following are deleted with no replacement or backward-compatible shim
 5. **Admin:** Create/edit products with requirements via the new unified UI; verify instances created correctly
 6. **Plugin types:** Register a custom requirement type, attach to a product, complete checkout — verify the full lifecycle works
 7. **Event extra info removal:** Verify event admin pages render without errors after field removal; verify event receipt emails send without errors (no `more_info_required` reference); verify `/profile/event_register_finish` returns 404; verify event registration checkout still works with QuestionRequirement-based alternatives
+
+---
+
+## Implementation Notes
+
+Notes from pre-implementation code review (2026-03-03):
+
+### `Product::save_requirement_instances()` Rewrite
+
+The existing `save_requirement_instances()` method at `products_class.php:732` currently only manages question-based instances (the `additional_pro_requirements` form field). After the refactor, this method must handle ALL requirement types — both system types and custom questions — since the unified admin UI submits a single checkbox list. The method's current pattern (diff-based: delete removed, add new) is sound and can be adapted.
+
+### `prq_is_default_checked` Ghost Field Cleanup
+
+`admin_product_edit.php:178` references `$product_requirement->get('prq_is_default_checked')`, but this field does not exist in `product_requirements_class.php`'s `$field_specifications`. This is a pre-existing bug. Since we are rewriting the admin product edit requirement section, clean this up as part of the refactor.
+
+### GDPR Requirement (ID=16) Visibility
+
+The current admin checkbox list at `admin_product_edit.php:134-144` shows only 9 of the 10 bitmask types — `GDPRNoticeRequirement` (ID=16) is absent. The class exists in code but was never exposed in the admin UI. After migration to the new system, GDPR will appear as an available requirement type in the unified admin UI. If no products currently use bit 16, the migration will not create any instances for it, but it will be selectable going forward.
