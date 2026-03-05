@@ -224,10 +224,6 @@
 								</td>
 							</tr>
 							<?php endif; ?>
-							<tr>
-								<td class="p-1" style="width: 35%;">Collect Extra Info:</td>
-								<td class="p-1 text-600"><?php echo $event->get('evt_collect_extra_info') ? 'Yes' : 'No'; ?></td>
-							</tr>
 							<?php if($event_survey): ?>
 							<tr>
 								<td class="p-1" style="width: 35%;">Survey:</td>
@@ -507,37 +503,6 @@
 		else{
 			array_push($rowvalues, LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
 		}
-/*
-		$reginfo = '';
-		if($event_registrant->get('evr_recording_consent')){
-			$reginfo .= 'Recording consent: '.LibraryFunctions::bool_to_english($event_registrant->get('evr_recording_consent'),"Yes", "No"). '<br />';
-		}
-		if(!is_null($event_registrant->get('evr_first_event'))){
-			$reginfo .= '<br>First Event: '. LibraryFunctions::bool_to_english($event_registrant->get('evr_first_event'),"Yes", "No") . '<br />';
-		}
-
-		if($event_registrant->get('evr_other_events')){
-			$reginfo .= '<br>Other events attended: '. $event_registrant->get('evr_other_events'). '<br />';
-		}
-		if($event_registrant->get('evr_health_notes')){
-			$reginfo .= '<br>Health notes: '. $event_registrant->get('evr_health_notes');
-		}
-
-		if($event_registrant->get('evr_extra_info_completed') || !$event->get('evt_collect_extra_info')){
-			array_push($rowvalues, $reginfo);
-		}
-		else{
-			$act_code = Activation::CheckForActiveCode($registrant->key, Activation::EMAIL_VERIFY);
-			if($act_code){
-				$line = 'Not Answered <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$registrant->key.'&eventregistrantid='.$event_registrant->key.'">link</a>';
-			}
-			else{
-				$line = 'Not Answered';
-			}
-			array_push($rowvalues, $line);
-		}
-	*/
-
 		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
 		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
 		<input type="hidden" class="hidden" name="evr_event_registrant_id" id="evr_event_registrant_id" value="'.$event_registrant->key.'" />

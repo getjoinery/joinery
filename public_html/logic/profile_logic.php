@@ -95,13 +95,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$tevent['calendar_links'] = $event->get_add_to_calendar_links();
 		}
 
-		/*
-		if(!$event_registrant->get('evr_extra_info_completed') && $event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
-			$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-			$actions .= '<a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">Additional information needed</a> ';
-		}
-		*/
-
 		$tevent['event_name'] = $event->get('evt_name');
 		$tevent['event_expires'] = '';
 		 '';

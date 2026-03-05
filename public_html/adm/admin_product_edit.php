@@ -130,33 +130,37 @@ if($has_product_groups){
 	]);
 }
 
-// Info to collect at purchase - with readonly handling
-$optionvals = array(
-	1 => 'Name',
-	64 => 'Email',
-	2 => 'Phone Number',
-	4 => 'Date of Birth',
-	8 => 'Address',
-	32 => 'Consent to record',
-	128 => 'Optional One-time Donation',
-	256 => 'Newsletter Signup',
-	512 => 'Comment'
-);
-
-if ($product->key) {
-	//FILL THE CHECKED VALUES
-	$checkedvals = $product->get_requirement_info('ids');
-	$checkedvals[] = 1;
-	$checkedvals[] = 64;
-} else {
-	$checkedvals = array(1, 64);
+// Requirements - unified checkbox list
+// Build checked values from existing pri instances
+$checked_system = [];
+$checked_questions = [];
+foreach ($instances as $instance) {
+	$class_name = $instance->get('pri_class_name');
+	if ($class_name === 'QuestionRequirement') {
+		$config = json_decode($instance->get('pri_config'), true) ?: [];
+		if (!empty($config['question_id'])) {
+			$checked_questions[] = $config['question_id'];
+		}
+	} else {
+		$checked_system[] = $class_name;
+	}
 }
 
-$formwriter->checkboxList('pro_requirements', 'Info to collect at purchase', [
-	'options' => $optionvals,
-	'checked' => $checkedvals,
-	'validation' => ['required' => true]
-]);
+// System requirements (Tier 2)
+if (!empty($grouped_requirements['system'])) {
+	$formwriter->checkboxList('system_requirements', 'System Requirements', [
+		'options' => $grouped_requirements['system'],
+		'checked' => $checked_system,
+	]);
+}
+
+// Question requirements (Tier 1)
+if (!empty($grouped_requirements['questions'])) {
+	$formwriter->checkboxList('question_requirements', 'Questions & Confirmations', [
+		'options' => $grouped_requirements['questions'],
+		'checked' => $checked_questions,
+	]);
+}
 
 // Product Scripts
 if(!empty($product_scripts_optionvals)){
@@ -169,28 +173,7 @@ if(!empty($product_scripts_optionvals)){
 	]);
 }
 
-// Additional Product Requirements
-if($has_product_requirements){
-	$optionvals = $product_requirements->get_dropdown_array();
-
-	$checkedvals = array();
-	foreach ($product_requirements as $product_requirement){
-		if($product_requirement->get('prq_is_default_checked')){
-			$checkedvals[] = $product_requirement->key;
-		}
-
-		foreach($instances as $instance){
-			if($product_requirement->key == $instance->get('pri_prq_product_requirement_id')){
-				$checkedvals[] = $instance->get('pri_prq_product_requirement_id');
-			}
-		}
-	}
-
-	$formwriter->checkboxList('additional_pro_requirements', 'Additional Info to collect at purchase', [
-		'options' => $optionvals,
-		'checked' => $checkedvals
-	]);
-}
+// Additional Product Requirements section removed — now handled via unified checkbox list above
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 $formwriter->end_form();

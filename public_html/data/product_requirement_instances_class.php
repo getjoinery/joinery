@@ -37,9 +37,15 @@ class ProductRequirementInstance extends SystemBase {	public static $prefix = 'p
 	public static $field_specifications = array(
 	    'pri_product_requirement_instance_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'pri_pro_product_id' => array('type'=>'int4', 'required'=>true),
-	    'pri_prq_product_requirement_id' => array('type'=>'int4', 'required'=>true),
+	    'pri_prq_product_requirement_id' => array('type'=>'int4'),
+	    'pri_class_name' => array('type'=>'varchar(255)'),
+	    'pri_config' => array('type'=>'jsonb'),
+	    'pri_order' => array('type'=>'int4', 'default'=>0),
 	    'pri_delete_time' => array('type'=>'timestamp(6)'),
-	); 
+	    'pri_created_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	);
+
+	public static $json_vars = array('pri_config'); 
 
 function authenticate_write($data) {
 		if ($data['current_user_permission'] < 5) {
@@ -75,6 +81,10 @@ class MultiProductRequirementInstance extends SystemMultiBase {
 
 		if (isset($this->options['product_requirement_id'])) {
 			$filters['pri_prq_product_requirement_id'] = [$this->options['product_requirement_id'], PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['class_name'])) {
+			$filters['pri_class_name'] = [$this->options['class_name'], PDO::PARAM_STR];
 		}
 
 		if (isset($this->options['deleted'])) {

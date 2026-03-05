@@ -249,8 +249,6 @@ $formwriter->textbox('evt_private_info', 'Info only for registrants', [
 
 echo '</div>';
 
-$formwriter->hiddeninput('evt_collect_extra_info', '', ['value' => 0]);
-
 $formwriter->submitbutton('btn_submit', 'Submit');
 $formwriter->end_form();
 

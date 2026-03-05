@@ -327,9 +327,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$order_item->set('odi_is_subscription', false);	
 		}
 		
-		//STORE COMMENT IF ENTERED
-		if(isset($data['comment'])){
-			$order_item->set('odi_comment', $data['comment']);	
+		//STORE COMMENT IF ENTERED (legacy — now handled via QuestionRequirement)
+		if(isset($data['comment']) && !is_array($data['comment'])){
+			$order_item->set('odi_comment', $data['comment']);
 		}
 
 		$order_item->set('odi_prv_product_version_id', $product_version->key);	
@@ -470,17 +470,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
 			$order_item->save();
 
-			//THE RECORDING CONSENT BOX
-			if(isset($data['record_terms'])){ 
-				$event_registrant->set('evr_recording_consent', TRUE);
-				$event_registrant->save();		
-			} 				
-			
-			//SEND THE EMAIL
-			$email_fill['more_info_required'] = false;
-			if($event->get('evt_collect_extra_info')){
-				$email_fill['more_info_required'] = true;	
-			}
 			$email_fill['event_registrant_id'] = $event_registrant->key;
 
 			$template = 'event_reciept_content';
@@ -503,12 +492,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
 				$event_registrant = $event->add_registrant($user->key, $order_item, $product->get('pro_grp_group_id'), NULL);
 				
-				//THE RECORDING CONSENT BOX
-				if(isset($data['record_terms'])){ 
-					$event_registrant->set('evr_recording_consent', TRUE);	
-				}
-
-				$event_registrant->save();	
+					$event_registrant->save();	
 				
 			}
 			
@@ -533,6 +517,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			
 		//RUN THE PRODUCT SCRIPTS
 		$product->run_product_scripts($user, $order_item);
+
+		// Run requirement-level post_purchase hooks
+		require_once(PathHelper::getIncludePath('includes/requirements/AbstractProductRequirement.php'));
+		foreach (AbstractProductRequirement::getProductRequirements($product->key) as $requirement) {
+			$requirement->post_purchase($data, $order_item, $user, $order);
+		}
 
 		// Handle subscription tier assignment - ONLY if payment was successful
 		if($order_item->get('odi_status') == OrderItem::STATUS_PAID) {

@@ -555,21 +555,6 @@
 
 				<?php
 
-	//DISPLAY REGISTER FINISH LINKS FOR ANY EVENTS
-	/*
-	if($page_vars['event']->get('evt_collect_extra_info')){
-		$page_vars['event_registrant']s = new MultiEventRegistrant(array('user_id' => $page_vars['session']->get_user_id(), 'event_id' => $page_vars['event']->key), NULL);
-		$page_vars['event_registrant']s->load();
-		foreach($page_vars['event_registrant']s as $page_vars['event_registrant']){
-			if(!$page_vars['event_registrant']->get('evr_extra_info_completed')){
-				$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-				$line = 'Your registration for <strong>'.$page_vars['event']->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$page_vars['event_registrant']->key.'">click here to add the information</a>';
-				echo '<div class="status_warning">'.$line.'</div><br /><br />';
-			}
-		}
-	}		
-	*/
-
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

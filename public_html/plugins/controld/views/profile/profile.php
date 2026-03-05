@@ -26,21 +26,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
 		}
 	}	
-		/*
-	if($page_vars['settings']->get_setting('events_active')){
-		//DISPLAY REGISTER FINISH LINKS
-		foreach($event_registrants as $event_registrant){
-			if(!$event_registrant->get('evr_extra_info_completed')){
-				$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-				if($event->get('evt_collect_extra_info') && $event->get('evt_status') == 1){
-					$act_code = Activation::CheckForActiveCode($user->key, Activation::EMAIL_VERIFY);
-					$line = 'Your registration for <strong>'.$event->get('evt_name').'</strong> needs some additional information. <a href="/profile/event_register_finish?act_code='.$act_code->act_code.'&userid='.$user->key.'&eventregistrantid='.$event_registrant->key.'">click here to add the information</a>';
-					echo '<div class="status_warning">'.$line.'</div><br /><br />';
-				}
-			}
-		}			
-	} 
-	*/
 	echo PublicPage::tab_menu($page_vars['tab_menus'], 'My Profile');
 	?>
 

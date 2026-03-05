@@ -25,6 +25,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	const TYPE_RADIO = 4;
 	const TYPE_CHECKBOX = 5;
 	const TYPE_CHECKBOX_LIST = 6;
+	const TYPE_CONFIRMATION = 7;
 
 		/**
 	 * Field specifications define database column properties and validation rules
@@ -49,11 +50,15 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	    'qst_options' => array('type'=>'text'),
 	    'qst_validate' => array('type'=>'varchar(255)'),
 	    'qst_type' => array('type'=>'int4'),
+	    'qst_config' => array('type'=>'jsonb'),
+	    'qst_is_required' => array('type'=>'bool', 'default'=>false),
 	    'qst_is_published' => array('type'=>'bool', 'default'=>true),
 	    'qst_published_time' => array('type'=>'timestamp(6)'),
 	    'qst_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'qst_delete_time' => array('type'=>'timestamp(6)'),
 	);
+
+	public static $json_vars = array('qst_config');
 
 	function output_js_validation($validation_rules){
 		$validation_options = unserialize($this->get('qst_validate')) ?: [];
@@ -245,6 +250,37 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 				'validation' => $validation
 			]);
 		}
+		else if ($this->get('qst_type') == Question::TYPE_CONFIRMATION){
+			$config = json_decode($this->get('qst_config'), true) ?: [];
+			$body_text = isset($config['body_text']) ? $config['body_text'] : null;
+			$checkbox_label = isset($config['checkbox_label']) ? $config['checkbox_label'] : $this->get('qst_question');
+			$scrollable = isset($config['scrollable']) ? $config['scrollable'] : false;
+
+			if ($body_text) {
+				if ($scrollable) {
+					echo '<div class="sm:col-span-6">';
+					echo '<label>' . htmlspecialchars($this->get('qst_question')) . '</label>';
+					echo '<div style="overflow:auto; height: 100px; border: 1px solid #DDDAD3; width: 100%; padding: 6px; margin-bottom: 5px; background-color: #f5f5f5;">';
+					echo $body_text;
+					echo '</div>';
+					echo '</div>';
+				} else {
+					echo '<div class="sm:col-span-6">';
+					echo '<label>' . htmlspecialchars($this->get('qst_question')) . '</label>';
+					echo '<div style="padding: 6px; margin-bottom: 5px;">';
+					echo $body_text;
+					echo '</div>';
+					echo '</div>';
+				}
+			}
+
+			$validation['required'] = true;
+			$formwriter->checkboxinput($field_name, $checkbox_label, [
+				'value' => '1',
+				'checked' => ($value == '1'),
+				'validation' => $validation
+			]);
+		}
 	}
 
 	//TAKES AN ANSWER AS INPUT AND RETURNS A HUMAN READABLE ANSWER, RETURN_SAFE OPTIONALLY ADDS ESCAPING
@@ -255,6 +291,9 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_LONG_TEXT){
 			$return_string = $answer;
+		}
+		else if ($this->get('qst_type') == Question::TYPE_CONFIRMATION){
+			$return_string = $answer ? 'Yes' : 'No';
 		}
 		else if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$options = new MultiQuestionOption(
@@ -405,6 +444,10 @@ class MultiQuestion extends SystemMultiBase {
 
 		if (isset($this->options['published'])) {
 			$filters['qst_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
+		}
+
+		if (isset($this->options['type'])) {
+			$filters['qst_type'] = [$this->options['type'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['deleted'])) {
