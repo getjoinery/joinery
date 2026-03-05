@@ -89,7 +89,6 @@ function admin_product_logic($get_vars, $post_vars) {
 
 	// Get requirements
 	$requirements = $product->get_requirement_info();
-	$instances = $product->get_requirement_instances();
 
 	$page_vars = array(
 		'session' => $session,
@@ -101,7 +100,6 @@ function admin_product_logic($get_vars, $post_vars) {
 		'event' => $event,
 		'product_group' => $product_group,
 		'requirements' => $requirements,
-		'instances' => $instances,
 	);
 
 	return LogicResult::render($page_vars);

@@ -106,33 +106,16 @@
 			</div>
 
 			<!-- Product Requirements Card -->
-			<?php if(!empty($requirements) || count($instances) > 0): ?>
+			<?php if(!empty($requirements)): ?>
 			<div class="card mb-3">
 				<div class="card-header bg-body-tertiary">
 					<h6 class="mb-0"><span class="fas fa-clipboard-list me-2"></span>Purchase Requirements</h6>
 				</div>
 				<div class="card-body">
-					<?php if(!empty($requirements)): ?>
 					<div class="mb-2">
-						<strong class="fs-9">Standard Info Collected:</strong>
+						<strong class="fs-9">Info Collected:</strong>
 						<div class="fs-10 text-600 mt-1"><?php echo implode(', ', $requirements); ?></div>
 					</div>
-					<?php endif; ?>
-					<?php if(count($instances) > 0): ?>
-					<div>
-						<strong class="fs-9">Additional Info Collected:</strong>
-						<div class="fs-10 text-600 mt-1">
-							<?php
-							$instance_titles = array();
-							foreach($instances as $instance){
-								$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
-								$instance_titles[] = htmlspecialchars($requirement->get('prq_title'));
-							}
-							echo implode(', ', $instance_titles);
-							?>
-						</div>
-					</div>
-					<?php endif; ?>
 				</div>
 			</div>
 			<?php endif; ?>
