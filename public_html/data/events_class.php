@@ -102,7 +102,6 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_timezone' => array('type'=>'varchar(32)', 'default'=>'America/New_York'),
 	    'evt_is_accepting_signups' => array('type'=>'bool'),
 	    'evt_picture_link' => array('type'=>'varchar(255)'),
-	    'evt_collect_extra_info' => array('type'=>'bool'),
 	    'evt_grp_group_id' => array('type'=>'int4'),
 	    'evt_private_info' => array('type'=>'text'),
 	    'evt_status' => array('type'=>'int4', 'default'=>1),

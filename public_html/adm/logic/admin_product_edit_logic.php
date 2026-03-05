@@ -43,15 +43,27 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 			$product->set('pro_created_by', $session->get_user_id());
 		}
 
-		if($post_vars['pro_requirements']){
-			$total_value = 0;
-			foreach ($post_vars['pro_requirements'] as $choice => $value){
-				$total_value += $value;
+		// Build requirement instances from the unified checkbox list
+		$requirement_specs = [];
+
+		// System requirements (Tier 2 — class_name directly)
+		if (!empty($post_vars['system_requirements']) && is_array($post_vars['system_requirements'])) {
+			foreach ($post_vars['system_requirements'] as $class_name) {
+				$requirement_specs[] = ['class_name' => $class_name, 'config' => []];
 			}
-			$product->set('pro_requirements', $total_value);
 		}
 
-		$product->save_requirement_instances($post_vars['additional_pro_requirements']);
+		// Question requirements (Tier 1 — QuestionRequirement with question_id config)
+		if (!empty($post_vars['question_requirements']) && is_array($post_vars['question_requirements'])) {
+			foreach ($post_vars['question_requirements'] as $question_id) {
+				$requirement_specs[] = [
+					'class_name' => 'QuestionRequirement',
+					'config' => ['question_id' => intval($question_id)],
+				];
+			}
+		}
+
+		$product->save_requirement_instances($requirement_specs);
 
 		if($post_vars['pro_evt_event_id'] == '' || $post_vars['pro_evt_event_id'] == 0){
 			$product->set('pro_evt_event_id', NULL);
@@ -212,19 +224,12 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 		$pgs->load();
 	}
 
-	// Load requirement instances
+	// Load requirement instances for the product
 	$instances = $product->get_requirement_instances(false);
 
-	// Load product requirements
-	$product_requirements = new MultiProductRequirement(
-		array('deleted'=>false),
-		NULL,
-		NULL,
-		NULL);
-	$has_product_requirements = $product_requirements->count_all();
-	if($has_product_requirements){
-		$product_requirements->load();
-	}
+	// Load the requirement registry for the unified checkbox list
+	require_once(PathHelper::getIncludePath('includes/requirements/AbstractProductRequirement.php'));
+	$grouped_requirements = AbstractProductRequirement::getGrouped();
 
 	// Build product scripts options
 	$product_scripts_optionvals = array();
@@ -253,8 +258,7 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 		'pgs' => $pgs,
 		'has_product_groups' => $has_product_groups,
 		'instances' => $instances,
-		'product_requirements' => $product_requirements,
-		'has_product_requirements' => $has_product_requirements,
+		'grouped_requirements' => $grouped_requirements,
 		'product_scripts_optionvals' => $product_scripts_optionvals,
 		'session' => $session,
 		'settings' => $settings,
