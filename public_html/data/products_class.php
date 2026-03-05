@@ -22,590 +22,6 @@ class ProductException extends SystemBaseException {}
 
 class BasicProductRequirementException extends SystemBaseException {}
 
-abstract class BasicProductRequirement {
-	protected static $model_class = 'Product';
-
-	public static $REQUIREMENT_IDS = array(
-		1 => 'FullNameRequirement',
-		2 => 'PhoneNumberRequirement',
-		4 => 'DOBRequirement',
-		8 => 'AddressRequirement',
-		16 => 'GDPRNoticeRequirement',
-		32 => 'RecordConsentRequirement',
-		64 => 'EmailRequirement',
-		128 => 'UserPriceRequirement',
-		256 => 'NewsletterSignupRequirement',
-		512 => 'CommentRequirement'
-	);
-
-	public static function GetRequirements($requirements) {
-		$req_classes = array();
-		foreach(self::$REQUIREMENT_IDS as $requirement => $req_class) {
-			if ($requirements & $requirement) {
-				$req_classes[] = new $req_class;
-			}
-		}
-		return $req_classes;
-	}
-
-	public function get_form($formwriter, $user=NULL) {}
-	public function validate_form($data, $session=NULL) {}
-
-	public function get_javascript() { return ''; }
-	public function get_validation_info() { return NULL; }
-}
-
-class FullNameRequirement extends BasicProductRequirement {
-	const ID = 1;
-	const LABEL = 'Name';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-
-	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("First Name", "full_name_first", NULL, 20, $user ? $user->get('usr_first_name') : '', '', 255, '');
-		echo $formwriter->textinput("Last Name", "full_name_last", NULL, 20, $user ? $user->get('usr_last_name') : '', '', 255, '');
-	}
-
-	public function validate_form($data, $session=NULL) {
-
-		if (empty($data['full_name_first'])) {
-			throw new BasicProductRequirementException('First Name is Required');
-		}
-		if (empty($data['full_name_last'])) {
-			throw new BasicProductRequirementException('Last Name is Required');
-		}
-		
-		$return_array = array(
-			'full_name_first' => $data['full_name_first'],
-			'full_name_last' => $data['full_name_last']
-		);
-
-		$display_array = array(
-			'First Name' => $data['full_name_first'],
-		);
-
-		$display_array['Last Name'] = $data['full_name_last'];
-		return array(
-			$return_array, $display_array);
-	}
-
-	public function get_validation_info() {
-		return array(
-			'full_name_first' => array('required' => array('true', 'First Name is required')),
-			'full_name_last' => array('required' => array('true', 'Last name is required')),
-		);
-	}
-}
-
-class PhoneNumberRequirement extends BasicProductRequirement {
-	const ID = 2;
-	const LABEL = 'Phone Number';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-		//echo $formwriter->textinput("Phone Number", "phone", NULL, 11, '', "Example: 123-456-6789", 17, "");
-		PhoneNumber::renderFormFields($formwriter, [
-			'required' => true,
-			'include_user_id' => false,
-			'model' => NULL
-		]);
-	}
-
-	public function get_validation_info() {
-		return array(
-			'phn_phone_number' => array(
-				'required' => array('true', 'Phone number is required'),
-				//'regex' => array('\'^[0-9]{3}[- \.]?[0-9]{3}[- \.]?[0-9]{4}$\'', 'Phone Number should be in this form: XXX-XXX-XXXX')
-			));
-	}
-
-	public function validate_form($data, $session=NULL) {
-		/*
-		if (empty($data['phone']) || !preg_match('/^[0-9]{3}[- \.]?[0-9]{3}[- \.]?[0-9]{4}$/', $data['phone'])) {
-			throw new BasicProductRequirementException('Phone Number is not valid, must be XXX-XXX-XXXX');
-		}
-		*/
-		if (empty($data['phn_phone_number'])) {
-			throw new BasicProductRequirementException('Phone Number is not valid');
-		}
-
-		return array(
-			array('phn_phone_number' => $data['phn_phone_number']),
-			array('Phone Number' => $data['phn_phone_number']));
-	}
-}
-
-class DOBRequirement extends BasicProductRequirement {
-	const ID = 4;
-	const LABEL = 'Date of Birth';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-?>
-			<div id="dob_container" class="errorplacement sm:col-span-6">
-				<label for="dob_date" class="block text-sm font-medium text-gray-700">Date of Birth</label>
-
-				<select style="width: 175px" name="dob_month" id="dob_month" class="mt-1 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
-				<option value="" selected></option><option value="01">01 - January</option><option value="02">02 - February</option><option value="03">03 - March</option><option value="04">04 - April</option><option value="05">05 - May</option><option value="06">06 - June</option><option value="07">07 - July</option><option value="08">08 - August</option><option value="09">09 - September</option><option value="10">10 - October</option><option value="11">11 - November</option><option value="12">12 - December</option></select>
-
-				<select style="width: 75px;" class="mt-1  text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" name="dob_day" id="dob_day">
-				<option value="" selected></option>
-				<?php
-				foreach(range(1, 31) as $day) {
-					echo "<option value=\"$day\">$day</option>";
-				}
-				?>
-				</select>
-
-				<select style="width: 100px;" name="dob_year" id="dob_year" class="mt-1 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
-				<option value="" selected></option>
-				<?php
-				foreach(range(intval(date('Y') - 0), 1900, -1) as $year) {
-					echo "<option value=\"$year\">$year</option>";
-				}
-				?>
-				</select>
-				</div>
-	<?php
-	}
-
-	public function get_validation_info() {
-		return array(
-			'dob_month' => array(
-				'required' => array('true', 'Please enter the month you were born', 'dob_container'),
-			),
-			'dob_day' => array(
-				'required' => array('true', 'Please enter the day of the month you were born', 'dob_container'),
-			),
-			'dob_year' => array(
-				'required' => array('true', 'Please enter the year you were born', 'dob_container'),
-			),
-		);
-	}
-
-	public function validate_form($data, $session=NULL) {
-		if (empty($data['dob_month']) || empty($data['dob_day']) || empty($data['dob_year'])) {
-			throw new BasicProductRequirementException('Date of Birth must be fully filled out.');
-		}
-
-		if (!is_numeric($data['dob_month']) || !is_numeric($data['dob_day']) || !is_numeric($data['dob_year'])) {
-			throw new BasicProductRequirementException('Date of Birth is invalid.');
-		}
-
-		$day = intval($data['dob_day']);
-		$month = intval($data['dob_month']);
-		$year = intval($data['dob_year']);
-
-		if ($day < 1 || $day > 31 || $month < 1 || $month > 12 || $year < 1900 || $year > 2030) {
-			throw new BasicProductRequirementException('Date of Birth is invalid.');
-		}
-
-		return array(
-			array(
-				'dob_day' => $day,
-				'dob_month' => $month,
-				'dob_year' => $year,
-			),
-			array(
-				'Date Of Birth' => $month . '/' . $day . '/' . $year
-			)
-		);
-	}
-}
-
-class AddressRequirement extends BasicProductRequirement {
-	const ID = 8;
-	const LABEL = 'Address';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-
-	public function get_form($formwriter, $user=NULL) {
-		$new_address_display = true;
-		if ($user) {
-			$default_address = $user->get_default_address();
-			$address_book = new MultiAddress(array('user_id' => $user->key, 'deleted' => FALSE));
-			$address_book->load();
-			$address_dropdown_builder = $address_book->get_address_dropdown_options($user->get_default_address());
-			$new_address_display = true;
-
-			if (count($address_dropdown_builder) > 1) {
-				echo '<div id="address_container" class="sm:col-span-6 errorplacement">
-					<label for="address" class="block text-sm font-medium text-gray-700">Address</label>
-					<select name="address" id="address" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">'
-					. implode('', $address_dropdown_builder) .
-					'</select></div>';
-				$new_address_display = false;
-				echo '<div id="new_address_block" class="sm:col-span-6" style="display:none;">';
-				Address::renderFormFields($formwriter, [
-					'required' => true,
-					'include_country' => true,
-					'include_user_id' => false,
-					'model' => NULL
-				]);
-				echo '</div>';
-			} 
-			else {
-				echo $formwriter->hiddeninput('address', 'new');
-				Address::renderFormFields($formwriter, [
-					'required' => true,
-					'include_country' => true,
-					'include_user_id' => false,
-					'model' => NULL
-				]);
-			}
-		}
-		else{
-			echo $formwriter->hiddeninput('address', 'new');
-			Address::renderFormFields($formwriter, [
-				'required' => true,
-				'include_country' => true,
-				'include_user_id' => false,
-				'model' => NULL
-			]);
-		}
-	}
-
-	function get_javascript() {
-		return '
-		document.addEventListener("DOMContentLoaded", function() {
-			const addressSelect = document.getElementById("address");
-			const newAddressBlock = document.getElementById("new_address_block");
-
-			if (addressSelect && newAddressBlock) {
-				addressSelect.addEventListener("change", function() {
-					if (this.value === "new") {
-						newAddressBlock.style.display = "block";
-					} else {
-						newAddressBlock.style.display = "none";
-					}
-				});
-			}
-		});
-
-		function is_new_address(element) {
-			const addressSelect = document.getElementById("address");
-			return addressSelect && addressSelect.value === "new";
-		}';
-	}
-
-	public function get_validation_info() {
-		return array(
-			'usa_address1' => array(
-				'required' => array('is_new_address', 'Street Address must be set.')),
-			'usa_city' => array(
-				'required' => array('is_new_address', 'City must be set.')),
-			'usa_zip_code_id' => array(
-				'required' => array('is_new_address', 'Zip/Postcode must be set.')),
-			'usa_state' => array(
-				'required' => array('is_new_address', 'State must be set.')),
-		);
-	}
-
-	function validate_form($data, $session=NULL) {
-		if (empty($data['address'])) {
-			throw new BasicProductRequirementException('The address section must be filled out.');
-		}
-
-		if ($data['address'] === 'new') {
-			try {
-				$user_id = NULL;
-				if($session->get_user_id()){
-					$user_id = $session->get_user_id();
-				}
-				$address = Address::CreateAddressFromForm($data, $user_id);
-				return array(
-					array('address' => $address),
-					array('Address' => $address->get_address_string(', '))
-				);
-			}	catch (AddressException $e) {
-				throw new BasicProductRequirementException('Your address was invalid: ' . $e->getMessage());
-			}
-		} else {
-			$address_key = LibraryFunctions::decode($data['address']);
-			if ($address_key === FALSE) {
-				throw new BasicProductRequirementException('You have selected an invalid address, please try again.');
-			}
-			$address = new Address($address_key, TRUE);
-			$address->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-			return array(
-				array('address' => $address),
-				array('Address' => $address->get_address_string(', '))
-			);
-		}
-	}
-}
-
-class GDPRNoticeRequirement extends BasicProductRequirement {
-	const ID = 16;
-	const LABEL = 'GDPR Notice';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-		echo '<div id="gdpr_terms_container" class=NULL>';
-		echo '<label for="gdpr_terms">Privacy Notice</label>';
-		echo "<div><div onclick=\"document.getElementById('gdpr_terms').checked = !document.getElementById('gdpr_terms').checked; return false;\" style=\"overflow:auto; height: 100px; border: 1px solid #DDDAD3; width: 45%; padding: 6px; margin-bottom: 5px; background-color: #f5f5f5;\">Your personal data will be used to process your order, support your experience throughout this website, and for other purposes described in our privacy policy.</div>";
-		echo '<label></label><input name="gdpr_terms" id="gdpr_terms" value="1" type="checkbox"  /><span onclick="document.getElementById(\'gdpr_terms\').checked = !document.getElementById(\'gdpr_terms\').checked; return false;"> I have read and agree to the privacy policy.</span></div>';
-	}
-
-	function validate_form($data, $session=NULL) {
-		if (empty($data['gdpr_terms'])) {
-			throw new BasicProductRequirementException('You must have read and agreed to the privacy policy in order to continue.');
-		}
-		
-		if($data['gdpr_terms']){
-			$display = 'Yes';
-		} 
-		else{
-			$display = 'No';
-		}
-
-		return array(array('gdpr_terms' => $data['gdpr_terms']), array('GDPR Terms' => $display));
-	}
-
-	public function get_validation_info() {
-		return array(
-				'gdpr_terms' => array('required' => array('true', 'You must have read and agreed to the privacy policy in order to continue.')));
-	}
-}
-
-class RecordConsentRequirement extends BasicProductRequirement {
-	const ID = 32;
-	const LABEL = 'Consent to Record';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->checkboxinput("I am aware that the course/event may be recorded and consent to being recorded.", "record_terms", "sm:col-span-6", "normal", '1', "yes", '');
-	}
-
-	function validate_form($data, $session=NULL) {
-
-		if (empty($data['record_terms'])) {
-			throw new BasicProductRequirementException('You must have read and agreed to the recording notice in order to continue.');
-		}
-		
-		if($data['record_terms']){
-			$display = 'Yes';
-		} 
-		else{
-			$display = 'No';
-		}
-
-		return array(array('record_terms' => $data['record_terms']), array('Record Consent' => $display));
-	}
-
-	public function get_validation_info() {
-		return array(
-				'record_terms' => array('required' => array('true', 'You must have read and agreed to the recording notice in order to continue.')));
-	}
-}
-
-class EmailRequirement extends BasicProductRequirement {
-	const ID = 64;
-	const LABEL = 'Email';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Email", "email", NULL, 20, $user ? $user->get('usr_email') : '', '', 255, '');
-		
-	}
-
-	public function validate_form($data, $session=NULL) {
-		if (empty($data['email'])) {
-			throw new BasicProductRequirementException('Email is Required');
-		}
-		
-		if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-			$error = "Email address '".$data['email']."' is not valid.\n";
-			throw new BasicProductRequirementException($error);
-		}		
-
-		$return_array = array(
-			'email' => $data['email'],
-		);
-
-		$display_array = array(
-			'Email' => $data['email'],
-		);
-
-		return array(
-			$return_array, $display_array);
-	}
-
-	public function get_validation_info() {
-		return array(
-			'email' => array('required' => array('true', 'Email is required')),
-		);
-	}
-}
-
-class UserPriceRequirement extends BasicProductRequirement {
-	const ID = 128;
-	const LABEL = 'User chooses price';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Optional donation amount ($)", "user_price", NULL, 20, '', '', 255, '');
-		
-	}
-
-	public function validate_form($data, $session=NULL) {
-		/*if (empty($data['user_price'])) {
-			throw new BasicProductRequirementException('Donation amount is required');
-		}*/
-
-		//CLEAN IT UP
-		//REMOVE ANYTHING BUT NUMBERS AND A DOT
-		$data['user_price'] = str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price'])); 
-		
-		/*
-		if ($data['user_price'] == 0 || $data['user_price'] == '0.00') {
-			throw new BasicProductRequirementException('Donation amount must be greater than zero.');
-		}
-		*/
-		if ($data['user_price'] < 0) {
-			throw new BasicProductRequirementException('Donation amount must be zero or more.');
-		}
-
-		$return_array = array(
-			'user_price' => $data['user_price'],
-		);
-
-		$display_array = array(
-			'Donation amount ($)' => $data['user_price']. '.00',
-		);
-
-		return array(
-			$return_array, $display_array);
-	}
-
-	public function get_validation_info() {
-		return array(
-			//'user_price' => array('required' => array('true', 'Donation amount is required')),
-		);
-	}
-}
-
-class NewsletterSignupRequirement extends BasicProductRequirement {
-	const ID = 256;
-	const LABEL = 'Newsletter Signup';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->checkboxinput("Keep me updated by email", "newsletter", "checkbox", "", NULL, 1, "");
-
-	}
-
-	function validate_form($data, $session=NULL) {
-		/*
-		if (empty($data['newsletter'])) {
-			throw new ProductRequirementException('You must have read and agreed to the recording notice in order to continue.');
-		}
-		*/
-		
-		if($data['newsletter']){
-			$display = 'Yes';
-		} 
-		else{
-			$display = 'No';
-		}
-
-		return array(array('newsletter' => $data['newsletter']), array('Newsletter Signup' => $display));
-
-	}
-
-	public function get_validation_info() {
-		/*return array(
-				'newsletter' => array('required' => array('true', 'You must have read and agreed to the recording notice in order to continue.')));*/
-	}
-}
-
-class CommentRequirement extends BasicProductRequirement {
-	const ID = 512;
-	const LABEL = 'Comment';
-	
-	function get_id() {
-        return  self::ID;
-    }
-	function get_label() {
-        return  self::LABEL;
-    }
-	
-	public function get_form($formwriter, $user=NULL) {
-		echo $formwriter->textinput("Optional comment", "comment", NULL, 20, '', '', 255, '');
-		
-	}
-
-	public function validate_form($data, $session=NULL) {
-
-		$return_array = array(
-			'comment' => $data['comment'],
-		);
-
-		$display_array = array(
-			'Comment' => $data['comment'],
-		);
-
-		return array(
-			$return_array, $display_array);
-	}
-
-	public function get_validation_info() {
-		return array();
-	}
-}
-
 class Product extends SystemBase {
 	public static $prefix = 'pro';
 	public static $tablename = 'pro_products';
@@ -651,7 +67,6 @@ class Product extends SystemBase {
 	    'pro_name' => array('type'=>'varchar(255)', 'required'=>true),
 	    'pro_short_description' => array('type'=>'text'),
 	    'pro_description' => array('type'=>'text'),
-	    'pro_requirements' => array('type'=>'int4'),
 	    'pro_max_cart_count' => array('type'=>'int4'),
 	    'pro_max_purchase_count' => array('type'=>'int4'),
 	    'pro_prg_product_group_id' => array('type'=>'int4'),
@@ -673,14 +88,9 @@ class Product extends SystemBase {
 
 public function get_requirement_info($output='text') {
 		$requirements_out = array();
-		foreach ($this->get_product_requirements() as $productr){
-			if($output == 'text'){
-				$requirements_out[] = $productr->get_label();
-			}
-			else{
-				$requirements_out[] = $productr->get_id();
-			}
-		}	
+		foreach ($this->get_product_requirements() as $requirement){
+			$requirements_out[] = $requirement->get_label();
+		}
 		return $requirements_out;
 	}	
 	
@@ -728,73 +138,66 @@ public function get_requirement_info($output='text') {
 		return true;
 	}
 
-	//SAVE THE SET OF NEW REQUIREMENT INSTANCES
+	/**
+	 * Save the set of requirement instances for this product.
+	 *
+	 * @param array $requirements Array of requirement specs, each containing:
+	 *   - 'class_name' => string (e.g., 'FullNameRequirement' or 'QuestionRequirement')
+	 *   - 'config' => array (e.g., ['question_id' => 42] for QuestionRequirement)
+	 *   A unique key is generated from class_name + config for diff matching.
+	 */
 	function save_requirement_instances($requirements){
 		if(empty($requirements)){
 			$requirements = array();
 		}
-		$requirements = array_filter($requirements);
 
-		//FIRST GET A LIST OF THE CURRENT REQUIREMENT INSTANCES
-		
-		$pri_lists = $this->get_requirement_instances(true);
-		$to_process = array();
-		foreach($pri_lists as $pri_list){
-			$to_process[] = $pri_list->get('pri_prq_product_requirement_id');
+		// Build map of current instances by unique key (class_name + config)
+		$current_instances = $this->get_requirement_instances(true);
+		$current_map = [];
+		foreach($current_instances as $instance){
+			$key = $instance->get('pri_class_name') . '|' . ($instance->get('pri_config') ?: '');
+			$current_map[$key] = $instance;
 		}
 
-		foreach ($requirements as $choice => $value){
-			//THEN CYCLE THROUGH THE NEW ONES, ADD IF IT'S NOT THERE
-			if(in_array($value, $to_process)){
-				//ITS ALREADY THERE, UNDELETE(IF NEEDED) AND REMOVE IT FROM THE LIST
-				$product_requirement_instances = new MultiProductRequirementInstance(array('product_id' => $this->key, 'product_requirement_id' => $value));  	
-				$product_requirement_instances->load();	
-				foreach($product_requirement_instances as $product_requirement_instance){
-					$product_requirement_instance->set('pri_delete_time', NULL);
-					$product_requirement_instance->save();
-				}
-				
-				unset($to_process[$choice]);
-			}
-			else{
-				//ADD THE NEW ONE
+		$order = 0;
+		$processed_keys = [];
+
+		foreach ($requirements as $req_spec) {
+			$class_name = $req_spec['class_name'];
+			$config = isset($req_spec['config']) ? $req_spec['config'] : [];
+			$config_json = !empty($config) ? json_encode($config) : '';
+			$unique_key = $class_name . '|' . $config_json;
+
+			if (isset($current_map[$unique_key])) {
+				// Already exists — undelete if needed and update order
+				$instance = $current_map[$unique_key];
+				$instance->set('pri_delete_time', null);
+				$instance->set('pri_order', $order);
+				$instance->save();
+			} else {
+				// New — create it
 				$pri = new ProductRequirementInstance(NULL);
 				$pri->set('pri_pro_product_id', $this->key);
-				$pri->set('pri_prq_product_requirement_id', $value);
-				$pri->prepare();
-				$pri->save();
-				//NOW REMOVE IT FROM THE LIST
-				unset($to_process[$choice]);
-			}
-		}
-
-		//IF ANY ARE LEFT, SET THEM TO DELETED
-		//WE ARE NOT ALLOWING FULL DELETION IN CASE THERE ARE REFERENCES IN THE DATABASE
-		foreach($pri_lists as $pri_list){
-			if(in_array($pri_list->get('pri_prq_product_requirement_id'), $to_process)){
-				$pri = new ProductRequirementInstance($pri_list->key, TRUE);
-				$pri->set('pri_delete_time', 'now()');
+				$pri->set('pri_class_name', $class_name);
+				$pri->set('pri_config', $config_json ?: null);
+				$pri->set('pri_order', $order);
 				$pri->save();
 			}
+
+			$processed_keys[] = $unique_key;
+			$order++;
 		}
 
+		// Soft-delete any current instances not in the new set
+		foreach($current_map as $key => $instance){
+			if(!in_array($key, $processed_keys)){
+				$instance->set('pri_delete_time', 'now()');
+				$instance->save();
+			}
+		}
 	}	
 	
-	function get_requirement_validation(){
-		//GET EXTRA PRODUCT REQUIREMENTS, HERE WE OUTPUT THE FORM.  THE VALIDATION HAPPENS ELSEWHERE
-		$instances = $this->get_requirement_instances();
-
-		foreach($instances as $instance){
-			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
-			if($requirement->get('prq_qst_question_id')){
-				$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
-				$validation_rules = array();
-				$validation_rules[] = $question->output_js_validation($validation_rules);
-				//echo $formwriter->set_validate($validation_rules);	
-			}
-		}
-		return $validation_rules;
-	}
+	// get_requirement_validation() removed — validation is now unified through AbstractProductRequirement
 	
 	//THIS FUNCTION GIVES AN ESTIMATE OF PRICE FOR DISPLAY PURPOSES
 	public function get_readable_price($product_version_id=NULL){
@@ -853,8 +256,6 @@ public function get_requirement_info($output='text') {
 	}
 	
 	public function get_price($product_version, $data){
-		$requirements = $this->get_requirement_info('id');
-
 		//HANDLE PRICES
 		$settings = Globalvars::get_instance(); 
 		
@@ -1038,7 +439,8 @@ public function get_requirement_info($output='text') {
 	}
 
 	function get_product_requirements() {
-		return BasicProductRequirement::GetRequirements($this->get('pro_requirements'));
+		require_once(PathHelper::getIncludePath('includes/requirements/AbstractProductRequirement.php'));
+		return AbstractProductRequirement::getProductRequirements($this->key);
 	}
 
 	function validate_form($form_data, $session) {
@@ -1062,12 +464,12 @@ public function get_requirement_info($output='text') {
 		$form_data['product_version'] = $product_version->get('prv_product_version_id');
 
 		//VALIDATE THE USER PRICE OVERRIDE IF THAT EXISTS
-		if($product_version->get('prv_price_type') == 'user' && isset($form_data['user_price_override'])){	
+		if($product_version->get('prv_price_type') == 'user' && isset($form_data['user_price_override'])){
 			if(!$form_data['user_price_override']){
 				throw new SystemDisplayableErrorNoLog(
 					'You must enter an amount in the "Price to pay" field.');
 			}
-		}		
+		}
 
 		//IF NO ITEMS REMAINING, SHOW ERROR
 		if($this->get('pro_max_purchase_count') > 0){
@@ -1078,62 +480,38 @@ public function get_requirement_info($output='text') {
 			}
 		}
 
-		foreach ($this->get_product_requirements() as $product_requirement) {
+		// Validate all requirements via the AbstractProductRequirement
+		foreach ($this->get_product_requirements() as $requirement) {
+			// Validate
+			$errors = $requirement->validate($form_data, $this);
+			if (!empty($errors)) {
+				throw new BasicProductRequirementException(implode('<br>', $errors));
+			}
 
-			list($validation_data, $display_data) = $product_requirement->validate_form($form_data, $session);
-			
-			if ($validation_data !== NULL) {
+			// Process — get data and display arrays
+			list($validation_data, $display_data) = $requirement->process($form_data, $this, null, null);
+
+			if ($validation_data !== null) {
 				$form_data = array_merge($form_data, $validation_data);
 			}
-			if ($display_data !== NULL) {
+			if ($display_data !== null) {
 				$form_display_data = array_merge($form_display_data, $display_data);
 			}
 		}
-
-		//NOW VALIDATE THE ADDITIONAL PRODUCT REQUIREMENTS
-		$instances = $this->get_requirement_instances();
-
-		foreach($instances as $instance){
-			$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
-			$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
-			$valid = $question->validate_answers($form_data['question_'.$question->key]);
-			if($valid == 'valid'){
-				$question_info = array('name' => 'question_'.$question->key, 'requirement_id' => $instance->get('pri_prq_product_requirement_id'), 'question_id' => $question->key, 'question' => $question->get('qst_question'), 'answer' => $question->get_answer_readable($form_data['question_'.$question->key], false));
-				$form_data['question_'.$question->key] = $question_info;
-			}
-			else{
-				throw new SystemDisplayableErrorNoLog($valid);
-				/*$errorhandler = new ErrorHandler(TRUE);
-				$errorhandler->handle_general_error();
-				exit();*/
-			}
-		}
-
-/*
-		$errors = array();
-		foreach (static::$required_fields as $field => $error_message) {
-			if (empty($data[$field])) {
-				$errors[] = $error_message;
-			}
-		}
-		if ($errors) {
-			throw new BasicProductRequirementException(
-				implode('<br>', $errors));
-		}
-		*/
 
 		return array($form_data, $form_display_data);
 	}
 
 	function output_javascript($formwriter, $extra_data=array(), $form_id='product_form') {
-		
+
 		$validation_info = array();
 
 		echo '<script type="text/javascript">';
-		foreach ($this->get_product_requirements() as $product_requirement) {
-			echo $product_requirement->get_javascript();
-			if ($product_requirement->get_validation_info()) {
-				$validation_info[] = $product_requirement->get_validation_info();
+		foreach ($this->get_product_requirements() as $requirement) {
+			echo $requirement->get_javascript();
+			$info = $requirement->get_validation_info();
+			if ($info) {
+				$validation_info[] = $info;
 			}
 		}
 
@@ -1145,43 +523,29 @@ public function get_requirement_info($output='text') {
 			foreach($validation_info as $info) {
 				foreach($info as $field_name => $field_constraints) {
 					foreach($field_constraints as $constraint => $value_message) {
-						if (count($value_message) == 2) {
-							list($value, $message) = $value_message;
-							$field_container = $field_name . '_container';
+						if (is_array($value_message)) {
+							if (count($value_message) == 2) {
+								list($value, $message) = $value_message;
+								$field_container = $field_name . '_container';
+							} else {
+								list($value, $message, $field_container) = $value_message;
+							}
+							$rules[$field_name][$constraint] = $value;
+							$messages[$field_name][$constraint] = $message;
+							$error_message_objects[$field_name] = $field_container;
 						} else {
-							list($value, $message, $field_container) = $value_message;
+							// Simple value (e.g., from Question validation)
+							$rules[$field_name][$constraint] = $value_message;
 						}
-						list($value, $message) = $value_message;
-						$rules[$field_name][$constraint] = $value;
-						$messages[$field_name][$constraint] = $message;
-						$error_message_objects[$field_name] = $field_container;
 					}
 				}
 			}
-
-			//ADD IN THE PRODUCT REQUIREMENT INSTANCES
-			$instances_validations = $this->get_requirement_validation();
-			foreach($instances_validations as $instance_validation){
-				foreach($instance_validation as $field=>$valuearray){
-						$value = $valuearray['required'];
-						$rules[$field] = array(key($valuearray)=>$value['value']);
-
-				}
-			}
-
-			//ADD IN REQUIRED PRICE OVERRIDE
-			/*
-			if($this->get('pro_price_type') == Product::PRICE_TYPE_USER_CHOOSE){
-				$rules['user_price_override'] = array('required' => 'true');
-			}
-			*/
 
 			//ADD IN EXTRA DATA
 			if(count($extra_data)){
 				foreach($extra_data as $field=>$valuearray){
 						$value = $valuearray['required'];
 						$rules[$field] = array(key($valuearray)=>$value['value']);
-
 				}
 			}
 
@@ -1243,21 +607,21 @@ public function get_requirement_info($output='text') {
 	}
 
 	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL) {
-		$settings = Globalvars::get_instance(); 
+		$settings = Globalvars::get_instance();
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
-	
+
 		$versions = $this->get_product_versions();
 
 		if ($this->count_product_versions() == 1) {
 			$version = $versions->get(0);
-			
+
 			if($version->get('prv_price_type') == 'user'){
 				$validation_rules = array();
 				$validation_rules['user_price_override']['required']['value'] = 'true';
-				echo $formwriter->textinput('Amount to pay ('.$currency_symbol.')', 'user_price_override', NULL, 100, NULL, '', 5, ''); 
+				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')', ['size' => 100, 'maxlength' => 5]);
 			}
 			else{
-				echo $formwriter->hiddeninput('product_version', $version->get('prv_product_version_id'));
+				$formwriter->hiddeninput('product_version', '', ['value' => $version->get('prv_product_version_id')]);
 			}
 		}
 		else if ($this->count_product_versions() > 1) {
@@ -1270,42 +634,29 @@ public function get_requirement_info($output='text') {
 				$output_string = $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price');
 				$version_dropdown[$version->key] = $output_string;
 			}
-			echo $formwriter->dropinput(
-				'Product',
-				'product_version',
-				NULL,
-				$version_dropdown,
-				$selected,
-				'',
-				FALSE);
-			
+			$formwriter->dropinput('product_version', 'Product', [
+				'options' => $version_dropdown,
+				'value' => $selected,
+				'showdefault' => false,
+			]);
 		}
 
 		if(!$exclude_requirements){
-			
-			$form_javascript = array();
-			foreach ($this->get_product_requirements() as $product_requirement) {
-				$product_requirement->get_form($formwriter, $user);	
+			// Build existing data for pre-filling forms
+			$existing_data = [];
+			if ($user) {
+				$existing_data['user'] = $user;
+				$existing_data['usr_first_name'] = $user->get('usr_first_name');
+				$existing_data['usr_last_name'] = $user->get('usr_last_name');
+				$existing_data['usr_email'] = $user->get('usr_email');
 			}
 
-			//GET EXTRA PRODUCT REQUIREMENTS, HERE WE OUTPUT THE FORM.  THE VALIDATION HAPPENS ELSEWHERE
-			$instances = $this->get_requirement_instances();
-
-			foreach($instances as $instance){
-				$requirement = new ProductRequirement($instance->get('pri_prq_product_requirement_id'), TRUE);
-				if($requirement->get('prq_qst_question_id')){
-					$question = new Question($requirement->get('prq_qst_question_id'), TRUE);
-					//$validation_rules = array();
-					//$validation_rules = $question->output_js_validation($validation_rules);
-					//echo $formwriter->set_validate($validation_rules);
-					if($link_append = $requirement->get_link_to_append()){
-						$link_append = ' (<a target="_blank" href="'.$link_append.'">'.$link_append.'</a>)';
-					}
-					echo $question->output_question($formwriter, NULL, $link_append);		
-				}
+			// Render all requirements via the AbstractProductRequirement
+			foreach ($this->get_product_requirements() as $requirement) {
+				$requirement->render_fields($formwriter, $this, $existing_data);
 			}
 		}
-		
+
 		return TRUE;
 	}
 

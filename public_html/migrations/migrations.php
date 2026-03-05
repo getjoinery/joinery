@@ -1213,3 +1213,12 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Product Requirements Refactor (v86) ==========
+	// Migrate bitmask requirements and old prq/pri rows to new class_name-based system
+	$migration = array();
+	$migration['database_version'] = '86';
+	$migration['test'] = "SELECT count(1) as count FROM pri_product_requirement_instances WHERE pri_class_name IS NOT NULL";
+	$migration['migration_file'] = 'migrate_product_requirements.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
