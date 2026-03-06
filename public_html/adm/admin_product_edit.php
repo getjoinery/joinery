@@ -49,29 +49,20 @@ $formwriter = $page->getFormWriter('form1', [
 
 $formwriter->begin_form();
 
-$formwriter->dropinput('pro_is_active', 'Active?', [
-	'options' => ['Disabled' => 0, 'Active' => 1],
-	'value' => !$product->key ? 1 : NULL
-]);
-
 $formwriter->textinput('pro_name', 'Product Name', [
 	'validation' => ['required' => true, 'maxlength' => 255]
 ]);
 
-$formwriter->textbox('pro_short_description', 'Short Description', [
-	'rows' => 5,
-	'cols' => 80,
-	'htmlmode' => 'yes'
+$formwriter->dropinput('pro_is_active', 'Active?', [
+	'options' => [0 => 'Disabled', 1 => 'Active'],
 ]);
+
+$formwriter->textinput('pro_short_description', 'Short Description');
 
 $formwriter->textbox('pro_description', 'Description', [
 	'rows' => 5,
 	'cols' => 80,
 	'htmlmode' => 'yes'
-]);
-
-$formwriter->textinput('pro_digital_link', 'Digital item link', [
-	'validation' => ['maxlength' => 255]
 ]);
 
 if($numevents){
@@ -90,6 +81,50 @@ if($numbundles){
 	]);
 }
 
+if($has_product_groups){
+	$optionvals = $pgs->get_dropdown_array();
+	$formwriter->dropinput('pro_prg_product_group_id', 'Product Group', [
+		'options' => $optionvals,
+		'empty_option' => '-- Select --'
+	]);
+}
+
+// Build checked values from existing pri instances
+$checked_system = [];
+$checked_questions = [];
+foreach ($instances as $instance) {
+	$class_name = $instance->get('pri_class_name');
+	if ($class_name === 'QuestionRequirement') {
+		$config = json_decode($instance->get('pri_config'), true) ?: [];
+		if (!empty($config['question_id'])) {
+			$checked_questions[] = $config['question_id'];
+		}
+	} else {
+		$checked_system[] = $class_name;
+	}
+}
+
+// System requirements (Tier 2)
+if (!empty($grouped_requirements['system'])) {
+	$formwriter->checkboxList('system_requirements', 'Info to collect before purchase', [
+		'options' => $grouped_requirements['system'],
+		'checked' => $checked_system,
+	]);
+}
+
+// Advanced options
+$is_new_product = empty($product->key);
+$advanced_style = $is_new_product ? 'display: none;' : '';
+$toggle_style = $is_new_product ? '' : 'display: none;';
+
+echo '<div id="advanced-toggle" class="mb-3" style="' . $toggle_style . '">
+	<a href="#" onclick="document.getElementById(\'advanced-fields\').style.display=\'block\'; document.getElementById(\'advanced-toggle\').style.display=\'none\'; return false;" class="btn btn-outline-secondary btn-sm">
+		Show Advanced Options
+	</a>
+</div>';
+
+echo '<div id="advanced-fields" style="' . $advanced_style . '">';
+
 // Subscription Tier dropdown
 $tier_options = ['' => '-- None --'];
 foreach ($subscription_tiers as $tier) {
@@ -100,7 +135,7 @@ foreach ($subscription_tiers as $tier) {
 	);
 	$tier_options[$tier->key] = $display_name;
 }
-$formwriter->dropinput('pro_sbt_subscription_tier_id', 'Subscription Tier', [
+$formwriter->dropinput('pro_sbt_subscription_tier_id', 'Activates Subscription', [
 	'options' => $tier_options,
 	'help_text' => 'Select a tier this product grants when purchased',
 	'empty_option' => '-- Select --'
@@ -122,45 +157,19 @@ if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
 	]);
 }
 
-if($has_product_groups){
-	$optionvals = $pgs->get_dropdown_array();
-	$formwriter->dropinput('pro_prg_product_group_id', 'Product Group', [
-		'options' => $optionvals,
-		'empty_option' => '-- Select --'
-	]);
-}
-
-// Requirements - unified checkbox list
-// Build checked values from existing pri instances
-$checked_system = [];
-$checked_questions = [];
-foreach ($instances as $instance) {
-	$class_name = $instance->get('pri_class_name');
-	if ($class_name === 'QuestionRequirement') {
-		$config = json_decode($instance->get('pri_config'), true) ?: [];
-		if (!empty($config['question_id'])) {
-			$checked_questions[] = $config['question_id'];
-		}
-	} else {
-		$checked_system[] = $class_name;
-	}
-}
-
-// System requirements (Tier 2)
-if (!empty($grouped_requirements['system'])) {
-	$formwriter->checkboxList('system_requirements', 'System Requirements', [
-		'options' => $grouped_requirements['system'],
-		'checked' => $checked_system,
-	]);
-}
+$formwriter->textinput('pro_digital_link', 'Digital item link', [
+	'validation' => ['maxlength' => 255]
+]);
 
 // Question requirements (Tier 1)
 if (!empty($grouped_requirements['questions'])) {
-	$formwriter->checkboxList('question_requirements', 'Questions & Confirmations', [
+	$formwriter->checkboxList('question_requirements', 'Questions to ask before purchase', [
 		'options' => $grouped_requirements['questions'],
 		'checked' => $checked_questions,
 	]);
 }
+
+echo '</div>';
 
 // Product Scripts
 if(!empty($product_scripts_optionvals)){
