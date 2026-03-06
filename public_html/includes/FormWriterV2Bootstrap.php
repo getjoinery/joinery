@@ -36,7 +36,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
+        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group mb-3">';
 
         // Output label
         if ($label) {
@@ -127,7 +127,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
+        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group mb-3">';
 
         // Output label
         if ($label) {
@@ -206,7 +206,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        $html = '<div class="form-group">';
+        $html = '<div class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
@@ -289,7 +289,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $class .= ' is-invalid';
         }
 
-        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group">';
+        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
@@ -481,7 +481,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $has_errors = isset($this->errors[$name]);
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
         $html .= '<div class="form-check">';
 
         $html .= '<input type="checkbox"';
@@ -543,7 +543,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $has_errors = isset($this->errors[$name]);
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
 
         // Group label
         if ($label) {
@@ -615,7 +615,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
@@ -685,7 +685,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $ampm = $time_components['ampm'];
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label>' . htmlspecialchars($label) . '</label>';
@@ -805,7 +805,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $ampm = $time_components['ampm'];
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label>' . htmlspecialchars($label) . '</label>';
@@ -926,7 +926,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
@@ -1356,7 +1356,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
@@ -1426,7 +1426,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         }
 
         $html = '';
-        $html .= '<div class="form-group">';
+        $html .= '<div class="form-group mb-3">';
 
         if ($label) {
             $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
