@@ -227,7 +227,7 @@ class MultiPage extends SystemMultiBase {
 		}
 
 		if (isset($this->options['has_link'])) {
-			$filters['pag_link'] = "LENGTH(pag_link) > 0";
+			$filters['pag_link'] = "IS NOT NULL AND pag_link != ''";
 		}
 
 		if (isset($this->options['deleted'])) {
