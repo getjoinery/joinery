@@ -21,10 +21,10 @@ Two pieces of prior work make this feasible:
 ```
 PublicPageBase (abstract — framework-agnostic, plain HTML5 defaults)
   -> PublicPageFalcon (overrides rendering methods with Bootstrap markup)
-  -> PublicPageCanvasHTML5 (NEW — may need minimal overrides, or none if base defaults suffice)
+  -> theme/canvas-html5/includes/PublicPage.php (NEW — extends PublicPageBase directly)
 ```
 
-The new theme does **not** extend Falcon. It extends `PublicPageBase` directly via a new `PublicPageCanvasHTML5` class in `/includes/`, keeping the vanilla HTML5 approach completely independent of Bootstrap.
+The new theme does **not** extend Falcon. Its `PublicPage.php` extends `PublicPageBase` directly, keeping the vanilla HTML5 approach completely independent of Bootstrap. There is no intermediate `PublicPageCanvasHTML5` class — since only one theme uses this base, everything lives in the theme's own `PublicPage.php`.
 
 ### Theme Configuration
 
@@ -38,8 +38,7 @@ theme/canvas-html5/theme.json
     "author": "Joinery Team",
     "is_stock": true,
     "cssFramework": "html5",
-    "formWriterBase": "FormWriterV2HTML5",
-    "publicPageBase": "PublicPageCanvasHTML5"
+    "formWriterBase": "FormWriterV2HTML5"
 }
 ```
 
@@ -93,84 +92,41 @@ theme/canvas-html5/
 
 Extracted 8 rendering methods from PublicPageBase into overridable protected methods (`renderAlert`, `renderPagination`, `renderToolbar`, `renderBoxOpen`, `renderBoxClose`, `renderDropdown`, `renderButtonGroup`, `renderTabMenu`). Base class now produces clean HTML5 defaults. PublicPageFalcon overrides with Bootstrap markup. PublicPageTailwind overrides with Tailwind markup. `getFormWriter()` fixed to use theme override chain. All existing themes produce identical output.
 
-### Phase 2: Theme Scaffolding
+### Phase 2: Build Theme
 
-1. Create `theme/canvas-html5/` directory structure
-2. Create `theme.json` with configuration above
-3. Copy `style.css` and `script.js` from `/home/user1/theme-sources/canvas-html5/` into `assets/css/` and `assets/js/`
-4. Create `assets/css/custom.css` for Joinery-specific style additions (form styling to match FormWriterV2HTML5 output, alert styles, etc.)
+Create `theme/canvas-html5/` with all required files. Reference existing themes (e.g., `theme/canvas/`) for structure and `PublicPageFalcon` for logic patterns.
 
-### Phase 3: PublicPageCanvasHTML5
+#### Scaffolding
 
-Create `/includes/PublicPageCanvasHTML5.php` extending `PublicPageBase`. Because Phase 1 made the base framework-agnostic, this class may need very few overrides — primarily the methods that remain abstract or theme-specific.
+- `theme.json` with configuration above
+- Copy `style.css` and `script.js` from `/home/user1/theme-sources/canvas-html5/`
+- Create `custom.css` for Joinery-specific additions (forms, alerts, tables, pagination, utilities)
 
-**Must implement:**
+#### PublicPage.php (extends PublicPageBase)
 
-| Method | Purpose | Reference |
-|--------|---------|-----------|
-| `public_header()` | HTML head + header nav using canvas-html5 markup | `canvas-html5/about.html` header |
-| `public_footer()` | Footer + closing tags using canvas-html5 markup | `canvas-html5/about.html` footer |
-| `top_right_menu()` | User/cart/admin menu items in vanilla HTML5 | `PublicPageFalcon::top_right_menu()` for logic |
-| `get_logo()` | Site logo output | `PublicPageFalcon::get_logo()` for logic |
-| `getTableClasses()` | CSS classes for table rendering | Return vanilla class names |
-
-**May override if base defaults don't match Canvas design:**
-
-| Method | Override if... |
-|--------|----------------|
-| `BeginPage()` / `EndPage()` | Canvas needs different content wrapper |
-| `BeginPageNoCard()` / `EndPageNoCard()` | Canvas uses `.page-hero` pattern |
-| `renderAlert()` | Canvas notification style differs from base default |
-| `renderPagination()` | Canvas pagination style differs from base default |
-
-**Header markup pattern** (from canvas-html5 `about.html`):
-```html
-<header class="site-header">
-    <div class="header-inner">
-        <a href="/" class="logo">...</a>
-        <button class="menu-toggle" aria-label="Toggle menu">...</button>
-        <nav class="nav-links">
-            <!-- Dynamic menu from get_public_menu() -->
-        </nav>
-        <div class="header-actions">
-            <!-- Cart, user menu, admin link -->
-        </div>
-    </div>
-</header>
-```
-
-**Footer markup pattern** (from canvas-html5 `about.html`):
-```html
-<footer class="site-footer">
-    <div class="container">
-        <div class="footer-widgets grid-3">...</div>
-    </div>
-    <div class="footer-bottom">
-        <div class="container">...</div>
-    </div>
-</footer>
-```
-
-**Key differences from PublicPageFalcon:**
-- No Bootstrap grid (`row`, `col-*`) -- use `.grid-2` through `.grid-6` from canvas-html5
-- No Bootstrap components (`card`, `dropdown`, `navbar`) -- use semantic HTML5
-- No jQuery or Bootstrap JS -- vanilla JS only
-- No Font Awesome dependency -- use inline SVG icons or simple Unicode
-- Dynamic menu uses `<nav class="nav-links"><ul>` instead of Bootstrap navbar
-- User dropdown uses vanilla JS toggle instead of `data-bs-toggle="dropdown"`
-
-### Phase 4: Theme PublicPage and FormWriter
-
-**`theme/canvas-html5/includes/PublicPage.php`:**
 ```php
-require_once(PathHelper::getIncludePath('includes/PublicPageCanvasHTML5.php'));
+require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
-class PublicPage extends PublicPageCanvasHTML5 {
-    // Theme-specific overrides if needed
+class PublicPage extends PublicPageBase {
+    // Header, footer, menu, logo, table classes, etc.
 }
 ```
 
-**`theme/canvas-html5/includes/FormWriter.php`:**
+**Must implement:** `public_header()`, `public_footer()`, `top_right_menu()`, `get_logo()`, `getTableClasses()`
+
+**May override** if base HTML5 defaults don't match Canvas design: `BeginPage()`/`EndPage()`, `renderAlert()`, `renderPagination()`
+
+**Reference:** canvas-html5 `about.html` for header/footer markup, `PublicPageFalcon` for logic patterns.
+
+**Key differences from PublicPageFalcon:**
+- `.grid-2` through `.grid-6` instead of `row`/`col-*`
+- Semantic HTML5 instead of Bootstrap components
+- Vanilla JS instead of jQuery/Bootstrap JS
+- Inline SVG or Unicode instead of Font Awesome
+- `<nav class="nav-links">` instead of Bootstrap navbar
+
+#### FormWriter.php (extends FormWriterV2HTML5)
+
 ```php
 require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 
@@ -179,64 +135,26 @@ class FormWriter extends FormWriterV2HTML5 {
 }
 ```
 
-### Phase 5: View Overrides
+#### View Overrides
 
-Convert views from Bootstrap markup to vanilla HTML5. Each view currently uses Bootstrap classes that need to be replaced with canvas-html5 equivalents.
+Convert views from Bootstrap markup to vanilla HTML5. Keep all PHP logic and FormWriter calls unchanged; replace HTML wrapper markup with canvas-html5 equivalents.
 
 **Common class substitutions:**
 
 | Bootstrap | Canvas HTML5 |
 |-----------|-------------|
-| `container` | `container` (same) |
 | `row` | `grid-2`, `grid-3`, etc. |
-| `col-md-6` | Grid children (auto-sized by parent grid) |
-| `col-12` | Full-width block (default) |
-| `card` / `card-body` | `<div class="content-section">` or semantic sections |
-| `btn btn-primary` | `<button class="btn btn-primary">` (defined in canvas-html5 style.css) |
+| `col-md-6` | Grid children (auto-sized by parent) |
+| `card` / `card-body` | `<div class="content-section">` |
+| `btn btn-primary` | `<button class="btn btn-primary">` |
 | `alert alert-danger` | `<div class="alert alert-error">` |
-| `form-control` | `form-control` (FormWriterV2HTML5 uses this) |
-| `form-group` | `form-group` (FormWriterV2HTML5 uses this) |
-| `d-flex` | `display: flex` inline or utility class in custom.css |
-| `justify-content-between` | Inline style or utility class |
-| `mb-3`, `mt-4`, etc. | Inline margins or section spacing from style.css |
-| `text-center` | `text-align: center` inline or utility class |
+| `d-flex`, `justify-content-between` | Inline styles or utility classes in `custom.css` |
+| `mb-3`, `mt-4`, etc. | Inline margins or section spacing |
 | `table table-striped` | `<table class="styled-table">` |
 
-**Priority order for view conversion:**
-1. `login.php`, `register.php` -- First user touchpoints
-2. `index.php`, `404.php` -- Landing pages
-3. `cart.php`, `cart_charge.php`, `cart_clear.php`, `product.php` -- Commerce flow
-4. `password-reset-1.php`, `password-reset-2.php`, `password-set.php` -- Auth flow
-5. `post.php`, `list.php`, `lists.php` -- Content pages
-6. `site-directory.php`, `event_waiting_list.php`, `survey.php`, `survey_finish.php` -- Remaining pages
+#### Testing
 
-**Conversion approach per view:**
-1. Read the current canvas theme view (e.g., `theme/canvas/views/login.php`)
-2. Keep all PHP logic, FormWriter calls, and data access unchanged
-3. Replace Bootstrap HTML wrapper markup with canvas-html5 equivalents
-4. Reference the corresponding canvas-html5 static file for layout patterns (e.g., `canvas-html5/login-register.html`)
-5. Test in browser
-
-### Phase 6: Integration CSS (`custom.css`)
-
-The canvas-html5 `style.css` covers visual components but not Joinery-specific needs. `custom.css` bridges the gap:
-
-- **Form field styling** -- Ensure `FormWriterV2HTML5` output classes (`.form-group`, `.form-control`, `.form-label`, `.is-invalid`, `.error-message`) are styled consistently with the canvas-html5 design
-- **Alert variants** -- Map Joinery alert types (`error`, `warn`, `success`, `info`) to canvas-html5 notification styles
-- **Utility classes** -- Minimal set for common layout needs (`.text-center`, `.mt-1` through `.mt-4`, etc.) to avoid excessive inline styles in views
-- **Table styling** -- Classes for data tables used by `getTableClasses()`
-- **Pager/pagination** -- Style the pagination output from `renderPagination()` base defaults
-- **Content box** -- Style `.content-box` / `.content-box-header` from `renderBoxOpen()` base defaults
-- **Action buttons** -- Style `.action-buttons`, `.btn-outline`, `details.dropdown` from base defaults
-
-### Phase 7: Testing and Polish
-
-1. Switch test site theme to `canvas-html5`
-2. Browser-test each page type (login, register, events, cart, product, etc.)
-3. Verify responsive behavior at mobile (375px), tablet (768px), desktop (1200px+)
-4. Test dynamic interactions: mobile menu, dropdowns, form validation, cart updates
-5. Verify FormWriter output renders correctly for all field types
-6. Check error log for any missing includes or PHP errors
+Switch test site theme to `canvas-html5` and verify all public pages, responsive behavior, form submissions, cart/checkout flow, and login/register flows.
 
 ## Scope Boundaries
 
