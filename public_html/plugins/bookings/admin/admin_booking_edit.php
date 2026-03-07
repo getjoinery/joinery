@@ -102,9 +102,6 @@
 		'action' => '/admin/admin_booking_edit'
 	]);
 
-	$validation_rules = array();
-	$validation_rules['bkn_name']['required']['value'] = 'true';
-	$validation_rules['bkn_external_register_link']['minlength']['value'] = '5';
 
 	$formwriter->begin_form();
 
@@ -156,9 +153,7 @@
 		'maxlength' => 255
 	]);
 
-	$formwriter->start_buttons();
-	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
-	$formwriter->end_buttons();
+	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 
 	$formwriter->end_form();
 

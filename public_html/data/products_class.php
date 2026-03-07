@@ -616,8 +616,6 @@ public function get_requirement_info($output='text') {
 			$version = $versions->get(0);
 
 			if($version->get('prv_price_type') == 'user'){
-				$validation_rules = array();
-				$validation_rules['user_price_override']['required']['value'] = 'true';
 				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')', ['size' => 100, 'maxlength' => 5]);
 			}
 			else{

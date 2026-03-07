@@ -100,14 +100,6 @@
 		'action' => '/admin/admin_item_edit'
 	]);
 
-	$validation_rules = array();
-	$validation_rules['itm_description']['required']['value'] = 'true';
-	$validation_rules['itm_description']['minlength']['value'] = 10;
-	$validation_rules['itm_name']['required']['value'] = 'true';
-	$validation_rules['itm_name']['minlength']['value'] = 2;
-	if($_SESSION['permission'] == 10){
-		$validation_rules['itm_link']['required']['value'] = 'true';
-	}
 
 	$formwriter->begin_form();
 
@@ -153,9 +145,7 @@
 		'use_editor' => true
 	]);
 
-	$formwriter->start_buttons();
-	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
-	$formwriter->end_buttons();
+	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 	$formwriter->end_form();
 
 	echo '    </div>
@@ -182,7 +172,7 @@
 		$formwriter->dropinput("cnv_content_version_id", "Load another version", [
 			'options' => $optionvals
 		]);
-		$formwriter->submitbutton('submit', 'Load', ['class' => 'btn btn-primary']);
+		$formwriter->submitbutton('btn_submit', 'Load', ['class' => 'btn btn-primary']);
 		$formwriter->end_form();
 	}
 	else{

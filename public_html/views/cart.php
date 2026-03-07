@@ -153,13 +153,8 @@ $page_vars = $page_vars->data;
 								</div>
 								<div class="card-body">
 									<?php
-									$formwriter = $page->getFormWriter('form2');
-
-									$formwriter->begin_form([
-										'id' => '',
-										'method' => 'POST',
-										'action' => '/cart'
-									]);
+									$formwriter = $page->getFormWriter('form2', ['action' => '/cart', 'method' => 'POST']);
+									$formwriter->begin_form();
 									?>
 
 									<?php if($page_vars['session']->is_logged_in()): ?>
@@ -235,7 +230,7 @@ $page_vars = $page_vars->data;
 										<div class="col-12">
 											<div class="d-grid">
 												<?php
-												$formwriter->submitbutton('submit', 'Save Billing Information', [
+												$formwriter->submitbutton('btn_submit', 'Save Billing Information', [
 													'class' => 'btn btn-primary btn-lg'
 												]);
 												?>
@@ -287,12 +282,8 @@ $page_vars = $page_vars->data;
 
 									<!-- Add Coupon Form -->
 									<?php
-									$formwriter = $page->getFormWriter('form_coupon');
-									$formwriter->begin_form([
-										'id' => '',
-										'method' => 'GET',
-										'action' => '/cart'
-									]);
+									$formwriter = $page->getFormWriter('form_coupon', ['action' => '/cart', 'method' => 'GET']);
+									$formwriter->begin_form();
 									?>
 
 									<div class="input-group">
@@ -388,17 +379,13 @@ $page_vars = $page_vars->data;
 									<div class="card-body text-center">
 										<p class="text-muted mb-4">Your order total is <?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></p>
 										<?php
-										$formwriter = $page->getFormWriter('form4');
-										$formwriter->begin_form([
-											'id' => '',
-											'method' => 'POST',
-											'action' => '/cart_charge'
-										]);
+										$formwriter = $page->getFormWriter('form4', ['action' => '/cart_charge', 'method' => 'POST']);
+										$formwriter->begin_form();
 										$formwriter->hiddeninput('novalue', ['value' => '']);
 										?>
 										<div class="d-grid">
 											<?php
-											$formwriter->submitbutton('submit', 'Complete Order', [
+											$formwriter->submitbutton('btn_submit', 'Complete Order', [
 												'class' => 'btn btn-success btn-lg'
 											]);
 											?>

@@ -47,8 +47,8 @@ else{
 	$page->admin_header(10);
 
 	echo '<h1>Event Log</h1>';
-	$formwriter = $page->getFormWriter('form1');
-	$formwriter->begin_form('form', 'POST', '/admin/admin_log_event');
+	$formwriter = $page->getFormWriter('form1', ['action' => '/admin/admin_log_event', 'method' => 'POST']);
+	$formwriter->begin_form();
 
 	echo '<fieldset><h4>Confirm</h4>';
 	echo '<div class="fields full">';

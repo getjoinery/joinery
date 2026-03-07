@@ -132,8 +132,8 @@
 		}
 
 		echo '<tr><td colspan="3">';
-		$formwriter = $page->getFormWriter('form3');
-		$formwriter->begin_form('form3', 'POST', '/admin/admin_email_recipients_modify');
+		$formwriter = $page->getFormWriter('form3', ['action' => '/admin/admin_email_recipients_modify', 'method' => 'POST']);
+		$formwriter->begin_form();
 
 		$groups = new MultiGroup(
 			array('category'=>'user', 'deleted'=>false),
@@ -151,14 +151,14 @@
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->submitbutton('submit', 'Add group members', ['class' => 'btn btn-primary']);
+			echo $formwriter->submitbutton('btn_submit', 'Add group members', ['class' => 'btn btn-primary']);
 		}
 		else{
 			$formwriter->dropinput('grp_group_id', 'Exclude group members', [
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->submitbutton('submit', 'Exclude group members', ['class' => 'btn btn-primary']);
+			echo $formwriter->submitbutton('btn_submit', 'Exclude group members', ['class' => 'btn btn-primary']);
 		}
 		$formwriter->end_form();
 
@@ -169,8 +169,8 @@
 			NULL);  //OFFSET
 		$events->load();
 
-		$formwriter = $page->getFormWriter('form4');
-		$formwriter->begin_form('form4', 'POST', '/admin/admin_email_recipients_modify');
+		$formwriter = $page->getFormWriter('form4', ['action' => '/admin/admin_email_recipients_modify', 'method' => 'POST']);
+		$formwriter->begin_form();
 		$optionvals = $events->get_dropdown_array();
 
 		$formwriter->hiddeninput('action', '', ['value' => 'addevent']);
@@ -181,14 +181,14 @@
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->submitbutton('submit', 'Add event attendees', ['class' => 'btn btn-primary']);
+			echo $formwriter->submitbutton('btn_submit', 'Add event attendees', ['class' => 'btn btn-primary']);
 		}
 		else{
 			$formwriter->dropinput('evt_event_id', 'Exclude event attendees', [
 				'options' => $optionvals,
 				'empty_option' => '-- Select --'
 			]);
-			echo $formwriter->submitbutton('submit', 'Exclude event attendees', ['class' => 'btn btn-primary']);
+			echo $formwriter->submitbutton('btn_submit', 'Exclude event attendees', ['class' => 'btn btn-primary']);
 		}
 		$formwriter->end_form();
 		echo '</td></tr>';

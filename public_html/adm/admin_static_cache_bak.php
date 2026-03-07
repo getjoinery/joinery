@@ -452,20 +452,11 @@ if (!empty($display_messages)) {
     <div class="col-12">
         <h5 class="mb-3">Cache Diagnostic Tool</h5>
                 <?php
-                $formwriter = $page->getFormWriter('diagnose_form');
-
-                $validation_rules = array();
-                $validation_rules['diagnose_url']['required']['value'] = 'true';
-                echo $formwriter->set_validate($validation_rules);
-
-                echo $formwriter->begin_form('diagnose_form', 'POST', '/admin/admin_static_cache');
-                echo $formwriter->textinput('URL to diagnose', 'diagnose_url', 'form-control', 100, '',
-                                          '/page/about or https://example.com/page', 255,
-                                          'Enter a URL to check if it will be cached and why or why not');
+                $formwriter = $page->getFormWriter('diagnose_form', ['action' => '/admin/admin_static_cache']);
+                $formwriter->begin_form();
+                echo $formwriter->textinput('diagnose_url', 'URL to diagnose', ['placeholder' => '/page/about or https://example.com/page', 'maxlength' => 255, 'required' => true]);
                 echo $formwriter->hiddeninput('action', 'diagnose_url');
-                echo $formwriter->start_buttons();
-                echo $formwriter->new_form_button('Diagnose URL', 'btn btn-secondary');
-                echo $formwriter->end_buttons();
+                echo $formwriter->submitbutton('btn_submit', 'Diagnose URL', ['class' => 'btn btn-secondary']);
                 echo $formwriter->end_form();
 
                 // Display diagnosis results if available
@@ -636,17 +627,11 @@ if (!empty($display_messages)) {
                 <?php
                 $formwriter = $page->getFormWriter('invalidate_form');
 
-                $validation_rules = array();
-                $validation_rules['url']['required']['value'] = 'true';
-                echo $formwriter->set_validate($validation_rules);
-
-                echo $formwriter->begin_form('invalidate_form', 'POST', '/admin/admin_static_cache');
-                echo $formwriter->textinput('URL to invalidate', 'url', 'form-control', 100, '',
-                                          '/page/about?param=value', 255, 'Enter the URL path to remove from cache');
+                $formwriter = $page->getFormWriter('invalidate_form', ['action' => '/admin/admin_static_cache']);
+                $formwriter->begin_form();
+                echo $formwriter->textinput('url', 'URL to invalidate', ['placeholder' => '/page/about?param=value', 'maxlength' => 255, 'required' => true]);
                 echo $formwriter->hiddeninput('action', 'invalidate_url');
-                echo $formwriter->start_buttons();
-                echo $formwriter->new_form_button('Invalidate Cache', 'btn btn-secondary');
-                echo $formwriter->end_buttons();
+                echo $formwriter->submitbutton('btn_submit', 'Invalidate Cache', ['class' => 'btn btn-secondary']);
                 echo $formwriter->end_form();
                 ?>
     </div>
@@ -654,19 +639,11 @@ if (!empty($display_messages)) {
     <div class="col-md-6">
         <h5 class="mb-3">Mark URL as Non-Cacheable</h5>
                 <?php
-                $formwriter = $page->getFormWriter('nostatic_form');
-
-                $validation_rules = array();
-                $validation_rules['url']['required']['value'] = 'true';
-                echo $formwriter->set_validate($validation_rules);
-
-                echo $formwriter->begin_form('nostatic_form', 'POST', '/admin/admin_static_cache');
-                echo $formwriter->textinput('URL to exclude', 'url', 'form-control', 100, '',
-                                          '/page/dynamic', 255, 'Enter the URL path to exclude from caching');
+                $formwriter = $page->getFormWriter('nostatic_form', ['action' => '/admin/admin_static_cache']);
+                $formwriter->begin_form();
+                echo $formwriter->textinput('url', 'URL to exclude', ['placeholder' => '/page/dynamic', 'maxlength' => 255, 'required' => true]);
                 echo $formwriter->hiddeninput('action', 'mark_nostatic');
-                echo $formwriter->start_buttons();
-                echo $formwriter->new_form_button('Mark as Non-Cacheable', 'btn btn-secondary');
-                echo $formwriter->end_buttons();
+                echo $formwriter->submitbutton('btn_submit', 'Mark as Non-Cacheable', ['class' => 'btn btn-secondary']);
                 echo $formwriter->end_form();
                 ?>
     </div>

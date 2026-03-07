@@ -164,7 +164,7 @@ $formwriter->textinput(\'usr_last_name\', \'Last Name\');');
 echo '</code></pre>';
 echo '</div></div></div></div>';
 
-$formwriter1->submitbutton('submit', 'Test Submit');
+$formwriter1->submitbutton('btn_submit', 'Test Submit');
 $formwriter1->end_form();
 
 // ============================================================================
@@ -229,7 +229,7 @@ $formwriter->textinput(\'custom_field\', \'Label\', [
 echo '</code></pre>';
 echo '</div></div></div></div>';
 
-$formwriter2->submitbutton('submit', 'Test Validation');
+$formwriter2->submitbutton('btn_submit', 'Test Validation');
 $formwriter2->end_form();
 
 // ============================================================================
@@ -490,7 +490,7 @@ echo '<li><strong>Test 3:</strong> Country selector changes field labels and vis
 echo '</ul></div>';
 
 // Submit Button
-$formwriter3->submitbutton('submit', 'Submit Form', ['class' => 'btn btn-primary btn-lg']);
+$formwriter3->submitbutton('btn_submit', 'Submit Form', ['class' => 'btn btn-primary btn-lg']);
 
 $formwriter3->end_form();
 
@@ -563,7 +563,7 @@ $formwriter->textinput(\'zip\', \'ZIP\', [
 echo '</code></pre>';
 echo '</div></div></div></div>';
 
-$formwriter4->submitbutton('submit', 'Test Types');
+$formwriter4->submitbutton('btn_submit', 'Test Types');
 $formwriter4->end_form();
 
 // ============================================================================
@@ -584,7 +584,7 @@ echo '</div>';
 
 $formwriter5->begin_form();
 $formwriter5->textinput('test_field', 'Test Field', ['validation' => ['required' => true]]);
-$formwriter5->submitbutton('submit', 'Submit with CSRF');
+$formwriter5->submitbutton('btn_submit', 'Submit with CSRF');
 $formwriter5->end_form();
 
 echo '<div class="card bg-light mt-3">';

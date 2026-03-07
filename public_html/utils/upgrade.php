@@ -1050,8 +1050,8 @@
 		$page->begin_box($pageoptions);
 
 		// Get FormWriter from AdminPage (which loads the correct theme-specific FormWriter)
-		$formwriter = $page->getFormWriter('form1');
-		echo $formwriter->begin_form("form", "post", "/utils/upgrade");
+		$formwriter = $page->getFormWriter('form1', ['action' => '/utils/upgrade', 'method' => 'post']);
+		$formwriter->begin_form();
 
 		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';
 
@@ -1074,7 +1074,7 @@
 				echo '<p style="margin: 10px 0 0 28px; color: #6c757d; font-size: 0.9em;">Files will be downloaded and validated, but not deployed. Database migrations will be skipped.</p>';
 				echo '</div>';
 
-				$formwriter->submitbutton('submit', 'Submit');
+				$formwriter->submitbutton('btn_submit', 'Submit');
 
 			}
 			else if(version_compare($decode_response['system_version'], $settings->get_setting('system_version'), '==')){
@@ -1091,7 +1091,7 @@
 				echo '<p style="margin: 10px 0 0 28px; color: #6c757d; font-size: 0.9em;">Files will be downloaded and validated, but not deployed. Database migrations will be skipped.</p>';
 				echo '</div>';
 
-				$formwriter->submitbutton('submit', 'Upgrade anyway');
+				$formwriter->submitbutton('btn_submit', 'Upgrade anyway');
 
 			}
 			else{

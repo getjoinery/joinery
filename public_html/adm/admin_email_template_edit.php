@@ -108,8 +108,8 @@
 	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
-		$formwriter = $page->getFormWriter('form_load_version');
-		$formwriter->begin_form('form_load_version', 'GET', '/admin/admin_email_template_edit');
+		$formwriter = $page->getFormWriter('form_load_version', ['action' => '/admin/admin_email_template_edit', 'method' => 'GET']);
+		$formwriter->begin_form();
 		$formwriter->hiddeninput('emt_email_template_id', '', ['value' => $email_template->key]);
 		$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
 			'options' => $optionvals,

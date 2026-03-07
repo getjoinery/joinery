@@ -20,14 +20,9 @@
 	}
 	else{
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
+		$formwriter = $page->getFormWriter('form1', ['action' => '/password-set', 'method' => 'POST']);
 
-		$formwriter->begin_form([
-			'id' => 'form1',
-			'method' => 'POST',
-			'action' => '/password-set',
-			'ajax' => true
-		]);
+		$formwriter->begin_form();
 
 		$formwriter->passwordinput('usr_password', 'New Password', [
 			'maxlength' => 255,
@@ -44,7 +39,7 @@
 			'data-msg-equalTo' => 'Your password did not match the one you entered above'
 		]);
 
-		$formwriter->submitbutton('submit', 'Submit', [
+		$formwriter->submitbutton('btn_submit', 'Submit', [
 			'class' => 'btn btn-primary'
 		]);
 

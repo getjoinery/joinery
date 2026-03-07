@@ -263,8 +263,8 @@ if (isset($_GET['edit'])) {
 		$pageoptions = array('title' => 'Edit Task: ' . htmlspecialchars($edit_task->get('sct_name')));
 		$page->begin_box($pageoptions);
 
-		$formwriter = $page->getFormWriter('edit_form');
-		echo $formwriter->begin_form('edit_form', 'post', '/admin/admin_scheduled_tasks');
+		$formwriter = $page->getFormWriter('edit_form', ['action' => '/admin/admin_scheduled_tasks', 'method' => 'post']);
+		$formwriter->begin_form();
 
 		$formwriter->hiddeninput('action', '', array('value' => 'save'));
 		$formwriter->hiddeninput('sct_scheduled_task_id', '', array('value' => $edit_task->key));

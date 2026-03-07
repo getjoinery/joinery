@@ -260,8 +260,8 @@ echo '    </div>
 $optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 if(count($optionvals)){
-	$formwriter = $page->getFormWriter('form_load_version');
-	$formwriter->begin_form('form_load_version', 'GET', '/admin/admin_event_edit');
+	$formwriter = $page->getFormWriter('form_load_version', ['action' => '/admin/admin_event_edit', 'method' => 'GET']);
+	$formwriter->begin_form();
 	$formwriter->hiddeninput('evt_event_id', '', ['value' => $event->key]);
 	$formwriter->dropinput('cnv_content_version_id', 'Load another description', [
 		'options' => $optionvals,

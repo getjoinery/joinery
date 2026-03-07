@@ -27,14 +27,9 @@
 	}
 
 	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', ['action' => $mailing_list->get_url(), 'method' => 'POST']);
 
-	$formwriter->begin_form([
-		'id' => '',
-		'method' => 'POST',
-		'action' => $mailing_list->get_url(),
-		'ajax' => true
-	]);
+	$formwriter->begin_form();
 
 	if(!$session->get_user_id()){
 		$formwriter->textinput('usr_first_name', 'First Name', [
@@ -94,7 +89,7 @@
 		$formwriter->captcha_hidden_input();
 	}
 
-	$formwriter->submitbutton('submit', 'Submit', [
+	$formwriter->submitbutton('btn_submit', 'Submit', [
 		'class' => 'btn btn-primary'
 	]);
 
