@@ -43,12 +43,8 @@ $page_vars = $page_vars->data;
 		echo '<div class="card-body p-4">';
 		echo '<p class="mb-4">Is everything correct?</p>';
 
-		$formwriter = $page->getFormWriter('product_form');
-		$formwriter->begin_form([
-			'id' => '',
-			'method' => 'POST',
-			'action' => '/product'
-		]);
+		$formwriter = $page->getFormWriter('product_form', ['action' => '/product', 'method' => 'POST']);
+		$formwriter->begin_form();
 
 		$formwriter->hiddeninput('product_id', ['value' => $product_id]);
 		$formwriter->hiddeninput('product_key', ['value' => $form_key]);
@@ -60,7 +56,7 @@ $page_vars = $page_vars->data;
 		}
 
 		echo '<div class="d-grid">';
-		$formwriter->submitbutton('submit', 'Confirm Order', [
+		$formwriter->submitbutton('btn_submit', 'Confirm Order', [
 			'class' => 'btn btn-primary btn-lg'
 		]);
 		echo '</div>';
@@ -154,17 +150,12 @@ $page_vars = $page_vars->data;
 										elseif(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)):
 											// Product can be added to cart
 											$formwriter = $page->getFormWriter('product_form');
-											$formwriter->begin_form([
-												'id' => 'product-quantity',
-												'method' => 'POST',
-												'action' => $product->get_url(),
-												'ajax' => true
-											]);
+											$formwriter->begin_form();
 											$formwriter->hiddeninput('product_id', ['value' => $product_id]);
 
 											if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 												echo '<div class="d-grid gap-2 mt-3">';
-												$formwriter->submitbutton('submit', 'Add to Cart', [
+												$formwriter->submitbutton('btn_submit', 'Add to Cart', [
 													'class' => 'btn btn-primary btn-lg'
 												]);
 												echo '</div>';

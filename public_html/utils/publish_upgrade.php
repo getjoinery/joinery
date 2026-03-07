@@ -456,10 +456,8 @@
 
 
 		// Get FormWriter using theme-aware pattern
-		$formwriter = $page->getFormWriter('form1');	
-		
-		
-		echo $formwriter->begin_form('form1', 'POST', '/utils/publish_upgrade');
+		$formwriter = $page->getFormWriter('form1', ['action' => '/utils/publish_upgrade', 'method' => 'POST']);
+		$formwriter->begin_form();
 
 		
 		$major = new MultiUpgrade(array(), array('major_version' => 'DESC'));

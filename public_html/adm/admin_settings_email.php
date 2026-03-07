@@ -717,7 +717,7 @@
 	//$optionvals = array("General"=>'general', 'Emails' => 'emails');
 	//echo $formwriter->dropinput("Setting group", "stg_group_name", '', $optionvals, $setting->get('stg_group_name'), '', FALSE);
 
-	$formwriter->submitbutton('submit', 'Submit');
+	$formwriter->submitbutton('btn_submit', 'Submit');
 
 	$page->end_box();
 

@@ -868,9 +868,9 @@ class PublicPageFalcon extends PublicPageBase {
 
 		if($search_on){
 			echo '<div class="col-sm-auto">';
-			$formwriter = $this->getFormWriter('search_form');
+			$formwriter = $this->getFormWriter('search_form', ['action' => $pager->base_url(), 'method' => 'get']);
 
-			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
+			$formwriter->begin_form();
 			echo $pager->url_vars_as_hidden_input(array('searchterm'));
 			echo '<label for="searchterm">Search: </label>
 						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.$pager->search_term().'" size="20" type="text" class="textInput" maxlength="">';

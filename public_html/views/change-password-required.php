@@ -49,15 +49,9 @@
 							<h3>Set New Password</h3>
 
 							<?php
-							$formwriter = $page->getFormWriter('form1');
+							$formwriter = $page->getFormWriter('form1', ['action' => '/change-password-required', 'method' => 'POST']);
 
-							$formwriter->begin_form([
-								'id' => 'change-password-form',
-								'method' => 'POST',
-								'action' => '/change-password-required',
-								'ajax' => true,
-								'attributes' => 'class="mb-0"'
-							]);
+							$formwriter->begin_form();
 							?>
 
 							<div class="row">
@@ -90,7 +84,7 @@
 
 								<div class="col-12 form-group">
 									<?php
-									$formwriter->submitbutton('submit', 'Change Password', [
+									$formwriter->submitbutton('btn_submit', 'Change Password', [
 										'class' => 'button button-3d button-black m-0'
 									]);
 									?>

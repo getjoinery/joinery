@@ -15,13 +15,8 @@
 	echo PublicPage::BeginPage($survey->get('svy_name'));
 	echo PublicPage::BeginPanel();
 
-	$formwriter = $page->getFormWriter('form1');
-	$formwriter->begin_form([
-		'id' => 'form1',
-		'method' => 'POST',
-		'action' => '/survey',
-		'ajax' => true
-	]);
+	$formwriter = $page->getFormWriter('form1', ['action' => '/survey', 'method' => 'POST']);
+	$formwriter->begin_form();
 
 	if($invalid_messages){
 		foreach ($invalid_messages as $invalid_message){
@@ -29,7 +24,6 @@
 		}
 	}
 
-	$validation_rules = array();
 	foreach ($page_vars['survey_questions'] as $survey_question){
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 
@@ -48,18 +42,13 @@
 			}
 		}
 
-		$formwriter->hiddeninput('survey_id', ['value' => LibraryFunctions::encode($survey->key)]);
-		$validation_rules = $question->output_js_validation($validation_rules);
+		$formwriter->hiddeninput('survey_id', LibraryFunctions::encode($survey->key));
 
 		echo $question->output_question($formwriter,$answer_fill);
 	}
 
-	// Note: Questions may still use old validation API via output_js_validation()
-	// This is handled by the Question class and doesn't need conversion here
-	if(!empty($validation_rules)){
-	}
 
-	$formwriter->submitbutton('submit', 'Submit', [
+	$formwriter->submitbutton('btn_submit', 'Submit', [
 		'class' => 'btn btn-primary'
 	]);
 

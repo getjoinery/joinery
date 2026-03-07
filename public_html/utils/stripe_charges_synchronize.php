@@ -99,15 +99,13 @@
 		
 
 	
-		$formwriter = new FormWriter('form1');
-		echo $formwriter->begin_form("", "get", "/utils/stripe_charges_synchronize");
-		echo $formwriter->dateinput("Start Date", "startdate", "dateinput", 30, $display_startdate, "", 10);
-		echo $formwriter->dateinput("End Date", "enddate", "dateinput", 30, $display_enddate, "", 10);
-		echo $formwriter->hiddeninput('source', 'form');
-		echo $formwriter->start_buttons();
-		echo $formwriter->new_form_button('Submit');
-		echo $formwriter->end_buttons();
-		echo $formwriter->end_form();	
+		$formwriter = $page->getFormWriter('form1', ['action' => '/utils/stripe_charges_synchronize', 'method' => 'GET']);
+		$formwriter->begin_form();
+		$formwriter->dateinput("startdate", "Start Date", ['value' => $display_startdate]);
+		$formwriter->dateinput("enddate", "End Date", ['value' => $display_enddate]);
+		$formwriter->hiddeninput('source', 'form');
+		$formwriter->submitbutton('btn_submit', 'Submit');
+		$formwriter->end_form();
 		
 		
 		if($verbose){

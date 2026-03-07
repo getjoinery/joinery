@@ -41,132 +41,38 @@ echo PublicPage::BeginPage('Complete Bootstrap Forms Test - All Field Types with
 
 // Use standard FormWriterV2Bootstrap
 require_once(PathHelper::getIncludePath('/includes/FormWriterV2Bootstrap.php'));
-$formwriter = new FormWriterV2Bootstrap('form1');
+$formwriter = new FormWriterV2Bootstrap('form1', ['action' => '/admin/admin', 'method' => 'POST']);
 
-// ==============================================
-// COMPREHENSIVE VALIDATION RULES - ALL FIELDS
-// ==============================================
-$validation_rules = array();
-
-// === STANDARD INPUT TYPES ===
-
-// 1. Text Input - Required
-$validation_rules['text_required']['required']['value'] = 'true';
-$validation_rules['text_required']['minlength']['value'] = '3';
-$validation_rules['text_required']['maxlength']['value'] = '50';
-
-// 2. Email Input (with AJAX validation to check if email is available)
-$validation_rules['email_field']['required']['value'] = 'true';
-$validation_rules['email_field']['email']['value'] = 'true';
-// Remote validation - send as 'usr_email' parameter which the endpoint expects
-// Use clean URL without .php extension
-$validation_rules['email_field']['remote']['value'] = json_encode(array(
-    'url' => '/ajax/email_check_ajax',
-    'dataFieldName' => 'usr_email'  // Send the value as 'usr_email' parameter
-));
-// Note: Enter an email that exists in your usr_users table to see validation fail
-
-// 3. URL Input
-$validation_rules['url_field']['required']['value'] = 'true';
-$validation_rules['url_field']['url']['value'] = 'true';
-
-// 4. Number Input
-$validation_rules['number_field']['required']['value'] = 'true';
-$validation_rules['number_field']['number']['value'] = 'true';
-$validation_rules['number_field']['min']['value'] = '1';
-$validation_rules['number_field']['max']['value'] = '100';
-
-// 5. Phone Number (with custom validator)
-$validation_rules['phone_field']['required']['value'] = 'true';
-$validation_rules['phone_field']['phoneUS']['value'] = 'true';
-
-// 6. Password & Confirm
-$validation_rules['password']['required']['value'] = 'true';
-$validation_rules['password']['minlength']['value'] = '8';
-$validation_rules['password_confirm']['required']['value'] = 'true';
-$validation_rules['password_confirm']['equalTo']['value'] = 'password';  // Field name, not selector
-
-// 7. Textarea
-$validation_rules['comments']['required']['value'] = 'true';
-$validation_rules['comments']['minlength']['value'] = '10';
-$validation_rules['comments']['maxlength']['value'] = '500';
-
-// 8. Select/Dropdown
-$validation_rules['country']['required']['value'] = 'true';
-
-// 9. Radio Buttons
-$validation_rules['interval']['required']['value'] = 'true';
-
-// 10. Checkbox (single)
-$validation_rules['terms']['required']['value'] = 'true';
-
-// 11. Checkbox List
-$validation_rules['products_list']['required']['value'] = 'true';
-
-// 12. File Upload
-$validation_rules['upload']['required']['value'] = 'true';
-
-// 13. Date Input
-$validation_rules['date_field']['required']['value'] = 'true';
-$validation_rules['date_field']['date']['value'] = 'true';
-
-// 14. Time Input
-$validation_rules['time_field']['required']['value'] = 'true';
-$validation_rules['time_field']['time']['value'] = 'true';
-
-// 15. DateTime Input
-$validation_rules['datetime_field']['required']['value'] = 'true';
-
-// 16. Hidden Input (usually not validated but included for completeness)
-// No validation
-
-// 17. Color Picker
-$validation_rules['color_field']['required']['value'] = 'true';
-
-// 18. Range/Slider - REMOVED per user request
-
-// Layout Variation Fields
-$validation_rules['horizontal_input']['required']['value'] = 'true';
-$validation_rules['horizontal_check']['required']['value'] = 'true';  // Single checkbox, no brackets
-$validation_rules['horizontal_select']['required']['value'] = 'true';
-$validation_rules['row_datetime']['required']['value'] = 'true';
-$validation_rules['combined_datetime']['required']['value'] = 'true';
-$validation_rules['combined_datetime_h']['required']['value'] = 'true';
-$validation_rules['rich_text']['required']['value'] = 'true';
-$validation_rules['url_prefix']['required']['value'] = 'true';
-
-// DO NOT output jQuery validation - we're using pure Joinery validation
-// echo $formwriter->set_validate($validation_rules);
 
 // Begin form
-echo $formwriter->begin_form('form1', 'POST', '/admin/admin', true);
+$formwriter->begin_form();
 
 echo '<h3>Standard Input Types</h3>';
 echo '<p class="text-muted small">The email field demonstrates AJAX validation - it checks if the email is already registered in real-time.</p>';
 
 // 1. Text Input
-echo $formwriter->textinput('Text (Required)', 'text_required', NULL, 100, NULL, 'Enter your full name', 50);
+$formwriter->textinput('text_required', 'Text (Required)', ['placeholder' => 'Enter your full name', 'maxlength' => 50]);
 
 // 2. Email (with AJAX validation)
-echo $formwriter->textinput('Email Address (checks if available)', 'email_field', NULL, 100, '', 'your@email.com', 255, '', TRUE, FALSE, 'email');
+$formwriter->textinput('email_field', 'Email Address (checks if available)', ['placeholder' => 'your@email.com', 'maxlength' => 255, 'type' => 'email']);
 
 // 3. URL
-echo $formwriter->textinput('Website URL', 'url_field', NULL, 100, '', 'https://example.com', 255, '', TRUE, FALSE, 'url');
+$formwriter->textinput('url_field', 'Website URL', ['placeholder' => 'https://example.com', 'maxlength' => 255, 'type' => 'url']);
 
 // 4. Number
-echo $formwriter->textinput('Quantity (1-100)', 'number_field', NULL, 100, '', 'Enter a number', 3, '', TRUE, FALSE, 'number');
+$formwriter->textinput('number_field', 'Quantity (1-100)', ['placeholder' => 'Enter a number', 'maxlength' => 3, 'type' => 'number']);
 
 // 5. Phone
-echo $formwriter->textinput('Phone Number', 'phone_field', NULL, 100, '', '(555) 123-4567', 20, '', TRUE, FALSE, 'tel');
+$formwriter->textinput('phone_field', 'Phone Number', ['placeholder' => '(555) 123-4567', 'maxlength' => 20, 'type' => 'tel']);
 
 // 6. Password Fields
-echo $formwriter->passwordinput('Password', 'password', NULL, 100, '', 'Min 8 characters', 255, '', TRUE, FALSE, 'password');
-echo $formwriter->passwordinput('Confirm Password', 'password_confirm', NULL, 100, '', 'Re-enter password', 255, '', TRUE, FALSE, 'password');
+$formwriter->passwordinput('password', 'Password', ['placeholder' => 'Min 8 characters', 'maxlength' => 255]);
+$formwriter->passwordinput('password_confirm', 'Confirm Password', ['placeholder' => 'Re-enter password', 'maxlength' => 255]);
 
 echo '<hr><h3>Text Areas and Selections</h3>';
 
 // 7. Textarea
-echo $formwriter->textbox('Comments', 'comments', '', 5, 80, '', 'Enter your comments (10-500 chars)', 'no');
+$formwriter->textbox('comments', 'Comments', ['rows' => 5, 'cols' => 80, 'placeholder' => 'Enter your comments (10-500 chars)']);
 
 // 8. Dropdown/Select
 $countries = array(
@@ -175,14 +81,14 @@ $countries = array(
     "Mexico" => "MX",
     "United Kingdom" => "UK"
 );
-echo $formwriter->dropinput("Country", "country", "", $countries, NULL, 'Select your country', TRUE);
+$formwriter->dropinput('country', 'Country', ['options' => $countries, 'placeholder' => 'Select your country']);
 
 // 9. Radio Buttons
 $intervals = array("Daily" => "1", "Weekly" => "7", "Monthly" => "30");
-echo $formwriter->radioinput("Frequency", "interval", NULL, $intervals, '', array(), array(), 'Choose one');
+$formwriter->radioinput('interval', 'Frequency', ['options' => $intervals]);
 
 // 10. Single Checkbox
-echo $formwriter->checkboxinput("I agree to terms", "terms", "", "left", NULL, 1, "You must agree to continue");
+$formwriter->checkboxinput('terms', 'I agree to terms', ['value' => 1]);
 
 // 11. Checkbox List
 $products = array(
@@ -191,65 +97,63 @@ $products = array(
     "Product C" => "3",
     "Product D" => "4"
 );
-echo $formwriter->checkboxList("Select Products", "products_list", "", $products, array(), array(), array());
+$formwriter->checkboxList('products_list', 'Select Products', ['options' => $products]);
 
 echo '<hr><h3>File and Date Inputs</h3>';
 
 // 12. File Upload
-echo $formwriter->fileinput("Upload Document", "upload", "", 30, 'PDF, DOC, DOCX only');
+$formwriter->fileinput('upload', 'Upload Document', ['placeholder' => 'PDF, DOC, DOCX only']);
 
 // 13. Date Input
-echo $formwriter->dateinput("Date", "date_field", NULL, 30, date('Y-m-d'), "", 10);
+$formwriter->dateinput('date_field', 'Date', ['value' => date('Y-m-d')]);
 
 // 14. Time Input
-echo $formwriter->timeinput("Time", "time_field", NULL, 30, date('H:i'), "", 8);
+$formwriter->timeinput('time_field', 'Time', ['value' => date('H:i')]);
 
 // 15. DateTime Combined
-echo $formwriter->datetimeinput("Date & Time", "datetime_field", NULL, date('Y-m-d'), date('H:i'), "", 10, 8);
+$formwriter->datetimeinput('datetime_field', 'Date & Time', ['date_value' => date('Y-m-d'), 'time_value' => date('H:i')]);
 
 echo '<hr><h3>Special Input Types</h3>';
 
 // 16. Hidden Input
-echo $formwriter->hiddeninput('form_token', 'abc123xyz');
+$formwriter->hiddeninput('form_token', 'abc123xyz');
 
 // 17. Color Picker
-echo $formwriter->textinput('Choose Color', 'color_field', NULL, 100, '#0000ff', 'Select a color', 7, '', TRUE, FALSE, 'color');
+$formwriter->textinput('color_field', 'Choose Color', ['value' => '#0000ff', 'placeholder' => 'Select a color', 'maxlength' => 7, 'type' => 'color']);
 
 // 18. Range/Slider - REMOVED per user request
 
 echo '<hr><h3>Advanced FormWriter Methods</h3>';
 
 // 19. Text (read-only display)
-echo $formwriter->text('Information Label', 'This is:', 'Some read-only information that is displayed but not editable', NULL);
+echo '<div class="mb-3"><label class="form-label">Information Label</label><p class="form-control-plaintext">This is: Some read-only information that is displayed but not editable</p></div>';
 
 // 20. Additional test fields from experimental file matching
 
 // Prefixed input
-echo $formwriter->textinput('URL with Prefix', 'url_prefix', NULL, 100, NULL, 'example.com', 255, '', TRUE, 'https://', 'text');
+$formwriter->textinput('url_prefix', 'URL with Prefix', ['placeholder' => 'example.com', 'maxlength' => 255, 'prefix' => 'https://']);
 
 // Different layout options
 echo '<hr><h3>Layout Variations</h3>';
 
-echo $formwriter->text('Horizontal Layout', 'Label:', 'Text displayed horizontally', NULL, 'horizontal');
-echo $formwriter->textinput('Horizontal Input', 'horizontal_input', NULL, 100, NULL, 'Horizontal layout', 255, '', TRUE, FALSE, 'text', 'horizontal');
-echo $formwriter->checkboxinput("Horizontal Checkbox", "horizontal_check", "", "left", NULL, 1, "Check this box", 'horizontal');
-echo $formwriter->dropinput("Horizontal Select", "horizontal_select", "", $countries, NULL, '', TRUE, FALSE, FALSE, FALSE, 'horizontal');
+echo '<div class="mb-3"><label class="form-label">Horizontal Layout</label><p class="form-control-plaintext">Label: Text displayed horizontally</p></div>';
+$formwriter->textinput('horizontal_input', 'Horizontal Input', ['placeholder' => 'Horizontal layout', 'maxlength' => 255]);
+$formwriter->checkboxinput('horizontal_check', 'Horizontal Checkbox', ['value' => 1]);
+$formwriter->dropinput('horizontal_select', 'Horizontal Select', ['options' => $countries]);
 
 // Row layout for date/time
-echo $formwriter->datetimeinput('Row Layout DateTime', 'row_datetime', '', date('Y-m-d'), date('H:i'), '', '','row');
+$formwriter->datetimeinput('row_datetime', 'Row Layout DateTime', ['date_value' => date('Y-m-d'), 'time_value' => date('H:i')]);
 
 // Alternative datetime format (needs proper format for datetime-local input)
 
 // Textbox with TinyMCE
-echo $formwriter->textbox('Rich Text Editor', 'rich_text', '', 5, 80, NULL, '', 'yes');
+$formwriter->textbox('rich_text', 'Rich Text Editor', ['rows' => 5, 'cols' => 80, 'use_editor' => true]);
 
 // 21. Buttons
-echo $formwriter->start_buttons();
-echo $formwriter->new_form_button('Cancel', 'secondary');
-echo $formwriter->new_form_button('Submit Form', 'primary');
-echo $formwriter->end_buttons();
+$formwriter->submitbutton('cancel', 'Cancel', ['class' => 'btn btn-secondary']);
+$formwriter->submitbutton('btn_submit', 'Submit Form', ['class' => 'btn btn-primary']);
 
-echo $formwriter->end_form(true);
+$formwriter->end_form();
 
 echo PublicPage::EndPage();
 
@@ -275,31 +179,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 remote: "This email address is already registered."
             }
         },
-        rules: {
-            <?php
-            // Output the rules in JavaScript format
-            $first = true;
-            foreach ($validation_rules as $fieldName => $rules) {
-                if (!$first) echo ",\n            ";
-                $first = false;
-                // Use json_encode to properly quote field names with special characters
-                echo json_encode($fieldName) . ': {';
-                $firstRule = true;
-                foreach ($rules as $ruleName => $ruleData) {
-                    if (!$firstRule) echo ', ';
-                    $firstRule = false;
-                    echo $ruleName . ': ';
-                    if (isset($ruleData['value'])) {
-                        $value = $ruleData['value'];
-                        echo ($value === 'true' || $value === 'false') ? $value : '"' . addslashes($value) . '"';
-                    } else {
-                        echo 'true';
-                    }
-                }
-                echo '}';
-            }
-            ?>
-        }
+        rules: {}
     };
 
     // Initialize Joinery Validation

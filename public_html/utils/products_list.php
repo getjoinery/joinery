@@ -59,13 +59,13 @@
 		}
 		else{
 			$settings = Globalvars::get_instance();
-			$formwriter = new FormWriter("product_form".$product->key);
-			echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
+			$formwriter = $page->getFormWriter("product_form".$product->key, ['action' => '/product', 'method' => 'POST']);
+			$formwriter->begin_form();
 			echo $formwriter->hiddeninput('product_id', $product->key);
 			if ($product->output_product_form($formwriter, $page_vars['user'], null)) {
-				echo $formwriter->new_form_button('Add to Cart', 'primary','full');
+				$formwriter->submitbutton('btn_submit', 'Add to Cart', ['class' => 'btn btn-primary']);
 			}
-			echo $formwriter->end_form(true);
+			echo $formwriter->end_form();
 			$product->output_javascript($formwriter, NULL, "product_form".$product->key);
 	
 		}

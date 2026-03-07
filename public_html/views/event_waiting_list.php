@@ -27,13 +27,9 @@
 	else{
 
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
+		$formwriter = $page->getFormWriter('form1', ['action' => '/event_waiting_list', 'method' => 'POST']);
 
-		$formwriter->begin_form([
-			'id' => '',
-			'method' => 'POST',
-			'action' => '/event_waiting_list'
-		]);
+		$formwriter->begin_form();
 
 		$formwriter->hiddeninput('event_id', ['value' => $event->key]);
 
@@ -91,7 +87,7 @@
 			}
 		}
 
-		$formwriter->submitbutton('submit', 'Add me to the waiting list', [
+		$formwriter->submitbutton('btn_submit', 'Add me to the waiting list', [
 			'class' => 'btn btn-primary'
 		]);
 

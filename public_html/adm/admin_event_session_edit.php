@@ -270,9 +270,9 @@
 		$page->begin_box($pageoptions);
 
 		// Editing an existing event
-		$formwriter = $page->getFormWriter('form2');
+		$formwriter = $page->getFormWriter('form2', ['action' => '/admin/admin_event_session_edit', 'method' => 'POST']);
 
-		$formwriter->begin_form('form2', 'POST', '/admin/admin_event_session_edit');
+		$formwriter->begin_form();
 
 		$formwriter->hiddeninput('action', '', ['value' => 'addfile']);
 		$formwriter->hiddeninput('evs_event_session_id', '', ['value' => $event_session->key]);

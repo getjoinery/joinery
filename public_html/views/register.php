@@ -29,14 +29,9 @@
 	$settings = Globalvars::get_instance();
 	$nickname_display = $settings->get_setting('nickname_display_as');
 
-	$formwriter = $page->getFormWriter('form1');
+	$formwriter = $page->getFormWriter('form1', ['action' => '/register', 'method' => 'POST']);
 
-	$formwriter->begin_form([
-		'id' => 'form1',
-		'method' => 'POST',
-		'action' => '/register',
-		'ajax' => true
-	]);
+	$formwriter->begin_form();
 
 	$formwriter->hiddeninput('prevformname', ['value' => 'register']);
 
@@ -102,7 +97,7 @@
 	$formwriter->honeypot_hidden_input();
 	$formwriter->captcha_hidden_input();
 
-	$formwriter->submitbutton('submit', 'Submit', [
+	$formwriter->submitbutton('btn_submit', 'Submit', [
 		'class' => 'btn btn-primary btn-block'
 	]);
 

@@ -116,34 +116,27 @@ if (!$run_test) {
             <h5 class="mb-3">Run End-to-End Authentication Analysis</h5>
             
             <?php
-            require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-            $formwriter = new FormWriterV2Bootstrap('email_test_form');
-            
-            // No validation rules - just plain form
-            $form_html = $formwriter->begin_form('email_test_form', 'POST', '/utils/email_send_test');
-            echo '<!-- DEBUG FORM HTML: ' . htmlspecialchars($form_html) . ' -->';
-            echo $form_html;
-            
+            $formwriter = $page->getFormWriter('email_test_form', ['action' => '/utils/email_send_test', 'method' => 'POST']);
+            $formwriter->begin_form();
+
             echo '<div class="row g-3 mb-4">';
             echo '<div class="col-md-6">';
-            echo $formwriter->textinput('Gmail address to send test email to', 'test_email', 'form-control', 100, 'joineryemailtests@gmail.com', 'email@gmail.com', 255, '');
+            echo $formwriter->textinput('test_email', 'Gmail address to send test email to', ['value' => 'joineryemailtests@gmail.com', 'placeholder' => 'email@gmail.com', 'maxlength' => 255, 'type' => 'email']);
             echo '</div>';
-            
+
             echo '<div class="col-md-6">';
-            echo $formwriter->textinput('Gmail username for IMAP access', 'imap_username', 'form-control', 100, 'joineryemailtests@gmail.com', 'email@gmail.com', 255, 'Usually the same as your email address');
+            echo $formwriter->textinput('imap_username', 'Gmail username for IMAP access', ['value' => 'joineryemailtests@gmail.com', 'placeholder' => 'email@gmail.com', 'maxlength' => 255]);
             echo '</div>';
-            
+
             echo '<div class="col-12">';
-            echo $formwriter->passwordinput('Gmail App Password', 'imap_password', 'form-control', 100, '', '16-character app-specific password from Google Account settings');
+            echo $formwriter->passwordinput('imap_password', 'Gmail App Password', ['placeholder' => '16-character app-specific password from Google Account settings']);
             echo '</div>';
-            
+
             echo '<div class="col-12">';
-            echo $formwriter->start_buttons();
-            echo $formwriter->new_form_button('<i class="fas fa-microscope"></i> Run Advanced Analysis', 'btn btn-primary');
-            echo $formwriter->end_buttons();
+            echo $formwriter->submitbutton('btn_submit', '<i class="fas fa-microscope"></i> Run Advanced Analysis', ['class' => 'btn btn-primary']);
             echo '</div>';
             echo '</div>';
-            
+
             echo $formwriter->end_form();
             ?>
             
