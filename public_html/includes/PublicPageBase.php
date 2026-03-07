@@ -507,6 +507,11 @@ abstract class PublicPageBase {
 			}
 		}
 
+		// Base CSS/JS provides framework-agnostic styles and interactions for fallback views
+		// Themes that include Bootstrap will naturally override these
+		echo '<link rel="stylesheet" href="/assets/css/base.css">' . "\n";
+		echo '<script defer src="/assets/js/base.js"></script>' . "\n";
+
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
 		}

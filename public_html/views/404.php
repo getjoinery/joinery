@@ -103,7 +103,7 @@
 .error404-number {
 	font-size: 8rem;
 	font-weight: 900;
-	color: var(--bs-primary);
+	color: var(--bs-primary, var(--base-primary, #1abc9c));
 	opacity: 0.1;
 	line-height: 1;
 	text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
@@ -123,11 +123,11 @@
 }
 
 .error404-content .heading-block h1 {
-	color: var(--bs-dark);
+	color: var(--bs-dark, var(--base-dark, #212529));
 }
 
 .error404-links ul li a:hover {
-	color: var(--bs-primary) !important;
+	color: var(--bs-primary, var(--base-primary, #1abc9c)) !important;
 	transform: translateX(5px);
 	transition: all 0.3s ease;
 }
