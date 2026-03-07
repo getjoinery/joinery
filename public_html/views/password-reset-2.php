@@ -1,147 +1,72 @@
 <?php
-	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('password-reset-2_logic.php', 'logic'));
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+    require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+    require_once(PathHelper::getThemeFilePath('password-reset-2_logic.php', 'logic'));
 
-	$page_vars = password_reset_2_logic($_GET, $_POST);
-	// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
-	$settings = Globalvars::get_instance();
+    $page_vars = password_reset_2_logic($_GET, $_POST);
+    if ($page_vars->redirect) {
+        LibraryFunctions::redirect($page_vars->redirect);
+        exit();
+    }
+    $page_vars = $page_vars->data;
 
-	$page = new PublicPage();
-	$hoptions=array(
-		'is_valid_page' => $is_valid_page,
-		'title'=>'Password Reset',
-		'header_only' => true,
-	);
-	$page->public_header($hoptions,NULL);
+    $page = new PublicPage();
+    $page->public_header([
+        'is_valid_page' => $is_valid_page,
+        'title'         => 'Password Reset',
+        'header_only'   => true,
+    ]);
+?>
 
-	if($page_vars['message']){
-		?>
-		<!-- Content
-		============================================= -->
-		<section id="content">
-			<div class="content-wrap py-0">
+<div class="auth-page">
+    <div class="auth-card">
 
-				<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
+        <div class="auth-logo">
+            <a href="/"><?php $page->get_logo(); ?></a>
+        </div>
 
-				<div class="section bg-transparent min-vh-100 p-0 m-0">
-					<div class="vertical-middle">
-						<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
+        <?php if ($page_vars['message']): ?>
 
-							<div class="center mb-4">
-								<a href="/">
-									<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
-								</a>
-							</div>
+            <div class="text-center">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#198754" stroke-width="1.5" style="margin-bottom: 1rem;" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                <h3>Password Successfully Reset</h3>
+                <p class="text-muted">Continue to log in with your new password.</p>
+                <a href="/login" class="btn btn-primary">Continue to Login</a>
+            </div>
 
-							<div class="card mb-0">
-								<div class="card-body text-center" style="padding: 40px;">
-									<div class="mb-4">
-										<div class="text-success mb-3">
-											<i class="icon-check-circle" style="font-size: 4rem;"></i>
-										</div>
-										<h3 class="mb-2">Password Successfully Reset</h3>
-										<p class="text-muted">Continue to log in with your new password.</p>
-									</div>
-									<a href="/login" class="button button-3d button-black m-0">
-										<i class="icon-chevron-left me-1"></i>Continue to Login
-									</a>
-								</div>
-							</div>
+        <?php else: ?>
 
-						</div>
-					</div>
-				</div>
+            <h3>Set New Password</h3>
 
-			</div>
-		</section><!-- #content end -->
-		<?php
-	}
-	else{
-		?>
-		<!-- Content
-		============================================= -->
-		<section id="content">
-			<div class="content-wrap py-0">
+            <?php
+            $formwriter = $page->getFormWriter('form1', [
+                'action' => '/password-reset-2',
+            ]);
+            $formwriter->begin_form();
+            $formwriter->hiddeninput('act_code', $page_vars['act_code']);
+            ?>
 
-				<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
+            <div class="form-group">
+                <label for="usr_password" class="form-label">New Password:</label>
+                <input type="password" name="usr_password" id="usr_password" class="form-control" autocomplete="new-password">
+            </div>
 
-				<div class="section bg-transparent min-vh-100 p-0 m-0">
-					<div class="vertical-middle">
-						<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
+            <div class="form-group">
+                <label for="usr_password_again" class="form-label">Confirm Password:</label>
+                <input type="password" name="usr_password_again" id="usr_password_again" class="form-control" autocomplete="new-password">
+            </div>
 
-							<div class="center mb-4">
-								<a href="/">
-									<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
-								</a>
-							</div>
+            <div style="margin-top: 1rem;">
+                <button type="submit" name="submit" class="btn btn-primary btn-block">Set Password</button>
+            </div>
 
-							<div class="card mb-0">
-								<div class="card-body" style="padding: 40px;">
-									<h3>Set New Password</h3>
+            <?php echo $formwriter->end_form(); ?>
 
-									<?php
-									$formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-2', 'method' => 'POST']);
+        <?php endif; ?>
 
-									$formwriter->begin_form();
+    </div>
+</div>
 
-									$formwriter->hiddeninput('act_code', ['value' => $page_vars['act_code']]);
-									?>
-
-									<div class="row">
-										<div class="col-12 form-group">
-											<label for="usr_password">New Password:</label>
-											<?php
-											$formwriter->passwordinput('usr_password', '', [
-												'class' => 'form-control',
-												'required' => true,
-												'minlength' => 5,
-												'autocomplete' => 'new-password'
-											]);
-											?>
-										</div>
-
-										<div class="col-12 form-group">
-											<label for="usr_password_again">Confirm Password:</label>
-											<?php
-											$formwriter->passwordinput('usr_password_again', '', [
-												'class' => 'form-control',
-												'required' => true,
-												'data-msg-required' => 'You must enter your password twice to confirm',
-												'data-rule-equalTo' => '#usr_password',
-												'data-msg-equalTo' => 'Your password did not match the one you entered above',
-												'autocomplete' => 'new-password'
-											]);
-											?>
-										</div>
-
-										<div class="col-12 form-group">
-											<?php
-											$formwriter->submitbutton('btn_submit', 'Set Password', [
-												'class' => 'button button-3d button-black m-0'
-											]);
-											?>
-										</div>
-									</div>
-
-									<?php $formwriter->end_form(); ?>
-								</div>
-							</div>
-
-						</div>
-					</div>
-				</div>
-
-			</div>
-		</section><!-- #content end -->
-		<?php
-	}
-
-	$page->public_footer($foptions=array('track'=>TRUE, 'header_only' => true));
+<?php
+    $page->public_footer(['track' => true, 'header_only' => true]);
 ?>

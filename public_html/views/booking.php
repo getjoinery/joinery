@@ -1,91 +1,62 @@
 <?php
-	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('booking_logic.php', 'logic'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	
-	$page_vars = booking_logic($_GET, $_POST);
-	// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
-	$booking_type = $page_vars['booking_type'];
-	$client_user = $page_vars['client_user'];
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+    require_once(PathHelper::getThemeFilePath('booking_logic.php', 'logic'));
+    require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-	$page = new PublicPage();
-	$hoptions = array(
-		'title' => 'Book an appointment',
-		'description' => 'Book an appointment',
-		'banner' => 'Book',
-		'submenu' => 'Book',
-	);
-	$page->public_header($hoptions);
+    $page_vars = booking_logic($_GET, $_POST);
+    if ($page_vars->redirect) {
+        LibraryFunctions::redirect($page_vars->redirect);
+        exit();
+    }
+    $page_vars = $page_vars->data;
+    $booking_type = $page_vars['booking_type'];
+    $client_user  = $page_vars['client_user'];
 
-	echo PublicPage::BeginPage('Book an appointment');
+    $page = new PublicPage();
+    $page->public_header([
+        'title'    => 'Book an appointment',
+        'banner'   => 'Book',
+        'submenu'  => 'Book',
+    ]);
 ?>
 
-<!-- Canvas Booking Section -->
-<section id="content">
-	<div class="content-wrap">
-		<div class="container">
-			<div class="row justify-content-center">
-				<div class="col-lg-8 col-xl-7">
-					
-					<!-- Page Header -->
-					<div class="text-center mb-5">
-						<h1 class="h2 mb-2">Book an Appointment</h1>
-						<p class="text-muted">Schedule your appointment with our convenient booking system</p>
-					</div>
+<!-- Page Title -->
+<section class="page-title bg-transparent">
+    <div class="container">
+        <div class="page-title-row">
+            <div class="page-title-content">
+                <h1>Book an Appointment</h1>
+                <span>Schedule your appointment with our convenient booking system</span>
+            </div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item active">Book</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+</section>
 
-					<!-- Booking Status -->
-					<div class="card shadow-sm rounded-4 border-0">
-						<div class="card-body p-4 p-lg-5 text-center">
-							<div class="mb-4">
-								<div class="text-warning mb-3">
-									<i class="icon-calendar display-4"></i>
-								</div>
-								<h4 class="mb-3">Booking Temporarily Unavailable</h4>
-								<div class="alert alert-info rounded-4 mb-4" role="alert">
-									<i class="icon-info-circle me-2"></i>
-									Booking functionality is temporarily disabled while we review our calendar integration.
-								</div>
-								<p class="text-muted">We apologize for any inconvenience. Please check back soon or contact us directly for scheduling assistance.</p>
-							</div>
-							
-							<div class="row g-3 justify-content-center">
-								<div class="col-auto">
-									<a href="/contact" class="btn btn-primary rounded-pill">
-										<i class="icon-envelope me-2"></i>Contact Us
-									</a>
-								</div>
-								<div class="col-auto">
-									<a href="/" class="btn btn-outline-secondary rounded-pill">
-										<i class="icon-home me-2"></i>Back to Home
-									</a>
-								</div>
-							</div>
-						</div>
-					</div>
-
-					<?php 
-					/*
-					// Future implementation when booking is re-enabled
-					echo '<!-- Calendly inline widget begin -->
-					<div class="calendly-inline-widget" data-url="'.$booking_type->get('bkt_schedule_link').'?primary_color=69be00&name='.str_replace(' ', '%20', $client_user->display_name()).'&email='.$client_user->get('usr_email').'&salesforce_uuid='.$booking_type->key.'" style="min-width:320px;height:630px;"></div>
-					<script type="text/javascript" src="https://assets.calendly.com/assets/external/widget.js" async></script>
-					<!-- Calendly inline widget end -->';
-					*/
-					?>
-
-				</div>
-			</div>
-		</div>
-	</div>
+<section class="content-section">
+    <div class="container">
+        <div style="max-width: 640px; margin: 0 auto;">
+            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2.5rem; text-align: center;">
+                <div style="font-size: 3rem; color: #f6c23e; margin-bottom: 1rem;">&#128197;</div>
+                <h4 style="margin-bottom: 1rem;">Booking Temporarily Unavailable</h4>
+                <div class="alert alert-info" style="margin-bottom: 1.5rem; text-align: left;">
+                    Booking functionality is temporarily disabled while we review our calendar integration.
+                </div>
+                <p style="color: var(--color-muted); margin-bottom: 2rem;">We apologize for any inconvenience. Please check back soon or contact us directly for scheduling assistance.</p>
+                <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+                    <a href="/contact" class="btn btn-primary">Contact Us</a>
+                    <a href="/" class="btn btn-outline">Back to Home</a>
+                </div>
+            </div>
+        </div>
+    </div>
 </section>
 
 <?php
-	echo PublicPage::EndPage();
-	$page->public_footer(array('track'=>TRUE));
+    $page->public_footer(['track' => true]);
 ?>

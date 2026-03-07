@@ -1,5 +1,5 @@
 <?php
-	
+
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('event_withdraw_logic.php', 'logic'));
@@ -7,38 +7,68 @@
 	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Withdraw from Event/Course'
-		);
+	);
 	$page->public_header($hoptions);
+?>
 
-	echo PublicPage::BeginPage('Withdraw from Event/Course', $hoptions);
+<!-- Page Title -->
+<section class="page-title bg-transparent">
+    <div class="container">
+        <div class="page-title-row">
+            <div class="page-title-content">
+                <h1>Withdraw from Event/Course</h1>
+            </div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item"><a href="/profile/profile">My Profile</a></li>
+                    <li class="breadcrumb-item active">Withdraw</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+</section>
 
-	if(!$event_registrant){
-		echo 'You are not registered for this course, or you have already withdrawn.';
-	}
-	else if(!$event->get('evt_end_time') || $event->get('evt_end_time') > date('Y-m-d H:i:s')){
-		$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', [
-		'action' => '/profile/event_withdraw'
-	]);
-	$formwriter->begin_form();
+<section class="content-section">
+    <div class="container">
+        <div style="max-width: 640px; margin: 0 auto;">
+            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem;">
 
-	echo '<h4>Confirm withdrawal from '.$event->get('evt_name').'</h4>';
-	echo '<p>Withdrawing from the course/event will remove you from the attendee list and the mailing list. </p><p><strong>It will NOT refund any payments.  To refund a payment, contact us at <a href="mailto:'.$settings->get_setting('defaultemail').'">'.$settings->get_setting('defaultemail').'</a></p>';
+                <?php
+                if(!$event_registrant){
+                    echo '<p>You are not registered for this course, or you have already withdrawn.</p>';
+                }
+                else if(!$event->get('evt_end_time') || $event->get('evt_end_time') > date('Y-m-d H:i:s')){
+                    $settings = Globalvars::get_instance();
+                    $formwriter = $page->getFormWriter('form1', [
+                        'action' => '/profile/event_withdraw'
+                    ]);
+                    $formwriter->begin_form();
 
-	$formwriter->hiddeninput('confirm', '', ['value' => 1]);
-	$formwriter->hiddeninput('evr_event_registrant_id', '', ['value' => $evr_event_registrant_id]);
+                    echo '<h4 style="margin-bottom: 1rem;">Confirm withdrawal from ' . htmlspecialchars($event->get('evt_name')) . '</h4>';
+                    echo '<p style="margin-bottom: 0.75rem;">Withdrawing from the course/event will remove you from the attendee list and the mailing list.</p>';
+                    echo '<p style="margin-bottom: 1.5rem;"><strong>It will NOT refund any payments.</strong> To refund a payment, contact us at <a href="mailto:' . htmlspecialchars($settings->get_setting('defaultemail')) . '">' . htmlspecialchars($settings->get_setting('defaultemail')) . '</a>.</p>';
 
-	$formwriter->submitbutton('btn_submit', 'Confirm');
-	echo ' <a href="/profile">Cancel, I changed my mind</a>';
+                    $formwriter->hiddeninput('confirm', '', ['value' => 1]);
+                    $formwriter->hiddeninput('evr_event_registrant_id', '', ['value' => $evr_event_registrant_id]);
 
-	$formwriter->end_form();
-		
-	}
-	else{
-		echo 'You cannot withdraw from an event in the past.';
-	}
+                    echo '<div style="display: flex; gap: 1rem; align-items: center;">';
+                    $formwriter->submitbutton('btn_submit', 'Confirm Withdrawal', ['class' => 'btn btn-primary']);
+                    echo ' <a href="/profile">Cancel, I changed my mind</a>';
+                    echo '</div>';
 
-	echo PublicPage::EndPage();
-	$page->public_footer();
+                    $formwriter->end_form();
+                }
+                else{
+                    echo '<p>You cannot withdraw from an event in the past.</p>';
+                }
+                ?>
 
+            </div>
+        </div>
+    </div>
+</section>
+
+<?php
+$page->public_footer();
 ?>

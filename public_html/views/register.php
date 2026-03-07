@@ -1,109 +1,143 @@
 <?php
+    require_once(PathHelper::getThemeFilePath('register_logic.php', 'logic'));
+    require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('register_logic.php', 'logic'));
+    $page_vars = register_logic($_GET, $_POST);
+    if ($page_vars->redirect) {
+        LibraryFunctions::redirect($page_vars->redirect);
+        exit();
+    }
+    $page_vars = $page_vars->data;
 
-	$page_vars = process_logic(register_logic($_GET, $_POST));
+    $extra = '';
+    if (isset($_GET['m'])) {
+        $extra = '?m=' . htmlspecialchars($_GET['m']);
+    }
 
-	$page = new PublicPage();
-	$hoptions=array(
-		'is_valid_page' => $is_valid_page,
-		'title'=>'Register',
-	);
-	$page->public_header($hoptions,NULL);
+    $page = new PublicPage();
+    $page->public_header([
+        'is_valid_page' => $is_valid_page,
+        'title'         => 'Register',
+        'header_only'   => true,
+    ]);
 
-	$extra = '';
-	if(isset($_GET['m'])){
-		$extra = '?m='.htmlspecialchars($_GET['m']);
-	}
-	$options['subtitle'] = '<a href="/login'.$extra.'">Already a member? Log in</a>';
-	echo PublicPage::BeginPage('Register', $options);
+    $settings = Globalvars::get_instance();
+    $nickname_display = $settings->get_setting('nickname_display_as');
 
-	if(isset($_GET['msgtext'])){
-		if (array_key_exists($_GET['msgtext'], $page_vars['LOGIN_MESSAGES'])) {
-			echo PublicPage::alert('Login warning', htmlspecialchars($LOGIN_MESSAGES[$_GET['msgtext']]), 'warn');
-		}
-	}
+    $formwriter = $page->getFormWriter('form1', [
+        'action' => '/register',
+    ]);
 
-	$settings = Globalvars::get_instance();
-	$nickname_display = $settings->get_setting('nickname_display_as');
+    $formwriter->antispam_question_validate([]);
+?>
 
-	$formwriter = $page->getFormWriter('form1', ['action' => '/register', 'method' => 'POST']);
+<div class="auth-page">
+    <div class="auth-card" style="max-width: 540px;">
 
-	$formwriter->begin_form();
+        <div class="auth-logo">
+            <a href="/"><?php $page->get_logo(); ?></a>
+        </div>
 
-	$formwriter->hiddeninput('prevformname', ['value' => 'register']);
+        <h3>Register for an Account</h3>
 
-	$formwriter->textinput('usr_first_name', 'First Name', [
-		'value' => @$form_fields->usr_first_name,
-		'maxlength' => 32,
-		'required' => true,
-		'minlength' => 1,
-		'data-msg-required' => 'Please enter your first name.'
-	]);
+        <?php
+        if (isset($_GET['msgtext']) && array_key_exists($_GET['msgtext'], $page_vars['LOGIN_MESSAGES'])) {
+            echo PublicPage::alert('Login warning', htmlspecialchars($page_vars['LOGIN_MESSAGES'][$_GET['msgtext']]), 'warn');
+        }
 
-	$formwriter->textinput('usr_last_name', 'Last Name', [
-		'value' => @$form_fields->usr_last_name,
-		'maxlength' => 32,
-		'required' => true,
-		'minlength' => 2
-	]);
+        $formwriter->begin_form();
+        $formwriter->hiddeninput('prevformname', 'register');
+        ?>
 
-	if($nickname_display){
-		$formwriter->textinput('usr_nickname', $nickname_display, [
-			'value' => @$form_fields->usr_nickname,
-			'maxlength' => 32
-		]);
-	}
+        <div class="row g-3">
+            <div class="col-md-6">
+                <?php $formwriter->textinput('usr_first_name', 'First Name:', [
+                    'value'     => @$form_fields->usr_first_name,
+                    'maxlength' => 32,
+                ]); ?>
+            </div>
+            <div class="col-md-6">
+                <?php $formwriter->textinput('usr_last_name', 'Last Name:', [
+                    'value'     => @$form_fields->usr_last_name,
+                    'maxlength' => 32,
+                ]); ?>
+            </div>
 
-	$formwriter->textinput('usr_email', 'Email', [
-		'maxlength' => 64,
-		'required' => true,
-		'type' => 'email',
-		'data-rule-remote' => '/ajax/email_check_ajax',
-		'data-msg-remote' => 'This email already exists.'
-	]);
+            <?php if ($nickname_display): ?>
+            <div class="col-12">
+                <?php $formwriter->textinput('usr_nickname', htmlspecialchars($nickname_display) . ':', [
+                    'value'     => @$form_fields->usr_nickname,
+                    'maxlength' => 32,
+                ]); ?>
+            </div>
+            <?php endif; ?>
 
-	$formwriter->passwordinput('password', 'Create Password', [
-		'maxlength' => 255,
-		'required' => true,
-		'minlength' => 5,
-		'data-msg-minlength' => 'Password must be at least 5 characters'
-	]);
+            <div class="col-12">
+                <?php $formwriter->textinput('usr_email', 'Email Address:', [
+                    'type'      => 'email',
+                    'maxlength' => 64,
+                ]); ?>
+            </div>
 
-	$optionvals = Address::get_timezone_drop_array();
-	$default_timezone = $settings->get_setting('default_timezone');
-	$formwriter->dropinput('usr_timezone', 'Timezone', [
-		'options' => $optionvals,
-		'value' => $default_timezone
-	]);
+            <div class="col-12">
+                <?php $formwriter->passwordinput('password', 'Choose Password:', [
+                    'maxlength' => 255,
+                ]); ?>
+            </div>
 
-	$formwriter->antispam_question_input();
+            <div class="col-12">
+                <?php
+                $optionvals = Address::get_timezone_drop_array();
+                $default_timezone = $settings->get_setting('default_timezone');
+                $formwriter->dropinput('usr_timezone', 'Timezone:', [
+                    'options' => $optionvals,
+                    'value'   => $default_timezone,
+                ]);
+                ?>
+            </div>
 
-	$formwriter->checkboxinput('privacy', 'I have read and agree to the <a href=\'/privacy\'>privacy policy</a>', [
-		'required' => true
-	]);
+            <div class="col-12">
+                <?php $formwriter->antispam_question_input(); ?>
+            </div>
 
-	$formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
-		'value' => 'yes'
-	]);
+            <div class="col-12">
+                <?php $formwriter->checkboxinput('privacy', "I have read and agree to the <a href='/privacy' target='_blank'>privacy policy</a>", [
+                    'value' => 'yes',
+                ]); ?>
+            </div>
+            <div class="col-12">
+                <?php $formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
+                    'value' => 'yes',
+                ]); ?>
+            </div>
+            <div class="col-12">
+                <?php $formwriter->checkboxinput('setcookie', 'Keep me logged in', [
+                    'value'   => 'yes',
+                    'checked' => true,
+                ]); ?>
+            </div>
 
-	$formwriter->checkboxinput('setcookie', 'Keep me logged in', [
-		'checked' => true,
-		'value' => 'yes'
-	]);
+            <div class="col-12">
+                <?php
+                $formwriter->honeypot_hidden_input();
+                $formwriter->captcha_hidden_input();
+                ?>
+            </div>
 
-	$formwriter->honeypot_hidden_input();
-	$formwriter->captcha_hidden_input();
+            <div class="col-12">
+                <?php $formwriter->submitbutton('btn_submit', 'Register Now', ['class' => 'btn btn-primary btn-block']); ?>
+            </div>
+        </div>
 
-	$formwriter->submitbutton('btn_submit', 'Submit', [
-		'class' => 'btn btn-primary btn-block'
-	]);
+        <?php $formwriter->end_form(); ?>
 
-	$formwriter->end_form();
+        <div class="auth-footer-text">
+            Already have an account? <a href="/login<?php echo $extra; ?>">Login to your Account</a>
+        </div>
 
-	echo PublicPage::EndPage();
-	$page->public_footer($foptions=array('track'=>TRUE, 'fbconnect'=>TRUE));
+    </div>
+</div>
 
+<?php
+    $page->public_footer(['header_only' => true, 'track' => true]);
 ?>
