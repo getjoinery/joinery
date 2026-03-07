@@ -1,153 +1,70 @@
 <?php
-	// Core files (PathHelper, Globalvars, SessionControl) are guaranteed available
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('password-reset-1_logic.php', 'logic'));
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+    require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+    require_once(PathHelper::getThemeFilePath('password-reset-1_logic.php', 'logic'));
 
-	$page_vars = password_reset_1_logic($_GET, $_POST);
-	// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
-	$settings = Globalvars::get_instance();
+    $page_vars = password_reset_1_logic($_GET, $_POST);
+    if ($page_vars->redirect) {
+        LibraryFunctions::redirect($page_vars->redirect);
+        exit();
+    }
+    $page_vars = $page_vars->data;
 
-	$page = new PublicPage();
-	$hoptions=array(
-		'is_valid_page' => $is_valid_page,
-		'title'=>'Password Reset',
-		'header_only' => true,
-	);
-	$page->public_header($hoptions,NULL);
-
-	if($page_vars['message']):
+    $page = new PublicPage();
+    $page->public_header([
+        'is_valid_page' => $is_valid_page,
+        'title'         => 'Password Reset',
+        'header_only'   => true,
+    ]);
 ?>
-<!-- Content
-============================================= -->
-<section id="content">
-	<div class="content-wrap py-0">
 
-		<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
+<div class="auth-page">
+    <div class="auth-card">
 
-		<div class="section bg-transparent min-vh-100 p-0 m-0">
-			<div class="vertical-middle">
-				<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
+        <div class="auth-logo">
+            <a href="/"><?php $page->get_logo(); ?></a>
+        </div>
 
-					<div class="center mb-4">
-						<a href="/">
-							<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
-						</a>
-					</div>
+        <?php if ($page_vars['message']): ?>
 
-					<div class="card mb-0">
-						<div class="card-body text-center" style="padding: 40px;">
-							<?php if ($page_vars['message_type'] === 'error'): ?>
-							<!-- Error Icon -->
-							<div class="mb-4">
-								<i class="bi-exclamation-circle text-danger" style="font-size: 4rem;"></i>
-							</div>
-							<h3><?php echo htmlspecialchars($page_vars['message_title']); ?></h3>
-							<p class="text-muted mb-4">
-								<?php echo htmlspecialchars($page_vars['message']); ?>
-							</p>
-							<a href="/password-reset-1" class="button button-3d button-black m-0">
-								<i class="bi-arrow-left me-2"></i>Try Again
-							</a>
-							<?php else: ?>
-							<!-- Success Icon -->
-							<div class="mb-4">
-								<i class="bi-envelope-check text-success" style="font-size: 4rem;"></i>
-							</div>
-							<h3><?php echo htmlspecialchars($page_vars['message_title']); ?></h3>
-							<p class="text-muted mb-4">
-								<?php echo $page_vars['message']; ?>
-							</p>
-							<a href="/login" class="button button-3d button-black m-0">
-								<i class="bi-arrow-left me-2"></i>Return to Login
-							</a>
-							<?php endif; ?>
-						</div>
-					</div>
+            <div class="text-center">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#198754" stroke-width="1.5" style="margin-bottom: 1rem;" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                <h3>Check Your Email!</h3>
+                <p class="text-muted">An email has been sent to you. Please click on the included link to reset your password.</p>
+                <a href="/login" class="btn btn-primary">Return to Login</a>
+            </div>
 
-				</div>
-			</div>
-		</div>
+        <?php else: ?>
 
-	</div>
-</section><!-- #content end -->
+            <h3>Reset Password</h3>
+            <p class="text-muted" style="margin-bottom: 1.5rem;">Enter your email address and we'll send you a link to reset your password.</p>
 
-<?php else: ?>
+            <?php
+            $formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-1', 'method' => 'POST']);
+            $formwriter->begin_form();
 
-<!-- Content
-============================================= -->
-<section id="content">
-	<div class="content-wrap py-0">
+            $formwriter->textinput('usr_email', 'Email Address:', [
+                'type'      => 'email',
+                'required'  => true,
+                'maxlength' => 64,
+            ]);
+            ?>
 
-		<div class="section p-0 m-0 h-100 position-absolute" style="background: url('/theme/canvas/assets/images/hero/hero-login.jpg') center center no-repeat; background-size: cover;"></div>
+            <div style="margin-top: 1rem;">
+                <?php $formwriter->submitbutton('btn_submit', 'Send Reset Link', ['class' => 'btn btn-primary btn-block']); ?>
+            </div>
 
-		<div class="section bg-transparent min-vh-100 p-0 m-0">
-			<div class="vertical-middle">
-				<div class="container-fluid py-5 mx-auto" style="max-width: 40rem;">
+            <?php $formwriter->end_form(); ?>
 
-					<div class="center mb-4">
-						<a href="/">
-							<img src="/theme/canvas/assets/images/logo-dark.png" alt="Logo" style="max-height: 50px;">
-						</a>
-					</div>
+            <div class="auth-footer-text">
+                Remember your password? <a href="/login">Login to your Account</a>
+            </div>
 
-					<div class="card mb-0">
-						<div class="card-body" style="padding: 40px;">
-							<h3>Reset Password</h3>
-							<p class="text-muted mb-4">Enter your email address and we'll send you a link to reset your password.</p>
+        <?php endif; ?>
 
-							<?php
-							$formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-1', 'method' => 'POST']);
-
-							$formwriter->begin_form();
-							?>
-
-							<div class="row">
-								<div class="col-12 form-group">
-									<label for="usr_email">Email Address:</label>
-									<?php
-									$formwriter->textinput('usr_email', '', [
-										'class' => 'form-control',
-										'maxlength' => 64,
-										'required' => true,
-										'type' => 'email'
-									]);
-									?>
-								</div>
-
-								<div class="col-12 form-group">
-									<?php
-									$formwriter->submitbutton('btn_submit', 'Send Reset Link', [
-										'class' => 'button button-3d button-black m-0'
-									]);
-									?>
-								</div>
-							</div>
-
-							<?php $formwriter->end_form(); ?>
-
-							<div class="w-100"></div>
-
-							<div class="text-center w-100">
-								<p style="line-height: 1.6">Remember your password? <a href="/login">Login to your Account</a></p>
-							</div>
-						</div>
-					</div>
-
-				</div>
-			</div>
-		</div>
-
-	</div>
-</section><!-- #content end -->
-
-<?php endif; ?>
+    </div>
+</div>
 
 <?php
-$page->public_footer(array('track'=>TRUE, 'header_only' => true));
+    $page->public_footer(['track' => true, 'header_only' => true]);
 ?>

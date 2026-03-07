@@ -103,13 +103,12 @@ class PathHelper {
             $theme_template = $settings->get_setting('theme_template', true, true);
         } catch (Exception $e) {
             // During database updates when settings table might not be available
-            $theme_template = 'falcon';
+            return null;
         }
 
-        // Validate theme_template is not empty/blank - single validation point
+        // Validate theme_template is not empty/blank — no theme means use base paths directly
         if (empty(trim($theme_template))) {
-            error_log("WARNING: theme_template setting is empty/blank, using default 'falcon'");
-            $theme_template = 'falcon';
+            return null;
         }
 
         if ($theme_template === 'plugin') {
