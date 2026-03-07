@@ -103,7 +103,7 @@
 		'value' => $display_enddate
 	]);
 	$formwriter->hiddeninput('source', ['value' => 'form']);
-	$formwriter->submitbutton('submit', 'Submit');
+	$formwriter->submitbutton('btn_submit', 'Submit');
 	$formwriter->end_form();	
 	
 	//PAGINATION

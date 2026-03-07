@@ -15,8 +15,8 @@
 	echo PublicPage::BeginPage($survey->get('svy_name'));
 	echo PublicPage::BeginPanel();
 
-	$formwriter = $page->getFormWriter();
-	echo $formwriter->begin_form('form1', 'POST', '/survey', true);
+	$formwriter = $page->getFormWriter('form1', ['action' => '/survey', 'method' => 'POST']);
+	echo $formwriter->begin_form();
 
 	if($invalid_messages){
 		foreach ($invalid_messages as $invalid_message){
@@ -24,7 +24,6 @@
 		}
 	}
 
-	$validation_rules = array();
 	foreach ($page_vars['survey_questions'] as $survey_question){
 		$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
 		
@@ -44,12 +43,11 @@
 		}
 		
 		echo $formwriter->hiddeninput('survey_id', LibraryFunctions::encode($survey->key));
-		$validation_rules = $question->output_js_validation($validation_rules);
 
 		echo $question->output_question($formwriter,$answer_fill);
 	}
 
-	echo $formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+	echo $formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 	echo $formwriter->end_form();
   
 	echo PublicPage::EndPanel();

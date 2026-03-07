@@ -90,8 +90,8 @@ $page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
 		'value' => $device->get('cdd_timezone')
 	]);
 
-	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
-	$formwriter->end_form(true);	
+	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->end_form();
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

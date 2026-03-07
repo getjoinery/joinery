@@ -75,18 +75,7 @@ $page_vars = $page_vars->data;
 									'action' => '/lists'
 								]);
 
-								$validation_rules = array();
-								$validation_rules['usr_first_name']['required']['value'] = 'true';
-								$validation_rules['usr_first_name']['minlength']['value'] = 1;
-								$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
-								$validation_rules['usr_first_name']['maxlength']['value'] = 32;
-								$validation_rules['usr_last_name']['required']['value'] = 'true';
-								$validation_rules['usr_last_name']['maxlength']['value'] = 32;
-								$validation_rules['privacy']['required']['value'] = 'true';
-								$validation_rules['usr_email']['required']['value'] = 'true';
-								$validation_rules['usr_email']['email']['value'] = 'true';
-								$validation_rules['usr_email']['maxlength']['value'] = 64;
-								$validation_rules = $formwriter->antispam_question_validate($validation_rules);
+								$formwriter->antispam_question_validate([]);
 
 								$formwriter->begin_form();
 								?>

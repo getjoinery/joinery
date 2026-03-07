@@ -81,14 +81,9 @@ $paget->public_header(array(
                     <div class="comment-form mb-5">
                         <h4 class="mb-4">Leave a Comment</h4>
                         <?php
-                        $formwriter = $paget->getFormWriter('form1');
+                        $formwriter = $paget->getFormWriter('form1', ['action' => $_SERVER['REQUEST_URI'], 'method' => 'POST']);
+                        $formwriter->begin_form();
 
-                        $formwriter->begin_form([
-                            'id' => '',
-                            'method' => 'POST',
-                            'action' => $_SERVER['REQUEST_URI'],
-                            'ajax' => true
-                        ]);
                         ?>
                         <div class="row">
                             <div class="col-md-6">
@@ -126,7 +121,7 @@ $paget->public_header(array(
 
                             <div class="col-12 mt-3">
                                 <?php
-                                $formwriter->submitbutton('submit', 'Post Comment', [
+                                $formwriter->submitbutton('btn_submit', 'Post Comment', [
                                     'class' => 'primary-btn'
                                 ]);
                                 ?>

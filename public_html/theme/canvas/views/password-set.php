@@ -54,13 +54,6 @@ $page_vars = $page_vars->data;
 									'action' => '/password-set'
 								]);
 
-								$validation_rules = array();
-								$validation_rules['usr_password']['required']['value'] = 'true';
-								$validation_rules['usr_password']['minlength']['value'] = 5;
-								$validation_rules['usr_password_again']['required']['value'] = 'true';
-								$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
-								$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
-								$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
 
 								$formwriter->begin_form();
 								?>

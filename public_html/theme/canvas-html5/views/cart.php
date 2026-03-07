@@ -112,10 +112,7 @@
                                     <h6 class="mb-1"><?php echo htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8') . ' ' . htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8'); ?></h6>
                                     <small class="text-muted"><?php echo htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'); ?></small>
                                 </div>
-                                <?php
-                                $formwriter = $page->getFormWriter('form_billing_user');
-                                echo $formwriter->new_button('Change', '/cart?newbilling=1', 'btn btn-outline btn-sm');
-                                ?>
+                                <a href="/cart?newbilling=1" class="btn btn-outline btn-sm">Change</a>
                             </div>
                         </div>
                     </div>
@@ -127,12 +124,6 @@
                         <div class="card-body">
                             <?php
                             $formwriter = $page->getFormWriter('form2', ['action' => '/cart']);
-                            $validation_rules = array();
-                            $validation_rules['billing_email']['required']['value'] = 'true';
-                            $validation_rules['billing_first_name']['required']['value'] = 'true';
-                            $validation_rules['billing_last_name']['required']['value'] = 'true';
-                            $validation_rules['password']['required']['value'] = 'true';
-                            echo $formwriter->set_validate($validation_rules);
                             $formwriter->begin_form();
                             ?>
 
@@ -145,37 +136,23 @@
 
                             <div class="row g-3">
                                 <div class="col-md-6">
-                                    <div class="form-group">
-                                        <label class="form-label">First Name <span class="text-danger">*</span></label>
-                                        <?php echo $formwriter->textinput('', 'billing_first_name', 'form-control', 30, htmlspecialchars($cart->billing_user['billing_first_name'] ?? '', ENT_QUOTES, 'UTF-8'), '', 255, ''); ?>
-                                    </div>
+                                    <?php echo $formwriter->textinput('billing_first_name', 'First Name', ['value' => htmlspecialchars($cart->billing_user['billing_first_name'] ?? '', ENT_QUOTES, 'UTF-8'), 'maxlength' => 255, 'required' => true]); ?>
                                 </div>
                                 <div class="col-md-6">
-                                    <div class="form-group">
-                                        <label class="form-label">Last Name <span class="text-danger">*</span></label>
-                                        <?php echo $formwriter->textinput('', 'billing_last_name', 'form-control', 30, htmlspecialchars($cart->billing_user['billing_last_name'] ?? '', ENT_QUOTES, 'UTF-8'), '', 255, ''); ?>
-                                    </div>
+                                    <?php echo $formwriter->textinput('billing_last_name', 'Last Name', ['value' => htmlspecialchars($cart->billing_user['billing_last_name'] ?? '', ENT_QUOTES, 'UTF-8'), 'maxlength' => 255, 'required' => true]); ?>
                                 </div>
                                 <div class="col-12">
-                                    <div class="form-group">
-                                        <label class="form-label">Email Address <span class="text-danger">*</span></label>
-                                        <?php echo $formwriter->textinput('', 'billing_email', 'form-control', 30, htmlspecialchars($cart->billing_user['billing_email'] ?? '', ENT_QUOTES, 'UTF-8'), '', 255, ''); ?>
-                                    </div>
+                                    <?php echo $formwriter->textinput('billing_email', 'Email Address', ['value' => htmlspecialchars($cart->billing_user['billing_email'] ?? '', ENT_QUOTES, 'UTF-8'), 'maxlength' => 255, 'required' => true, 'type' => 'email']); ?>
                                 </div>
                                 <div class="col-12">
-                                    <div class="form-group">
-                                        <label class="form-label">Create Password <span class="text-danger">*</span></label>
-                                        <?php echo $formwriter->passwordinput('', 'password', 'form-control', 20, '', '', 255, ''); ?>
-                                    </div>
+                                    <?php echo $formwriter->passwordinput('password', 'Create Password', ['required' => true]); ?>
                                 </div>
                                 <div class="col-12">
-                                    <div class="form-check">
-                                        <?php echo $formwriter->checkboxinput('I consent to the terms of use and privacy policy.', 'privacy', 'form-check-input', 'left', null, 1, ''); ?>
-                                    </div>
+                                    <?php echo $formwriter->checkboxinput('privacy', 'I consent to the terms of use and privacy policy.', ['required' => true]); ?>
                                 </div>
                                 <div class="col-12">
                                     <div class="d-grid">
-                                        <?php echo $formwriter->submitbutton('submit', 'Save Billing Information', ['class' => 'btn btn-primary']); ?>
+                                        <?php echo $formwriter->submitbutton('btn_submit', 'Save Billing Information', ['class' => 'btn btn-primary']); ?>
                                     </div>
                                 </div>
                             </div>
@@ -221,9 +198,9 @@
                             $formwriter->begin_form();
                             ?>
                             <div class="input-group">
-                                <?php echo $formwriter->textinput('', 'coupon_code', 'form-control', 64, null, 'Enter coupon code', 255, ''); ?>
+                                <?php echo $formwriter->textinput('coupon_code', '', ['placeholder' => 'Enter coupon code', 'maxlength' => 255]); ?>
                                 <div class="input-group-append">
-                                    <?php echo $formwriter->submitbutton('submit', 'Apply', ['class' => 'btn btn-primary']); ?>
+                                    <?php echo $formwriter->submitbutton('btn_submit', 'Apply', ['class' => 'btn btn-primary']); ?>
                                 </div>
                             </div>
                             <?php if ($page_vars['coupon_error']): ?>
@@ -307,7 +284,7 @@
                                 $formwriter->hiddeninput('novalue', '');
                                 ?>
                                 <div class="d-grid">
-                                    <?php echo $formwriter->submitbutton('submit', 'Complete Order', ['class' => 'btn btn-primary']); ?>
+                                    <?php echo $formwriter->submitbutton('btn_submit', 'Complete Order', ['class' => 'btn btn-primary']); ?>
                                 </div>
                                 <?php echo $formwriter->end_form(); ?>
                             </div>

@@ -41,12 +41,8 @@
             }
         }
 
-        $formwriter = $page->getFormWriter('form1');
-        $formwriter->begin_form([
-            'method' => 'POST',
-            'action' => '/login',
-            'ajax'   => true,
-        ]);
+        $formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);
+        $formwriter->begin_form();
 
         $formwriter->textinput('email', 'Email:', [
             'type'     => 'email',

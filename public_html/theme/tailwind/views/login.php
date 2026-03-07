@@ -54,12 +54,9 @@
 						}
 					}
 
-					$formwriter = $page->getFormWriter('form1');
+					$formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);
 
-					$validation_rules = array();
-					$validation_rules['email']['required']['value'] = 'true';
-					$validation_rules['password']['required']['value'] = 'true';
-					echo $formwriter->begin_form('form1', 'POST', '/login');
+					echo $formwriter->begin_form();
 				?>
 
                 <div class="flex items-center justify-between mb-4">

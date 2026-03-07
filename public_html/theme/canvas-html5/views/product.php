@@ -49,7 +49,7 @@
                             }
                             ?>
                             <div class="d-grid">
-                                <?php echo $formwriter->submitbutton('submit', 'Confirm Order', ['class' => 'btn btn-primary']); ?>
+                                <?php echo $formwriter->submitbutton('btn_submit', 'Confirm Order', ['class' => 'btn btn-primary']); ?>
                             </div>
                             <?php echo $formwriter->end_form(); ?>
                         </div>
@@ -102,15 +102,15 @@
                 if (!$product_version): ?>
                     <div class="alert alert-danger mb-0">This product is not available for purchase. No product version found.</div>
                 <?php elseif (!$product->is_sold_out() && $cart->can_add_to_cart($product_version)):
-                    $formwriter = $page->getFormWriter('product_form');
-                    echo $formwriter->begin_form('product-quantity', 'POST', $product->get_url(), true);
+                    $formwriter = $page->getFormWriter('product_form', ['action' => $product->get_url(), 'method' => 'POST']);
+                    echo $formwriter->begin_form();
                     echo $formwriter->hiddeninput('product_id', $product_id);
                     if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
                         echo '<div class="d-grid mt-3">';
-                        echo $formwriter->submitbutton('submit', 'Add to Cart', ['class' => 'btn btn-primary']);
+                        echo $formwriter->submitbutton('btn_submit', 'Add to Cart', ['class' => 'btn btn-primary']);
                         echo '</div>';
                     }
-                    echo $formwriter->end_form(true);
+                    echo $formwriter->end_form();
                     $product->output_javascript($formwriter, []);
                 elseif ($product_version && !$cart->can_add_to_cart($product_version)): ?>
                     <div class="alert alert-warning mb-0">

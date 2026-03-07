@@ -73,15 +73,8 @@
 				<div class="bg-white rounded-lg shadow-md overflow-hidden">
 				  <div class="p-6 sm:p-8">
 					<?php
-					$formwriter = $page->getFormWriter('form1');
-					$validation_rules = array();
-					$validation_rules['usr_password']['required']['value'] = 'true';
-					$validation_rules['usr_password']['minlength']['value'] = 5;
-					$validation_rules['usr_password_again']['required']['value'] = 'true';
-					$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
-					$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
-					$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
-					echo $formwriter->begin_form("", "post", "/password-reset-2", true);
+					$formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-2', 'method' => 'post']);
+					echo $formwriter->begin_form();
 					echo $formwriter->hiddeninput('act_code',$page_vars['act_code']);
 					?>
 					<h5 class="text-center text-xl font-semibold text-gray-900 mb-4">Set new password</h5>

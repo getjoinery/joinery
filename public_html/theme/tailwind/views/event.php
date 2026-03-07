@@ -216,10 +216,7 @@
 							}
 
 							foreach($page_vars['register_urls'] as $register_url){
-								
-								$formwriter = $page->getFormWriter('form1');
-								echo $formwriter->new_button($register_url['label'], $register_url['link'], 'primary', 'full');	
-								echo $formwriter->end_form();
+								echo '<a href="'.htmlspecialchars($register_url['link'], ENT_QUOTES, 'UTF-8').'" class="btn btn-primary">'.htmlspecialchars($register_url['label'], ENT_QUOTES, 'UTF-8').'</a>';
 							}			
 
 							if($page_vars['if_registered_message']){

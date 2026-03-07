@@ -56,7 +56,7 @@
 		<?php
 	}
 	else{
-		$formwriter = $page->getFormWriter('form1');
+		$formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-1', 'method' => 'post']);
 
 		?>
 		<main class="min-h-screen" id="top">
@@ -77,10 +77,7 @@
 					<small class="text-gray-600">Enter your email and we'll send you a reset link.</small>
 					<div class="mt-4">
 						<?php
-						$validation_rules = array();
-						$validation_rules['email']['required']['value'] = 'true';
-						$validation_rules['password']['required']['value'] = 'true';
-						echo $formwriter->begin_form("", "post", "/password-reset-1", true);
+						echo $formwriter->begin_form();
 
 						?>
 					  <label for="email" class="block text-sm font-medium text-gray-700 mb-2 text-left">Email address</label>

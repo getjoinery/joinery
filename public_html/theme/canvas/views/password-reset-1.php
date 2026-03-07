@@ -91,15 +91,9 @@ $page_vars = $page_vars->data;
 							<p class="text-muted mb-4">Enter your email address and we'll send you a link to reset your password.</p>
 
 							<?php
-							$formwriter = $page->getFormWriter('form1');
+							$formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-1', 'method' => 'POST']);
 
-							$formwriter->begin_form([
-								'id' => '',
-								'method' => 'POST',
-								'action' => '/password-reset-1',
-								'ajax' => true,
-								'attributes' => 'class="mb-0"'
-							]);
+							$formwriter->begin_form();
 							?>
 
 							<div class="row">
@@ -116,7 +110,7 @@ $page_vars = $page_vars->data;
 
 								<div class="col-12 form-group">
 									<?php
-									$formwriter->submitbutton('submit', 'Send Reset Link', [
+									$formwriter->submitbutton('btn_submit', 'Send Reset Link', [
 										'class' => 'button button-3d button-black m-0'
 									]);
 									?>

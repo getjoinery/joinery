@@ -22,12 +22,9 @@ $page_vars = process_logic(ctldprofile_delete_logic($_GET, $_POST));
 
 	echo PublicPage::BeginPage('Delete Profile', $hoptions);
 	
-	$formwriter = $page->getFormWriter();
-	$validation_rules = array();
-	$validation_rules['confirm']['required']['value'] = 'true';
+	$formwriter = $page->getFormWriter('delete_form', ['action' => '/profile/ctldprofile_delete', 'method' => 'POST']);
 
-
-	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctldprofile_delete', true);
+	echo $formwriter->begin_form();
 	
 		?>
                         <div class="job-content">
@@ -43,10 +40,10 @@ $page_vars = process_logic(ctldprofile_delete_logic($_GET, $_POST));
 	
 	echo '<p>You are about to delete this scheduled profile. After your scheduled profile is deleted, your default profile will always be active.</p>';
 
-	echo $formwriter->checkboxinput("Confirm deletion", "confirm", "checkbox", "left", 0, 1, "");
+	echo $formwriter->checkboxinput('confirm', 'Confirm deletion', ['value' => 1]);
 
-	echo $formwriter->submitbutton('submit', 'Delete', ['class' => 'btn btn-primary']);
-	echo $formwriter->end_form(true);	
+	echo $formwriter->submitbutton('btn_submit', 'Delete', ['class' => 'btn btn-primary']);
+	echo $formwriter->end_form();
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

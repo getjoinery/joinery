@@ -164,9 +164,7 @@
 		'method' => 'GET'
 	]);
 
-	$validation_rules = array();
-	$validation_rules['point']['required']['value'] = 'true';
-	$validation_rules = $formwriter->antispam_question_validate($validation_rules);
+	$formwriter->antispam_question_validate([]);
 
 	$formwriter->begin_form();
 	echo '<fieldset class="inlineLabels">';
@@ -178,7 +176,7 @@
 	$formwriter->honeypot_hidden_input();
 
 	$formwriter->captcha_hidden_input();
-	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 	$formwriter->end_form();
 
 	echo '</div></div>';

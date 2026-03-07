@@ -36,30 +36,23 @@ $page->admin_header([
         <h5 class="mb-3">Check Domain Authentication</h5>
         
         <?php
-        $formwriter = new FormWriter('domain_check_form');
-        
-        $validation_rules = array();
-        $validation_rules['domain']['required']['value'] = 'true';
-        echo $formwriter->set_validate($validation_rules);
-        
-        echo $formwriter->begin_form('domain_check_form', 'GET', '/utils/email_setup_check');
-        
+        $formwriter = $page->getFormWriter('domain_check_form', ['action' => '/utils/email_setup_check', 'method' => 'GET']);
+        $formwriter->begin_form();
+
         echo '<div class="row g-3 mb-4">';
         echo '<div class="col-md-6">';
-        echo $formwriter->textinput('Domain to Check', 'domain', 'form-control', 100, $domain, 'example.com', 255, 'Enter domain name without http:// or www.');
+        echo $formwriter->textinput('domain', 'Domain to Check', ['value' => $domain, 'placeholder' => 'example.com', 'maxlength' => 255]);
         echo '</div>';
-        
+
         echo '<div class="col-md-6">';
-        echo $formwriter->checkboxinput('Comprehensive DKIM scan (slower, checks 400+ selectors)', 'complete', 'form-check-input', 'left', '1', $is_comprehensive ? '1' : '', 'Quick scan: checks the 10 most common DKIM selectors (~5 seconds)<br>Comprehensive scan: checks 400+ selectors using multiple discovery methods (~30-60 seconds)');
+        echo $formwriter->checkboxinput('complete', 'Comprehensive DKIM scan (slower, checks 400+ selectors)', ['value' => '1', 'checked' => $is_comprehensive]);
         echo '</div>';
-        
+
         echo '<div class="col-12">';
-        echo $formwriter->start_buttons();
-        echo $formwriter->new_form_button('<i class="fas fa-search"></i> Check Domain', 'btn btn-primary');
-        echo $formwriter->end_buttons();
+        echo $formwriter->submitbutton('btn_submit', '<i class="fas fa-search"></i> Check Domain', ['class' => 'btn btn-primary']);
         echo '</div>';
         echo '</div>';
-        
+
         echo $formwriter->end_form();
         ?>
 

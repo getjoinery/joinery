@@ -52,7 +52,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		]);
 
 		$formwriter->hiddeninput('zone', '', ['value' => 'optional']);
-		$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+		$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 	}
 	$formwriter->end_form();
 

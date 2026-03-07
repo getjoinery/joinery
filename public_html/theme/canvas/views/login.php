@@ -56,15 +56,9 @@ $page_vars = $page_vars->data;
 									}
 								}
 
-								$formwriter = $page->getFormWriter('form1');
+								$formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);
 
-								$formwriter->begin_form([
-									'id' => 'form1',
-									'method' => 'POST',
-									'action' => '/login',
-									'ajax' => true,
-									'attributes' => 'class="mb-0"'
-								]);
+								$formwriter->begin_form();
 								?>
 
 								<div class="row">

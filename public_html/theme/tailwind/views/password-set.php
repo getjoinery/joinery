@@ -20,22 +20,14 @@
 	}
 	else{
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
+		$formwriter = $page->getFormWriter('form1', ['action' => '/password-set', 'method' => 'post']);
 
-		$validation_rules = array();
-		$validation_rules['usr_password']['required']['value'] = 'true';
-		$validation_rules['usr_password']['minlength']['value'] = 5;
-		$validation_rules['usr_password_again']['required']['value'] = 'true';
-		$validation_rules['usr_password_again']['required']['message'] = "'You must enter your password twice to confirm'";
-		$validation_rules['usr_password_again']['equalTo']['value'] = "'#usr_password'";
-		$validation_rules['usr_password_again']['equalTo']['message'] = "'Your password did not match the one you entered above'";
+		echo $formwriter->begin_form();
 
-		echo $formwriter->begin_form("form1", "post", "/password-set", true);
+		echo $formwriter->passwordinput('usr_password', 'New Password', ['maxlength' => 255, 'placeholder' => 'Must be at least 5 characters.']);
+		echo $formwriter->passwordinput('usr_password_again', 'Retype New Password', ['maxlength' => 255]);
 
-		echo $formwriter->passwordinput("New Password", "usr_password", NULL, 20, NULL , 'Must be at least 5 characters.',255, "");
-		echo $formwriter->passwordinput("Retype New Password", "usr_password_again", NULL, 20, "" , "", 255,"");
-
-		echo $formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+		echo $formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 
 		echo $formwriter->end_form();
 	}

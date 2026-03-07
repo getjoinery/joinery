@@ -74,8 +74,8 @@ Price Area
 			<?php if ($page_vars['show_reactivate_button']): ?>
 				<div class="text-center mb-4">
 					<?php
-					$formwriter = $page->getFormWriter();
-					echo $formwriter->begin_form("reactivate_form", "POST", "/profile/change-tier");
+					$formwriter = $page->getFormWriter('reactivate_form', ['action' => '/profile/change-tier', 'method' => 'POST']);
+					echo $formwriter->begin_form();
 					?>
 					<input type="hidden" name="action" value="reactivate">
 					<button type="submit" class="th-btn" style="background-color: #28a745;">Reactivate Subscription</button>
@@ -132,8 +132,8 @@ Price Area
 									<?php if (count($tier_data['products']) == 1): ?>
 										<?php // Single product - direct action ?>
 										<?php
-										$formwriter = $page->getFormWriter();
-										echo $formwriter->begin_form("tier_action_".$tier->key, "POST", "/profile/change-tier");
+										$formwriter = $page->getFormWriter('tier_action_'.$tier->key, ['action' => '/profile/change-tier', 'method' => 'POST']);
+										echo $formwriter->begin_form();
 										?>
 										<input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
 										<input type="hidden" name="product_id" value="<?php echo $tier_data['products'][0]['id']; ?>">
@@ -142,8 +142,8 @@ Price Area
 									<?php else: ?>
 										<?php // Multiple products - show dropdown ?>
 										<?php
-										$formwriter = $page->getFormWriter();
-										echo $formwriter->begin_form("tier_action_".$tier->key, "POST", "/profile/change-tier");
+										$formwriter = $page->getFormWriter('tier_action_'.$tier->key, ['action' => '/profile/change-tier', 'method' => 'POST']);
+										echo $formwriter->begin_form();
 										?>
 										<input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
 										<div class="mb-2">
@@ -190,8 +190,8 @@ Cancel Subscription Area
                             <div class="row">
                                 <div class="col-12 form-group mb-0 text-center">
 									<?php
-									$formwriter = $page->getFormWriter();
-									echo $formwriter->begin_form("cancel_form", "POST", "/profile/change-tier");
+									$formwriter = $page->getFormWriter('cancel_form', ['action' => '/profile/change-tier', 'method' => 'POST']);
+									echo $formwriter->begin_form();
 									?>
 									<input type="hidden" name="action" value="cancel">
 									<button type="submit" class="th-btn style-radius" style="background-color: #dc3545;"

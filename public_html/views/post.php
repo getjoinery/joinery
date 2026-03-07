@@ -147,14 +147,8 @@ $page_vars = $page_vars->data;
 						<div class="card-body p-4">
 							<?php
 							$settings = Globalvars::get_instance();
-							$formwriter = $page->getFormWriter('form1');
+						$formwriter = $page->getFormWriter('form1', ['action' => $_SERVER['REQUEST_URI'], 'method' => 'POST']);
 
-							$formwriter->begin_form([
-								'id' => '',
-								'method' => 'POST',
-								'action' => $_SERVER['REQUEST_URI'],
-								'ajax' => true
-							]);
 							?>
 
 							<div class="row g-3">
@@ -201,7 +195,7 @@ $page_vars = $page_vars->data;
 								<div class="col-12">
 									<div class="d-flex justify-content-end">
 										<?php
-										$formwriter->submitbutton('submit', 'Post Comment', [
+										$formwriter->submitbutton('btn_submit', 'Post Comment', [
 											'class' => 'btn btn-primary'
 										]);
 										?>
@@ -252,16 +246,10 @@ $page_vars = $page_vars->data;
 										<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
 										<div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="mt-3 p-3 bg-light rounded">
 											<?php
-											$formwriter = $page->getFormWriter('form'.$comment->key);
+							$formwriter = $page->getFormWriter('form'.$comment->key, ['action' => $_SERVER['REQUEST_URI'], 'method' => 'POST']);
 
-											$formwriter->begin_form([
-												'id' => 'form'.$comment->key,
-												'method' => 'POST',
-												'action' => $_SERVER['REQUEST_URI'],
-												'ajax' => true
-											]);
 
-											$formwriter->hiddeninput('cmt_comment_id_parent', ['value' => $comment->key]);
+							$formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
 											?>
 
 											<div class="row g-3">
@@ -308,7 +296,7 @@ $page_vars = $page_vars->data;
 												<div class="col-12">
 													<div class="d-flex justify-content-end">
 														<?php
-														$formwriter->submitbutton('submit', 'Reply', [
+														$formwriter->submitbutton('btn_submit', 'Reply', [
 															'class' => 'btn btn-primary btn-sm'
 														]);
 														?>

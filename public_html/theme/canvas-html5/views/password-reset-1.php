@@ -40,12 +40,8 @@
             <p class="text-muted" style="margin-bottom: 1.5rem;">Enter your email address and we'll send you a link to reset your password.</p>
 
             <?php
-            $formwriter = $page->getFormWriter('form1');
-            $formwriter->begin_form([
-                'method' => 'POST',
-                'action' => '/password-reset-1',
-                'ajax'   => true,
-            ]);
+            $formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-1', 'method' => 'POST']);
+            $formwriter->begin_form();
 
             $formwriter->textinput('usr_email', 'Email Address:', [
                 'type'      => 'email',
@@ -55,7 +51,7 @@
             ?>
 
             <div style="margin-top: 1rem;">
-                <?php $formwriter->submitbutton('submit', 'Send Reset Link', ['class' => 'btn btn-primary btn-block']); ?>
+                <?php $formwriter->submitbutton('btn_submit', 'Send Reset Link', ['class' => 'btn btn-primary btn-block']); ?>
             </div>
 
             <?php $formwriter->end_form(); ?>

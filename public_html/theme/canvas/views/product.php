@@ -54,7 +54,7 @@ $page_vars = $page_vars->data;
 		}
 
 		echo '<div class="d-grid">';
-		echo $formwriter->submitbutton('submit', 'Confirm Order', ['class' => 'btn btn-primary']);
+		echo $formwriter->submitbutton('btn_submit', 'Confirm Order', ['class' => 'btn btn-primary']);
 		echo '</div>';
 		echo $formwriter->end_form();
 		
@@ -145,13 +145,13 @@ $page_vars = $page_vars->data;
 											<?php
 										elseif(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)):
 											// Product can be added to cart
-											$formwriter = $page->getFormWriter('product_form');
-											echo $formwriter->begin_form("product-quantity", "POST", $product->get_url(), true); 
+											$formwriter = $page->getFormWriter('product_form', ['action' => $product->get_url(), 'method' => 'POST']);
+											echo $formwriter->begin_form();
 											echo $formwriter->hiddeninput('product_id', $product_id);
 											
 											if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 												echo '<div class="d-grid gap-2 mt-3">';
-												echo $formwriter->submitbutton('submit', 'Add to Cart', ['class' => 'btn btn-primary']);
+												echo $formwriter->submitbutton('btn_submit', 'Add to Cart', ['class' => 'btn btn-primary']);
 												echo '</div>';
 											} else {
 												echo '<div class="alert alert-info mb-0">';
@@ -159,7 +159,7 @@ $page_vars = $page_vars->data;
 												echo '</div>';
 											}
 											
-											echo $formwriter->end_form(true);
+											echo $formwriter->end_form();
 											$product->output_javascript($formwriter, array());
 											
 										elseif($product_version && !$cart->can_add_to_cart($product_version)):

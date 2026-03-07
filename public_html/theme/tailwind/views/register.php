@@ -37,30 +37,7 @@
 		'action' => '/register'
 	]);
 
-	$validation_rules = array();
-	$validation_rules['usr_first_name']['required']['value'] = 'true';
-	$validation_rules['usr_first_name']['minlength']['value'] = 1;
-	$validation_rules['usr_first_name']['maxlength']['value'] = 32;
-	$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
-	$validation_rules['usr_last_name']['required']['value'] = 'true';
-	$validation_rules['usr_last_name']['minlength']['value'] = 2;
-	$validation_rules['usr_last_name']['maxlength']['value'] = 32;
-	if($nickname_display){
-	$validation_rules['usr_nickname']['maxlength']['value'] = 32;
-	}
-	$validation_rules['usr_email']['required']['value'] = 'true';
-	$validation_rules['usr_email']['email']['value'] = 'true';
-	$validation_rules['usr_email']['maxlength']['value'] = 64;
-	$validation_rules['usr_email']['remote']['value'] = "'/ajax/email_check_ajax'";
-	$validation_rules['usr_email']['remote']['message'] = "'This email already exists.'";
-	$validation_rules['password']['required']['value'] = 'true';
-	$validation_rules['password']['minlength']['value'] = 5;
-	$validation_rules['password']['minlength']['message'] = "'Password must be at least {0} characters'";
-	$validation_rules['privacy']['required']['value'] = 'true';
-	if($nickname_display){
-		$validation_rules['usr_nickname']['maxlength']['value'] = 32;
-	}
-	$validation_rules = $formwriter->antispam_question_validate($validation_rules);
+	$formwriter->antispam_question_validate([]);
 
 	$formwriter->begin_form();
 	$formwriter->hiddeninput("prevformname", "register");
@@ -111,7 +88,7 @@
 	$formwriter->captcha_hidden_input();
 
 	$formwriter->submitbutton('btn_submit', 'Submit');
-	$formwriter->end_form(true);
+	$formwriter->end_form();
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'fbconnect'=>TRUE));

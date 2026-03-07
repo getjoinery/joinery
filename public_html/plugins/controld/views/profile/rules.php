@@ -68,15 +68,12 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 
 	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'controld_custom_rules', false)){
 		if($device->are_filters_editable()){
-			$formwriter = $page->getFormWriter();
-			$validation_rules = array();
-			$validation_rules['cdr_rule_hostname']['required']['value'] = 'true';
-			$validation_rules['cdr_rule_action']['required']['value'] = 'true';	
-			echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/rules', true);
+			$formwriter = $page->getFormWriter('rules_form', ['action' => '/profile/rules', 'method' => 'POST']);
+			echo $formwriter->begin_form();
 			$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
 			$formwriter->hiddeninput('profile_choice', '', ['value' => $profile_choice]);
 			echo '<tr><td>';
-			echo $formwriter->textinput('Add Site', 'cdr_rule_hostname', NULL, 100, '', '', 255, '');	
+			echo $formwriter->textinput('cdr_rule_hostname', 'Add Site', ['maxlength' => 255]);
 
 			$optionvals = [
 				'Block' => 0,
@@ -84,13 +81,13 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 			];
 			echo '</td><td>';
 			
-			echo $formwriter->dropinput("&nbsp;", "cdr_rule_action", "", $optionvals, NULL, '', FALSE);	
+			echo $formwriter->dropinput('cdr_rule_action', '&nbsp;', ['options' => $optionvals]);
 			echo '</td><td>';
 			echo '<br>';
-			echo $formwriter->submitbutton('submit', 'New Rule', ['class' => 'btn btn-primary']);
+			echo $formwriter->submitbutton('btn_submit', 'New Rule', ['class' => 'btn btn-primary']);
 			
 			echo '</td></tr>';
-			echo $formwriter->end_form(true);	
+			echo $formwriter->end_form();
 		}
 		else{
 			echo '<div class="alert alert-warning" role="alert">

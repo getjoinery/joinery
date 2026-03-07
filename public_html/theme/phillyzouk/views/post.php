@@ -184,16 +184,10 @@ $page->public_header($hoptions);
                                     <?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
                                     <div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="reply-form-container">
                                         <?php
-                                        $formwriter = $page->getFormWriter('form'.$comment->key);
+                                        $formwriter = $page->getFormWriter('form'.$comment->key, ['action' => $_SERVER['REQUEST_URI'], 'method' => 'POST']);
+                                        $formwriter->begin_form();
 
-                                        $formwriter->begin_form([
-                                            'id' => 'form'.$comment->key,
-                                            'method' => 'POST',
-                                            'action' => $_SERVER['REQUEST_URI'],
-                                            'ajax' => true
-                                        ]);
-
-                                        $formwriter->hiddeninput('cmt_comment_id_parent', ['value' => $comment->key]);
+                                        $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
                                         ?>
 
                                         <div class="row">
@@ -234,7 +228,7 @@ $page->public_header($hoptions);
 
                                             <div class="col-md-12">
                                                 <?php
-                                                $formwriter->submitbutton('submit', 'Reply', [
+                                                $formwriter->submitbutton('btn_submit', 'Reply', [
                                                     'class' => 'default-btn'
                                                 ]);
                                                 ?>
@@ -298,15 +292,10 @@ $page->public_header($hoptions);
 
                             <?php
                             $settings = Globalvars::get_instance();
-                            $formwriter = $page->getFormWriter('form1');
-
-                            $formwriter->begin_form([
-                                'id' => '',
-                                'method' => 'POST',
-                                'action' => $_SERVER['REQUEST_URI'],
-                                'ajax' => true
-                            ]);
+                            $formwriter = $page->getFormWriter('form1', ['action' => $_SERVER['REQUEST_URI'], 'method' => 'POST']);
+                            $formwriter->begin_form();
                             ?>
+
 
                             <div class="row">
                                 <div class="col-lg-6 col-md-12">
@@ -340,7 +329,7 @@ $page->public_header($hoptions);
 
                                 <div class="col-lg-12 col-md-12">
                                     <?php
-                                    $formwriter->submitbutton('submit', 'Post Comment', [
+                                    $formwriter->submitbutton('btn_submit', 'Post Comment', [
                                         'class' => 'default-btn'
                                     ]);
                                     ?>

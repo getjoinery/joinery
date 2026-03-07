@@ -1014,9 +1014,9 @@ abstract class FormWriterV2Base {
      * @param string $label Button label
      * @param array $options Button options
      */
-    public function submitbutton($name = 'submit', $label = 'Submit', $options = []) {
-        // If $name is empty string, use 'submit'
-        if (!$name) $name = 'submit';
+    public function submitbutton($name = 'btn_submit', $label = 'Submit', $options = []) {
+        // If $name is empty string, use 'btn_submit'
+        if (!$name) $name = 'btn_submit';
 
         $this->outputSubmitButton($name, $label, $options);
     }

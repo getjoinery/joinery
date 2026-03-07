@@ -29,8 +29,8 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 	if (!$page_vars['display_empty_form']) {
 		echo '<p>Is everything correct?</p>';
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('product_form');
-		echo $formwriter->begin_form("", "POST", "/product"); 
+		$formwriter = $page->getFormWriter('product_form', ['action' => '/product', 'method' => 'POST']);
+		echo $formwriter->begin_form();
 
 		$formwriter->hiddeninput('product_id', '', ['value' => $product_id]);
 		$formwriter->hiddeninput('product_key', '', ['value' => $form_key]);
@@ -38,7 +38,7 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 		foreach($page_vars['display_data'] as $key => $value) {
 		}
 
-		echo $formwriter->submitbutton('submit', 'Next Step', ['class' => 'btn btn-primary']);
+		echo $formwriter->submitbutton('btn_submit', 'Next Step', ['class' => 'btn btn-primary']);
 		echo $formwriter->end_form();
 		echo PublicPage::EndPage();
 		$page->public_footer($foptions=array('track'=>TRUE));
@@ -90,18 +90,18 @@ Career Area
 						
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT 
 				if(!$product->is_sold_out()){
-					$formwriter = $page->getFormWriter('product_form');
+					$formwriter = $page->getFormWriter('product_form', ['action' => $product_url, 'method' => 'POST']);
 					// Post back to the same product URL (with slug)
 					$product_url = '/product/' . $product->get('pro_link');
-					echo $formwriter->begin_form("product-quantity", "POST", $product_url, true); 
+					echo $formwriter->begin_form();
 					$formwriter->hiddeninput('product_id', '', ['value' => $product_id]);
 
 					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
 
 
-						echo $formwriter->submitbutton('submit', 'Add to Cart', ['class' => 'btn btn-primary']);
+						echo $formwriter->submitbutton('btn_submit', 'Add to Cart', ['class' => 'btn btn-primary']);
 					}
-					echo $formwriter->end_form(true);
+					echo $formwriter->end_form();
 					$product->output_javascript($formwriter, array());
 				}
 				?>

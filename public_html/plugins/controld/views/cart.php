@@ -112,26 +112,25 @@ Contact Area
 						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
 							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
 							foreach($page_vars['all_coupons'] as $coupon){
-								$formwriter = $page->getFormWriter('form_test_coupon');
-								echo $formwriter->begin_form("mt-6", "get", '/cart');
-								$formwriter->hiddeninput('coupon_code', '', ['value' => $coupon->get('ccd_code')]);
-								echo $formwriter->new_form_button('Add'.$coupon->get('ccd_code'), 'secondary', '', 'th-btn');
+								$formwriter = $page->getFormWriter('form_test_coupon', ['action' => '/cart', 'method' => 'GET']);
+								$formwriter->begin_form();
+								echo $formwriter->hiddeninput('coupon_code', $coupon->get('ccd_code'));
+								echo $formwriter->submitbutton('btn_submit', 'Add '.$coupon->get('ccd_code'), ['class' => 'btn btn-secondary']);
 								echo $formwriter->end_form();
 							}
 							echo '</div>';
 						}
 
 
-						$formwriter = $page->getFormWriter('form_coupon');
-
-						echo $formwriter->begin_form("mt-6", "get", '/cart');
+						$formwriter = $page->getFormWriter('form_coupon', ['action' => '/cart', 'method' => 'GET']);
+						$formwriter->begin_form();
 						echo '<div style="display: flex; align-items: center;">';
-						echo $formwriter->textinput('Coupon Code', 'coupon_code', NULL, 64, NULL, '', 255, '');
+						echo $formwriter->textinput('coupon_code', 'Coupon Code', ['maxlength' => 255]);
 
 						if($page_vars['coupon_error']){
 							echo '<p>'.$page_vars['coupon_error'].'</p>';
 						}
-						echo $formwriter->submitbutton('submit', 'Add', ['class' => 'btn btn-primary']);
+						echo $formwriter->submitbutton('btn_submit', 'Add', ['class' => 'btn btn-primary']);
 						echo $formwriter->end_form();
 						echo '</div>';
 
@@ -166,9 +165,7 @@ Contact Area
 					else{							
 						if($cart->is_billing_user_complete()){
 							echo '<p>'.$cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'] . ' ('. $cart->billing_user['billing_email'].')</p>';
-							$formwriter = $page->getFormWriter('form_billing_user');
-							
-							echo $formwriter->new_button('Change billing user', '/cart?newbilling=1', 'secondary', '', 'th-btn');
+							echo '<a href="/cart?newbilling=1" class="btn btn-secondary">Change billing user</a>';
 							echo '<br><br>';
 						}
 						else{
@@ -188,57 +185,21 @@ Contact Area
 							</script>
 							<?php	
 							*/
-							$formwriter = $page->getFormWriter('form2');
-							$validation_rules = array();
-							$validation_rules['billing_first_name']['required']['value'] = 'true';
-							$validation_rules['billing_last_name']['required']['value'] = 'true';
-							$validation_rules['billing_email']['required']['value'] = 'true';
-							/*
-							$validation_rules['billing_email']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
-							
-							$validation_rules['billing_first_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";
-							$validation_rules['billing_last_name']['required']['value'] = "function(element) { return $('#existing_billing_email option:selected').text() == 'A different person'; }";	
-							*/
-							if(!$session->get_user_id()){
-								$validation_rules['password']['required']['value'] = 'true';
-								$validation_rules['privacy']['required']['value'] = 'true';
-							}
-							
-
-
-							/*
-							$optionvals = array();
-							$selected = '';
-							foreach($cart->items as $key => $cart_item) {
-								list($quantity, $product, $data, $price, $discount) = $cart_item;
-								$name = $data['full_name_first'] . ' ' . $data['full_name_last'];
-								$optionvals[$name] = $data['email'];
-								if(!$selected){
-									$selected = $name;
-								}				
-							}
-							$optionvals['A different person'] = 'A different person';
-							echo $formwriter->dropinput("Billing User", "existing_billing_email", NULL, $optionvals, $selected, '', FALSE);
-							*/
-							echo $formwriter->begin_form("", "post", "/cart");
-							
+							$formwriter = $page->getFormWriter('form2', ['action' => '/cart']);
+							$formwriter->begin_form();
 							echo '<div id="new_billing">';
-
-							echo $formwriter->textinput("First Name", "billing_first_name", NULL, 30, $cart->billing_user['billing_first_name'], "", 255, "");
-							echo $formwriter->textinput("Last Name", "billing_last_name", NULL, 30, $cart->billing_user['billing_last_name'], "", 255, "");
-							echo $formwriter->textinput("Email", "billing_email", NULL, 30, $cart->billing_user['billing_email'], "", 255, "");
+							echo $formwriter->textinput('billing_first_name', 'First Name', ['value' => htmlspecialchars($cart->billing_user['billing_first_name'], ENT_QUOTES, 'UTF-8'), 'maxlength' => 255, 'required' => true]);
+							echo $formwriter->textinput('billing_last_name', 'Last Name', ['value' => htmlspecialchars($cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8'), 'maxlength' => 255, 'required' => true]);
+							echo $formwriter->textinput('billing_email', 'Email', ['value' => htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'), 'maxlength' => 255, 'required' => true, 'type' => 'email']);
 							if(!$session->get_user_id()){
-								echo $formwriter->passwordinput("Create Password", "password", '', 20, "" , "", 255,"");
-
-								echo $formwriter->checkboxinput("I consent to the terms of use and privacy policy.", "privacy", "", "left", NULL, 1, "");
+								echo $formwriter->passwordinput('password', 'Create Password', ['required' => true]);
+								echo $formwriter->checkboxinput('privacy', 'I consent to the terms of use and privacy policy.', ['required' => true]);
 							}
 							echo '</div>';
-							//echo $formwriter->new_button('Cancel', 'secondary');
-							echo $formwriter->submitbutton('submit', 'Submit Billing User', ['class' => 'btn btn-primary']);
+							echo $formwriter->submitbutton('btn_submit', 'Submit Billing User', ['class' => 'btn btn-primary']);
 							echo $formwriter->end_form();
 							echo '<br><br>';
-								
-						}	
+						}
 					}
 					?>
                     </div>

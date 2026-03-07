@@ -98,13 +98,7 @@ $page_vars = $page_vars->data;
 					'action' => $_SERVER['REQUEST_URI']
 				]);
 
-				$validation_rules = array();
-				$validation_rules['cmt']['required']['value'] = 'true';
-				$validation_rules['cmt']['minlength']['value'] = 20;
-				$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-				$validation_rules['name']['required']['value'] = 'true';
-				$validation_rules['name']['minlength']['value'] = 2;
-				$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+				$formwriter->antispam_question_validate([], 'blog');
 
 				$formwriter->begin_form();
 
@@ -125,7 +119,7 @@ $page_vars = $page_vars->data;
 					$formwriter->captcha_hidden_input('blog');
 				}
 
-				$formwriter->submitbutton('submit', 'Comment', ['class' => 'btn btn-primary']);
+				$formwriter->submitbutton('btn_submit', 'Comment', ['class' => 'btn btn-primary']);
 				$formwriter->end_form();
 			}
 		}

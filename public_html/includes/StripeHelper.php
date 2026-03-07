@@ -336,7 +336,7 @@ class StripeHelper {
 					<!-- Used to display form errors. -->
 					<div id="card-errors" role="alert"></div>
 				  </div>
-				<br />'. $formwriter->new_form_button('Pay with Stripe', 'primary', 'full', $button_class).'</form>';
+				<br />'. '<button type="submit" class="btn btn-primary '.$button_class.'">Pay with Stripe</button></form>';
 
 
 	
@@ -422,8 +422,8 @@ class StripeHelper {
 	}
 	
 	public function output_stripe_checkout_form($cart_hash){
-				require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
-				$formwriter = new FormWriter('form3');
+				require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
+				$formwriter = new FormWriterV2Bootstrap('form3', ['action' => '/profile/payment_finalize', 'method' => 'post']);
 				$output = '
 				<script src="https://js.stripe.com/v3/"></script>
 				<script language="javascript">
@@ -442,17 +442,15 @@ class StripeHelper {
 					
 
 				
-				$output .= $formwriter->begin_form("mt-6", "post", '/profile/payment_finalize');
+				$output .= $formwriter->begin_form();
 
 				$output .=  '<div id="errorMsg" style="display:none;"></div>';
 
 				$output .=  $formwriter->hiddeninput('cc_type', '');
 				$output .=  $formwriter->hiddeninput('cart_cs', $cart_hash);
 				
-				$output .=  $formwriter->start_buttons();
 				$output .=  '<input type="button" value="Pay with Stripe" class="inline-flex justify-center mr-3 mt-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 " onclick="ToCheckout();" style="width:200px;">';
 				
-				$output .=  $formwriter->end_buttons();
 
 				$output .=  $formwriter->end_form();	
 

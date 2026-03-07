@@ -27,51 +27,39 @@
 	else{
 
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
-		$validation_rules = array();
-		$validation_rules['usr_first_name']['required']['value'] = 'true';
-		$validation_rules['usr_first_name']['minlength']['value'] = 1;
-		$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
-		$validation_rules['usr_first_name']['maxlength']['value'] = 32;
-		$validation_rules['usr_last_name']['required']['value'] = 'true';
-		$validation_rules['usr_last_name']['minlength']['value'] = 2;
-		$validation_rules['usr_last_name']['maxlength']['value'] = 32;
-		$validation_rules['privacy']['required']['value'] = 'true';
-		$validation_rules['usr_email']['required']['value'] = 'true';
-		$validation_rules['usr_email']['email']['value'] = 'true';
-		$validation_rules['usr_email']['maxlength']['value'] = 64;
-		$validation_rules = $formwriter->antispam_question_validate($validation_rules);
+		$formwriter = $page->getFormWriter('form1', ['action' => '/event_waiting_list', 'method' => 'post']);
+		$formwriter->antispam_question_validate([]);
 
-		echo $formwriter->begin_form("", "post", "/event_waiting_list");
+		echo $formwriter->begin_form();
 		echo $formwriter->hiddeninput("event_id", $event->key);
 		if($page_vars['session']->get_user_id()){
 			echo '<p>Click the button below to be added to this waiting list.</p>';
 		}
 		else{
-			echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");
-			echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 30, '', "", 32, "");
+			echo $formwriter->textinput('usr_first_name', 'First Name', ['maxlength' => 32]);
+			echo $formwriter->textinput('usr_last_name', 'Last Name', ['maxlength' => 32]);
 			
 			$nickname_display = $page_vars['settings']->get_setting('nickname_display_as');
 			if($nickname_display){
-				echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, NULL, "" , 32, "");
+				echo $formwriter->textinput('usr_nickname', $nickname_display, ['maxlength' => 32]);
 			}
-			echo $formwriter->textinput("Email", "usr_email", NULL, 30, '', "", 64, "");
+			echo $formwriter->textinput('usr_email', 'Email', ['type' => 'email', 'maxlength' => 64]);
 			
 			$optionvals = Address::get_timezone_drop_array();
 			$default_timezone = $page_vars['settings']->get_setting('default_timezone');
-			echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);			
+			echo $formwriter->dropinput('usr_timezone', 'Your Timezone', ['options' => $optionvals, 'value' => $default_timezone]);
 			
 			echo $formwriter->antispam_question_input();
 			echo $formwriter->honeypot_hidden_input();
 
-			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "checkbox", "left", NULL, 1, "");
-			echo $formwriter->checkboxinput("Add me to the newsletter", "newsletter", "checkbox", "left", NULL, 1, "");
+			echo $formwriter->checkboxinput('privacy', 'I consent to the privacy policy.', ['value' => 1]);
+			echo $formwriter->checkboxinput('newsletter', 'Add me to the newsletter', ['value' => 1]);
 			if(!$page_vars['session']->get_user_id()){
 				echo $formwriter->captcha_hidden_input();
 			}
 		}
 
-		echo $formwriter->submitbutton('submit', 'Add me to the waiting list', ['class' => 'btn btn-primary']);
+		echo $formwriter->submitbutton('btn_submit', 'Add me to the waiting list', ['class' => 'btn btn-primary']);
 		echo $formwriter->end_form();
 	}
 

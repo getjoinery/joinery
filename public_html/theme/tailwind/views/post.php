@@ -64,21 +64,15 @@
 
 								<?php
 								$settings = Globalvars::get_instance();
-								$formwriter = $page->getFormWriter('form1');
-								$validation_rules = array();
-								$validation_rules['cmt']['required']['value'] = 'true';
-								$validation_rules['cmt']['minlength']['value'] = 20;
-								$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-								$validation_rules['name']['required']['value'] = 'true';
-								$validation_rules['name']['minlength']['value'] = 2;
-								$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+							$formwriter = $page->getFormWriter('form1', ['action' => $_SERVER['REQUEST_URI'], 'method' => 'POST']);
+							$formwriter->antispam_question_validate([], 'blog');
 
-								echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
+							echo $formwriter->begin_form();
 
-								echo $formwriter->textinput("Name", "name", NULL, 20, NULL , "",255, "");	
+							echo $formwriter->textinput("name", "Name", ['maxlength' => 255]);
 								//echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 20, @$form_fields->usr_last_name, "" , 255, "");
 								//echo $formwriter->textinput("Email", "usr_email", NULL, 20, '', "" , 255, "");
-								echo $formwriter->textbox('Comment', 'cmt', NULL, 3, 80, NULL, '', '');
+							echo $formwriter->textbox('cmt', 'Comment', ['rows' => 3, 'cols' => 80]);
 								
 								if(!$page_vars['session']->get_user_id()){
 									echo $formwriter->antispam_question_input('blog');
@@ -88,9 +82,9 @@
 								}
 
 								
-								echo $formwriter->submitbutton('submit', 'Comment', ['class' => 'btn btn-primary']);
+								echo $formwriter->submitbutton('btn_submit', 'Comment', ['class' => 'btn btn-primary']);
 								
-								echo $formwriter->end_form(true);
+							echo $formwriter->end_form();
 								?>
 
 			<?php 
@@ -146,22 +140,16 @@
 
 									if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()){
 											echo '<div id="comment'.$comment->key.'container" style="display:none;">';
-											$formwriter = LibraryFunctions::get_formwriter_object('form'.$comment->key);
+									$formwriter = $page->getFormWriter('form'.$comment->key, ['action' => $_SERVER['REQUEST_URI'], 'method' => 'post']);
 	
-											$validation_rules = array();
-											$validation_rules['cmt']['required']['value'] = 'true';
-											$validation_rules['cmt']['minlength']['value'] = 20;
-											$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-											$validation_rules['name']['required']['value'] = 'true';
-											$validation_rules['name']['minlength']['value'] = 2;
-											$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+									$formwriter->antispam_question_validate([], 'blog');
 
-											echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
+									echo $formwriter->begin_form();
 											echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
-											echo $formwriter->textinput("Your name", "name", NULL, 20, NULL , "",255, "");	
+									echo $formwriter->textinput("name", "Your name", ['maxlength' => 255]);
 											//echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 20, @$form_fields->usr_last_name, "" , 255, "");
 											//echo $formwriter->textinput("Email", "usr_email", NULL, 20, '', "" , 255, "");
-											echo $formwriter->textbox('Your reply', 'cmt', NULL, 3, 80, NULL, '', '');
+									echo $formwriter->textbox('cmt', 'Your reply', ['rows' => 3, 'cols' => 80]);
 											
 											if(!$page_vars['session']->get_user_id()){
 												echo $formwriter->antispam_question_input('blog');
@@ -171,9 +159,9 @@
 											}
 
 											
-											echo $formwriter->submitbutton('submit', 'Comment', ['class' => 'btn btn-primary']);
+											echo $formwriter->submitbutton('btn_submit', 'Comment', ['class' => 'btn btn-primary']);
 											
-											echo $formwriter->end_form(true);
+									echo $formwriter->end_form();
 											echo '</div>';
 										}
 

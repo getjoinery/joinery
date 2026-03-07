@@ -191,8 +191,8 @@ $profile_choice = $page_vars['profile_choice'];
 		}
 	}
 
-	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
-	$formwriter->end_form(true);	
+	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->end_form();
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

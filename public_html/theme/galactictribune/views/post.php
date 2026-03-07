@@ -150,17 +150,11 @@ $page_vars = $page_vars->data;
 					<?php if($page_vars['settings']->get_setting('comments_unregistered_users') || $page_vars['session']->get_user_id()): ?>
 					<div id="comment<?php echo $comment->key; ?>container" style="display:none;" class="mt-4 p-4 bg-gray-50 rounded-lg">
 						<?php
-						$formwriter = $page->getFormWriter('form'.$comment->key);
+						$formwriter = $page->getFormWriter('form'.$comment->key, ['action' => $_SERVER['REQUEST_URI'], 'method' => 'post']);
 
-						$validation_rules = array();
-						$validation_rules['cmt']['required']['value'] = 'true';
-						$validation_rules['cmt']['minlength']['value'] = 20;
-						$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-						$validation_rules['name']['required']['value'] = 'true';
-						$validation_rules['name']['minlength']['value'] = 2;
-						$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+						$formwriter->antispam_question_validate([], 'blog');
 
-						echo $formwriter->begin_form('form'.$comment->key, "post", $_SERVER['REQUEST_URI'], true);
+						echo $formwriter->begin_form();
 						echo $formwriter->hiddeninput('cmt_comment_id_parent', $comment->key);
 						?>
 
@@ -188,7 +182,7 @@ $page_vars = $page_vars->data;
 							<button type="submit" class="inline-flex items-center px-3 py-1 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-colors duration-200 text-sm">Reply</button>
 						</div>
 
-						<?php echo $formwriter->end_form(true); ?>
+						<?php echo $formwriter->end_form(); ?>
 					</div>
 					<?php endif; ?>
 
@@ -231,16 +225,10 @@ $page_vars = $page_vars->data;
 			<h2 class="text-2xl font-bold text-gray-900 mb-6">Leave a Comment</h2>
 			<?php
 			$settings = Globalvars::get_instance();
-			$formwriter = $page->getFormWriter('form1');
-			$validation_rules = array();
-			$validation_rules['cmt']['required']['value'] = 'true';
-			$validation_rules['cmt']['minlength']['value'] = 20;
-			$validation_rules['cmt']['minlength']['message'] = "'Comment must be at least {0} characters'";
-			$validation_rules['name']['required']['value'] = 'true';
-			$validation_rules['name']['minlength']['value'] = 2;
-			$validation_rules = $formwriter->antispam_question_validate($validation_rules, 'blog');
+			$formwriter = $page->getFormWriter('form1', ['action' => $_SERVER['REQUEST_URI'], 'method' => 'post']);
+			$formwriter->antispam_question_validate([], 'blog');
 
-			echo $formwriter->begin_form("", "post", $_SERVER['REQUEST_URI'], true);
+			echo $formwriter->begin_form();
 			?>
 
 			<div class="mb-4 w-full">
@@ -267,7 +255,7 @@ $page_vars = $page_vars->data;
 				<button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-colors duration-200">Post Comment</button>
 			</div>
 
-			<?php echo $formwriter->end_form(true); ?>
+			<?php echo $formwriter->end_form(); ?>
 		</div>
 		<?php endif; ?>
 

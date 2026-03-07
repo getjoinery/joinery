@@ -24,8 +24,8 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 	
 	if (!$page_vars['display_empty_form']) {
 		echo '<p>Is everything correct?</p>';
-		$formwriter = $page->getFormWriter('product_form');
-		echo $formwriter->begin_form("", "POST", "/product"); 
+		$formwriter = $page->getFormWriter('product_form', ['action' => '/product', 'method' => 'POST']);
+		echo $formwriter->begin_form();
 
 		echo $formwriter->hiddeninput('product_id', $product_id);
 		echo $formwriter->hiddeninput('product_key', $form_key);
@@ -33,7 +33,7 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 		foreach($page_vars['display_data'] as $key => $value) {
 		}
 
-		echo $formwriter->submitbutton('submit', 'Next Step', ['class' => 'btn btn-primary']);
+		echo $formwriter->submitbutton('btn_submit', 'Next Step', ['class' => 'btn btn-primary']);
 		echo $formwriter->end_form();
 		echo PublicPage::EndPage();
 		$page->public_footer($foptions=array('track'=>TRUE));
@@ -109,14 +109,14 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 				}
 				else if(!$product->is_sold_out() && $cart->can_add_to_cart($product_version)){
 
-					$formwriter = $page->getFormWriter('product_form');
-					echo $formwriter->begin_form("product-quantity", "POST", "/product", true); 
+					$formwriter = $page->getFormWriter('product_form', ['action' => '/product', 'method' => 'POST']);
+					echo $formwriter->begin_form();
 					echo $formwriter->hiddeninput('product_id', $product_id);
 	
 					if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
-						echo $formwriter->submitbutton('submit', 'Add to Cart', ['class' => 'btn btn-primary btn-block']);
+						echo $formwriter->submitbutton('btn_submit', 'Add to Cart', ['class' => 'btn btn-primary btn-block']);
 					}
-					echo $formwriter->end_form(true);
+					echo $formwriter->end_form();
 					$product->output_javascript($formwriter, array());
 				}
 				else if($product_version && !$cart->can_add_to_cart($product_version)){

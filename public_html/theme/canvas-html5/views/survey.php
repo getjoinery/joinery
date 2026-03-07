@@ -42,7 +42,6 @@
                         </div>
                     <?php endif;
 
-                    $validation_rules = array();
                     foreach ($page_vars['survey_questions'] as $survey_question):
                         $question = new Question($survey_question->get('srq_qst_question_id'), true);
 
@@ -59,7 +58,6 @@
                         endforeach;
 
                         echo '<input type="hidden" name="survey_id" value="' . LibraryFunctions::encode($survey->key) . '">';
-                        $validation_rules = $question->output_js_validation($validation_rules);
                         ?>
                         <div class="mb-4">
                             <?php echo $question->output_question($formwriter, $answer_fill); ?>

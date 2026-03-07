@@ -87,15 +87,9 @@ $page_vars = $page_vars->data;
 									<h3>Set New Password</h3>
 
 									<?php
-									$formwriter = $page->getFormWriter('form1');
+									$formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-2', 'method' => 'POST']);
 
-									$formwriter->begin_form([
-										'id' => '',
-										'method' => 'POST',
-										'action' => '/password-reset-2',
-										'ajax' => true,
-										'attributes' => 'class="mb-0"'
-									]);
+									$formwriter->begin_form();
 
 									$formwriter->hiddeninput('act_code', ['value' => $page_vars['act_code']]);
 									?>
@@ -129,7 +123,7 @@ $page_vars = $page_vars->data;
 
 										<div class="col-12 form-group">
 											<?php
-											$formwriter->submitbutton('submit', 'Set Password', [
+											$formwriter->submitbutton('btn_submit', 'Set Password', [
 												'class' => 'button button-3d button-black m-0'
 											]);
 											?>

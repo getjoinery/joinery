@@ -66,7 +66,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		'value' => $page_vars['user']->get('usr_timezone')
 	]);
 
-	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 
 	$formwriter->end_form();
 

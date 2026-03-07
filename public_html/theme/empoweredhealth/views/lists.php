@@ -62,12 +62,7 @@ $paget->public_header(array(
                             $settings = Globalvars::get_instance();
                             $formwriter = $paget->getFormWriter('form1');
 
-                            $formwriter->begin_form([
-                                'id' => '',
-                                'method' => 'POST',
-                                'action' => '/lists',
-                                'ajax' => true
-                            ]);
+                            $formwriter->begin_form();
 
                             if(!$session->get_user_id()){
                                 $formwriter->textinput('usr_first_name', 'First Name', [
@@ -129,7 +124,7 @@ $paget->public_header(array(
                                 $formwriter->captcha_hidden_input();
                             }
 
-                            $formwriter->submitbutton('submit', 'Submit', [
+                            $formwriter->submitbutton('btn_submit', 'Submit', [
                                 'class' => 'btn btn-primary'
                             ]);
                             $formwriter->end_form();

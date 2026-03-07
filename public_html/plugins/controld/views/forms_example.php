@@ -26,7 +26,7 @@
 	// Note: FormWriter v2 handles validation differently - validation rules are applied per-field through options array
 	// The set_validate() method from v1 is not available in v2
 
-	$formwriter->begin_form('contact-form style2', 'POST');
+	$formwriter->begin_form();
 
 	$formwriter->textinput('ccd_code', '', [
 		'maxlength' => 255,
@@ -137,8 +137,8 @@
 
 	// Note: start_buttons(), new_form_button(), and end_buttons() are v1 methods
 	// Use submitbutton() instead in FormWriter v2
-	$formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
-	$formwriter->end_form(true);
+	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
+	$formwriter->end_form();
 
 
 

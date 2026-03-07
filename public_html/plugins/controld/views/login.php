@@ -43,19 +43,16 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 			}
 		}   		
 		
-		$formwriter = $page->getFormWriter('form1');
+		$formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);
 
-		$validation_rules = array();
-		$validation_rules['email']['required']['value'] = 'true';
-		$validation_rules['password']['required']['value'] = 'true';
-		echo $formwriter->begin_form('form1', 'POST', '/login');
+		echo $formwriter->begin_form();
 	?>
       <div class="mb-4">
-		<?php echo $formwriter->textinput("Email", "email", NULL , 20, htmlspecialchars($page_vars['email']), '',255, ''); ?>
+		<?php echo $formwriter->textinput('email', 'Email', ['maxlength' => 255, 'value' => htmlspecialchars($page_vars['email'])]); ?>
 
       </div>
       <div class="mb-4">
-		<?php echo $formwriter->passwordinput("Password", "password", NULL, 20, '','', 255, ''); ?>
+		<?php echo $formwriter->passwordinput('password', 'Password', ['maxlength' => 255]); ?>
       </div>
       <div class="mt-6 flex items-center justify-between">
         <div class="flex items-center">
@@ -65,7 +62,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
       </div>
       <div class="mt-6">
 	  <?php
-			echo $formwriter->submitbutton('submit', 'Log In', ['class' => 'btn btn-primary']);		
+			echo $formwriter->submitbutton('btn_submit', 'Log In', ['class' => 'btn btn-primary']);		
 	
 	  ?>
       </div>

@@ -23,13 +23,10 @@ $page_vars = process_logic(ctlddevice_delete_logic($_GET, $_POST));
 
 	echo PublicPage::BeginPage('Delete Device', $hoptions);
 
-	$formwriter = $page->getFormWriter();
-
-	$validation_rules = array();
-	$validation_rules['confirm']['required']['value'] = 'true';
+	$formwriter = $page->getFormWriter('delete_form', ['action' => '/profile/ctlddevice_delete', 'method' => 'POST']);
 
 
-	echo $formwriter->begin_form('contact-form style2', 'POST', '/profile/ctlddevice_delete', true);
+	echo $formwriter->begin_form();
 	
 		?>
                         <div class="job-content">
@@ -45,10 +42,10 @@ $page_vars = process_logic(ctlddevice_delete_logic($_GET, $_POST));
 	
 	echo '<p>You are about to delete this device. If you want to reactivate you will need to set up a new device.</p>';
 
-	echo $formwriter->checkboxinput("Confirm deletion", "confirm", "checkbox", "left", 0, 1, "");
+	echo $formwriter->checkboxinput('confirm', 'Confirm deletion', ['value' => 1]);
 
-	echo $formwriter->submitbutton('submit', 'Delete', ['class' => 'btn btn-primary']);
-	echo $formwriter->end_form(true);	
+	echo $formwriter->submitbutton('btn_submit', 'Delete', ['class' => 'btn btn-primary']);
+	echo $formwriter->end_form();
 
 	echo PublicPage::EndPage();
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));

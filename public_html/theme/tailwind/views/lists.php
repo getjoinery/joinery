@@ -33,38 +33,26 @@
 	else{
 
 		$settings = Globalvars::get_instance();
-		$formwriter = $page->getFormWriter('form1');
+		$formwriter = $page->getFormWriter('form1', ['action' => '/lists', 'method' => 'post']);
 		
-		$validation_rules = array();
-		$validation_rules['usr_first_name']['required']['value'] = 'true';
-		$validation_rules['usr_first_name']['minlength']['value'] = 1;
-		$validation_rules['usr_first_name']['required']['message'] = "'Please enter your first name.'";
-		$validation_rules['usr_first_name']['maxlength']['value'] = 32;
-		$validation_rules['usr_last_name']['required']['value'] = 'true';
-		$validation_rules['usr_last_name']['maxlength']['value'] = 32;
-		$validation_rules['privacy']['required']['value'] = 'true';
-		$validation_rules['usr_email']['required']['value'] = 'true';
-		$validation_rules['usr_email']['email']['value'] = 'true';
-		$validation_rules['usr_email']['maxlength']['value'] = 64;
-		$validation_rules = $formwriter->antispam_question_validate($validation_rules);
-
-		echo $formwriter->begin_form("", "post", "/lists", true);
+		$formwriter->antispam_question_validate([]);
+		echo $formwriter->begin_form();
 
 		if(!$session->get_user_id()){
-			echo $formwriter->textinput("First Name", "usr_first_name", NULL, 30, '', "", 32, "");
-			echo $formwriter->textinput("Last Name", "usr_last_name", NULL, 30, '', "", 32, "");
+			echo $formwriter->textinput('usr_first_name', 'First Name', ['maxlength' => 32]);
+			echo $formwriter->textinput('usr_last_name', 'Last Name', ['maxlength' => 32]);
 			$settings = Globalvars::get_instance();
 			$nickname_display = $settings->get_setting('nickname_display_as');
 			if($nickname_display){
-				echo $formwriter->textinput($nickname_display, "usr_nickname", NULL, 20, NULL, "" , 32, "");
+				echo $formwriter->textinput('usr_nickname', $nickname_display, ['maxlength' => 32]);
 			}
-			echo $formwriter->textinput("Email", "usr_email", NULL, 30, strip_tags($_GET['email']), "", 64, "");
+			echo $formwriter->textinput('usr_email', 'Email', ['type' => 'email', 'maxlength' => 64, 'value' => strip_tags($_GET['email'] ?? '')]);
 			
 			$optionvals = Address::get_timezone_drop_array();
 			$default_timezone = $settings->get_setting('default_timezone');
-			echo $formwriter->dropinput("Your timezone", "usr_timezone", NULL, $optionvals, $default_timezone, '', FALSE);	
+			echo $formwriter->dropinput('usr_timezone', 'Your Timezone', ['options' => $optionvals, 'value' => $default_timezone]);
 			
-			echo $formwriter->checkboxinput("I consent to the privacy policy.", "privacy", "", "left", 1, NULL, "");
+			echo $formwriter->checkboxinput('privacy', 'I consent to the privacy policy.', ['value' => 1]);
 		}
 
 		$optionvals = $mailing_lists->get_dropdown_array();	
@@ -72,7 +60,7 @@
 		$readonlyvals = array(); //DEFAULT
 		$disabledvals = array();
 
-		echo $formwriter->checkboxList("Check the box to subscribe:", 'new_list_subscribes', "ctrlHolder", $optionvals, $checkedvals, $disabledvals, $readonlyvals);	
+		echo $formwriter->checkboxList('new_list_subscribes', 'Check the box to subscribe:', ['options' => $optionvals, 'checked_values' => $checkedvals]);
 		echo $formwriter->hiddeninput('form_submitted', 1);
 		
 		if(!$session->get_user_id()){
@@ -82,7 +70,7 @@
 		}
 
 		echo '<div>';
-		echo $formwriter->submitbutton('submit', 'Submit', ['class' => 'btn btn-primary']);
+		echo $formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 		echo '</div>';
 		echo $formwriter->end_form();
 		
