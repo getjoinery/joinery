@@ -8,48 +8,75 @@
 	extract($page_vars);
 
 	$page = new PublicPage();
-		$hoptions=array(
-			'title'=>'Edit Address',
-			'breadcrumbs' => array(
-				'My Profile' => '/profile/profile',
-				'Edit Address' => '',
-			),
-			);
+	$hoptions=array(
+		'title'=>'Edit Address',
+		'breadcrumbs' => array(
+			'My Profile' => '/profile/profile',
+			'Edit Address' => '',
+		),
+	);
 	$page->public_header($hoptions);
-	echo PublicPage::BeginPage('Edit Address', $hoptions);
+?>
 
-	echo PublicPage::tab_menu($tab_menus, 'Edit Address');
+<!-- Page Title -->
+<section class="page-title bg-transparent">
+    <div class="container">
+        <div class="page-title-row">
+            <div class="page-title-content">
+                <h1>Edit Address</h1>
+            </div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item"><a href="/profile/profile">My Profile</a></li>
+                    <li class="breadcrumb-item active">Edit Address</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+</section>
 
-	$settings = Globalvars::get_instance();
-	$formwriter = $page->getFormWriter('form1', [
-		'model' => $address,
-		'edit_primary_key_value' => $address->key
-	]);
+<section class="content-section">
+    <div class="container">
+        <div style="max-width: 720px; margin: 0 auto;">
 
-	$formwriter->begin_form();
+            <?php echo PublicPage::tab_menu($tab_menus, 'Edit Address'); ?>
 
-	foreach($display_messages AS $display_message) {
-		if($display_message->identifier == 'addressbox') {
-			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-		}
-	}
+            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem; margin-top: 1.5rem;">
+                <?php
+                $formwriter = $page->getFormWriter('form1', [
+                    'model' => $address,
+                    'edit_primary_key_value' => $address->key
+                ]);
 
-	// Render all address fields using the model's static helper method
-	Address::renderFormFields($formwriter, [
-		'required' => true,
-		'include_country' => true,
-		'include_user_id' => false,
-		'model' => $address
-	]);
+                $formwriter->begin_form();
 
-	echo '<a href="/profile/account_edit">Cancel</a> ';
-	$formwriter->submitbutton('btn_submit', 'Submit');
+                foreach($display_messages AS $display_message) {
+                    if($display_message->identifier == 'addressbox') {
+                        echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
+                    }
+                }
 
-	$formwriter->end_form();
+                Address::renderFormFields($formwriter, [
+                    'required' => true,
+                    'include_country' => true,
+                    'include_user_id' => false,
+                    'model' => $address
+                ]);
 
-	$page->endtable();
+                echo '<a href="/profile/account_edit">Cancel</a> ';
+                $formwriter->submitbutton('btn_submit', 'Submit');
 
-	echo PublicPage::EndPage();
-	$page->public_footer($foptions=array('track'=>TRUE));
+                $formwriter->end_form();
 
+                $page->endtable();
+                ?>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+<?php
+$page->public_footer($foptions=array('track'=>TRUE));
 ?>
