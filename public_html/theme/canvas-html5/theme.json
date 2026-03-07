@@ -1,0 +1,10 @@
+{
+    "name": "canvas-html5",
+    "display_name": "Canvas HTML5",
+    "version": "1.0.0",
+    "description": "Lightweight Canvas theme using vanilla HTML5+CSS with zero framework dependencies",
+    "author": "Joinery Team",
+    "is_stock": true,
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterV2HTML5"
+}
