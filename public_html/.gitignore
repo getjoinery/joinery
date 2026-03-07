@@ -10,3 +10,4 @@ Globalvars_site.php
 .playwright-mcp/
 *.bak
 /cache
+/theme-sources
