@@ -658,6 +658,9 @@ sudo systemctl status apache2
 sudo systemctl restart apache2
 ```
 
+### Theme Reference Files
+Commercial theme source files (HTML demos, docs) are stored at `/home/user1/theme-sources/` and symlinked into the web root at `public_html/theme-sources/` (gitignored). Browse them at `https://joinerytest.site/theme-sources/`. Currently available: Canvas 7.
+
 ### Test Server Monitoring
 **Usage Pattern:**
 1. Make code changes
