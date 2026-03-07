@@ -767,7 +767,7 @@ class PublicPageTailwind extends PublicPageBase {
 		<?php
 	}
 
-	static function alert($title, $content, $type){
+	protected static function renderAlert($title, $content, $type){
 		if($type == 'error'){
 			$output = '<div class="rounded-md bg-red-50 p-4">
 			  <div class="flex">
@@ -962,7 +962,7 @@ class PublicPageTailwind extends PublicPageBase {
 	}
 
 
-	static function tab_menu($tab_menus, $type=NULL){
+	protected static function renderTabMenu($tab_menus, $current=NULL){
 		$output = '';
 		$output .= '
 		<script language="javascript">

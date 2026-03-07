@@ -693,8 +693,7 @@ class PublicPageFalcon extends PublicPageBase {
 	
 	
 	
-	static function alert($title, $content, $type)
-	{
+	protected static function renderAlert($title, $content, $type) {
 		// map types to Bootstrap classes and SVG icons
 		switch ($type) {
 			case 'error':
@@ -740,30 +739,192 @@ class PublicPageFalcon extends PublicPageBase {
 	
 
 
-	static function tab_menu($tab_menus, $current=NULL){
-		
+	protected static function renderTabMenu($tab_menus, $current=NULL){
 		$output = '';
 		$output .= '
 		<ul class="nav nav-tabs mb-3">';
 
 					foreach($tab_menus as $name => $link){
 						if($name == $current){
-						  $output .= '<li class="nav-item"><a class="nav-link active" href="#"  aria-selected="true">'.$name.'</a></li>';						
+						  $output .= '<li class="nav-item"><a class="nav-link active" href="#"  aria-selected="true">'.$name.'</a></li>';
 						}
 						else{
-						   $output .= '<li class="nav-item"><a class="nav-link" href="'.$link.'"  aria-selected="false">'.$name.'</a></li>';							
+						   $output .= '<li class="nav-item"><a class="nav-link" href="'.$link.'"  aria-selected="false">'.$name.'</a></li>';
 						}
 					}
 				$output .= '
 
 		</ul>';
-		
+
 		return $output;
-		
 	}
 
+	// --- Bootstrap rendering overrides ---
 
-	
+	protected function renderBoxOpen($options) {
+		$use_card = isset($options['card']) && $options['card'] === true;
+
+		if ($use_card) {
+			echo '<div class="card mb-3">';
+			if (!empty($options['title'])) {
+				echo '<div class="card-header bg-body-tertiary">';
+				echo '<h6 class="mb-0">' . htmlspecialchars($options['title']) . '</h6>';
+				echo '</div>';
+			}
+			echo '<div class="card-body p-0">';
+		} else {
+			echo '<div>';
+		}
+	}
+
+	protected function renderBoxClose($options) {
+		$use_card = isset($options['card']) && $options['card'] === true;
+
+		if ($use_card) {
+			echo '</div>'; // Close card-body
+			echo '</div>'; // Close card
+		} else {
+			echo '</div>';
+		}
+	}
+
+	protected function renderDropdown($label, $links) {
+		echo '<div class="row justify-content-end gx-3 gy-0 px-3"><div class="col-sm-auto">';
+		echo '<div class="dropdown font-sans-serif d-inline-block mb-2">';
+		echo '<button class="btn btn-falcon-default dropdown-toggle" id="dropdownMenuButton" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">' . htmlspecialchars($label) . '</button>';
+		echo '<div class="dropdown-menu dropdown-menu-end py-0" aria-labelledby="dropdownMenuButton">';
+		foreach($links as $link_label => $link_url){
+			echo '<a href="' . htmlspecialchars($link_url) . '" class="dropdown-item">' . htmlspecialchars($link_label) . '</a>';
+		}
+		echo '</div></div>';
+		echo '</div></div>';
+	}
+
+	protected function renderButtonGroup($links) {
+		echo '<div class="row justify-content-end gx-3 gy-0 px-3"><div class="col-sm-auto">';
+		foreach($links as $label => $link){
+			echo '<a href="' . htmlspecialchars($link) . '"><button class="btn btn-outline-secondary me-1 mb-1" type="button">' . htmlspecialchars($label) . '</button></a>';
+		}
+		echo '</div></div>';
+	}
+
+	protected function renderToolbar($sort_data, $filter_data, $search_on, $pager) {
+		if (!$sort_data && !$filter_data && !$search_on) return;
+
+		echo '<div class="row justify-content-end gx-3 gy-0 px-3">';
+
+		if($sort_data){
+			echo '<div class="col-sm-auto">';
+			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('sort', 'sdirection'));
+			echo '<label for="'.$pager->prefix().'sort'.'">Sort: </label><select name="'.$pager->prefix().'sort'.'">';
+			foreach ($sort_data as $key => $value) {
+				if($pager->get_sort() == $value){
+					echo "<option value='$value' selected=selected>$key";
+				} else {
+					echo "<option value='$value'>$key";
+				}
+			}
+			echo '</select>';
+
+			echo '<label for="'.$pager->prefix().'sdirection'.'"> </label><select name="'.$pager->prefix().'sdirection'.'">';
+			$diroptions = array('Descending'=>'DESC', 'Ascending'=>'ASC');
+			foreach ($diroptions as $key => $value) {
+				if($pager->sort_direction() == $value){
+					echo "<option value='$value' selected=selected>$key";
+				} else {
+					echo "<option value='$value'>$key";
+				}
+			}
+			echo '</select>';
+
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			}
+			echo '<input type="submit" value="sort" /></form>';
+			echo '</div>';
+		}
+
+		if($filter_data){
+			echo '<div class="col-sm-auto">';
+			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('filter'));
+			echo '<label for="'.$pager->prefix().'filter'.'">Show: </label><select name="'.$pager->prefix().'filter'.'">';
+			foreach ($filter_data as $key => $value) {
+				if($pager->get_filter() == $value){
+					echo "<option value='$value' selected=selected>$key";
+				} else {
+					echo "<option value='$value'>$key";
+				}
+			}
+			echo '</select>';
+
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			}
+			echo '<input type="submit" value="submit" /></form>';
+			echo '</div>';
+		}
+
+		if($search_on){
+			echo '<div class="col-sm-auto">';
+			$formwriter = $this->getFormWriter('search_form');
+
+			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('searchterm'));
+			echo '<label for="searchterm">Search: </label>
+						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.$pager->search_term().'" size="20" type="text" class="textInput" maxlength="">';
+
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			}
+			echo '<input type="submit" value="Search" />';
+			echo $formwriter->end_form();
+			echo '</div>';
+		}
+
+		echo '</div>';
+	}
+
+	protected function renderPagination($data) {
+		$padding_class = $data['in_card'] ? 'px-3 pb-3' : '';
+		$text_padding_class = $data['in_card'] ? 'ps-3' : '';
+
+		echo '<div class="d-flex align-items-center justify-content-center position-relative mt-3 ' . $padding_class . '">';
+		echo '<div class="position-absolute start-0 mb-0 fs-10 ' . $text_padding_class . '"> ' . $data['num_records'] . ' records, Page ' . $data['current_page'] . ' of ' . $data['total_pages'] . '</div>';
+		echo '<div><div class="d-flex justify-content-center mt-3">';
+
+		if ($data['show_controls']) {
+			$chevron_left = '<svg class="svg-inline--fa fa-chevron-left fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-left" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><path fill="currentColor" d="M34.52 239.03L228.87 44.69c9.37-9.37 24.57-9.37 33.94 0l22.67 22.67c9.36 9.36 9.37 24.52.04 33.9L131.49 256l154.02 154.75c9.34 9.38 9.32 24.54-.04 33.9l-22.67 22.67c-9.37 9.37-24.57 9.37-33.94 0L34.52 272.97c-9.37-9.37-9.37-24.57 0-33.94z"></path></svg>';
+			$chevron_right = '<svg class="svg-inline--fa fa-chevron-right fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-right" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><path fill="currentColor" d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"></path></svg>';
+
+			if ($data['prev_10_url']) {
+				echo '<a href="' . $data['prev_10_url'] . '"><button class="btn btn-sm btn-falcon-default me-1" type="button" title="Previous 10">' . $chevron_left . '</button></a>';
+			} else {
+				echo '<button class="btn btn-sm btn-falcon-default me-1 disabled" type="button" title="Previous 10" disabled="">' . $chevron_left . '</button>';
+			}
+
+			echo '<ul class="pagination mb-0">';
+			foreach ($data['pages'] as $page) {
+				if ($page['is_current']) {
+					echo '<li class="active"><button class="page btn btn-sm btn-falcon-default disabled" type="button" disabled="">' . $page['number'] . '</button></li> ';
+				} else {
+					echo '<a href="' . $page['url'] . '"><button class="page btn btn-sm btn-falcon-default" type="button">' . $page['number'] . '</button></a> ';
+				}
+			}
+			echo '</ul>';
+
+			if ($data['next_10_url']) {
+				echo '<a href="' . $data['next_10_url'] . '"><button class="btn btn-sm btn-falcon-default ms-1" type="button" title="Next 10">' . $chevron_right . '</button></a>';
+			} else {
+				echo '<button class="btn btn-sm btn-falcon-default ms-1 disabled" type="button" title="Next 10" disabled="">' . $chevron_right . '</button>';
+			}
+		}
+
+		echo '</div></div>';
+		echo '</div>';
+	}
+
 }
 
 ?>

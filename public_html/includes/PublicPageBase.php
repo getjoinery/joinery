@@ -72,17 +72,15 @@ abstract class PublicPageBase {
 	
 	/**
 	 * Get a FormWriter instance appropriate for this page
-	 * Uses PathHelper's standard theme/plugin override pattern for cleaner view code
+	 * Loads the theme's FormWriter via the standard theme override chain
 	 *
 	 * @param string $form_id The form identifier (default: 'form1')
-	 * @param string $version The FormWriter version: 'v1' (default) or 'v2'
-	 * @param array $options Configuration options for V2 FormWriter (model, action, etc.)
-	 * @return FormWriter|FormWriterV2Bootstrap The appropriate FormWriter instance
+	 * @param array $options Configuration options for FormWriter
+	 * @return FormWriter The theme-appropriate FormWriter instance
 	 */
 	public function getFormWriter($form_id = 'form1', $options = []) {
-        // FormWriter v2 is now the default and only supported version
-        require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-        return new FormWriterV2Bootstrap($form_id, $options);
+        require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
+        return new FormWriter($form_id, $options);
     }
 	
 	public static function get_public_menu(){
@@ -383,39 +381,31 @@ abstract class PublicPageBase {
 	}
 	
 	static function tab_menu($tab_menus, $current=NULL){
-	
-		
-		$output = '';
-		
+		return static::renderTabMenu($tab_menus, $current);
+	}
 
-		$output .= '<div class="container"><div class="filter-menu filter-menu-active">
-
-								';
-									foreach($tab_menus as $name => $link){
-										if($name == 'Edit Address' || $name == 'Edit Phone Number'){
-											continue;
-										}
-										if($name == $current){
-											$output .= '
-											<button data-filter="*" class="tab-btn active" type="button">'.$name.'</button>
-											
-											';
-										}
-										else{
-											$output .= '
-											<a href="'.$link.'"><button data-filter=".cat5" class="tab-btn" type="button">'.$name.'</button></a>
-											
-											';
-										}
-									}
-                             $output .= '       
-                                
-                        </div></div>';
-		
-
-		
+	/**
+	 * Render tab navigation menu
+	 * Override in subclasses for framework-specific markup
+	 *
+	 * @param array $tab_menus Associative array of tab_name => url
+	 * @param string|null $current Currently active tab name
+	 * @return string HTML output
+	 */
+	protected static function renderTabMenu($tab_menus, $current=NULL){
+		$output = '<nav class="tab-menu" aria-label="Tabs">';
+		foreach($tab_menus as $name => $link){
+			if($name == 'Edit Address' || $name == 'Edit Phone Number'){
+				continue;
+			}
+			if($name == $current){
+				$output .= '<span class="tab-link active" aria-current="page">' . htmlspecialchars($name) . '</span>';
+			} else {
+				$output .= '<a href="' . htmlspecialchars($link) . '" class="tab-link">' . htmlspecialchars($name) . '</a>';
+			}
+		}
+		$output .= '</nav>';
 		return $output;
-		
 	}
 	
 	/**
@@ -618,27 +608,31 @@ abstract class PublicPageBase {
 	}
 	
 	static function alert($title, $content, $type){
-		if($type == 'error'){
-			$output = '<div class="alert alert-danger" role="alert">
-			  <h4 class="alert-heading">'.$title.'</h4>
-			  <p>'.$content.'</p>
-			</div>';
+		return static::renderAlert($title, $content, $type);
+	}
+
+	/**
+	 * Render an alert/notification message
+	 * Override in subclasses for framework-specific markup
+	 *
+	 * @param string $title Alert title
+	 * @param string $content Alert body content
+	 * @param string $type Alert type: 'error', 'warn', 'success'
+	 * @return string HTML output
+	 */
+	protected static function renderAlert($title, $content, $type){
+		$type_class = $type;
+		if ($type === 'warn') $type_class = 'warning';
+
+		$output = '<div class="alert alert-' . $type_class . '" role="alert">';
+		if ($title) {
+			$output .= '<h4>' . htmlspecialchars($title) . '</h4>';
 		}
-		else if($type == 'warn'){
-			$output = '<div class="alert alert-warning" role="alert">
-			  <h4 class="alert-heading">'.$title.'</h4>
-			  <p>'.$content.'</p>
-			</div>';	
-		}
-		else if($type == 'success'){
-			$output = '<div class="alert alert-success" role="alert">
-			  <h4 class="alert-heading">'.$title.'</h4>
-			  <p>'.$content.'</p>
-			</div>';
-		}
-		
+		$output .= '<p>' . $content . '</p>';
+		$output .= '</div>';
+
 		return $output;
-	}	
+	}
 
 	public function public_footer($options=array()) {
 		$session = SessionControl::get_instance();
@@ -704,125 +698,102 @@ abstract class PublicPageBase {
 		$this->current_table_options = $options;
 
 		$this->begin_box($options);
-		
+
 		if(!$pager){
 			$pager = new Pager();
 		}
 
-		$sortoptions = null;
-		if(isset($options['sortoptions'])){
-			$sortoptions = $options['sortoptions'];
-		}
-		
-		$filteroptions = null;
-		if(isset($options['filteroptions'])){
-			$filteroptions = $options['filteroptions'];
-		}
-		
-		$search_on = null;
-		if(isset($options['search_on'])){
-			$search_on = $options['search_on'];
-		}
+		$sort_data = isset($options['sortoptions']) ? $options['sortoptions'] : null;
+		$filter_data = isset($options['filteroptions']) ? $options['filteroptions'] : null;
+		$search_on = isset($options['search_on']) ? $options['search_on'] : null;
+
+		$this->renderToolbar($sort_data, $filter_data, $search_on, $pager);
 
 		// Get theme-specific CSS classes
 		$css = $this->getTableClasses();
+		$wrapperClass = isset($css['wrapper']) ? $css['wrapper'] : 'table-wrapper';
+		$tableClass = isset($css['table']) ? $css['table'] : 'styled-table';
 
-		echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3">';
+		echo '<div class="' . $wrapperClass . '">';
+		echo '<table class="' . $tableClass . '">';
+		echo '<tr>';
 
-		if($sortoptions){
-			echo '<div class="col-sm-auto">';
-			printf('<form method="get" ACTION="%s">', $pager->base_url());
-			echo $pager->url_vars_as_hidden_input(array('sort', 'sdirection'));
-			echo '<label for="'.$pager->prefix().'sort'.'">Sort: </label><select name="'.$pager->prefix().'sort'.'">';
-			foreach ($sortoptions as $key => $value) {
-				if($pager->get_sort() == $value){
-					echo "<option value='$value' selected=selected>$key";
-				}
-				else{
-					echo "<option value='$value'>$key";
-				}
-			}
-			echo '</select>';
-			
-
-			echo '<label for="'.$pager->prefix().'sdirection'.'"> </label><select name="'.$pager->prefix().'sdirection'.'">';
-			$diroptions = array('Descending'=>'DESC', 'Ascending'=>'ASC');
-			foreach ($diroptions as $key => $value) {
-				if($pager->sort_direction() == $value){
-					echo "<option value='$value' selected=selected>$key";
-				}
-				else{
-					echo "<option value='$value'>$key";
-				}
-			}
-			echo '</select>';
-
-						
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
-			}
-
-			echo '<input type="submit" value="sort" /></form>'; 
-			echo '</div>';
+		foreach ($headers as $value) {
+			echo '<th>'.$value.'</th>';
 		}
 
-		if($filteroptions){
-			echo '<div class="col-sm-auto">';
-			printf('<form method="get" ACTION="%s">', $pager->base_url());
-			echo $pager->url_vars_as_hidden_input(array('filter'));
-			echo '<label for="'.$pager->prefix().'filter'.'">Show: </label><select name="'.$pager->prefix().'filter'.'">';
-			foreach ($filteroptions as $key => $value) {
-				if($pager->get_filter() == $value){
-					echo "<option value='$value' selected=selected>$key";
-				}
-				else{
-					echo "<option value='$value'>$key";
-				}
+		echo '</tr>';
+	}
+
+	/**
+	 * Render sort/filter/search toolbar above a table
+	 * Override in subclasses for framework-specific markup
+	 *
+	 * @param array|null $sort_data Sort options (display_name => column)
+	 * @param array|null $filter_data Filter options (display_name => value)
+	 * @param bool|null $search_on Whether to show search
+	 * @param Pager $pager Pager instance
+	 */
+	protected function renderToolbar($sort_data, $filter_data, $search_on, $pager) {
+		if (!$sort_data && !$filter_data && !$search_on) return;
+
+		echo '<div class="table-toolbar">';
+
+		if($sort_data){
+			printf('<form method="get" action="%s" class="toolbar-form">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('sort', 'sdirection'));
+			echo '<label for="'.$pager->prefix().'sort">Sort: </label>';
+			echo '<select name="'.$pager->prefix().'sort">';
+			foreach ($sort_data as $key => $value) {
+				$selected = ($pager->get_sort() == $value) ? ' selected' : '';
+				echo '<option value="' . htmlspecialchars($value) . '"' . $selected . '>' . htmlspecialchars($key) . '</option>';
 			}
 			echo '</select>';
 
-						
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
+			echo ' <select name="'.$pager->prefix().'sdirection">';
+			$diroptions = array('Descending'=>'DESC', 'Ascending'=>'ASC');
+			foreach ($diroptions as $key => $value) {
+				$selected = ($pager->sort_direction() == $value) ? ' selected' : '';
+				echo '<option value="' . htmlspecialchars($value) . '"' . $selected . '>' . htmlspecialchars($key) . '</option>';
 			}
+			echo '</select>';
 
-			echo '<input type="submit" value="submit" /></form>'; 
-			echo '</div>';
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.htmlspecialchars($key).'" value="'.htmlspecialchars($value).'">';
+			}
+			echo ' <button type="submit">Sort</button></form>';
+		}
+
+		if($filter_data){
+			printf('<form method="get" action="%s" class="toolbar-form">', $pager->base_url());
+			echo $pager->url_vars_as_hidden_input(array('filter'));
+			echo '<label for="'.$pager->prefix().'filter">Show: </label>';
+			echo '<select name="'.$pager->prefix().'filter">';
+			foreach ($filter_data as $key => $value) {
+				$selected = ($pager->get_filter() == $value) ? ' selected' : '';
+				echo '<option value="' . htmlspecialchars($value) . '"' . $selected . '>' . htmlspecialchars($key) . '</option>';
+			}
+			echo '</select>';
+
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.htmlspecialchars($key).'" value="'.htmlspecialchars($value).'">';
+			}
+			echo ' <button type="submit">Filter</button></form>';
 		}
 
 		if($search_on){
-			echo '<div class="col-sm-auto">';
-			$formwriter = $this->getFormWriter('search_form');
-
-			echo $formwriter->begin_form("search_form", "get", $pager->base_url());
+			printf('<form method="get" action="%s" class="toolbar-form">', $pager->base_url());
 			echo $pager->url_vars_as_hidden_input(array('searchterm'));
-			echo '<label for="searchterm">Search: </label>
-						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.$pager->search_term().'" size="20" type="text" class="textInput" maxlength="">';	
-			
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
-			}	
+			echo '<label for="'.$pager->prefix().'searchterm">Search: </label>';
+			echo '<input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.htmlspecialchars($pager->search_term()).'" size="20" type="text" maxlength="">';
 
-			echo '<input type="submit" value="Search" />';
-			echo $formwriter->end_form();
-			echo '</div>';
+			foreach($pager->url_vars() as $key=>$value){
+				echo '<input type="hidden" name="'.htmlspecialchars($key).'" value="'.htmlspecialchars($value).'">';
+			}
+			echo ' <button type="submit">Search</button></form>';
 		}
 
 		echo '</div>';
-
-		// Use theme-specific wrapper and table classes
-		$wrapperClass = isset($css['wrapper']) ? $css['wrapper'] : 'table-responsive';
-		$tableClass = isset($css['table']) ? $css['table'] : 'table';
-		
-		echo '<div class="'.$wrapperClass.'">
-	  <table class="'.$tableClass.'">
-			<tr>';
-
-			foreach ($headers as $value) {
-				echo '<th>'.$value.'</th>';
-			}
-
-		echo '</tr>';
 	}
 
 	function disprow($dataarray){
@@ -843,86 +814,98 @@ abstract class PublicPageBase {
 		}
 		echo '</table></div>';
 
-		// Get stored options to check if we're in a card
+		// Build pagination data structure
 		$options = isset($this->current_table_options) ? $this->current_table_options : array();
-		$use_card = isset($options['card']) && $options['card'] === true;
 
-		//PAGE
 		if($pager->num_records()){
-			// Add padding for card layout
-			$padding_class = $use_card ? 'px-3 pb-3' : '';
-			$text_padding_class = $use_card ? 'ps-3' : '';
-			echo '<div class="d-flex align-items-center justify-content-center position-relative mt-3 ' . $padding_class . '">';
-						echo '<div class="position-absolute start-0 mb-0 fs-10 ' . $text_padding_class . '"> '.$pager->num_records().' records, Page '.$pager->current_page() .' of '.$pager->total_pages().'</div>';
+			$pagination_data = [
+				'num_records'   => $pager->num_records(),
+				'current_page'  => $pager->current_page(),
+				'total_pages'   => $pager->total_pages(),
+				'show_controls' => ($pager->num_records() > $pager->num_per_page()),
+				'in_card'       => (isset($options['card']) && $options['card'] === true),
+				'prev_10_url'   => null,
+				'next_10_url'   => null,
+				'pages'         => [],
+			];
 
-						echo '<div><div class="d-flex justify-content-center mt-3">';
+			if ($pagination_data['show_controls']) {
+				// Previous 10 pages
+				$p = $pager->is_valid_page('-10');
+				if ($p) $pagination_data['prev_10_url'] = $pager->get_url($p);
 
-						if($pager->num_records() > $pager->num_per_page()){
-							if($page_number = $pager->is_valid_page('-10')){
-								echo '<a href="'.$pager->get_url($page_number).'"><button class="btn btn-sm btn-falcon-default me-1" type="button" title="Previous 10" data-list-pagination="prev"><svg class="svg-inline--fa fa-chevron-left fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-left" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M34.52 239.03L228.87 44.69c9.37-9.37 24.57-9.37 33.94 0l22.67 22.67c9.36 9.36 9.37 24.52.04 33.9L131.49 256l154.02 154.75c9.34 9.38 9.32 24.54-.04 33.9l-22.67 22.67c-9.37 9.37-24.57 9.37-33.94 0L34.52 272.97c-9.37-9.37-9.37-24.57 0-33.94z"></path></svg><!-- <span class="fas fa-chevron-left"></span> Font Awesome fontawesome.com --></button></a>';
-							}
-							else{
-								echo '<button class="btn btn-sm btn-falcon-default me-1 disabled" type="button" title="Previous 10" data-list-pagination="prev" disabled=""><svg class="svg-inline--fa fa-chevron-left fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-left" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M34.52 239.03L228.87 44.69c9.37-9.37 24.57-9.37 33.94 0l22.67 22.67c9.36 9.36 9.37 24.52.04 33.9L131.49 256l154.02 154.75c9.34 9.38 9.32 24.54-.04 33.9l-22.67 22.67c-9.37 9.37-24.57 9.37-33.94 0L34.52 272.97c-9.37-9.37-9.37-24.57 0-33.94z"></path></svg><!-- <span class="fas fa-chevron-left"></span> Font Awesome fontawesome.com --></button>';
-							}
+				// Next 10 pages
+				$p = $pager->is_valid_page('+10');
+				if ($p) $pagination_data['next_10_url'] = $pager->get_url($p);
 
-							echo '<ul class="pagination mb-0">';
-							for($x=4; $x>=1;$x--){
-								if($page_number = $pager->is_valid_page('-'.$x)){
-									echo '<a href="'.$pager->get_url($page_number).'"><button class="page btn btn-sm btn-falcon-default" type="button" data-i="2" data-page="5">'.$page_number.'</button></a> ';
-								}
-							}
+				// Surrounding pages (4 before, current, 4 after)
+				for($x=4; $x>=1; $x--){
+					$p = $pager->is_valid_page('-'.$x);
+					if($p){
+						$pagination_data['pages'][] = ['number' => $p, 'url' => $pager->get_url($p), 'is_current' => false];
+					}
+				}
+				$pagination_data['pages'][] = ['number' => $pager->current_page(), 'url' => null, 'is_current' => true];
+				for($x=1; $x<=4; $x++){
+					$p = $pager->is_valid_page('+'.$x);
+					if($p){
+						$pagination_data['pages'][] = ['number' => $p, 'url' => $pager->get_url($p), 'is_current' => false];
+					}
+				}
+			}
 
-							echo '<li class="active"><button class="page btn btn-sm btn-falcon-default disabled" type="button" disabled="">'.$pager->current_page().'</button></li> ';
-
-							for($x=1; $x<=4;$x++){
-								if($page_number = $pager->is_valid_page('+'.$x)){
-									echo '<a href="'.$pager->get_url($page_number).'"><button class="page btn btn-sm btn-falcon-default" type="button" data-i="2" data-page="5">'.$page_number.'</button></a> ';
-								}
-							}
-							echo '</ul>';
-
-							if($page_number = $pager->is_valid_page('+10')){
-								echo '<a href="'.$pager->get_url($page_number).'"><button class="btn btn-sm btn-falcon-default ms-1" type="button" title="Next 10" data-list-pagination="next"><svg class="svg-inline--fa fa-chevron-right fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-right" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"></path></svg><!-- <span class="fas fa-chevron-right"></span> Font Awesome fontawesome.com --></button></a>';
-							}
-							else{
-								echo '<button class="btn btn-sm btn-falcon-default ms-1 disabled" type="button" title="Next 10" data-list-pagination="next" disabled=""><svg class="svg-inline--fa fa-chevron-right fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-right" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" data-fa-i2svg=""><path fill="currentColor" d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"></path></svg><!-- <span class="fas fa-chevron-right"></span> Font Awesome fontawesome.com --></button>';
-							}
-						}
-
-
-			echo '</div></div>';
-			echo '</div>';
-
+			$this->renderPagination($pagination_data);
 		}
 
-		// Pass stored options to end_box
-		$options = isset($this->current_table_options) ? $this->current_table_options : array();
 		$this->end_box($options);
+	}
+
+	/**
+	 * Render pagination controls
+	 * Override in subclasses for framework-specific markup
+	 *
+	 * @param array $data Pagination data structure with keys:
+	 *   num_records, current_page, total_pages, show_controls, in_card,
+	 *   prev_10_url, next_10_url, pages (array of [number, url, is_current])
+	 */
+	protected function renderPagination($data) {
+		echo '<nav class="pagination-wrapper" aria-label="Pagination">';
+		echo '<span class="pagination-info">' . $data['num_records'] . ' records, Page ' . $data['current_page'] . ' of ' . $data['total_pages'] . '</span>';
+
+		if ($data['show_controls']) {
+			echo '<ul class="pagination">';
+
+			if ($data['prev_10_url']) {
+				echo '<li><a href="' . htmlspecialchars($data['prev_10_url']) . '" title="Previous 10">&laquo;</a></li>';
+			} else {
+				echo '<li class="disabled"><span>&laquo;</span></li>';
+			}
+
+			foreach ($data['pages'] as $page) {
+				if ($page['is_current']) {
+					echo '<li class="active" aria-current="page"><span>' . $page['number'] . '</span></li>';
+				} else {
+					echo '<li><a href="' . htmlspecialchars($page['url']) . '">' . $page['number'] . '</a></li>';
+				}
+			}
+
+			if ($data['next_10_url']) {
+				echo '<li><a href="' . htmlspecialchars($data['next_10_url']) . '" title="Next 10">&raquo;</a></li>';
+			} else {
+				echo '<li class="disabled"><span>&raquo;</span></li>';
+			}
+
+			echo '</ul>';
+		}
+
+		echo '</nav>';
 	}
 
 	function begin_box($options=NULL){
 		if(!is_array($options)){
 			$options = array();
 		}
-
-		// Check if card wrapping is requested
-		$use_card = isset($options['card']) && $options['card'] === true;
-
-		if ($use_card) {
-			echo '<div class="card mb-3">';
-
-			// Add card header if title is provided
-			if (!empty($options['title'])) {
-				echo '<div class="card-header bg-body-tertiary">';
-				echo '<h6 class="mb-0">' . htmlspecialchars($options['title']) . '</h6>';
-				echo '</div>';
-			}
-
-			echo '<div class="card-body p-0">';
-		} else {
-			echo '<div>';
-		}
-
+		$this->renderBoxOpen($options);
 		$this->dropdown_or_buttons($options);
 	}
 
@@ -930,16 +913,7 @@ abstract class PublicPageBase {
 		if(!is_array($options)){
 			$options = array();
 		}
-
-		// Check if card wrapping was used
-		$use_card = isset($options['card']) && $options['card'] === true;
-
-		if ($use_card) {
-			echo '</div>'; // Close card-body
-			echo '</div>'; // Close card
-		} else {
-			echo '</div>';
-		}
+		$this->renderBoxClose($options);
 	}
 
 	function dropdown_or_buttons($options=array()){
@@ -947,29 +921,80 @@ abstract class PublicPageBase {
 			$options = array();
 		}
 
-		if(!isset($options['options_label'])){
-			$options['options_label'] = 'Options';
-		}		
+		if(!isset($options['altlinks']) || !is_array($options['altlinks']) || count($options['altlinks']) == 0){
+			return;
+		}
 
-		if(isset($options['altlinks']) && is_array($options['altlinks'])){
-			echo '<div class="row justify-content-end justify-content-end gx-3 gy-0 px-3"><div class="col-sm-auto">';
-			if(count($options['altlinks']) > 2){
-				echo '<div class="dropdown font-sans-serif d-inline-block mb-2"><button class="btn btn-falcon-default dropdown-toggle" id="dropdownMenuButton" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">'.$options['options_label'].'</button><div class="dropdown-menu dropdown-menu-end py-0" aria-labelledby="dropdownMenuButton">';
-				foreach($options['altlinks'] as $label=>$link){
-					echo '<a href="'.$link.'" class="dropdown-item">'.$label.'</a></li>';
-				}	
-				echo '</div></div>';	    
-										
+		$label = isset($options['options_label']) ? $options['options_label'] : 'Options';
+		$links = $options['altlinks'];
+
+		if(count($links) > 2){
+			$this->renderDropdown($label, $links);
+		} else {
+			$this->renderButtonGroup($links);
+		}
+	}
+
+	/**
+	 * Render the opening markup for a content box/card
+	 * Override in subclasses for framework-specific markup
+	 */
+	protected function renderBoxOpen($options) {
+		$use_card = isset($options['card']) && $options['card'] === true;
+
+		if ($use_card) {
+			echo '<div class="content-box">';
+			if (!empty($options['title'])) {
+				echo '<div class="content-box-header"><h6>' . htmlspecialchars($options['title']) . '</h6></div>';
 			}
-			else if(count($options['altlinks']) > 0){
-				
-				foreach($options['altlinks'] as $label=>$link){
-					echo '<a href="'.$link.'"><button class="btn btn-outline-secondary me-1 mb-1" type="button">'.$label.'</button></a>';
-				}
-				
-			}
-			echo '</div></div>';
-		}			
+			echo '<div class="content-box-body">';
+		} else {
+			echo '<div>';
+		}
+	}
+
+	/**
+	 * Render the closing markup for a content box/card
+	 * Override in subclasses for framework-specific markup
+	 */
+	protected function renderBoxClose($options) {
+		$use_card = isset($options['card']) && $options['card'] === true;
+
+		if ($use_card) {
+			echo '</div>';
+			echo '</div>';
+		} else {
+			echo '</div>';
+		}
+	}
+
+	/**
+	 * Render a dropdown menu for action links (>2 links)
+	 * Override in subclasses for framework-specific markup
+	 */
+	protected function renderDropdown($label, $links) {
+		echo '<div class="action-buttons">';
+		echo '<details class="dropdown">';
+		echo '<summary>' . htmlspecialchars($label) . '</summary>';
+		echo '<ul class="dropdown-menu">';
+		foreach($links as $link_label => $link_url){
+			echo '<li><a href="' . htmlspecialchars($link_url) . '">' . htmlspecialchars($link_label) . '</a></li>';
+		}
+		echo '</ul>';
+		echo '</details>';
+		echo '</div>';
+	}
+
+	/**
+	 * Render inline buttons for action links (1-2 links)
+	 * Override in subclasses for framework-specific markup
+	 */
+	protected function renderButtonGroup($links) {
+		echo '<div class="action-buttons">';
+		foreach($links as $label => $link){
+			echo '<a href="' . htmlspecialchars($link) . '" class="btn btn-outline">' . htmlspecialchars($label) . '</a> ';
+		}
+		echo '</div>';
 	}
 
 	/**
