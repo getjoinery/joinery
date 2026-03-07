@@ -321,8 +321,8 @@ class StripeHelper {
 				
 				$output = '
 				<script>
-				$(document).ready(function() {
-					$(\'#nojavascript\').hide();
+					document.addEventListener(\'DOMContentLoaded\', function() {
+						var el = document.getElementById(\'nojavascript\'); if (el) el.style.display = \'none\';
 				});
 				</script>
 				<div id="nojavascript" style="border: 3px solid red; padding: 10px; margin: 10px;">Our payment form requires javascript to be turned on.  Please set your browser to allow javascript, turn off ad blockers, or try another browser.</div>

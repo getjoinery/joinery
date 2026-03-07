@@ -24,118 +24,155 @@
         PublicPage::OutputGenericPublicPage('Product not available', 'Product not available', 'Sorry, this item is currently not available for purchase/registration.');
     }
 
-    echo PublicPage::BeginPage('Product Details');
-
     if (!$page_vars['display_empty_form']) {
-        ?>
-        <div class="container">
-            <div class="row justify-content-center">
-                <div class="col-lg-8">
-                    <div class="card shadow-sm rounded-4">
-                        <div class="card-header bg-primary text-white">
-                            <h4 class="mb-0">Confirm Your Order</h4>
-                        </div>
-                        <div class="card-body p-4">
-                            <p class="mb-4">Is everything correct?</p>
+?>
 
-                            <?php
-                            $formwriter = $page->getFormWriter('product_form', ['action' => '/product']);
-                            $formwriter->begin_form();
-                            echo $formwriter->hiddeninput('product_id', $product_id);
-                            echo $formwriter->hiddeninput('product_key', $form_key);
+<!-- Page Title -->
+<section class="page-title bg-transparent">
+    <div class="container">
+        <div class="page-title-row">
+            <div class="page-title-content">
+                <h1>Confirm Your Order</h1>
+            </div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item"><a href="/products">Products</a></li>
+                    <li class="breadcrumb-item active"><?php echo htmlspecialchars($product->get('pro_name')); ?></li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+</section>
 
-                            foreach ($page_vars['display_data'] as $key => $value) {
-                                echo '<div class="mb-3"><strong>' . htmlspecialchars($key) . ':</strong> ' . htmlspecialchars($value) . '</div>';
-                            }
-                            ?>
-                            <div class="d-grid">
-                                <?php echo $formwriter->submitbutton('btn_submit', 'Confirm Order', ['class' => 'btn btn-primary']); ?>
-                            </div>
-                            <?php echo $formwriter->end_form(); ?>
-                        </div>
+<section class="content-section">
+    <div class="container">
+        <div style="max-width: 640px; margin: 0 auto;">
+            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                <div style="background: var(--color-primary); color: #fff; padding: 1rem 1.5rem;">
+                    <h4 style="margin: 0; color: #fff;">Confirm Your Order</h4>
+                </div>
+                <div style="padding: 2rem;">
+                    <p style="margin-bottom: 1.5rem;">Is everything correct?</p>
+
+                    <?php
+                    $formwriter = $page->getFormWriter('product_form', ['action' => '/product']);
+                    $formwriter->begin_form();
+                    echo $formwriter->hiddeninput('product_id', $product_id);
+                    echo $formwriter->hiddeninput('product_key', $form_key);
+
+                    foreach ($page_vars['display_data'] as $key => $value) {
+                        echo '<div style="margin-bottom: 0.75rem;"><strong>' . htmlspecialchars($key) . ':</strong> ' . htmlspecialchars($value) . '</div>';
+                    }
+                    ?>
+                    <div style="margin-top: 1.5rem;">
+                        <?php echo $formwriter->submitbutton('btn_submit', 'Confirm Order', ['class' => 'btn btn-primary']); ?>
                     </div>
+                    <?php echo $formwriter->end_form(); ?>
                 </div>
             </div>
         </div>
-        <?php
-        echo PublicPage::EndPage();
+    </div>
+</section>
+
+<?php
         $page->public_footer(['track' => true]);
         exit;
     }
 ?>
 
-<div class="container" style="padding: 2rem 1rem;">
-    <div class="row gx-5">
+<!-- Page Title -->
+<section class="page-title bg-transparent">
+    <div class="container">
+        <div class="page-title-row">
+            <div class="page-title-content">
+                <h1><?php echo htmlspecialchars($product->get('pro_name')); ?></h1>
+            </div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item"><a href="/products">Products</a></li>
+                    <li class="breadcrumb-item active"><?php echo htmlspecialchars($product->get('pro_name')); ?></li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+</section>
 
-        <div class="col-lg-6">
-            <div class="mb-4 text-center">
-                <img src="https://via.placeholder.com/500x500/f8f9fa/6c757d?text=Product+Image"
-                     style="max-height: 400px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
-                     class="mw-100"
-                     alt="<?php echo htmlspecialchars($product->get('pro_name')); ?>">
-                <?php if ($product->get('pro_on_sale')): ?>
-                    <div class="mt-2"><span class="badge bg-danger">Sale!</span></div>
+<section class="content-section">
+    <div class="container">
+        <div class="grid-2" style="gap: 3rem; align-items: start;">
+
+            <!-- Left: image + description -->
+            <div>
+                <div style="margin-bottom: 1.5rem; text-align: center;">
+                    <div style="width: 100%; max-width: 400px; height: 300px; background: linear-gradient(135deg, #f0f4f8 0%, #dde3ea 100%); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 5rem; color: #b0bac4; margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        &#128722;
+                    </div>
+                    <?php if ($product->get('pro_on_sale')): ?>
+                    <div style="margin-top: 0.75rem;">
+                        <span style="display: inline-block; background: #dc3545; color: #fff; font-size: 0.8125rem; font-weight: 700; padding: 0.25rem 0.75rem; border-radius: 4px; letter-spacing: 0.05em;">SALE</span>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <?php if ($product->get('pro_description')): ?>
+                <div>
+                    <h5 style="margin-bottom: 0.75rem;">Description</h5>
+                    <div style="color: var(--color-muted);"><?php echo $product->get('pro_description'); ?></div>
+                </div>
                 <?php endif; ?>
             </div>
 
-            <?php if ($product->get('pro_description')): ?>
-            <div class="mb-4">
-                <h5>Description</h5>
-                <div class="text-muted"><?php echo $product->get('pro_description'); ?></div>
-            </div>
-            <?php endif; ?>
-        </div>
-
-        <div class="col-lg-6">
-            <h1 class="mb-3"><?php echo htmlspecialchars($product->get('pro_name')); ?></h1>
-
-            <?php if ($product->is_sold_out()): ?>
-                <div class="alert alert-warning mb-3"><strong>Sold Out</strong></div>
-            <?php elseif ($product->get_readable_price()): ?>
-                <div class="mb-3" style="font-size: 1.75rem; font-weight: 700; color: var(--color-primary);">
-                    <?php echo $product->get_readable_price(); ?>
-                </div>
-            <?php endif; ?>
-
-            <div class="card border-0 bg-light rounded-4 p-4 mb-4">
-                <?php
-                if (!$product_version): ?>
-                    <div class="alert alert-danger mb-0">This product is not available for purchase. No product version found.</div>
-                <?php elseif (!$product->is_sold_out() && $cart->can_add_to_cart($product_version)):
-                    $formwriter = $page->getFormWriter('product_form', ['action' => $product->get_url(), 'method' => 'POST']);
-                    echo $formwriter->begin_form();
-                    echo $formwriter->hiddeninput('product_id', $product_id);
-                    if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
-                        echo '<div class="d-grid mt-3">';
-                        echo $formwriter->submitbutton('btn_submit', 'Add to Cart', ['class' => 'btn btn-primary']);
-                        echo '</div>';
-                    }
-                    echo $formwriter->end_form();
-                    $product->output_javascript($formwriter, []);
-                elseif ($product_version && !$cart->can_add_to_cart($product_version)): ?>
-                    <div class="alert alert-warning mb-0">
-                        <?php
-                        if ($product_version->is_subscription()) {
-                            echo $cart->get_num_recurring()
-                                ? 'You cannot add more than one subscription to the cart.'
-                                : 'You cannot add a subscription to a cart that contains other items. Please check out first or clear your cart.';
-                        } else {
-                            echo 'You cannot add an item to a cart containing a subscription. Please check out first or clear your cart.';
-                        }
-                        ?>
+            <!-- Right: purchase form -->
+            <div>
+                <?php if ($product->is_sold_out()): ?>
+                    <div class="alert alert-warning" style="margin-bottom: 1.5rem;"><strong>Sold Out</strong></div>
+                <?php elseif ($product->get_readable_price()): ?>
+                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-primary); margin-bottom: 1.25rem;">
+                        <?php echo $product->get_readable_price(); ?>
                     </div>
                 <?php endif; ?>
+
+                <div style="background: var(--color-light, #f8f9fa); border-radius: 8px; padding: 1.75rem; margin-bottom: 1.5rem;">
+                    <?php
+                    if (!$product_version): ?>
+                        <div class="alert alert-error">This product is not available for purchase. No product version found.</div>
+                    <?php elseif (!$product->is_sold_out() && $cart->can_add_to_cart($product_version)):
+                        $formwriter = $page->getFormWriter('product_form', ['action' => $product->get_url(), 'method' => 'POST']);
+                        echo $formwriter->begin_form();
+                        echo $formwriter->hiddeninput('product_id', $product_id);
+                        if ($product->output_product_form($formwriter, $page_vars['user'], null, $product_version->key)) {
+                            echo '<div style="margin-top: 1.25rem;">';
+                            echo $formwriter->submitbutton('btn_submit', 'Add to Cart', ['class' => 'btn btn-primary']);
+                            echo '</div>';
+                        }
+                        echo $formwriter->end_form();
+                        $product->output_javascript($formwriter, []);
+                    elseif ($product_version && !$cart->can_add_to_cart($product_version)): ?>
+                        <div class="alert alert-warning">
+                            <?php
+                            if ($product_version->is_subscription()) {
+                                echo $cart->get_num_recurring()
+                                    ? 'You cannot add more than one subscription to the cart.'
+                                    : 'You cannot add a subscription to a cart that contains other items. Please check out first or clear your cart.';
+                            } else {
+                                echo 'You cannot add an item to a cart containing a subscription. Please check out first or clear your cart.';
+                            }
+                            ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <div style="padding-top: 1rem; border-top: 1px solid var(--color-border, #eee);">
+                    <a href="/products" class="btn btn-outline">&#8592; Back to Products</a>
+                </div>
             </div>
 
-            <div class="mt-4 pt-4 border-top">
-                <a href="/products" class="btn btn-outline">&larr; Back to Products</a>
-            </div>
         </div>
-
     </div>
-</div>
+</section>
 
 <?php
-    echo PublicPage::EndPage();
     $page->public_footer(['track' => true]);
 ?>

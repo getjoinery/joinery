@@ -33,12 +33,12 @@ canvas-html5/
     style.css              # Shared vanilla CSS (~1,370 lines, 53KB)
     script.js              # Shared vanilla JS (~176 lines, 7KB)
     about.html             # Template page (copy header/footer from here)
-    *.html                 # 76 converted pages
+    *.html                 # 86 converted pages
     images/ -> symlink     # Points to Canvas 7 Files/images/
     demos/ -> symlink      # Points to Canvas 7 Files/demos/
 ```
 
-## Current Progress: 76 Files Complete
+## Current Progress: 86 Files Complete
 
 ### Foundation Files
 - **`style.css`** -- ~1,370 lines of comprehensive vanilla CSS covering all major Canvas components
@@ -46,7 +46,7 @@ canvas-html5/
 - **`images/`** -- Symlink to `Canvas 7 Files/images/`
 - **`demos/`** -- Symlink to `Canvas 7 Files/demos/`
 
-### Completed Files (76)
+### Completed Files (86)
 
 **Phase 1-3 (56 files):**
 404.html, about.html, about-2.html, about-me.html, block-contact-1.html,
@@ -69,16 +69,26 @@ image-sliders.html, index.html, page-submenu.html, parallax-elements.html,
 pie-skills.html, process-steps.html, profile.html, promo-boxes.html,
 shape-dividers.html, split-section.html, style-boxes.html, widgets.html
 
-### Suggested Next Batch
+**Phase 5 (10 files):**
+ajax-button.html, block-blog-grid-hover.html, block-blog-list-hover.html,
+block-carousel-tabs.html, block-footer-2.html, hover-animations.html,
+labels-badges.html, media-embeds.html, offcanvas.html, ticker.html
 
-Skip alternates (e.g., 404-2, 404-3) and focus on unique page types not yet covered:
+### Verified Next Batch (from actual Canvas 7 directory)
 
+**IMPORTANT: Always verify filenames with `find` before assigning to agents.** Canvas 7 does NOT use
+numbered variants (no banner-1.html, grid-2.html, etc.). Run this first:
+```bash
+find "/home/user1/theme-sources/canvas/Canvas 7 Files" -maxdepth 1 -name "*.html" -type f | sed 's/.*\///' | sort
+```
+
+**Confirmed existing unique pages not yet converted:**
 - **Homepage variants:** index-blog.html, index-portfolio.html, index-shop.html, index-magazine.html
 - **Contact variants:** contact-4.html, contact-6.html, contact-7.html
-- **Additional unique pages:** maintenance.html, navigation.html, social-icons.html, ticker.html, labels-badges.html, media-embeds.html, hover-animations.html, offcanvas.html, side-navigation.html, scroll-elements.html
-- **Form showcases:** form-elements.html, form-fields.html, conditional-form.html
-- **Additional block-* pages** (select ones with unique component patterns)
-- **Additional portfolio-* layout variants** (select ones with unique grid patterns)
+- **Page variants:** maintenance.html, navigation.html, social-icons.html, side-navigation.html, scroll-elements.html, animations.html, adaptive-scheme.html, blank-page.html
+- **Form showcases:** form-elements.html, form-fields.html, conditional-form.html (verify these exist first)
+- **Block-* content pages:** block-footer-3.html through block-footer-8.html, block-blog-single-2.html through block-blog-single-6.html, block-contact-2.html, block-contact-3.html, block-content-counter-*.html, block-content-featured-boxes-2.html through block-content-featured-boxes-8.html, block-content-testimonials.html, block-content-testimonials-2.html, block-content-testimonials-3.html, block-content-team-1.html, block-content-team-2.html, block-content-cards-2.html through block-content-cards-10.html, block-content-gallery-2.html through block-content-gallery-10.html, block-content-pricing-1.html through block-content-pricing-11.html
+- **Page title variants:** page-title.html, page-title-bold.html, page-title-center.html, page-title-dark.html, page-title-fancy.html, page-title-parallax.html, page-title-mini.html, page-title-video.html
 
 **General rule:** Most of the 1,394 original files are near-duplicates (sidebar variants, recaptcha variants, etc.). Focus on files that introduce genuinely new visual components. ~100 total converted files would cover 95%+ of unique components.
 
@@ -156,15 +166,52 @@ This is NOT a translation/porting exercise. For each file:
 - Images in the same positions with same sizing
 - Minor differences acceptable: exact animation timing, hover micro-interactions, carousel auto-play
 
-### Agent Conversion Method
-Files can be converted efficiently using background agents. Each agent:
-1. Reads the original Canvas 7 HTML file
-2. Reads the shared style.css and about.html template
-3. Creates a new vanilla HTML5 file with header/footer from about.html
-4. Adds page-specific content and styles
-5. Sets permissions to 666
+### Agent Conversion Method — LESSONS LEARNED
 
-20 files can run in parallel in ~3-5 minutes. Use `general-purpose` agent type.
+**TL;DR: Agents are bad at writing files. Use agents only to analyze + return HTML; main session writes files.**
+
+#### What Actually Works (Phase 5 experience)
+
+**Agents frequently fail to write files** due to permission prompt sandboxing — they get blocked waiting
+for interactive approval that never comes in async mode. 26 agents were launched; only ~4 files were
+written by agents. The main session wrote 6 files directly in seconds.
+
+**Efficient workflow:**
+
+**Option A — Main session writes directly (fastest, most reliable):**
+1. Use `find` to get verified filenames from Canvas 7 directory
+2. Read original file to understand structure
+3. Use Write tool to create vanilla HTML5 file
+4. No agents needed for simple conversions
+
+**Option B — Agents for analysis only:**
+Have agents read source files and **return complete HTML as their result** (not try to write).
+Then main session writes all returned HTML using Write tool.
+
+Agent prompt template:
+```
+Read /home/user1/theme-sources/canvas/Canvas 7 Files/[filename].html
+Read /home/user1/theme-sources/canvas-html5/about.html for the template structure.
+
+Return the COMPLETE converted vanilla HTML5 file content as your response.
+DO NOT try to write the file yourself — just return the HTML.
+```
+
+**Option C — Parallel agents for large batches (when writing works):**
+- Assign 3-5 confirmed-existing files per agent
+- Include explicit "You have write permission, use the Write tool" in prompt
+- Expect ~30-40% success rate on writes; main session handles failures
+
+#### Key Pitfalls
+- **Never guess filenames.** Canvas 7 doesn't use numbered variants. Always verify with `find` first.
+- **Agents can't reliably write files** in async mode — permission prompts stall them.
+- **5 agents × 5 files = less than 5 agents × "return HTML content"** — the latter actually completes.
+- Many Canvas 7 files are near-identical (24 versions of the same contact form). Skip them.
+
+#### Realistic throughput
+- Main session writing directly: ~10-15 files per session with good parallel Read → Write flow
+- Agents returning HTML for main session to write: ~20-30 files per session
+- Blind parallel agents trying to write: ~4-8 files per 26 agents (mostly wasted tokens)
 
 ## CSS Architecture
 

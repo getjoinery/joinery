@@ -161,14 +161,13 @@ Switch test site theme to `canvas-html5` and verify all public pages, responsive
 ### In Scope
 - Refactoring `PublicPageBase` to be framework-agnostic (Phase 1)
 - Public-facing pages only
-- All view files that the current Canvas theme overrides
-- Base views that need overrides to remove Bootstrap dependencies
-- Plugin public views (controld plugin has 9 views)
+- All view files in `/views/` that contain Bootstrap-specific markup and need theme overrides
 
 ### Out of Scope
 - **Admin interface** -- Stays on Falcon/Bootstrap. Admin pages (`/adm/`) are unaffected.
 - **Admin page FormWriter** -- Admin forms continue using Bootstrap FormWriter
-- **Additional canvas-html5 static conversions** -- The 76 existing files are sufficient reference
+- **Plugin views** -- Plugin-specific views (e.g. controld) are not part of this theme. Plugins maintain their own views independently.
+- **Additional canvas-html5 static conversions** -- The existing files are sufficient reference
 - **Email templates** -- Email HTML is separate from theme rendering
 - **API endpoints** -- No UI involvement
 
@@ -193,6 +192,20 @@ Compare to current Canvas theme: ~780KB CSS + ~8MB JS.
 | FormWriterV2HTML5 output gaps | Test all field types early; the class is already built and tested |
 | Missing utility classes | Add minimal set to `custom.css` rather than pulling in a framework |
 | Plugin views use Bootstrap | Override in theme or add compatibility styles in `custom.css` |
+
+### Phase 3: Promote Theme to Base Views
+
+Once the canvas-html5 theme is complete and verified, promote its views to become the system default:
+
+1. **Move view files** from `theme/canvas-html5/views/` to `/views/` (replacing Bootstrap-markup base views)
+2. **Move includes** — `PublicPage.php` becomes the new `PublicPageBase` (or a new concrete base class in `/includes/`)
+3. **Falcon becomes an override theme** — move current Falcon public views (Bootstrap markup) into `theme/falcon/views/` so Falcon overrides the new HTML5 base
+4. **Remove `theme/canvas-html5/`** — no longer needed once its files are the base
+
+After this, the architecture is:
+- `/views/` = vanilla HTML5 (canvas-html5 design)
+- `theme/falcon/views/` = Bootstrap overrides
+- New themes extend the HTML5 base by default
 
 ## Success Criteria
 
