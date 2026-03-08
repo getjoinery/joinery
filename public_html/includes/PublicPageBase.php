@@ -497,9 +497,11 @@ abstract class PublicPageBase {
 			}
 		}
 
-		// Base CSS/JS provides framework-agnostic styles and interactions for fallback views
-		// Themes that include Bootstrap will naturally override these
+		// Base CSS/JS provides default styles for all core views (forms, tables, nav, etc.)
+		// Always loaded first so theme-specific CSS can override via the cascade.
+		// This ensures fallback views look correct even when a theme doesn't style every element.
 		echo '<link rel="stylesheet" href="/assets/css/base.css">' . "\n";
+		echo '<link rel="stylesheet" href="/assets/css/style.css">' . "\n";
 		echo '<script defer src="/assets/js/base.js?v=2"></script>' . "\n";
 
 		if($settings->get_setting('custom_css')){
