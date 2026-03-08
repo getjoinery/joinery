@@ -15,8 +15,8 @@ $page = new AdminPage();
 $page->admin_header(
 array(
 	'menu-id'=> 'groups',
-	'page_title' => 'Add User',
-	'readable_title' => 'Add User',
+	'page_title' => 'Groups',
+	'readable_title' => 'Groups',
 	'breadcrumbs' => array(
 		'Users'=>'/admin/admin_users',
 		'Groups' => '',

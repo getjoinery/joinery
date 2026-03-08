@@ -500,7 +500,7 @@ abstract class PublicPageBase {
 		// Base CSS/JS provides framework-agnostic styles and interactions for fallback views
 		// Themes that include Bootstrap will naturally override these
 		echo '<link rel="stylesheet" href="/assets/css/base.css">' . "\n";
-		echo '<script defer src="/assets/js/base.js"></script>' . "\n";
+		echo '<script defer src="/assets/js/base.js?v=2"></script>' . "\n";
 
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
@@ -697,7 +697,14 @@ abstract class PublicPageBase {
 		// Store options for use in endtable
 		$this->current_table_options = $options;
 
+		// Signal to renderBoxOpen that this box contains a table (affects card-body padding)
+		if (property_exists($this, '_is_table_box')) {
+			$this->_is_table_box = true;
+		}
 		$this->begin_box($options);
+		if (property_exists($this, '_is_table_box')) {
+			$this->_is_table_box = false;
+		}
 
 		if(!$pager){
 			$pager = new Pager();
@@ -713,16 +720,21 @@ abstract class PublicPageBase {
 		$css = $this->getTableClasses();
 		$wrapperClass = isset($css['wrapper']) ? $css['wrapper'] : 'table-wrapper';
 		$tableClass = isset($css['table']) ? $css['table'] : 'styled-table';
+		$headerClass = isset($css['header']) ? $css['header'] : '';
 
 		echo '<div class="' . $wrapperClass . '">';
 		echo '<table class="' . $tableClass . '">';
-		echo '<tr>';
+		if ($headerClass !== '') {
+			echo '<thead class="' . $headerClass . '"><tr>';
+		} else {
+			echo '<thead><tr>';
+		}
 
 		foreach ($headers as $value) {
 			echo '<th>'.$value.'</th>';
 		}
 
-		echo '</tr>';
+		echo '</tr></thead><tbody>';
 	}
 
 	/**
@@ -812,7 +824,7 @@ abstract class PublicPageBase {
 		if(!$pager){
 			$pager = new Pager();
 		}
-		echo '</table></div>';
+		echo '</tbody></table></div>';
 
 		// Build pagination data structure
 		$options = isset($this->current_table_options) ? $this->current_table_options : array();

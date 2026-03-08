@@ -80,7 +80,7 @@ array(
 				<h6 class="mb-0"><span class="fas fa-user me-2"></span>Account Information</h6>
 			</div>
 			<div class="card-body">
-				<table class="table table-borderless fs-9 fw-medium mb-0">
+				<table class="table table-borderless fw-medium mb-0">
 					<tbody>
 						<tr>
 							<td class="p-1" style="width: 35%;">Email:</td>
@@ -172,7 +172,7 @@ array(
 				<h6 class="mb-0"><span class="fas fa-star me-2"></span>Subscription Tier</h6>
 			</div>
 			<div class="card-body">
-				<table class="table table-borderless fs-9 fw-medium mb-0">
+				<table class="table table-borderless fw-medium mb-0">
 					<tbody>
 						<tr>
 							<td class="p-1" style="width: 35%;">Current Tier:</td>
@@ -241,7 +241,7 @@ array(
 				<h6 class="mb-0"><span class="fas fa-envelope-open me-2"></span>Mailing List Subscriptions</h6>
 			</div>
 			<div class="card-body">
-				<p class="fs-9 mb-0">This user is subscribed to: <strong><?php echo implode(', ', $user_subscribed_list); ?></strong></p>
+				<p class="mb-0">This user is subscribed to: <strong><?php echo implode(', ', $user_subscribed_list); ?></strong></p>
 			</div>
 		</div>
 		<?php endif; ?>
@@ -251,13 +251,13 @@ array(
 			<div class="card-header bg-body-tertiary">
 				<h6 class="mb-0"><span class="fas fa-users me-2"></span>Groups</h6>
 			</div>
-			<div class="card-body">
+			<div class="card-body p-0">
 				<div class="table-responsive">
-					<table class="table table-sm fs-9 mb-0">
+					<table class="table mb-0">
 						<thead>
-							<tr class="border-bottom">
-								<th class="py-2">Group</th>
-								<th class="py-2 text-end">Action</th>
+							<tr>
+								<th>Group</th>
+								<th class="text-end">Action</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -267,8 +267,8 @@ array(
 							foreach($groups as $group): ?>
 								<?php $groupmember = $group->is_member_in_group($user->key); ?>
 								<tr>
-									<td class="py-2"><?php echo htmlspecialchars($group->get('grp_name')); ?></td>
-									<td class="py-2 text-end">
+									<td><?php echo htmlspecialchars($group->get('grp_name')); ?></td>
+									<td class="text-end">
 										<form method="POST" action="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>" style="display: inline;">
 											<input type="hidden" name="action" value="remove_from_group" />
 											<input type="hidden" name="grm_group_member_id" value="<?php echo $groupmember->key; ?>" />
@@ -335,7 +335,7 @@ array(
 							$status_words = $subscription->get('odi_subscription_status') ? $subscription->get('odi_subscription_status') : 'active';
 						?>
 						<div class="mb-3 p-2 bg-body-tertiary rounded">
-							<div class="fs-9 fw-semi-bold">
+							<div class="fw-semi-bold">
 								<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
 								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
@@ -350,7 +350,7 @@ array(
 						</div>
 					<?php endforeach; ?>
 				<?php else: ?>
-					<p class="text-600 fs-9 mb-0">No active subscriptions</p>
+					<p class="text-600 mb-0">No active subscriptions</p>
 				<?php endif; ?>
 			</div>
 			<?php echo $active_subscriptions_pager->record_count_info($active_subscriptions->count(), array('show_all_url' => $show_all_url)); ?>
@@ -365,7 +365,7 @@ array(
 				<?php if($cancelled_subscriptions->count() > 0): ?>
 					<?php foreach($cancelled_subscriptions as $subscription): ?>
 						<div class="mb-2 p-2 bg-body-tertiary rounded">
-							<div class="fs-9 fw-semi-bold">
+							<div class="fw-semi-bold">
 								<a href="/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
 								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
@@ -379,7 +379,7 @@ array(
 						</div>
 					<?php endforeach; ?>
 				<?php else: ?>
-					<p class="text-600 fs-9 mb-0">No cancelled subscriptions</p>
+					<p class="text-600 mb-0">No cancelled subscriptions</p>
 				<?php endif; ?>
 			</div>
 			<?php echo $cancelled_subscriptions_pager->record_count_info($cancelled_subscriptions->count(), array('show_all_url' => $show_all_url)); ?>
@@ -515,12 +515,12 @@ $page->endtable($orders_pager);
 			</div>
 			<div class="card-body p-0">
 				<div class="table-responsive">
-					<table class="table table-sm fs-9 mb-0">
-						<thead class="bg-body-tertiary">
+					<table class="table mb-0">
+						<thead>
 							<tr>
-								<th class="py-2 ps-3">Subject</th>
-								<th class="py-2 text-center">Status</th>
-								<th class="py-2 text-center">Sent Date</th>
+								<th>Subject</th>
+								<th class="text-center">Status</th>
+								<th class="text-center">Sent Date</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -538,13 +538,13 @@ $page->endtable($orders_pager);
 									$email = new Email($received_email->get('erc_eml_email_id'), TRUE);
 							?>
 								<tr>
-									<td class="py-2 ps-3">
+									<td>
 										<a href="/admin/admin_email_view?eml_email_id=<?php echo $email->key; ?>">
 											<?php echo htmlspecialchars($email->get('eml_subject')); ?>
 										</a>
 									</td>
-									<td class="py-2 text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
-									<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
+									<td class="text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
+									<td class="text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
 								</tr>
 							<?php endforeach; ?>
 						</tbody>
@@ -562,12 +562,12 @@ $page->endtable($orders_pager);
 			</div>
 			<div class="card-body p-0">
 				<div class="table-responsive">
-					<table class="table table-sm fs-9 mb-0">
-						<thead class="bg-body-tertiary">
+					<table class="table mb-0">
+						<thead>
 							<tr>
-								<th class="py-2 ps-3">Subject</th>
-								<th class="py-2 text-center">Status</th>
-								<th class="py-2 text-center">Sent Date</th>
+								<th>Subject</th>
+								<th class="text-center">Status</th>
+								<th class="text-center">Sent Date</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -582,9 +582,9 @@ $page->endtable($orders_pager);
 								foreach ($emails as $email):
 							?>
 								<tr>
-									<td class="py-2 ps-3"><?php echo htmlspecialchars($email->get('eml_subject')); ?></td>
-									<td class="py-2 text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
-									<td class="py-2 text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
+									<td><?php echo htmlspecialchars($email->get('eml_subject')); ?></td>
+									<td class="text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
+									<td class="text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
 								</tr>
 							<?php endforeach; ?>
 						</tbody>
@@ -605,12 +605,12 @@ $page->endtable($orders_pager);
 			</div>
 			<div class="card-body p-0">
 				<div class="table-responsive">
-					<table class="table table-sm fs-9 mb-0">
-						<thead class="bg-body-tertiary">
+					<table class="table mb-0">
+						<thead>
 							<tr>
-								<th class="py-2 ps-3">Session</th>
-								<th class="py-2 text-center">Last Viewed</th>
-								<th class="py-2 text-center"># Views</th>
+								<th>Session</th>
+								<th class="text-center">Last Viewed</th>
+								<th class="text-center"># Views</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -630,9 +630,9 @@ $page->endtable($orders_pager);
 											$session_num = $event_session->get('evs_session_number') ? 'Session '.$event_session->get('evs_session_number'). ' - ' : '';
 							?>
 								<tr>
-									<td class="py-2 ps-3"><?php echo htmlspecialchars($event->get('evt_name') . ' - '. $session_num . $event_session->get('evs_title')); ?></td>
-									<td class="py-2 text-center"><?php echo LibraryFunctions::convert_time($visit_time, 'UTC', $session->get_timezone()); ?></td>
-									<td class="py-2 text-center"><?php echo $event_session->get_number_visits_for_user($user->key); ?></td>
+									<td><?php echo htmlspecialchars($event->get('evt_name') . ' - '. $session_num . $event_session->get('evs_title')); ?></td>
+									<td class="text-center"><?php echo LibraryFunctions::convert_time($visit_time, 'UTC', $session->get_timezone()); ?></td>
+									<td class="text-center"><?php echo $event_session->get_number_visits_for_user($user->key); ?></td>
 								</tr>
 							<?php
 										endif;
@@ -653,16 +653,16 @@ $page->endtable($orders_pager);
 			</div>
 			<div class="card-body p-0">
 				<div class="table-responsive">
-					<table class="table table-sm fs-9 mb-0">
-						<thead class="bg-body-tertiary">
+					<table class="table mb-0">
+						<thead>
 							<tr>
-								<th class="py-2 ps-3">Time</th>
+								<th>Time</th>
 							</tr>
 						</thead>
 						<tbody>
 							<?php foreach ($logins as $login): ?>
 								<tr>
-									<td class="py-2 ps-3"><?php echo LibraryFunctions::convert_time($login->log_login_time, "UTC", $session->get_timezone()); ?></td>
+									<td><?php echo LibraryFunctions::convert_time($login->log_login_time, "UTC", $session->get_timezone()); ?></td>
 								</tr>
 							<?php endforeach; ?>
 						</tbody>

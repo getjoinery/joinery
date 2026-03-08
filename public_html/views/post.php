@@ -136,7 +136,7 @@
                     <?php foreach ($page_vars['comments'] as $comment): ?>
                     <div class="border-bottom p-4">
                         <div class="d-flex align-items-start">
-                            <img class="rounded-circle me-3" src="/includes/images/blank-avatar.png" width="50" height="50" alt="Avatar">
+                            <img class="rounded-circle me-3" src="/assets/images/blank-avatar.png" width="50" height="50" alt="Avatar">
                             <div class="flex-grow-1">
                                 <h6 class="mb-0"><?php echo htmlspecialchars($comment->get('cmt_author_name')); ?></h6>
                                 <small class="text-muted"><?php echo LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></small>
@@ -189,7 +189,7 @@
                                         <?php foreach ($replies as $reply):
                                             if ($reply->get('cmt_comment_id_parent') == $comment->key): ?>
                                             <div class="d-flex align-items-start mt-3 ms-4">
-                                                <img class="rounded-circle me-3" src="/includes/images/blank-avatar.png" width="40" height="40" alt="Avatar">
+                                                <img class="rounded-circle me-3" src="/assets/images/blank-avatar.png" width="40" height="40" alt="Avatar">
                                                 <div class="flex-grow-1 bg-light p-3" style="border-radius: 4px;">
                                                     <div class="d-flex justify-content-between mb-1">
                                                         <strong class="small"><?php echo htmlspecialchars($reply->get('cmt_author_name')); ?></strong>
