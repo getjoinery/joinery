@@ -1,15 +1,12 @@
 {
   "name": "default",
   "displayName": "Default Theme",
-  "version": "1.0.0",
-  "description": "Default system theme",
+  "version": "1.1.0",
+  "description": "Default canvas HTML5 theme — uses base views and styles with no overrides",
   "author": "Joinery Team",
   "is_stock": true,
   "requires": {
     "php": ">=7.4",
     "joinery": ">=1.0.0"
-  },
-  "cssFramework": "tailwind",
-  "formWriterBase": "FormWriterTailwind",
-  "publicPageBase": "PublicPageFalcon"
+  }
 }

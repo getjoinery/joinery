@@ -2,18 +2,13 @@
 require_once(__DIR__ . '/PathHelper.php');
 
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/PublicPageFalcon.php'));
+require_once(PathHelper::getIncludePath('includes/PublicPageJoinerySystem.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 
-// Load theme-specific PublicPage override if available (e.g. joinery-system uses PublicPageJoinerySystem)
-// Falls back to PublicPageFalcon if the theme has no PublicPage.php
-$_admin_pubpage = PathHelper::getThemeFilePath('PublicPage.php', 'includes');
-if ($_admin_pubpage && file_exists($_admin_pubpage) && !class_exists('PublicPage')) {
-    require_once($_admin_pubpage);
-}
+// Admin section always uses joinery-system theme, regardless of the active public theme
 if (!class_exists('PublicPage')) {
-    class PublicPage extends PublicPageFalcon {}
+    class PublicPage extends PublicPageJoinerySystem {}
 }
 
 class AdminPage extends PublicPage {
@@ -25,19 +20,19 @@ class AdminPage extends PublicPage {
 
     /**
      * Get FormWriter instance for admin pages
-     * Uses FormWriterV2Bootstrap (modern version)
+     * Uses FormWriterV2HTML5 to match the joinery-system HTML5 theme
      *
      * @param string $form_id Form identifier (default: 'form1')
      * @param array $form_options Additional form options (csrf, action, method, etc.)
-     * @return FormWriterV2Bootstrap FormWriter instance
+     * @return FormWriterV2HTML5 FormWriter instance
      *
      * Usage:
      *   $formwriter = $page->getFormWriter('form1');
      *   $formwriter = $page->getFormWriter('form1', ['csrf' => false]);
      */
     public function getFormWriter($form_id = 'form1', $form_options = []) {
-        require_once(PathHelper::getIncludePath('includes/FormWriterV2Bootstrap.php'));
-        return new FormWriterV2Bootstrap($form_id, $form_options);
+        require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+        return new FormWriterV2HTML5($form_id, $form_options);
     }
 
 
