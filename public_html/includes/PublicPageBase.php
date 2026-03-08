@@ -1047,6 +1047,15 @@ abstract class PublicPageBase {
 				top: 32px !important;
 				height: calc(100vh - 32px) !important;
 			}
+
+			/* Fix for joinery-system theme sidebar and topbar */
+			body.joinery-admin-bar-active .sidebar {
+				top: 32px !important;
+				height: calc(100vh - 32px) !important;
+			}
+			body.joinery-admin-bar-active .topbar {
+				top: 32px !important;
+			}
 			
 			/* Fix for any other sticky/fixed elements */
 			body.joinery-admin-bar-active .sticky-top {
