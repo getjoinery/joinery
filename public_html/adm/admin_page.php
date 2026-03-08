@@ -279,17 +279,16 @@
 		// Actions
 		$actions = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '" class="btn btn-sm btn-outline-primary me-1">Edit</a>';
 		if ($is_deleted) {
-			$actions .= '<form method="POST" style="display:inline">';
-			$actions .= '<input type="hidden" name="action" value="undelete_component">';
-			$actions .= '<input type="hidden" name="pac_page_content_id" value="' . $component->key . '">';
-			$actions .= '<button type="submit" class="btn btn-sm btn-outline-success">Undelete</button>';
-			$actions .= '</form>';
+			$actions .= AdminPage::action_button('Undelete', '', [
+				'hidden' => ['action' => 'undelete_component', 'pac_page_content_id' => $component->key],
+				'class'  => 'btn btn-sm btn-outline-success',
+			]);
 		} else {
-			$actions .= '<form method="POST" style="display:inline" onsubmit="return confirm(\'Are you sure you want to delete this component?\');">';
-			$actions .= '<input type="hidden" name="action" value="delete_component">';
-			$actions .= '<input type="hidden" name="pac_page_content_id" value="' . $component->key . '">';
-			$actions .= '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
-			$actions .= '</form>';
+			$actions .= AdminPage::action_button('Delete', '', [
+				'hidden'  => ['action' => 'delete_component', 'pac_page_content_id' => $component->key],
+				'confirm' => 'Are you sure you want to delete this component?',
+				'class'   => 'btn btn-sm btn-outline-danger',
+			]);
 		}
 		array_push($rowvalues, $actions);
 

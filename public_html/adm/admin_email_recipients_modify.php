@@ -120,11 +120,10 @@
 				array_push($rowvalues, 'Users to exclude: '. $num_total);
 			}
 
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_email_recipients_modify?eml_email_id='.$email->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="remove" />
-			<input type="hidden" class="hidden" name="erg_email_recipient_group_id" id="erg_email_recipient_group_id" value="'.$recipient_group->key.'" />
-			<button type="submit">Delete</button>
-			</form>';
+			$delform = AdminPage::action_button('Delete', '/admin/admin_email_recipients_modify', [
+				'hidden'  => ['action' => 'remove', 'erg_email_recipient_group_id' => $recipient_group->key, 'eml_email_id' => $email->key],
+				'confirm' => 'Remove this recipient group?',
+			]);
 			array_push($rowvalues, $delform);
 
 			$page->disprow($rowvalues);

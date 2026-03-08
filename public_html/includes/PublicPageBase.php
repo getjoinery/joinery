@@ -634,6 +634,39 @@ abstract class PublicPageBase {
 		return $output;
 	}
 
+	/**
+	 * Render a small styled action button (POST form submit) for use inside table rows.
+	 *
+	 * @param string $label   Button text
+	 * @param string $url     Form action URL (may include query params)
+	 * @param array  $options Optional:
+	 *   'hidden'  => array of name=>value hidden fields to include
+	 *   'confirm' => string JS confirm message before submitting
+	 *   'class'   => additional CSS classes for the button
+	 * @return string HTML
+	 */
+	static function action_button($label, $url, $options = []) {
+		$hidden_fields = isset($options['hidden']) ? $options['hidden'] : [];
+		$confirm_msg   = isset($options['confirm']) ? $options['confirm'] : '';
+		$extra_class   = isset($options['class'])   ? ' ' . $options['class'] : '';
+
+		$onsubmit = '';
+		if ($confirm_msg) {
+			$escaped = htmlspecialchars($confirm_msg, ENT_QUOTES);
+			$onsubmit = ' onsubmit="return confirm(\'' . $escaped . '\');"';
+		}
+
+		$html = '<form method="POST" action="' . htmlspecialchars($url) . '" style="display:inline;"' . $onsubmit . '>';
+		foreach ($hidden_fields as $name => $value) {
+			$html .= '<input type="hidden" name="' . htmlspecialchars($name) . '" value="' . htmlspecialchars($value) . '">';
+		}
+		$btn_class = ($extra_class !== '') ? ltrim($extra_class) : 'btn btn-falcon-default btn-sm';
+		$html .= '<button type="submit" class="' . $btn_class . '">' . htmlspecialchars($label) . '</button>';
+		$html .= '</form>';
+
+		return $html;
+	}
+
 	public function public_footer($options=array()) {
 		$session = SessionControl::get_instance();
 		$session->clear_clearable_messages();

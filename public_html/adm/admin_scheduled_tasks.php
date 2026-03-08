@@ -213,25 +213,23 @@ if (empty($active_tasks)) {
 		echo '<a href="/admin/admin_scheduled_tasks?edit=' . $task->key . '" class="btn btn-sm btn-outline-primary" style="margin-right: 4px;">Edit</a>';
 
 		// Run Now button
-		echo '<form method="post" action="/admin/admin_scheduled_tasks" style="display: inline;">';
-		echo '<input type="hidden" name="action" value="run_now">';
-		echo '<input type="hidden" name="sct_scheduled_task_id" value="' . $task->key . '">';
-		echo '<button type="submit" class="btn btn-sm btn-outline-secondary" style="margin-right: 4px;">Run Now</button>';
-		echo '</form>';
+		echo AdminPage::action_button('Run Now', '/admin/admin_scheduled_tasks', [
+			'hidden' => ['action' => 'run_now', 'sct_scheduled_task_id' => $task->key],
+			'class'  => 'btn btn-sm btn-soft me-1',
+		]);
 
 		// Deactivate/Reactivate button
 		if ($is_active) {
-			echo '<form method="post" action="/admin/admin_scheduled_tasks" style="display: inline;">';
-			echo '<input type="hidden" name="action" value="deactivate">';
-			echo '<input type="hidden" name="sct_scheduled_task_id" value="' . $task->key . '">';
-			echo '<button type="submit" class="btn btn-sm btn-outline-warning">Deactivate</button>';
-			echo '</form>';
+			echo AdminPage::action_button('Deactivate', '/admin/admin_scheduled_tasks', [
+				'hidden'  => ['action' => 'deactivate', 'sct_scheduled_task_id' => $task->key],
+				'confirm' => 'Deactivate this scheduled task?',
+				'class'   => 'btn btn-sm btn-warning',
+			]);
 		} else {
-			echo '<form method="post" action="/admin/admin_scheduled_tasks" style="display: inline;">';
-			echo '<input type="hidden" name="action" value="reactivate">';
-			echo '<input type="hidden" name="sct_scheduled_task_id" value="' . $task->key . '">';
-			echo '<button type="submit" class="btn btn-sm btn-outline-success">Reactivate</button>';
-			echo '</form>';
+			echo AdminPage::action_button('Reactivate', '/admin/admin_scheduled_tasks', [
+				'hidden' => ['action' => 'reactivate', 'sct_scheduled_task_id' => $task->key],
+				'class'  => 'btn btn-sm btn-success',
+			]);
 		}
 
 		echo '</td>';

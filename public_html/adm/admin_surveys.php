@@ -59,11 +59,10 @@ foreach ($surveys as $survey){
 		array_push($rowvalues, '<b>Deleted</b>');
 	}
 	else{
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_survey_permanent_delete?svy_survey_id='. $survey->key.'">
-		<input type="hidden" class="hidden" name="action" value="removesurvey" />
-		<input type="hidden" class="hidden" name="svy_survey_id" value="'.$survey->key.'" />
-		<button type="submit">Delete</button>
-		</form>';
+		$delform = AdminPage::action_button('Delete', '/admin/admin_survey_permanent_delete', [
+			'hidden'  => ['action' => 'removesurvey', 'svy_survey_id' => $survey->key],
+			'confirm' => 'Are you sure you want to delete this survey?',
+		]);
 		array_push($rowvalues, $delform);
 	}
 

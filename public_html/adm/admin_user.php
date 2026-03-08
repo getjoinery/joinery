@@ -269,11 +269,10 @@ array(
 								<tr>
 									<td><?php echo htmlspecialchars($group->get('grp_name')); ?></td>
 									<td class="text-end">
-										<form method="POST" action="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>" style="display: inline;">
-											<input type="hidden" name="action" value="remove_from_group" />
-											<input type="hidden" name="grm_group_member_id" value="<?php echo $groupmember->key; ?>" />
-											<button type="submit" class="btn btn-sm btn-falcon-default">Remove</button>
-										</form>
+										<?php echo AdminPage::action_button('Remove', '/admin/admin_user', [
+											'hidden'  => ['action' => 'remove_from_group', 'grm_group_member_id' => $groupmember->key, 'usr_user_id' => $user->key],
+											'confirm' => 'Remove user from this group?',
+										]); ?>
 									</td>
 								</tr>
 							<?php endforeach; ?>
@@ -409,11 +408,10 @@ foreach ($event_registrations as $event_registration):
 	$added_cell = LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone(), 'M j');
 	$expires_cell = LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone(), 'M j');
 
-	$action_cell = '<form method="POST" action="/admin/admin_user?usr_user_id='.$user->key.'" style="display: inline;">'.
-		'<input type="hidden" name="action" value="remove_from_event" />'.
-		'<input type="hidden" name="evt_event_id" value="'.$event->key.'" />'.
-		'<button type="submit" class="btn btn-sm btn-falcon-default">Remove</button>'.
-		'</form>';
+	$action_cell = AdminPage::action_button('Remove', '/admin/admin_user', [
+		'hidden'  => ['action' => 'remove_from_event', 'evt_event_id' => $event->key, 'usr_user_id' => $user->key],
+		'confirm' => 'Remove user from this event?',
+	]);
 
 	$page->disprow(array($event_cell, $added_cell, $expires_cell, $action_cell));
 endforeach;

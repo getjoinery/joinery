@@ -163,11 +163,10 @@
 
 		array_push($rowvalues, $user->display_name());
 
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_mailing_list?mlt_mailing_list_id='.$mailing_list->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="removeregistrant" />
-		<input type="hidden" class="hidden" name="mlr_mailing_list_registrant_id" id="mlr_mailing_list_registrant_id" value="'.$registrant->key.'" />
-		<button type="submit">Delete</button>
-		</form>';
+		$delform = AdminPage::action_button('Delete', '/admin/admin_mailing_list', [
+			'hidden'  => ['action' => 'removeregistrant', 'mlr_mailing_list_registrant_id' => $registrant->key, 'mlt_mailing_list_id' => $mailing_list->key],
+			'confirm' => 'Remove this subscriber?',
+		]);
 		array_push($rowvalues, $delform);
 
 		$page->disprow($rowvalues);
