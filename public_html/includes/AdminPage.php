@@ -6,7 +6,17 @@ require_once(PathHelper::getIncludePath('includes/PublicPageFalcon.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 
-class AdminPage extends PublicPageFalcon {
+// Load theme-specific PublicPage override if available (e.g. joinery-system uses PublicPageJoinerySystem)
+// Falls back to PublicPageFalcon if the theme has no PublicPage.php
+$_admin_pubpage = PathHelper::getThemeFilePath('PublicPage.php', 'includes');
+if ($_admin_pubpage && file_exists($_admin_pubpage) && !class_exists('PublicPage')) {
+    require_once($_admin_pubpage);
+}
+if (!class_exists('PublicPage')) {
+    class PublicPage extends PublicPageFalcon {}
+}
+
+class AdminPage extends PublicPage {
 
     /**
      * Store header options for use in footer
@@ -50,7 +60,7 @@ class AdminPage extends PublicPageFalcon {
 		if (isset($options['no_page_card']) && $options['no_page_card'] === true) {
 			echo AdminPage::BeginPageNoCard($options);
 		} else {
-			echo AdminPage::BeginPage($options['readable_title']);
+			echo AdminPage::BeginPage($options['readable_title'], $options);
 		}
 
 		return true;

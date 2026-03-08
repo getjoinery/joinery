@@ -1,8 +1,8 @@
 {
-  "name": "falcon-html5",
-  "display_name": "Falcon HTML5 Theme",
+  "name": "joinery-system",
+  "display_name": "Joinery System",
   "version": "1.0.0",
-  "description": "Vanilla HTML5+CSS version of Falcon — no Bootstrap, FontAwesome, jQuery, Simplebar, or Popper. ~98% smaller payload.",
+  "description": "The Joinery system admin theme. Vanilla HTML5+CSS — no Bootstrap, FontAwesome, jQuery, Simplebar, or Popper. ~98% smaller payload.",
   "author": "Joinery Team",
   "is_stock": true,
   "system": true,
@@ -12,7 +12,7 @@
   },
   "cssFramework": "vanilla",
   "formWriterBase": "FormWriterBootstrap",
-  "publicPageBase": "PublicPageFalconHtml5",
+  "publicPageBase": "PublicPageJoinerySystem",
   "image_sizes": {
     "avatar": { "width": 80, "height": 80, "crop": true },
     "profile_card": { "width": 400, "height": 500, "crop": true },

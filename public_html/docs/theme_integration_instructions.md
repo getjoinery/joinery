@@ -538,7 +538,7 @@ tail -f /var/www/html/joinerytest/logs/error.log
 
 ## Important Notes
 
-1. **Always extend PublicPageBase**, never PublicPageFalcon
+1. **Always extend PublicPageBase directly** — never extend another theme's class (e.g. PublicPageFalcon). Each theme must be self-contained and inherit only from the framework base class. Inheriting from a sibling theme creates a hidden dependency on that theme's frontend framework (Bootstrap, etc.) and makes both themes harder to maintain independently.
 2. **Always implement getTableClasses()** in PublicPage class
 3. **Always fix permissions** before testing (644 files, 755 directories)
 4. **Always use actual HTML** from source template, not placeholders
