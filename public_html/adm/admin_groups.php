@@ -46,11 +46,10 @@ foreach ($groups as $group){
 
 	array_push($rowvalues, LibraryFunctions::convert_time($group->get('grp_update_time'), "UTC", $session->get_timezone(), 'M j, Y'));
 
-	$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_group_permanent_delete?grp_group_id='. $group->key.'">
-	<input type="hidden" class="hidden" name="action" value="remove" />
-	<input type="hidden" class="hidden" name="grp_group_id" value="'.$group->key.'" />
-	<button type="submit">Delete</button>
-	</form>';
+	$delform = AdminPage::action_button('Delete', '/admin/admin_group_permanent_delete', [
+		'hidden'  => ['action' => 'remove', 'grp_group_id' => $group->key],
+		'confirm' => 'Are you sure you want to delete this group?',
+	]);
 
 	array_push($rowvalues, $delform);
 

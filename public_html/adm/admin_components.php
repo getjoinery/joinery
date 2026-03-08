@@ -111,25 +111,24 @@ foreach ($contents as $content) {
 
 	// Published status with toggle button
 	$is_published = $content->get('pac_is_published');
-	$toggle_form = '<form method="POST" style="display:inline">';
-	$toggle_form .= '<input type="hidden" name="action" value="toggle_published">';
-	$toggle_form .= '<input type="hidden" name="pac_page_content_id" value="' . $content->key . '">';
-	if ($is_published) {
-		$toggle_form .= '<button type="submit" class="btn btn-sm btn-success">Published</button>';
-	} else {
-		$toggle_form .= '<button type="submit" class="btn btn-sm btn-secondary">Draft</button>';
-	}
-	$toggle_form .= '</form>';
+	$toggle_form = AdminPage::action_button(
+		$is_published ? 'Published' : 'Draft',
+		'',
+		[
+			'hidden' => ['action' => 'toggle_published', 'pac_page_content_id' => $content->key],
+			'class'  => $is_published ? 'btn btn-sm btn-success' : 'btn btn-sm btn-secondary',
+		]
+	);
 	array_push($rowvalues, $toggle_form);
 
 	// Actions
 	$edit_link = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $content->key . '" class="btn btn-sm btn-outline-primary me-1">Edit</a>';
 
-	$delete_form = '<form method="POST" style="display:inline" onsubmit="return confirm(\'Are you sure you want to delete this component?\');">';
-	$delete_form .= '<input type="hidden" name="action" value="delete">';
-	$delete_form .= '<input type="hidden" name="pac_page_content_id" value="' . $content->key . '">';
-	$delete_form .= '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
-	$delete_form .= '</form>';
+	$delete_form = AdminPage::action_button('Delete', '', [
+		'hidden'  => ['action' => 'delete', 'pac_page_content_id' => $content->key],
+		'confirm' => 'Are you sure you want to delete this component?',
+		'class'   => 'btn btn-sm btn-outline-danger',
+	]);
 
 	array_push($rowvalues, $edit_link . $delete_form);
 

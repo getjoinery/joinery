@@ -83,14 +83,10 @@ if ($page_vars['view'] === 'database') {
 		}
 
 		$rowvalues = array();
-		$delete_string = '
-		<form action="/admin/admin_errors_delete" method="post">
-			<input type="hidden" id="message" name="message" value="'.base64_encode($error->get('err_message')).'">
-			<input type="hidden" id="file" name="file" value="'.$error->get('err_file').'">
-			<input type="hidden" id="line" name="line" value="'.$error->get('err_line').'">
-		  <button type="submit" class="btn btn-sm btn-outline-secondary">Delete</button>
-		</form>
-		';
+		$delete_string = AdminPage::action_button('Delete', '/admin/admin_errors_delete', [
+			'hidden' => ['message' => base64_encode($error->get('err_message')), 'file' => $error->get('err_file'), 'line' => $error->get('err_line')],
+			'confirm' => 'Delete this error record?',
+		]);
 
 		array_push($rowvalues, $delete_string);
 		array_push($rowvalues, $user_name);

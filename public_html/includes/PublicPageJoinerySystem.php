@@ -18,6 +18,22 @@ class PublicPageJoinerySystem extends PublicPageBase {
     protected $_is_table_box = false;
 
     // =====================================================================
+    // Box open — close card-header properly for non-table boxes with altlinks
+    // =====================================================================
+    function begin_box($options = NULL) {
+        if (!is_array($options)) $options = array();
+        $this->renderBoxOpen($options);
+        $this->dropdown_or_buttons($options);
+        // For non-table boxes with altlinks, renderToolbar won't be called,
+        // so we close the flex container and card-header here.
+        if ($this->_box_has_toolbar && !$this->_is_table_box) {
+            echo '</div>'; // close right-side flex container
+            echo '</div>'; // close card-header
+            echo '<div class="card-body">'; // open card-body
+        }
+    }
+
+    // =====================================================================
     // Inline SVG icon map  (FontAwesome name → inline SVG)
     // =====================================================================
     protected static function getIconSvg($icon_name) {
@@ -249,7 +265,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
     // =====================================================================
     protected function renderDropdown($label, $links) {
         echo '<div class="dropdown d-inline-block">';
-        echo '<button class="btn btn-falcon-default btn-sm" type="button" data-toggle="dropdown">' . htmlspecialchars($label) . '</button>';
+        echo '<button class="btn btn-falcon-default btn-sm" type="button" data-toggle="dropdown">' . htmlspecialchars($label) . ' <svg width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:middle;margin-left:2px;"><path d="M1 1l4 4 4-4"/></svg></button>';
         echo '<div class="dropdown-menu">';
         foreach ($links as $link_label => $link_url) {
             echo '<a href="' . htmlspecialchars($link_url) . '" class="dropdown-item">' . htmlspecialchars($link_label) . '</a>';
