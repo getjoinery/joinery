@@ -74,11 +74,10 @@
 		$rowvalues = array();
 		array_push($rowvalues, $event->get('evt_name'));
 
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event_bundle?grp_group_id='. $group->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove" />
-		<input type="hidden" class="hidden" name="grm_group_member_id" value="'.$group_member->key.'" />
-		<button type="submit">Remove</button>
-		</form>';
+		$delform = AdminPage::action_button('Remove', '/admin/admin_event_bundle', [
+			'hidden'  => ['action' => 'remove', 'grm_group_member_id' => $group_member->key, 'grp_group_id' => $group->key],
+			'confirm' => 'Remove this event from the bundle?',
+		]);
 		array_push($rowvalues, $delform);
 
 		$page->disprow($rowvalues);

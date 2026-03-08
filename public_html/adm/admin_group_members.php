@@ -58,11 +58,10 @@
 */
 		array_push($rowvalues, $user->display_name());
 
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_user?usr_user_id='. $user->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_group" />
-		<input type="hidden" class="hidden" name="grm_group_member_id" value="'.$group_member->key.'" />
-		<button type="submit">Remove</button>
-		</form>';
+		$delform = AdminPage::action_button('Remove', '/admin/admin_user', [
+			'hidden'  => ['action' => 'remove_from_group', 'grm_group_member_id' => $group_member->key, 'usr_user_id' => $user->key],
+			'confirm' => 'Remove this user from the group?',
+		]);
 
 		array_push($rowvalues, $delform);
 

@@ -351,10 +351,11 @@
 			<h6 class="mb-0"><span class="fas fa-sync me-2"></span>Series Occurrences</h6>
 			<div>
 				<a href="/admin/admin_event_edit?evt_event_id=<?php echo $event->key; ?>" class="btn btn-sm btn-falcon-default me-2">Edit Series</a>
-				<form method="POST" action="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="d-inline">
-					<input type="hidden" name="action" value="end_series">
-					<button type="submit" class="btn btn-sm btn-falcon-danger" onclick="return confirm('End this recurring series? Future virtual instances will stop appearing.');">End Series</button>
-				</form>
+				<?php echo AdminPage::action_button('End Series', '/admin/admin_event', [
+					'hidden'  => ['action' => 'end_series', 'evt_event_id' => $event->key],
+					'confirm' => 'End this recurring series? Future virtual instances will stop appearing.',
+					'class'   => 'btn btn-sm btn-danger',
+				]); ?>
 			</div>
 		</div>
 		<div class="card-body">
@@ -406,11 +407,11 @@
 									<a href="/admin/admin_event_edit?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-falcon-default py-0 px-2">Edit</a>
 								<?php else: ?>
 									<a href="/admin/admin_event_edit?parent_event_id=<?php echo $event->key; ?>&instance_date=<?php echo $occ_date; ?>" class="btn btn-sm btn-falcon-primary py-0 px-2">Edit</a>
-									<form method="POST" action="/admin/admin_event?evt_event_id=<?php echo $event->key; ?>" class="d-inline">
-										<input type="hidden" name="action" value="cancel_instance">
-										<input type="hidden" name="instance_date" value="<?php echo $occ_date; ?>">
-										<button type="submit" class="btn btn-sm btn-falcon-danger py-0 px-2" onclick="return confirm('Cancel this occurrence?');">Cancel</button>
-									</form>
+									<?php echo AdminPage::action_button('Cancel', '/admin/admin_event', [
+										'hidden'  => ['action' => 'cancel_instance', 'instance_date' => $occ_date, 'evt_event_id' => $event->key],
+										'confirm' => 'Cancel this occurrence?',
+										'class'   => 'btn btn-sm btn-danger py-0 px-2',
+									]); ?>
 								<?php endif; ?>
 							</td>
 						</tr>
@@ -503,11 +504,10 @@
 		else{
 			array_push($rowvalues, LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
 		}
-		$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
-		<input type="hidden" class="hidden" name="action" id="action" value="remove_from_event" />
-		<input type="hidden" class="hidden" name="evr_event_registrant_id" id="evr_event_registrant_id" value="'.$event_registrant->key.'" />
-		<button type="submit" class="btn btn-sm btn-falcon-secondary">Remove</button>
-		</form>';
+		$delform = AdminPage::action_button('Remove', '/admin/admin_event', [
+			'hidden'  => ['action' => 'remove_from_event', 'evr_event_registrant_id' => $event_registrant->key, 'evt_event_id' => $event->key],
+			'confirm' => 'Remove this registrant from the event?',
+		]);
 		array_push($rowvalues, $delform);
 
         $page->disprow($rowvalues);
@@ -539,11 +539,10 @@
 			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
 			array_push($rowvalues, LibraryFunctions::convert_time($waiting_list->get('ewl_create_time'), 'UTC', $session->get_timezone()));
 
-			$delform = '<form id="form2" class="form2" name="form2" method="POST" action="/admin/admin_event?evt_event_id='. $event->key.'">
-			<input type="hidden" class="hidden" name="action" id="action" value="remove_from_waiting_list" />
-			<input type="hidden" class="hidden" name="ewl_waiting_list_id" id="ewl_waiting_list_id" value="'.$waiting_list->key.'" />
-			<button type="submit" class="btn btn-sm btn-falcon-secondary">Remove</button>
-			</form>';
+			$delform = AdminPage::action_button('Remove', '/admin/admin_event', [
+				'hidden'  => ['action' => 'remove_from_waiting_list', 'ewl_waiting_list_id' => $waiting_list->key, 'evt_event_id' => $event->key],
+				'confirm' => 'Remove from waiting list?',
+			]);
 			array_push($rowvalues, $delform);
 
 			$page->disprow($rowvalues);

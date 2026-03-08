@@ -712,25 +712,19 @@ if (!empty($display_messages)) {
 
             // Actions column
             if ($item['status'] === 'cached') {
-                $action_form = '<div class="btn-group" role="group">
-                               <form method="post" style="display: inline;">
-                                   <input type="hidden" name="url" value="' . htmlspecialchars($item['url']) . '">
-                                   <button type="submit" name="action" value="invalidate_url"
-                                           class="btn btn-sm btn-secondary">Invalidate</button>
-                               </form>
-                               <form method="post" style="display: inline;">
-                                   <input type="hidden" name="url" value="' . htmlspecialchars($item['url']) . '">
-                                   <button type="submit" name="action" value="delete_from_index"
-                                           class="btn btn-sm btn-secondary ms-1">Delete</button>
-                               </form>
-                               </div>';
+                $action_form = AdminPage::action_button('Invalidate', '/admin/admin_static_cache', [
+                                   'hidden' => ['action' => 'invalidate_url', 'url' => $item['url']],
+                               ]);
+                $action_form .= ' ' . AdminPage::action_button('Delete', '/admin/admin_static_cache', [
+                                   'hidden'  => ['action' => 'delete_from_index', 'url' => $item['url']],
+                                   'confirm' => 'Delete this URL from the cache index?',
+                               ]);
                 array_push($rowvalues, $action_form);
             } elseif ($item['status'] === 'nostatic') {
-                $action_form = '<form method="post" style="display: inline;">
-                               <input type="hidden" name="url" value="' . htmlspecialchars($item['url']) . '">
-                               <button type="submit" name="action" value="delete_from_index"
-                                       class="btn btn-sm btn-secondary">Delete</button>
-                               </form>';
+                $action_form = AdminPage::action_button('Delete', '/admin/admin_static_cache', [
+                                   'hidden'  => ['action' => 'delete_from_index', 'url' => $item['url']],
+                                   'confirm' => 'Delete this URL from the cache index?',
+                               ]);
                 array_push($rowvalues, $action_form);
             } else {
                 array_push($rowvalues, '-');
