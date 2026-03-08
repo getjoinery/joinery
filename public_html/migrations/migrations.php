@@ -1222,3 +1222,22 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Theme System Flags (v87) ==========
+	// joinery-system is the system admin theme (not deletable); falcon is not a system theme
+
+	// Insert joinery-system theme record if it doesn't exist
+	$migration = array();
+	$migration['database_version'] = '87';
+	$migration['test'] = "SELECT count(1) as count FROM thm_themes WHERE thm_name = 'joinery-system'";
+	$migration['migration_sql'] = "INSERT INTO thm_themes (thm_name, thm_display_name, thm_description, thm_version, thm_author, thm_is_active, thm_is_stock, thm_is_system, thm_create_time, thm_update_time) VALUES ('joinery-system', 'Joinery System', 'Vanilla HTML5+CSS admin theme for the Joinery system', '1.0.0', 'Joinery Team', false, true, true, now(), now())";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// Update falcon to not be a system theme
+	$migration = array();
+	$migration['database_version'] = '87';
+	$migration['test'] = "SELECT count(1) as count FROM thm_themes WHERE thm_name = 'falcon' AND thm_is_system = false";
+	$migration['migration_sql'] = "UPDATE thm_themes SET thm_is_system = false WHERE thm_name = 'falcon'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
