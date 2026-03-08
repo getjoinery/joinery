@@ -625,6 +625,42 @@ select.form-control {
 .input-group .form-control { border-radius: 0; }
 .input-group .form-control:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .input-group .form-control:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+/* Form validation states */
+.form-control.is-invalid {
+    border-color: var(--danger);
+    box-shadow: none;
+}
+.form-control.is-invalid:focus {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 0.2rem rgba(230,55,87,0.25);
+}
+.form-control.is-valid {
+    border-color: var(--success);
+    box-shadow: none;
+}
+.form-control.is-valid:focus {
+    border-color: var(--success);
+    box-shadow: 0 0 0 0.2rem rgba(0,210,122,0.25);
+}
+
+/* Error messages — both PHP server-side (.form-error) and JS client-side (.invalid-feedback) */
+.form-error,
+.invalid-feedback,
+.joinery-error-label {
+    display: block;
+    font-size: 0.8125rem;
+    color: var(--danger);
+    margin-top: 0.25rem;
+}
+.form-error .error-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.form-error .error-list li::before {
+    content: '⚠ ';
+}
+
 .input-group-text {
     display: flex;
     align-items: center;
