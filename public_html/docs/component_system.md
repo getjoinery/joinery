@@ -39,10 +39,11 @@ ComponentRenderer (renders output)
 HTML Output
 ```
 
-### Two Ways to Use Components
+### Three Ways to Use Components
 
-1. **Page-Attached** - Automatically rendered with page content via `pac_pag_page_id`
-2. **Standalone (Slug-Based)** - Explicitly rendered via `ComponentRenderer::render('slug')`
+1. **Page-Attached** - Automatically rendered with page content via `pac_pag_page_id` (most common — no slug needed)
+2. **Standalone (Slug-Based)** - Explicitly rendered in a template via `ComponentRenderer::render('slug')`
+3. **Programmatic** - Rendered from PHP code by type key, no database instance needed
 
 ---
 
@@ -83,7 +84,7 @@ echo ComponentRenderer::render(null, 'image_gallery', [
 ]);
 ```
 
-**Full signature:** `render($slug, $type_key = null, $overrides = [])`
+**`render()` signature:** `render($slug, $type_key = null, $overrides = [])`
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -92,7 +93,7 @@ echo ComponentRenderer::render(null, 'image_gallery', [
 | `$overrides` | array | Config values — merged with database config (slug mode) or used as full config (type_key mode) |
 
 **Behavior:**
-- `render('slug')` — Existing behavior, loads from database
+- `render('slug')` — Loads from database by slug
 - `render('slug', null, $overrides)` — Loads from database, merges overrides into config
 - `render(null, 'type_key', $config)` — Renders template by type key with provided config
 
@@ -101,6 +102,20 @@ When rendering by type key:
 - `$component` = `null` (no PageContent instance)
 - Layout wrapper is skipped (the calling view controls layout)
 
+### Render a Pre-Loaded Instance
+
+When you already have a `PageContent` object (e.g. iterating components loaded for a page), use `render_component()` instead of `render()`. Components created through the page editor typically have no slug, so passing `pac_location_name` to `render()` would silently return empty output.
+
+```php
+// Correct: render a loaded PageContent instance directly
+echo ComponentRenderer::render_component($component);
+
+// With config overrides
+echo ComponentRenderer::render_component($component, ['heading' => 'Override']);
+```
+
+**`render_component()` signature:** `render_component($component_instance, $overrides = [])`
+
 ### Get Page Components
 
 ```php
@@ -108,7 +123,7 @@ When rendering by type key:
 $components = ComponentRenderer::get_page_components($page_id);
 
 foreach ($components as $component) {
-    echo ComponentRenderer::render($component->get('pac_location_name'));
+    echo ComponentRenderer::render_component($component);
 }
 ```
 
@@ -955,7 +970,7 @@ Component types that need full control over their own layout can set `skip_wrapp
 ### Render a Component
 
 ```php
-// By slug (from database)
+// By slug (from database — slug must be set)
 echo ComponentRenderer::render('my-component-slug');
 
 // By slug with config overrides
@@ -963,6 +978,9 @@ echo ComponentRenderer::render('my-component-slug', null, ['heading' => 'Overrid
 
 // By type key (programmatic, no database instance)
 echo ComponentRenderer::render(null, 'image_gallery', ['photos' => $photos]);
+
+// From a loaded PageContent instance (use this when iterating page components)
+echo ComponentRenderer::render_component($component_instance);
 ```
 
 ### Check Before Rendering
@@ -1044,7 +1062,7 @@ $components = new MultiPageContent(['page_id' => $this->key, 'components_only' =
 if ($components->count_all() > 0) {
     // Has components - render them, ignore page body entirely
     foreach ($components as $component) {
-        $output .= ComponentRenderer::render($component->get('pac_location_name'));
+        $output .= ComponentRenderer::render_component($component);
     }
     return $output;
 }

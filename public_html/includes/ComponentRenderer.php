@@ -16,8 +16,11 @@
  *   // Render by type key (programmatic, no database instance)
  *   echo ComponentRenderer::render(null, 'image_gallery', ['photos' => $photos]);
  *
+ *   // Render a pre-loaded PageContent instance (used by Page::get_filled_content())
+ *   echo ComponentRenderer::render_component($component_instance);
+ *
  * @see /specs/page_component_system.md
- * @version 1.5.0
+ * @version 1.6.0
  */
 
 class ComponentRenderer {
@@ -60,7 +63,7 @@ class ComponentRenderer {
 		$component_type = null;
 		$debug_label = $slug ?: $type_key ?: '';
 
-		// --- Resolve component type ---
+		// --- Resolve component instance and/or type ---
 
 		if (!empty($slug)) {
 			// Slug mode: load instance from database
@@ -95,6 +98,56 @@ class ComponentRenderer {
 		} else {
 			return '';
 		}
+
+		return self::_render_resolved($component_instance, $component_type, $slug ?: '', $overrides);
+	}
+
+	/**
+	 * Render a pre-loaded component instance
+	 *
+	 * Used when the caller already has a PageContent object (e.g. Page::get_filled_content()).
+	 * Skips the slug-based database lookup — the instance is used directly.
+	 *
+	 * Components created through the page editor typically have no pac_location_name (slug),
+	 * so they cannot be rendered via render(). This method handles that case correctly.
+	 *
+	 * @param PageContent $component_instance The loaded component instance
+	 * @param array $overrides Config values merged on top of stored config
+	 * @return string Rendered HTML
+	 */
+	public static function render_component($component_instance, $overrides = []) {
+		$slug = $component_instance->get('pac_location_name') ?: '';
+		$debug_label = $slug ?: ('id:' . $component_instance->key);
+
+		if (!$component_instance->is_component()) {
+			return self::debug_output("Record is not a component (no pac_com_component_id)", $debug_label);
+		}
+		if (!$component_instance->is_visible()) {
+			return self::debug_output("Component is deleted", $debug_label);
+		}
+
+		$component_type = $component_instance->get_component_type();
+		if (!$component_type) {
+			return self::debug_output("Component type not found (pac_com_component_id may reference deleted type)", $debug_label);
+		}
+
+		return self::_render_resolved($component_instance, $component_type, $slug, $overrides);
+	}
+
+	/**
+	 * Shared rendering pipeline — runs after instance/type have been resolved
+	 *
+	 * Called by both render() and render_component(). Handles availability checks,
+	 * config building, logic function execution, template resolution, layout, and output.
+	 *
+	 * @param PageContent|null $component_instance Loaded instance, or null in type_key mode
+	 * @param Component $component_type The resolved component type
+	 * @param string $slug Slug for debug labels (may be empty)
+	 * @param array $overrides Config overrides
+	 * @return string Rendered HTML
+	 */
+	protected static function _render_resolved($component_instance, $component_type, $slug, $overrides = []) {
+		$debug_label = $slug ?: ($component_instance ? ('id:' . $component_instance->key) : $component_type->get('com_type_key'));
 
 		if (!$component_type->is_available()) {
 			$tk = $component_type->get('com_type_key');

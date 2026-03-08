@@ -42,8 +42,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // --- Dropdown toggle (replaces Bootstrap's data-bs-toggle="dropdown") ---
+    // Only activate if Bootstrap JS is NOT loaded (Bootstrap handles its own dropdowns)
     document.querySelectorAll('[data-bs-toggle="dropdown"]').forEach(function(trigger) {
         trigger.addEventListener('click', function(e) {
+            // If Bootstrap is available, let it handle the dropdown natively
+            if (typeof bootstrap !== 'undefined' && bootstrap.Dropdown) return;
             e.preventDefault();
             e.stopPropagation();
             var menu = this.nextElementSibling;
@@ -60,8 +63,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Close dropdowns when clicking outside
+    // Close dropdowns when clicking outside (only when Bootstrap is not present)
     document.addEventListener('click', function() {
+        if (typeof bootstrap !== 'undefined' && bootstrap.Dropdown) return;
         document.querySelectorAll('.dropdown-menu.show').forEach(function(m) {
             m.classList.remove('show');
         });

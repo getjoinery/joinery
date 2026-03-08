@@ -373,7 +373,7 @@ echo ComponentRenderer::render(null, 'image_gallery', [
 ```
 
 **Automatic (page-attached):**
-Components attached to a page render automatically when using `ComponentRenderer::get_page_components()`.
+Components attached to a page render automatically via `Page::get_filled_content()`. Page-attached components typically have no slug — they are rendered using `ComponentRenderer::render_component($instance)`, not `render('slug')`.
 
 ---
 

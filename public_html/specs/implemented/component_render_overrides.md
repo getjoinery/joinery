@@ -43,7 +43,7 @@ When rendered programmatically (no database instance):
 
 ### Caller migration
 
-`Page::get_filled_content()` in `data/pages_class.php` was updated from:
+`Page::get_filled_content()` in `data/pages_class.php` was initially updated from:
 ```php
 $output .= ComponentRenderer::render_component($component);
 ```
@@ -51,6 +51,8 @@ to:
 ```php
 $output .= ComponentRenderer::render($component->get('pac_location_name'));
 ```
+
+**⚠️ This migration was incorrect and was subsequently reverted.** See `specs/implemented/fix_component_render_instance.md` for the full post-mortem. The `pac_location_name` field is optional — page-attached components created through the admin UI never have a slug set, so passing it to `render()` returned empty string for 100% of real-world components. `render_component()` was restored as a separate public method in v1.6.0.
 
 ## Usage Examples
 
@@ -71,10 +73,10 @@ echo ComponentRenderer::render(null, 'image_gallery', [
 ## Files Modified
 
 1. `includes/ComponentRenderer.php` — Consolidated to single `render()` method, removed `render_component()` and `render_by_type()`
-2. `data/pages_class.php` — Updated caller to use `render()` with slug string
+2. `data/pages_class.php` — Updated caller to use `render()` with slug string (later reverted — see note above)
 3. `docs/component_system.md` — Added programmatic rendering documentation
 4. `docs/creating_components_from_themes.md` — Added override and type_key rendering examples
 
 ## Backward Compatibility
 
-Fully backward compatible for the public API. `render($slug)` calls continue to work unchanged. The removed `render_component()` was only called from one internal location which was migrated.
+The `render($slug)` and `render(null, 'type_key', $config)` calls work correctly. However, removing `render_component()` broke `Page::get_filled_content()` for all page-attached components without slugs (which is the normal case). This was fixed in a subsequent commit — see `specs/implemented/fix_component_render_instance.md`.
