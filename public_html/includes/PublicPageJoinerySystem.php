@@ -526,9 +526,6 @@ class PublicPageJoinerySystem extends PublicPageBase {
     <?php if ($has_sidebar): ?>
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
-        <button class="sidebar-toggle-btn" type="button" aria-label="Toggle sidebar">
-          <span class="toggle-line"></span>
-        </button>
         <a href="/">
           <?php
           $logo_link = $settings->get_setting('logo_link');
@@ -537,7 +534,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
           } else { ?>
           <svg width="28" height="28" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
             <circle cx="20" cy="20" r="20" fill="#2A7BE4"/>
-            <path d="M12 28L20 10L28 28H22L20 22L18 28H12Z" fill="white"/>
+            <text x="21" y="30" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="900" fill="white">J</text>
           </svg>
           <?php }
           echo '<span>' . htmlspecialchars($settings->get_setting('site_name')) . '</span>';
