@@ -861,11 +861,8 @@
 				echo "  • " . htmlspecialchars($error['file']) .
 					 " (line {$error['line']}): " . htmlspecialchars($error['message']) . "<br>";
 			}
-			echo '<br><strong>Rolling back deployment...</strong><br>';
-			$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
-			if ($rollback['success']) {
-				echo "✓ Rollback completed successfully<br>";
-			}
+			echo '<br><strong>Aborting upgrade (pre-deployment — no rollback needed).</strong><br>';
+			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
 			exit(1);
 		} else {
 			echo "✓ PHP syntax validation passed ({$result['files_checked']} files)<br>";
@@ -880,11 +877,8 @@
 				echo "  • [$type_label] " . htmlspecialchars($error['file']) . ": " .
 					 htmlspecialchars($error['message']) . "<br>";
 			}
-			echo '<br><strong>Rolling back deployment...</strong><br>';
-			$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
-			if ($rollback['success']) {
-				echo "✓ Rollback completed successfully<br>";
-			}
+			echo '<br><strong>Aborting upgrade (pre-deployment — no rollback needed).</strong><br>';
+			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
 			exit(1);
 		} else {
 			echo "✓ Plugin loading tests passed ({$result['files_checked']} plugins)<br>";
@@ -894,11 +888,8 @@
 		$result = DeploymentHelper::testBootstrap($stage_directory, $verbose);
 		if (!$result['success']) {
 			echo "<strong>Bootstrap test FAILED:</strong> " . htmlspecialchars($result['error']) . "<br>";
-			echo '<br><strong>Rolling back deployment...</strong><br>';
-			$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
-			if ($rollback['success']) {
-				echo "✓ Rollback completed successfully<br>";
-			}
+			echo '<br><strong>Aborting upgrade (pre-deployment — no rollback needed).</strong><br>';
+			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
 			exit(1);
 		} else {
 			echo "✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")<br>";
@@ -916,11 +907,17 @@
 			echo "✓ Themes: {$result['themes_copied']} custom preserved, {$result['themes_skipped']} stock (will update)<br>";
 			echo "✓ Plugins: {$result['plugins_copied']} custom preserved, {$result['plugins_skipped']} stock (will update)<br>";
 		} else {
-			echo "Theme/Plugin preservation had errors:<br>";
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>❌ Theme/Plugin Preservation Failed:</strong><br>';
 			foreach ($result['errors'] as $error) {
 				echo "  • " . htmlspecialchars($error) . "<br>";
 			}
-			// Don't abort on preservation errors, but log them
+			echo '<br>Custom themes/plugins could not be preserved. Deploying without them would cause data loss.<br>';
+			echo 'Aborting upgrade to protect your custom themes and plugins.<br>';
+			echo '</div>';
+			// Clean up staging
+			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
+			exit(1);
 		}
 
 		// ============================================
@@ -1054,9 +1051,11 @@
 				exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
 				exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
 				if(!is_dir_empty($stage_location)){
-					echo 'Failed to clear staging location:'.$stage_location.'...aborting.<br>';
-					echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
-					exit;
+					echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
+					echo '<strong>⚠️ Warning:</strong> Failed to clear staging location: ' . htmlspecialchars($stage_location) . '<br>';
+					echo 'Permissions: '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
+					echo 'Continuing with upgrade — staging cleanup can be done manually later.<br>';
+					echo '</div>';
 				}
 				else{
 					if($verbose) echo 'Staging area cleared<br>';
@@ -1179,6 +1178,13 @@
 				echo '<strong>❌ Database Error:</strong> Failed to update system version.<br>';
 				echo 'Error: ' . htmlspecialchars($e->getMessage()) . '<br>';
 				echo '</div>';
+				echo '<br><strong>Rolling back deployment...</strong><br>';
+				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
+				if ($rollback['success']) {
+					echo "✓ Rollback completed successfully<br>";
+				} else {
+					echo "✗ Rollback FAILED: " . htmlspecialchars($rollback['error']) . "<br>";
+				}
 				exit(1);
 			}
 		}
@@ -1225,7 +1231,17 @@
 					upgrade_echo("✓ Plugins synced: " . implode(", ", $plugin_parts) . "<br>");
 				}
 			} catch (Exception $e) {
-				upgrade_echo("⚠ Theme/Plugin sync warning: " . htmlspecialchars($e->getMessage()) . "<br>");
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+				echo '<strong>❌ Theme/Plugin Sync Failed:</strong> ' . htmlspecialchars($e->getMessage()) . '<br>';
+				echo '</div>';
+				echo '<br><strong>Rolling back deployment...</strong><br>';
+				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
+				if ($rollback['success']) {
+					echo "✓ Rollback completed successfully<br>";
+				} else {
+					echo "✗ Rollback FAILED: " . htmlspecialchars($rollback['error']) . "<br>";
+				}
+				exit(1);
 			}
 		}
 
