@@ -1,6 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
+if (!class_exists('PublicPage')) {
 class PublicPage extends PublicPageBase {
 
     protected function getTableClasses() {
@@ -228,4 +229,5 @@ class PublicPage extends PublicPageBase {
         $page->public_footer();
         exit;
     }
-}
+} // end class PublicPage
+} // end class_exists guard

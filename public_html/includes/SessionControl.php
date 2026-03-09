@@ -756,13 +756,11 @@ class SessionControl{
 			//REDIRECT TO THE LOGIN PAGE
 			if($msgtext) {
 				$msgtext= urlencode($msgtext);
-				header("HTTP/1.1 401 Unauthorized");
-				require_once(PathHelper::getThemeFilePath('login.php', 'views', 'system').'?msgtext='.$msgtext);			
+				header('Location: /login?msgtext=' . $msgtext);
 				exit();
 			}
 			else {
-				header("HTTP/1.1 401 Unauthorized");
-				require_once(PathHelper::getThemeFilePath('login.php', 'views', 'system'));	
+				header('Location: /login');
 				exit();
 			}
 

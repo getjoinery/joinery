@@ -276,9 +276,69 @@
 			return false;
 		}
 		
+		// Step 3.9: Verify schema update actually took effect
+		// This catches cases where the schema updater reported success but columns
+		// weren't actually created (e.g., due to opcache serving stale bytecode,
+		// silent PDO errors, or other environmental issues).
+		echo "-----SCHEMA VERIFICATION-----<br>\n";
+		$schema_verification_errors = [];
+
+		// Re-query the actual database state
+		$dblink_verify = $dbconnector->get_db_link();
+		$verify_sql = "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'";
+		$verify_q = $dblink_verify->prepare($verify_sql);
+		$verify_q->execute();
+		$actual_columns = [];
+		while ($row = $verify_q->fetch(PDO::FETCH_ASSOC)) {
+			$actual_columns[$row['table_name']][] = $row['column_name'];
+		}
+
+		foreach ($classes as $class) {
+			$table_name = $class::$tablename;
+			$field_specs = $class::$field_specifications;
+
+			if (!isset($actual_columns[$table_name])) {
+				$schema_verification_errors[] = "Table {$table_name} does not exist in database after schema update (class: {$class})";
+				continue;
+			}
+
+			foreach ($field_specs as $field_name => $specs) {
+				if (!in_array($field_name, $actual_columns[$table_name])) {
+					$schema_verification_errors[] = "Column {$table_name}.{$field_name} missing from database after schema update (class: {$class})";
+				}
+			}
+		}
+
+		if (!empty($schema_verification_errors)) {
+			echo "<br>❌ SCHEMA VERIFICATION FAILED - columns/tables missing after schema update<br>\n";
+			echo "This usually means PHP opcache served stale class definitions.<br>\n";
+			echo "Missing items:<br>\n";
+			foreach ($schema_verification_errors as $error) {
+				echo "  • " . $error . "<br>\n";
+			}
+			echo "<br>Suggested fix: Clear PHP opcache and re-run the database update.<br>\n";
+			echo "  CLI: php -r \"opcache_reset();\" then re-run update_database<br>\n";
+			echo "  Web: Restart PHP-FPM (sudo systemctl restart php*-fpm) then re-run<br>\n";
+
+			// Log the failed run
+			$migration_log = new Migration(null);
+			$migration_log->set('mig_hash', md5('SCHEMA_VERIFICATION_FAILED'));
+			$migration_log->set('mig_sql', '');
+			$migration_log->set('mig_output', implode("\n", $schema_verification_errors));
+			$migration_log->set('mig_success', 0);
+			$migration_log->prepare();
+			$migration_log->save();
+
+			return false;
+		}
+
+		if ($verbose) {
+			echo "✓ Schema verification passed - all " . count($classes) . " tables verified<br>\n";
+		}
+
 		// Step 4: Run database migrations
 		echo "-----MIGRATIONS-----<br>\n";
-		
+
 		// Load migrations using Migration class
 		$migrations = Migration::loadMigrations();
 		

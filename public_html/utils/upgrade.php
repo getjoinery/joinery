@@ -81,6 +81,11 @@
 		// Theme/plugin download endpoint
 		$response['theme_endpoint'] = LibraryFunctions::get_absolute_url('/utils/publish_theme');
 
+		// Required system themes/plugins — these must be downloaded even if
+		// the target site doesn't have them installed yet
+		$response['required_themes'] = get_system_required_themes($live_directory . '/theme');
+		$response['required_plugins'] = get_system_required_plugins($live_directory . '/plugins');
+
 		header("Content-Type: application/json");
 		http_response_code(200);
 
@@ -366,7 +371,99 @@
 			exit(1);
 		}
 
+		// =====================================================
+		// SELF-UPDATE RESUME DETECTION
+		// =====================================================
+		// If a previous run self-updated deployment files and asked for a re-run,
+		// detect the marker and skip download/extraction (staging already has files).
+		$self_update_marker = $stage_location . '.self_update_ready';
+		$resuming_after_self_update = false;
+
+		if (file_exists($self_update_marker)) {
+			$marker_data = json_decode(file_get_contents($self_update_marker), true);
+
+			if ($marker_data && json_last_error() === JSON_ERROR_NONE) {
+				$marker_age = time() - strtotime($marker_data['created_time']);
+				$max_age = 86400; // 24 hours
+				$versions_match = ($marker_data['target_version'] === $decode_response['system_version']);
+				$staging_has_files = is_dir($stage_directory) && !is_dir_empty($stage_directory);
+
+				if ($marker_age <= $max_age && $versions_match && $staging_has_files) {
+					$resuming_after_self_update = true;
+
+					if ($is_cli) {
+						echo "\n✓ Resuming upgrade after self-update.\n";
+						echo "  Updated files: " . implode(', ', $marker_data['files_updated']) . "\n\n";
+					} else {
+						echo '<div style="border: 2px solid #0c5460; padding: 15px; margin: 20px 0; background-color: #d1ecf1; color: #0c5460;">';
+						echo '<strong>✓ Resuming upgrade after self-update.</strong> ';
+						echo 'Updated files: ' . htmlspecialchars(implode(', ', $marker_data['files_updated']));
+						echo '</div>';
+					}
+
+					// Clean up marker now that we've consumed it
+					@unlink($self_update_marker);
+				} else {
+					// Stale or mismatched marker — clean up and do fresh download
+					if ($verbose) {
+						$reason_parts = [];
+						if ($marker_age > $max_age) $reason_parts[] = 'expired (' . round($marker_age/3600, 1) . 'h old)';
+						if (!$versions_match) $reason_parts[] = 'version mismatch';
+						if (!$staging_has_files) $reason_parts[] = 'staging empty';
+						upgrade_echo('Found stale self-update marker (' . implode(', ', $reason_parts) . '). Starting fresh download.<br>');
+					}
+					@unlink($self_update_marker);
+					if (file_exists($stage_location)) {
+						exec("chmod -R 770 " . escapeshellarg($stage_location));
+						exec("rm -rf " . escapeshellarg($stage_location) . "/*");
+					}
+				}
+			} else {
+				// Corrupt marker
+				@unlink($self_update_marker);
+			}
+		}
+
+		// Determine which themes/plugins to download based on what's installed
+		$themes_to_download = get_installed_stock_themes($live_directory . '/theme');
+		$plugins_to_download = get_installed_stock_plugins($live_directory . '/plugins');
+
+		// Get detailed info for status display
+		$all_themes_info = get_all_themes_info($live_directory . '/theme');
+		$all_plugins_info = get_all_plugins_info($live_directory . '/plugins');
+
+		if (!$resuming_after_self_update) {
+
 		upgrade_echo('<h3>Downloading Upgrade Components</h3>');
+
+		// Display theme status
+		if ($is_cli) {
+			echo "\n=== INSTALLED THEMES ===\n";
+		} else {
+			upgrade_echo('<h4>Installed Themes</h4>');
+		}
+		output_component_status($all_themes_info, 'theme', $is_cli);
+
+		// Display plugin status
+		if ($is_cli) {
+			echo "=== INSTALLED PLUGINS ===\n";
+		} else {
+			upgrade_echo('<h4>Installed Plugins</h4>');
+		}
+		output_component_status($all_plugins_info, 'plugin', $is_cli);
+
+		// Summary
+		$total_themes = count($all_themes_info);
+		$stock_themes = count($themes_to_download);
+		$total_plugins = count($all_plugins_info);
+		$stock_plugins = count($plugins_to_download);
+
+		if ($is_cli) {
+			echo "Summary: {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded\n\n";
+		} else {
+			upgrade_echo("<p><strong>Summary:</strong> {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded</p>");
+		}
+
 		upgrade_echo('Downloading core archive: ' . htmlspecialchars($sourceFile) . '<br>');
 		flush();
 
@@ -404,42 +501,6 @@
 
 		$core_size_mb = round(filesize($file_download_location) / 1024 / 1024, 2);
 		upgrade_echo("✓ Core archive downloaded ({$core_size_mb} MB)<br>");
-
-		// Determine which themes/plugins to download based on what's installed
-		$themes_to_download = get_installed_stock_themes($live_directory . '/theme');
-		$plugins_to_download = get_installed_stock_plugins($live_directory . '/plugins');
-
-		// Get detailed info for status display
-		$all_themes_info = get_all_themes_info($live_directory . '/theme');
-		$all_plugins_info = get_all_plugins_info($live_directory . '/plugins');
-
-		// Display theme status
-		if ($is_cli) {
-			echo "\n=== INSTALLED THEMES ===\n";
-		} else {
-			upgrade_echo('<h4>Installed Themes</h4>');
-		}
-		output_component_status($all_themes_info, 'theme', $is_cli);
-
-		// Display plugin status
-		if ($is_cli) {
-			echo "=== INSTALLED PLUGINS ===\n";
-		} else {
-			upgrade_echo('<h4>Installed Plugins</h4>');
-		}
-		output_component_status($all_plugins_info, 'plugin', $is_cli);
-
-		// Summary
-		$total_themes = count($all_themes_info);
-		$stock_themes = count($themes_to_download);
-		$total_plugins = count($all_plugins_info);
-		$stock_plugins = count($plugins_to_download);
-
-		if ($is_cli) {
-			echo "Summary: {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded\n\n";
-		} else {
-			upgrade_echo("<p><strong>Summary:</strong> {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded</p>");
-		}
 
 		//CLEAR OLD STAGED FILES
 		if($verbose) upgrade_echo('Clearing staging area: '.$stage_location.'<br>');
@@ -501,6 +562,161 @@
 			else {
 			  echo 'Unable to unzip upgrade from '.$file_download_location.' <br>';
 			  exit;
+			}
+		}
+
+		// =====================================================
+		// SELF-UPDATE CHECK
+		// =====================================================
+		// Compare key deployment files between staged and live versions.
+		// If any differ, copy the new versions to live and request a re-run
+		// so the new code executes from the start.
+		$self_update_files = [
+			'utils/upgrade.php',
+			'utils/update_database.php',
+			'includes/DatabaseUpdater.php',
+			'includes/DeploymentHelper.php',
+		];
+
+		$files_needing_update = [];
+		foreach ($self_update_files as $rel_path) {
+			$staged_file = $stage_directory . '/' . $rel_path;
+			$live_file = $live_directory . '/' . $rel_path;
+
+			if (file_exists($staged_file)) {
+				if (!file_exists($live_file) || md5_file($staged_file) !== md5_file($live_file)) {
+					$files_needing_update[] = $rel_path;
+				}
+			}
+		}
+
+		if (!empty($files_needing_update)) {
+			if ($is_cli) {
+				echo "\n=== SELF-UPDATE REQUIRED ===\n";
+				echo "The following deployment files have changed in the new version:\n";
+			} else {
+				upgrade_echo('<br><h3>Self-Update Required</h3>');
+				echo 'The following deployment files have changed in the new version:<br>';
+			}
+			foreach ($files_needing_update as $f) {
+				echo ($is_cli ? '  - ' : '  &bull; ') . htmlspecialchars($f) . ($is_cli ? "\n" : '<br>');
+			}
+
+			if (!$dry_run) {
+				// Copy new versions over live files
+				$copy_errors = [];
+				foreach ($files_needing_update as $rel_path) {
+					$staged_file = $stage_directory . '/' . $rel_path;
+					$live_file = $live_directory . '/' . $rel_path;
+
+					$target_dir = dirname($live_file);
+					if (!is_dir($target_dir)) {
+						mkdir($target_dir, 0770, true);
+					}
+
+					if (copy($staged_file, $live_file)) {
+						// Invalidate opcache for the updated file so the re-run loads fresh bytecode
+						if (function_exists('opcache_invalidate')) {
+							opcache_invalidate($live_file, true);
+						}
+					} else {
+						$copy_errors[] = $rel_path;
+					}
+				}
+
+				if (!empty($copy_errors)) {
+					echo ($is_cli ? "\n" : '<div style="border: 2px solid #856404; padding: 15px; margin: 20px 0; background-color: #fff3cd; color: #856404;">');
+					echo 'Warning: Failed to copy some files: ' . implode(', ', $copy_errors) . '. Continuing with current versions.';
+					echo ($is_cli ? "\n" : '</div>');
+					// Don't abort — proceed with old code, which is better than failing entirely
+				} else {
+					// Write marker file so re-run skips download/extraction
+					$marker_data = [
+						'created_time' => gmdate('c'),
+						'source_version' => $settings->get_setting('system_version'),
+						'target_version' => $decode_response['system_version'],
+						'files_updated' => $files_needing_update,
+					];
+
+					file_put_contents($self_update_marker, json_encode($marker_data, JSON_PRETTY_PRINT));
+
+					// Ask user to re-run
+					if ($is_cli) {
+						echo "\n";
+						echo "════════════════════════════════════════════════════════════\n";
+						echo "  SELF-UPDATE COMPLETE — PLEASE RE-RUN THE UPGRADE\n";
+						echo "════════════════════════════════════════════════════════════\n";
+						echo "\n";
+						echo "  Deployment tools have been updated. The upgrade will\n";
+						echo "  resume automatically from where it left off.\n";
+						echo "\n";
+						echo "  Re-run with the same command to continue.\n";
+						echo "\n";
+					} else {
+						echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
+						echo '<h2 style="margin-top: 0; color: #0066cc;">Self-Update Complete</h2>';
+						echo '<p>Deployment infrastructure has been updated to the latest version.</p>';
+						echo '<p><strong>Please click the button below to continue the upgrade.</strong> ';
+						echo 'The download step will be skipped automatically.</p>';
+						echo '<form method="POST" action="/utils/upgrade">';
+						echo '<input type="hidden" name="confirm" value="1">';
+						if ($force_upgrade) echo '<input type="hidden" name="force-upgrade" value="1">';
+						if ($verbose) echo '<input type="hidden" name="verbose" value="1">';
+						if ($dry_run) echo '<input type="hidden" name="dry-run" value="1">';
+						echo '<button type="submit" style="background-color: #0066cc; color: white; padding: 12px 24px; font-size: 16px; border: none; cursor: pointer; border-radius: 4px;">Continue Upgrade</button>';
+						echo '</form>';
+						echo '</div>';
+					}
+
+					exit(0);
+				}
+			} else {
+				// Dry run — just report what would happen
+				echo ($is_cli ? "\n" : '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">');
+				echo ($is_cli ? '' : '<strong>') . 'DRY RUN:' . ($is_cli ? '' : '</strong>') . ' These files would be self-updated and the upgrade would require a re-run.';
+				echo ($is_cli ? "\n\n" : '</div>');
+			}
+		} else {
+			if ($verbose) {
+				upgrade_echo('Self-update check: all deployment files are current.<br>');
+			}
+		}
+
+		} // end if (!$resuming_after_self_update)
+
+		// =====================================================
+		// CHECK FOR REQUIRED THEMES/PLUGINS NOT YET INSTALLED
+		// =====================================================
+		// The upgrade server response may include required_themes — system themes
+		// that must be present for core code to function (e.g., joinery-system).
+		// Download these even if they aren't currently installed on this site.
+		$required_themes = $decode_response['required_themes'] ?? [];
+		foreach ($required_themes as $req_theme) {
+			if (!in_array($req_theme, $themes_to_download)) {
+				$theme_dir_check = $live_directory . '/theme/' . $req_theme;
+				if (!is_dir($theme_dir_check)) {
+					upgrade_echo("Adding required system theme: {$req_theme} (not currently installed)<br>");
+				} else {
+					if ($verbose) {
+						upgrade_echo("Adding required system theme: {$req_theme} (ensuring latest version)<br>");
+					}
+				}
+				$themes_to_download[] = $req_theme;
+			}
+		}
+
+		$required_plugins = $decode_response['required_plugins'] ?? [];
+		foreach ($required_plugins as $req_plugin) {
+			if (!in_array($req_plugin, $plugins_to_download)) {
+				$plugin_dir_check = $live_directory . '/plugins/' . $req_plugin;
+				if (!is_dir($plugin_dir_check)) {
+					upgrade_echo("Adding required system plugin: {$req_plugin} (not currently installed)<br>");
+				} else {
+					if ($verbose) {
+						upgrade_echo("Adding required system plugin: {$req_plugin} (ensuring latest version)<br>");
+					}
+				}
+				$plugins_to_download[] = $req_plugin;
 			}
 		}
 
@@ -889,11 +1105,12 @@
 		// ============================================
 		// OPCACHE RESET
 		// ============================================
-		// After file swap, PHP opcache may still serve old bytecode for model classes.
-		// This caused missing database columns on upgrades (e.g. evt_recurrence_type)
-		// because update_database loaded stale field_specifications from opcache.
-		if (!$dry_run && function_exists('opcache_reset')) {
-			opcache_reset();
+		// After file swap, clear opcache so the subprocess (update_database.php) loads
+		// fresh bytecode from the new files. Also needed for any subsequent page loads.
+		if (!$dry_run) {
+			if (function_exists('opcache_reset')) {
+				opcache_reset();
+			}
 			clearstatcache(true);
 			if($verbose) upgrade_echo('Cleared PHP opcache and stat cache after file deployment<br>');
 		}
@@ -915,14 +1132,26 @@
 			echo '</div>';
 		}
 		else{
-			//DO THE MIGRATION
-			$noautorun = 1;  //DO NOT AUTORUN THE update_database include
-			require_once('update_database.php');
+			// Run update_database.php as a SUBPROCESS to ensure a clean PHP process.
+			// This is critical because upgrade.php pre-loads data model classes (via
+			// AdminPage → SessionControl → ShoppingCart → products_class.php → etc.)
+			// BEFORE the file swap. Those stale class definitions are locked in memory
+			// by require_once and cannot be refreshed. Running in a subprocess guarantees
+			// the schema updater reads the NEW class files from disk.
+			$update_db_script = $live_directory . '/utils/update_database.php';
+			$update_cmd = '/usr/bin/php ' . escapeshellarg($update_db_script) . ' --upgrade';
+			if ($verbose) $update_cmd .= ' --verbose';
 
-			// NOTE: Using backwards exit codes for now (Phase 2 will fix this)
-			// update_database() returns bool (true = success, false = failure)
-			// but the script uses exit(1) for success and exit(0) for failure
-			$migration_result = update_database($verbose, true, false);
+			$update_output = [];
+			$update_return = 0;
+			exec($update_cmd . ' 2>&1', $update_output, $update_return);
+
+			// Display the subprocess output
+			$update_output_str = implode("\n", $update_output);
+			echo nl2br(htmlspecialchars($update_output_str)) . "<br>\n";
+
+			// update_database.php uses standard exit codes: 0 = success, 1 = failure
+			$migration_result = ($update_return === 0);
 
 			if(!$migration_result){
 				echo '<strong>Migration failed...reverting upgrade.</strong><br>';
@@ -1215,6 +1444,43 @@
 			}
 		}
 		return $themes;
+	}
+
+	/**
+	 * Get list of stock themes marked as system-required (system=true in theme.json)
+	 * These themes must be present on every site for core functionality to work.
+	 */
+	function get_system_required_themes($theme_dir) {
+		$themes = [];
+		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
+			$theme_data = json_decode(file_get_contents($json_file), true);
+			if ($theme_data) {
+				$is_stock = $theme_data['is_stock'] ?? false;
+				$is_system = $theme_data['system'] ?? false;
+				if ($is_stock && $is_system) {
+					$themes[] = basename(dirname($json_file));
+				}
+			}
+		}
+		return $themes;
+	}
+
+	/**
+	 * Get list of stock plugins marked as system-required (system=true in plugin.json)
+	 */
+	function get_system_required_plugins($plugin_dir) {
+		$plugins = [];
+		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
+			$plugin_data = json_decode(file_get_contents($json_file), true);
+			if ($plugin_data) {
+				$is_stock = $plugin_data['is_stock'] ?? false;
+				$is_system = $plugin_data['system'] ?? false;
+				if ($is_stock && $is_system) {
+					$plugins[] = basename(dirname($json_file));
+				}
+			}
+		}
+		return $plugins;
 	}
 
 	/**
