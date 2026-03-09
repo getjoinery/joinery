@@ -69,6 +69,8 @@ body {
     background: #f0f4fa;
     -webkit-font-smoothing: antialiased;
 }
+fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.25rem; background: var(--white); }
+legend { font-weight: 600; font-size: 1rem; padding: 0 0.5rem; color: var(--body-color); }
 img { max-width: 100%; height: auto; display: block; }
 a { color: var(--primary); text-decoration: none; transition: color var(--transition); }
 a:hover { color: var(--primary-dark); text-decoration: none; }
