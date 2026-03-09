@@ -832,7 +832,9 @@ class DeploymentHelper {
 
         mkdir($public_html);
         $copy_result = 0;
-        exec("cp -r $backup_dir/* $public_html/", $output, $copy_result);
+        $escaped_backup = escapeshellarg($backup_dir);
+        $escaped_public = escapeshellarg($public_html);
+        exec("cp -r ${escaped_backup}/. ${escaped_public}/", $output, $copy_result);
 
         if ($copy_result !== 0) {
             $result['error'] = "Failed to restore from backup";
