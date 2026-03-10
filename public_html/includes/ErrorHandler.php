@@ -291,16 +291,18 @@ class ErrorManager {
             $context = $this->buildContext($exception);
             $handler = $this->selectHandler($context);
             $response = $handler->handle($exception, $context);
-            
+
             $this->logError($exception, $context);
             $response->send();
-            
+
         } catch (\Throwable $handlerException) {
             // Fallback error handling
             $this->handleFallback($handlerException, $exception);
         }
-        
-        exit;
+
+        // Exit with non-zero code so callers (especially exec() in upgrade.php)
+        // can detect that an error occurred. exit(0) would mask failures.
+        exit(1);
     }
 
     public function handleFatalError(): void {

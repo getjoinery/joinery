@@ -180,9 +180,8 @@ abstract class SystemBase {
 	
 	function set($key, $value, $check_existance=TRUE) {
 		if ($check_existance && !array_key_exists($key, static::$field_specifications)) {
-			//TODO BETTER LOGGING HERE
-			error_log('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
-			//throw new SystemBaseException('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
+			$display_value = is_array($value) || is_object($value) ? json_encode($value) : $value;
+			error_log('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $display_value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
 		}
 		$this->data->$key = $value;
 	}
