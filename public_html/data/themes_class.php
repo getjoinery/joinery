@@ -68,6 +68,8 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
 
     );
 
+    public static $json_vars = array('thm_metadata');
+
     /**
      * Get theme by name
      */

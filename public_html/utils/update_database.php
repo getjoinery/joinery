@@ -284,7 +284,7 @@
 		$schema_verification_errors = [];
 
 		// Re-query the actual database state
-		$dblink_verify = $dbconnector->get_db_link();
+		$dblink_verify = DbConnector::get_instance()->get_db_link();
 		$verify_sql = "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'";
 		$verify_q = $dblink_verify->prepare($verify_sql);
 		$verify_q->execute();
