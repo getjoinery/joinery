@@ -3,12 +3,7 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('cart_logic.php', 'logic'));
 
-    $page_vars = cart_logic($_GET, $_POST);
-    if ($page_vars->redirect) {
-        LibraryFunctions::redirect($page_vars->redirect);
-        exit();
-    }
-    $page_vars = $page_vars->data;
+    $page_vars = process_logic(cart_logic($_GET, $_POST));
     $cart            = $page_vars['cart'];
     $currency_symbol = $page_vars['currency_symbol'];
     $currency_code   = $page_vars['currency_code'];

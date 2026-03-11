@@ -2,14 +2,7 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
 
-$page_vars = index_logic($_GET, $_POST);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
-
+$page_vars = process_logic(index_logic($_GET, $_POST));
 $page = new PublicPage();
 $page->public_header(array(
     'title' => 'Home - Phillyzouk Modern Blog',

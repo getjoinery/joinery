@@ -4,14 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password-reset-2_logic.php', 'logic'));
 
-	$page_vars = password_reset_2_logic($_GET, $_POST);
-	// Handle LogicResult return format
-	if ($page_vars->redirect) {
-		LibraryFunctions::redirect($page_vars->redirect);
-		exit();
-	}
-	$page_vars = $page_vars->data;
-
+	$page_vars = process_logic(password_reset_2_logic($_GET, $_POST));
 	$settings = Globalvars::get_instance();
 
 	$page = new PublicPage();

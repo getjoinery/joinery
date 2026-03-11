@@ -5,12 +5,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 $instance_date = isset($params['date']) ? $params['date'] : null;
 
-$page_vars = event_logic($_GET, $_POST, $event, $instance_date);
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars       = $page_vars->data;
+$page_vars = process_logic(event_logic($_GET, $_POST, $event, $instance_date));
 $event           = $page_vars['event'];
 $is_virtual_event = !empty($page_vars['is_virtual']);
 $settings        = Globalvars::get_instance();

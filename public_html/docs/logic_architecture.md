@@ -4,6 +4,8 @@
 
 The logic layer (`/logic/`) provides the business logic and controller functionality in the application's MVC-like architecture. All logic files follow a standardized pattern using the `LogicResult` class for consistent return handling.
 
+**Critical rule:** Logic files must never call `exit()`, `die()`, or `throw` exceptions. Every code path must return a `LogicResult` object. This makes logic files testable, composable, and safe to call from any context.
+
 ## Directory Structure
 
 ```
@@ -24,11 +26,9 @@ Every logic file follows this naming convention and structure:
 
 ```php
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function page_name_logic($get_vars, $post_vars) {
     // PathHelper, Globalvars, SessionControl are always available
-    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
     // Include required data classes
@@ -98,7 +98,7 @@ function logout_logic($get_vars, $post_vars) {
 ```
 
 #### 3. Error Pattern
-Used when an error occurs that should be handled by the error system:
+Used when an error occurs that should be displayed to the user:
 
 ```php
 function secure_page_logic($get_vars, $post_vars) {
@@ -113,38 +113,37 @@ function secure_page_logic($get_vars, $post_vars) {
 }
 ```
 
-## Integration Points
+## View Integration
 
-### Router Integration
-
-The router (`serve.php` and `RouteHelper.php`) automatically handles LogicResult returns:
+Views should always use `process_logic()` to call logic functions. This handles redirects, errors, and data extraction automatically:
 
 ```php
-// In RouteHelper::handleDynamicRoute()
-$result = $logic_function($_GET, $_POST);
-
-if ($result instanceof LogicResult) {
-    if ($result->redirect) {
-        header("Location: " . $result->redirect);
-        exit();
-    } elseif ($result->error) {
-        // Handle error
-        throw new Exception($result->error);
-    } else {
-        // Pass data to view
-        $page_vars = $result->data;
-    }
-}
+// ✅ CORRECT - Always use process_logic()
+$page_vars = process_logic(product_logic($_GET, $_POST));
+$product = $page_vars['product'];
 ```
 
-### View Integration
+`process_logic()` handles:
+- `LogicResult::redirect()` — performs the redirect
+- `LogicResult::error()` — adds error message to session, returns data for re-display
+- `LogicResult::render()` — returns the data array
+- Legacy array returns — passes through unchanged for backward compatibility
 
-Views should use `process_logic()` helper:
+**Never manually check LogicResult in views:**
 
 ```php
-// Simple one-line pattern
-$page_vars = process_logic(product_logic($_GET, $_POST, $product));
-$product = $page_vars['product'];
+// ❌ WRONG - Don't manually handle LogicResult in views
+$result = product_logic($_GET, $_POST);
+if ($result instanceof LogicResult) {
+    if ($result->redirect) {
+        LibraryFunctions::redirect($result->redirect);
+        exit();
+    }
+    $page_vars = $result->data;
+}
+
+// ✅ CORRECT - One line
+$page_vars = process_logic(product_logic($_GET, $_POST));
 ```
 
 ## Common Patterns
@@ -156,9 +155,7 @@ function feature_logic($get_vars, $post_vars) {
     $settings = Globalvars::get_instance();
 
     if (!$settings->get_setting('feature_active')) {
-        header("HTTP/1.0 404 Not Found");
-        echo 'This feature is turned off';
-        exit();
+        return LogicResult::error('This feature is not available');
     }
 
     // Feature logic continues...
@@ -172,7 +169,13 @@ function feature_logic($get_vars, $post_vars) {
 function admin_page_logic($get_vars, $post_vars) {
     $session = SessionControl::get_instance();
 
-    $session->check_permission(5); // Requires admin
+    if (!$session->is_logged_in()) {
+        return LogicResult::redirect('/login');
+    }
+
+    if ($session->get_permission_level() < 5) {
+        return LogicResult::error('You do not have permission to access this page');
+    }
 
     // Admin logic continues...
     return LogicResult::render($page_vars);
@@ -225,58 +228,28 @@ function admin_item_edit_logic($get_vars, $post_vars) {
 
 **See [FormWriter Documentation - Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value)** for complete details on why this pattern is required.
 
-### AJAX Response Pattern
+### Error Handling Pattern
+
+When calling code that might throw exceptions (e.g., Stripe, external APIs), catch them and return `LogicResult::error()`:
 
 ```php
-function ajax_logic($get_vars, $post_vars) {
-    $ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) ||
-              $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
+function checkout_logic($get_vars, $post_vars) {
+    if ($post_vars) {
+        try {
+            $cart = $session->get_shopping_cart();
+            $cart->process_payment($post_vars);
+            return LogicResult::redirect('/order-confirmation');
 
-    if ($ajax) {
-        // Return JSON for AJAX requests
-        echo json_encode(array('success' => true));
-        exit();
+        } catch (Exception $e) {
+            return LogicResult::error($e->getMessage(), $post_vars);
+        }
     }
 
-    // Regular request handling
     return LogicResult::render($page_vars);
 }
 ```
 
-## Best Practices
-
-### 1. Always Use LogicResult
-
-Never return raw arrays or use direct redirects in new code:
-
-```php
-// ❌ WRONG - Old pattern
-return $page_vars;
-
-// ❌ WRONG - Direct redirect
-header("Location: /page");
-exit();
-
-// ✅ CORRECT - Use LogicResult
-return LogicResult::render($page_vars);
-return LogicResult::redirect('/page');
-```
-
-### 2. Include Required Files Early
-
-```php
-function logic($get_vars, $post_vars) {
-    // Include all requirements at the top
-    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-    require_once(PathHelper::getIncludePath('data/users_class.php'));
-
-    // Then proceed with logic
-    // ...
-}
-```
-
-### 3. Handle Missing Parameters Gracefully
+### Missing/Invalid Parameter Pattern
 
 ```php
 function event_logic($get_vars, $post_vars) {
@@ -286,90 +259,104 @@ function event_logic($get_vars, $post_vars) {
 
     $event = new Event($get_vars['event_id'], TRUE);
     if (!$event->get('evt_id')) {
-        header("HTTP/1.0 404 Not Found");
-        require_once(LibraryFunctions::display_404_page());
-        exit();
+        return LogicResult::error('Event not found');
     }
 
     // Continue with valid event...
+    return LogicResult::render(['event' => $event]);
 }
 ```
 
-### 4. Use Early Returns for Clarity
+## Rules for Logic Files
+
+### Never do these in logic files:
 
 ```php
-function protected_logic($get_vars, $post_vars) {
-    $session = SessionControl::get_instance();
+// ❌ WRONG - Never call exit()
+LibraryFunctions::redirect('/page');
+exit();
 
-    // Early return for unauthorized
-    if (!$session->is_logged_in()) {
-        return LogicResult::redirect('/login');
-    }
+// ❌ WRONG - Never throw exceptions
+throw new SystemDisplayableError('Something went wrong');
 
-    // Early return for missing data
-    if (empty($get_vars['id'])) {
-        return LogicResult::error('ID is required');
-    }
+// ❌ WRONG - Never set headers directly
+header("HTTP/1.0 404 Not Found");
+exit();
 
-    // Main logic with clean flow
-    $data = process_request($get_vars['id']);
-    return LogicResult::render(['data' => $data]);
-}
+// ❌ WRONG - Never echo output directly
+echo json_encode(['success' => true]);
+exit();
+
+// ❌ WRONG - Never return raw arrays in new code
+return $page_vars;
 ```
 
-### 5. Consistent Variable Naming
+### Always do these:
 
-Always use these standard variable names:
-- `$page_vars` - Array of variables to pass to view
-- `$settings` - Globalvars singleton instance
-- `$session` - SessionControl singleton instance
+```php
+// ✅ CORRECT - Return LogicResult for redirects
+return LogicResult::redirect('/page');
+
+// ✅ CORRECT - Return LogicResult for errors
+return LogicResult::error('Something went wrong');
+
+// ✅ CORRECT - Return LogicResult for page renders
+return LogicResult::render($page_vars);
+
+// ✅ CORRECT - Catch exceptions from services and wrap them
+try {
+    $stripe->charge($amount);
+} catch (Exception $e) {
+    return LogicResult::error($e->getMessage(), $post_vars);
+}
+```
 
 ## Migration from Legacy Patterns
 
 ### Converting Old Logic Files
 
-When updating legacy logic files that return arrays directly:
+When updating legacy logic files, convert all `throw`, `exit()`, and raw array returns:
 
-**Before:**
+**Redirect conversion:**
 ```php
-function old_logic($get_vars, $post_vars) {
-    $page_vars = array();
-    $page_vars['data'] = 'value';
-    return $page_vars;
-}
+// Before:
+LibraryFunctions::redirect('/some-page');
+exit();
+
+// After:
+return LogicResult::redirect('/some-page');
 ```
 
-**After:**
+**Error conversion:**
 ```php
-function old_logic($get_vars, $post_vars) {
-    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+// Before:
+throw new SystemDisplayableError('Email is required');
 
-    $page_vars = array();
-    $page_vars['data'] = 'value';
-    return LogicResult::render($page_vars);
-}
+// After:
+return LogicResult::error('Email is required');
+```
+
+**Array return conversion:**
+```php
+// Before:
+return $page_vars;
+
+// After:
+return LogicResult::render($page_vars);
 ```
 
 ### Backward Compatibility
 
-The system maintains backward compatibility by checking return types in views:
+`process_logic()` handles both old and new return formats, so views don't need to change when logic files are migrated:
 
 ```php
-$result = logic_function($_GET, $_POST);
-
-// Handle both old and new formats
-if ($result instanceof LogicResult) {
-    // New format
-    $page_vars = $result->data;
-} else {
-    // Legacy array format
-    $page_vars = $result;
-}
+// This works whether the logic returns LogicResult or a raw array
+$page_vars = process_logic(some_logic($_GET, $_POST));
 ```
 
 ## Testing Logic Files
 
-### Unit Testing Pattern
+Because logic files return `LogicResult` objects and never `exit()` or `throw`, they can be tested directly:
 
 ```php
 // tests/logic/test_product_logic.php
@@ -399,7 +386,6 @@ Plugins can provide their own logic files following the same patterns:
 ```php
 // plugins/bookings/logic/booking_logic.php
 function booking_logic($get_vars, $post_vars) {
-    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
 
     // Plugin-specific logic
@@ -431,15 +417,11 @@ Instead of completely replacing core logic, themes can create focused logic file
 
 **Example: Homepage with Dynamic Content**
 
-Base core logic typically handles general page preparation. A theme-specific logic can extend this with custom data:
-
 ```php
 // /theme/phillyzouk/logic/index_logic.php
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
 function index_logic($get_vars, $post_vars) {
-    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('data/posts_class.php'));
     require_once(PathHelper::getIncludePath('data/events_class.php'));
 
@@ -476,13 +458,7 @@ function index_logic($get_vars, $post_vars) {
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
 
-$page_vars = index_logic($_GET, $_POST);
-// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+$page_vars = process_logic(index_logic($_GET, $_POST));
 
 $page = new PublicPage();
 $page->public_header(array(
@@ -505,34 +481,21 @@ $page->public_header(array(
 4. **Easy Debugging** - Can inspect `$page_vars` to see what data is available
 5. **Reusable** - Other themes can use similar patterns for their needs
 
-**File Permissions Note**
-
-When creating theme logic files, ensure proper permissions:
-```bash
-# Directory: readable and executable by web server
-chmod 755 /theme/themename/logic/
-
-# Files: readable by web server
-chmod 644 /theme/themename/logic/*.php
-```
-
-Failure to set proper permissions will result in "File not found" errors even though the file exists.
-
 ## Common Issues and Solutions
 
 ### Issue: "Cannot use object of type LogicResult as array"
 
-**Cause:** View is not handling LogicResult return
-**Solution:** Add LogicResult handling in view:
+**Cause:** View is calling a logic function directly without `process_logic()`
+**Solution:** Wrap the call with `process_logic()`:
 
 ```php
-if ($page_vars instanceof LogicResult) {
-    if ($page_vars->redirect) {
-        LibraryFunctions::redirect($page_vars->redirect);
-        exit();
-    }
-    $page_vars = $page_vars->data;
-}
+// ❌ Causes error
+$page_vars = product_logic($_GET, $_POST);
+echo $page_vars['product'];
+
+// ✅ Works correctly
+$page_vars = process_logic(product_logic($_GET, $_POST));
+echo $page_vars['product'];
 ```
 
 ### Issue: Logic file not found
@@ -547,17 +510,23 @@ require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic')); // The
 
 ### Issue: Redirect not working
 
-**Cause:** Output sent before redirect
-**Solution:** Ensure no echo/print before LogicResult::redirect() and check for PHP errors/warnings
+**Cause:** Output sent before redirect, or not using `process_logic()`
+**Solution:** Ensure no echo/print before `process_logic()` call, and check for PHP errors/warnings
+
+## Consistent Variable Naming
+
+Always use these standard variable names:
+- `$page_vars` - Array of variables to pass to view
+- `$settings` - Globalvars singleton instance
+- `$session` - SessionControl singleton instance
 
 ## Related Documentation
 
 - [Plugin Developer Guide](plugin_developer_guide.md) - For plugin-specific logic patterns
-- [Admin Pages Documentation](CLAUDE_admin_pages.md) - For admin interface logic
-- [Main Architecture Guide](../../CLAUDE.md) - For overall system architecture
+- [Admin Pages Documentation](admin_pages.md) - For admin interface logic
+- [Main Architecture Guide](../CLAUDE.md) - For overall system architecture
 
 ## Specifications
 
-For detailed implementation specifications, see:
-- `/specs/logic_result_minimal_spec.md` - Current minimal implementation
-- `/specs/logic_result_with_validation_spec.md` - Future validation features
+- `/specs/implemented/logic_result_minimal_spec.md` - Phase 1 implementation (redirect/render/error)
+- `/specs/logic_result_with_validation_spec.md` - Phase 2: complete migration and validation support

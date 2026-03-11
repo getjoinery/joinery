@@ -12,13 +12,7 @@
 
 	require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 
-	$page_vars = event_logic($_GET, $_POST, $event, NULL);
-	// Handle LogicResult return format
-if ($page_vars->redirect) {
-    LibraryFunctions::redirect($page_vars->redirect);
-    exit();
-}
-$page_vars = $page_vars->data;
+	$page_vars = process_logic(event_logic($_GET, $_POST, $event, NULL));
 	$event = $page_vars['event'];
 	
 	$session = SessionControl::get_instance();

@@ -3,12 +3,7 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 
-    $page_vars = product_logic($_GET, $_POST, $product);
-    if ($page_vars->redirect) {
-        LibraryFunctions::redirect($page_vars->redirect);
-        exit();
-    }
-    $page_vars = $page_vars->data;
+    $page_vars = process_logic(product_logic($_GET, $_POST, $product));
     $product         = $page_vars['product'];
     $product_version = $page_vars['product_version'];
     $cart            = $page_vars['cart'];
