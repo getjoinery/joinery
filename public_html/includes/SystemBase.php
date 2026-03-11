@@ -1167,7 +1167,7 @@ abstract class SystemBase {
 			$colphrase="";
 			$valphrase="";
 			foreach($rowdata as $column_name=>$column_val){
-				if((string)$column_val != "-NOUPDATE-"){
+				if(is_array($column_val) || is_object($column_val) || (string)$column_val != "-NOUPDATE-"){
 					$colphrase .= $column_name . ',';
 						$valphrase .= ':' . $column_name . ',';
 
@@ -1184,7 +1184,7 @@ abstract class SystemBase {
 			$sql = 'UPDATE ' . static::$tablename . ' SET ';
 
 			foreach($rowdata as $column_name=>$column_val){
-				if((string)$column_val != "-NOUPDATE-"){
+				if(is_array($column_val) || is_object($column_val) || (string)$column_val != "-NOUPDATE-"){
 						$sql .= $column_name . '=:' . $column_name . ',';
 				}
 			}
@@ -1205,7 +1205,7 @@ abstract class SystemBase {
 		$dbhelper->prepare_query($sql);
 
 		foreach($rowdata as $column_name=>$column_val){
-			if((string)$column_val != "-NOUPDATE-"){
+			if(is_array($column_val) || is_object($column_val) || (string)$column_val != "-NOUPDATE-"){
 				if($column_meta[$column_name]['data_type'] == 'integer' || $column_meta[$column_name]['data_type'] == 'smallint'){
 					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_INT);
 				}
