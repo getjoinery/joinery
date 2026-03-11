@@ -2,12 +2,7 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('video_logic.php', 'logic'));
 
-    $page_vars = video_logic($_GET, $_POST, $video, $params);
-    if ($page_vars->redirect) {
-        LibraryFunctions::redirect($page_vars->redirect);
-        exit();
-    }
-    $page_vars = $page_vars->data;
+    $page_vars = process_logic(video_logic($_GET, $_POST, $video, $params));
     $video     = $page_vars['video'];
 
     $page = new PublicPage();

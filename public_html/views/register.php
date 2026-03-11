@@ -2,13 +2,7 @@
     require_once(PathHelper::getThemeFilePath('register_logic.php', 'logic'));
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-    $page_vars = register_logic($_GET, $_POST);
-    if ($page_vars->redirect) {
-        LibraryFunctions::redirect($page_vars->redirect);
-        exit();
-    }
-    $page_vars = $page_vars->data;
-
+    $page_vars = process_logic(register_logic($_GET, $_POST));
     $extra = '';
     if (isset($_GET['m'])) {
         $extra = '?m=' . htmlspecialchars($_GET['m']);
