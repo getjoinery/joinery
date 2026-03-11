@@ -662,7 +662,7 @@ abstract class PublicPageBase {
 		foreach ($hidden_fields as $name => $value) {
 			$html .= '<input type="hidden" name="' . htmlspecialchars($name) . '" value="' . htmlspecialchars($value) . '">';
 		}
-		$btn_class = ($extra_class !== '') ? ltrim($extra_class) : 'btn btn-falcon-default btn-sm';
+		$btn_class = ($extra_class !== '') ? ltrim($extra_class) : 'btn btn-soft-default btn-sm';
 		$html .= '<button type="submit" class="' . $btn_class . '">' . htmlspecialchars($label) . '</button>';
 		$html .= '</form>';
 

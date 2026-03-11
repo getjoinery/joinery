@@ -208,7 +208,7 @@
 					<h5 class="mb-0">Direct Link</h5>
 				</div>
 				<div class="card-body">
-					<a href="/uploads/<?php echo htmlspecialchars($file->get('fil_name')); ?>" target="_blank" class="btn btn-falcon-default">
+					<a href="/uploads/<?php echo htmlspecialchars($file->get('fil_name')); ?>" target="_blank" class="btn btn-soft-default">
 						<i class="bi bi-download me-1"></i> Download File
 					</a>
 					<div class="mt-3">

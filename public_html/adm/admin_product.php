@@ -129,7 +129,7 @@
 			<div class="card">
 				<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
 					<h6 class="mb-0"><span class="fas fa-dollar-sign me-2"></span>Price Versions</h6>
-					<a href="/admin/admin_product_version_edit?product_id=<?php echo $product->key; ?>" class="btn btn-sm btn-falcon-default">
+					<a href="/admin/admin_product_version_edit?product_id=<?php echo $product->key; ?>" class="btn btn-sm btn-soft-default">
 						<span class="fas fa-plus me-1"></span>Add Price
 					</a>
 				</div>

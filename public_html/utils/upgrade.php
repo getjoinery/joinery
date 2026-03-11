@@ -1,4 +1,7 @@
 <?php
+	// Upgrade script version - increment to trigger self-update on deployed sites
+	define('UPGRADE_SCRIPT_VERSION', '2.70.1');
+
 	// Detect CLI mode early to avoid loading unnecessary UI components
 	$is_cli = (php_sapi_name() === 'cli');
 

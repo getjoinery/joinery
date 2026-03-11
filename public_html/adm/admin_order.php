@@ -210,7 +210,7 @@
 
 					<!-- Add New Item Link -->
 					<div class="mt-3 pt-3 border-top">
-						<a href="/admin/admin_order_item_edit?ord_order_id=<?php echo $order->key; ?>" class="btn btn-sm btn-falcon-default">
+						<a href="/admin/admin_order_item_edit?ord_order_id=<?php echo $order->key; ?>" class="btn btn-sm btn-soft-default">
 							<span class="fas fa-plus me-1"></span>Add Order Item
 						</a>
 					</div>

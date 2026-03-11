@@ -265,7 +265,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
     // =====================================================================
     protected function renderDropdown($label, $links) {
         echo '<div class="dropdown d-inline-block">';
-        echo '<button class="btn btn-falcon-default btn-sm" type="button" data-toggle="dropdown">' . htmlspecialchars($label) . ' <svg width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:middle;margin-left:2px;"><path d="M1 1l4 4 4-4"/></svg></button>';
+        echo '<button class="btn btn-soft-default btn-sm" type="button" data-toggle="dropdown">' . htmlspecialchars($label) . ' <svg width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:middle;margin-left:2px;"><path d="M1 1l4 4 4-4"/></svg></button>';
         echo '<div class="dropdown-menu">';
         foreach ($links as $link_label => $link_url) {
             echo '<a href="' . htmlspecialchars($link_url) . '" class="dropdown-item">' . htmlspecialchars($link_label) . '</a>';
@@ -301,7 +301,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
             }
             echo '</select>';
             foreach ($pager->url_vars() as $k => $v) echo '<input type="hidden" name="' . htmlspecialchars($k) . '" value="' . htmlspecialchars($v) . '">';
-            echo '<button type="submit" class="btn btn-sm btn-falcon-default">Sort</button></form>';
+            echo '<button type="submit" class="btn btn-sm btn-soft-default">Sort</button></form>';
         }
         if ($filter_data) {
             printf('<form method="get" action="%s" style="display:flex;align-items:center;gap:0.375rem;">', $pager->base_url());
@@ -314,7 +314,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
             }
             echo '</select>';
             foreach ($pager->url_vars() as $k => $v) echo '<input type="hidden" name="' . htmlspecialchars($k) . '" value="' . htmlspecialchars($v) . '">';
-            echo '<button type="submit" class="btn btn-sm btn-falcon-default">Go</button></form>';
+            echo '<button type="submit" class="btn btn-sm btn-soft-default">Go</button></form>';
         }
         if ($search_on) {
             $formwriter = $this->getFormWriter('search_form', ['action' => $pager->base_url(), 'method' => 'get']);
@@ -324,7 +324,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
             echo '<label style="font-size:0.8125rem;color:var(--muted);">Search:</label>';
             echo '<input name="' . $pager->prefix() . 'searchterm" value="' . htmlspecialchars($pager->search_term()) . '" type="text" class="form-control form-control-sm" style="width:180px;" maxlength="100">';
             foreach ($pager->url_vars() as $k => $v) echo '<input type="hidden" name="' . htmlspecialchars($k) . '" value="' . htmlspecialchars($v) . '">';
-            echo '<button type="submit" class="btn btn-sm btn-falcon-default">Search</button>';
+            echo '<button type="submit" class="btn btn-sm btn-soft-default">Search</button>';
             echo '</div>';
             echo $formwriter->end_form();
         }

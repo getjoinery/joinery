@@ -350,7 +350,7 @@
 		<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
 			<h6 class="mb-0"><span class="fas fa-sync me-2"></span>Series Occurrences</h6>
 			<div>
-				<a href="/admin/admin_event_edit?evt_event_id=<?php echo $event->key; ?>" class="btn btn-sm btn-falcon-default me-2">Edit Series</a>
+				<a href="/admin/admin_event_edit?evt_event_id=<?php echo $event->key; ?>" class="btn btn-sm btn-soft-default me-2">Edit Series</a>
 				<?php echo AdminPage::action_button('End Series', '/admin/admin_event', [
 					'hidden'  => ['action' => 'end_series', 'evt_event_id' => $event->key],
 					'confirm' => 'End this recurring series? Future virtual instances will stop appearing.',
@@ -403,10 +403,10 @@
 								<?php if ($is_cancelled): ?>
 									—
 								<?php elseif ($is_materialized): ?>
-									<a href="/admin/admin_event?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-falcon-default py-0 px-2">View</a>
-									<a href="/admin/admin_event_edit?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-falcon-default py-0 px-2">Edit</a>
+									<a href="/admin/admin_event?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-soft-default py-0 px-2">View</a>
+									<a href="/admin/admin_event_edit?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-soft-default py-0 px-2">Edit</a>
 								<?php else: ?>
-									<a href="/admin/admin_event_edit?parent_event_id=<?php echo $event->key; ?>&instance_date=<?php echo $occ_date; ?>" class="btn btn-sm btn-falcon-primary py-0 px-2">Edit</a>
+									<a href="/admin/admin_event_edit?parent_event_id=<?php echo $event->key; ?>&instance_date=<?php echo $occ_date; ?>" class="btn btn-sm btn-soft-primary py-0 px-2">Edit</a>
 									<?php echo AdminPage::action_button('Cancel', '/admin/admin_event', [
 										'hidden'  => ['action' => 'cancel_instance', 'instance_date' => $occ_date, 'evt_event_id' => $event->key],
 										'confirm' => 'Cancel this occurrence?',
@@ -606,8 +606,8 @@
 		}
 
 		// Action
-		$action_link = '<a href="/admin/admin_event_session_edit?evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-falcon-default">Edit</a> ';
-		$action_link .= '<a href="/admin/admin_event_session_edit?action=delete&evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-falcon-danger" onclick="return confirm(\'Are you sure you want to delete this session?\')">Delete</a>';
+		$action_link = '<a href="/admin/admin_event_session_edit?evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-soft-default">Edit</a> ';
+		$action_link .= '<a href="/admin/admin_event_session_edit?action=delete&evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-soft-danger" onclick="return confirm(\'Are you sure you want to delete this session?\')">Delete</a>';
 		array_push($rowvalues, $action_link);
 
 		$page->disprow($rowvalues);
