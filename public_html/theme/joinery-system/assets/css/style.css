@@ -541,14 +541,14 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .btn-outline-secondary { background: transparent; border-color: var(--border); color: var(--body-color); }
 .btn-outline-secondary:hover { background: var(--lighter); }
 
-/* Falcon-style default button */
-.btn-falcon-default {
+/* Soft default button */
+.btn-soft-default {
     background: var(--white);
     border-color: var(--border);
     color: var(--body-color);
     box-shadow: var(--shadow-sm);
 }
-.btn-falcon-default:hover { background: var(--lighter); }
+.btn-soft-default:hover { background: var(--lighter); }
 
 /* Block button */
 .btn-block, .w-100 { width: 100%; }
@@ -588,6 +588,8 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 textarea.form-control { min-height: 6rem; resize: vertical; }
 
 select.form-control {
+    appearance: none;
+    -webkit-appearance: none;
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23748194' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 0.75rem center;

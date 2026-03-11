@@ -67,7 +67,7 @@ function admin_file_logic($get_vars, $post_vars) {
 	$dropdown_button = '';
 	if (!empty($options['altlinks'])) {
 		$dropdown_button = '<div class="dropdown">';
-		$dropdown_button .= '<button class="btn btn-falcon-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
 		foreach ($options['altlinks'] as $label => $url) {
 			$is_danger = strpos($label, 'Delete') !== false;
