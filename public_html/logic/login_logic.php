@@ -22,7 +22,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$page_vars['settings'] = $settings;
 
 		if(!$settings->get_setting('register_active')){
-			require_once(LibraryFunctions::display_404_page());
+			return LogicResult::error('This feature is turned off');
 		}
 
 		if ($session->get_user_id()) {
@@ -64,8 +64,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 		else {
-			require_once(__DIR__ . '/../includes/Exceptions/BusinessLogicException.php');
-			throw new BusinessLogicException('You cannot activate a user while being logged in as another user.');
+			return LogicResult::error('You cannot activate a user while being logged in as another user.');
 		}
 	}
 
@@ -87,8 +86,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					'password' => 'Password is required'
 				]);
 			} else {
-				header("Location: /login?retry=1");
-				exit;
+				return LogicResult::redirect('/login?retry=1');
 			}
 		}
 
@@ -102,8 +100,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Your username or password was incorrect. Please try again, or sign up if you don\'t have an account.');
 			} else {
-				header("Location: /login?retry=1&e=" . rawurlencode($email));
-				exit;
+				return LogicResult::redirect("/login?retry=1&e=" . rawurlencode($email));
 			}
 		}
 
@@ -114,8 +111,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Login from this IP address (' . $client_ip . ') is not permitted for this account.');
 			} else {
-				header("Location: /login?retry=1&e=" . rawurlencode($email) . "&ip_blocked=1&ip=" . rawurlencode($client_ip));
-				exit;
+				return LogicResult::redirect("/login?retry=1&e=" . rawurlencode($email) . "&ip_blocked=1&ip=" . rawurlencode($client_ip));
 			}
 		}
 
@@ -127,10 +123,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		if($settings->get_setting('activation_required_login')){
 			if(!$user->get('usr_is_activated')){
-				$message = 'This site requires email activation before you can log in.  An activation email has been sent to '.$user->get('usr_email').'. Please click on the link inside to activate';
-				PublicPage::OutputGenericPublicPage('Email verification required', 'Email verification required', $message);
 				Activation::email_activate_send($user);
-				exit();
+				return LogicResult::error('This site requires email activation before you can log in.  An activation email has been sent to '.$user->get('usr_email').'. Please click on the link inside to activate');
 			}
 		}
 
@@ -148,20 +142,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$_SESSION['forcelogin'] = FALSE;
 		}
 
-		if ($ajax) {
-			echo json_encode(array('success' => 1));
+		$returnurl = $session->get_return();
+		$_SESSION['returnurl'] = NULL;
+
+		if ($returnurl) {
+			return LogicResult::redirect($returnurl);
 		} else {
-
-			$returnurl = $session->get_return();
-			$_SESSION['returnurl'] = NULL;
-
-			if ($returnurl) {
-				header("Location: $returnurl");
-			} else {
-				header("Location: /profile");
-			}
+			return LogicResult::redirect('/profile');
 		}
-		exit();
 	}
 
 	$session = SessionControl::get_instance();

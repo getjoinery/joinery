@@ -128,7 +128,7 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 					$stripe_product = $stripe_helper->create_product($product_info);
 					$product->set('pro_stripe_product_id_test', $stripe_product['id']);
 					if(!$stripe_product['id']){
-						throw new SystemDisplayablePermanentError("Unable to create a stripe product.");
+						return LogicResult::error('Unable to create a stripe product.');
 					}
 				}
 			}
@@ -136,7 +136,7 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 				if(!$product->get('pro_stripe_product_id')){
 					$stripe_product = $stripe_helper->create_product($product_info);
 					if(!$stripe_product['id']){
-						throw new SystemDisplayablePermanentError("Unable to create a stripe product.");
+						return LogicResult::error('Unable to create a stripe product.');
 					}
 					$product->set('pro_stripe_product_id', $stripe_product['id']);
 				}

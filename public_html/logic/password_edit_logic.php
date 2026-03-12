@@ -22,21 +22,21 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	if($post_vars) {
 
 		if(!isset($post_vars['usr_password']) || !isset($post_vars['usr_password_again'])){
-			throw new SystemDisplayableError('The following required fields were not set: passwords');
+			return LogicResult::error('The following required fields were not set: passwords');
 		}
 
 		if ($has_old_password) {
 			// If the user doesn't have an existing password
 			// then no need for them to type in their old password.
 			if(!isset($post_vars['usr_old_password'])){
-				throw new SystemDisplayableError('The following required fields were not set: old password');
+				return LogicResult::error('The following required fields were not set: old password');
 			}
 
 		}
 
 		// Only check the old password if they had one!
 		if ($has_old_password && !$user->check_password($post_vars['usr_old_password'])) {
-			throw new SystemDisplayableError('Sorry, the old password you typed in was not correct.');
+			return LogicResult::error('Sorry, the old password you typed in was not correct.');
 		}
 		else {
 			$user->set('usr_password', User::GeneratePassword($post_vars['usr_password']));

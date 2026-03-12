@@ -19,9 +19,7 @@ function pricing_logic($get_vars, $post_vars){
 	$pricing_active = $settings->get_setting('pricing_page');
 	if(!$pricing_active){
 		//TURNED OFF
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();
+		return LogicResult::error('This feature is turned off');
 	}
 
 	// Determine billing period (month or year)

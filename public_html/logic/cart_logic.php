@@ -89,10 +89,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// Validate required fields for logged-out users
 		if(!$session->get_user_id()){
 			if(empty($_POST['privacy'])){
-				throw new SystemDisplayableError('You must agree to the terms of use and privacy policy.');
+				return LogicResult::error('You must agree to the terms of use and privacy policy.');
 			}
 			if(empty($_POST['password'])){
-				throw new SystemDisplayableError('Password is required.');
+				return LogicResult::error('Password is required.');
 			}
 		}
 		$cart->determine_billing_user($_POST, false);

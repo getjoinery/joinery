@@ -20,8 +20,7 @@ function change_password_required_logic($get_vars, $post_vars){
 			echo json_encode(array('success' => 0, 'error' => 'Not logged in'));
 			exit();
 		}
-		header('Location: /login');
-		exit();
+		return LogicResult::redirect('/login');
 	}
 
 	// Get current user
@@ -35,8 +34,7 @@ function change_password_required_logic($get_vars, $post_vars){
 			echo json_encode(array('success' => 1, 'redirect' => '/admin/admin_users'));
 			exit();
 		}
-		header('Location: /admin/admin_users');
-		exit();
+		return LogicResult::redirect('/admin/admin_users');
 	}
 
 	if ($post_vars) {
@@ -46,7 +44,7 @@ function change_password_required_logic($get_vars, $post_vars){
 				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
 				throw new ValidationException('Please enter a new password.', ['new_password' => 'Password is required']);
 			}
-			throw new SystemDisplayableError('Please enter a new password.');
+			return LogicResult::error('Please enter a new password.');
 		}
 
 		if ($post_vars['new_password'] !== $post_vars['confirm_password']) {
@@ -54,7 +52,7 @@ function change_password_required_logic($get_vars, $post_vars){
 				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
 				throw new ValidationException('Passwords do not match.', ['confirm_password' => 'Passwords do not match']);
 			}
-			throw new SystemDisplayableError('Passwords do not match.');
+			return LogicResult::error('Passwords do not match.');
 		}
 
 		if (strlen($post_vars['new_password']) < 8) {
@@ -62,7 +60,7 @@ function change_password_required_logic($get_vars, $post_vars){
 				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
 				throw new ValidationException('Password must be at least 8 characters long.', ['new_password' => 'Minimum 8 characters']);
 			}
-			throw new SystemDisplayableError('Password must be at least 8 characters long.');
+			return LogicResult::error('Password must be at least 8 characters long.');
 		}
 
 		// Update password and clear flag
@@ -77,8 +75,7 @@ function change_password_required_logic($get_vars, $post_vars){
 			echo json_encode(array('success' => 1, 'redirect' => '/admin/admin_users'));
 			exit();
 		}
-		header('Location: /admin/admin_users');
-		exit();
+		return LogicResult::redirect('/admin/admin_users');
 	}
 
 	return LogicResult::render($page_vars);
