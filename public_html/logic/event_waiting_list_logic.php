@@ -2,7 +2,11 @@
 
 require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
-function event_waiting_list_logic($get_vars, $post_vars, $event_id){
+function event_waiting_list_logic($get_vars, $post_vars, $event_id = null){
+	// Support API calls where event_id comes from post/get instead of router
+	if ($event_id === null) {
+		$event_id = $post_vars['event_id'] ?? $get_vars['event_id'] ?? null;
+	}
 	$event_id = LibraryFunctions::fetch_variable_local($event_id, 'sdirection', NULL, 'required', '', 'safemode', 'int');
 	
 	require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -105,5 +109,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	
 	return LogicResult::render($page_vars);
+}
+
+function event_waiting_list_logic_api() {
+	return [
+		'requires_session' => true,
+		'description' => 'Join event waiting list',
+	];
 }
 ?>

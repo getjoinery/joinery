@@ -107,4 +107,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['user_photos'] = $user->get_photos();
 	return LogicResult::render($page_vars);
 }
+
+function account_edit_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Update profile fields',
+    ];
+}
 ?>

@@ -62,4 +62,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	return LogicResult::render($page_vars);
 }
+
+function password_reset_2_logic_api() {
+    return [
+        'requires_session' => false,
+        'description' => 'Set new password via reset code',
+    ];
+}
 ?>

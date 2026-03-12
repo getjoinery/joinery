@@ -80,4 +80,11 @@ function change_password_required_logic($get_vars, $post_vars){
 
 	return LogicResult::render($page_vars);
 }
+
+function change_password_required_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Forced password change',
+    ];
+}
 ?>

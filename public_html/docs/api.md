@@ -224,6 +224,152 @@ X-XSS-Protection: 1; mode=block
 Referrer-Policy: no-referrer
 ```
 
+## Action Endpoints
+
+Actions execute multi-step business logic (registration, event signup, payments, etc.) rather than raw CRUD operations. All logic functions that have been opted in via a companion `_api()` function are available.
+
+### Making a Logic Function Available via API
+
+Add a companion function to your logic file:
+
+```php
+// In logic/your_action_logic.php
+
+function your_action_logic_api() {
+    return [
+        'requires_session' => true,   // default: true
+        'description' => 'What this action does',
+    ];
+}
+```
+
+That's it — no registry file or mapping needed.
+
+### Action Request Format
+
+```
+POST /api/v1/action/{action_name}
+Content-Type: application/json
+public_key: {key}
+secret_key: {key}
+
+{ "field": "value", ... }
+```
+
+Actions require API key write permission (level 2+).
+
+### Action Response Formats
+
+**Success (HTTP 200):**
+```json
+{
+    "api_version": "1.0",
+    "success_message": "Action 'register' completed successfully.",
+    "redirect": "/page/register-thanks",
+    "data": { ... }
+}
+```
+
+- `redirect` is included when the action would have redirected in the web UI (informational — the API consumer decides what to do with it)
+- `data` contains any output data from the logic function
+
+**Validation error (HTTP 422):**
+```json
+{
+    "api_version": "1.0",
+    "errortype": "ValidationError",
+    "error": "Please correct the errors below",
+    "validation_errors": {
+        "field_name": "Error message for this field"
+    },
+    "data": {}
+}
+```
+
+**Action error (HTTP 422):**
+```json
+{
+    "api_version": "1.0",
+    "errortype": "ActionError",
+    "error": "This feature is turned off",
+    "data": {}
+}
+```
+
+### Available Actions
+
+| Action | Description | Session |
+|--------|------------|---------|
+| `register` | Register a new user account | No |
+| `password_reset_1` | Request password reset email | No |
+| `password_reset_2` | Set new password via reset code | No |
+| `password_set` | Set password on first login | No |
+| `password_edit` | Change password (logged in) | Yes |
+| `change_password_required` | Forced password change | Yes |
+| `contact_preferences` | Update contact preferences | Yes |
+| `account_edit` | Update profile fields | Yes |
+| `address_edit` | Update address | Yes |
+| `phone_numbers_edit` | Update phone numbers | Yes |
+| `change_tier` | Change subscription tier | Yes |
+| `survey` | Submit survey response | Yes |
+| `booking` | Book an appointment | Yes |
+| `cart` | Add item to cart | Yes |
+| `cart_clear` | Clear cart | Yes |
+| `event_register` | Register for an event | Yes |
+| `event_withdraw` | Withdraw from event | Yes |
+| `event_waiting_list` | Join event waiting list | Yes |
+| `event_sessions` | Select event sessions | Yes |
+| `event_sessions_course` | Select course sessions | Yes |
+| `orders_recurring_action` | Recurring order action | Yes |
+
+### Action Discovery Endpoint
+
+```
+GET /api/v1/actions
+```
+
+Returns a list of all available actions with descriptions. Useful for API consumers to programmatically determine what actions are available.
+
+**Response:**
+```json
+{
+    "api_version": "1.0",
+    "success_message": "Available actions",
+    "data": {
+        "register": {
+            "description": "Register a new user account",
+            "requires_session": false
+        },
+        "event_register": {
+            "description": "Register for an event",
+            "requires_session": true
+        }
+    }
+}
+```
+
+## Error Types
+
+### CRUD Error Types
+
+| Status | Error Type | Meaning |
+|--------|-----------|---------|
+| 400 | AuthenticationError | Missing headers, invalid key, deleted user |
+| 400 | TransactionError | Object not found, validation failure, save error, invalid object name |
+| 401 | AuthenticationError | Wrong secret, IP restricted, inactive/expired key |
+| 403 | AuthenticationError | Insufficient permission for this operation |
+| 426 | SecurityError | HTTPS required |
+| 429 | RateLimitError | Rate limit exceeded |
+
+### Action Error Types
+
+| Status | Error Type | Meaning |
+|--------|-----------|---------|
+| 404 | ActionError | Unknown action name or action not available via API |
+| 405 | ActionError | Wrong HTTP method (actions require POST) |
+| 422 | ActionError | Business logic error (e.g., feature disabled, invalid state) |
+| 422 | ValidationError | Input validation failed — check `validation_errors` for field-level detail |
+
 ## Request Logging
 
 All API requests are logged for audit purposes. Logs include: feature, action, IP address, user ID, success/failure, HTTP status code, and response time. Secret keys and request bodies are never logged.

@@ -84,4 +84,11 @@ function address_edit_logic($get_vars, $post_vars){
 
 	return LogicResult::render($page_vars);
 }
+
+function address_edit_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Update address',
+    ];
+}
 ?>

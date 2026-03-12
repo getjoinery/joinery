@@ -123,4 +123,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	return LogicResult::render($page_vars);
 }
+
+function event_sessions_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Select event sessions',
+    ];
+}
 ?>

@@ -172,4 +172,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	return LogicResult::render($page_vars);
 }
 
+function cart_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Add item to cart',
+    ];
+}
 ?>

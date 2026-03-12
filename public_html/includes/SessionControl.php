@@ -630,6 +630,60 @@ class SessionControl{
 		$_SESSION['saved_messages'] = array_values($_SESSION['saved_messages']);
 	}
 
+	/**
+	 * API session simulation — sets session variables for the given user
+	 * so that logic functions see a logged-in user during API calls.
+	 * Stores original session state for restoration via clear_api_user().
+	 *
+	 * @param int $user_id The user ID associated with the API key
+	 */
+	public function set_api_user($user_id) {
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$user = new User($user_id, TRUE);
+
+		$this->_api_original_session = [
+			'loggedin' => $_SESSION['loggedin'] ?? null,
+			'usr_user_id' => $_SESSION['usr_user_id'] ?? null,
+			'permission' => $_SESSION['permission'] ?? null,
+			'timezone' => $_SESSION['timezone'] ?? null,
+		];
+		$this->_api_context = true;
+
+		$_SESSION['loggedin'] = TRUE;
+		$_SESSION['usr_user_id'] = $user->key;
+		$_SESSION['permission'] = $user->get('usr_permission');
+		$_SESSION['timezone'] = $user->get('usr_timezone');
+	}
+
+	/**
+	 * Restore original session state after an API call.
+	 */
+	public function clear_api_user() {
+		if (isset($this->_api_original_session)) {
+			foreach ($this->_api_original_session as $key => $value) {
+				if ($value === null) {
+					unset($_SESSION[$key]);
+				} else {
+					$_SESSION[$key] = $value;
+				}
+			}
+			unset($this->_api_original_session);
+		}
+		$this->_api_context = false;
+	}
+
+	/**
+	 * Check if the current request is an API context (session was simulated).
+	 *
+	 * @return bool
+	 */
+	public function is_api_context() {
+		return !empty($this->_api_context);
+	}
+
+	private $_api_original_session = null;
+	private $_api_context = false;
+
 	function get_user_id($initial_user=FALSE) {
 		if ($initial_user && $this->get_initial_user_id() !== NULL) {
 			return $this->get_initial_user_id();
