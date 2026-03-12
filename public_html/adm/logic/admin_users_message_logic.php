@@ -24,12 +24,10 @@ function admin_users_message_logic($get, $post) {
 	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', 0, FALSE, '');
 
 	if(!$evt_event_id && !$usr_user_id && !$grp_group_id){
-		throw new SystemDisplayableError("You must pass an event or a group or a user.");
-		exit();
+		return LogicResult::error("You must pass an event or a group or a user.");
 	}
 	else if($evt_event_id && $usr_user_id && $grp_group_id){
-		throw new SystemDisplayableError("You cannot pass both an event and a user and a group.");
-		exit();
+		return LogicResult::error("You cannot pass both an event and a user and a group.");
 	}
 
 	$sender = new User($session->get_user_id(), TRUE);
@@ -48,14 +46,13 @@ function admin_users_message_logic($get, $post) {
 		$recipient = new User($usr_user_id, TRUE);
 	}
 	else{
-		throw new SystemDisplayableError("You must pass an event or a user.");
-		exit();
+		return LogicResult::error("You must pass an event or a user.");
 	}
 
 	$settings = Globalvars::get_instance();
 
 	if(!$settings->get_setting('mailgun_domain') || !$settings->get_setting('mailgun_api_key')){
-		throw new SystemDisplayableError('Mailgun credentials are not in the db or settings.');
+		return LogicResult::error('Mailgun credentials are not in the db or settings.');
 	}
 
 	$email_inner_template = $settings->get_setting('event_email_inner_template');

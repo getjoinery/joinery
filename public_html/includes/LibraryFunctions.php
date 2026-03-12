@@ -1296,23 +1296,25 @@ class LibraryFunctions {
  * @throws Exception If the LogicResult contains an error
  */
 function process_logic($result) {
-    // Handle backward compatibility - if logic function returns array directly
     if (!($result instanceof LogicResult)) {
         return $result;
     }
 
-    // Handle redirects
     if ($result->redirect) {
         LibraryFunctions::redirect($result->redirect);
         exit();
     }
 
-    // Handle errors
     if ($result->error) {
-        throw new Exception($result->error);
+        if (empty($result->data) && empty($result->validation_errors)) {
+            throw new SystemDisplayableError($result->error);
+        }
+        $session = SessionControl::get_instance();
+        $session->save_message(new DisplayMessage($result->error, 'Error', NULL, DisplayMessage::MESSAGE_ERROR));
     }
 
-    // Return the data array
-    return $result->data;
+    $page_vars = $result->data;
+    $page_vars['validation_errors'] = $result->validation_errors;
+    return $page_vars;
 }
 ?>

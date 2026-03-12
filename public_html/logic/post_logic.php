@@ -17,9 +17,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('blog_active')){
 		//TURNED OFF
-		header("HTTP/1.0 404 Not Found");
-		echo 'This setting is turned off';
-		exit();			
+		return LogicResult::error('This feature is turned off');
 	}
 	
 	$page_vars['post'] = $post;
@@ -78,8 +76,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
-		header('Location: '.$_SERVER['REQUEST_URI']);
-		exit();
+		return LogicResult::redirect($_SERVER['REQUEST_URI']);
 	}
 	
 	//TODO: HANDLE COMMENT THREADING

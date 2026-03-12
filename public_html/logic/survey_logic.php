@@ -27,7 +27,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$survey_id = LibraryFunctions::decode($post_vars['survey_id']);
 	}
 	else{
-		throw new SystemDisplayableError('Survey id is missing.');
+		return LogicResult::error('Survey id is missing.');
 	}
 
 	$survey = new Survey($survey_id, TRUE);

@@ -37,8 +37,7 @@ function admin_analytics_users_logic($get_vars, $post_vars) {
 		$q->setFetchMode(PDO::FETCH_OBJ);
 	}
 	catch(PDOException $e){
-		$dbhelper->handle_query_error($e);
-		exit();
+		return LogicResult::error('A database error occurred while loading domain data.');
 	}
 
 	$domains = $q->fetchAll();
@@ -68,8 +67,7 @@ function admin_analytics_users_logic($get_vars, $post_vars) {
 		$q->setFetchMode(PDO::FETCH_OBJ);
 	}
 	catch(PDOException $e){
-		$dbhelper->handle_query_error($e);
-		exit();
+		return LogicResult::error('A database error occurred while loading verification data.');
 	}
 
 	$verifieds = $q->fetchAll();

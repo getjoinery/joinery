@@ -2,14 +2,12 @@
 /**
  * Standard result object for logic functions
  * Provides consistent return format and redirect handling
- *
- * Phase 1: Basic implementation for returns and redirects only
- * Phase 2: Will add error handling and validation support
  */
 class LogicResult {
-    public $redirect = null;    // URL to redirect to (if any)
-    public $data = [];          // Data to pass to view
-    public $error = null;       // Error message (if any) - Phase 2
+    public $redirect = null;
+    public $data = [];
+    public $error = null;
+    public $validation_errors = [];
 
     /**
      * Factory method for creating a redirect result
@@ -37,8 +35,6 @@ class LogicResult {
 
     /**
      * Factory method for creating an error result
-     * Note: In Phase 1, errors are still thrown as exceptions
-     * This is here for Phase 2 compatibility
      * @param string $message The error message
      * @param array $data Optional data to pass along with error
      * @return LogicResult
@@ -48,5 +44,16 @@ class LogicResult {
         $result->error = $message;
         $result->data = $data;
         return $result;
+    }
+
+    public function hasValidationErrors() {
+        return !empty($this->validation_errors);
+    }
+
+    public function addValidationError($field, $message) {
+        $this->validation_errors[$field] = $message;
+        if (!$this->error) {
+            $this->error = 'Please correct the errors below';
+        }
     }
 }

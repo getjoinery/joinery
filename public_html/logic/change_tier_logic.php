@@ -19,8 +19,7 @@ function change_tier_logic($get, $post) {
     // Check if user is logged in
     if (!$session->is_logged_in()) {
         // Redirect to login with return URL
-        header('Location: /login?return=' . urlencode('/profile/change-tier'));
-        exit;
+        return LogicResult::redirect('/login?return=' . urlencode('/profile/change-tier'));
     }
 
     // Get period filter from GET parameter (default to 'month')

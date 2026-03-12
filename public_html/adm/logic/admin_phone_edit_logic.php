@@ -31,7 +31,7 @@ function admin_phone_edit_logic($get_vars, $post_vars) {
 	}
 
 	if(!$user_id){
-		throw new SystemDisplayableError('User ID is required');
+		return LogicResult::error('User ID is required');
 	}
 
 	if($post_vars){

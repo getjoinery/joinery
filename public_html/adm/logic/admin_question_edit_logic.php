@@ -28,8 +28,7 @@ function admin_question_edit_logic($get_vars, $post_vars) {
 
 	if(isset($post_vars['action']) && $post_vars['action'] == 'add_question_option'){
 		if(!isset($question->key)){
-			throw new SystemDisplayablePermanentError("You cannot add a question option when there is no question.  Submit your question first.");
-			exit();
+			return LogicResult::error("You cannot add a question option when there is no question.  Submit your question first.");
 		}
 		$question_option = new QuestionOption(NULL);
 		$question_option->set('qop_qst_question_id', $question->key);

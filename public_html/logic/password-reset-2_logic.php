@@ -14,9 +14,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('register_active')){
-			header("HTTP/1.0 404 Not Found");
-			echo 'This feature is turned off';
-			exit();
+			return LogicResult::error('This feature is turned off');
 	}
 
 	$act_code = $get_vars['act_code'];
@@ -30,31 +28,26 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$success = Activation::checkTempCode($act_code, 2);
 
 		if(!$success){
-			throw new SystemDisplayableError(
-				'Sorry, this code has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
+			return LogicResult::error('Sorry, this code has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
 		}
 
 		if(!isset($post_vars['usr_password']) || !isset($post_vars['usr_password_again'])){
-			throw new SystemDisplayableError(
-				'The following required fields were not set: passwords');
+			return LogicResult::error('The following required fields were not set: passwords');
 		}
 
 		if ($post_vars['usr_password'] != $post_vars['usr_password_again']) {
-			throw new SystemDisplayableError(
-				'Your password did not match in both fields.');
+			return LogicResult::error('Your password did not match in both fields.');
 		}
 
 		// Attempt to activiate the user if they aren't already activated and get the user
 		$user = Activation::ActivateUser($act_code);
 
 		if (!$user) {
-			throw new SystemDisplayableError(
-				'Sorry, this form has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
+			return LogicResult::error('Sorry, this form has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
 		}
 
 		if($user->get('usr_password_recovery_disabled')){
-				echo 'This feature is turned off for this user.  Please email us to recover your password.';
-				exit();
+				return LogicResult::error('This feature is turned off for this user.  Please email us to recover your password.');
 		}
 
 		$user->set('usr_password', User::GeneratePassword($post_vars['usr_password']));

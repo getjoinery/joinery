@@ -54,8 +54,7 @@ function admin_analytics_stats_logic($get_vars, $post_vars) {
 	}
 	catch(PDOException $e)
 	{
-		$dbhelper->handle_query_error($e);
-		exit();
+		return LogicResult::error('A database error occurred while loading visitor data.');
 	}
 
 	$unique_visitors = $q->fetchAll();
@@ -90,8 +89,7 @@ function admin_analytics_stats_logic($get_vars, $post_vars) {
 	}
 	catch(PDOException $e)
 	{
-		$dbhelper->handle_query_error($e);
-		exit();
+		return LogicResult::error('A database error occurred while loading page data.');
 	}
 
 	$page_visitors = $q->fetchAll();
@@ -117,8 +115,7 @@ function admin_analytics_stats_logic($get_vars, $post_vars) {
 	}
 	catch(PDOException $e)
 	{
-		$dbhelper->handle_query_error($e);
-		exit();
+		return LogicResult::error('A database error occurred while loading 404 data.');
 	}
 
 	$t404_pages = $q->fetchAll();

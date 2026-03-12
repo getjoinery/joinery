@@ -32,9 +32,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	
 	if(!$settings->get_setting('products_active')){
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();
+		return LogicResult::error('This feature is turned off');
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
@@ -90,7 +88,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		$billing_user = User::CreateCompleteNew($user_data, true, true, false);
 		if(!$billing_user){
-			throw new SystemDisplayablePermanentError("Failed to create or retrieve billing user.");
+			return LogicResult::error("Failed to create or retrieve billing user.");
 		}
 	}
 	
@@ -108,13 +106,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			
 			if(!$order = Order::GetByStripeSession($session_id)){	
 				$error = 'Stripe returned bad or missing session id';
-				throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no stripe session ID returned.");
-				exit();				  
+				return LogicResult::error("Something went wrong with the order.  There was no stripe session ID returned.");				  
 			}
 			
 		} catch (StripeHelperException $e) {
 			error_log("Stripe session validation failed: " . $e->getMessage());
-			throw new SystemDisplayableError("Invalid payment session");
+			return LogicResult::error("Invalid payment session");
 		}
 	}
 	else{
@@ -140,8 +137,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	foreach($cart->coupon_codes as $coupon_code_name){
 		$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim($coupon_code_name));
 		if(!$coupon_code_test->is_valid()){
-			throw new SystemDisplayablePermanentError("Sorry, one of the coupon codes is invalid.");
-			exit();				
+			return LogicResult::error("Sorry, one of the coupon codes is invalid.");				
 		}
 		
 	}
@@ -180,8 +176,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$order->set('ord_error', $error);
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->save();
-				throw new SystemDisplayablePermanentError("Something went wrong with the order.  There was no paypal transaction ID returned.");
-				exit();
+				return LogicResult::error("Something went wrong with the order.  There was no paypal transaction ID returned.");
 			}
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
@@ -204,8 +199,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				
 				$log_error = "The credit card information was not submitted because your browser has javascript turned off or is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon) and turn off any script blockers.  For help, contact us at ".$settings->get_setting('defaultemail')." .";
 
-				throw new SystemDisplayableError($log_error);
-				exit();					
+				return LogicResult::error($log_error);
 			}	
 
 			$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
@@ -214,8 +208,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$payment_service = 'stripe_regular';
 		}
 		else{		
-			throw new SystemDisplayablePermanentError("Something went wrong with the order. Unable to determine checkout type.");
-			exit();				  
+			return LogicResult::error("Something went wrong with the order. Unable to determine checkout type.");
 		}
 	}
 	else{
@@ -257,21 +250,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				);
 			}
 			catch (SystemDisplayableError $e) {
-				// User-friendly error from comprehensive error handling
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->set('ord_error', substr($e->getMessage(), 0, 250));
-				$order->save();	
-				PublicPage::OutputGenericPublicPage("Payment Error", "Payment Error", $e->getMessage());
-				exit;
+				$order->save();
+				return LogicResult::error($e->getMessage());
 			}
 			catch (StripeHelperException $e) {
-				// Configuration error - should not happen in production
 				error_log("Stripe configuration error during payment: " . $e->getMessage());
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->set('ord_error', 'Stripe configuration error');
-				$order->save();	
-				PublicPage::OutputGenericPublicPage("System Error", "System Error", "Payment system configuration error. Please contact support at " . $settings->get_setting('defaultemail'));
-				exit;
+				$order->save();
+				return LogicResult::error("Payment system configuration error. Please contact support at " . $settings->get_setting('defaultemail'));
 			}
 
 			//STORE THE CHARGE ID
