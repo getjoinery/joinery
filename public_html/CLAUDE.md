@@ -137,6 +137,7 @@ See `/docs/` for detailed guides on specific subsystems:
 
 - [Admin Pages](docs/admin_pages.md) - Admin interface development patterns
 - [Admin Page Reference](docs/admin_page_reference.md) - Quick reference for admin pages
+- [API](docs/api.md) - REST API authentication, endpoints, and usage
 - [Component System](docs/component_system.md) - Reusable component architecture
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns

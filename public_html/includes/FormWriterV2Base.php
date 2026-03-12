@@ -840,7 +840,7 @@ abstract class FormWriterV2Base {
      *   - 'empty_option' bool|string: Add empty first option (true for "Select...", string for custom)
      *   - 'multiple' bool: Allow multiple selections
      *   - 'disabled' bool: Disable the field
-     *   - 'help' string: Help text displayed below field
+     *   - 'helptext' string: Help text displayed below field
      */
     public function dropinput($name, $label = '', $options = []) {
         // Validate option format in debug mode
@@ -1057,7 +1057,7 @@ abstract class FormWriterV2Base {
      *
      *   Core Options:
      *   - value: Current image URL
-     *   - help: Help text
+     *   - helptext: Help text
      *   - required: Boolean
      *   - placeholder: Placeholder text for search (default: 'Search images...')
      *   - ajax_endpoint: Custom endpoint URL (default: '/ajax/image_list_ajax')
@@ -1077,7 +1077,7 @@ abstract class FormWriterV2Base {
 
         // Extract options with defaults
         $value = $options['value'] ?? '';
-        $help = $options['help'] ?? '';
+        $help = $options['helptext'] ?? '';
         $id = $options['id'] ?? preg_replace('/[^a-zA-Z0-9_]/', '_', $name);
         $ajaxEndpoint = $options['ajax_endpoint'] ?? '/ajax/image_list_ajax';
         $pageSize = $options['page_size'] ?? 20;
@@ -1722,7 +1722,7 @@ abstract class FormWriterV2Base {
      * @param string $label Field label
      * @param array $options Field options:
      *   - value: Current hex color value (default: '')
-     *   - help: Help text
+     *   - helptext: Help text
      *   - required: Boolean
      *   - theme: Theme name to scan for colors (default: current theme)
      *   - max_swatches: Maximum swatches to show (default: 100)
@@ -1737,7 +1737,7 @@ abstract class FormWriterV2Base {
 
         // Extract options with defaults
         $value = $options['value'] ?? '';
-        $help = $options['help'] ?? '';
+        $help = $options['helptext'] ?? '';
         $required = !empty($options['required']);
         $id = $options['id'] ?? preg_replace('/[^a-zA-Z0-9_]/', '_', $name);
         $theme = $options['theme'] ?? null;
@@ -4115,8 +4115,8 @@ class AjaxSearchSelect {
         echo '<label class="form-label fw-bold">' . htmlspecialchars($label) . '</label>';
 
         // Help text if provided
-        if (!empty($options['help'])) {
-            echo '<div class="form-text text-muted mb-2">' . htmlspecialchars($options['help']) . '</div>';
+        if (!empty($options['helptext'])) {
+            echo '<div class="form-text text-muted mb-2">' . htmlspecialchars($options['helptext']) . '</div>';
         }
 
         echo '<div class="repeater-items">';
@@ -4293,10 +4293,8 @@ document.addEventListener("DOMContentLoaded", function() {
                 }
             }
 
-            // Map help to helptext for FormWriter compatibility
-            if (isset($subfield['help'])) {
-                $field_options['help'] = $subfield['help'];
-                $field_options['helptext'] = $subfield['help'];
+            if (isset($subfield['helptext'])) {
+                $field_options['helptext'] = $subfield['helptext'];
             }
 
             // Add required indicator to label

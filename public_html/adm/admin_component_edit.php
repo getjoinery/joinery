@@ -279,11 +279,11 @@ echo '</div>';
 // Assign to Page - right after component type
 $formwriter->dropinput('pac_pag_page_id', 'Assign to Page', [
 	'options' => $pages_dropdown,
-	'help' => 'Optional. Auto-render on this page via get_filled_content()'
+	'helptext' => 'Optional. Auto-render on this page via get_filled_content()'
 ]);
 
 $formwriter->textinput('pac_title', 'Label', [
-	'help' => 'Internal name for identifying this component'
+	'helptext' => 'Internal name for identifying this component'
 ]);
 
 // Dynamic config fields based on component type
@@ -324,7 +324,7 @@ if ($current_type_id) {
 			$field_default = $field['default'] ?? '';
 			$field_options = [
 				'value' => $current_config[$field_name] ?? $field_default,
-				'help' => $field_help,
+				'helptext' => $field_help,
 				'helptext' => $field_help,
 				'model' => false,
 				'validation' => false
@@ -411,23 +411,23 @@ if ($current_type_id) {
 
 		if (!$type_skip_wrapper) {
 			// Layout controls (hidden when component type opts out via skip_wrapper)
-			$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
-			$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+			$formwriter->textinput('pac_max_width', 'Max Width', ['helptext' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
+			$formwriter->textinput('pac_max_height', 'Max Height', ['helptext' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
 			$formwriter->dropinput('pac_vertical_margin', 'Vertical Margin', [
 				'options' => ['' => 'Default', 'none' => 'None', 'sm' => 'Small', 'md' => 'Medium', 'lg' => 'Large', 'xl' => 'Extra Large'],
-				'help' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
+				'helptext' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
 			]);
 			echo '<hr>';
 		}
 
 		// Slug field (always advanced)
 		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
-			'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
+			'helptext' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 		]);
 
 		// Display order (always advanced)
 		$formwriter->textinput('pac_order', 'Display Order', [
-			'help' => 'Order when multiple components on same page (lower = first)'
+			'helptext' => 'Order when multiple components on same page (lower = first)'
 		]);
 
 		// Schema-defined advanced fields
@@ -448,20 +448,20 @@ if ($current_type_id) {
 		echo '<div class="mt-3 pt-3 border-top">';
 
 		if (!$type_skip_wrapper) {
-			$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
-			$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+			$formwriter->textinput('pac_max_width', 'Max Width', ['helptext' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
+			$formwriter->textinput('pac_max_height', 'Max Height', ['helptext' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
 			$formwriter->dropinput('pac_vertical_margin', 'Vertical Margin', [
 				'options' => ['' => 'Default', 'none' => 'None', 'sm' => 'Small', 'md' => 'Medium', 'lg' => 'Large', 'xl' => 'Extra Large'],
-				'help' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
+				'helptext' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
 			]);
 			echo '<hr>';
 		}
 
 		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
-			'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
+			'helptext' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 		]);
 		$formwriter->textinput('pac_order', 'Display Order', [
-			'help' => 'Order when multiple components on same page (lower = first)'
+			'helptext' => 'Order when multiple components on same page (lower = first)'
 		]);
 		echo '</div></div></div>';
 
@@ -477,19 +477,19 @@ if ($current_type_id) {
 	echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 	echo '<div class="mt-3 pt-3 border-top">';
 
-	$formwriter->textinput('pac_max_width', 'Max Width', ['help' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
-	$formwriter->textinput('pac_max_height', 'Max Height', ['help' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
+	$formwriter->textinput('pac_max_width', 'Max Width', ['helptext' => 'CSS value, e.g. 720px, 80%. Leave empty for no restriction.']);
+	$formwriter->textinput('pac_max_height', 'Max Height', ['helptext' => 'CSS value, e.g. 400px, 50vh. Leave empty for no restriction.']);
 	$formwriter->dropinput('pac_vertical_margin', 'Vertical Margin', [
 		'options' => ['' => 'Default', 'none' => 'None', 'sm' => 'Small', 'md' => 'Medium', 'lg' => 'Large', 'xl' => 'Extra Large'],
-		'help' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
+		'helptext' => 'Space above and below the component. Default uses the component type\'s preferred spacing.',
 	]);
 	echo '<hr>';
 
 	$formwriter->textinput('pac_location_name', 'Slug (optional)', [
-		'help' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
+		'helptext' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 	]);
 	$formwriter->textinput('pac_order', 'Display Order', [
-		'help' => 'Order when multiple components on same page (lower = first)'
+		'helptext' => 'Order when multiple components on same page (lower = first)'
 	]);
 	echo '</div></div></div>';
 

@@ -706,7 +706,7 @@ Repeaters support `item_label`, `min`, and `max` properties for better admin UX:
 | `min` | Minimum number of rows. Pre-populates empty rows on new instances. Disables remove at limit. |
 | `max` | Maximum number of rows. Disables add button at limit. |
 
-Sub-fields within repeaters support the same schema properties as top-level fields: `help`, `default`, `placeholder`, `required`, `advanced`, and type-specific options like `min`/`max`/`step` for `numberinput`.
+Sub-fields within repeaters support the same schema properties as top-level fields: `helptext`, `default`, `placeholder`, `required`, `advanced`, and type-specific options like `min`/`max`/`step` for `numberinput`.
 
 ### Accessing Defaults Programmatically
 

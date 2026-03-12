@@ -399,7 +399,7 @@
 		$formwriter->dropinput('protocol_mode', 'Protocol Mode', [
 			'options' => $optionvals,
 			'value' => $protocol_mode_value,
-			'help' => 'Controls protocol for generated URLs and redirect behavior'
+			'helptext' => 'Controls protocol for generated URLs and redirect behavior'
 		]);
 
 		$formwriter->dropinput('debug_css', 'CSS Debug Mode (tailwind themes only)', [
@@ -452,7 +452,7 @@
 		$formwriter->dropinput('active_theme_plugin', 'Active Theme Plugin', [
 			'options' => $plugin_options,
 			'value' => $current_plugin,
-			'help' => 'Select which plugin provides the user interface'
+			'helptext' => 'Select which plugin provides the user interface'
 		]);
 		echo '</div>';
 
@@ -1103,37 +1103,37 @@
 	$formwriter->dropinput('subscription_downgrades_enabled', 'Allow subscription downgrades', [
 		'options' => $yes_no_options,
 		'value' => $settings->get_setting('subscription_downgrades_enabled'),
-		'help' => 'Allow users to downgrade to lower subscription tiers'
+		'helptext' => 'Allow users to downgrade to lower subscription tiers'
 	]);
 
 	$formwriter->dropinput('subscription_downgrade_timing', 'Downgrade timing', [
 		'options' => ["Immediate"=>'immediate', 'End of billing period' => 'end_of_period'],
 		'value' => $settings->get_setting('subscription_downgrade_timing'),
-		'help' => 'When downgrades take effect (only applies if downgrades are enabled)'
+		'helptext' => 'When downgrades take effect (only applies if downgrades are enabled)'
 	]);
 
 	$formwriter->dropinput('subscription_cancellation_enabled', 'Allow subscription cancellations', [
 		'options' => $yes_no_options,
 		'value' => $settings->get_setting('subscription_cancellation_enabled'),
-		'help' => 'Allow users to cancel their subscriptions'
+		'helptext' => 'Allow users to cancel their subscriptions'
 	]);
 
 	$formwriter->dropinput('subscription_cancellation_timing', 'Cancellation timing', [
 		'options' => ["Immediate"=>'immediate', 'End of billing period' => 'end_of_period'],
 		'value' => $settings->get_setting('subscription_cancellation_timing'),
-		'help' => 'When cancellations take effect'
+		'helptext' => 'When cancellations take effect'
 	]);
 
 	$formwriter->dropinput('subscription_cancellation_prorate', 'Issue prorated refunds on cancellation', [
 		'options' => $yes_no_options,
 		'value' => $settings->get_setting('subscription_cancellation_prorate'),
-		'help' => 'Issue refunds for unused time (only for immediate cancellations)'
+		'helptext' => 'Issue refunds for unused time (only for immediate cancellations)'
 	]);
 
 	$formwriter->dropinput('subscription_reactivation_enabled', 'Allow subscription reactivation', [
 		'options' => $yes_no_options,
 		'value' => $settings->get_setting('subscription_reactivation_enabled'),
-		'help' => 'Allow users to reactivate cancelled subscriptions before they expire'
+		'helptext' => 'Allow users to reactivate cancelled subscriptions before they expire'
 	]);
 	
 	echo '<hr>';
@@ -1162,12 +1162,12 @@
 			'ccpa' => 'CCPA (Opt-out)'
 		],
 		'value' => $settings->get_setting('cookie_consent_mode'),
-		'help' => 'Auto detects visitor location. GDPR requires consent before setting cookies. CCPA allows opt-out.'
+		'helptext' => 'Auto detects visitor location. GDPR requires consent before setting cookies. CCPA allows opt-out.'
 	]);
 	$formwriter->textinput('cookie_privacy_policy_link', 'Privacy policy URL', [
 		'value' => $settings->get_setting('cookie_privacy_policy_link'),
 		'prepend' => rtrim($settings->get_setting('webDir'), '/') . '/',
-		'help' => 'Path to your privacy policy page (shown in consent banner)'
+		'helptext' => 'Path to your privacy policy page (shown in consent banner)'
 	]);
 
 	echo '<h3>Video Settings</h3>';
@@ -1235,6 +1235,53 @@
 			'helptext' => 'JSON array of IPs. Example: ["203.0.113.50", "10.0.0.0/24"]'
 		]);
 	}
+
+	echo '<hr>';
+
+	echo '<h3>API Settings</h3>';
+
+	$true_false_options = ['true' => 'Yes', 'false' => 'No'];
+	$formwriter->dropinput('api_require_https', 'Require HTTPS for API requests', [
+		'options' => $true_false_options,
+		'value' => $settings->get_setting('api_require_https') ?: 'true',
+		'helptext' => 'Disable for local development only. Always enable in production.'
+	]);
+
+	$formwriter->textinput('api_allowed_origins', 'Allowed CORS origins (comma-separated)', [
+		'value' => $settings->get_setting('api_allowed_origins'),
+		'helptext' => 'Example: https://example.com,https://app.example.com. Leave blank to disable CORS.'
+	]);
+
+	echo '<h5>Rate Limiting</h5>';
+
+	$formwriter->textinput('api_rate_limit_requests', 'Max API requests per window', [
+		'value' => $settings->get_setting('api_rate_limit_requests') ?: '1000',
+		'helptext' => 'Maximum number of API requests per IP within the time window'
+	]);
+
+	$formwriter->textinput('api_rate_limit_window', 'API rate limit window (seconds)', [
+		'value' => $settings->get_setting('api_rate_limit_window') ?: '3600',
+		'helptext' => 'Time window in seconds (3600 = 1 hour)'
+	]);
+
+	$formwriter->textinput('api_auth_rate_limit_requests', 'Max failed auth attempts per window', [
+		'value' => $settings->get_setting('api_auth_rate_limit_requests') ?: '10',
+		'helptext' => 'Maximum failed authentication attempts per IP within the time window'
+	]);
+
+	$formwriter->textinput('api_auth_rate_limit_window', 'Auth rate limit window (seconds)', [
+		'value' => $settings->get_setting('api_auth_rate_limit_window') ?: '900',
+		'helptext' => 'Time window in seconds for auth failures (900 = 15 minutes)'
+	]);
+
+	echo '<h5>Request Log Retention</h5>';
+
+	$formwriter->textinput('request_log_retention_days', 'Days to keep request logs', [
+		'value' => $settings->get_setting('request_log_retention_days') ?: '90',
+		'helptext' => 'Logs older than this are purged by the scheduled task. Set to 0 to keep indefinitely.'
+	]);
+
+	echo '<hr>';
 
 	// Scan for plugin settings forms and only show section if any exist
 	$plugins = LibraryFunctions::list_plugins();

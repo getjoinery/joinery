@@ -1241,3 +1241,54 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== API Security Hardening Settings (v88) ==========
+	$migration = array();
+	$migration['database_version'] = '88';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_require_https'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_require_https', 'true', 1, now(), now(), 'api')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '88';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_allowed_origins'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_allowed_origins', '', 1, now(), now(), 'api')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '88';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'request_log_retention_days'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('request_log_retention_days', '90', 1, now(), now(), 'api')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== API Rate Limit Settings (v89) ==========
+	$migration = array();
+	$migration['database_version'] = '89';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_rate_limit_requests'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_rate_limit_requests', '1000', 1, now(), now(), 'api')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '89';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_rate_limit_window'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_rate_limit_window', '3600', 1, now(), now(), 'api')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '89';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_auth_rate_limit_requests'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_auth_rate_limit_requests', '10', 1, now(), now(), 'api')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	$migration = array();
+	$migration['database_version'] = '89';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_auth_rate_limit_window'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_auth_rate_limit_window', '900', 1, now(), now(), 'api')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
