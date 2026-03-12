@@ -25,6 +25,7 @@ The API currently implements core security practices correctly:
 5. **API Key Status Not Fully Validated**
 6. **Commented Out Collection Authentication**
 7. **Missing Security Headers**
+8. **Repetitive Error Response Pattern (Code Quality)**
 
 ## Requirements
 
@@ -82,124 +83,222 @@ if(empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') {
 
 **Note:** This can be disabled in development environments via a setting.
 
-### 3. Implement Rate Limiting
+### 3. Request Log Table (Shared Infrastructure for Rate Limiting and Audit Trail)
 
-**Issue:** No protection against brute force attacks on API keys or excessive API usage.
+**Issues addressed:** No rate limiting (#3), no audit trail (#4).
 
-**Strategy:** Track failed authentication attempts by IP address and throttle requests.
+**Strategy:** A single general-purpose request log table that serves both as an audit trail and as the data source for rate limiting. This table is **not API-specific** — it can log requests from any site feature (API calls, login attempts, form submissions, password resets, etc.).
 
-**File:** `/api/apiv1.php`
-
-**Implementation:** Add after HTTPS check:
-
-```php
-// Rate limiting for API requests
-require_once(PathHelper::getIncludePath('includes/RateLimiter.php'));
-
-$rate_limiter = new RateLimiter();
-$client_ip = $_SERVER['REMOTE_ADDR'];
-
-// Check general rate limit (e.g., 1000 requests per hour)
-if(!$rate_limiter->check_limit($client_ip, 'api_general', 1000, 3600)) {
-	$response = array(
-		'api_version' => '1.0',
-		'errortype' => 'RateLimitError',
-		'error' => 'Error: Rate limit exceeded. Please try again later.',
-		'data' => ''
-	);
-	header("Content-Type: application/json");
-	http_response_code(429); // Too Many Requests
-	echo json_encode($response) . PHP_EOL;
-	exit;
-}
-
-// Check failed authentication rate limit (e.g., 10 failed attempts per 15 minutes)
-// This will be called after authentication failures
-```
-
-**New File:** `/includes/RateLimiter.php`
+**New Data Class:** `/data/request_logs_class.php`
 
 ```php
 <?php
-class RateLimiter {
-	private $db;
+class RequestLog extends SystemBase {
+	public static $prefix = 'rql';
+	public static $tablename = 'rql_request_logs';
+	public static $pkey_column = 'rql_request_log_id';
 
-	public function __construct() {
+	public static $field_specifications = array(
+		'rql_request_log_id' => array('type'=>'int8', 'serial'=>true),
+		'rql_feature'        => array('type'=>'varchar(50)', 'is_nullable'=>false),  // e.g. 'api', 'login', 'register', 'password_reset'
+		'rql_action'         => array('type'=>'varchar(100)', 'is_nullable'=>true),   // e.g. 'GET /api/v1/User/5', 'login_attempt', 'form_submit'
+		'rql_ip_address'     => array('type'=>'varchar(45)', 'is_nullable'=>false),
+		'rql_usr_user_id'    => array('type'=>'int4', 'is_nullable'=>true),
+		'rql_was_success'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'true'),
+		'rql_status_code'    => array('type'=>'int2', 'is_nullable'=>true),           // HTTP status code (when applicable)
+		'rql_error_type'     => array('type'=>'varchar(50)', 'is_nullable'=>true),    // e.g. 'AuthenticationError', 'ValidationError'
+		'rql_note'           => array('type'=>'varchar(255)', 'is_nullable'=>true),   // Human-readable detail
+		'rql_response_ms'    => array('type'=>'int4', 'is_nullable'=>true),           // Response time in milliseconds
+		'rql_create_time'    => array('type'=>'timestamp', 'is_nullable'=>false, 'default'=>'now()'),
+	);
+
+	public static $timestamp_fields = array('rql_create_time');
+}
+
+class MultiRequestLog extends SystemMultiBase {
+	public static $table_name = 'rql_request_logs';
+	public static $table_primary_key = 'rql_request_log_id';
+}
+?>
+```
+
+**Key design decisions:**
+- `rql_feature` identifies the subsystem (keeps queries fast without needing to parse action strings)
+- `rql_action` holds the specific operation (flexible per feature)
+- `rql_was_success` is the boolean that rate limiting queries against
+- `rql_usr_user_id` is nullable because failed auth attempts won't have a user yet
+- No request bodies or secrets are logged (privacy)
+
+**New Utility Class:** `/includes/RequestLogger.php`
+
+A lightweight static class that wraps the data model. Any feature can call it without understanding the table structure.
+
+```php
+<?php
+require_once(PathHelper::getIncludePath('data/request_logs_class.php'));
+
+class RequestLogger {
+
+	/**
+	 * Log a request.
+	 */
+	public static function log($feature, $action, $success = true, $options = array()) {
+		$log = new RequestLog(NULL);
+		$log->set('rql_feature', $feature);
+		$log->set('rql_action', substr($action, 0, 100));
+		$log->set('rql_ip_address', $_SERVER['REMOTE_ADDR']);
+		$log->set('rql_was_success', $success);
+
+		if(isset($options['user_id']))     $log->set('rql_usr_user_id', $options['user_id']);
+		if(isset($options['status_code'])) $log->set('rql_status_code', $options['status_code']);
+		if(isset($options['error_type']))  $log->set('rql_error_type', $options['error_type']);
+		if(isset($options['note']))        $log->set('rql_note', substr($options['note'], 0, 255));
+		if(isset($options['response_ms'])) $log->set('rql_response_ms', $options['response_ms']);
+
+		$log->save();
+	}
+
+	/**
+	 * Check if a rate limit has been exceeded.
+	 * Counts rows matching feature + IP (optionally filtered by success/failure)
+	 * within the given time window.
+	 *
+	 * @param string $feature       Feature name (e.g. 'api', 'login')
+	 * @param int    $max_requests  Maximum allowed requests in the window
+	 * @param int    $window_seconds Time window in seconds
+	 * @param bool|null $success_filter  null=count all, true=only successes, false=only failures
+	 * @return bool  True if within limit, false if exceeded
+	 */
+	public static function check_rate_limit($feature, $max_requests, $window_seconds, $success_filter = null) {
 		$dbconnector = DbConnector::get_instance();
-		$this->db = $dbconnector->get_db_link();
-		$this->create_table_if_needed();
+		$db = $dbconnector->get_db_link();
+
+		$sql = "SELECT COUNT(*) as cnt FROM rql_request_logs
+		        WHERE rql_feature = ? AND rql_ip_address = ?
+		        AND rql_create_time > NOW() - INTERVAL '{$window_seconds} seconds'";
+		$params = [$feature, $_SERVER['REMOTE_ADDR']];
+
+		if($success_filter !== null) {
+			$sql .= " AND rql_was_success = ?";
+			$params[] = $success_filter;
+		}
+
+		$stmt = $db->prepare($sql);
+		$stmt->execute($params);
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+		return ($row['cnt'] < $max_requests);
 	}
 
-	private function create_table_if_needed() {
-		// Create rate limit tracking table
-		// Table: rtl_rate_limits (rtl_id, rtl_identifier, rtl_limit_key, rtl_timestamp)
-	}
+	/**
+	 * Delete records older than the given number of days.
+	 * Called by the PurgeOldRequestLogs scheduled task.
+	 *
+	 * @param int $days Records older than this many days are deleted
+	 * @return int Number of rows deleted
+	 */
+	public static function cleanup($days = 90) {
+		$dbconnector = DbConnector::get_instance();
+		$db = $dbconnector->get_db_link();
 
-	public function check_limit($identifier, $limit_key, $max_requests, $window_seconds) {
-		// Check if identifier has exceeded max_requests in the time window
-		// Returns true if within limit, false if exceeded
-	}
-
-	public function record_request($identifier, $limit_key) {
-		// Record a request for rate limiting
-	}
-
-	public function record_failure($identifier, $limit_key) {
-		// Record a failed authentication attempt
-	}
-
-	private function cleanup_old_records() {
-		// Remove records older than longest window
+		$sql = "DELETE FROM rql_request_logs WHERE rql_create_time < NOW() - (INTERVAL '1 day' * :days)";
+		$stmt = $db->prepare($sql);
+		$stmt->execute([':days' => $days]);
+		return $stmt->rowCount();
 	}
 }
 ?>
 ```
 
-**Future Enhancement:** Create data model classes for rate limits.
-
-### 4. Add Request Logging and Audit Trail
-
-**Issue:** No visibility into API usage or security events.
+### 3a. Rate Limiting (API)
 
 **File:** `/api/apiv1.php`
 
-**Implementation:** Log key events to database table.
+**Implementation:** Add after HTTPS check, using RequestLogger:
 
-**New Table:** `apl_api_logs`
-```sql
-CREATE TABLE apl_api_logs (
-    apl_api_log_id BIGSERIAL PRIMARY KEY,
-    apl_apk_api_key_id INT4,
-    apl_ip_address VARCHAR(45),
-    apl_endpoint VARCHAR(255),
-    apl_method VARCHAR(10),
-    apl_status_code INT4,
-    apl_error_type VARCHAR(50),
-    apl_request_time TIMESTAMP(6) DEFAULT NOW(),
-    apl_response_time_ms INT4
-);
-```
-
-**Add Logging Function:**
 ```php
-function log_api_request($api_key_id, $ip, $endpoint, $method, $status_code, $error_type = null, $response_time_ms = 0) {
-	$dbconnector = DbConnector::get_instance();
-	$db = $dbconnector->get_db_link();
+require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 
-	$sql = "INSERT INTO apl_api_logs (apl_apk_api_key_id, apl_ip_address, apl_endpoint, apl_method, apl_status_code, apl_error_type, apl_response_time_ms)
-	        VALUES (?, ?, ?, ?, ?, ?, ?)";
-	$stmt = $db->prepare($sql);
-	$stmt->execute([$api_key_id, $ip, $endpoint, $method, $status_code, $error_type, $response_time_ms]);
+// Check general API rate limit (1000 requests per hour per IP)
+if(!RequestLogger::check_rate_limit('api', 1000, 3600)) {
+	api_error('Rate limit exceeded. Please try again later.', 'RateLimitError', 429);
+}
+
+// Check failed API auth rate limit (10 failures per 15 minutes per IP)
+if(!RequestLogger::check_rate_limit('api_auth', 10, 900, false)) {
+	api_error('Too many failed authentication attempts. Please try again later.', 'RateLimitError', 429);
 }
 ```
 
-**Log Points:**
-- Every successful request
-- Every authentication failure
-- Every authorization failure
-- Response times for performance monitoring
+After each authentication failure, log it:
+```php
+RequestLogger::log('api_auth', 'auth_failure', false, [
+	'status_code' => 401,
+	'error_type' => 'AuthenticationError',
+	'note' => 'Incorrect secret key'
+]);
+```
 
-**Privacy Note:** Do not log request bodies or secret keys.
+### 3b. Audit Logging (API)
+
+Log every completed API request at the end of processing:
+
+```php
+// On success
+RequestLogger::log('api', $operation, true, [
+	'user_id' => $api_user->key,
+	'status_code' => 200,
+	'response_ms' => $response_time_ms
+]);
+
+// On error
+RequestLogger::log('api', $operation, false, [
+	'user_id' => $api_user->key,
+	'status_code' => 400,
+	'error_type' => 'TransactionError',
+	'note' => $e->getMessage()
+]);
+```
+
+### 3c. Usage from Other Site Features (Examples)
+
+The same infrastructure works for any feature without additional tables or classes:
+
+```php
+// Login rate limiting
+require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+
+// Check before processing login
+if(!RequestLogger::check_rate_limit('login', 10, 900, false)) {
+	return LogicResult::error('Too many failed login attempts. Please try again in 15 minutes.');
+}
+
+// After failed login
+RequestLogger::log('login', 'login_attempt', false, [
+	'note' => 'Invalid password for ' . $email
+]);
+
+// After successful login
+RequestLogger::log('login', 'login_attempt', true, [
+	'user_id' => $user->key
+]);
+```
+
+```php
+// Registration spam prevention
+if(!RequestLogger::check_rate_limit('register', 5, 3600)) {
+	return LogicResult::error('Too many registration attempts. Please try again later.');
+}
+RequestLogger::log('register', 'register_attempt', true, ['user_id' => $user->key]);
+```
+
+```php
+// Password reset abuse prevention
+if(!RequestLogger::check_rate_limit('password_reset', 5, 3600)) {
+	return LogicResult::error('Too many password reset requests. Please try again later.');
+}
+RequestLogger::log('password_reset', 'reset_request', true);
+```
 
 ### 5. Validate API Key Status Completely
 
@@ -336,23 +435,147 @@ if($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 **New Setting:** Add `api_allowed_origins` to settings table for CORS configuration.
 
+### 8. Refactor Repetitive Error Response Pattern (Code Quality)
+
+**Issue:** The file contains ~15 instances of the same `echo json_encode() + exit` error response pattern. Each is 7-8 lines of identical boilerplate. This makes the file ~480 lines when it could be ~250, and every error response is a copy-paste opportunity for bugs (as evidenced by the line 45 HTTP 200 and line 303 commented-out status code issues).
+
+**Current Pattern (repeated ~15 times):**
+```php
+$response = array(
+    'api_version' => '1.0',
+    'errortype' => 'AuthenticationError',
+    'error' => 'Error: Some message',
+    'data' => ''
+);
+header("Content-Type: application/json");
+http_response_code(400);
+
+$response = json_encode($response);
+echo $response . PHP_EOL;
+exit;
+```
+
+**Implementation:** Extract a helper function and replace all instances:
+
+```php
+/**
+ * Send a JSON error response and exit.
+ */
+function api_error($message, $error_type = 'TransactionError', $status_code = 400) {
+    $response = array(
+        'api_version' => '1.0',
+        'errortype' => $error_type,
+        'error' => 'Error: ' . $message,
+        'data' => ''
+    );
+    header("Content-Type: application/json");
+    http_response_code($status_code);
+    echo json_encode($response) . PHP_EOL;
+    exit;
+}
+
+/**
+ * Send a JSON success response and exit.
+ */
+function api_success($data, $message = '', $status_code = 200, $extra = array()) {
+    $response = array(
+        'api_version' => '1.0',
+        'success_message' => $message,
+        'data' => $data
+    );
+    $response = array_merge($response, $extra);
+    header("Content-Type: application/json");
+    http_response_code($status_code);
+    echo json_encode($response) . PHP_EOL;
+    exit;
+}
+```
+
+**Conversion examples:**
+
+```php
+// BEFORE (7 lines)
+$response = array(
+    'api_version' => '1.0',
+    'errortype' => 'AuthenticationError',
+    'error' => 'Error: Public/secret keys not present',
+    'data' => '',
+);
+header("Content-Type: application/json");
+http_response_code(400);
+$response = json_encode($response);
+echo $response . PHP_EOL;
+exit;
+
+// AFTER (1 line)
+api_error('Public/secret keys not present', 'AuthenticationError', 400);
+```
+
+```php
+// BEFORE (success, 5 lines)
+header("Content-Type: application/json");
+http_response_code(200);
+$response = json_encode($response);
+echo $response . PHP_EOL;
+exit;
+
+// AFTER (1 line)
+api_success($object->export_as_array(), $class_name . ' found.');
+```
+
+**Instances to convert:**
+| Line | Type | Error Type | Status Code |
+|------|------|-----------|-------------|
+| 17-30 | Error | AuthenticationError | 400 |
+| 38-50 | Error | AuthenticationError | 200 → 400 (fixes #1) |
+| 52-65 | Error | AuthenticationError | 400 |
+| 67-84 | Error | AuthenticationError | 400 |
+| 86-99 | Error | AuthenticationError | 400 |
+| 101-114 | Error | AuthenticationError | 400 |
+| 121-134 | Error | AuthenticationError | 401 |
+| 140-154 | Error | AuthenticationError | 401 |
+| 166-179 | Error | AuthenticationError | 403 |
+| 191-204 | Error | TransactionError | 400 |
+| 208-221 | Error | AuthenticationError | 403 |
+| 242-255 | Error | TransactionError | 400 |
+| 259-272 | Error | AuthenticationError | 403 |
+| 295-308 | Error | TransactionError | commented → 400 (fixes #1) |
+| 312-325 | Error | AuthenticationError | 403 |
+| 341-354 | Error | TransactionError | 400 |
+| 358-371 | Error | AuthenticationError | 403 |
+| 459-467 | Success | — | 200 |
+| 468-480 | Error | (generic) | 400 |
+
+**Benefits:**
+- Eliminates the two status code bugs by construction (single source of truth)
+- Reduces file from ~480 lines to ~250 lines
+- Makes it impossible to forget `header("Content-Type: application/json")` or `exit`
+- Prepares the codebase for the business logic endpoints spec (which reuses these helpers)
+
+**Note:** This should be done in the same pass as fixes #1-#7 since it touches the same lines and naturally fixes the status code issues.
+
 ## Implementation Priority
 
-### Phase 1: Critical Security Fixes (High Priority)
-1. ✅ Fix inconsistent HTTP status codes (Lines 45, 303)
-2. ✅ Add HTTPS enforcement
-3. ✅ Validate API key status (active, start_time, expires_time)
-4. ✅ Add security headers
+### Phase 1: Critical Security Fixes & Code Quality (High Priority)
+1. ✅ Refactor error response pattern (extract `api_error()`/`api_success()` helpers) — do this first since it touches every error path and naturally fixes the status code bugs
+2. ✅ Fix inconsistent HTTP status codes (Lines 45, 303) — absorbed by #1
+3. ✅ Add HTTPS enforcement
+4. ✅ Validate API key status (active, start_time, expires_time)
+5. ✅ Add security headers
 
-### Phase 2: Operational Security (Medium Priority)
-5. ⚠️ Implement basic rate limiting
-6. ⚠️ Add request logging for audit trail
-7. ⚠️ Uncomment collection authentication (or document why it's disabled)
+### Phase 2: Request Logging & Rate Limiting (Medium Priority)
+6. ⚠️ Create `RequestLog` data class and `RequestLogger` utility (shared infrastructure)
+7. ⚠️ Add API request logging (audit trail)
+8. ⚠️ Add API rate limiting (uses same table)
+9. ⚠️ Add cleanup scheduled task
+10. ⚠️ Uncomment collection authentication (or document why it's disabled)
 
-### Phase 3: Advanced Features (Low Priority)
-8. 🔄 Advanced rate limiting (per-key limits, dynamic throttling)
-9. 🔄 Performance monitoring and alerting
-10. 🔄 API key usage statistics dashboard
+### Phase 3: Extend to Other Features (Low Priority)
+11. 🔄 Add rate limiting to login
+12. 🔄 Add rate limiting to registration
+13. 🔄 Add rate limiting to password reset
+14. 🔄 Admin page for viewing request logs
+15. 🔄 Per-API-key rate limits
 
 ## Testing Requirements
 
@@ -361,18 +584,22 @@ if($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 - [ ] Verify inactive API keys are rejected
 - [ ] Verify expired API keys are rejected
 - [ ] Verify not-yet-active API keys are rejected
-- [ ] Test rate limiting (exceed limits, verify 429 response)
+- [ ] Test API rate limiting (exceed limits, verify 429 response)
+- [ ] Test auth failure rate limiting (10 bad secrets, verify lockout)
 - [ ] Verify security headers are present in all responses
 
 ### Functional Testing
-- [ ] Existing API functionality still works
+- [ ] Existing API functionality still works after `api_error()`/`api_success()` refactor
 - [ ] Error messages are clear and helpful
-- [ ] HTTP status codes are correct
-- [ ] Logs are created for all requests
+- [ ] HTTP status codes are correct (especially the two that were wrong)
+- [ ] Request logs are created for API requests
+- [ ] `RequestLogger::log()` works from a non-API context (e.g., login)
+- [ ] `RequestLogger::check_rate_limit()` correctly counts within time windows
+- [ ] `RequestLogger::cleanup()` removes old records
 
 ### Performance Testing
-- [ ] Rate limiting doesn't impact normal usage
-- [ ] Logging doesn't significantly slow down requests
+- [ ] Rate limit check query is fast (<5ms) even with large log table
+- [ ] Logging doesn't significantly slow down API requests
 - [ ] Collection authentication performance is acceptable
 
 ## Configuration
@@ -388,50 +615,92 @@ INSERT INTO stg_settings (stg_name, stg_value) VALUES ('api_require_https', 'tru
 -- CORS allowed origins (comma-separated)
 INSERT INTO stg_settings (stg_name, stg_value) VALUES ('api_allowed_origins', '');
 
--- Rate limiting: General requests per hour
-INSERT INTO stg_settings (stg_name, stg_value) VALUES ('api_rate_limit_general', '1000');
-
--- Rate limiting: Failed auth attempts per 15 minutes
-INSERT INTO stg_settings (stg_name, stg_value) VALUES ('api_rate_limit_auth_failures', '10');
-
--- Enable/disable API request logging
-INSERT INTO stg_settings (stg_name, stg_value) VALUES ('api_enable_logging', 'true');
+-- Request log retention in days (used by cleanup scheduled task)
+INSERT INTO stg_settings (stg_name, stg_value) VALUES ('request_log_retention_days', '90');
 ```
+
+**Note:** Rate limit thresholds (e.g., 1000 requests/hour, 10 auth failures/15 min) are hardcoded in the calling code, not in settings. This keeps the check fast (no settings lookup per request) and makes limits explicit where they're enforced. They can be moved to settings later if admin-configurable limits are needed.
 
 ## Database Changes
 
-### New Table: Rate Limiting
-```sql
-CREATE TABLE rtl_rate_limits (
-    rtl_rate_limit_id BIGSERIAL PRIMARY KEY,
-    rtl_identifier VARCHAR(255) NOT NULL,
-    rtl_limit_key VARCHAR(50) NOT NULL,
-    rtl_timestamp TIMESTAMP(6) DEFAULT NOW(),
-    rtl_is_failure BOOLEAN DEFAULT FALSE
-);
+### New Table: Request Logs
 
-CREATE INDEX idx_rtl_identifier_key ON rtl_rate_limits(rtl_identifier, rtl_limit_key);
-CREATE INDEX idx_rtl_timestamp ON rtl_rate_limits(rtl_timestamp);
+One table serves both rate limiting and audit logging for all site features. Created automatically by the `RequestLog` data class via `update_database`.
+
+```
+rql_request_logs
+├── rql_request_log_id  (int8, serial PK)
+├── rql_feature          (varchar 50, NOT NULL)   — 'api', 'login', 'register', 'password_reset', etc.
+├── rql_action           (varchar 100, nullable)   — specific operation detail
+├── rql_ip_address       (varchar 45, NOT NULL)
+├── rql_usr_user_id      (int4, nullable)          — null for unauthenticated requests
+├── rql_was_success       (bool, NOT NULL, default true)
+├── rql_status_code      (int2, nullable)          — HTTP status code when applicable
+├── rql_error_type       (varchar 50, nullable)
+├── rql_note             (varchar 255, nullable)   — human-readable detail, never secrets
+├── rql_response_ms      (int4, nullable)
+└── rql_create_time      (timestamp, NOT NULL, default now())
 ```
 
-### New Table: API Logs
-```sql
-CREATE TABLE apl_api_logs (
-    apl_api_log_id BIGSERIAL PRIMARY KEY,
-    apl_apk_api_key_id INT4,
-    apl_ip_address VARCHAR(45),
-    apl_endpoint VARCHAR(255),
-    apl_method VARCHAR(10),
-    apl_status_code INT4,
-    apl_error_type VARCHAR(50),
-    apl_request_time TIMESTAMP(6) DEFAULT NOW(),
-    apl_response_time_ms INT4
-);
+**Rate limiting queries** use: `WHERE rql_feature = ? AND rql_ip_address = ? AND rql_create_time > NOW() - INTERVAL '...'`
 
-CREATE INDEX idx_apl_api_key ON apl_api_logs(apl_apk_api_key_id);
-CREATE INDEX idx_apl_request_time ON apl_api_logs(apl_request_time);
-CREATE INDEX idx_apl_ip_address ON apl_api_logs(apl_ip_address);
+**Audit queries** use: `WHERE rql_feature = 'api' ORDER BY rql_create_time DESC`
+
+**Indexes** (add to `$field_specifications` or create manually if needed for performance):
+- `(rql_feature, rql_ip_address, rql_create_time)` — rate limiting lookups
+- `(rql_create_time)` — cleanup and audit trail queries
+
+### Cleanup Scheduled Task
+
+A scheduled task runs daily to delete old request log records. Follows the existing pattern (see `PurgeOldErrors` for reference).
+
+**New File:** `/tasks/PurgeOldRequestLogs.json`
+```json
+{
+    "name": "Purge Old Request Logs",
+    "description": "Deletes request log entries older than a configurable number of days",
+    "default_frequency": "daily",
+    "default_time": "03:15:00",
+    "config_fields": {
+        "days_to_keep": {"type": "number", "label": "Days to Keep", "required": true}
+    }
+}
 ```
+
+**New File:** `/tasks/PurgeOldRequestLogs.php`
+```php
+<?php
+/**
+ * PurgeOldRequestLogs - Scheduled Task
+ *
+ * Deletes request log entries older than a configurable number of days.
+ *
+ * @version 1.0
+ */
+
+require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+
+class PurgeOldRequestLogs implements ScheduledTaskInterface {
+
+	public function run(array $config) {
+		$days_to_keep = isset($config['days_to_keep']) ? (int)$config['days_to_keep'] : 0;
+		if ($days_to_keep <= 0) {
+			return array('status' => 'skipped', 'message' => 'days_to_keep not configured');
+		}
+
+		$deleted = RequestLogger::cleanup($days_to_keep);
+
+		if ($deleted === 0) {
+			return array('status' => 'success', 'message' => 'No old request logs to purge');
+		}
+
+		return array('status' => 'success', 'message' => 'Purged ' . $deleted . ' request log(s) older than ' . $days_to_keep . ' days');
+	}
+}
+```
+
+**Note:** `RequestLogger::cleanup()` should return the number of deleted rows (update from the current spec to use `$stmt->rowCount()` and return it). After deployment, activate the task via Admin > System > Scheduled Tasks and set `days_to_keep` (recommended: 90).
 
 ## Security Considerations
 
@@ -440,31 +709,135 @@ CREATE INDEX idx_apl_ip_address ON apl_api_logs(apl_ip_address);
 - Ensure reverse proxies properly set HTTPS headers
 
 ### Rate Limiting
-- Use IP address as primary identifier
-- Consider adding per-API-key rate limits
-- Clean up old rate limit records regularly
-- Don't let rate limit table grow unbounded
+- Uses IP address as primary identifier
+- Rate limits are per-feature (API, login, register, etc. are independent)
+- Cleanup scheduled task prevents unbounded table growth
+- Per-API-key rate limits can be added later by extending `check_rate_limit()` with an optional identifier parameter
 
 ### Logging
-- Never log secret keys or sensitive request data
-- Implement log rotation/cleanup
-- Consider privacy regulations (GDPR, etc.)
-- Provide admin interface to view logs
+- Never log secret keys, passwords, or request bodies
+- `rql_note` should contain only non-sensitive context (e.g., "Invalid password for user@example.com" is acceptable; the actual password is not)
+- Scheduled cleanup respects configurable retention period
+- Consider privacy regulations (GDPR, etc.) when setting retention
 
 ### Collection Authentication
 - Performance impact of per-object auth checks
 - Consider caching authentication results
 - Document performance vs. security tradeoff
 
-## Documentation Updates
+## Documentation Requirements
 
-Update `/docs/api_documentation.md` to document:
-- HTTPS requirement
-- Rate limiting behavior and limits
-- New error types (SecurityError, RateLimitError)
-- New HTTP status codes (426, 429)
-- CORS configuration
-- API key time restrictions behavior
+**No API documentation currently exists.** Create `/docs/api.md` covering both the existing API and the changes in this spec. This document serves external API consumers (developers integrating with the platform).
+
+### New File: `/docs/api.md`
+
+The document should contain the following sections:
+
+#### 1. Overview
+- Base URL: `https://{site-domain}/api/v1/`
+- JSON-only API (all requests and responses are `application/json`)
+- REST conventions: GET (read), POST (create), PUT (update), DELETE (soft delete)
+
+#### 2. Authentication
+- All requests require `public_key` and `secret_key` headers
+- How to obtain API keys (admin creates them via Admin > API Keys)
+- API keys are associated with a user account — the key inherits that user's identity for authorization checks
+- IP restriction: keys can optionally be locked to specific IPs
+- **NEW: Key lifecycle** — keys have `is_active`, `start_time`, and `expires_time` fields; requests with inactive, not-yet-started, or expired keys are rejected with HTTP 401
+
+#### 3. Permission Levels
+Document the permission model clearly, since the current code has a quirk:
+- Permission 1: Read-only (GET single objects and collections)
+- Permission 2: Write-only (POST, PUT) — **cannot read** (this is the current behavior and should be documented as intentional or flagged as a bug to fix)
+- Permission 3: Read + Write
+- Permission 4+: Read + Write + Delete
+
+#### 4. CRUD Endpoints
+- **GET `/api/v1/{ClassName}/{id}`** — Read a single object
+- **GET `/api/v1/{ClassName}s?page=0&numperpage=10&sort=field&sdirection=ASC`** — List objects (note: plural form, trailing 's')
+  - Document pagination parameters: `page`, `numperpage`, `sort`, `sdirection`
+  - Document that additional query parameters are passed as filters to the Multi class
+- **POST `/api/v1/{ClassName}`** — Create a new object (fields in POST body)
+- **PUT `/api/v1/{ClassName}/{id}?field=value`** — Update an object (fields in query string)
+- **DELETE `/api/v1/{ClassName}/{id}`** — Soft delete an object
+
+#### 5. Available Models
+- List of model class names that can be used as endpoints (or explain that any SystemBase model is available)
+- Note that the class name is case-sensitive and uses PascalCase (e.g., `User`, `EventRegistrant`, `ProductGroup`)
+
+#### 6. Response Format
+Document the two response shapes:
+
+**Success (single object):**
+```json
+{
+    "api_version": "1.0",
+    "success_message": "ClassName found.",
+    "data": { ... }
+}
+```
+
+**Success (collection):**
+```json
+{
+    "api_version": "1.0",
+    "success_message": "",
+    "num_results": 100,
+    "page": 0,
+    "numperpage": 10,
+    "data": [ ... ]
+}
+```
+
+**Error:**
+```json
+{
+    "api_version": "1.0",
+    "errortype": "AuthenticationError",
+    "error": "Error: description",
+    "data": ""
+}
+```
+
+#### 7. Error Types and HTTP Status Codes
+| Status Code | Error Type | Meaning |
+|-------------|-----------|---------|
+| 400 | AuthenticationError | Missing headers, invalid key, deleted user |
+| 400 | TransactionError | Object not found, validation failure, save error |
+| 401 | AuthenticationError | Wrong secret, IP restricted, inactive/expired key |
+| 403 | AuthenticationError | Insufficient permission for this operation |
+| **426** | **SecurityError** | **HTTPS required (new)** |
+| **429** | **RateLimitError** | **Rate limit exceeded (new)** |
+
+#### 8. HTTPS Requirement (NEW)
+- All API requests must use HTTPS
+- HTTP requests are rejected with 426 Upgrade Required
+- Note about development bypass via `api_require_https` setting
+
+#### 9. Rate Limiting (NEW)
+- General limit: 1000 requests per hour per IP
+- Auth failure limit: 10 failed attempts per 15 minutes per IP
+- When exceeded: HTTP 429 with `RateLimitError`
+- Limits reset after the time window passes (sliding window)
+
+#### 10. CORS (NEW)
+- CORS is disabled by default
+- Configurable via `api_allowed_origins` setting (comma-separated origins)
+- Preflight OPTIONS requests are handled automatically
+
+#### 11. Security Headers (NEW)
+List the headers returned on every response:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+- `Referrer-Policy: no-referrer`
+
+### Update CLAUDE.md
+
+Add an entry to the documentation index in CLAUDE.md:
+```
+- [API](docs/api.md) - REST API authentication, endpoints, and usage
+```
 
 ## Backward Compatibility
 
@@ -478,13 +851,15 @@ All changes are backward compatible:
 
 1. ✅ All security vulnerabilities identified are addressed
 2. ✅ HTTPS enforced in production
-3. ✅ Rate limiting prevents brute force attacks
+3. ✅ Rate limiting prevents brute force attacks on API
 4. ✅ Complete audit trail of API usage
 5. ✅ API key status fully validated
 6. ✅ Security headers present on all responses
-7. ✅ Performance impact is minimal (<10% slower)
-8. ✅ All tests pass
-9. ✅ Documentation updated
+7. ✅ `apiv1.php` refactored — no more copy-paste error response blocks
+8. ✅ RequestLogger is reusable by any site feature (login, registration, etc.)
+9. ✅ Performance impact is minimal (<10% slower)
+10. ✅ All tests pass
+11. ✅ Documentation updated
 
 ## Future Enhancements
 
