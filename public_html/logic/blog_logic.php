@@ -13,9 +13,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$page_vars['settings'] = $settings;
 		if(!$settings->get_setting('blog_active')){
 			//TURNED OFF
-			header("HTTP/1.0 404 Not Found");
-			echo 'This feature is turned off';
-			exit();			
+			return LogicResult::error('This feature is turned off');			
 		}
 
 		$session = SessionControl::get_instance();
@@ -35,9 +33,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$page_vars['posts'] = MultiPost::get_posts_for_tag($params[2], $numperpage, $page_offset);
 			$numrecords = MultiPost::get_num_posts_for_tag($params[2], $numperpage, $page_offset);
 			if(empty($page_vars['posts'])){
-				header("HTTP/1.0 404 Not Found");
-				LibraryFunctions::display_404_page();
-				exit();					
+				return LogicResult::error('No blog posts found for this tag.');
 			}
 			$page_vars['title'] = 'Blog Posts with tag '.$params[2];
 		}

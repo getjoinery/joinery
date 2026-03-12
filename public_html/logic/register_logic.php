@@ -23,9 +23,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('register_active')){
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();
+		return LogicResult::error('This feature is turned off');
 	}
 
 	$page_vars['LOGIN_MESSAGES'] = array(
@@ -40,18 +38,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		$formwriter = new FormWriter('form1');
 		if(!$formwriter->honeypot_check($post_vars)){
-			LibraryFunctions::display_404_page();
+			return LogicResult::error('This feature is turned off');
 		}
 
 		if(!$formwriter->antispam_question_check($post_vars)){
-			throw new SystemDisplayableError(
-				'Please type the correct value into the anti-spam field.');
+			return LogicResult::error('Please type the correct value into the anti-spam field.');
 		}
 
 		$captcha_success = $formwriter->captcha_check($post_vars);
 		if (!$captcha_success) {
 			$errormsg = 'Sorry, '.strip_tags($post_vars['usr_first_name']).' '.strip_tags($post_vars['usr_last_name']).', you must click the CAPTCHA to submit the form.';
-			throw new SystemDisplayableError($errormsg);
+			return LogicResult::error($errormsg);
 		}
 
 		if(isset($post_vars['prevformname'])){
@@ -93,8 +90,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		if ($error_fields) {
-			throw new SystemDisplayableError(
-				"The following required fields were left blank: " . implode(', ', $error_fields) . '.  Please try again.');
+			return LogicResult::error("The following required fields were left blank: " . implode(', ', $error_fields) . '.  Please try again.');
 		}
 
 		/*
@@ -108,40 +104,25 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		*/
 
 		if (User::GetByEmail($fixed_fields['usr_email'])) {
-			throw new SystemDisplayableError(
-				'An account has already been registered with this email address.  Please go back and double
-				check the email you entered or <a href="/password-reset-1">click here</a> if you forgot
-				your password.');
+			return LogicResult::error('An account has already been registered with this email address.  Please go back and double check the email you entered or <a href="/password-reset-1">click here</a> if you forgot your password.');
 		}
 		else{
 			$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);
 		}
 
-		if ($ajax) {
-			echo json_encode(array('success' => 1));
-		}
-		else {
+		$returnurl = $session->get_return();
+		$session->set_return(NULL);
 
-			$returnurl = $session->get_return();
-			$session->set_return(NULL);
-
-			// NOW REDIRECT
-			if ($returnurl) {
-				header("Location: $returnurl");
-			} else {
-				header("Location: /page/register-thanks");
-			}
+		if ($returnurl) {
+			return LogicResult::redirect($returnurl);
+		} else {
+			return LogicResult::redirect('/page/register-thanks');
 		}
 
 	}
 	else {
 
 		$form_fields = $session->get_formfields('register');
-
-		if ($ajax) {
-			// AJAX calls should never get here.
-			exit;
-		}
 
 		$session->set_formfields_save("register");
 	}

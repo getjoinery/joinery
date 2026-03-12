@@ -24,8 +24,7 @@ function devices_logic($get_vars, $post_vars){
 	$page_vars['session'] = $session;
 
 	if(!$session->is_logged_in()){
-		LibraryFunctions::redirect('/login');
-		exit;
+		return LogicResult::redirect('/login');
 	}
 	$session->check_permission(0);
 	$session->set_return();

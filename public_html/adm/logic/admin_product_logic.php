@@ -38,7 +38,7 @@ function admin_product_logic($get_vars, $post_vars) {
 
 	if($get_vars['action'] == 'permanent_delete'){
 		if($orders->count_all()){
-			throw new SystemDisplayableError('You cannot delete a product with orders.');
+			return LogicResult::error('You cannot delete a product with orders.');
 		}
 		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$product->permanent_delete();

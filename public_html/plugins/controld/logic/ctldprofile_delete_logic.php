@@ -36,12 +36,11 @@ function ctldprofile_delete_logic($get_vars, $post_vars){
 	if(isset($_POST['confirm'])){	
 		$profile->permanent_delete();			
 
-		LibraryFunctions::redirect('/profile/devices');
-		exit;
+		return LogicResult::redirect('/profile/devices');
 	}
 	else{
 		if($profile->is_primary_or_secondary() == 'primary'){
-			throw new SystemDisplayablePermanentError("You cannot delete a default profile.");
+			return LogicResult::error('You cannot delete a default profile.');
 		}
 		$page_vars['profile'] = $profile;
 		return LogicResult::render($page_vars);

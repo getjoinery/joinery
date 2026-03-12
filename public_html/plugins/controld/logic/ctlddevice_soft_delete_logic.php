@@ -42,15 +42,13 @@ function ctlddevice_soft_delete_logic($get_vars, $post_vars){
 		);
 		$result = $cd->modifyDevice($device->get('cdd_device_id'), $data);
 		if(!$result['success']){
-			throw new SystemDisplayablePermanentError('Unable to modify device.');
-			exit;
+			return LogicResult::error('Unable to modify device.');
 		}
 		$device->set('cdd_is_active', false);
 		$device->set('cdd_delete_time', 'now()'); 
 		$device->save();
 
-		LibraryFunctions::redirect('/profile/devices');
-		exit;
+		return LogicResult::redirect('/profile/devices');
 	}
 	
 	return LogicResult::render($page_vars);

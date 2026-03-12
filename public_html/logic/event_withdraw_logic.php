@@ -11,9 +11,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$settings = Globalvars::get_instance();
 	if(!$settings->get_setting('events_active')){
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();
+		return LogicResult::error('This feature is turned off');
 	}
 
 if ($_POST){

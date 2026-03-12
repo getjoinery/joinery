@@ -28,8 +28,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 	// Check if user has ControlD access
 	$tier = SubscriptionTier::GetUserTier($user->key);
 	if(!$tier){
-		throw new SystemDisplayablePermanentError("You do not have an active subscription.");
-		exit;
+		return LogicResult::error("You do not have an active subscription.");
 	}
 	$page_vars['tier'] = $tier;
 
@@ -72,8 +71,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 				);
 				$result = $cd->modifyDevice($device->get('cdd_device_id'), $data);
 				if(!$result['success']){
-					throw new SystemDisplayablePermanentError('Unable to edit this device.');
-					exit;
+					return LogicResult::error('Unable to edit this device.');
 				}
 			}		
 
@@ -83,7 +81,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 			$device->prepare();
 			$device->save();
 
-			LibraryFunctions::redirect('/profile/devices');
+			return LogicResult::redirect('/profile/devices');
 
 		}
 		else{
@@ -94,8 +92,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 				'deleted' => false
 			]);
 			if($current_devices->count_all() >= $max_devices){
-				throw new SystemDisplayablePermanentError("You have reached your device limit of {$max_devices}.");
-				exit;
+				return LogicResult::error("You have reached your device limit of {$max_devices}.");
 			}
 			
 			$empty_device = new CtldDevice(NULL);
@@ -110,8 +107,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 
 		}
 		
-		LibraryFunctions::redirect('/profile/devices');
-		exit;
+		return LogicResult::redirect('/profile/devices');
 	}
 	else{
 	

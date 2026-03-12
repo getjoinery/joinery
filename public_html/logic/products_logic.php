@@ -19,9 +19,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$show_items = $settings->get_setting('products_list_items_active');
 	if(!$show_events && !$show_items){
 		//TURNED OFF
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();			
+		return LogicResult::error('This feature is turned off');			
 	}
 
 	if($get_vars['numperpage']){

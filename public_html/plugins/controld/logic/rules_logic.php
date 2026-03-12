@@ -49,7 +49,7 @@ function rules_logic($get_vars, $post_vars){
 	
 		$result = $profile->delete_rule($rule_id);
 		
-		LibraryFunctions::redirect('/profile/rules?device_id='.$device->key.'&profile_choice='.$profile_choice);
+		return LogicResult::redirect('/profile/rules?device_id='.$device->key.'&profile_choice='.$profile_choice);
 
 	}
 	else if(isset($_POST['cdr_rule_hostname'])){
@@ -72,8 +72,7 @@ function rules_logic($get_vars, $post_vars){
 
 		$result = $profile->add_rule($_POST['cdr_rule_hostname'], $_POST['cdr_rule_action']);
 
-		LibraryFunctions::redirect('/profile/rules?device_id='.$device->key.'&profile_choice='.$profile_choice);
-		exit;
+		return LogicResult::redirect('/profile/rules?device_id='.$device->key.'&profile_choice='.$profile_choice);
 	}
 	else{
 		$profile_choice = LibraryFunctions::fetch_variable_local($get_vars, 'profile_choice', 0, 'required', 'Profile choice is required.', 'safemode', NULL);

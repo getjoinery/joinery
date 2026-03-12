@@ -195,7 +195,7 @@ function admin_file_upload_process_logic($get, $post) {
 			$new_name = preg_replace('/_+/', '_', $new_name);
 
 			if(!rename($upload_dir.'/'.$thisfile->name, $upload_dir.'/'.$new_name)){
-				throw new SystemDisplayablePermanentError('Unable to save resized image.  Check file permissions.');
+				return LogicResult::error('Unable to save resized image.  Check file permissions.');
 			}
 
 			$file =	new File(NULL);
@@ -240,6 +240,6 @@ function admin_file_upload_process_logic($get, $post) {
 	}
 
 	// Exit here to prevent further output
-	exit();
+	return LogicResult::render(array());
 }
 ?>

@@ -20,9 +20,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('events_active')){
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();
+		return LogicResult::error('This feature is turned off');
 	}
 
 	$session = SessionControl::get_instance();
@@ -38,8 +36,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$event_id = $get_vars['event_id'];
 	}
 	else{
-		throw new SystemDisplayablePermanentError("This event does not exist.");
-		exit;
+		return LogicResult::error("This event does not exist.");
 	}
 
 	$event = new Event($event_id, TRUE);

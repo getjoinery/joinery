@@ -37,8 +37,7 @@ function ctlddevice_delete_logic($get_vars, $post_vars){
 	if(isset($_POST['confirm'])){	
 		$device->permanent_delete();			
 
-		LibraryFunctions::redirect('/profile/devices');
-		exit;
+		return LogicResult::redirect('/profile/devices');
 	}
 	
 	return LogicResult::render($page_vars);

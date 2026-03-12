@@ -20,7 +20,7 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 	} elseif (isset($get_vars['usr_user_id'])) {
 		$user = new User($get_vars['usr_user_id'], TRUE);
 	} else {
-		throw new Exception('User ID is required for editing');
+		return LogicResult::error('User ID is required for editing');
 	}
 
 	// Load mailing lists (needed for both display and processing)
@@ -47,8 +47,7 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 		if(isset($post_vars['usr_email_new']) && $post_vars['usr_email_new'] != $user->get('usr_email')) {
 
 			if (User::GetByEmail(trim($post_vars['usr_email_new']))) {
-				require_once(__DIR__ . '/../../includes/Exceptions/ValidationException.php');
-				throw new ValidationException('An account has already been registered with the email address '. htmlspecialchars($post_vars['usr_email_new']) .'.');
+				return LogicResult::error('An account has already been registered with the email address '. htmlspecialchars($post_vars['usr_email_new']) .'.');
 			} else {
 				if($_SESSION['permission'] == 0){
 					Activation::email_change_send($user->key, trim($post_vars['usr_email_new']));

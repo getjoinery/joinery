@@ -21,9 +21,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('products_active')){
-		header("HTTP/1.0 404 Not Found");
-		echo 'This feature is turned off';
-		exit();
+		return LogicResult::error('This feature is turned off');
 	}
 
 	if($product){
@@ -85,7 +83,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$page_vars['display_data'] = $display_data;
 		}
 		catch (BasicProductRequirementException $e) {
-			throw new SystemDisplayableErrorNoLog($e->getMessage());
+			return LogicResult::error($e->getMessage());
 		}
 
 		try {
@@ -100,7 +98,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$cart->add_item($product, $form_data);
 		}
 		catch (ShoppingCartException $e) {
-			throw new SystemDisplayableError($e->getMessage());
+			return LogicResult::error($e->getMessage());
 		}
 
 		$form_key = md5(serialize($form_data) . time());

@@ -88,8 +88,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 			$result = $profile->add_or_edit_schedule($device, $_POST);
 
 		}
-		LibraryFunctions::redirect('/profile/devices');
-		exit;
+		return LogicResult::redirect('/profile/devices');
 	}
 	else{
 		$profile_choice = LibraryFunctions::fetch_variable_local($get_vars, 'profile_choice', 0, 'required', 'Profile choice is required.', 'safemode', NULL);

@@ -28,8 +28,7 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 	}
 	catch(PDOException $e)
 	{
-		$dbhelper->handle_query_error($e);
-		exit();
+		return LogicResult::error('A database error occurred while loading analytics data.');
 	}
 	$results = $q->fetchAll();
 
@@ -148,8 +147,7 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 		}
 		catch(PDOException $e)
 		{
-			$dbhelper->handle_query_error($e);
-			exit();
+			return LogicResult::error('A database error occurred while processing funnel data.');
 		}
 
 		$funnel_stats = $q->fetchAll();
