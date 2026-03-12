@@ -22,4 +22,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	return LogicResult::render($page_vars);
 }
 
+function cart_clear_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Clear cart',
+    ];
+}
 ?>

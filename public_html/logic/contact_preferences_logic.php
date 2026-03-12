@@ -71,4 +71,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	return LogicResult::render($page_vars);
 }
+
+function contact_preferences_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Update contact preferences',
+    ];
+}
 ?>

@@ -2,7 +2,7 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.1
+ * @version 2.2
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -44,6 +44,42 @@ function api_success($data, $message = '', $status_code = 200, $extra = array())
 	http_response_code($status_code);
 	echo json_encode($response) . PHP_EOL;
 	exit;
+}
+
+/**
+ * Convert a LogicResult to an API JSON response.
+ *
+ * @param LogicResult $result
+ * @param string $action_name
+ * @return array ['response' => array, 'status_code' => int]
+ */
+function api_translate_logic_result($result, $action_name) {
+	if ($result->error) {
+		$response = array(
+			'api_version' => '1.0',
+			'errortype' => !empty($result->validation_errors) ? 'ValidationError' : 'ActionError',
+			'error' => $result->error,
+			'data' => $result->data ?: new stdClass()
+		);
+
+		if (!empty($result->validation_errors)) {
+			$response['validation_errors'] = $result->validation_errors;
+		}
+
+		return array('response' => $response, 'status_code' => 422);
+	}
+
+	$response = array(
+		'api_version' => '1.0',
+		'success_message' => 'Action \'' . $action_name . '\' completed successfully.',
+		'data' => $result->data ?: new stdClass()
+	);
+
+	if ($result->redirect) {
+		$response['redirect'] = $result->redirect;
+	}
+
+	return array('response' => $response, 'status_code' => 200);
 }
 
 // Security headers
@@ -400,6 +436,144 @@ if (in_array($operation, $classes)) {
 		'numperpage' => $numperpage,
 		'data' => $response_array
 	);
+
+} else if (strtolower($url_segments[2] ?? '') === 'actions' && $request_method === 'get') {
+	// Action discovery endpoint: GET /api/v1/actions
+	$logic_dir = PathHelper::getIncludePath('logic');
+	$actions = [];
+
+	foreach (glob($logic_dir . '/*_logic.php') as $file) {
+		$basename = basename($file, '.php');           // e.g., "register_logic"
+		$action_name = substr($basename, 0, -6);       // e.g., "register" (strip "_logic")
+		$api_meta_function = $basename . '_api';        // e.g., "register_logic_api"
+
+		// Check file contents for the _api() function without including
+		// (some legacy files have top-level code that would execute on include)
+		$contents = file_get_contents($file);
+		if (preg_match('/function\s+' . preg_quote($api_meta_function, '/') . '\s*\(/', $contents)) {
+			require_once($file);
+			if (function_exists($api_meta_function)) {
+				$meta = call_user_func($api_meta_function);
+				$actions[$action_name] = [
+					'description' => $meta['description'] ?? '',
+					'requires_session' => $meta['requires_session'] ?? true,
+				];
+			}
+		}
+	}
+
+	ksort($actions);
+	$response = array(
+		'api_version' => '1.0',
+		'success_message' => 'Available actions',
+		'data' => $actions
+	);
+
+} else if (strtolower($url_segments[2] ?? '') === 'action' && isset($url_segments[3])) {
+	// Action endpoint: POST /api/v1/action/{action_name}
+	if ($request_method !== 'post') {
+		api_error('Actions must use POST method', 'ActionError', 405);
+	}
+
+	if ($api_entry->get('apk_permission') < 2) {
+		api_error('Insufficient API key permission for actions', 'AuthenticationError', 403);
+	}
+
+	$action_name = strtolower($url_segments[3]);
+
+	// Validate action name format (security: prevent path traversal)
+	if (!preg_match('/^[a-zA-Z0-9_]+$/', $action_name)) {
+		api_error('Invalid action name', 'ActionError', 400);
+	}
+
+	// Convention: action name maps to logic/{action_name}_logic.php
+	$logic_filename = $action_name . '_logic.php';
+	try {
+		$logic_filepath = PathHelper::getThemeFilePath($logic_filename, 'logic');
+	} catch (Exception $e) {
+		api_error('Unknown action: ' . $action_name, 'ActionError', 404);
+	}
+
+	if (!file_exists($logic_filepath)) {
+		api_error('Unknown action: ' . $action_name, 'ActionError', 404);
+	}
+
+	require_once($logic_filepath);
+
+	// Check for opt-in: the logic file must define {action_name}_logic_api()
+	$api_meta_function = $action_name . '_logic_api';
+	$logic_function = $action_name . '_logic';
+
+	if (!function_exists($api_meta_function)) {
+		api_error('Unknown action: ' . $action_name, 'ActionError', 404);
+	}
+
+	if (!function_exists($logic_function)) {
+		api_error('Action is misconfigured: ' . $action_name, 'ActionError', 500);
+	}
+
+	// Get metadata
+	$meta = call_user_func($api_meta_function);
+	$requires_session = $meta['requires_session'] ?? true;
+
+	// Set up session simulation if needed
+	$session = SessionControl::get_instance();
+	if ($requires_session) {
+		$session->set_api_user($api_user->key);
+	}
+
+	// Build parameters from JSON request body or form data
+	$get_params = $_GET;
+	$raw_input = file_get_contents('php://input');
+	$json_params = json_decode($raw_input, true);
+	$post_params = is_array($json_params) ? $json_params : $_POST;
+
+	// Call the logic function
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	try {
+		$result = call_user_func($logic_function, $get_params, $post_params);
+	} catch (Exception $e) {
+		if ($requires_session) {
+			$session->clear_api_user();
+		}
+		RequestLogger::log('api', 'action ' . $action_name, false, [
+			'user_id' => $api_user->key,
+			'status_code' => 422,
+			'error_type' => 'ActionError',
+			'note' => $e->getMessage()
+		]);
+		$result = LogicResult::error($e->getMessage());
+	}
+
+	// Clean up session simulation
+	if ($requires_session) {
+		$session->clear_api_user();
+	}
+
+	// Translate LogicResult to API response
+	$translated = api_translate_logic_result($result, $action_name);
+	$response_ms = round((microtime(true) - $api_start_time) * 1000);
+
+	if ($translated['status_code'] >= 400) {
+		RequestLogger::log('api', 'action ' . $action_name, false, [
+			'user_id' => $api_user->key,
+			'status_code' => $translated['status_code'],
+			'error_type' => $translated['response']['errortype'] ?? 'ActionError',
+			'response_ms' => $response_ms,
+			'note' => $translated['response']['error'] ?? ''
+		]);
+	} else {
+		RequestLogger::log('api', 'action ' . $action_name, true, [
+			'user_id' => $api_user->key,
+			'status_code' => $translated['status_code'],
+			'response_ms' => $response_ms
+		]);
+	}
+
+	header("Content-Type: application/json");
+	http_response_code($translated['status_code']);
+	echo json_encode($translated['response']) . PHP_EOL;
+	exit;
 }
 
 if ($response !== NULL) {

@@ -4,6 +4,8 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('event_withdraw_logic.php', 'logic'));
 
+	$page_vars = process_logic(event_withdraw_logic($_GET, $_POST));
+
 	$page = new PublicPage();
 	$hoptions=array(
 		'title'=>'Withdraw from Event/Course'
@@ -35,6 +37,10 @@
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem;">
 
                 <?php
+                $event_registrant = $page_vars['event_registrant'] ?? null;
+                $event = $page_vars['event'] ?? null;
+                $evr_event_registrant_id = $page_vars['evr_event_registrant_id'] ?? null;
+
                 if(!$event_registrant){
                     echo '<p>You are not registered for this course, or you have already withdrawn.</p>';
                 }
