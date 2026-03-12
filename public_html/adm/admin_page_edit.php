@@ -153,7 +153,7 @@
 		$formwriter->textbox('pag_body', 'Content (Legacy)', [
 			'validation' => ['required' => false],
 			'htmlmode' => 'yes',
-			'help' => 'This page uses legacy body content. To switch to the component system, remove all content from this field.'
+			'helptext' => 'This page uses legacy body content. To switch to the component system, remove all content from this field.'
 		]);
 	}
 

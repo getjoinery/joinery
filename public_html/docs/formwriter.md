@@ -551,7 +551,7 @@ $formwriter->repeater('features', 'Features List', [
         ['name' => 'description', 'label' => 'Description', 'type' => 'textarea']
     ],
     'add_label' => '+ Add Feature',
-    'help' => 'Add as many features as needed'
+    'helptext' => 'Add as many features as needed'
 ]);
 ```
 
@@ -559,7 +559,7 @@ $formwriter->repeater('features', 'Features List', [
 - `value` - Array of existing data rows (each row is an associative array)
 - `fields` - Array of subfield definitions with `name`, `label`, and `type`
 - `add_label` - Button text for adding rows (default: '+ Add Item')
-- `help` - Help text displayed below the label
+- `helptext` - Help text displayed below the label
 
 **Subfield Types:**
 Any FormWriter field type can be used: `textinput`, `textarea`, `dropinput`, `checkboxinput`, etc.
