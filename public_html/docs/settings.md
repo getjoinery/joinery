@@ -75,7 +75,7 @@ echo '<p>Configure your plugin settings below.</p>';
 
 $formwriter->textinput('myplugin_api_key', 'API Key', [
     'value' => $settings->get_setting('myplugin_api_key'),
-    'help' => 'Your API key'
+    'helptext' => 'Your API key'
 ]);
 
 $formwriter->dropinput('myplugin_feature_enabled', 'Enable Feature', [
@@ -110,14 +110,14 @@ The FormWriter provides various input types:
 // Text input
 $formwriter->textinput('setting_name', 'Label', [
     'value' => $settings->get_setting('setting_name'),
-    'help' => 'Help text'
+    'helptext' => 'Help text'
 ]);
 
 // Dropdown
 $formwriter->dropinput('setting_name', 'Label', [
     'options' => [1 => 'Option 1', 2 => 'Option 2'],
     'value' => $settings->get_setting('setting_name'),
-    'help' => 'Help text'
+    'helptext' => 'Help text'
 ]);
 
 // Textarea

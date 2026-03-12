@@ -262,13 +262,13 @@
 		$formwriter->dropinput('email_service', 'Primary Email Service', [
 			'options' => $service_optionvals,
 			'value' => $settings->get_setting('email_service'),
-			'help' => 'Service used for sending emails',
+			'helptext' => 'Service used for sending emails',
 			'empty_option' => true
 		]);
 		$formwriter->dropinput('email_fallback_service', 'Fallback Email Service', [
 			'options' => $service_optionvals,
 			'value' => $settings->get_setting('email_fallback_service'),
-			'help' => 'Service used if primary fails',
+			'helptext' => 'Service used if primary fails',
 			'empty_option' => true
 		]);
 		
