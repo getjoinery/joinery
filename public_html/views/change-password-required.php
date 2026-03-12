@@ -1,7 +1,7 @@
 <?php
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-    require_once(PathHelper::getThemeFilePath('change-password-required_logic.php', 'logic'));
+    require_once(PathHelper::getThemeFilePath('change_password_required_logic.php', 'logic'));
 
     $page_vars = process_logic(change_password_required_logic($_GET, $_POST));
     $settings  = Globalvars::get_instance();

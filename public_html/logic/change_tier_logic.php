@@ -540,4 +540,11 @@ function change_tier_logic($get, $post) {
 
     return LogicResult::render($page_vars);
 }
+
+function change_tier_logic_api() {
+    return [
+        'requires_session' => true,
+        'description' => 'Change subscription tier',
+    ];
+}
 ?>
