@@ -77,6 +77,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// AJAX requests will be handled by the new ErrorManager system
 
 	if($post_vars){
+		// Rate limiting: block after too many failed login attempts from this IP
+		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+		if (!RequestLogger::check_rate_limit('login', 10, 900, false)) {
+			if ($ajax) {
+				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
+				throw new AuthenticationException('Too many failed login attempts. Please try again in 15 minutes.');
+			} else {
+				return LogicResult::error('Too many failed login attempts. Please try again in 15 minutes.');
+			}
+		}
+
 		if ((empty($post_vars['email']) && empty($post_vars['lbx_email'])) ||
 			(empty($post_vars['password']) && empty($post_vars['lbx_password']))) {
 			if ($ajax) {
@@ -96,6 +107,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		if (!$user || !$user->check_password($password)) {
 			// Email or password was incorrect
+			RequestLogger::log('login', 'login_attempt', false, [
+				'note' => 'Failed login for: ' . $email,
+			]);
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Your username or password was incorrect. Please try again, or sign up if you don\'t have an account.');
@@ -127,6 +141,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				return LogicResult::error('This site requires email activation before you can log in.  An activation email has been sent to '.$user->get('usr_email').'. Please click on the link inside to activate');
 			}
 		}
+
+		// Log successful login
+		RequestLogger::log('login', 'login_attempt', true, [
+			'user_id' => $user->key,
+		]);
 
 		// Save their session
 		$session->store_session_variables($user);
