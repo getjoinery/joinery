@@ -19,9 +19,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('This feature is turned off');
 	}
 
-	if (isset($post_vars['email'])){
+	if (isset($post_vars['email']) || isset($post_vars['usr_email'])){
 
-		$email = strtolower(trim($post_vars['email']));
+		// Rate limiting: block after too many password reset requests from this IP
+		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+		if (!RequestLogger::check_rate_limit('password_reset', 5, 900)) {
+			return LogicResult::error('Too many password reset requests. Please try again in 15 minutes.');
+		}
+
+		$email = strtolower(trim($post_vars['email'] ?? $post_vars['usr_email']));
 
 		$user = User::GetByEmail($email);
 
@@ -30,12 +36,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					return LogicResult::error('This feature is turned off for this user.  Please email us to recover your password.');
 			}
 
+			RequestLogger::log('password_reset', 'reset_request', true, [
+				'note' => 'Password reset sent to: ' . $email,
+			]);
 			Activation::email_forgotpw_send($email);
 			$page_vars['message_type'] = 'success';
 			$page_vars['message_title'] = 'Reset code sent';
 			$page_vars['message'] = 'Next step: Check your email for a message from us with a link to enter your new password.  If you don not receive an email from us within a few minutes, please check your spam folder.';
 		}
 		else{
+			RequestLogger::log('password_reset', 'reset_request', false, [
+				'note' => 'Password reset for unknown email: ' . $email,
+			]);
 			$page_vars['message_type'] = 'error';
 			$page_vars['message_title'] = 'Email not found';
 			$page_vars['message'] = '
