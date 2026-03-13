@@ -522,6 +522,12 @@ class MethodExistenceTest {
                                 if (isset($this->method_return_types[$lookup_key])) {
                                     return $this->method_return_types[$lookup_key];
                                 }
+
+                                // Convention: factory methods (GetBy*, Create*, get_by_*, Find*)
+                                // typically return an instance of their own class
+                                if (class_exists($class_name) && $this->isFactoryMethodName($method_name)) {
+                                    return $class_name;
+                                }
                             }
                         }
 
@@ -655,6 +661,31 @@ class MethodExistenceTest {
     }
 
     /**
+     * Check if a method name matches common factory method patterns.
+     * Factory methods typically return an instance of their own class.
+     * Patterns derived from actual codebase usage in data/ and includes/.
+     */
+    private function isFactoryMethodName($method_name) {
+        $factory_prefixes = [
+            'GetBy',        // GetByEmail, GetByColumn, GetByStripeCustomerId, etc.
+            'CreateNew',    // CreateNew, CreateCompleteNew
+            'CreateFrom',   // CreateFromForm
+            'Create',       // CreateAddressFromForm, CreateLegacyTemplate
+            'get_by_',      // get_by_link, get_by_slug, get_by_name, get_by_theme_name
+            'GetDefault',   // GetDefaultAddressForUser
+            'GetUser',      // GetUserTier
+        ];
+
+        foreach ($factory_prefixes as $prefix) {
+            if (strpos($method_name, $prefix) === 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Check if a call matches a blacklist pattern
      */
     private function checkBlacklist($type, $pattern) {
@@ -773,8 +804,12 @@ class MethodExistenceTest {
             }
 
             // 2. Try to infer from variable name
-            if (!$class_name && $var_name) {
-                $class_name = $this->inferClassFromVariable($var_name);
+            $inferred_name = null;
+            if ($var_name) {
+                $inferred_name = $this->inferClassFromVariable($var_name);
+            }
+            if (!$class_name) {
+                $class_name = $inferred_name;
             }
 
             if ($class_name) {
@@ -788,9 +823,16 @@ class MethodExistenceTest {
                 if (class_exists($class_name) && method_exists($class_name, $method_name)) {
                     $found++;
                 } else {
-                    $missing++;
-                    $issues[] = sprintf("  ✗ Line %4d: %s->%s() [inferred class: %s]",
-                        $line, $var_name ?: '?', $method_name, $class_name);
+                    // Fix 2: If tracked type doesn't have the method but name-inferred
+                    // type does, the tracked type is likely wrong — prefer the inference
+                    if ($inferred_name && $inferred_name !== $class_name &&
+                        class_exists($inferred_name) && method_exists($inferred_name, $method_name)) {
+                        $found++;
+                    } else {
+                        $missing++;
+                        $issues[] = sprintf("  ✗ Line %4d: %s->%s() [inferred class: %s]",
+                            $line, $var_name ?: '?', $method_name, $class_name);
+                    }
                 }
             } else {
                 // Can't determine class
