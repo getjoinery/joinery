@@ -305,166 +305,72 @@ CREATE TABLE wbh_webhook_logs (
 
 ---
 
-### 3. Documentation
+### 3. PayPal Subscription Lifecycle Completion
 
-**Priority:** HIGH for admin docs, MEDIUM for others
+**Goal:** Complete PayPal subscription management to match Stripe capabilities
 
-#### A. End-User Documentation
+**Priority:** HIGH (PayPal checkout and plan creation already work, but subscription lifecycle is incomplete)
 
-**File:** `/docs/user_subscription_guide.md`
+**Current State:**
+- ✅ `PaypalHelper` class exists with `createPlan()`, `subDetails()`, subscription button rendering
+- ✅ Cart detects subscription items and creates PayPal plans before checkout
+- ✅ `ord_payment_method` field tracks provider ('paypal', 'venmo', 'card', 'stripe')
+- ✅ `odi_is_subscription`, `odi_subscription_status`, `odi_subscription_period_end` fields exist (generic)
+- ❌ No `odi_paypal_subscription_id` field — PayPal subscription IDs are not persisted after checkout
+- ❌ No PayPal webhook handler — subscription status changes from PayPal are never synced
+- ❌ No PayPal subscription cancellation or management from the app
+- ❌ `change_subscription_logic.php` only routes through Stripe
 
-**Contents:**
-- How to view current subscription
-- How to upgrade/downgrade
-- How to cancel subscription
-- How to reactivate
-- Understanding proration
-- FAQ section
+#### A. Store PayPal Subscription IDs
 
-#### B. Administrator Documentation
+Add field to OrderItem:
+- `odi_paypal_subscription_id` — Store the PayPal subscription ID returned at checkout approval
 
-**File:** `/docs/admin_subscription_guide.md`
+Update `cart_charge_logic.php` to capture and persist the PayPal subscription ID when processing subscription payments.
 
-**Contents:**
-- Creating and managing tiers
-- Configuring subscription settings
-- Adding features to tiers
-- Manually assigning users to tiers
-- Understanding change tracking
-- Troubleshooting common issues
+#### B. PayPal Webhook Handler
 
-#### C. Developer Documentation
+Create `/ajax/paypal_webhook.php` to handle:
+- `BILLING.SUBSCRIPTION.ACTIVATED` — Confirm subscription active
+- `BILLING.SUBSCRIPTION.CANCELLED` — Handle cancellations
+- `BILLING.SUBSCRIPTION.SUSPENDED` — Handle payment failures
+- `BILLING.SUBSCRIPTION.EXPIRED` — Handle expiration
+- `PAYMENT.SALE.COMPLETED` — Confirm renewal payments
 
-**File:** `/docs/dev_subscription_integration.md`
+Use the same webhook logging table as Stripe (see Section 2C).
 
-**Contents:**
-- Using `getUserFeature()` in plugins
-- Creating `tier_features.json` files
-- Checking tier requirements
-- Testing with tiers
-- API reference for SubscriptionTier class
+#### C. Provider-Aware Subscription Management
 
-#### D. Migration Guide
-
-**File:** `/docs/plugin_tier_migration.md`
-
-**Contents:**
-- How to migrate from hardcoded plans
-- Creating tier features for plugins
-- Refactoring permission checks
-- User data migration strategies
-- Testing migration
-
----
-
-### 4. PayPal Integration (Optional)
-
-**Priority:** LOW (optional alternative payment method)
-
-**Note:** PayPal subscription support may be limited compared to Stripe
-
-#### A. Assessment
-
-Evaluate PayPal capabilities:
-- Can PayPal handle subscription changes mid-cycle?
-- Does PayPal support proration?
-- Can we reactivate cancelled subscriptions?
-- What webhook events are available?
-
-#### B. Implementation (If Feasible)
-
-**Database Changes:**
-Add PayPal fields to OrderItem:
-- `odi_paypal_subscription_id`
-- `odi_payment_provider` (enum: 'stripe', 'paypal')
-
-**Logic Changes:**
 Update `/logic/change_subscription_logic.php` to:
-- Detect payment provider
-- Route to StripeHelper or PayPalHelper
-- Handle provider-specific limitations
+- Detect payment provider from `ord_payment_method` on the user's active order
+- Route cancel/downgrade/upgrade actions to the correct helper (StripeHelper or PaypalHelper)
+- Add PayPal subscription cancellation via `PaypalHelper`
 
-**Admin Settings:**
-Add settings for provider preference:
-- `subscription_payment_provider` - Default provider
-- `subscription_allow_provider_choice` - Let users choose
+#### D. Provider-Aware Feature Gating in UI and Logic
 
-#### C. Limitations
+Disable incompatible subscription features when the user's active subscription is through PayPal.
 
-Document PayPal limitations:
-- May not support immediate tier changes
-- Proration may be manual
-- Webhook processing differences
-- Testing in PayPal sandbox
+**Detection (in `change_tier_logic.php`):**
+- Load the Order associated with the current subscription's OrderItem
+- Check `ord_payment_method` — values `'paypal'` or `'venmo'` indicate PayPal provider
+- Pass `$is_paypal` flag into `$page_vars` for the view
 
----
+**Logic gates to add (alongside existing setting checks at lines ~210, 323, 400):**
+- **Upgrade** — block for PayPal (no mid-cycle plan changes); show "cancel and re-subscribe" guidance
+- **Downgrade** — block for PayPal (same reason)
+- **Proration** — disable for PayPal (not natively supported)
+- **Reactivation** — block or limit for PayPal depending on cancellation state
 
-### 5. Additional Admin Tools
+**View changes (`change-tier.php`):**
+- For PayPal subscribers, replace upgrade/downgrade buttons with messaging: "To change your plan, cancel your current subscription and subscribe to a new tier"
+- Show "Contact Support" as fallback where appropriate
+- Cancel button remains available (routed to PayPal cancellation via Section 3C)
 
-**Priority:** MEDIUM
+#### E. PayPal Limitations Reference
 
-#### A. Bulk User Validation
-
-**File:** `/adm/admin_subscription_validation.php`
-
-**Purpose:** Validate all users' subscriptions at once
-
-**Features:**
-- List all users with subscriptions
-- Show subscription status
-- Highlight expired/invalid subscriptions
-- Bulk validation button
-- Report of changes made
-
-#### B. Subscription Analytics
-
-**File:** `/adm/admin_subscription_analytics.php`
-
-**Metrics:**
-- Total subscriptions by tier
-- Monthly recurring revenue by tier
-- Churn rate
-- Upgrade/downgrade trends
-- Expiration predictions
-
-#### C. Grace Period Configuration
-
-**Setting:** `subscription_grace_period_days`
-
-**Implementation:**
-- Instead of immediate tier removal on expiration
-- Allow X days of access after expiration
-- Send reminder emails during grace period
-- Remove tier only after grace period ends
-
----
-
-### 6. Testing Enhancements
-
-**Priority:** LOW (nice to have)
-
-#### A. End-to-End UI Tests
-
-Add Selenium/Playwright tests for:
-- Complete upgrade flow through UI
-- Complete downgrade flow through UI
-- Cancellation and reactivation flows
-- Error handling and messages
-
-#### B. Webhook Simulation Tests
-
-Create test framework for:
-- Simulating Stripe webhook events
-- Verifying correct processing
-- Testing error handling
-- Testing idempotency
-
-#### C. Load Testing
-
-Test performance under load:
-- Concurrent subscription changes
-- Many users checking features simultaneously
-- Webhook processing under high volume
+- PayPal does not support mid-cycle plan changes (upgrade/downgrade) — user must cancel and re-subscribe
+- Proration is not natively supported — handle manually if needed
+- Reactivation may be limited depending on cancellation state
 
 ---
 
@@ -472,19 +378,8 @@ Test performance under load:
 
 ### High Priority
 1. **Email notifications** - Critical for user communication
-2. **Enhanced webhook processing** - Critical for reliability
-3. **Administrator documentation** - Needed for operations
-
-### Medium Priority
-4. **Developer documentation** - Helpful for future development
-5. **Bulk validation tool** - Useful admin utility
-6. **End-user documentation** - Helpful for support
-
-### Low Priority
-7. **PayPal integration** - Optional payment method
-8. **Subscription analytics** - Nice-to-have insights
-9. **Grace period feature** - Optional enhancement
-10. **Advanced testing** - Quality improvements
+2. **Enhanced webhook processing** - Critical for reliability (Stripe)
+3. **PayPal subscription lifecycle** - PayPal checkout works but subscriptions are unmanaged after purchase
 
 ---
 
@@ -493,9 +388,7 @@ Test performance under load:
 - All enhancements can be implemented incrementally
 - Each feature can be deployed independently
 - Email notifications and webhooks are most important for production readiness
-- Documentation should start with basics and expand iteratively
-- PayPal integration should only proceed if technically feasible
-- Testing enhancements provide long-term quality benefits but aren't critical
+- PayPal subscription lifecycle should be completed alongside Stripe webhook work since they share infrastructure (webhook logging, provider-aware logic)
 
 ---
 
