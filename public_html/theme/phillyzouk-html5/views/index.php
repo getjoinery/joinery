@@ -1,0 +1,193 @@
+<?php
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
+
+$page_vars = process_logic(index_logic($_GET, $_POST));
+$page = new PublicPage();
+$page->public_header(array(
+    'title' => 'Home',
+    'showheader' => true
+));
+?>
+
+<!-- Hero Section -->
+<section class="hero-section">
+    <div class="container">
+        <div class="hero-content">
+            <div class="hero-text">
+                <span class="featured-badge">Welcome</span>
+                <h1><?php echo htmlspecialchars(Globalvars::get_instance()->get_setting('site_name', true, true) ?: 'Phillyzouk'); ?></h1>
+                <p><?php echo htmlspecialchars(Globalvars::get_instance()->get_setting('site_description', true, true) ?: ''); ?></p>
+                <a href="/events" class="cta-button">View Events</a>
+            </div>
+            <div class="hero-image">
+                <img src="/uploads/hero/DSC02831-edited_6uit40q2_xdnz67g0.jpg" alt="<?php echo htmlspecialchars(Globalvars::get_instance()->get_setting('site_name', true, true)); ?>">
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- About Info Area -->
+<section class="contact-info-area pt-100 pb-70">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-3 col-md-6">
+                <div class="single-contact-info">
+                    <span class="ci-icon">&#10084;</span>
+                    <h3>Our Passion</h3>
+                    <p>We are dedicated to celebrating the art of dance and bringing our community together through movement and music.</p>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="single-contact-info">
+                    <span class="ci-icon">&#128101;</span>
+                    <h3>Community</h3>
+                    <p>Join dancers of all levels in a welcoming environment where everyone can express themselves and grow together.</p>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="single-contact-info">
+                    <span class="ci-icon">&#127925;</span>
+                    <h3>Styles</h3>
+                    <p>We offer classes, socials, and weekenders for Brazilian Zouk dancing.</p>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="single-contact-info">
+                    <span class="ci-icon">&#128197;</span>
+                    <h3>Events</h3>
+                    <p>Participate in our performances, workshops, and social events throughout the year celebrating dance culture.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- List Signup -->
+<div class="container" style="margin-top: 3rem; margin-bottom: 3rem;">
+<?php
+require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+echo ComponentRenderer::render(null, 'list_signup', [
+    'heading' => 'Stay in the Loop',
+    'subheading' => 'Sign up for our newsletter to get the latest updates on events, classes, and socials.',
+    'list_mode' => 'default',
+    'background_type' => 'color',
+    'background_color' => '#f5f3f3',
+    'text_color' => '',
+    'button_text' => 'Subscribe',
+    'compact_mode' => true,
+]);
+?>
+</div>
+
+<!-- Events & Posts Section -->
+<section class="featured-posts-area pt-100 pb-70">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="section-title">
+                    <h2>Upcoming Events</h2>
+                </div>
+                <div class="row">
+                    <?php
+                    if (count($page_vars['upcoming_events']) > 0) {
+                        $count = 0;
+                        foreach ($page_vars['upcoming_events'] as $event) {
+                            if ($count >= 6) break;
+                            $is_virtual = is_object($event) && isset($event->is_virtual) && $event->is_virtual;
+                            $is_cancelled = (!$is_virtual && $event instanceof Event && $event->get('evt_status') == Event::STATUS_CANCELED);
+                            $evt_name = $is_virtual ? $event->evt_name : $event->get('evt_name');
+                            $evt_start = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
+                            $evt_tz = $is_virtual ? ($event->evt_timezone ?: 'America/New_York') : ($event->get('evt_timezone') ?: 'America/New_York');
+                            $evt_short = $is_virtual ? $event->evt_short_description : $event->get('evt_short_description');
+                            $evt_url = $is_virtual ? '/event/' . $event->evt_link : $event->get_url();
+                            $evt_pic = $is_virtual ? ($event->_picture_link ?: null) : $event->get_picture_link();
+                            ?>
+                            <div class="col-lg-6 col-md-6">
+                                <div class="single-featured event-card">
+                                    <?php if ($evt_pic): ?>
+                                    <a href="<?php echo $evt_url; ?>" class="blog-img">
+                                        <img src="<?php echo htmlspecialchars($evt_pic); ?>" alt="<?php echo htmlspecialchars($evt_name); ?>">
+                                    </a>
+                                    <?php endif; ?>
+                                    <div class="featured-content">
+                                        <?php if($is_cancelled): ?>
+                                        <div class="mb-2"><span class="badge bg-danger">Cancelled</span></div>
+                                        <?php endif; ?>
+                                        <ul>
+                                            <li>
+                                                <span class="icon">&#128197;</span>
+                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'M d, Y'); ?>
+                                            </li>
+                                            <li>
+                                                <span class="icon">&#128336;</span>
+                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'g:i A'); ?>
+                                            </li>
+                                        </ul>
+                                        <a href="<?php echo $evt_url; ?>">
+                                            <h3><?php echo htmlspecialchars($evt_name); ?></h3>
+                                        </a>
+                                        <?php if ($evt_short): ?>
+                                        <p><?php echo htmlspecialchars(substr($evt_short, 0, 120)); ?>...</p>
+                                        <?php endif; ?>
+                                        <a href="<?php echo $evt_url; ?>" class="read-more">View Event</a>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php
+                            $count++;
+                        }
+                    } else {
+                        ?>
+                        <div class="col-lg-12">
+                            <p>No upcoming events scheduled.</p>
+                        </div>
+                        <?php
+                    }
+                    ?>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                <div class="section-title">
+                    <h2>Latest Posts</h2>
+                </div>
+                <?php
+                if ($page_vars['recent_posts']->count() > 0) {
+                    $count = 0;
+                    foreach ($page_vars['recent_posts'] as $post) {
+                        if ($count >= 4) break;
+                        ?>
+                        <div class="sidebar-post-item">
+                            <?php if ($post->get('pst_image_link')): ?>
+                            <a href="<?php echo $post->get_url(); ?>" class="sidebar-post-img">
+                                <img src="<?php echo htmlspecialchars($post->get('pst_image_link')); ?>" alt="<?php echo htmlspecialchars($post->get('pst_title')); ?>">
+                            </a>
+                            <?php endif; ?>
+                            <div class="sidebar-post-content">
+                                <a href="<?php echo $post->get_url(); ?>">
+                                    <h4><?php echo htmlspecialchars($post->get('pst_title')); ?></h4>
+                                </a>
+                                <span class="post-date">
+                                    <span class="icon" style="filter: grayscale(1);">&#128197;</span>
+                                    <?php echo date('M d, Y', strtotime($post->get('pst_published_time'))); ?>
+                                </span>
+                            </div>
+                        </div>
+                        <?php
+                        $count++;
+                    }
+                } else {
+                    ?>
+                    <p>No blog posts published yet.</p>
+                    <?php
+                }
+                ?>
+            </div>
+        </div>
+    </div>
+</section>
+
+<?php
+$page->public_footer();
+?>

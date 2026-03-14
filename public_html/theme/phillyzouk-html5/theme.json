@@ -1,0 +1,12 @@
+{
+    "name": "phillyzouk-html5",
+    "display_name": "Phillyzouk HTML5",
+    "version": "1.0.0",
+    "description": "Clean HTML5 theme based on Linka design, zero dependencies",
+    "author": "Joinery Team",
+    "is_stock": true,
+    "system": false,
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterHTML5",
+    "publicPageBase": "PublicPageBase"
+}
