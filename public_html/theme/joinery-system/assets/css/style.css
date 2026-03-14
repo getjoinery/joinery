@@ -690,7 +690,7 @@ select.form-control {
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted);
-    background: var(--light);
+    background: transparent;
     padding: 0.625rem 1rem;
     border-bottom: 2px solid var(--border);
     text-align: left;

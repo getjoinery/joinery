@@ -109,7 +109,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
         return [
             'wrapper' => 'table-responsive',
             'table'   => 'table mb-0',
-            'header'  => 'bg-body-tertiary',
+            'header'  => '',
         ];
     }
 
