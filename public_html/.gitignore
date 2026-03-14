@@ -9,5 +9,7 @@ Globalvars_site.php
 .claude/
 .playwright-mcp/
 *.bak
+*.png
+*.log
 /cache
 /theme-sources

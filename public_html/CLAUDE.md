@@ -601,11 +601,14 @@ mcp__browser__browser_navigate with url: "https://joinerytest.site/path"
 mcp__browser__browser_snapshot
 
 # Take a screenshot (for visual verification)
-mcp__browser__browser_take_screenshot
+# ALWAYS specify filename in /tmp/ to avoid polluting public_html
+mcp__browser__browser_take_screenshot with filename: "/tmp/description.png"
 
 # Click an element (use ref from snapshot)
 mcp__browser__browser_click with element: "description" and ref: "e123"
 ```
+
+**CRITICAL: Always save screenshots to `/tmp/`** — always specify `filename: "/tmp/something.png"`. Omitting the filename saves to `.playwright-mcp/` inside `public_html`, and bare filenames save directly to `public_html`.
 
 **When to use the browser:**
 - Verifying component rendering and layouts
