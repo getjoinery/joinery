@@ -114,10 +114,25 @@ Create `theme/$THEME_NAME/theme.json` with minimal, accurate configuration:
 }
 ```
 
+**For HTML5 zero-dependency themes** (no Bootstrap, no jQuery):
+```json
+{
+    "name": "mytheme-html5",
+    "display_name": "My Theme HTML5",
+    "version": "1.0.0",
+    "description": "Clean HTML5 theme based on [source] design, zero dependencies",
+    "author": "Joinery Team",
+    "is_stock": true,
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterV2HTML5",
+    "publicPageBase": "PublicPageBase"
+}
+```
+
 **Important field notes:**
-- `cssFramework`: Use "bootstrap" for Bootstrap themes, "tailwind" for Tailwind
-- `formWriterBase`: Use "FormWriterBootstrap" for Bootstrap, "FormWriterHTML5" for others
-- `publicPageBase`: Always use "PublicPageBase" (NOT PublicPageFalcon)
+- `cssFramework`: Use `"bootstrap"` for Bootstrap themes, `"html5"` for zero-dependency themes, `"tailwind"` for Tailwind
+- `formWriterBase`: Use `"FormWriterV2Bootstrap"` for Bootstrap, `"FormWriterV2HTML5"` for HTML5, `"FormWriterV2Tailwind"` for Tailwind
+- `publicPageBase`: Always use `"PublicPageBase"` (NOT PublicPageFalcon)
 
 ### Step 5: Create FormWriter.php
 
@@ -137,8 +152,21 @@ class FormWriter extends FormWriterV2Bootstrap {
 
 **Framework mappings:**
 - Bootstrap themes → `FormWriterV2Bootstrap`
-- Tailwind themes → `FormWriterTailwindv3`
-- Generic/other → `FormWriterHTML5`
+- HTML5 zero-dependency themes → `FormWriterV2HTML5`
+- Tailwind themes → `FormWriterV2Tailwind`
+
+**HTML5 FormWriter example:**
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+
+class FormWriter extends FormWriterV2HTML5 {
+    // Inherits all form methods from FormWriterV2HTML5
+}
+?>
+```
+
+**Important:** `FormWriterV2HTML5` generates semantic HTML form elements with CSS classes like `.form-group`, `.form-control`, `.form-label`, `.btn`, and `.form-check`. Your theme CSS must style these classes — see the [HTML5 Zero-Dependency Themes](#html5-zero-dependency-themes) section for required form CSS.
 
 ### Step 6: Create PublicPage.php (Most Critical File)
 
@@ -1407,6 +1435,432 @@ For most themes, using the default cart pages with your theme's styling is recom
 
 For most themes, the default utility pages styled with your theme's CSS framework are perfectly adequate.
 
+## HTML5 Zero-Dependency Themes
+
+This section covers the specific workflow for creating Joinery themes that use **zero external dependencies** — no Bootstrap, no jQuery, no icon fonts. Everything is vanilla CSS + vanilla JS.
+
+This approach was proven with the `jeremytunnell-html5` (based on Typology) and `phillyzouk-html5` (based on Linka) themes.
+
+### When to Use HTML5 vs Bootstrap
+
+| Criteria | HTML5 Theme | Bootstrap Theme |
+|----------|-------------|-----------------|
+| Source template | Static HTML/CSS conversion (no framework) | Commercial Bootstrap template |
+| CSS framework | None — theme provides all CSS | Bootstrap loaded in header |
+| JavaScript | Vanilla JS only | jQuery + Bootstrap JS available |
+| Icon system | Unicode characters or inline SVG | Boxicons, Font Awesome, etc. |
+| Form styling | Theme must style `.form-group`, `.form-control`, etc. | Bootstrap provides form styles |
+| Grid system | Theme CSS provides own grid rules | Bootstrap grid available |
+| File size | Very small (one CSS + one JS file) | Larger (framework + plugins) |
+
+### HTML5 Theme Prerequisites
+
+Before creating an HTML5 Joinery theme, you need **static HTML/CSS source files** — a clean-room conversion of a commercial template into zero-dependency HTML5. These are stored in `/home/user1/theme-sources/` (e.g., `canvas-html5/`, `linka-html5/`).
+
+The source files typically include:
+- `index.html` — Homepage with navbar, hero, content sections, footer
+- `style.css` — All base styles (grid, navbar, footer, typography, etc.)
+- `script.js` — Vanilla JS for interactive elements (menu toggle, scroll-to-top, etc.)
+- Additional page HTMLs (e.g., `right-sidebar.html` for blog, `post-style-one.html` for single posts) — **these often have page-specific CSS as inline `<style>` blocks**
+
+### Step-by-Step: HTML5 Theme Creation
+
+Follow the same 10-step process from the main guide above, with these specific differences:
+
+#### 1. Configuration Files
+
+**theme.json** — Use `"html5"` framework and `"FormWriterV2HTML5"` base:
+```json
+{
+    "name": "mytheme-html5",
+    "display_name": "My Theme HTML5",
+    "version": "1.0.0",
+    "description": "Clean HTML5 theme based on [source] design, zero dependencies",
+    "author": "Joinery Team",
+    "is_stock": true,
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterV2HTML5",
+    "publicPageBase": "PublicPageBase"
+}
+```
+
+**FormWriter.php** — Extend `FormWriterV2HTML5`:
+```php
+<?php
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+
+class FormWriter extends FormWriterV2HTML5 {
+}
+?>
+```
+
+**serve.php** — HTML5 themes should have their own serve.php for custom routes:
+```php
+<?php
+$routes = [
+    'dynamic' => [
+        '/blog' => ['view' => 'views/blog'],
+        '/blog/tag/{tag}' => ['view' => 'views/blog'],
+        '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class'],
+        '/events' => ['view' => 'views/events'],
+    ],
+    'custom' => [],
+];
+?>
+```
+
+#### 2. CSS Consolidation (Critical)
+
+The static HTML5 source files typically have page-specific styles as inline `<style>` blocks in each HTML file. You must **extract and merge all inline CSS into a single `style.css`** file.
+
+**Process:**
+1. Start with the base `style.css` from the source (contains grid, navbar, footer, typography)
+2. Open each additional HTML file (blog listing, single post, etc.)
+3. Copy each `<style>` block's contents into your theme's `style.css`
+4. Add comments to separate sections (e.g., `/* ===== BLOG LISTING ===== */`)
+
+**Example — extracting from `right-sidebar.html`:**
+```css
+/* ===== BLOG LISTING (from right-sidebar.html) ===== */
+.single-blog-post { ... }
+.blog-image { ... }
+.blog-content { ... }
+.blog-category { ... }
+.blog-meta { ... }
+```
+
+#### 3. Required Utility CSS Classes
+
+Bootstrap themes get utility classes for free. HTML5 themes must define them in CSS. These are used throughout Joinery views (comments, forms, event cards, etc.):
+
+```css
+/* ===== UTILITY CLASSES (required for Joinery views) ===== */
+
+/* Spacing */
+.mb-1 { margin-bottom: 0.25rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-3 { margin-bottom: 1rem; }
+.mb-4 { margin-bottom: 1.5rem; }
+.mb-5 { margin-bottom: 3rem; }
+.mt-3 { margin-top: 1rem; }
+.mt-4 { margin-top: 1.5rem; }
+.p-5 { padding: 3rem; }
+.pt-100 { padding-top: 100px; }
+.pb-70 { padding-bottom: 70px; }
+.ptb-100 { padding-top: 100px; padding-bottom: 100px; }
+
+/* Text */
+.text-center { text-align: center; }
+.text-muted { color: #6c757d; }
+.small { font-size: 0.875em; }
+
+/* Badges */
+.badge { display: inline-block; padding: 3px 8px; font-size: 12px; font-weight: 600; border-radius: 3px; }
+.bg-danger { background-color: #dc3545; color: #fff; }
+
+/* Grid (provide columns your views use) */
+.row { display: flex; flex-wrap: wrap; margin: 0 -15px; }
+.row > [class*="col-"] { padding: 0 15px; }
+.col-lg-3 { width: 25%; }
+.col-lg-4 { width: 33.333%; }
+.col-lg-6 { width: 50%; }
+.col-lg-8 { width: 66.666%; }
+.col-md-6 { width: 50%; }
+
+@media (max-width: 991px) {
+    .col-lg-3, .col-lg-4, .col-lg-6, .col-lg-8 { width: 100%; }
+}
+@media (max-width: 767px) {
+    .col-md-6 { width: 100%; }
+}
+```
+
+#### 4. Form Styling CSS
+
+`FormWriterV2HTML5` generates forms with these CSS classes that your theme must style:
+
+```css
+/* ===== FORM STYLES (for FormWriterV2HTML5) ===== */
+.form-group { margin-bottom: 1rem; }
+
+.form-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.form-control {
+    display: block;
+    width: 100%;
+    padding: 10px 15px;
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+    transition: border-color 0.3s;
+}
+.form-control:focus {
+    border-color: #d80650;  /* Use your theme's primary color */
+    outline: none;
+}
+
+textarea.form-control { min-height: 100px; resize: vertical; }
+
+.form-check { margin-bottom: 0.5rem; }
+.form-check label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* Submit buttons */
+.btn { display: inline-block; padding: 10px 25px; font-size: 14px; font-weight: 600; border: none; border-radius: 4px; cursor: pointer; transition: all 0.3s; }
+.btn-submit, .btn-primary { background: #d80650; color: #fff; }
+.btn-submit:hover, .btn-primary:hover { background: #b8053f; }
+
+/* Validation states */
+.is-invalid { border-color: #dc3545; }
+.invalid-feedback { color: #dc3545; font-size: 13px; margin-top: 4px; }
+```
+
+#### 5. Icon Replacement (Icon Fonts → Unicode)
+
+Bootstrap themes use icon fonts (Boxicons, Font Awesome). HTML5 themes use Unicode characters instead.
+
+**Common replacements:**
+
+| Purpose | Boxicons | Unicode | Code |
+|---------|----------|---------|------|
+| Calendar | `bx bx-calendar` | &#128197; | `&#128197;` |
+| Clock | `bx bx-time` | &#128336; | `&#128336;` |
+| User/Person | `bx bx-user` | &#128100; | `&#128100;` |
+| People | `bx bx-group` | &#128101; | `&#128101;` |
+| Heart | `bx bx-heart` | &#10084; | `&#10084;` |
+| Music | `bx bx-music` | &#127925; | `&#127925;` |
+| Phone | `bx bx-phone` | &#128222; | `&#128222;` |
+| Email | `bx bx-envelope` | &#9993; | `&#9993;` |
+| Location | `bx bx-map` | &#128205; | `&#128205;` |
+| Arrow left | `bx bx-left-arrow` | &#8592; | `&#8592;` |
+| Arrow right | `bx bx-right-arrow` | &#8594; | `&#8594;` |
+| Arrow up | `bx bx-up-arrow` | &#8679; | `&#8679;` |
+| Dropdown | `bx bx-chevron-down` | &#9660; | `&#9660;` |
+| Close | `bx bx-x` | &times; | `&times;` |
+| Menu/hamburger | `bx bx-menu` | &#9776; | `&#9776;` |
+
+**Social media in footer** — Use text abbreviations instead of icon fonts:
+```php
+<!-- Facebook -->
+<li><a href="..." target="_blank">f</a></li>
+<!-- Twitter -->
+<li><a href="..." target="_blank">t</a></li>
+<!-- LinkedIn -->
+<li><a href="..." target="_blank">in</a></li>
+<!-- Instagram -->
+<li><a href="..." target="_blank">ig</a></li>
+<!-- YouTube -->
+<li><a href="..." target="_blank">&#9654;</a></li>
+```
+
+To prevent color in emoji icons, use: `style="filter: grayscale(1);"`
+
+#### 6. jQuery → Vanilla JS Patterns
+
+Any interactive behavior from the Bootstrap theme must be rewritten in vanilla JS.
+
+**Mobile menu toggle:**
+```html
+<script>
+    const menuToggle = document.querySelector('.menu-toggle');
+    const mainNav = document.querySelector('.main-nav');
+    if (menuToggle && mainNav) {
+        menuToggle.addEventListener('click', function() {
+            mainNav.classList.toggle('open');
+        });
+    }
+</script>
+```
+
+With CSS:
+```css
+/* Mobile: hide desktop nav, show toggle */
+@media (max-width: 991px) {
+    .main-nav { display: none; }
+    .main-nav.open { display: block; }
+    .mobile-nav { display: flex; }
+}
+
+/* Desktop: show nav, hide toggle */
+@media (min-width: 992px) {
+    .main-nav { display: block; }
+    .mobile-nav { display: none; }
+}
+```
+
+**Comment reply toggle** (replaces jQuery `.slideToggle()`):
+```html
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.comment-reply-link').forEach(function(link) {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            var commentId = this.getAttribute('data-comment-id');
+            var formContainer = document.getElementById('reply-form-' + commentId);
+            if (formContainer) {
+                formContainer.style.display =
+                    formContainer.style.display === 'none' ? 'block' : 'none';
+            }
+        });
+    });
+});
+</script>
+```
+
+**Sidebar panel toggle** (for sidebar-based navigation designs):
+```javascript
+const toggle = document.getElementById('sidebarToggle');
+const overlay = document.getElementById('sidebarOverlay');
+const panel = document.getElementById('sidebarPanel');
+const close = document.getElementById('sidebarClose');
+function openSidebar() { overlay.classList.add('active'); panel.classList.add('active'); }
+function closeSidebar() { overlay.classList.remove('active'); panel.classList.remove('active'); }
+if (toggle) toggle.addEventListener('click', openSidebar);
+if (overlay) overlay.addEventListener('click', closeSidebar);
+if (close) close.addEventListener('click', closeSidebar);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
+```
+
+#### 7. PublicPage.php Structure
+
+HTML5 PublicPage.php follows the same structure as Bootstrap themes — the only difference is:
+- Load **one CSS file** (your consolidated `style.css`) instead of multiple framework files
+- Load **one JS file** (your `script.js`) instead of jQuery + Bootstrap + plugins
+- Use `$this->global_includes_top($options)` in `<head>` for system CSS/JS
+- Include mobile menu toggle JS inline in the footer (after `script.js`)
+
+**Key pattern — always include:**
+```php
+public function public_header($options=array()) {
+    $_GLOBALS['page_header_loaded'] = true;
+    $settings = Globalvars::get_instance();
+    $session = SessionControl::get_instance();
+    $options = parent::public_header_common($options);  // CRITICAL: call parent
+    $menu_data = $this->get_menu_data();
+    // ... render header HTML
+}
+```
+
+**BeginPage/EndPage** — Use your theme's content wrapper classes:
+```php
+public static function BeginPage($title='', $options=array()) {
+    $output = '<section class="post-detail-area"><div class="container"><div class="post-content">';
+    if ($title) {
+        $output .= '<div class="post-header"><h1>' . htmlspecialchars($title) . '</h1></div>';
+    }
+    $output .= '<div class="post-body">';
+    return $output;
+}
+
+public static function EndPage($options=array()) {
+    return '</div></div></div></section>';
+}
+```
+
+#### 8. Views — What to Copy vs Rewrite
+
+When creating HTML5 theme views from an existing Bootstrap theme:
+
+| File | Approach |
+|------|----------|
+| **Logic files** (`index_logic.php`, etc.) | Copy verbatim — no framework dependency |
+| **Views** (`index.php`, `blog.php`, etc.) | Rewrite HTML structure using source template classes, keep all PHP logic |
+| **PublicPage.php** | Full rewrite — HTML structure from source, PHP patterns from existing theme |
+| **FormWriter.php** | Trivial — just change the extends |
+| **theme.json** | New file — change 3 values |
+| **serve.php** | Copy from existing theme or create new |
+
+**When rewriting views**, the PHP logic (loops, conditionals, model access) stays the same — only the HTML wrapper classes change:
+
+```php
+<!-- Bootstrap theme -->
+<div class="col-lg-4 col-md-6">
+    <div class="single-blog-post card">
+        <img class="card-img-top" ...>
+
+<!-- HTML5 theme — same PHP, different CSS classes -->
+<div class="col-lg-4 col-md-6">
+    <div class="single-blog-post">
+        <div class="blog-image"><img ...></div>
+```
+
+#### 9. Events View — Virtual Recurring Instances
+
+The events page requires special handling for **virtual recurring event instances** — these are generated at runtime and use property access instead of `get()` methods. This pattern is identical in Bootstrap and HTML5 themes:
+
+```php
+$is_virtual = (is_object($event) && isset($event->is_virtual) && $event->is_virtual);
+
+// Dual accessor pattern — required for both real and virtual events
+$evt_name = $is_virtual ? $event->evt_name : $event->get('evt_name');
+$evt_start_time = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
+$evt_link = $is_virtual ? $event->evt_link : $event->get('evt_link');
+$evt_tz = $is_virtual ? ($event->evt_timezone ?: 'America/New_York') : ($event->get('evt_timezone') ?: 'America/New_York');
+
+// Virtual instances have instance_date for URL construction
+if ($is_virtual) {
+    $event_url = '/event/' . $evt_link . '/' . $event->instance_date;
+} else {
+    $event_url = $event->get_url();
+}
+```
+
+#### 10. Comment System CSS
+
+The post page's comment system requires these styles:
+
+```css
+/* ===== COMMENTS ===== */
+.comments-section { margin-top: 40px; padding-top: 30px; border-top: 1px solid #eee; }
+.comments-title { margin-bottom: 20px; }
+
+.comment { padding: 20px 0; border-bottom: 1px solid #f0f0f0; }
+.comment-author { font-weight: 600; font-size: 15px; }
+.comment-date { font-size: 13px; color: #999; margin-bottom: 8px; }
+.comment-text { font-size: 14px; line-height: 1.6; }
+
+.comment-reply { margin-left: 30px; border-left: 2px solid #f0f0f0; padding-left: 20px; }
+.comment-reply-link { font-size: 13px; color: #d80650; cursor: pointer; }
+
+.reply-form-container { margin-top: 15px; padding: 15px; background: #f9f9f9; border-radius: 5px; }
+
+.comment-form { margin-top: 40px; padding-top: 30px; border-top: 1px solid #eee; }
+.comment-form h3 { margin-bottom: 20px; }
+```
+
+### HTML5 Theme Checklist (Additions to Main Checklist)
+
+Beyond the standard validation checklist, HTML5 themes must verify:
+
+- [ ] `theme.json` has `cssFramework: "html5"` and `formWriterBase: "FormWriterV2HTML5"`
+- [ ] `FormWriter.php` extends `FormWriterV2HTML5` (not `FormWriterV2Bootstrap`)
+- [ ] All inline CSS from source HTML files extracted into single `style.css`
+- [ ] Utility CSS classes defined (`.mb-*`, `.mt-*`, `.text-center`, `.text-muted`, `.badge`, etc.)
+- [ ] Grid CSS defined (`.row`, `.col-lg-*`, `.col-md-*` with responsive breakpoints)
+- [ ] Form CSS defined (`.form-group`, `.form-control`, `.form-label`, `.btn`, `.btn-submit`)
+- [ ] Comment CSS defined (`.comment`, `.comment-reply`, `.reply-form-container`, `.comment-form`)
+- [ ] No jQuery references anywhere — all JS is vanilla
+- [ ] No icon font references — all icons are Unicode or inline SVG
+- [ ] Mobile menu works with vanilla JS toggle (no Bootstrap collapse)
+- [ ] `global_includes_top()` called in `<head>` section of PublicPage.php
+- [ ] `parent::public_header_common($options)` called at start of `public_header()`
+- [ ] Comment reply toggle uses vanilla JS `addEventListener` (not jQuery)
+- [ ] Single consolidated CSS file loads in header (not multiple framework files)
+
+### Existing HTML5 Theme References
+
+Use these as working examples when creating new HTML5 themes:
+
+| Theme | Source Design | Key Features |
+|-------|--------------|--------------|
+| `jeremytunnell-html5` | Typology | Sidebar panel navigation, minimal blog design, drop-cap letters |
+| `phillyzouk-html5` | Linka | Traditional navbar, event listings, full comment system, newsletter signup |
+
 ## Lessons Learned from Phillyzouk Implementation
 
 ### What Went Wrong Initially
@@ -1440,9 +1894,11 @@ The system automatically adds canonical URL tags to all public pages. It uses yo
 1. Start with a simple layout first (homepage only)
 2. Test frequently during development
 3. Keep the browser console open to catch errors early
-4. Use the theme that's already working (phillyzouk) as a reference
+4. Use working themes as references:
+   - **Bootstrap themes:** `/theme/phillyzouk/`
+   - **HTML5 themes:** `/theme/phillyzouk-html5/` or `/theme/jeremytunnell-html5/`
 5. Document any theme-specific quirks in theme.json description
-6. When in doubt, check how phillyzouk did it: `/theme/phillyzouk/`
+6. For HTML5 themes, see the [HTML5 Zero-Dependency Themes](#html5-zero-dependency-themes) section
 
 This guide should enable successful theme integration following the proven Phillyzouk pattern.
 
