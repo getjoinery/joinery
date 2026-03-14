@@ -210,12 +210,6 @@ function resolve(resolver_uid string, dns_query *dns.Msg) → *dns.Msg:
             - Parent domain walk
           - If any match: return NXDOMAIN
 
-       c. Service blocklists:
-          - For each service_key in profile.EnabledServices:
-            - Look up service_key in cache.serviceDomains → get domain set
-            - Check exact match (no parent domain walk for services — service domains are exact)
-          - If any match: return NXDOMAIN
-
     7. FORWARD TO UPSTREAM DNS
        Forward the original dns_query unmodified (preserving any EDNS0 options).
        a. Send to SCD_UPSTREAM_PRIMARY via UDP
@@ -360,7 +354,6 @@ Check DB connectivity by calling `db.Ping()`. If unreachable:
   "profiles": 280,
   "blocklist_categories": 26,
   "blocklist_domains_total": 523000,
-  "service_domains_total": 4200,
   "last_light_reload": "2026-03-14T10:30:00Z",
   "last_full_reload": "2026-03-14T06:00:00Z",
   "uptime_seconds": 86400
@@ -425,7 +418,7 @@ For a custom allow rule bypass:
 }
 ```
 
-Possible `reason` values: `not_blocked`, `custom_block_rule`, `custom_allow_rule`, `category_blocklist`, `service_blocklist`, `safesearch_rewrite`, `safeyoutube_rewrite`.
+Possible `reason` values: `not_blocked`, `custom_block_rule`, `custom_allow_rule`, `category_blocklist`, `safesearch_rewrite`, `safeyoutube_rewrite`.
 
 **Implementation note:** The resolver's `resolve()` function needs to return a `ResolveResult` struct with the reason/category/matched_rule alongside the DNS response. The DoH and DoT handlers use only the DNS response; the `/test` handler uses the full struct.
 
@@ -574,7 +567,122 @@ This ensures the client gets both the CNAME and the resolved IP in a single resp
 
 ---
 
-## 10. In-Memory Cache (internal/cache/cache.go)
+## 10. Category Filter Blocklist Sources
+
+Category filters (ads, malware, porn, gambling, etc.) are populated from open-source community-maintained blocklists. These lists are downloaded, parsed, and loaded into the `bld_blocklist_domains` table by a PHP maintenance script. The Go DNS service reads from this table.
+
+### Blocklist Format
+
+All lists use **plain domain format** — one domain per line. Lines starting with `#` are comments. The PHP loader strips whitespace, skips comments and blank lines, lowercases all domains, and inserts into the database keyed by `category_key`.
+
+### Category-to-Source Mapping
+
+Each filter category (matching the keys in `ControlDHelper::$filters`) maps to one or more open-source blocklist URLs:
+
+| Category Key | Display Name | Source(s) |
+|---|---|---|
+| `ads_small` | Ads & Trackers (Relaxed) | hagezi light |
+| `ads_medium` | Ads & Trackers (Balanced) | hagezi normal |
+| `ads` | Ads & Trackers (Strict) | hagezi pro.plus |
+| `porn` | Adult content | OISD NSFW |
+| `porn_strict` | Adult content (Strict) | OISD NSFW + Bon-Appetit porn-domains |
+| `noai` | Artificial intelligence | hagezi native.ai |
+| `fakenews` | Hoaxes and disinformation | blocklistproject fraud |
+| `cryptominers` | Cryptocurrency | blocklistproject crypto |
+| `dating` | Dating sites | ShadowWhisperer Dating |
+| `drugs` | Illegal drugs | blocklistproject drugs |
+| `ddns` | Dynamic DNS hosts | hagezi dyndns |
+| `filehost` | File hosting | ShadowWhisperer Free (free hosting) |
+| `gambling` | Gambling sites | hagezi gambling + ShadowWhisperer Gambling |
+| `games` | Games | (no reliable open-source list — defer to custom rules) |
+| `gov` | Government sites | (no reliable open-source list — defer to custom rules) |
+| `iot` | Internet of things | hagezi native.* vendor trackers |
+| `malware` | Known malware sites (Relaxed) | hagezi tif (Threat Intelligence Feeds) |
+| `ip_malware` | Known malware sites (Balanced) | hagezi tif + blocklistproject malware |
+| `ai_malware` | Known malware sites (Strict) | hagezi tif + blocklistproject malware + ransomware |
+| `nrd_small` | New domains (Last week) | hagezi nrd7 |
+| `nrd` | New domains (Last month) | hagezi nrd7 + nrd14-8 + nrd21-15 + nrd28-22 |
+| `typo` | Phishing domains | blocklistproject phishing + hagezi fake |
+| `social` | Social media | ShadowWhisperer Social (when available) + blocklistproject facebook |
+| `torrents` | Torrent sites | blocklistproject torrent |
+| `urlshort` | URL shorteners | hagezi urlshortener |
+| `dnsvpn` | VPN and DNS providers | hagezi doh-vpn-proxy-bypass |
+
+### Source URLs
+
+**Hagezi** (cdn.jsdelivr.net — CDN-cached, updated daily):
+```
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/light.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/multi.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/pro.plus.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/tif.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/nrd7.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/nrd14-8.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/nrd21-15.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/nrd28-22.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/doh.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/dyndns.txt
+https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/native.ai.txt
+```
+
+**OISD** (oisd.nl — updated continuously):
+```
+https://nsfw.oisd.nl/domainswild2
+```
+
+**Block List Project** (blocklistproject.github.io — domain-only format):
+```
+https://blocklistproject.github.io/Lists/alt-version/crypto-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/drugs-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/fraud-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/gambling-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/malware-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/phishing-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/torrent-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/ransomware-nl.txt
+https://blocklistproject.github.io/Lists/alt-version/facebook-nl.txt
+```
+
+**ShadowWhisperer** (raw.githubusercontent.com — plain domain format):
+```
+https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Lists/Dating
+https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Lists/Gambling
+https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Lists/Free
+```
+
+**Bon-Appetit** (raw.githubusercontent.com — for strict adult content):
+```
+https://raw.githubusercontent.com/Bon-Appetit/porn-domains/master/domains.txt
+```
+
+### PHP Blocklist Loader
+
+A PHP maintenance script (`utils/load_blocklists.php`) handles downloading and loading:
+
+```
+1. For each category_key in the mapping:
+   a. Download each source URL (curl, 30-second timeout)
+   b. Parse: skip comments (#), blank lines; lowercase; trim whitespace
+   c. Merge domains from all sources for that category (deduplicate)
+   d. Begin transaction
+   e. DELETE FROM bld_blocklist_domains WHERE bld_category_key = $category_key
+   f. Batch INSERT new domains (1000 rows per INSERT for performance)
+   g. Commit transaction
+   h. Log: "Loaded X domains for category_key"
+2. Log total: "Blocklist load complete: X total domains across Y categories"
+```
+
+This script runs via cron (e.g., daily at 3 AM) or manually via the admin utilities page. The Go service picks up changes on its next full reload cycle (hourly by default, or triggered via `POST /reload`).
+
+### Notes
+
+- Categories `games` and `gov` have no reliable open-source blocklists. They remain available as filter options but will be empty until manually populated or a suitable source is found.
+- The mapping table above is the initial configuration. Sources can be added, replaced, or combined as better lists become available — the PHP loader is configured by a data structure, not hardcoded per-category.
+- When a category maps to multiple sources, domains are merged and deduplicated before insertion.
+
+---
+
+## 11. In-Memory Cache (internal/cache/cache.go)
 
 ### Data Structures
 
@@ -591,9 +699,6 @@ type Cache struct {
     // Blocklist domains: category_key → set of domains
     // Shared across all profiles (memory efficient)
     blocklistDomains map[string]map[string]bool
-
-    // Service domains: service_key → set of domains
-    serviceDomains map[string]map[string]bool
 
     // Metadata
     lastLightReload     time.Time
@@ -625,9 +730,6 @@ type ProfileInfo struct {
     // Enabled filter category keys for this profile
     EnabledCategories []string  // e.g. ["ads", "malware", "porn"]
 
-    // Enabled service keys for this profile
-    EnabledServices []string    // e.g. ["spotify", "tiktok"]
-
     // Custom rules for this profile
     CustomBlocked map[string]bool  // domains with rule_action=0
     CustomAllowed map[string]bool  // domains with rule_action=1
@@ -658,13 +760,10 @@ func (c *Cache) GetProfile(profileID int64) *ProfileInfo
 // IsDomainBlockedByCategory checks if a domain (or parent) is in the given category's blocklist.
 func (c *Cache) IsDomainBlockedByCategory(domain string, categoryKey string) bool
 
-// IsDomainBlockedByService checks if a domain matches a service's domain list (exact match only).
-func (c *Cache) IsDomainBlockedByService(domain string, serviceKey string) bool
-
-// LightReload reloads devices, profiles, filters, services, and rules from DB.
+// LightReload reloads devices, profiles, filters, and rules from DB.
 func (c *Cache) LightReload(db *DB) error
 
-// FullReload reloads blocklist domains and service domains from DB.
+// FullReload reloads blocklist domains from DB.
 func (c *Cache) FullReload(db *DB) error
 
 // Stats returns current cache statistics.
@@ -673,7 +772,7 @@ func (c *Cache) Stats() CacheStats
 
 ---
 
-## 11. Database Queries (internal/db/db.go)
+## 12. Database Queries (internal/db/db.go)
 
 All queries are **read-only SELECT statements**. The Go service never writes to the database.
 
@@ -714,17 +813,11 @@ var expectedSchema = map[string][]string{
     "cdf_ctldfilters": {
         "cdf_cdp_ctldprofile_id", "cdf_filter_pk", "cdf_is_active",
     },
-    "cds_ctldservices": {
-        "cds_cdp_ctldprofile_id", "cds_service_pk", "cds_is_active",
-    },
     "cdr_ctldrules": {
         "cdr_cdp_ctldprofile_id", "cdr_rule_hostname", "cdr_rule_action", "cdr_is_active",
     },
     "bld_blocklist_domains": {
         "bld_category_key", "bld_domain",
-    },
-    "svd_service_domains": {
-        "svd_service_key", "svd_domain",
     },
 }
 ```
@@ -786,16 +879,7 @@ FROM cdf_ctldfilters
 WHERE cdf_is_active = 1;
 ```
 
-**Query 3: Load all active service assignments**
-
-```sql
-SELECT cds_cdp_ctldprofile_id AS profile_id,
-       cds_service_pk AS service_key
-FROM cds_ctldservices
-WHERE cds_is_active = 1;
-```
-
-**Query 4: Load all active custom rules**
+**Query 3: Load all active custom rules**
 
 ```sql
 SELECT cdr_cdp_ctldprofile_id AS profile_id,
@@ -809,7 +893,7 @@ WHERE cdr_is_active = 1;
 
 ### Full Blocklist Reload Queries (every 1 hour, or on SIGHUP/POST /reload)
 
-**Query 5: Load all blocklist domains**
+**Query 4: Load all blocklist domains**
 
 ```sql
 SELECT bld_category_key, bld_domain
@@ -818,33 +902,26 @@ FROM bld_blocklist_domains;
 
 This may return hundreds of thousands of rows. Process with `rows.Next()` in a loop, building the `map[string]map[string]bool` incrementally. Do NOT load all rows into memory as a slice first.
 
-**Query 6: Load all service domains**
-
-```sql
-SELECT svd_service_key, svd_domain
-FROM svd_service_domains;
-```
-
 ### Reload Process
 
 **Lightweight reload:**
-1. Begin a read-only transaction for consistency across queries 1-4
-2. Run queries 1-4
+1. Begin a read-only transaction for consistency across queries 1-3
+2. Run queries 1-3
 3. Build new `devices` and `profiles` maps from results
 4. Acquire cache write lock
-5. Replace `cache.devices` and `cache.profiles` (keep existing `blocklistDomains` and `serviceDomains`)
+5. Replace `cache.devices` and `cache.profiles` (keep existing `blocklistDomains`)
 6. Update metadata (lastLightReload, totalDevices)
 7. Release write lock
 8. Log: `"Lightweight reload complete: X devices, Y profiles"`
 
 **Full reload:**
-1. Run queries 5-6 (no transaction needed — these are append-only tables)
-2. Build new `blocklistDomains` and `serviceDomains` maps
+1. Run query 4 (no transaction needed — this is an append-only table)
+2. Build new `blocklistDomains` map
 3. Acquire cache write lock
-4. Replace `cache.blocklistDomains` and `cache.serviceDomains`
+4. Replace `cache.blocklistDomains`
 5. Update metadata (lastFullReload, totalBlockedDomains)
 6. Release write lock
-7. Log: `"Full reload complete: X blocklist domains across Y categories, Z service domains"`
+7. Log: `"Full reload complete: X blocklist domains across Y categories"`
 
 ### Schedule Days Parsing
 
@@ -860,7 +937,7 @@ if err := json.Unmarshal([]byte(rawValue), &days); err != nil {
 
 ---
 
-## 12. Upstream DNS Forwarding (internal/upstream/upstream.go)
+## 13. Upstream DNS Forwarding (internal/upstream/upstream.go)
 
 ### Forwarding Logic
 
@@ -895,7 +972,7 @@ When both upstreams fail, the resolver returns a DNS SERVFAIL response.
 
 ---
 
-## 13. Logging
+## 14. Logging
 
 All logging goes to stdout (captured by supervisord) or a configurable file path.
 
@@ -930,7 +1007,7 @@ Use Go's standard `log` package. Prefix each line with timestamp and level.
 
 ---
 
-## 14. Error Handling and Resilience
+## 15. Error Handling and Resilience
 
 | Failure | Behavior |
 |---------|----------|
@@ -952,13 +1029,13 @@ Use Go's standard `log` package. Prefix each line with timestamp and level.
 
 **IPv6:** The service listens on both IPv4 and IPv6 (Go's default behavior when binding to `:port`). AAAA queries are treated like any other query type — blocked if the domain is blocked, forwarded to upstream otherwise. The default upstream servers (1.1.1.1, 8.8.8.8) handle AAAA queries natively.
 
-**Rate limiting:** Not in v1 (see Section 17).
+**Rate limiting:** Not in v1 (see Section 19).
 
-**DNS response caching:** Not in v1 (see Section 17).
+**DNS response caching:** Not in v1 (see Section 19).
 
 ---
 
-## 15. Build and Compilation
+## 16. Build and Compilation
 
 Prerequisites: Go 1.22+ installed.
 
@@ -1020,7 +1097,7 @@ curl -X POST http://localhost:8053/reload
 
 ---
 
-## 16. Supervisord Configuration
+## 17. Supervisord Configuration
 
 Inside the Docker container, supervisord manages the Go service alongside Apache and cron.
 
@@ -1043,7 +1120,7 @@ Environment variables are injected at container startup (see migration spec Sect
 
 ---
 
-## 17. Testing
+## 18. Testing
 
 Go unit tests that test all logic in isolation, without a database connection. Tests create in-memory cache structures directly and verify behavior. Run with `go test ./...`.
 
@@ -1055,7 +1132,6 @@ Go unit tests that test all logic in isolation, without a database connection. T
 - Custom allow rule bypasses block (exact match and parent domain)
 - Custom block rule blocks domain (exact match and parent domain)
 - Category blocklist blocks domain
-- Service blocklist blocks domain (exact match only, no parent walk)
 - Allow rule takes priority over block rule for same domain
 - Unknown resolver UID returns REFUSED
 - Inactive device returns REFUSED
@@ -1098,7 +1174,7 @@ Not tested in automated tests. Verify manually by running the service against th
 
 ---
 
-## 18. Future Improvements (Not in v1)
+## 19. Future Improvements (Not in v1)
 
 These are deferred to keep v1 simple. Add when scale or need justifies the complexity.
 
