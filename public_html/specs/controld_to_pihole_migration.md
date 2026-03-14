@@ -3,6 +3,7 @@
 **Status:** Draft
 **Plugin:** controld (Scrolldaddy)
 **Scope:** Replace ControlD cloud API with a self-hosted DNS filtering service that replicates ControlD's architecture
+**Related spec:** [ScrollDaddy DNS Service](scrolldaddy_dns_service.md) -- full Go application specification
 
 ---
 
@@ -50,11 +51,11 @@ Currently, every management action makes TWO writes: one to the local database A
 ```
                           Internet
                              |
-                    [HTTPS Termination]
-                      (Caddy / nginx)
+                    [Apache Reverse Proxy]
+                     (host-level, TLS via Certbot)
                              |
                    [ScrollDaddy DNS Service]
-                     (lightweight Go binary)
+                     (Go binary inside Docker container)
                         /          \
               DoH endpoint       Reads from
            /resolve/{uid}        PostgreSQL
@@ -68,178 +69,21 @@ Currently, every management action makes TWO writes: one to the local database A
 
 ### Components
 
-1. **ScrollDaddy DNS Service** -- A small Go program (~500-1000 lines) that:
-   - Listens for DNS-over-HTTPS requests at `/resolve/{resolver_uid}`
-   - Extracts the resolver UID from the URL path
-   - Looks up which profile applies (from PostgreSQL, cached in memory)
-   - Checks the queried domain against that profile's blocklists (in-memory hash sets)
-   - Returns NXDOMAIN for blocked domains
-   - Forwards allowed queries to upstream DNS (Cloudflare 1.1.1.1, Google 8.8.8.8)
-   - Periodically reloads profiles and blocklists from the database
+1. **ScrollDaddy DNS Service** -- A Go program (written by Claude) that handles DNS-over-HTTPS and DNS-over-TLS. Reads device/profile/blocklist data from the database, caches in memory, reloads periodically. Fully specified in **[scrolldaddy_dns_service.md](scrolldaddy_dns_service.md)**.
 
-2. **HTTPS Termination** -- Caddy or nginx handles TLS certificates for `dns.scrolldaddy.app` (or similar domain) and proxies to the Go service
+2. **Apache Reverse Proxy** (host-level) -- Uses the existing Joinery deployment pattern: Apache on the Docker host with Certbot for Let's Encrypt TLS. Proxies `dns.scrolldaddy.app` traffic to the Go service port inside the container. Same pattern already used for site domains.
 
 3. **Joinery Plugin (modified)** -- The existing PHP plugin, with ControlDHelper replaced by direct database writes. No external API calls needed.
 
-4. **Blocklist Downloader** -- A cron job or scheduled task that fetches community blocklist URLs, parses them into domain lists, and stores them in the database
+4. **Blocklist Downloader** -- A Joinery scheduled task (PHP) using the existing scheduled task framework. Runs periodically to fetch community blocklist URLs, parse them, and store domains in the database.
+
+5. **Blocklist Admin Page** -- A plugin admin page at `plugins/controld/admin/admin_blocklist_sources.php` for managing blocklist source URLs.
+
+6. **Container Install Script** -- A bash script (`install_scrolldaddy_dns.sh`) that installs Go, compiles the DNS service binary, and configures supervisord to run it alongside Apache and PostgreSQL inside the Docker container.
 
 ---
 
-## 3. The DNS Service (Go)
-
-### Why Go?
-
-- `miekg/dns` is the standard DNS library, battle-tested, used by CoreDNS
-- Single static binary, trivial to deploy
-- Excellent concurrency for handling many DNS queries
-- Small memory footprint with efficient hash set lookups
-
-### Core Logic (pseudocode)
-
-```
-on HTTP request to /resolve/{resolver_uid}:
-    1. Parse DNS query from DoH request body (application/dns-message)
-    2. Look up resolver_uid in cache -> get profile_id
-    3. If not found: return REFUSED
-    4. Get queried domain name from DNS question
-    5. Check domain against profile's blocked domains (hash set lookup)
-       - Check exact match: "ads.example.com"
-       - Check parent domains: "example.com", "com" (wildcard blocking)
-    6. If blocked: return NXDOMAIN response
-    7. If allowed: forward query to upstream DNS, return response
-```
-
-### DoH Protocol (RFC 8484)
-
-DNS-over-HTTPS is simple:
-- **POST** to endpoint with `Content-Type: application/dns-message`, body is raw DNS wire format
-- **GET** with `?dns=` parameter (base64url-encoded DNS wire format)
-- Response: `Content-Type: application/dns-message`, body is raw DNS wire format response
-
-The `miekg/dns` library handles all the wire format parsing/serialization.
-
-### In-Memory Data Structures
-
-```go
-type ProfileCache struct {
-    // resolver_uid -> profile_id
-    resolvers map[string]int64
-
-    // profile_id -> set of blocked domains
-    blockedDomains map[int64]map[string]bool
-
-    // profile_id -> set of allowed domains (bypass rules)
-    allowedDomains map[int64]map[string]bool
-
-    // Reload interval
-    reloadTicker *time.Ticker
-}
-```
-
-**Memory estimation:** A blocklist of 500,000 domains uses ~50MB as a Go map. Most profiles will share the same underlying blocklist data, so using per-category domain sets with per-profile category membership keeps memory efficient.
-
-Optimized structure:
-
-```go
-type BlocklistCache struct {
-    // category_key -> set of domains in that category
-    // e.g., "ads" -> {"doubleclick.net": true, "googlesyndication.com": true, ...}
-    categories map[string]map[string]bool
-
-    // profile_id -> list of enabled category keys
-    // e.g., 42 -> ["ads", "malware", "porn"]
-    profileCategories map[int64][]string
-
-    // profile_id -> custom blocked domains (from cdr_ctldrules with action=0)
-    customBlocked map[int64]map[string]bool
-
-    // profile_id -> custom allowed domains (from cdr_ctldrules with action=1)
-    customAllowed map[int64]map[string]bool
-
-    // resolver_uid -> profile_id (active profile, considering schedule)
-    resolvers map[string]int64
-}
-```
-
-### Reload Strategy
-
-The DNS service reloads data from PostgreSQL periodically:
-- **Every 30-60 seconds:** Reload resolver->profile mappings and profile->category assignments (lightweight query)
-- **Every 1-6 hours:** Reload full blocklist domain sets (heavier, only when blocklists are updated)
-- **On signal (SIGHUP):** Force immediate full reload (triggered after blocklist download)
-
-This means changes made through the Joinery UI take effect within 30-60 seconds without any API call to the DNS service.
-
-### Scheduling Support
-
-The DNS service handles scheduling natively by checking the schedule fields:
-
-```go
-func (c *BlocklistCache) getActiveProfileForResolver(uid string) int64 {
-    device := c.devices[uid]
-    if device.secondaryProfileID == 0 {
-        return device.primaryProfileID
-    }
-
-    // Check if current time falls within schedule
-    now := time.Now().In(device.timezone)
-    currentDay := strings.ToLower(now.Format("Mon"))
-
-    if !contains(device.scheduleDays, currentDay) {
-        return device.primaryProfileID
-    }
-
-    if isInTimeRange(now, device.scheduleStart, device.scheduleEnd) {
-        return device.secondaryProfileID
-    }
-    return device.primaryProfileID
-}
-```
-
-No separate scheduled task needed -- the DNS service evaluates the schedule on every query. This is more accurate than polling and has zero delay.
-
-### API Endpoints (minimal, for health/stats only)
-
-The DNS service exposes a small internal API (not public-facing):
-
-```
-GET /health                    -- Health check
-GET /stats                     -- Query counts, cache size, uptime
-POST /reload                   -- Force reload from database
-GET /resolve/{uid}?dns=...     -- DoH GET (public)
-POST /resolve/{uid}            -- DoH POST (public)
-```
-
-### SafeSearch & SafeYouTube
-
-These can be implemented directly in the DNS service as DNS rewrites per-profile:
-
-```go
-// If safesearch is enabled for this profile:
-if profile.safesearch {
-    rewrites := map[string]string{
-        "www.google.com":    "forcesafesearch.google.com",
-        "www.bing.com":      "strict.bing.com",
-        "duckduckgo.com":    "safe.duckduckgo.com",
-    }
-    if cname, ok := rewrites[queryDomain]; ok {
-        // Return CNAME response pointing to safe version
-    }
-}
-
-// If safeyoutube is enabled:
-if profile.safeyoutube {
-    if queryDomain == "www.youtube.com" || queryDomain == "youtube.com" {
-        // Return CNAME to restrict.youtube.com
-    }
-}
-```
-
-This is **per-profile**, unlike Pi-hole where it would be global.
-
----
-
-## 4. Blocklist Management
+## 3. Blocklist Management
 
 ### Blocklist Sources
 
@@ -276,47 +120,105 @@ Community-maintained blocklists replace ControlD's curated categories. Each cate
 
 ### Blocklist Download & Storage
 
-**New table: `scd_blocklist_sources`**
+**New table: `bls_blocklist_sources`** (class: `BlocklistSource` / `MultiBlocklistSource`)
 
 ```
-scd_blocklist_source_id (PK, serial)
-scd_category_key (varchar) -- maps to filter category
-scd_url (text) -- blocklist URL to download
-scd_name (varchar) -- human-readable name
-scd_format (varchar) -- 'hosts', 'domains', 'adblock' (parsing format)
-scd_is_active (bool)
-scd_last_download_time (timestamp)
-scd_domain_count (int) -- number of domains after parsing
+bls_blocklist_source_id (PK, serial)
+bls_category_key (varchar) -- maps to filter category
+bls_url (text) -- blocklist URL to download
+bls_name (varchar) -- human-readable name
+bls_format (varchar) -- 'hosts', 'domains', 'adblock' (parsing format)
+bls_is_active (bool)
+bls_last_download_time (timestamp)
+bls_domain_count (int) -- number of domains after parsing
 ```
 
-**New table: `scd_blocklist_domains`**
+**New table: `bld_blocklist_domains`** (class: `BlocklistDomain` / `MultiBlocklistDomain`)
 
 ```
-scd_blocklist_domain_id (PK, serial)
-scd_category_key (varchar) -- which category this domain belongs to
-scd_domain (varchar) -- the blocked domain
+bld_blocklist_domain_id (PK, serial)
+bld_category_key (varchar) -- which category this domain belongs to
+bld_domain (varchar) -- the blocked domain
 ```
 
-Index: `CREATE INDEX idx_blocklist_domain ON scd_blocklist_domains(scd_category_key, scd_domain)`
+Index: `CREATE INDEX idx_blocklist_domain ON bld_blocklist_domains(bld_category_key, bld_domain)`
 
-**Download process** (PHP cron job or scheduled task):
-1. For each active source in `scd_blocklist_sources`, fetch the URL
-2. Parse the file format (hosts file, domain list, or adblock format)
-3. Extract domains, deduplicate
-4. Delete old domains for that category, insert new ones
-5. Send SIGHUP or POST /reload to the DNS service
+### Blocklist Downloader (Joinery Scheduled Task)
+
+Uses the existing Joinery scheduled task framework. Two files in `plugins/controld/tasks/`:
+
+**`DownloadBlocklists.json`**
+```json
+{
+    "name": "Download Blocklists",
+    "description": "Fetches community blocklist URLs, parses domains, and stores them in the database for the DNS service",
+    "default_frequency": "daily",
+    "default_time": "04:00:00",
+    "config_fields": {
+        "dns_service_url": {
+            "type": "text",
+            "label": "DNS Service Internal URL",
+            "required": false
+        }
+    }
+}
+```
+
+**`DownloadBlocklists.php`** implements `ScheduledTaskInterface`:
+
+```
+function run(array $config):
+    1. Load all active rows from bls_blocklist_sources
+    2. Group sources by category_key
+    3. For each category:
+       a. For each source in this category:
+          - Fetch URL via file_get_contents() or curl
+          - If fetch fails: log warning, skip to next source
+          - Parse based on bls_format:
+            * 'hosts': Extract second column from "0.0.0.0 domain.com" lines (skip comments, localhost)
+            * 'domains': One domain per line (skip comments, blank lines)
+            * 'adblock': Extract domain from "||domain.com^" patterns
+          - Normalize all domains: lowercase, strip trailing dots
+          - Collect all domains for this category
+       b. Deduplicate across all sources for this category
+       c. Begin transaction:
+          - DELETE FROM bld_blocklist_domains WHERE bld_category_key = [category]
+          - INSERT all deduplicated domains for this category
+          - UPDATE bls_blocklist_sources SET bls_last_download_time = now(),
+            bls_domain_count = [count per source]
+       d. Commit transaction
+    4. After all categories processed, signal DNS service to reload:
+       - POST to http://localhost:8053/reload (configurable via task config dns_service_url)
+    5. Return status: "Downloaded X sources, Y total domains across Z categories"
+```
+
+### Admin Page for Blocklist Sources
+
+**Location:** `plugins/controld/admin/admin_blocklist_sources.php`
+
+A standard Joinery admin table page (following the patterns in `docs/admin_pages.md`) that allows admins to:
+- View all blocklist sources with columns: Name, Category, URL, Format, Active, Last Downloaded, Domain Count
+- Add new blocklist source (name, category_key dropdown, URL, format dropdown, active toggle)
+- Edit existing sources
+- Delete sources
+- Manual "Download Now" action for individual sources
+- Manual "Download All" action (triggers the full scheduled task logic)
+
+**Route:** Auto-discovered as a plugin admin page at `/admin/admin_blocklist_sources` via the existing plugin admin route discovery.
+
+**Logic file:** `plugins/controld/admin/logic/admin_blocklist_sources_logic.php`
 
 ### Service Blocking
 
 ControlD's 400+ individual service toggles (Spotify, Facebook, etc.) are handled as **curated domain lists per service**, stored in the same blocklist infrastructure:
 
-**New table: `scd_service_domains`**
+**New table: `svd_service_domains`** (class: `ServiceDomain` / `MultiServiceDomain`)
 
 ```
-scd_service_domain_id (PK, serial)
-scd_service_key (varchar) -- e.g., 'spotify', 'facebook'
-scd_service_category (varchar) -- e.g., 'audio', 'social'
-scd_domain (varchar) -- domain to block
+svd_service_domain_id (PK, serial)
+svd_service_key (varchar) -- e.g., 'spotify', 'facebook'
+svd_service_category (varchar) -- e.g., 'audio', 'social'
+svd_domain (varchar) -- domain to block
 ```
 
 Pre-populated with domains for each service. When a user blocks "Spotify", the DNS service loads those domains into the profile's blocked set.
@@ -330,13 +232,17 @@ The existing `ControlDHelper::$services` array already has the service keys and 
 
 ---
 
-## 5. Changes to the Joinery Plugin
+## 4. Changes to the Joinery Plugin
 
-### 5.1 Remove ControlDHelper.php entirely
+### 4.1 Remove ControlDHelper.php entirely
 
 Every place that calls `new ControlDHelper()` and makes API calls is replaced with direct database operations. The DNS service reads from the same database.
 
-### 5.2 Device Creation (ctlddevice_edit_logic.php + CtldDevice)
+The static `$filters` and `$services` arrays currently defined in ControlDHelper need to move. They should become either:
+- Static arrays in the relevant data model class (CtldFilter, CtldService)
+- Or a new standalone helper file (without any API logic)
+
+### 4.2 Device Creation (ctlddevice_edit_logic.php + CtldDevice)
 
 **Current flow:**
 1. Create local profile -> call ControlD API to create remote profile -> get profile ID
@@ -365,7 +271,7 @@ $profile1->save();
 // That's it. No API calls.
 ```
 
-### 5.3 Filter Toggling (CtldProfile::update_remote_filters)
+### 4.3 Filter Toggling (CtldProfile::update_remote_filters)
 
 **Current flow:** For each changed filter, call `$cd->modifyProfileFilter()` API, then update local cache.
 
@@ -384,7 +290,7 @@ $filter->save();
 
 This simplifies `update_remote_filters()` from ~100 lines to ~30 lines. Same for `update_remote_services()`.
 
-### 5.4 Custom Rules (CtldProfile::add_rule, delete_rule)
+### 4.4 Custom Rules (CtldProfile::add_rule, delete_rule)
 
 **Current flow:** Call ControlD API to create/delete rule, then update local DB.
 
@@ -405,31 +311,25 @@ $rule->set('cdr_rule_action', $action);
 $rule->save();
 ```
 
-### 5.5 Device Deletion (CtldDevice::permanent_delete)
+### 4.5 Device Deletion (CtldDevice::permanent_delete)
 
 **Current flow:** Call ControlD API to delete device and profiles, then delete locally.
 
 **New flow:** Just delete locally. DNS service stops serving that resolver UID on next reload.
 
-### 5.6 Scheduling (CtldProfile::add_or_edit_schedule)
+### 4.6 Scheduling (CtldProfile::add_or_edit_schedule)
 
 **Current flow:** Call ControlD API to create/modify/delete schedule.
 
-**New flow:** Just save schedule params to local DB. The DNS service evaluates schedules on every query (see Section 3).
+**New flow:** Just save schedule params to local DB. The DNS service evaluates schedules on every query (see DNS service spec Section 6).
 
-### 5.7 Device Activation (CtldDevice::check_activate)
+### 4.7 Device Activation (CtldDevice::check_activate)
 
 **Current flow:** Poll ControlD API for device status.
 
-**New flow options:**
+**New flow:** Auto-activate on creation. The device is "active" as soon as it's created -- the resolver UID works immediately. The user just needs to configure their device to use the DoH URL. No activation polling needed. The `cdd_is_active` field is set to true on creation.
 
-**Option A (simplest):** Auto-activate on creation. The device is "active" as soon as it's created -- the resolver UID works immediately. The user just needs to configure their device to use the DoH URL. No activation polling needed.
-
-**Option B (verify):** The DNS service tracks query counts per resolver. The Joinery plugin queries the DNS service's `/stats/{uid}` endpoint to check if the device has made queries. Mark active when first query is detected.
-
-**Recommendation:** Option A. Simplify the UX -- create device, get resolver URL, configure device, done. Remove the activation polling entirely. The `cdd_is_active` field becomes unnecessary or is set to true immediately.
-
-### 5.8 Device Setup Instructions
+### 4.8 Device Setup Instructions
 
 After creating a device, show the user their unique DoH URL and setup instructions:
 
@@ -439,18 +339,30 @@ https://dns.scrolldaddy.app/resolve/a1b2c3d4e5f6...
 
 To set up your device:
 - iPhone/iPad: Settings > General > VPN & Device Management > DNS > Configure DNS > https://dns.scrolldaddy.app/resolve/a1b2c3d4e5f6...
-- Android: Settings > Network > Private DNS > dns.scrolldaddy.app
+- Android: Settings > Network > Private DNS > a1b2c3d4e5f6.dns.scrolldaddy.app
 - Windows: [instructions]
 - Mac: [instructions]
 ```
 
-Note: Android's Private DNS uses DNS-over-TLS (DoT), not DoH. The DNS service should also support DoT on port 853 for Android compatibility. Alternatively, provide a DNS profile/config file that users can install.
+Note: Android's Private DNS uses DNS-over-TLS (DoT), not DoH. The Go service handles DoT on port 853 using subdomain-based device identification (see DNS service spec Section 8).
+
+### 4.9 Soft Delete (ctlddevice_soft_delete_logic.php)
+
+**Current flow:** Call `$cd->modifyDevice()` to set ControlD device status to disabled, then update local DB.
+
+**New flow:** Just set `cdd_is_active = false` and `cdd_delete_time = now()` in the local DB. The DNS service will return REFUSED for inactive devices on next reload.
+
+### 4.10 Device Name Edit (ctlddevice_edit_logic.php)
+
+**Current flow:** Call `$cd->modifyDevice()` to rename device at ControlD, then update local DB.
+
+**New flow:** Just update `cdd_device_name` locally. The DNS service doesn't use the device name.
 
 ---
 
-## 6. Database Changes
+## 5. Database Changes
 
-### 6.1 Settings Changes
+### 5.1 Settings Changes
 
 | Old Setting | New Setting | Purpose |
 |------------|-------------|---------|
@@ -458,7 +370,7 @@ Note: Android's Private DNS uses DNS-over-TLS (DoT), not DoH. The DNS service sh
 | -- | `scrolldaddy_dns_host` | DNS service hostname (e.g., `dns.scrolldaddy.app`) |
 | -- | `scrolldaddy_dns_internal_url` | Internal URL to DNS service for reload/stats (e.g., `http://localhost:8053`) |
 
-### 6.2 Existing Table Changes
+### 5.2 Existing Table Changes
 
 **CtldDevice (cdd_ctlddevices):**
 
@@ -479,51 +391,247 @@ Note: Android's Private DNS uses DNS-over-TLS (DoT), not DoH. The DNS service sh
 | `cdp_schedule_id` | Remove | Was ControlD's remote schedule ID |
 | `cdp_safesearch` | Add (bool) | Per-profile SafeSearch toggle |
 | `cdp_safeyoutube` | Add (bool) | Per-profile SafeYouTube toggle |
-| All schedule fields | Keep | cdp_schedule_start, end, days, timezone |
+| `cdp_schedule_days` | Change format | Convert from PHP `serialize()` to `json_encode()`. Data migration needed for existing rows. |
+| All other schedule fields | Keep | cdp_schedule_start, end, timezone |
 
 **CtldFilter, CtldService, CtldRule:** No structural changes needed. These tables already store the right data -- they just no longer need to be "synced" to a remote API.
 
-### 6.3 New Tables
+### 5.3 New Tables
 
-**scd_blocklist_sources** -- Blocklist URL registry (see Section 4)
+**bls_blocklist_sources** -- Blocklist URL registry (see Section 3)
 
-**scd_blocklist_domains** -- Parsed domains from blocklists (see Section 4)
+**bld_blocklist_domains** -- Parsed domains from blocklists (see Section 3)
 
-**scd_service_domains** -- Domains per service for service-level blocking (see Section 4)
+**svd_service_domains** -- Domains per service for service-level blocking (see Section 3)
+
+---
+
+## 6. Container Infrastructure
+
+### 6.1 Current Docker Container Setup
+
+The existing Joinery Docker container (Dockerfile.template) runs:
+- **Ubuntu 24.04** base image
+- **Apache** (foreground process, keeps container alive)
+- **PostgreSQL 16** (started as service in CMD)
+- **Cron** (started as service in CMD, runs scheduled tasks every 15 minutes)
+
+The container exposes ports 80 (HTTP) and 5432 (PostgreSQL). The Docker host runs an Apache reverse proxy with Certbot for SSL, forwarding site domains to the container.
+
+### 6.2 Container Modifications Needed
+
+The Go DNS service must run alongside Apache and PostgreSQL inside the container. This requires:
+
+1. **supervisord** to manage multiple foreground processes (replaces the bare `apache2ctl -D FOREGROUND` CMD)
+2. **Go toolchain** installed during Docker build to compile the binary (removed after compilation to reduce image size)
+3. **Additional port exposure**: 8053 (DoH, for host reverse proxy) and 853 (DoT, direct passthrough)
+
+### 6.3 Install Script: install_scrolldaddy_dns.sh
+
+Located at: `maintenance_scripts/install_tools/install_scrolldaddy_dns.sh`
+
+This script runs during the Docker image build (called from Dockerfile) and handles all non-PHP setup. It is idempotent (safe to run multiple times).
+
+```bash
+#!/bin/bash
+# install_scrolldaddy_dns.sh
+# Installs the ScrollDaddy DNS service inside a Joinery Docker container.
+# Called during Docker image build.
+#
+# What it does:
+# 1. Installs Go toolchain
+# 2. Compiles the scrolldaddy-dns binary from source
+# 3. Installs supervisord
+# 4. Creates supervisord configuration for Apache, PostgreSQL, cron, and scrolldaddy-dns
+# 5. Cleans up Go toolchain (only the compiled binary is needed at runtime)
+#
+# Prerequisites:
+# - Ubuntu 24.04 base (matches Dockerfile.template)
+# - PostgreSQL 16 already installed (by install.sh server)
+# - Apache already installed (by install.sh server)
+# - Cron already installed (by Dockerfile.template)
+# - scrolldaddy-dns/ Go source directory must exist at /var/www/html/${SITENAME}/scrolldaddy-dns/
+#
+# Usage:
+#   ./install_scrolldaddy_dns.sh <SITENAME>
+
+set -e
+
+SITENAME="$1"
+if [ -z "$SITENAME" ]; then
+    echo "Usage: ./install_scrolldaddy_dns.sh <SITENAME>"
+    exit 1
+fi
+
+SITE_ROOT="/var/www/html/${SITENAME}"
+DNS_SRC="${SITE_ROOT}/scrolldaddy-dns"
+DNS_BIN="/usr/local/bin/scrolldaddy-dns"
+
+echo "=== Installing ScrollDaddy DNS Service ==="
+
+# Step 1: Install Go toolchain
+echo "Installing Go 1.22..."
+apt-get update -qq
+apt-get install -y -qq golang-go > /dev/null 2>&1
+
+# Step 2: Compile the binary
+echo "Compiling scrolldaddy-dns..."
+cd "$DNS_SRC"
+go mod download
+go build -o "$DNS_BIN" ./cmd/dns
+chmod 755 "$DNS_BIN"
+echo "Binary installed at $DNS_BIN"
+
+# Step 3: Install supervisord
+echo "Installing supervisord..."
+apt-get install -y -qq supervisor > /dev/null 2>&1
+
+# Step 4: Create supervisord configuration
+cat > /etc/supervisor/conf.d/scrolldaddy.conf << 'SUPERVISORD_EOF'
+[program:scrolldaddy-dns]
+command=/usr/local/bin/scrolldaddy-dns
+autostart=true
+autorestart=true
+startsecs=5
+startretries=3
+stderr_logfile=/var/log/scrolldaddy-dns.err.log
+stdout_logfile=/var/log/scrolldaddy-dns.out.log
+stdout_logfile_maxbytes=10MB
+stderr_logfile_maxbytes=10MB
+SUPERVISORD_EOF
+
+cat > /etc/supervisor/conf.d/apache.conf << 'EOF'
+[program:apache]
+command=apache2ctl -D FOREGROUND
+autostart=true
+autorestart=true
+EOF
+
+cat > /etc/supervisor/conf.d/cron.conf << 'EOF'
+[program:cron]
+command=cron -f
+autostart=true
+autorestart=true
+EOF
+
+# Step 5: Clean up Go toolchain to reduce image size
+echo "Cleaning up build tools..."
+apt-get remove -y -qq golang-go > /dev/null 2>&1
+apt-get autoremove -y -qq > /dev/null 2>&1
+rm -rf /root/go /root/.cache/go-build
+
+echo "=== ScrollDaddy DNS Service installed ==="
+```
+
+### 6.4 Dockerfile.template Changes
+
+The Dockerfile.template needs these additions:
+
+```dockerfile
+# After the existing "RUN ./install.sh server" line:
+
+# Copy scrolldaddy-dns Go source code
+COPY scrolldaddy-dns/ /var/www/html/${SITENAME}/scrolldaddy-dns/
+
+# Install ScrollDaddy DNS service (compiles Go binary, installs supervisord)
+RUN cd /var/www/html/${SITENAME}/maintenance_scripts/install_tools && \
+    ./install_scrolldaddy_dns.sh ${SITENAME}
+
+# Additional ports for DNS service
+EXPOSE 80 5432 8053 853
+```
+
+The CMD section changes from running `apache2ctl -D FOREGROUND` directly to using supervisord:
+
+```dockerfile
+CMD set +H && \
+    # ... existing PostgreSQL startup and _site_init.sh logic ... \
+    # Set environment variables for scrolldaddy-dns
+    echo "[program:scrolldaddy-dns]" > /etc/supervisor/conf.d/scrolldaddy-env.conf && \
+    echo "environment=SCD_DB_HOST=\"localhost\",SCD_DB_PORT=\"5432\",SCD_DB_NAME=\"${SITENAME}\",SCD_DB_USER=\"postgres\",SCD_DB_PASSWORD=\"${POSTGRES_PASSWORD}\"" >> /etc/supervisor/conf.d/scrolldaddy-env.conf && \
+    # Start all services via supervisord (replaces apache2ctl -D FOREGROUND)
+    /usr/bin/supervisord -n -c /etc/supervisor/supervisord.conf
+```
+
+### 6.5 Docker Run Port Mapping Changes
+
+The `install.sh` site command needs to map two additional ports. Following the existing pattern where DB_PORT = PORT + 1000:
+
+| Port | Mapping | Purpose |
+|------|---------|---------|
+| `PORT` | → container 80 | Web (existing) |
+| `PORT + 1000` | → container 5432 | PostgreSQL (existing) |
+| `PORT + 2000` | → container 8053 | DoH (new, for Apache reverse proxy) |
+| `PORT + 3000` | → container 853 | DoT (new, direct passthrough for Android) |
+
+Example for a site on port 8080: web=8080, DB=9080, DoH=10080, DoT=11080.
+
+### 6.6 Host-Level Apache Reverse Proxy for DNS
+
+Uses the same Apache + Certbot pattern already in place for site domains. A new VirtualHost on the Docker host:
+
+```apache
+<VirtualHost *:80>
+    ServerName dns.scrolldaddy.app
+    ProxyPreserveHost On
+    ProxyPass /resolve/ http://localhost:10080/resolve/
+    ProxyPassReverse /resolve/ http://localhost:10080/resolve/
+    ProxyPass /health http://localhost:10080/health
+    ProxyPassReverse /health http://localhost:10080/health
+</VirtualHost>
+```
+
+Then run Certbot to add SSL: `certbot --apache -d dns.scrolldaddy.app`
+
+After Certbot, all traffic to `https://dns.scrolldaddy.app/resolve/{uid}` is proxied via TLS to the Go service inside the container.
+
+**DoT passthrough:** Port 853 is mapped directly from host to container. The Go service handles its own TLS for DoT. The host just needs the port open in the firewall. A wildcard DNS record `*.dns.scrolldaddy.app` points to the host IP.
+
+### 6.7 DNS Domain Configuration
+
+**One-time manual setup at domain registrar:**
+
+| Record | Type | Value |
+|--------|------|-------|
+| `dns.scrolldaddy.app` | A | `23.239.11.53` (Docker host IP) |
+| `*.dns.scrolldaddy.app` | A | `23.239.11.53` (for DoT subdomain routing) |
 
 ---
 
 ## 7. Implementation Plan
 
-### Phase 1: DNS Service MVP
+### Phase 1: Blocklist Infrastructure (PHP only, no Go yet)
 
-Build the Go DNS service with minimal features:
+Build the data layer and admin tooling first so blocklists are ready when the DNS service comes online.
 
-1. DoH endpoint at `/resolve/{uid}`
-2. Read resolver->profile mappings from PostgreSQL
-3. Read profile->categories from PostgreSQL (join cdf_ctldfilters)
-4. Read blocked domains from `scd_blocklist_domains`
-5. Domain lookup: check exact match + parent domain matching
-6. Forward allowed queries to upstream (1.1.1.1)
-7. Return NXDOMAIN for blocked queries
-8. Periodic reload (every 60 seconds)
-9. Health check endpoint
+1. Create data model classes for `bls_blocklist_sources`, `bld_blocklist_domains`, `svd_service_domains` in `plugins/controld/data/`
+2. Create admin page `plugins/controld/admin/admin_blocklist_sources.php` with logic file
+3. Build the `DownloadBlocklists` scheduled task (`plugins/controld/tasks/`)
+4. Populate `bls_blocklist_sources` with community blocklist URLs for initial categories (ads, malware, porn at minimum)
+5. Test: activate the scheduled task, run manually, verify domains populate in DB
 
-**Deliverable:** A working DNS service that can resolve queries, block domains based on profile/category, and read config from the existing Joinery database.
+### Phase 2: Go DNS Service
 
-### Phase 2: Blocklist Infrastructure
+Build and test the core DNS service per **[scrolldaddy_dns_service.md](scrolldaddy_dns_service.md)**.
 
-1. Create `scd_blocklist_sources` and `scd_blocklist_domains` tables (as data model classes)
-2. Populate `scd_blocklist_sources` with community blocklist URLs for each category
-3. Build blocklist downloader (PHP scheduled task or standalone script):
-   - Fetch URL, parse hosts/domain/adblock format
-   - Store parsed domains in `scd_blocklist_domains`
-4. Add admin page to manage blocklist sources
-5. Test with a few categories (ads, malware) to verify end-to-end flow
+1. Create `scrolldaddy-dns/` Go project with full directory structure
+2. Implement all modules: config, db, cache, doh, dot, resolver, upstream
+3. Test locally against the test database
 
-### Phase 3: Plugin Refactor
+**Deliverable:** A working DNS service that can resolve queries, block domains based on profile/category, and read config from the Joinery database.
 
-1. Remove `ControlDHelper.php`
+### Phase 3: Container Installation
+
+1. Create `install_scrolldaddy_dns.sh` (Section 6.3)
+2. Modify `Dockerfile.template` to include Go compilation and supervisord (Section 6.4)
+3. Update `install.sh` port mapping (Section 6.5)
+4. Set up host-level Apache reverse proxy for DNS domain (Section 6.6)
+5. Configure DNS records (Section 6.7)
+6. Test end-to-end: build container, verify DNS service starts, test DoH resolution via public URL
+
+### Phase 4: Plugin Refactor
+
+1. Remove `ControlDHelper.php`; move `$filters` and `$services` arrays to appropriate data classes
 2. Simplify `CtldDevice::createDevice()` -- generate resolver UID locally, no API calls
 3. Simplify `CtldProfile::createProfile()` -- just create DB row
 4. Simplify `CtldProfile::update_remote_filters()` -- just update local DB
@@ -531,26 +639,16 @@ Build the Go DNS service with minimal features:
 6. Simplify `CtldProfile::add_rule()` / `delete_rule()` -- just update local DB
 7. Simplify `CtldProfile::add_or_edit_schedule()` -- just update local DB
 8. Simplify `CtldDevice::permanent_delete()` -- just delete local records
-9. Simplify `CtldDevice::check_activate()` -- auto-activate or remove
-10. Update views to show DoH resolver URL instead of ControlD setup instructions
-11. Update `settings_form.php` to remove controld_key, add new settings
+9. Simplify `CtldDevice::check_activate()` -- auto-activate on creation
+10. Simplify soft delete logic -- just update local DB, no API call
+11. Update views to show DoH resolver URL instead of ControlD setup instructions
+12. Update activation page to show DoH/DoT URLs instead of ControlD app downloads
+13. Update `settings_form.php` to remove controld_key, add new settings
 
-### Phase 4: Scheduling & Advanced Features
+### Phase 5: Scheduling & Advanced Features
 
-1. Add schedule evaluation to DNS service (check schedule on each query)
-2. Add SafeSearch/SafeYouTube DNS rewrites to DNS service
-3. Add DoT (DNS-over-TLS) support for Android Private DNS compatibility
-4. Add per-resolver query stats tracking
-5. Service-level blocking: create `scd_service_domains` table, populate with service domain lists
-
-### Phase 5: Infrastructure & Deployment
-
-1. Set up DNS service on production server (Docker container or systemd service)
-2. Configure Caddy/nginx for TLS termination on `dns.scrolldaddy.app`
-3. Set up blocklist download cron job
-4. Set up monitoring/alerting for DNS service uptime
-5. Documentation: device setup instructions for iOS, Android, Windows, Mac
-6. Load testing: verify DNS service handles expected query volume
+1. Add SafeSearch/SafeYouTube fields to CtldProfile and filter edit UI
+2. Service-level blocking: populate `svd_service_domains` with service domain lists
 
 ### Phase 6: Cleanup
 
@@ -580,10 +678,17 @@ Build the Go DNS service with minimal features:
 - **Scheduling model** -- Same primary/secondary profile concept, same schedule fields
 
 ### New
-- **ScrollDaddy DNS Service** -- Go binary (~500-1000 lines)
-- **Blocklist management** -- Download, parse, store community blocklists
-- **Self-hosted infrastructure** -- DNS server, TLS, monitoring
-- **Per-profile SafeSearch/SafeYouTube** -- Now per-profile (was per-profile in ControlD too, but Pi-hole couldn't do it)
+- **ScrollDaddy DNS Service** -- Go binary (written by Claude, see [scrolldaddy_dns_service.md](scrolldaddy_dns_service.md))
+- **Blocklist management** -- Download scheduled task, admin page, new data model classes
+- **Container infrastructure** -- supervisord, Go compilation, additional port mappings
+- **Per-profile SafeSearch/SafeYouTube** -- DNS rewrites in Go service
+
+### Uses Existing Joinery Systems
+- **Scheduled tasks** -- Blocklist downloader uses existing ScheduledTaskInterface, auto-discovered, admin-configurable
+- **Admin pages** -- Blocklist source management uses standard admin page patterns inside the plugin
+- **Docker deployment** -- Same Dockerfile.template, install.sh, Apache reverse proxy + Certbot pattern
+- **Cron** -- Already installed and running in containers every 15 minutes
+- **Data model classes** -- New tables follow existing SystemBase/SystemMultiBase patterns
 
 ### Improved Over ControlD
 - **No API latency** -- Filter changes take effect in 30-60 seconds (DB reload) vs. API round-trip per change
@@ -594,70 +699,20 @@ Build the Go DNS service with minimal features:
 
 ---
 
-## 9. Infrastructure Requirements
+## 9. Open Questions
 
-### DNS Server Host
+1. **Hosting location:** DECIDED — Same Docker container. The container is built once via `install.sh` and runs continuously; PHP code updates happen inside the running container without restarting it, so the DNS service is never disrupted.
 
-The Go DNS service needs:
-- A server with a public IP address (can be the same server as Joinery, or separate)
-- A domain name for the DoH endpoint (e.g., `dns.scrolldaddy.app`)
-- TLS certificate (Let's Encrypt via Caddy, or similar)
-- Access to the PostgreSQL database (same host or network-accessible)
-- Ports: 443 (HTTPS/DoH), optionally 853 (DoT for Android)
+2. **Blocklist curation:** DECIDED — Launch with community blocklists for categories that have well-maintained sources (ads, malware, porn, gambling, social, fakenews, cryptominers, phishing). Defer categories without good community sources (dating, drugs, games, ddns, filehost, gov, iot, nrd, urlshort, dnsvpn). For service blocking, reverse-engineer domain lists from the service keys (e.g., "spotify" → spotify.com, scdn.co, etc.) for the most-used services. The admin page allows adding sources for any category at any time without code changes.
 
-**Resource requirements are minimal:**
-- CPU: DNS queries are fast lookups -- a single core handles thousands of queries/second
-- RAM: ~100-200MB for blocklists in memory (500K domains = ~50MB as hash map)
-- Disk: Negligible (binary + blocklist cache)
+3. **Service domain mapping:** DECIDED — Reverse-engineer domain lists for all 400+ services from the existing service keys. The complete service list is in `ControlDHelper::$services` across 12 categories (audio, career, finance, gaming, hosting, news, recreation, shop, social, tools, vendors, video). Build the domain mapping as a separate data file (`service_domains.sql` or similar) that populates the `svd_service_domains` table. Each service key maps to 1-10 domains typically (e.g., spotify → spotify.com, scdn.co). This is a research task that can be done with a cheaper model.
 
-### Docker Deployment (recommended)
+4. **Resolver UID format:** DECIDED — 32-character lowercase hex string generated via `bin2hex(random_bytes(16))`. 128 bits of randomness, URL-safe, unguessable.
 
-```dockerfile
-FROM golang:1.22-alpine AS builder
-COPY . /app
-WORKDIR /app
-RUN go build -o scrolldaddy-dns ./cmd/dns
+5. **Query logging/stats:** DECIDED — Skip for v1. The `/test` diagnostic endpoint handles debugging. Per-device stats (block counts, query counts) can be added later as a future improvement.
 
-FROM alpine:3.19
-COPY --from=builder /app/scrolldaddy-dns /usr/local/bin/
-EXPOSE 8053
-CMD ["scrolldaddy-dns", "--db-host=...", "--db-name=...", "--upstream=1.1.1.1"]
-```
+6. **Fallback behavior:** DECIDED — Serve from cached data if DB goes down. SERVFAIL if cache was never loaded. Supervisord restarts the process if it crashes. See DNS service spec Section 14.
 
-With Caddy for TLS:
-```
-dns.scrolldaddy.app {
-    reverse_proxy /resolve/* localhost:8053
-    reverse_proxy /health localhost:8053
-}
-```
+7. **Table/class renaming:** DECIDED — Not now. Possible future cleanup to rename `ctld*` prefixes to `scd*` (scrolldaddy), but zero functional benefit and large refactor scope.
 
-### Android Private DNS Support
-
-Android uses DNS-over-TLS (DoT), not DoH. Two options:
-
-**Option A:** Add DoT support to the Go service (listen on port 853 with TLS). The `miekg/dns` library supports this natively. Device identification would use a subdomain pattern: `{resolver_uid}.dns.scrolldaddy.app`
-
-**Option B:** Provide an Android app or configuration profile that sets up DoH. Many Android versions now support DoH in addition to DoT.
-
-**Recommendation:** Support both DoH and DoT in the Go service from the start. DoT adds ~50 lines of code.
-
----
-
-## 10. Open Questions
-
-1. **Hosting location:** Run the DNS service on the existing Joinery server, or a separate VPS? Same server is simpler; separate is more resilient (DNS uptime matters -- if DNS goes down, users can't browse at all).
-
-2. **Blocklist curation:** Some categories (dating, drugs, games, torrents) don't have well-maintained community blocklists. How much effort to invest in curating custom lists vs. dropping those categories?
-
-3. **Service domain mapping:** Where to source the domain lists for per-service blocking (Spotify, Facebook, etc.)? ControlD had this data internally. Options: manual curation, NextDNS's public data, DNS query logging + analysis.
-
-4. **Resolver UID format:** Simple hex string (`a1b2c3d4e5f6`), UUID, or human-readable (`user42-iphone`)? Shorter is better for URLs but must be unguessable to prevent abuse.
-
-5. **DNS service language:** Go is recommended but Python (with `dnspython`) or Rust (with `trust-dns`) are alternatives if Go expertise is limited. Python would be simpler but slower under load.
-
-6. **Query logging/stats:** Should the DNS service log queries for per-device statistics? ControlD provided block counts. This adds storage requirements but is valuable for the UI.
-
-7. **Fallback behavior:** What happens if the DNS service crashes or the database is unreachable? Options: fail-open (forward all queries unfiltered), fail-closed (return SERVFAIL for all queries), or cached (serve from last-known-good blocklist state).
-
-8. **Table/class renaming:** Rename `ctld*` prefixes to `scd*` (scrolldaddy) since we're no longer using ControlD? This is a larger refactor but improves clarity.
+8. **Wildcard TLS for DoT:** DECIDED — Domain registered at Namecheap, DNS managed by Cloudflare. Use `certbot` with the `certbot-dns-cloudflare` plugin for automated wildcard cert issuance and renewal for `*.dns.scrolldaddy.app`. Requires a Cloudflare API token with DNS edit permissions, stored in a credentials file on the Docker host. Command: `certbot certonly --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini -d "*.dns.scrolldaddy.app"`. The resulting cert/key files are mounted into the container for the Go service to use for DoT.
