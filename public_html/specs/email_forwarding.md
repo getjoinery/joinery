@@ -282,15 +282,7 @@ The forwarder uses SmtpMailer directly — not EmailSender — to avoid template
 
 SMTP settings fall back to the site defaults but can be overridden with `email_forwarding_smtp_*` settings, allowing a separate sending server for forwarding (keeps forwarding reputation isolated from transactional email).
 
-Two approaches depending on capability:
-
-**Approach A — Raw forwarding via SMTP (preferred):**
-Use PHPMailer's `preSend()` bypass to inject raw message content. This preserves the exact MIME structure, attachments, and formatting.
-
-**Approach B — Reconstructed forwarding via SmtpMailer:**
-Parse into parts, set From/To/Subject/Body on PHPMailer, send. Simpler but may lose complex MIME structures or attachments.
-
-Start with Approach B for Phase 1. Approach A can be added in Phase 2 if attachment/MIME fidelity is needed.
+**Raw forwarding via SMTP:** Modify the raw email headers (add X-Forwarded-For, X-Original-To, update Return-Path for SRS) and inject the raw message directly into SmtpMailer/PHPMailer. This preserves the exact MIME structure, attachments, and formatting. PHPMailer supports sending pre-built messages via `preSend()` bypass or by setting the raw body directly.
 
 ---
 
@@ -664,15 +656,40 @@ $domain_in_postfix = (strpos($domains_line, $domain) !== false);
 - **SPF** — green check or warning "SPF record missing or doesn't include server IP"
 - **DKIM** — green check or caution "No DKIM record found at mail._domainkey.example.com — outbound signing may not be verified by recipients"
 
-### Admin Utility for Postfix Domain Sync
+### Postfix Domain Configuration Instructions
 
-When domains are added/removed in the admin UI, the `virtual_mailbox_domains` list in Postfix needs updating. Options:
+When a domain is added in the admin UI, the domain edit/view page displays manual setup instructions. These differ by deployment type:
 
-**Option A (simple):** Admin page displays instructions for manually updating Postfix config. Appropriate for low-change environments.
+**Bare-metal instructions:**
+```
+1. Add domain to Postfix:
+   sudo postconf -e "virtual_mailbox_domains = example.com otherexisting.com"
+   sudo postfix reload
 
-**Option B (automated):** A script that regenerates `/etc/postfix/forwarding_domains` from the database and runs `postmap` + `postfix reload`. Could be triggered from the admin page or run as a scheduled task.
+2. Add DNS records for example.com:
+   MX  10  mail.yourserver.com.
+   TXT "v=spf1 ip4:SERVER_IP -all"
+   mail._domainkey TXT "v=DKIM1; k=rsa; p=PUBLIC_KEY"
+```
 
-Start with Option A. Add Option B later if domains change frequently.
+**Docker multi-container instructions:**
+```
+1. Inside the container — add domain to container's Postfix:
+   docker exec CONTAINER postconf -e "virtual_mailbox_domains = example.com"
+   docker exec CONTAINER postfix reload
+
+2. On the Docker host — add domain to host transport map:
+   echo "example.com    smtp:[127.0.0.1]:CONTAINER_SMTP_PORT" >> /etc/postfix/transport
+   sudo postmap /etc/postfix/transport
+   sudo postfix reload
+
+3. Add DNS records for example.com:
+   MX  10  mail.yourserver.com.
+   TXT "v=spf1 ip4:SERVER_IP -all"
+   mail._domainkey TXT "v=DKIM1; k=rsa; p=PUBLIC_KEY"
+```
+
+The page should auto-detect whether it's running in Docker (check for `/.dockerenv`) and show the appropriate instructions, pre-filled with the actual server IP and domain name.
 
 ---
 
@@ -1120,7 +1137,7 @@ For the forwarding server to work well:
 - [ ] SRS bounce handling in EmailForwarder (detect SRS recipient, decode, forward bounce)
 - [ ] DKIM verification on inbound (verify signature, reject failures, pass unsigned)
 - [ ] Postfix pipe script
-- [ ] Forward via SmtpMailer (Approach B — reconstructed message, no template wrapping)
+- [ ] Raw forwarding via SmtpMailer (preserves MIME, attachments, no template wrapping)
 - [ ] Admin pages (domains, aliases, logs)
 - [ ] Settings migration
 - [ ] Rate limiting via forwarding log table (per-alias and per-domain)
@@ -1132,16 +1149,12 @@ For the forwarding server to work well:
 - [ ] Update `CLAUDE.md` documentation index
 - [ ] Scheduled task for forwarding log cleanup (uses `email_forwarding_log_retention_days`)
 
-### Phase 2 — Reliability
-- [ ] Raw message forwarding (Approach A) for attachment fidelity
-- [ ] Spam scoring integration (SpamAssassin or rspamd)
-- [ ] Sender blocklist
-- [ ] Automated Postfix domain sync
-
-### Phase 3 — Hardening
-- [ ] SPF checking on inbound
-- [ ] IP reputation monitoring
-- [ ] Admin alerts for rate limit hits and forwarding errors
+### Future Considerations
+- Spam scoring integration (SpamAssassin or rspamd) — content-based filtering, likely overkill at low volume
+- Sender blocklist — admin-managed list of blocked sender addresses/domains
+- SPF checking on inbound mail
+- IP reputation monitoring
+- Admin alerts for rate limit hits and forwarding errors
 
 ---
 
