@@ -244,7 +244,61 @@ $page->admin_footer();
 ?>
 ```
 
+### Plugin Installation & Activation Lifecycle
+
+When a plugin is **installed** via the admin Plugins page, the system:
+1. Validates plugin structure and dependencies
+2. Creates database tables automatically from data class `$field_specifications` (via `DatabaseUpdater::runPluginTablesOnly()`)
+3. Runs any `.sql` migration files found in `plugins/{name}/migrations/` (via `PluginManager::runPendingMigrations()`)
+4. Records the plugin in `plg_plugins` with status `inactive`
+
+When a plugin is **activated**, it sets `plg_active = 1`. No additional table or migration processing occurs.
+
+**Important:** The core `update_database.php` script explicitly **excludes plugins** (`include_plugins => false`). Plugin tables are only created during the install step above. If you need to add columns to an existing plugin table, you must uninstall and reinstall the plugin, or manually run the database updater for the plugin.
+
+### Table Creation (Automatic)
+
+Plugin tables are created automatically from data class `$field_specifications` — you do NOT write CREATE TABLE statements. Simply define your data model classes in `plugins/{name}/data/` and tables will be created when the plugin is installed.
+
+```php
+// plugins/my-plugin/data/my_data_class.php
+class MyData extends SystemBase {
+    public static $prefix = 'mdt';
+    public static $tablename = 'mdt_my_data';
+    public static $pkey_column = 'mdt_my_data_id';
+
+    public static $field_specifications = array(
+        'mdt_my_data_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+        'mdt_name' => array('type'=>'varchar(255)', 'required'=>true),
+        'mdt_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
+        'mdt_delete_time' => array('type'=>'timestamp(6)'),
+    );
+}
+```
+
 ### Migration System
+
+**Current status:** The plugin migration runner (`PluginManager::runPendingMigrations()`) only processes `.sql` files in `plugins/{name}/migrations/`. The PHP `return []` format with `up`/`down` closures shown below is the intended future format but is **not yet executed automatically** during plugin installation.
+
+**For settings, menu entries, and initial data**, use `.sql` migration files:
+
+```sql
+-- plugins/my-plugin/migrations/001_initial_settings.sql
+INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
+SELECT 'my_plugin_enabled', '1', 1, NOW(), NOW(), 'general'
+WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'my_plugin_enabled');
+```
+
+SQL migration files are:
+- Located in `plugins/{name}/migrations/`
+- Named with a numeric prefix for ordering (e.g., `001_initial_settings.sql`, `002_add_menu.sql`)
+- Executed in filename order during plugin installation
+- Tracked in `plm_plugin_migrations` to prevent re-execution
+- Run only once — if a migration has already been recorded, it is skipped
+
+**PHP migration format (not yet auto-executed):**
+
+The `return []` format below is used by some existing plugins but requires manual execution or running `update_database` from the admin utilities page. It is the intended future format:
 
 ```php
 // plugins/my-plugin/migrations/migrations.php
@@ -254,12 +308,17 @@ return [
         'version' => '1.0.0',
         'description' => 'Initial plugin setup',
         'up' => function($dbconnector) {
-            // Add plugin settings
-            $dbconnector->exec("INSERT INTO stg_settings (stg_name, stg_value, stg_group_name) 
-                               VALUES ('my_plugin_enabled', '1', 'general')");
+            $dblink = $dbconnector->get_db_link();
+            $sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
+                    VALUES ('my_plugin_enabled', '1', 1, NOW(), NOW(), 'general')";
+            $q = $dblink->prepare($sql);
+            $q->execute();
+            return true;
         },
         'down' => function($dbconnector) {
-            $dbconnector->exec("DELETE FROM stg_settings WHERE stg_name LIKE 'my_plugin_%'");
+            $dblink = $dbconnector->get_db_link();
+            $dblink->exec("DELETE FROM stg_settings WHERE stg_name LIKE 'my_plugin_%'");
+            return true;
         }
     ]
 ];
@@ -716,12 +775,15 @@ Always use the two-parameter format:
 
 ### Creating a New Plugin
 
-1. Create plugin directory and plugin.json
-2. Develop data models and business logic
-3. Create admin interface if needed
-4. Add migrations for database changes
-5. Test admin functionality via `/plugins/{plugin}/admin/*`
-6. No user-facing routes - these go in themes
+1. Create plugin directory under `/plugins/{name}/` with `plugin.json`
+2. Create data model classes in `plugins/{name}/data/` with `$field_specifications` (tables created automatically on install)
+3. Create `.sql` migration files in `plugins/{name}/migrations/` for settings, menu entries, and initial data
+4. Create admin interface in `plugins/{name}/admin/` if needed
+5. Create `uninstall.php` for clean removal of settings, menu entries, and other non-table data
+6. **Install** the plugin via Admin > System > Plugins (creates tables, runs SQL migrations)
+7. **Activate** the plugin to make it live
+8. Test admin functionality via `/plugins/{plugin}/admin/*`
+9. No user-facing routes - these go in themes
 
 ### Creating a New Theme
 
