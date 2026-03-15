@@ -1,0 +1,9 @@
+{
+    "name": "Purge Old Forwarding Logs",
+    "description": "Deletes email forwarding log entries older than a configurable number of days",
+    "default_frequency": "daily",
+    "default_time": "03:30:00",
+    "config_fields": {
+        "days_to_keep": {"type": "number", "label": "Days to Keep", "required": true}
+    }
+}

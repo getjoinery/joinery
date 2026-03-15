@@ -87,7 +87,7 @@ function email_forwarding_uninstall() {
 
 ### Other Files (outside plugin)
 
-- `/docs/email_forwarding.md` — Setup guide, admin usage, server config, DNS, troubleshooting
+- `/docs/email_forwarding_plugin.md` — Setup guide, admin usage, server config, DNS, troubleshooting
 - Update `/docs/email_system.md` — Add note and link to email forwarding doc
 - Update `CLAUDE.md` — Add to documentation index
 - `/var/www/html/joinerytest/maintenance_scripts/install_tools/install.sh` — Add Postfix and opendkim packages
@@ -302,24 +302,26 @@ For MIME multipart messages (HTML + plain text + attachments), parse the `Conten
 
 ### Forwarding Behavior
 
-When forwarding, the system should:
-1. **Preserve the original From header** — so the recipient sees who actually sent the email
-2. **Set envelope sender (Return-Path)** to a Joinery SRS address (see SRS section below)
-3. **Add headers:**
+When forwarding, the system:
+1. **Sets From to the site's verified email address** (e.g., `info@mg.joinerytest.site`) for deliverability — third-party SMTP services like Mailgun require the From domain to be verified
+2. **Sets the From display name** to `"Original Sender via Site Name"` so the recipient can see who sent the original email
+3. **Puts the original sender in Reply-To** — so hitting Reply goes to the right person
+4. **Sets envelope sender (Return-Path)** to a Joinery SRS address (see SRS section below)
+5. **Adds forwarding headers:**
    - `X-Original-To: info@example.com` (the alias address)
    - `X-Forwarded-For: info@example.com`
    - `X-Forwarded-By: Joinery Email Forwarder`
-4. **Preserve original Subject, Date, Message-ID, Reply-To**
-5. **Forward both HTML and plain text parts** as they are
-6. **Preserve attachments** — forward the raw MIME message when possible
+6. **Preserves original Subject, Date, Message-ID**
+7. **Forwards both HTML and plain text parts** as they are
+8. **Preserves attachments** — forwards the raw MIME body
+
+**Why not preserve the original From?** Most SMTP services (Mailgun, SendGrid, Amazon SES) require the From address to be on a verified domain. Sending with an arbitrary external From address (e.g., `alice@gmail.com`) will be silently dropped or rejected. Using the site's verified address with the original sender in Reply-To provides reliable delivery while preserving reply functionality.
 
 ### Sending Strategy
 
 The forwarder uses SmtpMailer directly — not EmailSender — to avoid template wrapping and Mailgun header modifications. SmtpMailer is PHPMailer under the hood.
 
 SMTP settings fall back to the site defaults but can be overridden with `email_forwarding_smtp_*` settings, allowing a separate sending server for forwarding (keeps forwarding reputation isolated from transactional email).
-
-**Raw forwarding via SMTP:** Modify the raw email headers (add X-Forwarded-For, X-Original-To, update Return-Path for SRS) and inject the raw message directly into SmtpMailer/PHPMailer. This preserves the exact MIME structure, attachments, and formatting. PHPMailer supports sending pre-built messages via `preSend()` bypass or by setting the raw body directly.
 
 ---
 
@@ -542,6 +544,8 @@ joinery   unix  -       n       n       -       5       pipe
 ```
 
 The `5` limits concurrent forwarder processes. The `flags=DRhu` tell Postfix to pass envelope recipient/sender info and fold long headers.
+
+**CRITICAL: `mydestination` conflict** — Forwarding domains must NOT appear in Postfix's `mydestination` setting. If a domain is in both `mydestination` and `virtual_mailbox_domains`, Postfix treats it as local and looks for Unix user accounts instead of using the virtual transport. The setup script automatically detects and fixes this by setting `mydestination = localhost, localhost.localdomain`. The admin domain edit page also detects this conflict and displays a warning.
 
 ### DNS Requirements (per forwarding domain)
 
@@ -982,7 +986,8 @@ private function handleSRSBounce($parsed) {
     }
     $original_sender = $srs->decode($parsed['to']);
     // Forward the bounce to the original sender
-    EmailSender::quickSend($original_sender, $parsed['subject'], $parsed['body']);
+    // Forward bounce via SmtpMailer (raw SMTP, not EmailSender)
+    $this->forwardBounceViaSmtp($original_sender, $parsed);
     $this->logTransaction($parsed, null, 'bounce_forwarded');
     return 0;
 }
@@ -1149,7 +1154,7 @@ This is ~60-80 lines for a basic implementation covering RSA signatures with rel
 
 **Behavior:**
 - **DKIM pass** — forward normally
-- **DKIM fail** — reject (don't forward spoofed/tampered mail)
+- **DKIM fail** — log warning (rejection disabled pending verification refinement)
 - **DKIM none** (no signature) — forward normally (many legitimate senders don't use DKIM)
 - **DKIM error** (DNS timeout, unsupported algorithm) — forward normally (fail open, log the issue)
 
@@ -1202,7 +1207,7 @@ For the forwarding server to work well:
 - [ ] Postfix setup documentation (bare-metal and Docker multi-container)
 
 ### Documentation & Maintenance
-- [ ] `/docs/email_forwarding.md` — setup guide, admin usage, server config, DNS, troubleshooting, local testing
+- [ ] `/docs/email_forwarding_plugin.md` — setup guide, admin usage, server config, DNS, troubleshooting, local testing
 - [ ] Update `/docs/email_system.md` with note and link to forwarding doc
 - [ ] Update `CLAUDE.md` documentation index
 - [ ] Scheduled task for forwarding log cleanup

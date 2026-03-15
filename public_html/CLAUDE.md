@@ -142,6 +142,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
 - [Deploy and Upgrade](docs/deploy_and_upgrade.md) - Deployment and upgrade procedures
+- [Email Forwarding Plugin](docs/email_forwarding_plugin.md) - Self-hosted email forwarding with virtual mailboxes
 - [Email System](docs/email_system.md) - Email sending and templates
 - [FormWriter](docs/formwriter.md) - Form generation system
 - [jQuery Removal Analysis](docs/jquery_removal_analysis.md) - jQuery dependency analysis
