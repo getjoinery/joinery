@@ -189,87 +189,176 @@ class PluginManager extends AbstractExtensionManager {
     // ========== Migration Handling ==========
     
     /**
-     * Run all pending migrations for a plugin
+     * Run all pending migrations for a plugin.
+     * Supports both .sql files and PHP migrations.php (return [] with up/down closures).
+     *
      * @param string $plugin_name Plugin name
      * @return array Results of migration runs
      */
     public function runPendingMigrations($plugin_name) {
+        require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
+
         $results = array();
         $migration_dir = PathHelper::getAbsolutePath("plugins/{$plugin_name}/migrations");
-        
+
         if (!is_dir($migration_dir)) {
             return $results;
         }
-        
-        // Get list of migration files
-        $files = glob($migration_dir . '/*.sql');
-        if (empty($files)) {
-            return $results;
+
+        // Run PHP migrations (migrations.php with return [] format)
+        $php_migration_file = $migration_dir . '/migrations.php';
+        if (file_exists($php_migration_file)) {
+            $php_results = $this->runPhpMigrations($plugin_name, $php_migration_file);
+            $results = array_merge($results, $php_results);
         }
-        
-        // Sort files to ensure proper order
-        sort($files);
-        
-        foreach ($files as $file) {
-            $filename = basename($file);
-            
-            // Check if migration has already been run
-            $existing = PluginMigration::GetByColumns(array(
-                'pgm_plugin_name' => $plugin_name,
-                'pgm_filename' => $filename
-            ));
-            
-            if ($existing) {
-                continue; // Skip already-run migrations
+
+        // Run SQL migration files
+        $sql_files = glob($migration_dir . '/*.sql');
+        if (!empty($sql_files)) {
+            sort($sql_files);
+            foreach ($sql_files as $file) {
+                $sql_result = $this->runSqlMigration($plugin_name, $file);
+                if ($sql_result !== null) {
+                    $results[] = $sql_result;
+                }
             }
-            
-            // Run migration
-            $result = $this->runMigration($file);
-            $results[] = $result;
-            
-            // Record migration
-            $migration = new PluginMigration(null);
-            $migration->set('pgm_plugin_name', $plugin_name);
-            $migration->set('pgm_filename', $filename);
-            $migration->set('pgm_executed_time', date('Y-m-d H:i:s'));
-            $migration->set('pgm_success', $result['success']);
-            $migration->set('pgm_error_message', $result['error'] ?? null);
-            $migration->save();
         }
-        
+
         return $results;
     }
-    
+
     /**
-     * Run a single migration file
-     * @param string $file Path to migration file
-     * @return array Result with 'success' and optional 'error'
+     * Run PHP migrations from a migrations.php file.
+     * Format: return [ ['id' => '...', 'version' => '...', 'up' => function($dbconnector) {...}], ... ]
+     *
+     * @param string $plugin_name Plugin name
+     * @param string $file Path to migrations.php
+     * @return array Results of migration runs
      */
-    private function runMigration($file) {
+    private function runPhpMigrations($plugin_name, $file) {
+        $results = array();
+
+        try {
+            $migrations = require($file);
+        } catch (Exception $e) {
+            $results[] = array('success' => false, 'id' => 'load_error', 'error' => 'Failed to load migrations.php: ' . $e->getMessage());
+            return $results;
+        }
+
+        if (!is_array($migrations)) {
+            return $results;
+        }
+
+        $dbconnector = DbConnector::get_instance();
+
+        foreach ($migrations as $migration) {
+            $migration_id = $migration['id'] ?? null;
+            $version = $migration['version'] ?? '0.0.0';
+
+            if (!$migration_id) {
+                continue;
+            }
+
+            // Check if already applied
+            if ($this->isMigrationApplied($plugin_name, $migration_id)) {
+                continue;
+            }
+
+            // Run the up function
+            $result = array('success' => false, 'id' => $migration_id);
+
+            try {
+                $up = $migration['up'] ?? null;
+                if (is_callable($up)) {
+                    $up_result = $up($dbconnector);
+                    $result['success'] = ($up_result !== false);
+                } else {
+                    $result['success'] = true; // No up function — nothing to do
+                }
+            } catch (Exception $e) {
+                $result['success'] = false;
+                $result['error'] = $e->getMessage();
+            }
+
+            // Record the migration
+            $record = new PluginMigration(NULL);
+            $record->set('plm_plugin_name', $plugin_name);
+            $record->set('plm_migration_id', $migration_id);
+            $record->set('plm_version', $version);
+            $record->set('plm_applied_time', gmdate('Y-m-d H:i:s'));
+            $record->set('plm_status', $result['success'] ? 'applied' : 'error');
+            if (!empty($result['error'])) {
+                $record->set('plm_error_message', $result['error']);
+            }
+            $record->save();
+
+            $results[] = $result;
+        }
+
+        return $results;
+    }
+
+    /**
+     * Run a single .sql migration file if not already applied.
+     *
+     * @param string $plugin_name Plugin name
+     * @param string $file Path to .sql file
+     * @return array|null Result, or null if already applied
+     */
+    private function runSqlMigration($plugin_name, $file) {
+        $filename = basename($file);
+        $migration_id = 'sql_' . $filename;
+
+        // Check if already applied
+        if ($this->isMigrationApplied($plugin_name, $migration_id)) {
+            return null;
+        }
+
+        $result = array('success' => false, 'id' => $migration_id);
+
         try {
             $sql = file_get_contents($file);
-            if (empty($sql)) {
-                return array('success' => true, 'file' => basename($file));
+            if (empty(trim($sql))) {
+                $result['success'] = true;
+            } else {
+                $dblink = DbConnector::get_instance()->get_db_link();
+                $dblink->exec($sql);
+                $result['success'] = true;
             }
-            
-            $dbconnector = DbConnector::get_instance();
-            $dblink = $dbconnector->get_db_link();
-            
-            // Execute migration
-            $dblink->exec($sql);
-            
-            return array(
-                'success' => true,
-                'file' => basename($file)
-            );
-            
         } catch (Exception $e) {
-            return array(
-                'success' => false,
-                'file' => basename($file),
-                'error' => $e->getMessage()
-            );
+            $result['error'] = $e->getMessage();
         }
+
+        // Record the migration
+        $record = new PluginMigration(NULL);
+        $record->set('plm_plugin_name', $plugin_name);
+        $record->set('plm_migration_id', $migration_id);
+        $record->set('plm_version', '0.0.0');
+        $record->set('plm_applied_time', gmdate('Y-m-d H:i:s'));
+        $record->set('plm_status', $result['success'] ? 'applied' : 'error');
+        if (!empty($result['error'])) {
+            $record->set('plm_error_message', $result['error']);
+        }
+        $record->save();
+
+        return $result;
+    }
+
+    /**
+     * Check if a migration has already been applied.
+     *
+     * @param string $plugin_name Plugin name
+     * @param string $migration_id Migration identifier
+     * @return bool
+     */
+    private function isMigrationApplied($plugin_name, $migration_id) {
+        $db = DbConnector::get_instance()->get_db_link();
+        $sql = "SELECT COUNT(*) as cnt FROM plm_plugin_migrations
+                WHERE plm_plugin_name = ? AND plm_migration_id = ? AND plm_status = 'applied'";
+        $stmt = $db->prepare($sql);
+        $stmt->execute([$plugin_name, $migration_id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return ($row['cnt'] > 0);
     }
     
     // ========== Dependency Validation ==========
