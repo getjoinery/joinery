@@ -1,8 +1,8 @@
-# Email Forwarding System
+# Email Forwarding Plugin
 
 ## Overview
 
-A self-hosted email forwarding system that allows Joinery site admins to create virtual mailboxes (aliases) that forward incoming email to one or more real email addresses. Incoming mail is received by Postfix, piped to a PHP script, which looks up the alias in the database and forwards via Joinery's existing EmailSender.
+A self-hosted email forwarding plugin that allows Joinery site admins to create virtual mailboxes (aliases) that forward incoming email to one or more real email addresses. Incoming mail is received by Postfix, piped to a PHP script, which looks up the alias in the database and forwards via SmtpMailer. Implemented as a Joinery plugin at `/plugins/email_forwarding/`.
 
 ## Architecture
 
@@ -19,40 +19,77 @@ Inbound email (SMTP)
 
 All forwarding logic lives in PHP. Postfix is configured minimally as a dumb pipe — one transport entry per domain.
 
-## Files to Create
+## Plugin Structure
 
-### Data Layer
-- `/data/email_forwarding_alias_class.php` — Single + Multi model for aliases
-- `/data/email_forwarding_domain_class.php` — Single + Multi model for managed domains
-- `/data/email_forwarding_log_class.php` — Single + Multi model for forwarding logs
+```
+/plugins/email_forwarding/
+├── plugin.json
+├── uninstall.php
+├── data/
+│   ├── email_forwarding_alias_class.php
+│   ├── email_forwarding_domain_class.php
+│   └── email_forwarding_log_class.php
+├── includes/
+│   ├── EmailForwarder.php
+│   └── SRSRewriter.php
+├── scripts/
+│   └── email_forwarder.php
+├── tasks/
+│   ├── PurgeOldForwardingLogs.php
+│   └── PurgeOldForwardingLogs.json
+├── admin/
+│   ├── admin_email_forwarding.php
+│   ├── admin_email_forwarding_alias.php
+│   ├── admin_email_forwarding_domains.php
+│   └── admin_email_forwarding_logs.php
+├── logic/
+│   ├── admin_email_forwarding_logic.php
+│   ├── admin_email_forwarding_alias_logic.php
+│   └── admin_email_forwarding_domains_logic.php
+└── migrations/
+    └── migrations.php
+```
 
-### Processing
-- `/scripts/email_forwarder.php` — Receives piped email from Postfix, parses and forwards
-- `/includes/EmailForwarder.php` — Email parsing and forwarding logic class
-- `/includes/SRSRewriter.php` — SRS encode/decode/validate
+### Plugin Metadata (`plugin.json`)
 
-### Scheduled Tasks
-- `/tasks/PurgeOldForwardingLogs.php` — Deletes logs older than `email_forwarding_log_retention_days`
-- `/tasks/PurgeOldForwardingLogs.json` — Task configuration
+```json
+{
+    "name": "Email Forwarding",
+    "description": "Self-hosted email forwarding with virtual mailboxes, SRS, and DKIM verification",
+    "version": "1.0.0",
+    "author": "Joinery",
+    "requires": {
+        "php": ">=8.0",
+        "joinery": ">=1.0"
+    },
+    "tags": ["email", "forwarding", "smtp"]
+}
+```
 
-### Admin Interface
-- `/adm/admin_email_forwarding.php` — List/manage aliases (view)
-- `/adm/admin_email_forwarding_alias.php` — Create/edit single alias (view)
-- `/adm/admin_email_forwarding_domains.php` — List/manage forwarding domains (view)
-- `/adm/admin_email_forwarding_logs.php` — View forwarding log (view)
-- `/adm/logic/admin_email_forwarding_logic.php` — Logic for alias list
-- `/adm/logic/admin_email_forwarding_alias_logic.php` — Logic for alias create/edit
-- `/adm/logic/admin_email_forwarding_domains_logic.php` — Logic for domain management
+### Uninstall Script (`uninstall.php`)
 
-### Documentation
+```php
+function email_forwarding_uninstall() {
+    try {
+        $db = DbConnector::get_instance()->get_db_link();
+        $db->exec("DROP TABLE IF EXISTS efl_email_forwarding_logs CASCADE");
+        $db->exec("DROP TABLE IF EXISTS efa_email_forwarding_aliases CASCADE");
+        $db->exec("DROP TABLE IF EXISTS efd_email_forwarding_domains CASCADE");
+        $db->exec("DELETE FROM stg_settings WHERE stg_name LIKE 'email_forwarding_%'");
+        $db->exec("DELETE FROM amu_admin_menus WHERE amu_slug IN ('incoming', 'email-forwarding', 'forwarding-domains', 'forwarding-logs')");
+        return true;
+    } catch (Exception $e) {
+        error_log("Email Forwarding uninstall failed: " . $e->getMessage());
+        return false;
+    }
+}
+```
+
+### Other Files (outside plugin)
+
 - `/docs/email_forwarding.md` — Setup guide, admin usage, server config, DNS, troubleshooting
 - Update `/docs/email_system.md` — Add note and link to email forwarding doc
 - Update `CLAUDE.md` — Add to documentation index
-
-### Migrations
-- Entry in `/migrations/migrations.php` for initial settings and admin menu entries
-
-### Install Script Changes
 - `/var/www/html/joinerytest/maintenance_scripts/install_tools/install.sh` — Add Postfix and opendkim packages
 - `/var/www/html/joinerytest/maintenance_scripts/install_tools/Dockerfile.template` — Expose port 25, start Postfix in CMD
 
@@ -147,7 +184,7 @@ Status values: `forwarded`, `rejected`, `discarded`, `rate_limited`, `bounce_for
 
 Follows the existing task pattern (see `PurgeOldRequestLogs` for reference).
 
-**`/tasks/PurgeOldForwardingLogs.json`:**
+**`/plugins/email_forwarding/tasks/PurgeOldForwardingLogs.json`:**
 ```json
 {
     "name": "Purge Old Forwarding Logs",
@@ -160,7 +197,7 @@ Follows the existing task pattern (see `PurgeOldRequestLogs` for reference).
 }
 ```
 
-**`/tasks/PurgeOldForwardingLogs.php`:**
+**`/plugins/email_forwarding/tasks/PurgeOldForwardingLogs.php`:**
 ```php
 <?php
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -193,7 +230,7 @@ The `email_forwarding_log_retention_days` setting provides the default, but the 
 
 ---
 
-## EmailForwarder Class (`/includes/EmailForwarder.php`)
+## EmailForwarder Class (`/plugins/email_forwarding/includes/EmailForwarder.php`)
 
 Core class that handles email parsing and forwarding logic. Separated from the Postfix pipe script so it can be tested independently.
 
@@ -286,7 +323,7 @@ SMTP settings fall back to the site defaults but can be overridden with `email_f
 
 ---
 
-## Postfix Pipe Script (`/scripts/email_forwarder.php`)
+## Postfix Pipe Script (`/plugins/email_forwarding/scripts/email_forwarder.php`)
 
 Thin wrapper that bootstraps Joinery and calls EmailForwarder:
 
@@ -304,9 +341,9 @@ Thin wrapper that bootstraps Joinery and calls EmailForwarder:
  */
 
 // Bootstrap Joinery (outside normal web request)
-require_once('/var/www/html/joinerytest/public_html/includes/PathHelper.php');
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/EmailForwarder.php'));
+require_once(PathHelper::getIncludePath('plugins/email_forwarding/includes/EmailForwarder.php'));
 
 // Check master switch
 $settings = Globalvars::get_instance();
@@ -469,7 +506,7 @@ inet_interfaces = all
 # /etc/postfix/master.cf (inside container)
 joinery   unix  -       n       n       -       5       pipe
   flags=DRhu user=www-data
-  argv=/usr/bin/php /var/www/html/${SITENAME}/public_html/scripts/email_forwarder.php ${recipient}
+  argv=/usr/bin/php /var/www/html/${SITENAME}/public_html/plugins/email_forwarding/scripts/email_forwarder.php ${recipient}
 ```
 
 The `mynetworks` includes Docker bridge ranges so the container accepts relayed mail from the host.
@@ -501,7 +538,7 @@ smtpd_recipient_restrictions =
 # /etc/postfix/master.cf
 joinery   unix  -       n       n       -       5       pipe
   flags=DRhu user=www-data
-  argv=/usr/bin/php /var/www/html/joinerytest/public_html/scripts/email_forwarder.php ${recipient}
+  argv=/usr/bin/php /var/www/html/joinerytest/public_html/plugins/email_forwarding/scripts/email_forwarder.php ${recipient}
 ```
 
 The `5` limits concurrent forwarder processes. The `flags=DRhu` tell Postfix to pass envelope recipient/sender info and fold long headers.
@@ -706,11 +743,11 @@ The admin menu is database-driven (`amu_admin_menus` table). The "Emails" parent
 | 5 | Email Templates |
 | 7 | Mailing Lists |
 
-The admin menu system only supports two levels (parent → child), so three-level nesting isn't possible without modifying the menu renderer. Instead, add a single "Incoming" menu item under Emails that links to the aliases page. The aliases page provides tab navigation to domains and logs.
+The admin menu system only supports two levels (parent → child), so three-level nesting isn't possible without modifying the menu renderer. Instead, add a single "Incoming" menu item under Emails that links to the plugin admin page. The aliases page provides tab navigation to domains and logs.
 
 ```sql
 INSERT INTO amu_admin_menus (amu_menudisplay, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_slug, amu_setting_activate)
-VALUES ('Incoming', 'admin_email_forwarding', 11, 10, 5, 'incoming', 'email_forwarding_enabled');
+VALUES ('Incoming', '/plugins/email_forwarding/admin/admin_email_forwarding', 11, 10, 5, 'incoming', 'email_forwarding_enabled');
 ```
 
 ```
@@ -719,27 +756,32 @@ Emails
 ├── Contact Types
 ├── Email Templates
 ├── Mailing Lists
-└── Incoming          ← single menu entry, links to aliases page
+└── Incoming          ← links to plugin admin page
 ```
 
-All three forwarding admin pages (`admin_email_forwarding`, `admin_email_forwarding_domains`, `admin_email_forwarding_logs`) share the `incoming` slug so the menu item stays highlighted. Each page renders a tab bar at the top for navigation between them:
+All three forwarding admin pages share the `incoming` slug so the menu item stays highlighted. Each page renders a tab bar at the top for navigation between them:
 
 ```
 [Forwarding Aliases]  [Domains]  [Logs]
 ```
 
+Tab links use the plugin admin route format:
+- `/plugins/email_forwarding/admin/admin_email_forwarding`
+- `/plugins/email_forwarding/admin/admin_email_forwarding_domains`
+- `/plugins/email_forwarding/admin/admin_email_forwarding_logs`
+
 ### Admin Logic File Bootstrap
 
-All admin logic files must bootstrap PathHelper because they are included by view files, not served through the front controller:
+All plugin logic files must bootstrap PathHelper:
 
 ```php
 <?php
-require_once(__DIR__ . '/../../includes/PathHelper.php');
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 // ... rest of logic
 ```
 
-### Email Forwarding Aliases List (`/admin/admin_email_forwarding`)
+### Email Forwarding Aliases List (`/plugins/email_forwarding/admin/admin_email_forwarding`)
 
 **Table columns:**
 - Alias (e.g., `info@example.com`)
@@ -754,7 +796,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 **Actions:** Add new alias button, bulk enable/disable.
 
-### Edit Alias (`/admin/admin_email_forwarding_alias`)
+### Edit Alias (`/plugins/email_forwarding/admin/admin_email_forwarding_alias`)
 
 **Form fields:**
 - Domain (dropdown of enabled EmailForwardingDomains)
@@ -769,7 +811,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 - Each destination must be a valid email address
 - At least one destination required
 
-### Domain Management (`/admin/admin_email_forwarding_domains`)
+### Domain Management (`/plugins/email_forwarding/admin/admin_email_forwarding_domains`)
 
 **Table columns:**
 - Domain name
@@ -787,7 +829,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 **DNS instructions panel:** After adding a domain, display the required MX and SPF records for that domain, plus Postfix config instructions.
 
-### Forwarding Logs (`/admin/admin_email_forwarding_logs`)
+### Forwarding Logs (`/plugins/email_forwarding/admin/admin_email_forwarding_logs`)
 
 **Table columns:**
 - Timestamp
@@ -1111,9 +1153,8 @@ This is ~60-80 lines for a basic implementation covering RSA signatures with rel
 - **DKIM none** (no signature) — forward normally (many legitimate senders don't use DKIM)
 - **DKIM error** (DNS timeout, unsupported algorithm) — forward normally (fail open, log the issue)
 
-### Later Phase Mitigations
+### Future Spam Mitigations
 
-**Phase 2:**
 - **SpamAssassin or rspamd** — Score inbound email before forwarding. Discard or tag high-scoring messages.
 - **Sender blocklist** — Admin-managed list of blocked sender addresses or domains.
 - **SPF checking** on inbound mail (reject mail that fails the sender's own SPF)
@@ -1128,26 +1169,43 @@ For the forwarding server to work well:
 
 ---
 
-## Implementation Phases
+## Implementation Checklist
 
-### Phase 1 — Core Forwarding
-- [ ] Data models (domain, alias, log)
-- [ ] EmailForwarder class with basic parsing (manual header parsing, no mailparse dependency)
+### Plugin Setup
+- [ ] Plugin directory structure at `/plugins/email_forwarding/`
+- [ ] `plugin.json` metadata
+- [ ] `uninstall.php` cleanup script
+
+### Data Layer
+- [ ] Data models (domain, alias, log) in `/plugins/email_forwarding/data/`
+- [ ] Plugin migration (`/plugins/email_forwarding/migrations/migrations.php`) for settings and admin menu entry
+
+### Core Processing
+- [ ] EmailForwarder class with manual header/MIME parsing
 - [ ] SRSRewriter class (encode, decode, validate — ~40 lines)
 - [ ] SRS bounce handling in EmailForwarder (detect SRS recipient, decode, forward bounce)
 - [ ] DKIM verification on inbound (verify signature, reject failures, pass unsigned)
-- [ ] Postfix pipe script
+- [ ] Postfix pipe script at `/plugins/email_forwarding/scripts/`
 - [ ] Raw forwarding via SmtpMailer (preserves MIME, attachments, no template wrapping)
-- [ ] Admin pages (domains, aliases, logs)
-- [ ] Settings migration
 - [ ] Rate limiting via forwarding log table (per-alias and per-domain)
 - [ ] Basic header checks (missing From, oversized messages)
+
+### Admin Interface
+- [ ] Admin pages (aliases, domains, logs) with tab navigation
+- [ ] Admin menu entry under Emails → Incoming
+- [ ] DNS/Postfix validation panel on domain page
+
+### Server Configuration
+- [ ] Install script changes (Postfix, opendkim packages)
+- [ ] Dockerfile changes (port 25, service startup)
 - [ ] Postfix RBL configuration (zen.spamhaus.org, bl.spamcop.net, b.barracudacentral.org)
-- [ ] Postfix configuration documentation
+- [ ] Postfix setup documentation (bare-metal and Docker multi-container)
+
+### Documentation & Maintenance
 - [ ] `/docs/email_forwarding.md` — setup guide, admin usage, server config, DNS, troubleshooting, local testing
 - [ ] Update `/docs/email_system.md` with note and link to forwarding doc
 - [ ] Update `CLAUDE.md` documentation index
-- [ ] Scheduled task for forwarding log cleanup (uses `email_forwarding_log_retention_days`)
+- [ ] Scheduled task for forwarding log cleanup
 
 ### Future Considerations
 - Spam scoring integration (SpamAssassin or rspamd) — content-based filtering, likely overkill at low volume
@@ -1182,13 +1240,13 @@ echo "From: alice@gmail.com
 To: info@example.com
 Subject: Test forwarding
 
-This is a test message." | php scripts/email_forwarder.php info@example.com
+This is a test message." | php plugins/email_forwarding/scripts/email_forwarder.php info@example.com
 
 # Check exit code
 echo $?   # 0 = forwarded, 67 = unknown alias
 
 # Test with a saved .eml file
-php scripts/email_forwarder.php info@example.com < /tmp/test_email.eml
+php plugins/email_forwarding/scripts/email_forwarder.php info@example.com < /tmp/test_email.eml
 ```
 
 This exercises the full PHP path (parsing, alias lookup, DKIM check, rate limiting, forwarding via SmtpMailer) without needing DNS or Postfix configured.
