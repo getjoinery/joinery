@@ -23,7 +23,20 @@ Materialization is admin-initiated only (via admin event detail page). Virtual i
 
 ## Public listings
 
-Use `exclude_recurring_parents => true` in MultiEvent to hide parents, then merge in virtual instances from `get_instances_for_range()`.
+Use `MultiEvent::getWithRepeatingEvents()` to get a merged, deduplicated, sorted array of standalone events plus expanded recurring instances:
+
+```php
+// Get upcoming events with recurring series expanded (default 6-month range)
+$events = MultiEvent::getWithRepeatingEvents(
+    ['upcoming' => true, 'deleted' => false, 'visibility' => 1],
+    null,  // range_end (default: +6 months)
+    20     // limit (optional)
+);
+```
+
+Returns a mixed array of Event objects and virtual stdClass instances. Handles all deduplication between materialized instances and virtual instances automatically.
+
+**Do NOT manually query with `exclude_recurring_parents` and merge `get_instances_for_range()` — use `getWithRepeatingEvents()` instead** to avoid duplicate materialized instance bugs.
 
 ## Key model methods
 
