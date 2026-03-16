@@ -178,7 +178,7 @@ echo ComponentRenderer::render(null, 'list_signup', [
                                         <ul>
                                             <li>
                                                 <i class="bx bx-calendar"></i>
-                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'M d, Y'); ?>
+                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'D, M d, Y'); ?>
                                             </li>
                                             <li>
                                                 <i class="bx bx-time"></i>

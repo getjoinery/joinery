@@ -90,7 +90,7 @@ $page->public_header(array(
 					// Get date string
 					$date_str = '';
 					if($evt_start_time){
-						$date_str = LibraryFunctions::convert_time($evt_start_time, 'UTC', $evt_tz, 'M j, Y');
+						$date_str = LibraryFunctions::convert_time($evt_start_time, 'UTC', $evt_tz, 'D, M j, Y');
 					}
 					else if(!$is_virtual && ($next_session = $event->get_next_session())){
 						$date_str = $next_session->get_start_time($tz, 'M j, Y');
