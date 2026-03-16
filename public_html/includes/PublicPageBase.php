@@ -1051,11 +1051,18 @@ abstract class PublicPageBase {
 	abstract protected function getTableClasses();
 
 	/**
-	 * Check if admin bar should be displayed
+	 * Check if admin bar should be displayed.
+	 * Requires permission level 10 and the show_admin_bar setting to be enabled (default: on).
 	 */
 	protected function should_show_admin_bar() {
 		$session = SessionControl::get_instance();
-		return ($session->get_permission() == 10);
+		if ($session->get_permission() < 10) {
+			return false;
+		}
+		$settings = Globalvars::get_instance();
+		$setting = $settings->get_setting('show_admin_bar', false, true);
+		// Default to enabled if setting doesn't exist
+		return ($setting === null || $setting === '' || $setting);
 	}
 
 	/**
