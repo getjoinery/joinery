@@ -35,6 +35,7 @@ class PublicPage extends PublicPageBase {
 <!DOCTYPE html>
 <html lang="en" class="no-js">
     <head>
+        <?php $options = parent::public_header_common($options); ?>
         <!-- Mobile Specific Meta -->
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
         <!-- Favicon-->
