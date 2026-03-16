@@ -39,76 +39,32 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 
 		$mailing_list = new MailingList($mailing_list_id, true);
 
-		// 2. Query upcoming non-recurring events
-		$events = new MultiEvent(
-			array(
-				'upcoming' => true,
-				'deleted' => false,
-				'status_not_cancelled' => true,
-				'exclude_recurring_parents' => true,
-				'visibility' => 1,
-			),
-			array('evt_start_time' => 'ASC')
-		);
-		$events->load();
-
-		// 3. Filter to events starting within the next 7 days
+		// 2. Get upcoming events with recurring series expanded (7-day window)
 		$settings = Globalvars::get_instance();
 		$site_tz_string = $settings->get_setting('default_timezone');
 		if (!$site_tz_string) {
 			$site_tz_string = 'America/New_York';
 		}
-		$utc_tz = new DateTimeZone('UTC');
-		$now = new DateTime('now', $utc_tz);
-		$cutoff = new DateTime('+7 days', $utc_tz);
 
-		$upcoming_events = array();
-		foreach ($events as $event) {
-			$start_time_raw = $event->get('evt_start_time');
-			if (!$start_time_raw) {
-				continue;
-			}
-			$event_start = new DateTime($start_time_raw, $utc_tz);
-			if ($event_start >= $now && $event_start <= $cutoff) {
+		$range_end = date('Y-m-d', strtotime('+7 days'));
+		$all_events = MultiEvent::getWithRepeatingEvents(
+			['upcoming' => true, 'deleted' => false, 'status_not_cancelled' => true, 'visibility' => 1],
+			$range_end
+		);
+
+		// 3. Filter to events starting within the next 7 days (standalone events may extend beyond range_end)
+		$utc_tz = new DateTimeZone('UTC');
+		$cutoff = new DateTime('+7 days', $utc_tz);
+		$upcoming_events = [];
+		foreach ($all_events as $event) {
+			$is_virtual = is_object($event) && isset($event->is_virtual) && $event->is_virtual;
+			$start_raw = $is_virtual ? $event->evt_start_time : $event->get('evt_start_time');
+			if (!$start_raw) continue;
+			$event_start = new DateTime($start_raw, $utc_tz);
+			if ($event_start <= $cutoff) {
 				$upcoming_events[] = $event;
 			}
 		}
-
-		// 4. Merge virtual instances from recurring parents
-		$parents = new MultiEvent(
-			array(
-				'deleted' => false,
-				'visibility' => 1,
-				'only_recurring_parents' => true,
-				'status' => Event::STATUS_ACTIVE,
-			),
-			array()
-		);
-		$parents->load();
-
-		$range_start = date('Y-m-d');
-		$range_end = date('Y-m-d', strtotime('+7 days'));
-		foreach ($parents as $parent) {
-			$instances = $parent->get_instances_for_range($range_start, $range_end);
-			foreach ($instances as $instance) {
-				$is_virtual = is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual;
-				$start_raw = $is_virtual ? $instance->evt_start_time : $instance->get('evt_start_time');
-				if (!$start_raw) continue;
-				$inst_start = new DateTime($start_raw, $utc_tz);
-				if ($inst_start >= $now && $inst_start <= $cutoff) {
-					$upcoming_events[] = $instance;
-				}
-			}
-		}
-
-		// Sort all events by start time
-		usort($upcoming_events, function($a, $b) {
-			$a_virtual = is_object($a) && isset($a->is_virtual) && $a->is_virtual;
-			$b_virtual = is_object($b) && isset($b->is_virtual) && $b->is_virtual;
-			$a_time = $a_virtual ? $a->evt_start_time : $a->get('evt_start_time');
-			$b_time = $b_virtual ? $b->evt_start_time : $b->get('evt_start_time');
-			return strcmp($a_time, $b_time);
-		});
 
 		// 4. If none, return success with message
 		if (empty($upcoming_events)) {
@@ -134,13 +90,13 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			// Format date/time in site timezone
 			if ($is_virtual) {
 				$start_raw = $event->evt_start_time;
-				$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'M j, g:i a T');
+				$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'D, M j, g:i a T');
 				if ($event->evt_end_time) {
 					$end_time = LibraryFunctions::convert_time($event->evt_end_time, 'UTC', $site_tz_string, 'g:i a');
-					$end_day = LibraryFunctions::convert_time($event->evt_end_time, 'UTC', $site_tz_string, 'M j,');
-					$start_day = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'M j,');
+					$end_day = LibraryFunctions::convert_time($event->evt_end_time, 'UTC', $site_tz_string, 'D, M j,');
+					$start_day = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'D, M j,');
 					if ($start_day == $end_day) {
-						$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'M j, g:i a')
+						$date_time = LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'D, M j, g:i a')
 							. ' - ' . $end_time . ' '
 							. LibraryFunctions::convert_time($start_raw, 'UTC', $site_tz_string, 'T');
 					}
@@ -149,7 +105,22 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 				$date_time = $event->get_time_string($site_tz_string);
 			}
 
-			$location = $is_virtual ? ($event->evt_location ?? '') : $event->get('evt_location');
+			// Prefer Location object address over evt_location text field
+			$location = '';
+			$loc_id = $is_virtual ? ($event->evt_loc_location_id ?? null) : $event->get('evt_loc_location_id');
+			if ($loc_id) {
+				require_once(PathHelper::getIncludePath('data/locations_class.php'));
+				if (Location::check_if_exists($loc_id)) {
+					$loc_obj = new Location($loc_id, TRUE);
+					$location = $loc_obj->get('loc_name');
+					if ($loc_obj->get('loc_address')) {
+						$location .= ' — ' . $loc_obj->get('loc_address');
+					}
+				}
+			}
+			if (!$location) {
+				$location = $is_virtual ? ($event->evt_location ?? '') : $event->get('evt_location');
+			}
 			$short_desc = $is_virtual ? ($event->evt_short_description ?? '') : $event->get('evt_short_description');
 
 			$block = '<div style="margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 4px;">';

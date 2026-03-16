@@ -22,7 +22,7 @@
 	)
 	);
 
-	$headers = array("Start time", "Event",  "Published", "Registration", "Registrants", "Waiting List");
+	$headers = array("Start Date", "Event", "Status", "Registration");
 	$altlinks = array('New Event'=>'/admin/admin_event_edit');
 
 	$pager = new Pager(
@@ -37,7 +37,7 @@
 	);
 
 	$table_options = array(
-		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Time'=>'start_time'),
+		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Date'=>'start_time'),
 		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all", "Series"=>"series"),
 		'altlinks' => $altlinks,
 		'title' => 'Events',
@@ -46,9 +46,6 @@
 	$page->tableheader($headers, $table_options, $pager);
 
 	foreach ($events as $event){
-		$searches = array();
-		$searches['event_id'] = $event->key;
-
 		$registrants = new MultiEventRegistrant(
 			array('event_id'=>$event->key, 'expired' => false)
 		);
@@ -58,34 +55,56 @@
 			array('event_id'=>$event->key)
 		);
 		$numwaitinglists = $waiting_lists->count_all();
-		//$user = new User($events->get('evt_usr_user_id'),TRUE);
 
 		$rowvalues = array();
 
-		array_push($rowvalues, LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'M j, Y'));
+		// Start Date
+		$start_date = $event->get('evt_start_time')
+			? LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'D, M j, Y')
+			: '—';
+		$rowvalues[] = $start_date;
 
+		// Event name + Repeating badge
 		$event_name_display = '<a href="/admin/admin_event?evt_event_id='.$event->key.'"><strong>'.$event->get('evt_name'). '</strong></a>';
 		if ($event->is_recurring_parent()) {
-			$event_name_display .= ' <span class="fas fa-sync fs-11 text-muted ms-1" title="Recurring series"></span>';
+			$event_name_display .= ' <span class="badge bg-info ms-1">Repeating</span>';
 		}
-		array_push($rowvalues, $event_name_display);
+		$rowvalues[] = $event_name_display;
 
-		if($event->get('evt_delete_time')){
-			array_push($rowvalues, '<b>Deleted</b>');
+		// Status — visibility + cancelled badges
+		$status_parts = [];
+		if ($event->get('evt_delete_time')) {
+			$status_parts[] = '<span class="badge bg-dark">Deleted</span>';
+		} else if ($event->get('evt_visibility') == 0) {
+			$status_parts[] = '<span class="badge bg-secondary">Private</span>';
+		} else if ($event->get('evt_visibility') == 1) {
+			$status_parts[] = '<a href="' . $event->get_url() . '"><span class="badge bg-success">Public</span></a>';
+		} else {
+			$status_parts[] = '<a href="' . $event->get_url() . '"><span class="badge bg-warning text-dark">Unlisted</span></a>';
 		}
-		else if($event->get('evt_visibility') == 0) {
-			array_push($rowvalues, '<b>Private</b>');
+		if ($event->get('evt_status') == Event::STATUS_CANCELED) {
+			$status_parts[] = '<span class="badge bg-danger">Cancelled</span>';
 		}
-		else if($event->get('evt_visibility') == 1){
-			array_push($rowvalues, '<a href="' . $event->get_url() . '">Public</a>');
-		}
-		else{
-			array_push($rowvalues, '<a href="' . $event->get_url() . '">Unlisted</a>');
-		}
+		$rowvalues[] = implode(' ', $status_parts);
 
-		array_push($rowvalues, $event->get('evt_is_accepting_signups') ? 'Open' : 'Closed');
-		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numregistrants.' registered</a>');
-		array_push($rowvalues, '<a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$numwaitinglists.' on waiting list</a>');
+		// Registration — open/closed + counts + capacity + waiting list
+		$reg_parts = [];
+		if ($event->get('evt_is_accepting_signups')) {
+			$reg_parts[] = '<span class="text-success fw-semibold">Open</span>';
+		} else {
+			$reg_parts[] = '<span class="text-muted">Closed</span>';
+		}
+		if ($numregistrants > 0 || $event->get('evt_max_signups')) {
+			$count_str = $numregistrants;
+			if ($event->get('evt_max_signups')) {
+				$count_str .= '/' . $event->get('evt_max_signups');
+			}
+			$reg_parts[] = '<a href="/admin/admin_event?evt_event_id='.$event->key.'">' . $count_str . ' registered</a>';
+		}
+		if ($numwaitinglists > 0) {
+			$reg_parts[] = $numwaitinglists . ' waiting';
+		}
+		$rowvalues[] = implode(' · ', $reg_parts);
 
 		$page->disprow($rowvalues);
 	}

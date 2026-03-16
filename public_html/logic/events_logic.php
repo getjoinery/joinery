@@ -46,44 +46,20 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		
 	}
 
-	// Exclude recurring parents from public listings
-	$searches['exclude_recurring_parents'] = true;
-
-	$events = new MultiEvent(
-		$searches,
-		array($swasort=>$swasdirection),
-		$numperpage,
-		$swaoffset,
-		'AND');
-	$events->load();
-	$all_events = iterator_to_array($events);
-
-	// Merge virtual instances from recurring parents (only for future/active listings)
-	if (!isset($get_vars['type']) || $get_vars['type'] == 'future' || (!isset($get_vars['type']))) {
-		$parent_searches = array('deleted' => FALSE, 'visibility' => 1, 'only_recurring_parents' => true, 'status' => Event::STATUS_ACTIVE);
-		$parents = new MultiEvent($parent_searches, []);
-		$parents->load();
-
-		$range_end = date('Y-m-d', strtotime('+6 months'));
-		foreach ($parents as $parent) {
-			$instances = $parent->get_instances_for_range(date('Y-m-d'), $range_end);
-			foreach ($instances as $instance) {
-				if (is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual) {
-					// Virtual instances are never in the main query
-					$all_events[] = $instance;
-				} else if ($instance instanceof Event && $instance->get('evt_status') == Event::STATUS_CANCELED) {
-					// Cancelled materialized instances are excluded by the main query's status filter
-					$all_events[] = $instance;
-				}
-			}
-		}
-
-		// Sort merged array by start time
-		usort($all_events, function($a, $b) {
-			$a_time = (is_object($a) && isset($a->is_virtual) && $a->is_virtual) ? $a->evt_start_time : $a->get('evt_start_time');
-			$b_time = (is_object($b) && isset($b->is_virtual) && $b->is_virtual) ? $b->evt_start_time : $b->get('evt_start_time');
-			return strcmp($a_time, $b_time);
-		});
+	// Expand recurring events for future/active listings; plain query for past
+	$use_recurring = (!isset($get_vars['type']) || $get_vars['type'] == 'future');
+	if ($use_recurring) {
+		$all_events = MultiEvent::getWithRepeatingEvents($searches, null, $numperpage);
+	} else {
+		$searches['exclude_recurring_parents'] = true;
+		$events = new MultiEvent(
+			$searches,
+			array($swasort=>$swasdirection),
+			$numperpage,
+			$swaoffset,
+			'AND');
+		$events->load();
+		$all_events = iterator_to_array($events);
 	}
 
 	$page_vars['events'] = $all_events;
