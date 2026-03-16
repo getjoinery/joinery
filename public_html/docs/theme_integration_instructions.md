@@ -1737,12 +1737,19 @@ HTML5 PublicPage.php follows the same structure as Bootstrap themes — the only
 **Key pattern — always include:**
 ```php
 public function public_header($options=array()) {
-    $_GLOBALS['page_header_loaded'] = true;
     $settings = Globalvars::get_instance();
     $session = SessionControl::get_instance();
-    $options = parent::public_header_common($options);  // CRITICAL: call parent
     $menu_data = $this->get_menu_data();
-    // ... render header HTML
+    // ... prepare variables, then output HTML:
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <?php $options = parent::public_header_common($options); // CRITICAL: call inside <head> ?>
+    <meta charset="utf-8">
+    <!-- ... rest of head -->
+</head>
+    <?php
 }
 ```
 
@@ -1848,7 +1855,7 @@ Beyond the standard validation checklist, HTML5 themes must verify:
 - [ ] No icon font references — all icons are Unicode or inline SVG
 - [ ] Mobile menu works with vanilla JS toggle (no Bootstrap collapse)
 - [ ] `global_includes_top()` called in `<head>` section of PublicPage.php
-- [ ] `parent::public_header_common($options)` called at start of `public_header()`
+- [ ] `$options = parent::public_header_common($options)` called inside `<head>` in `public_header()` (injects admin bar, tracking, settings defaults)
 - [ ] Comment reply toggle uses vanilla JS `addEventListener` (not jQuery)
 - [ ] Single consolidated CSS file loads in header (not multiple framework files)
 
