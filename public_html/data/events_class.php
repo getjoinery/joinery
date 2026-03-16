@@ -169,20 +169,20 @@ function get_leader() {
 			$start_time_obj = new DateTime($this->get_event_start_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
 			$end_time_obj = new DateTime($this->get_event_end_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
 
-			// Build location: physical location first, fallback to event URL
+			// Build location: Location object address preferred, fallback to evt_location text
 			$address = '';
-			if ($this->get('evt_location')) {
-				$address = $this->get('evt_location');
-			}
 			if ($this->get('evt_loc_location_id')) {
 				require_once(PathHelper::getIncludePath('data/locations_class.php'));
 				if (Location::check_if_exists($this->get('evt_loc_location_id'))) {
 					$loc = new Location($this->get('evt_loc_location_id'), TRUE);
 					$loc_addr = $loc->get('loc_address');
 					if ($loc_addr) {
-						$address = $address ? $address . ', ' . $loc_addr : $loc_addr;
+						$address = $loc_addr;
 					}
 				}
+			}
+			if (!$address && $this->get('evt_location')) {
+				$address = $this->get('evt_location');
 			}
 			if (!$address) {
 				$address = LibraryFunctions::get_absolute_url($this->get_url());
@@ -401,7 +401,7 @@ function get_leader() {
 		}
 	}	
 	
-	function get_time_string($tz='event', $dayformat = 'M j,', $timeformat = 'g:i a'){
+	function get_time_string($tz='event', $dayformat = 'D, M j,', $timeformat = 'g:i a'){
 
 		if(!$this->get('evt_start_time') && !$this->get('evt_end_time')){
 			return '';
@@ -1303,8 +1303,85 @@ class MultiEvent extends SystemMultiBase {
             $filters['evt_recurrence_type'] = "IS NOT NULL AND evt_recurrence_type != ''";
         }
 
+        if (isset($this->options['exclude_materialized_instances']) && $this->options['exclude_materialized_instances']) {
+            $filters['evt_parent_event_id'] = "IS NULL";
+        }
+
+        if (isset($this->options['exclude_past_materialized']) && $this->options['exclude_past_materialized']) {
+            $filters['(evt_parent_event_id'] = "IS NULL OR evt_start_time > now() OR evt_start_time IS NULL)";
+        }
+
         return $this->_get_resultsv2('evt_events', $filters, $this->order_by, $only_count, $debug);
     }
+
+	/**
+	 * Get events with repeating (recurring) series expanded into individual instances.
+	 *
+	 * Returns a merged, sorted array of standalone Event objects, materialized
+	 * instances, and virtual stdClass instances. Handles all deduplication so
+	 * callers don't need to know about recurring internals.
+	 *
+	 * @param array  $options    MultiEvent filter options (deleted, visibility, status, upcoming, past, etc.)
+	 *                           Do NOT pass exclude_recurring_parents/exclude_materialized_instances/only_recurring_parents — they are managed internally.
+	 * @param string $range_end  End date for recurring expansion (Y-m-d). Default: +6 months from today.
+	 * @param int    $limit      Max events to return. Default: null (no limit).
+	 * @return array  Mixed array of Event objects and virtual stdClass instances, sorted by start time ASC.
+	 */
+	static function getWithRepeatingEvents($options = [], $range_end = null, $limit = null) {
+		if (!$range_end) {
+			$range_end = date('Y-m-d', strtotime('+6 months'));
+		}
+		$range_start = date('Y-m-d');
+
+		// 1. Get standalone events (exclude parents and materialized instances)
+		$standalone_options = $options;
+		$standalone_options['exclude_recurring_parents'] = true;
+		$standalone_options['exclude_materialized_instances'] = true;
+		$standalone_events = new MultiEvent($standalone_options, ['evt_start_time' => 'ASC']);
+		$standalone_events->load();
+		$all_events = iterator_to_array($standalone_events);
+
+		// 2. Get recurring parents and expand into instances
+		$parent_options = [
+			'deleted' => $options['deleted'] ?? false,
+			'visibility' => $options['visibility'] ?? null,
+			'only_recurring_parents' => true,
+			'status' => Event::STATUS_ACTIVE,
+		];
+		// Remove null values
+		$parent_options = array_filter($parent_options, function($v) { return $v !== null; });
+
+		$parents = new MultiEvent($parent_options, []);
+		$parents->load();
+
+		foreach ($parents as $parent) {
+			$parent_pic = $parent->get_picture_link();
+			$instances = $parent->get_instances_for_range($range_start, $range_end);
+			foreach ($instances as $instance) {
+				$is_virtual = is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual;
+				if ($is_virtual) {
+					$instance->_picture_link = $parent_pic;
+				}
+				$all_events[] = $instance;
+			}
+		}
+
+		// 3. Sort by start time
+		usort($all_events, function($a, $b) {
+			$a_virtual = is_object($a) && isset($a->is_virtual) && $a->is_virtual;
+			$b_virtual = is_object($b) && isset($b->is_virtual) && $b->is_virtual;
+			$a_time = $a_virtual ? $a->evt_start_time : $a->get('evt_start_time');
+			$b_time = $b_virtual ? $b->evt_start_time : $b->get('evt_start_time');
+			return strcmp($a_time, $b_time);
+		});
+
+		// 4. Apply limit
+		if ($limit) {
+			$all_events = array_slice($all_events, 0, $limit);
+		}
+
+		return $all_events;
+	}
 
 }
 

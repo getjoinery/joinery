@@ -52,11 +52,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$user = new User($session->get_user_id(), TRUE);
 		}
 		else if(!$user = User::GetByEmail($_POST['usr_email'])){
-			// Use email prefix as default name when name fields aren't provided (e.g. compact newsletter form)
-			$email_prefix = explode('@', $_POST['usr_email'])[0];
+			// Guess name from email when name fields aren't provided (e.g. compact newsletter form)
+			$guessed = User::guessNameFromEmail($_POST['usr_email']);
 			$data = array(
-				'usr_first_name' => !empty($_POST['usr_first_name']) ? $_POST['usr_first_name'] : $email_prefix,
-				'usr_last_name' => !empty($_POST['usr_last_name']) ? $_POST['usr_last_name'] : '(subscriber)',
+				'usr_first_name' => !empty($_POST['usr_first_name']) ? $_POST['usr_first_name'] : $guessed['first_name'],
+				'usr_last_name' => !empty($_POST['usr_last_name']) ? $_POST['usr_last_name'] : $guessed['last_name'],
 				'usr_email' => $_POST['usr_email'],
 				'usr_nickname' => $_POST['usr_nickname'] ?? '',
 				'usr_timezone' => $_POST['usr_timezone'] ?? '',

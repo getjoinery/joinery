@@ -71,7 +71,7 @@ $page->public_header($page_options);
                             if ($is_virtual_event) {
                                 if ($evt_get('evt_start_time')) {
                                     $tz       = $evt_get('evt_timezone') ?: 'America/New_York';
-                                    $start_str = LibraryFunctions::convert_time($evt_get('evt_start_time'), 'UTC', $tz, 'M j, Y g:i a T');
+                                    $start_str = LibraryFunctions::convert_time($evt_get('evt_start_time'), 'UTC', $tz, 'D, M j, Y g:i a T');
                                     echo '<p class="mb-2" style="font-size: 1.0625rem; color: var(--color-muted);">&#128197; ' . $start_str;
                                     if ($evt_get('evt_end_time')) {
                                         $end_str = LibraryFunctions::convert_time($evt_get('evt_end_time'), 'UTC', $tz, 'g:i a T');
@@ -88,7 +88,7 @@ $page->public_header($page_options);
                                 }
                             }
 
-                            if ($evt_get('evt_location')) {
+                            if (!$page_vars['location_object'] && $evt_get('evt_location')) {
                                 echo '<p class="mb-2" style="color: var(--color-muted);">&#128205; ' . htmlspecialchars($evt_get('evt_location')) . '</p>';
                             }
 

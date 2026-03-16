@@ -238,7 +238,34 @@ private static function UcName($string) {
 		return true;
 	}
 
-	static function CreateNew($data){   
+	/**
+	 * Guess first and last name from an email address.
+	 * Returns ['first_name' => string, 'last_name' => string].
+	 */
+	static function guessNameFromEmail($email) {
+		$prefix = explode('@', $email)[0];
+
+		// Strip trailing digits (e.g. john.smith99)
+		$prefix = preg_replace('/\d+$/', '', $prefix);
+
+		// Split on dots, underscores, or hyphens
+		$parts = preg_split('/[._\-]+/', $prefix);
+
+		// Filter out empty parts
+		$parts = array_values(array_filter($parts, function($p) { return $p !== ''; }));
+
+		if (count($parts) >= 2) {
+			$first = ucfirst(strtolower($parts[0]));
+			$last = ucfirst(strtolower($parts[count($parts) - 1]));
+			return ['first_name' => $first, 'last_name' => $last];
+		}
+
+		// Single token — just use as first name
+		$name = !empty($parts) ? ucfirst(strtolower($parts[0])) : $prefix;
+		return ['first_name' => $name, 'last_name' => ''];
+	}
+
+	static function CreateNew($data){
 	
 			if(!$first_name = $data['usr_first_name']){
 				throw new SystemDisplayablePermanentError("Missing first name in create user.");

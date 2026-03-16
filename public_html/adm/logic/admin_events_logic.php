@@ -38,6 +38,7 @@ function admin_events_logic($get_vars, $post_vars) {
 
 	if($filter == 'all'){
 		$breadcrumb_array = array('Events'=>'All Events');
+		$searches['exclude_past_materialized'] = true;
 	}
 	else if($filter == 'series'){
 		$breadcrumb_array = array('Events'=>'/admin/admin_events', 'Recurring Series'=>'');

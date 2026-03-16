@@ -200,6 +200,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$page_vars['show_sessions_block'] = true;
 	}
 	
+	$page_vars['location_object'] = null;
+	$page_vars['location_picture'] = null;
 	if($event->get('evt_loc_location_id')){
 		$location = new Location($event->get('evt_loc_location_id'), true);
 		$page_vars['location_object'] = $location;
