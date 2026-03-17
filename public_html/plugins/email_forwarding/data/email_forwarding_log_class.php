@@ -23,6 +23,10 @@ class EmailForwardingLog extends SystemBase {
 	const STATUS_BOUNCE_FORWARDED = 'bounce_forwarded';
 	const STATUS_ERROR = 'error';
 
+	protected static $foreign_key_actions = [
+		'efl_efa_email_forwarding_alias_id' => ['action' => 'null'],
+	];
+
 	public static $field_specifications = array(
 		'efl_email_forwarding_log_id'          => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'efl_efa_email_forwarding_alias_id'    => array('type'=>'int4'),
