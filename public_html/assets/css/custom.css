@@ -435,6 +435,7 @@
     font-weight: 600;
     border-radius: 50rem;
     line-height: 1.4;
+    text-transform: none;
 }
 .bg-danger.badge, .badge.bg-danger { background-color: #dc3545; color: #fff; }
 .bg-success.badge, .badge.bg-success { background-color: #198754; color: #fff; }
