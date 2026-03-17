@@ -717,8 +717,7 @@ select.form-control {
     line-height: 1;
     border-radius: var(--radius-pill);
     white-space: nowrap;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
 }
 .badge-primary   { background: var(--primary); color: #fff; }
 .badge-success   { background: var(--success); color: #fff; }
