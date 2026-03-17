@@ -501,6 +501,7 @@ Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 4. Add admin interface: `/adm/admin_[feature].php`
 5. Add route to `serve.php` if needed
 6. Add data migrations in `/migrations/` if needed (for settings, data updates only)
+7. Define deletion strategy (`$foreign_key_actions`, soft-delete cascading) — see [Deletion System](docs/deletion_system.md)
 
 **Helper Class Integration:** Use RouteHelper for custom routing, ThemeHelper for asset management, and PathHelper for file operations instead of manual path handling.
 

@@ -322,6 +322,73 @@ When `permanent_delete()` is called:
 
 All operations use prepared statements and are wrapped in try/catch with automatic rollback on error.
 
+## Designing a Deletion Strategy for New Models
+
+When creating a new model with parent-child relationships, plan for **both** soft delete and permanent delete:
+
+### 1. Permanent Delete (`$foreign_key_actions`)
+
+Declare on the **child** model what happens when its parent is permanently deleted:
+
+```php
+// Child model — alias belongs to a domain
+class EmailForwardingAlias extends SystemBase {
+    protected static $foreign_key_actions = [
+        'efa_efd_email_forwarding_domain_id' => ['action' => 'cascade'],
+    ];
+}
+
+// Grandchild model — log references an alias, preserve for auditing
+class EmailForwardingLog extends SystemBase {
+    protected static $foreign_key_actions = [
+        'efl_efa_email_forwarding_alias_id' => ['action' => 'null'],
+    ];
+}
+```
+
+### 2. Soft Delete Cascading
+
+`$foreign_key_actions` only applies to `permanent_delete()`. **Soft-delete cascading must be implemented manually** in your deletion logic. When a parent is soft-deleted, children often need to be soft-deleted too:
+
+```php
+// In admin logic — soft-delete domain cascades to aliases
+$domain->soft_delete();
+
+$aliases = new MultiEmailForwardingAlias([
+    'domain_id' => $domain->key,
+    'deleted' => false,
+]);
+$aliases->load();
+foreach ($aliases as $alias) {
+    $alias->soft_delete();
+}
+```
+
+### 3. Undelete with Cascade Awareness
+
+When restoring a soft-deleted parent, only restore children that were deleted **at the same time or after** the parent. Children independently deleted before the parent should remain deleted:
+
+```php
+$domain_delete_time = $domain->get('efd_delete_time');
+$domain->undelete();
+
+// Restore only aliases deleted when/after the domain was deleted
+$sql = "UPDATE efa_email_forwarding_aliases
+        SET efa_delete_time = NULL
+        WHERE efa_efd_email_forwarding_domain_id = ?
+        AND efa_delete_time >= ?";
+$q = $dblink->prepare($sql);
+$q->execute([$domain->key, $domain_delete_time]);
+```
+
+### Checklist for New Models
+
+- [ ] Define `$foreign_key_actions` on child models for permanent delete behavior
+- [ ] Implement soft-delete cascade in the admin/logic layer if parent-child relationship exists
+- [ ] Implement undelete logic that respects independently-deleted children
+- [ ] Consider whether logs/audit records should use `'action' => 'null'` to preserve history
+- [ ] Require appropriate permission level for permanent delete (typically 10)
+
 ## Best Practices
 
 1. **Use constants for sentinel values**: `User::USER_DELETED` instead of hardcoded `3`

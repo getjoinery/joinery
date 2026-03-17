@@ -2,7 +2,7 @@
 /**
  * Email Forwarding - Domain Management
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -273,79 +273,140 @@ if ($edit_domain) {
 } // end show_form
 
 // --- Domain List ---
-$domains = new MultiEmailForwardingDomain(array('deleted' => false), array('efd_domain' => 'ASC'));
+require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
+
+// Show deleted domains to superadmins
+$show_deleted = ($session->get_permission() >= 10);
+$domain_filters = $show_deleted ? [] : ['deleted' => false];
+$domains = new MultiEmailForwardingDomain($domain_filters, array('efd_delete_time' => 'ASC', 'efd_domain' => 'ASC'));
 $domains->load();
 
-$headers = array('Domain', 'Enabled', 'Catch-All', 'Reject Unmatched', 'Aliases', 'DNS Status', 'Actions');
-$altlinks = array('Add Domain' => '/plugins/email_forwarding/admin/admin_email_forwarding_domains?action=add');
-$table_options = array('title' => 'Forwarding Domains', 'altlinks' => $altlinks);
-$page->tableheader($headers, $table_options);
-
-// Get Postfix virtual_mailbox_domains for checking
+// Get Postfix virtual_mailbox_domains for stale config detection
 $vmd_output = array();
 exec('postconf virtual_mailbox_domains 2>/dev/null', $vmd_output);
 $vmd_line = implode('', $vmd_output);
 
+// Check for stale postfix config — active domains not in postfix
+$active_domains = new MultiEmailForwardingDomain(['deleted' => false], []);
+$active_domains->load();
+$stale_domains = [];
+foreach ($active_domains as $ad) {
+	if (strpos($vmd_line, $ad->get('efd_domain')) === false) {
+		$stale_domains[] = $ad->get('efd_domain');
+	}
+}
+// Also check for deleted domains still in postfix
+$deleted_in_postfix = [];
+if ($show_deleted) {
+	$deleted_domains = new MultiEmailForwardingDomain(['deleted' => true], []);
+	$deleted_domains->load();
+	foreach ($deleted_domains as $dd) {
+		if (strpos($vmd_line, $dd->get('efd_domain')) !== false) {
+			$deleted_in_postfix[] = $dd->get('efd_domain');
+		}
+	}
+}
+
+if (!empty($stale_domains) || !empty($deleted_in_postfix)) {
+	echo '<div class="alert alert-warning" style="margin-bottom: 1rem;">';
+	echo '<strong>Postfix configuration is out of sync.</strong> ';
+	if (!empty($stale_domains)) {
+		echo 'Active domain(s) not in Postfix: <strong>' . htmlspecialchars(implode(', ', $stale_domains)) . '</strong>. ';
+	}
+	if (!empty($deleted_in_postfix)) {
+		echo 'Deleted domain(s) still in Postfix: <strong>' . htmlspecialchars(implode(', ', $deleted_in_postfix)) . '</strong>. ';
+	}
+	echo 'Re-run the setup script in the Server Status section above to update.';
+	echo '</div>';
+}
+
+$headers = array('Domain', 'Status', 'Catch-All', 'Aliases', 'DNS', 'Actions');
+$altlinks = array('Add Domain' => '/plugins/email_forwarding/admin/admin_email_forwarding_domains?action=add');
+$table_options = array('title' => 'Forwarding Domains', 'altlinks' => $altlinks);
+$page->tableheader($headers, $table_options);
+
 foreach ($domains as $d) {
 	$domain_name = $d->get('efd_domain');
-	$alias_count = $d->get_alias_count();
+	$is_deleted = !empty($d->get('efd_delete_time'));
+	$alias_count = $is_deleted ? 0 : $d->get_alias_count();
 
-	// DNS checks
+	// DNS checks (skip for deleted domains)
 	$dns_status = '';
+	if (!$is_deleted) {
+		$mx_records = @dns_get_record($domain_name, DNS_MX);
+		$dns_status .= ($mx_records && count($mx_records) > 0)
+			? '<span class="badge bg-success">MX</span> '
+			: '<span class="badge bg-warning text-dark">MX</span> ';
 
-	// Check MX
-	$mx_records = @dns_get_record($domain_name, DNS_MX);
-	if ($mx_records && count($mx_records) > 0) {
-		$dns_status .= '<span class="badge bg-success">MX</span> ';
+		$txt_records = @dns_get_record($domain_name, DNS_TXT);
+		$spf_found = false;
+		if ($txt_records) {
+			foreach ($txt_records as $txt) {
+				if (strpos($txt['txt'] ?? '', 'v=spf1') !== false) { $spf_found = true; break; }
+			}
+		}
+		$dns_status .= $spf_found ? '<span class="badge bg-success">SPF</span> ' : '<span class="badge bg-warning text-dark">SPF</span> ';
+
+		$dkim_records = @dns_get_record('mail._domainkey.' . $domain_name, DNS_TXT);
+		$dkim_found = false;
+		if ($dkim_records) {
+			foreach ($dkim_records as $txt) {
+				if (strpos($txt['txt'] ?? '', 'v=DKIM1') !== false) { $dkim_found = true; break; }
+			}
+		}
+		$dns_status .= $dkim_found ? '<span class="badge bg-success">DKIM</span> ' : '<span class="badge bg-secondary">DKIM</span> ';
+
+		$in_postfix = (strpos($vmd_line, $domain_name) !== false);
+		$dns_status .= $in_postfix ? '<span class="badge bg-success">Postfix</span>' : '<span class="badge bg-warning text-dark">Postfix</span>';
 	} else {
-		$dns_status .= '<span class="badge bg-warning text-dark">MX</span> ';
+		$dns_status = '<span class="text-muted">-</span>';
 	}
 
-	// Check SPF
-	$txt_records = @dns_get_record($domain_name, DNS_TXT);
-	$spf_found = false;
-	if ($txt_records) {
-		foreach ($txt_records as $txt) {
-			if (strpos($txt['txt'] ?? '', 'v=spf1') !== false) {
-				$spf_found = true;
-				break;
-			}
+	// Status column — combines enabled + deleted
+	$status_parts = [];
+	if ($is_deleted) {
+		$status_parts[] = '<span class="badge bg-dark">Deleted</span>';
+	} else if ($d->get('efd_is_enabled')) {
+		$status_parts[] = '<span class="badge bg-success">Enabled</span>';
+	} else {
+		$status_parts[] = '<span class="badge bg-secondary">Disabled</span>';
+	}
+	$status_display = implode(' ', $status_parts);
+
+	// Build row
+	$rowvalues = [];
+	$rowvalues[] = htmlspecialchars($domain_name);
+	$rowvalues[] = $status_display;
+	$rowvalues[] = htmlspecialchars($d->get('efd_catch_all_address') ?: '-');
+	$rowvalues[] = $is_deleted ? '-' : $alias_count;
+	$rowvalues[] = $dns_status;
+
+	// Action buttons
+	$actions = '';
+	if ($is_deleted) {
+		// Undelete
+		$actions .= PublicPageBase::action_button('Restore', '/plugins/email_forwarding/admin/admin_email_forwarding_domains', [
+			'hidden' => ['action' => 'undelete', 'efd_email_forwarding_domain_id' => $d->key],
+			'confirm' => 'Restore this domain and its aliases?',
+			'class' => 'btn btn-sm btn-outline-success',
+		]);
+		// Permanent delete (permission 10 only)
+		if ($session->get_permission() >= 10) {
+			$actions .= ' ' . PublicPageBase::action_button('Permanent Delete', '/plugins/email_forwarding/admin/admin_email_forwarding_domains', [
+				'hidden' => ['action' => 'permanent_delete', 'efd_email_forwarding_domain_id' => $d->key],
+				'confirm' => 'PERMANENTLY delete this domain and all its aliases? This cannot be undone.',
+				'class' => 'btn btn-sm btn-outline-danger',
+			]);
 		}
+	} else {
+		$actions .= '<a href="/plugins/email_forwarding/admin/admin_email_forwarding_domains?efd_email_forwarding_domain_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
+		$actions .= PublicPageBase::action_button('Delete', '/plugins/email_forwarding/admin/admin_email_forwarding_domains', [
+			'hidden' => ['action' => 'delete', 'efd_email_forwarding_domain_id' => $d->key],
+			'confirm' => 'Delete this domain and all its aliases?',
+			'class' => 'btn btn-sm btn-outline-danger',
+		]);
 	}
-	$dns_status .= $spf_found ? '<span class="badge bg-success">SPF</span> ' : '<span class="badge bg-warning text-dark">SPF</span> ';
-
-	// Check DKIM
-	$dkim_records = @dns_get_record('mail._domainkey.' . $domain_name, DNS_TXT);
-	$dkim_found = false;
-	if ($dkim_records) {
-		foreach ($dkim_records as $txt) {
-			if (strpos($txt['txt'] ?? '', 'v=DKIM1') !== false) {
-				$dkim_found = true;
-				break;
-			}
-		}
-	}
-	$dns_status .= $dkim_found ? '<span class="badge bg-success">DKIM</span> ' : '<span class="badge bg-secondary">DKIM</span> ';
-
-	// Check Postfix
-	$in_postfix = (strpos($vmd_line, $domain_name) !== false);
-	$dns_status .= $in_postfix ? '<span class="badge bg-success">Postfix</span>' : '<span class="badge bg-warning text-dark">Postfix</span>';
-
-	$rowvalues = array();
-	array_push($rowvalues, htmlspecialchars($domain_name));
-	array_push($rowvalues, $d->get('efd_is_enabled') ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>');
-	array_push($rowvalues, htmlspecialchars($d->get('efd_catch_all_address') ?: '-'));
-	array_push($rowvalues, $d->get('efd_reject_unmatched') ? 'Yes' : 'No');
-	array_push($rowvalues, $alias_count);
-	array_push($rowvalues, $dns_status);
-
-	$actions = '<a href="/plugins/email_forwarding/admin/admin_email_forwarding_domains?efd_email_forwarding_domain_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a> '
-		. '<form method="post" style="display:inline" onsubmit="return confirm(\'Delete this domain and all its aliases?\')">'
-		. '<input type="hidden" name="action" value="delete">'
-		. '<input type="hidden" name="efd_email_forwarding_domain_id" value="' . $d->key . '">'
-		. '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>'
-		. '</form>';
-	array_push($rowvalues, $actions);
+	$rowvalues[] = $actions;
 
 	$page->disprow($rowvalues);
 }
@@ -358,7 +419,7 @@ $site_path = rtrim(PathHelper::getBasePath(), '/');
 $pipe_script = $site_path . '/plugins/email_forwarding/scripts/email_forwarder.php';
 
 $all_domain_names = array();
-foreach ($domains as $d) {
+foreach ($active_domains as $d) {
 	$all_domain_names[] = $d->get('efd_domain');
 }
 $domain_list = implode(' ', $all_domain_names) ?: 'example.com';
