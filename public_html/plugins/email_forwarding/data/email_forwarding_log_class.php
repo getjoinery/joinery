@@ -3,7 +3,7 @@
  * EmailForwardingLog - Records all forwarding transactions.
  * Also used for rate limiting by counting recent entries.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));

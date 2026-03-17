@@ -2,7 +2,7 @@
 /**
  * EmailForwardingAlias - Virtual mailbox aliases that forward to real addresses.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));

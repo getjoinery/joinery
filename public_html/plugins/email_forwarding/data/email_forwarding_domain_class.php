@@ -2,7 +2,7 @@
 /**
  * EmailForwardingDomain - Tracks domains that accept forwarded mail.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
