@@ -14,6 +14,10 @@ class EmailForwardingAlias extends SystemBase {
 	public static $tablename = 'efa_email_forwarding_aliases';
 	public static $pkey_column = 'efa_email_forwarding_alias_id';
 
+	protected static $foreign_key_actions = [
+		'efa_efd_email_forwarding_domain_id' => ['action' => 'cascade'],
+	];
+
 	public static $field_specifications = array(
 		'efa_email_forwarding_alias_id'        => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'efa_efd_email_forwarding_domain_id'   => array('type'=>'int4', 'is_nullable'=>false),

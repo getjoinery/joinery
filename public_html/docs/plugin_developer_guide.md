@@ -179,7 +179,7 @@ class MyData extends SystemBase {
 }
 ```
 
-**Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, and the deletion system, see the [Deletion System Documentation](deletion_system.md).
+**Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, soft-delete cascading patterns, and undelete strategies, see the [Deletion System Documentation](deletion_system.md).
 
 ### Business Logic Files
 
