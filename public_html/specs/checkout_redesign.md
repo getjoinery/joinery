@@ -370,7 +370,7 @@ Replace the standard site header/navigation with a minimal checkout header:
 - "Secure Checkout" text (center) with lock icon
 - No main navigation links -- removes distractions per best practice
 
-This is done by passing a `'checkout_mode' => true` option to `public_header()` which renders the minimal header.
+This is done by passing a `'noheader' => true` option to `public_header()` which renders the minimal header.
 
 ### Progress Indicator
 Above the accordion, show a lightweight progress bar or step indicator:
@@ -390,7 +390,7 @@ The checkout redesign evolves the existing `/cart` page in place rather than cre
 **Modified files:**
 - `/views/cart.php` -- Redesigned with accordion UI, order summary sidebar, login modal, checkout-mode header
 - `/logic/cart_logic.php` -- Refactored to support AJAX section validation. Extract billing validation into a reusable function callable from both the page POST flow (fallback) and the AJAX endpoint
-- `/includes/PublicPage.php` (or theme override) -- Add `checkout_mode` header option for minimal header
+- `/includes/PublicPage.php` (or theme override) -- Add `noheader` header option for minimal header
 - `/views/cart_confirm.php` -- Add inline post-purchase survey rendering
 
 **Unchanged:**
