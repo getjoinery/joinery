@@ -318,8 +318,8 @@
 						<?php endif; ?>
 
 						<?php if($event->get('evt_description')): ?>
-							<p class="<?php echo $event->get('evt_short_description') ? 'mt-3' : ''; ?>"><strong>Full Description:</strong><br>
-							<?php echo nl2br(htmlspecialchars($event->get('evt_description'))); ?></p>
+							<p class="<?php echo $event->get('evt_short_description') ? 'mt-3' : ''; ?>"><strong>Full Description:</strong></p>
+							<div><?php echo $event->get('evt_description'); ?></div>
 						<?php endif; ?>
 					</div>
 				</div>

@@ -226,7 +226,7 @@ if($num_event_types){
 	]);
 }
 
-$optionvals = array(1=>"Allow", 0=>"Prevent");
+$optionvals = array(0=>"Prevent", 1=>"Allow");
 $formwriter->dropinput('evt_allow_waiting_list', 'Waiting list', [
 	'options' => $optionvals
 ]);
@@ -245,6 +245,10 @@ $formwriter->textbox('evt_private_info', 'Info only for registrants', [
 	'rows' => 10,
 	'cols' => 80,
 	'htmlmode' => 'yes'
+]);
+
+$formwriter->textinput('evt_custom_registration_message', 'Custom registration message (replaces default when no register button)', [
+	'maxlength' => 255
 ]);
 
 echo '</div>';
