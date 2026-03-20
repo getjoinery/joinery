@@ -117,6 +117,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_svy_survey_id' => array('type'=>'int4'),
 	    'evt_survey_required' => array('type'=>'int2'),
 	    'evt_loc_location_id' => array('type'=>'int4'),
+	    'evt_custom_registration_message' => array('type'=>'varchar(255)', 'is_nullable'=>true),
 
 	    // Recurrence pattern fields (set on parent events)
 	    'evt_recurrence_type' => array('type'=>'varchar(20)', 'is_nullable'=>true),

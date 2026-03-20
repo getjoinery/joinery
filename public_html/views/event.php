@@ -130,33 +130,6 @@ $page->public_header($page_options);
                             </div>
                         </div>
 
-                        <!-- Location Details -->
-                        <?php if ($page_vars['location_object']): ?>
-                        <div class="bg-white rounded-4 shadow-sm p-4">
-                            <h3 class="mb-3">Location: <?php echo $page_vars['location_object']->get('loc_name'); ?></h3>
-
-                            <?php if ($page_vars['location_object']->get('loc_address')): ?>
-                            <p class="mb-2">&#128205; <?php echo $page_vars['location_object']->get('loc_address'); ?></p>
-                            <?php endif; ?>
-
-                            <?php if ($page_vars['location_object']->get('loc_website')): ?>
-                            <p class="mb-3">&#127760; <a href="<?php echo $page_vars['location_object']->get('loc_website'); ?>" target="_blank"><?php echo $page_vars['location_object']->get('loc_website'); ?></a></p>
-                            <?php endif; ?>
-
-                            <?php if ($page_vars['location_picture']): ?>
-                            <div class="mb-3">
-                                <img src="<?php echo $page_vars['location_picture']; ?>" style="width: 100%; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);" alt="<?php echo htmlspecialchars($page_vars['location_object']->get('loc_name')); ?>">
-                            </div>
-                            <?php endif; ?>
-
-                            <?php if ($page_vars['location_object']->get('loc_description')): ?>
-                            <div class="mb-3">
-                                <?php echo $page_vars['location_object']->get('loc_description'); ?>
-                            </div>
-                            <?php endif; ?>
-                        </div>
-                        <?php endif; ?>
-
                     </div>
                 </main>
 
@@ -186,6 +159,33 @@ $page->public_header($page_options);
                     <div class="widget bg-white rounded-4 shadow-sm p-4 mb-4">
                         <h4 class="mb-3">Registration</h4>
                         <p class="mb-0" style="color: var(--color-muted);">Registration is not yet open for this date.</p>
+                    </div>
+                    <?php endif; ?>
+
+                    <!-- Location Widget -->
+                    <?php if ($page_vars['location_object']): ?>
+                    <div class="widget bg-white rounded-4 shadow-sm p-4 mb-4">
+                        <h4 class="mb-3">Location: <?php echo $page_vars['location_object']->get('loc_name'); ?></h4>
+
+                        <?php if ($page_vars['location_object']->get('loc_address')): ?>
+                        <p class="mb-2">&#128205; <?php echo $page_vars['location_object']->get('loc_address'); ?></p>
+                        <?php endif; ?>
+
+                        <?php if ($page_vars['location_object']->get('loc_website')): ?>
+                        <p class="mb-3">&#127760; <a href="<?php echo $page_vars['location_object']->get('loc_website'); ?>" target="_blank"><?php echo $page_vars['location_object']->get('loc_website'); ?></a></p>
+                        <?php endif; ?>
+
+                        <?php if ($page_vars['location_picture']): ?>
+                        <div class="mb-3">
+                            <img src="<?php echo $page_vars['location_picture']; ?>" style="width: 100%; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);" alt="<?php echo htmlspecialchars($page_vars['location_object']->get('loc_name')); ?>">
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if ($page_vars['location_object']->get('loc_description')): ?>
+                        <div>
+                            <?php echo $page_vars['location_object']->get('loc_description'); ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     <?php endif; ?>
 
