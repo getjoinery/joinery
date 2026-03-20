@@ -151,7 +151,23 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 	}
-	
+
+	// Custom registration message: replaces auto-generated message in "dead end" states
+	// (no register/waitlist buttons, not completed/cancelled)
+	$custom_reg_msg = $event->get('evt_custom_registration_message');
+	if ($custom_reg_msg) {
+		$custom_reg_msg = htmlspecialchars($custom_reg_msg);
+		if ($registration_message && empty($register_urls) && !$is_registered
+			&& $event->get('evt_status') != Event::STATUS_COMPLETED
+			&& $event->get('evt_status') != Event::STATUS_CANCELED) {
+			// Dead end states: replace the generic message
+			$registration_message = $custom_reg_msg;
+		} elseif (empty($registration_message) && !$is_registered) {
+			// Open + not full: show as supplementary text alongside Register button
+			$registration_message = $custom_reg_msg;
+		}
+	}
+
 	$page_vars['registration_message'] = $registration_message;
 	$page_vars['view_course_link'] = $view_course_link;
 	$page_vars['register_link'] = $register_link;
