@@ -986,13 +986,14 @@ protected function getTableClasses() {
 4. **Clean uninstall** scripts for data cleanup
 5. **Version management** through plugin.json
 
-### For Theme Developers  
+### For Theme Developers
 1. **Framework consistency** - Match CSS framework to implementations
 2. **Accurate manifests** - theme.json should reflect actual code
 3. **View resolution** - Leverage the fallback chain effectively
 4. **Plugin integration** - Use data models, not direct plugin coupling
 5. **Asset management** - Proper theme asset organization
 6. **Abstract methods** - Implement required PublicPageBase methods
+7. **Base class render methods** - Call `$this->render_notification_icon($menu_data)` in `top_right_menu()` for notifications; override only if theme needs different markup
 
 ### For System Integration
 1. **Clear separation** - Plugins (backend) vs Themes (frontend)

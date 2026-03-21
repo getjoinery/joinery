@@ -232,6 +232,9 @@ class PublicPage extends PublicPageBase {
             ?>
         </nav>
 
+        <!-- Notification bell icon (provided by base class, override if needed) -->
+        <?php $this->render_notification_icon($menu_data); ?>
+
         <!-- CRITICAL: User menu (login/logout/profile) - ALWAYS include in header -->
         <div class="user-menu">
             <?php if ($session->is_logged_in()): ?>
@@ -534,6 +537,7 @@ Before declaring theme complete:
 - [ ] public_header() uses get_menu_data() for navigation
 - [ ] **public_header() includes user menu (login/logout/profile links)**
 - [ ] **public_header() includes shopping cart icon with item count**
+- [ ] **top_right_menu() calls `$this->render_notification_icon($menu_data)`** for notification bell
 - [ ] public_footer() uses Globalvars for site info
 - [ ] index.php uses actual HTML from source (not placeholders)
 - [ ] All image paths updated to `/theme/[name]/assets/images/`
@@ -575,6 +579,7 @@ tail -f /var/www/html/joinerytest/logs/error.log
 7. **Always check error logs** when debugging issues
 8. **Always include user menu (login/logout/profile)** in the header's utility/option area
 9. **Always include shopping cart icon** in the header's utility/option area (uses get_menu_data() cart data)
+10. **Always call `$this->render_notification_icon($menu_data)`** in `top_right_menu()` — this base class method renders the notification bell icon automatically; override it only if your theme needs different markup
 
 ## Footer Structure Pattern
 
