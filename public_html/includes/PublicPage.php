@@ -33,6 +33,9 @@ class PublicPage extends PublicPageBase {
             echo '</a>';
         }
 
+        // Notifications
+        $this->render_notification_icon($menu_data);
+
         // Admin link
         if ($user_menu['permission_level'] >= 5) {
             echo ' <a href="/admin" class="btn btn-sm btn-outline">Admin</a>';

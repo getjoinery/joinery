@@ -14,6 +14,7 @@ function admin_users_message_logic($get, $post) {
 	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 
 	$session = SessionControl::get_instance();
 	//$session->set_return();
@@ -141,6 +142,19 @@ function admin_users_message_logic($get, $post) {
 				$message->set('msg_sent_time', 'now()');
 				$message->save();
 
+				// In-app notification for event registrant
+				try {
+					$ntf_title = $event ? 'New message about ' . $event->get('evt_name') : 'New message from ' . $sender->display_name();
+					Notification::create_notification(
+						$recipient_user->key,
+						'message',
+						$ntf_title,
+						substr(strip_tags($post['eml_message']), 0, 100),
+						null,
+						$sender->key
+					);
+				} catch (Exception $e) { /* notification system not available */ }
+
 				$recipient_email = new EmailRecipient(NULL);
 				$recipient_email->set('erc_usr_user_id', $recipient_user->key);
 				$recipient_email->set('erc_email', $recipient_user->get('usr_email'));
@@ -244,6 +258,19 @@ function admin_users_message_logic($get, $post) {
 				$message->set('msg_sent_time', 'now()');
 				$message->save();
 
+				// In-app notification for group member
+				try {
+					$ntf_title = $group ? 'New message in ' . $group->get('grp_name') : 'New message from ' . $sender->display_name();
+					Notification::create_notification(
+						$recipient_user->key,
+						'message',
+						$ntf_title,
+						substr(strip_tags($post['eml_message']), 0, 100),
+						null,
+						$sender->key
+					);
+				} catch (Exception $e) { /* notification system not available */ }
+
 				$recipient_email = new EmailRecipient(NULL);
 				$recipient_email->set('erc_usr_user_id', $recipient_user->key);
 				$recipient_email->set('erc_email', $recipient_user->get('usr_email'));
@@ -305,6 +332,18 @@ function admin_users_message_logic($get, $post) {
 				$message->set('msg_body', $post['eml_message']);
 				$message->set('msg_sent_time', 'now()');
 				$message->save();
+
+				// In-app notification
+				try {
+					Notification::create_notification(
+						$recipient->key,
+						'message',
+						'New message from ' . $sender->display_name(),
+						substr(strip_tags($post['eml_message']), 0, 100),
+						null,
+						$sender->key
+					);
+				} catch (Exception $e) { /* notification system not available */ }
 
 				$recipient_email = new EmailRecipient(NULL);
 				$recipient_email->set('erc_usr_user_id', $recipient->key);

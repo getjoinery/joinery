@@ -19,7 +19,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/product_details_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_registrants_class.php')); 
 	require_once(PathHelper::getIncludePath('data/coupon_codes_class.php')); 
-	require_once(PathHelper::getIncludePath('data/coupon_code_uses_class.php')); 
+	require_once(PathHelper::getIncludePath('data/coupon_code_uses_class.php'));
+	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
 	
 			
 	$page_vars = array();
@@ -409,11 +410,23 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					}
 				}
 			}
+
+			// In-app notification: subscription confirmed
+			try {
+				Notification::create_notification(
+					$user->key,
+					'subscription',
+					'Your ' . $product->get('pro_name') . ' subscription is active',
+					'Order #' . $order->key,
+					'/profile#orders',
+					null
+				);
+			} catch (Exception $e) { /* notification system not available */ }
 		}
 		else{
 			//IT WAS PAID ABOVE
 			$order_item->set('odi_status', OrderItem::STATUS_PAID);
-			$order_item->save();	
+			$order_item->save();
 
 			//SEND NOTIFICATION
 			if($settings->get_setting('single_purchase_notification_emails')){
@@ -446,8 +459,19 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				}
 			}
 
+			// In-app notification: purchase confirmed
+			try {
+				Notification::create_notification(
+					$user->key,
+					'order',
+					'Your purchase is confirmed: ' . $product->get('pro_name'),
+					'Order #' . $order->key,
+					'/profile#orders',
+					null
+				);
+			} catch (Exception $e) { /* notification system not available */ }
 		}
-			
+
 		//ATTACH USERS TO THE RIGHT EVENTS/COURSES
 		if($product->get('pro_evt_event_id')){
 							
@@ -460,6 +484,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$order_item->save();
 
 			$email_fill['event_registrant_id'] = $event_registrant->key;
+
+			// In-app notification: event registration
+			try {
+				Notification::create_notification(
+					$user->key,
+					'event',
+					"You're registered for " . $event->get('evt_name'),
+					null,
+					'/event/' . $event->get('evt_link'),
+					null
+				);
+			} catch (Exception $e) { /* notification system not available */ }
 
 			$template = 'event_reciept_content';
 			

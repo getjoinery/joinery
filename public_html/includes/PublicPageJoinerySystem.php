@@ -436,7 +436,14 @@ class PublicPageJoinerySystem extends PublicPageBase {
         </li>
         <?php endif;
 
-        // --- Admin nine-dots menu ---
+        // --- Notifications ---
+        if ($menu_data['notifications']['enabled']): ?>
+        <li class="nav-item" style="position:relative;">
+          <?php $this->render_notification_icon($menu_data); ?>
+        </li>
+        <?php endif; ?>
+
+        <?php // --- Admin nine-dots menu ---
         if ($user_menu['permission_level'] >= 5): ?>
         <li class="nav-item dropdown">
           <button class="nav-link" type="button" data-toggle="dropdown" aria-label="Admin menu" style="padding:0.4rem 0.5rem;">
