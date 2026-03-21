@@ -251,6 +251,32 @@ $formwriter->textinput('evt_custom_registration_message', 'Custom registration m
 	'maxlength' => 255
 ]);
 
+// Survey link
+require_once(PathHelper::getIncludePath('data/surveys_class.php'));
+$surveys = new MultiSurvey(array('deleted'=>false));
+$surveys->load();
+$survey_options = array();
+foreach ($surveys as $survey) {
+	$survey_options[$survey->key] = $survey->get('svy_name');
+}
+if (!empty($survey_options)) {
+	$formwriter->dropinput('evt_svy_survey_id', 'Event Survey', [
+		'options' => $survey_options,
+		'showdefault' => 'No Survey'
+	]);
+
+	$display_options = array(
+		'none' => 'No survey',
+		'required_before_purchase' => 'Required before purchase (on product page)',
+		'optional_at_confirmation' => 'Optional at confirmation (shown after purchase)',
+		'after_event' => 'After event (sent via email after event ends)',
+	);
+	$formwriter->dropinput('evt_survey_display', 'Survey display', [
+		'options' => $display_options,
+		'showdefault' => false
+	]);
+}
+
 echo '</div>';
 
 $formwriter->submitbutton('btn_submit', 'Submit');

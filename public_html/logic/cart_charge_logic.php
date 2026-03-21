@@ -1,6 +1,16 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
+/**
+ * Save a payment error to session and return a redirect to /cart.
+ * This ensures all payment errors show on the checkout page instead of throwing exceptions.
+ */
+function _checkout_error($message) {
+	$session = SessionControl::get_instance();
+	$session->save_message(new DisplayMessage($message, 'Payment Error', null, DisplayMessage::MESSAGE_ERROR));
+	return LogicResult::redirect('/cart');
+}
+
 function cart_charge_logic($get_vars, $post_vars){
 
 	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
@@ -24,16 +34,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 			
 	$page_vars = array();
-	
+
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
-	
-	
+
+  try {
+
 	if(!$settings->get_setting('products_active')){
-		return LogicResult::error('This feature is turned off');
+		return _checkout_error('Purchasing is currently unavailable. Please try again later.');
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
@@ -89,7 +100,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		$billing_user = User::CreateCompleteNew($user_data, true, true, false);
 		if(!$billing_user){
-			return LogicResult::error("Failed to create or retrieve billing user.");
+			return _checkout_error("We couldn't create your account. Please check your information and try again.");
 		}
 	}
 	
@@ -107,12 +118,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			
 			if(!$order = Order::GetByStripeSession($session_id)){	
 				$error = 'Stripe returned bad or missing session id';
-				return LogicResult::error("Something went wrong with the order.  There was no stripe session ID returned.");				  
+				return _checkout_error("Your payment session could not be verified. Please try again.");				  
 			}
 			
 		} catch (StripeHelperException $e) {
 			error_log("Stripe session validation failed: " . $e->getMessage());
-			return LogicResult::error("Invalid payment session");
+			return _checkout_error("Your payment session has expired or is invalid. Please try again.");
 		}
 	}
 	else{
@@ -138,7 +149,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	foreach($cart->coupon_codes as $coupon_code_name){
 		$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim($coupon_code_name));
 		if(!$coupon_code_test->is_valid()){
-			return LogicResult::error("Sorry, one of the coupon codes is invalid.");				
+			return _checkout_error("One of your coupon codes is no longer valid. Please remove it and try again.");				
 		}
 		
 	}
@@ -177,7 +188,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$order->set('ord_error', $error);
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->save();
-				return LogicResult::error("Something went wrong with the order.  There was no paypal transaction ID returned.");
+				return _checkout_error("Your PayPal payment could not be verified. Please try again or use a different payment method.");
 			}
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_checkout' && $_GET['session_id']){
@@ -200,7 +211,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				
 				$log_error = "The credit card information was not submitted because your browser has javascript turned off or is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon) and turn off any script blockers.  For help, contact us at ".$settings->get_setting('defaultemail')." .";
 
-				return LogicResult::error($log_error);
+				return _checkout_error("Your credit card information could not be submitted. Please make sure you are using a secure connection (https) and that JavaScript is enabled.");
 			}	
 
 			$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
@@ -209,7 +220,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$payment_service = 'stripe_regular';
 		}
 		else{		
-			return LogicResult::error("Something went wrong with the order. Unable to determine checkout type.");
+			return _checkout_error("We couldn't process your payment. Please try again or contact support.");
 		}
 	}
 	else{
@@ -254,14 +265,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->set('ord_error', substr($e->getMessage(), 0, 250));
 				$order->save();
-				return LogicResult::error($e->getMessage());
+				return _checkout_error($e->getMessage());
 			}
 			catch (StripeHelperException $e) {
 				error_log("Stripe configuration error during payment: " . $e->getMessage());
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->set('ord_error', 'Stripe configuration error');
 				$order->save();
-				return LogicResult::error("Payment system configuration error. Please contact support at " . $settings->get_setting('defaultemail'));
+				$support_email = $settings->get_setting('defaultemail');
+				return _checkout_error("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".");
 			}
 
 			//STORE THE CHARGE ID
@@ -583,11 +595,34 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$order->set('ord_status', Order::STATUS_PAID);
 	$order->save();	
 	
+	// Collect optional surveys for confirmation page display
+	$confirmation_surveys = array();
+	foreach ($cart->items as $key => $cart_item) {
+		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+		if ($product->get('pro_evt_event_id')) {
+			require_once(PathHelper::getIncludePath('data/events_class.php'));
+			$evt = new Event($product->get('pro_evt_event_id'), TRUE);
+			if ($evt->get('evt_svy_survey_id') && $evt->get('evt_survey_display') === 'optional_at_confirmation') {
+				$confirmation_surveys[] = array(
+					'survey_id' => $evt->get('evt_svy_survey_id'),
+					'event_id' => $evt->key,
+					'event_name' => $evt->get('evt_name'),
+				);
+			}
+		}
+	}
+	$session->save_session_item('confirmation_surveys', $confirmation_surveys);
+
 	$cart->last_receipt = $receipts;
 	$cart->clear_cart();
-	
-	 
+
 	return LogicResult::render($page_vars);
+
+  } catch (Exception $e) {
+	error_log("Checkout error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+	$support_email = $settings->get_setting('defaultemail');
+	return _checkout_error("Something went wrong processing your order. Please try again" . ($support_email ? " or contact us at $support_email" : "") . ".");
+  }
 }
 
 ?>

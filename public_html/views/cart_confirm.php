@@ -72,6 +72,49 @@ $page->public_header([
                 </div>
             </div>
 
+            <!-- Optional Survey -->
+            <?php
+            $confirmation_surveys = $session->get_session_item('confirmation_surveys');
+            if (!empty($confirmation_surveys)):
+                require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));
+                require_once(PathHelper::getIncludePath('data/questions_class.php'));
+                foreach ($confirmation_surveys as $survey_info):
+                    $survey_questions = new MultiSurveyQuestion(
+                        array('survey_id' => $survey_info['survey_id'], 'deleted' => false),
+                        array('srq_order' => 'ASC')
+                    );
+                    $survey_questions->load();
+                    if (count($survey_questions) > 0):
+            ?>
+            <div id="survey-section-<?php echo $survey_info['survey_id']; ?>" style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; overflow: hidden;">
+                <div style="background: var(--color-light, #f8f9fa); padding: 1rem 1.5rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <h5 style="margin: 0;">We'd Love Your Feedback</h5>
+                    <small style="color: var(--color-muted);"><?php echo htmlspecialchars($survey_info['event_name'], ENT_QUOTES, 'UTF-8'); ?></small>
+                </div>
+                <div style="padding: 1.5rem;" id="survey-form-<?php echo $survey_info['survey_id']; ?>">
+                    <?php
+                    $formwriter = $page->getFormWriter('survey_form_' . $survey_info['survey_id']);
+                    foreach ($survey_questions as $sq) {
+                        $question = new Question($sq->get('srq_qst_question_id'), true);
+                        $field_name = 'confirm_survey_q_' . $question->key;
+                        $question->output_question($formwriter, null);
+                    }
+                    ?>
+                    <div style="margin-top: 1.25rem;">
+                        <button type="button" class="btn btn-primary" onclick="submitConfirmSurvey(<?php echo $survey_info['survey_id']; ?>, <?php echo $survey_info['event_id']; ?>)" style="width: 100%;">Submit Feedback</button>
+                    </div>
+                </div>
+                <div id="survey-thanks-<?php echo $survey_info['survey_id']; ?>" style="display: none; padding: 2rem; text-align: center;">
+                    <div style="font-size: 2rem; color: #198754; margin-bottom: 0.5rem;">&#10003;</div>
+                    <p style="color: var(--color-muted);">Thank you for your feedback!</p>
+                </div>
+            </div>
+            <?php
+                    endif;
+                endforeach;
+            endif;
+            ?>
+
             <!-- Next Steps -->
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem; text-align: center;">
                 <h5 style="margin-bottom: 0.75rem;">What's Next?</h5>
@@ -111,6 +154,39 @@ $page->public_header([
         </div>
     </div>
 </section>
+
+<script>
+function submitConfirmSurvey(surveyId, eventId) {
+    var form = document.getElementById('survey-form-' + surveyId);
+    if (!form) return;
+
+    // Collect all question answers from the form
+    var inputs = form.querySelectorAll('input, select, textarea');
+    var formData = new FormData();
+    formData.append('action', 'submit_survey');
+    formData.append('survey_id', surveyId);
+    formData.append('event_id', eventId);
+
+    inputs.forEach(function(input) {
+        if (input.type === 'checkbox') {
+            formData.append(input.name, input.checked ? input.value || '1' : '');
+        } else if (input.type === 'radio') {
+            if (input.checked) formData.append(input.name, input.value);
+        } else {
+            formData.append(input.name, input.value);
+        }
+    });
+
+    fetch('/ajax/checkout_ajax', { method: 'POST', body: formData })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                document.getElementById('survey-form-' + surveyId).style.display = 'none';
+                document.getElementById('survey-thanks-' + surveyId).style.display = 'block';
+            }
+        });
+}
+</script>
 
 <?php
 $page->public_footer(['track' => true]);

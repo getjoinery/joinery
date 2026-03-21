@@ -43,6 +43,16 @@
                 echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
             }
         }
+
+        // Survey reminders for incomplete surveys
+        if (!empty($page_vars['pending_surveys'])) {
+            foreach ($page_vars['pending_surveys'] as $ps) {
+                echo '<div class="alert alert-info" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;">';
+                echo '<div><strong>Feedback requested:</strong> Please complete the survey for <em>' . htmlspecialchars($ps['event_name'], ENT_QUOTES, 'UTF-8') . '</em></div>';
+                echo '<a href="/survey?survey_id=' . intval($ps['survey_id']) . '&event_id=' . intval($ps['event_id']) . '" class="btn btn-primary" style="font-size: 0.8125rem; padding: 0.375rem 0.875rem; margin-left: 1rem; white-space: nowrap;">Take Survey</a>';
+                echo '</div>';
+            }
+        }
         ?>
 
         <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">

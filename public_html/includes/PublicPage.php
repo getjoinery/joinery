@@ -100,6 +100,27 @@ class PublicPage extends PublicPageBase {
         if (isset($options['header_only']) && $options['header_only']) {
             return;
         }
+
+        // Store noheader option for use in public_footer
+        $this->_noheader = !empty($options['noheader']);
+
+        if ($this->_noheader) {
+?>
+<header class="site-header header-light" style="border-bottom: 1px solid var(--color-border, #eee);">
+    <div class="header-inner" style="justify-content: center; position: relative;">
+        <a href="/" class="logo" style="position: absolute; left: 1.5rem;" onclick="return confirm('Leave checkout? Your cart will be saved.');">
+            <?php $this->get_logo(); ?>
+        </a>
+        <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1.0625rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Secure Checkout
+        </div>
+    </div>
+</header>
+
+<main class="main-content">
+<?php
+        } else {
 ?>
 <header class="site-header header-light">
     <div class="header-inner">
@@ -140,6 +161,7 @@ class PublicPage extends PublicPageBase {
 
 <main class="main-content">
 <?php
+        }
     }
 
     public function public_footer($options = array()) {
@@ -148,6 +170,12 @@ class PublicPage extends PublicPageBase {
         $settings = Globalvars::get_instance();
 
         if (!isset($options['header_only']) || !$options['header_only']) {
+            if (!empty($this->_noheader)) {
+                // Minimal footer for checkout mode
+?>
+</main>
+<?php
+            } else {
 ?>
 </main>
 
@@ -159,6 +187,7 @@ class PublicPage extends PublicPageBase {
     </div>
 </footer>
 <?php
+            }
         }
 ?>
     <script src="/assets/js/joinery-validate.js"></script>
