@@ -101,9 +101,9 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/data/` - Database model classes using Active Record pattern (`[table]_class.php`)
 - `/logic/` - Business logic layer using LogicResult pattern (`[page]_logic.php`) [📖 See Logic Architecture Guide](docs/logic_architecture.md)
 - `/views/` - Base presentation templates
-- `/adm/` - Complete admin interface (currently uses Falcon theme)
+- `/adm/` - Complete admin interface (uses PublicPageJoinerySystem theme)
 - `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterHTML5, LogicResult, etc.)
-- `/theme/` - Multi-theme system (falcon=Bootstrap, tailwind=legacy Tailwind CSS option)
+- `/theme/` - Multi-theme system (active public theme: `default`, using PublicPage extending PublicPageBase)
 - `/plugins/` - Self-contained modules with own MVC structure
 - `/ajax/` - AJAX endpoints and webhook handlers
 - `/api/` - REST API with key-based authentication

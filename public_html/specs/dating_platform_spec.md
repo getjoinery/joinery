@@ -39,32 +39,7 @@ These are core user attributes. The `usr_users` table already has profile-type f
 
 ### 1.2 Notification Center
 
-**Problem:** The platform sends emails but has no in-app notification system. Every interactive platform needs this.
-
-**New Model: `notifications`**
-- `ntf_notification_id` (serial, primary key)
-- `ntf_usr_user_id` (int4, FK) - Recipient
-- `ntf_type` (varchar 50) - Category: 'message', 'like', 'match', 'system', 'event', etc.
-- `ntf_title` (varchar 255)
-- `ntf_body` (text)
-- `ntf_link` (varchar 255) - URL to navigate to on click
-- `ntf_is_read` (bool, default false)
-- `ntf_read_time` (timestamp)
-- `ntf_source_usr_user_id` (int4, nullable) - User who triggered it
-- `ntf_source_type` (varchar 50) - Entity type: 'user', 'event', 'order', etc.
-- `ntf_source_id` (int4, nullable) - Entity ID
-- `ntf_create_time` / `ntf_delete_time` (timestamps)
-
-**Existing UI Scaffolding:** The page header templates already have notification UI in place -- bell icon, unread count badge, and dropdown panel -- wired to `$menu_data['notifications']` in `PublicPageBase::get_menu_data()`. Currently disabled via `enabled => false` placeholder. Implementation needs to: create the data model, populate `get_menu_data()` with real counts/items, and fill in the dropdown content. The Falcon theme (`PublicPageFalcon.php`) and Tailwind theme (`PublicPageTailwind.php`) both have rendering code ready.
-
-**Delivery:** Notifications are always created in-app. Email delivery is controlled per-user via notification preferences (new setting per notification type).
-
-**New Model: `notification_preferences`**
-- `ntp_notification_preference_id` (serial, primary key)
-- `ntp_usr_user_id` (int4, FK)
-- `ntp_type` (varchar 50) - Matches notification type
-- `ntp_email_enabled` (bool, default true)
-- `ntp_in_app_enabled` (bool, default true)
+See **[Notification Center Spec](notification_center_spec.md)** for full details on the in-app notification system, data models (`notifications`, `notification_preferences`), existing UI scaffolding, and delivery strategy.
 
 ### 1.3 User Discovery / Member Directory
 
