@@ -196,6 +196,19 @@ class SubscriptionTier extends SystemBase {
                 'subscription_expired'
             );
 
+            // In-app notification: subscription expired
+            try {
+                require_once(PathHelper::getIncludePath('data/notifications_class.php'));
+                Notification::create_notification(
+                    $user_id,
+                    'subscription',
+                    'Your ' . $current_tier->get('sbt_name') . ' subscription has expired',
+                    'Your subscription tier access has been removed.',
+                    '/pricing',
+                    null
+                );
+            } catch (Exception $e) { /* notification system not available */ }
+
             self::clearUserCache($user_id);
         }
     }
