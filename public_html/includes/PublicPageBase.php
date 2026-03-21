@@ -308,14 +308,32 @@ abstract class PublicPageBase {
 			'has_items' => ($item_count > 0)
 		];
 
-		// 4. Notifications (placeholder for future implementation)
-		// No notifications system exists yet
+		// 4. Notifications
 		$menu_data['notifications'] = [
 			'enabled' => false,
-			'count' => 0,
 			'unread_count' => 0,
-			'items' => []
+			'view_all_link' => '/notifications',
 		];
+
+		if ($is_logged_in) {
+			try {
+				$unread_count = isset($_SESSION['notification_unread_count']) ? $_SESSION['notification_unread_count'] : null;
+				if ($unread_count === null) {
+					// Cache miss — single COUNT query, no object loading
+					require_once(PathHelper::getIncludePath('data/notifications_class.php'));
+					$unread_count = Notification::get_unread_count($session->get_user_id());
+					$_SESSION['notification_unread_count'] = $unread_count;
+				}
+
+				$menu_data['notifications'] = [
+					'enabled' => true,
+					'unread_count' => (int)$unread_count,
+					'view_all_link' => '/notifications',
+				];
+			} catch (Exception $e) {
+				// Notification system not yet installed or query failed — keep disabled
+			}
+		}
 
 		// 5. Site information
 		$menu_data['site_info'] = [
@@ -1248,6 +1266,27 @@ abstract class PublicPageBase {
 			}
 		</style>
 		<?php
+	}
+
+	/**
+	 * Render the notification bell icon for the header.
+	 * Called from each theme's top_right_menu(). Themes can override for custom markup.
+	 */
+	public function render_notification_icon($menu_data = null) {
+		if ($menu_data === null) {
+			$menu_data = $this->get_menu_data();
+		}
+		$notifications = $menu_data['notifications'];
+		if (!$notifications['enabled']) {
+			return;
+		}
+		$unread = (int)$notifications['unread_count'];
+		echo '<a href="' . htmlspecialchars($notifications['view_all_link'], ENT_QUOTES, 'UTF-8') . '" class="header-notifications-link" title="Notifications">';
+		echo '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+		if ($unread > 0) {
+			echo '<span class="notifications-count">' . $unread . '</span>';
+		}
+		echo '</a>';
 	}
 
 	/**

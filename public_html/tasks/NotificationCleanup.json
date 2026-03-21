@@ -1,0 +1,9 @@
+{
+    "name": "Notification Cleanup",
+    "description": "Permanently deletes read notifications older than a configurable number of days",
+    "default_frequency": "daily",
+    "default_time": "03:00:00",
+    "config_fields": {
+        "retention_days": {"type": "number", "label": "Days to keep read notifications", "required": true}
+    }
+}
