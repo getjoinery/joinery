@@ -42,6 +42,9 @@ The system now supports a hybrid approach where:
 
 ### Route Processing Order
 
+> For complete routing documentation (adding pages, route options, common patterns), see **[Routing](routing.md)**.
+> This section covers how routing interacts with plugins and themes.
+
 Routes are processed in this order:
 1. **Static routes** - Direct file serving with caching
 2. **Theme routes** - Theme-specific routing (serve.php in theme directory)
