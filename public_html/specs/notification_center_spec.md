@@ -54,7 +54,7 @@ $menu_data['notifications'] = [
     'items' => []
 ];
 ```
-The `get_menu_data()` spec (`specs/implemented/get_menu_data_spec.md`) documents this structure. Implementation needs to: create the data model, query unread counts, populate `items`, and flip `enabled` to `true`.
+The `get_menu_data()` spec (`specs/implemented/get_menu_data_spec.md`) documents this structure. Implementation replaces this with a session-cached unread count (no object loading on every page) and flips `enabled` to `true`. The `items` array and `count` fields are dropped — only `enabled`, `unread_count`, and `view_all_link` are needed.
 
 ### No Notification UI in Active Theme
 
@@ -103,8 +103,9 @@ ajax/
 ```
 
 **Existing files to modify:**
-- `includes/PublicPageBase.php` — `get_menu_data()`: replace placeholder with real query
-- `includes/PublicPage.php` — `top_right_menu()`: add bell icon + unread badge
+- `includes/PublicPageBase.php` — `get_menu_data()`: replace placeholder with real query; add `render_notification_icon()` method
+- `includes/PublicPage.php` — `top_right_menu()`: call `$this->render_notification_icon($menu_data)`
+- `includes/PublicPageJoinerySystem.php` — `top_right_menu()`: call `$this->render_notification_icon($menu_data)` (admin interface)
 
 ---
 
@@ -187,45 +188,31 @@ class MultiNotification extends SystemMultiBase {
 
 ### Populating `get_menu_data()` (PublicPageBase)
 
-Replace the placeholder block at `PublicPageBase.php:311-318` with a real query, following the cart pattern at lines 286-309:
+Replace the placeholder block at `PublicPageBase.php:311-318`. The header only needs the unread count — no object loading. The count is cached in the session to avoid a DB query on every page load.
+
+**Session cache approach:** `create_notification()` and the AJAX `mark_read`/`mark_all_read` actions invalidate the cached count. On the next page load, `get_menu_data()` does a single `SELECT COUNT(*)` and re-caches it. All other page loads use the cached value with zero DB cost.
 
 ```php
 // 4. Notifications
 $menu_data['notifications'] = [
     'enabled' => false,
-    'count' => 0,
     'unread_count' => 0,
-    'items' => []
+    'view_all_link' => '/notifications',
 ];
 
 if ($is_logged_in) {
     try {
-        require_once(PathHelper::getIncludePath('data/notifications_class.php'));
-        $unread = new MultiNotification(
-            ['user_id' => $session->get_user_id(), 'unread_only' => true, 'deleted' => false],
-            ['ntf_create_time' => 'DESC'],
-            5  // limit: only need a few for dropdown
-        );
-        $unread_count = $unread->count_all();
-        $unread->load();
-
-        $items = [];
-        foreach ($unread as $ntf) {
-            $items[] = [
-                'id'    => $ntf->get('ntf_notification_id'),
-                'title' => $ntf->get('ntf_title'),
-                'body'  => $ntf->get('ntf_body'),
-                'link'  => $ntf->get('ntf_link'),
-                'time'  => $ntf->get('ntf_create_time'),
-                'type'  => $ntf->get('ntf_type'),
-            ];
+        $unread_count = $session->get('notification_unread_count');
+        if ($unread_count === null) {
+            // Cache miss — single COUNT query, no object loading
+            require_once(PathHelper::getIncludePath('data/notifications_class.php'));
+            $unread_count = Notification::get_unread_count($session->get_user_id());
+            $session->set('notification_unread_count', $unread_count);
         }
 
         $menu_data['notifications'] = [
             'enabled' => true,
-            'count' => $unread_count,
-            'unread_count' => $unread_count,
-            'items' => $items,
+            'unread_count' => (int)$unread_count,
             'view_all_link' => '/notifications',
         ];
     } catch (Exception $e) {
@@ -234,23 +221,72 @@ if ($is_logged_in) {
 }
 ```
 
+**`Notification::get_unread_count()`** — lightweight static method, no model instantiation:
+
+```php
+public static function get_unread_count($user_id) {
+    $dbconnector = DbConnector::get_instance();
+    $dblink = $dbconnector->get_db_link();
+    $sql = "SELECT COUNT(*) FROM ntf_notifications
+            WHERE ntf_usr_user_id = ? AND ntf_is_read = false AND ntf_delete_time IS NULL";
+    $q = $dblink->prepare($sql);
+    $q->execute([$user_id]);
+    return (int)$q->fetchColumn();
+}
+```
+
+**Cache invalidation:** `create_notification()` and the AJAX mark-read actions clear the cached count:
+
+```php
+// In create_notification(), after save:
+$session = SessionControl::get_instance();
+if ($session->get_user_id() == $recipient_user_id) {
+    // Recipient is the current user (unlikely but possible for system notifications)
+    $session->set('notification_unread_count', null);
+}
+
+// In notifications_ajax.php, after mark_read / mark_all_read:
+$session->set('notification_unread_count', null);
+```
+
+**Note:** When another user triggers a notification for someone else (the common case), the recipient's session cache is stale until their next page load after cache expiry or their next explicit count refresh via AJAX. This is acceptable — the bell updates on next navigation, not in real-time. Real-time push is a post-MVP enhancement.
+
 The `try/catch` is important: if the `ntf_notifications` table doesn't exist yet (e.g., during rollout), the header silently degrades to no bell icon rather than crashing.
 
 ---
 
-### Header UI (PublicPage `top_right_menu()`)
+### Header UI: `render_notification_icon()` on PublicPageBase
 
-Add a bell icon between the cart and admin link in `PublicPage.php:top_right_menu()`, following the cart icon pattern at lines 28-34:
+`PublicPageBase` already has `render_` methods (`render_admin_bar()`, `render_admin_bar_css()`). Add `render_notification_icon()` to the base class so all themes get notification support automatically. Themes that need different markup can override it.
 
 ```php
-// Notifications bell (between cart and admin link)
-$notifications = $menu_data['notifications'];
-if ($notifications['enabled'] && $notifications['unread_count'] > 0) {
-    echo '<a href="' . htmlspecialchars($notifications['view_all_link'], ENT_QUOTES, 'UTF-8') . '" class="header-notifications-link" title="' . (int)$notifications['unread_count'] . ' unread notifications">';
+// In PublicPageBase
+public function render_notification_icon($menu_data = null) {
+    if ($menu_data === null) {
+        $menu_data = $this->get_menu_data();
+    }
+    $notifications = $menu_data['notifications'];
+    if (!$notifications['enabled']) {
+        return;
+    }
+    $unread = (int)$notifications['unread_count'];
+    echo '<a href="' . htmlspecialchars($notifications['view_all_link'], ENT_QUOTES, 'UTF-8') . '" class="header-notifications-link" title="Notifications">';
     echo '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
-    echo '<span class="notifications-count">' . (int)$notifications['unread_count'] . '</span>';
+    if ($unread > 0) {
+        echo '<span class="notifications-count">' . $unread . '</span>';
+    }
     echo '</a>';
 }
+```
+
+Themes call it from their `top_right_menu()`, passing the `$menu_data` they already have:
+
+```php
+// In any theme's top_right_menu()
+$menu_data = $this->get_menu_data();
+// ... cart icon ...
+$this->render_notification_icon($menu_data);
+// ... admin link, user menu ...
 ```
 
 For Phase 1, clicking the bell goes to the full `/notifications` page. A dropdown could be added later.
@@ -459,17 +495,60 @@ These are the places in the codebase where user-facing events happen that should
 
 ---
 
+## Cleanup: `NotificationCleanup` Scheduled Task
+
+Read notifications older than 30 days are permanently deleted by a scheduled task. Follows the existing `ScheduledTaskInterface` pattern.
+
+**`tasks/NotificationCleanup.json`:**
+```json
+{
+    "name": "Notification Cleanup",
+    "description": "Permanently deletes read notifications older than 30 days",
+    "default_frequency": "daily",
+    "default_time": "03:00:00",
+    "config_fields": {
+        "retention_days": {"type": "number", "label": "Days to keep read notifications", "required": true}
+    }
+}
+```
+
+**`tasks/NotificationCleanup.php`:**
+```php
+class NotificationCleanup implements ScheduledTaskInterface {
+    public function run(array $config) {
+        $retention_days = isset($config['retention_days']) ? (int)$config['retention_days'] : 30;
+
+        $dbconnector = DbConnector::get_instance();
+        $dblink = $dbconnector->get_db_link();
+        $sql = "DELETE FROM ntf_notifications
+                WHERE ntf_is_read = true
+                AND ntf_read_time < NOW() - INTERVAL '{$retention_days} days'";
+        $q = $dblink->prepare($sql);
+        $q->execute();
+        $deleted = $q->rowCount();
+
+        return ['status' => 'success', 'message' => "Deleted $deleted read notifications older than $retention_days days"];
+    }
+}
+```
+
+Activate via **Admin > System > Scheduled Tasks** after deployment.
+
+---
+
 ## MVP Scope
 
 **Phase 1:**
 - Notification data model, Multi class, AJAX endpoint
-- Bell icon with unread count in header
+- Bell icon with unread count in header (public + admin)
 - Full notification list page at `/notifications`
+- Session-cached unread count (no DB hit per page load)
 - `create_notification()` wired into the highest-value points:
   - New messages (admin → user)
   - Event registration confirmed
   - Purchase/subscription confirmed
   - Subscription expired
+- `NotificationCleanup` scheduled task
 - All notification types enabled (no per-type preferences yet)
 
 **Phase 2:**
