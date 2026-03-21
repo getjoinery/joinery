@@ -440,7 +440,22 @@ public function get_requirement_info($output='text') {
 
 	function get_product_requirements() {
 		require_once(PathHelper::getIncludePath('includes/requirements/AbstractProductRequirement.php'));
-		return AbstractProductRequirement::getProductRequirements($this->key);
+		$requirements = AbstractProductRequirement::getProductRequirements($this->key);
+
+		// Auto-add SurveyRequirement if this product's event has a required pre-purchase survey
+		if ($this->get('pro_evt_event_id')) {
+			require_once(PathHelper::getIncludePath('data/events_class.php'));
+			$event = new Event($this->get('pro_evt_event_id'), TRUE);
+			if ($event->get('evt_svy_survey_id') && $event->get('evt_survey_display') === 'required_before_purchase') {
+				require_once(PathHelper::getIncludePath('includes/requirements/SurveyRequirement.php'));
+				$requirements[] = AbstractProductRequirement::createInstance('SurveyRequirement', [
+					'survey_id' => $event->get('evt_svy_survey_id'),
+					'event_id' => $event->key,
+				]);
+			}
+		}
+
+		return $requirements;
 	}
 
 	function validate_form($form_data, $session) {
@@ -606,7 +621,7 @@ public function get_requirement_info($output='text') {
 		echo '</script>';
 	}
 
-	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL) {
+	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL, $prefill_data=NULL) {
 		$settings = Globalvars::get_instance();
 		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
@@ -616,7 +631,8 @@ public function get_requirement_info($output='text') {
 			$version = $versions->get(0);
 
 			if($version->get('prv_price_type') == 'user'){
-				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')', ['size' => 100, 'maxlength' => 5]);
+				$prefill_price = ($prefill_data && isset($prefill_data['user_price_override'])) ? $prefill_data['user_price_override'] : '';
+				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')', ['size' => 100, 'maxlength' => 5, 'value' => $prefill_price]);
 			}
 			else{
 				$formwriter->hiddeninput('product_version', '', ['value' => $version->get('prv_product_version_id')]);
@@ -625,6 +641,9 @@ public function get_requirement_info($output='text') {
 		else if ($this->count_product_versions() > 1) {
 			if($product_version_id){
 				$selected = $product_version_id;
+			}
+			if ($prefill_data && isset($prefill_data['product_version'])) {
+				$selected = $prefill_data['product_version'];
 			}
 
 			$version_dropdown = array();
@@ -648,10 +667,42 @@ public function get_requirement_info($output='text') {
 				$existing_data['usr_last_name'] = $user->get('usr_last_name');
 				$existing_data['usr_email'] = $user->get('usr_email');
 			}
+			// Merge in prefill data from cart item when editing
+			if ($prefill_data) {
+				$existing_data = array_merge($existing_data, $prefill_data);
+			}
 
-			// Render all requirements via the AbstractProductRequirement
+			// Group requirements by form group for card-based layout
+			$groups = array();
 			foreach ($this->get_product_requirements() as $requirement) {
-				$requirement->render_fields($formwriter, $this, $existing_data);
+				$group = $requirement->getFormGroup();
+				if (!isset($groups[$group])) {
+					$groups[$group] = array();
+				}
+				$groups[$group][] = $requirement;
+			}
+
+			$group_labels = array(
+				'info' => 'Your Information',
+				'address' => 'Address',
+				'questions' => 'Additional Questions',
+			);
+
+			// If only one group, skip card wrappers
+			$use_cards = (count($groups) > 1);
+
+			foreach ($groups as $group_key => $requirements) {
+				if ($use_cards) {
+					$label = isset($group_labels[$group_key]) ? $group_labels[$group_key] : ucfirst($group_key);
+					echo '<div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1.25rem; margin-bottom: 1rem;">';
+					echo '<h5 style="margin: 0 0 1rem; font-size: 1rem; font-weight: 600;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</h5>';
+				}
+				foreach ($requirements as $requirement) {
+					$requirement->render_fields($formwriter, $this, $existing_data);
+				}
+				if ($use_cards) {
+					echo '</div>';
+				}
 			}
 		}
 

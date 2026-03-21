@@ -218,6 +218,37 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
+	// Pending surveys: find event registrations with incomplete surveys
+	$pending_surveys = array();
+	if ($session->get_user_id()) {
+		require_once(PathHelper::getIncludePath('data/events_class.php'));
+		$user_registrations = new MultiEventRegistrant(
+			array('user_id' => $session->get_user_id(), 'deleted' => false),
+			array('evr_create_time' => 'DESC')
+		);
+		$user_registrations->load();
+		foreach ($user_registrations as $reg) {
+			if ($reg->get('evr_survey_completed')) continue;
+			$event = new Event($reg->get('evr_evt_event_id'), TRUE);
+			$display = $event->get('evt_survey_display');
+			if (!$event->get('evt_svy_survey_id')) continue;
+			if ($display === 'optional_at_confirmation' || $display === 'after_event') {
+				// For after_event, only show if event has ended
+				if ($display === 'after_event') {
+					$now_utc = gmdate('Y-m-d H:i:s');
+					$end_time = $event->get('evt_end_time') ?: $event->get('evt_start_time');
+					if ($end_time > $now_utc) continue;
+				}
+				$pending_surveys[] = array(
+					'survey_id' => $event->get('evt_svy_survey_id'),
+					'event_id' => $event->key,
+					'event_name' => $event->get('evt_name'),
+				);
+			}
+		}
+	}
+	$page_vars['pending_surveys'] = $pending_surveys;
+
 	return LogicResult::render($page_vars);
 }
 

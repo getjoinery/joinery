@@ -115,7 +115,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    'evt_ety_event_type_id' => array('type'=>'int4'),
 	    'evt_delete_time' => array('type'=>'timestamp(6)'),
 	    'evt_svy_survey_id' => array('type'=>'int4'),
-	    'evt_survey_required' => array('type'=>'int2'),
+	    'evt_survey_display' => array('type'=>'varchar(30)', 'default'=>'none'),
 	    'evt_loc_location_id' => array('type'=>'int4'),
 	    'evt_custom_registration_message' => array('type'=>'varchar(255)', 'is_nullable'=>true),
 
