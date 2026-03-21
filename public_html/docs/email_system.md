@@ -5,8 +5,10 @@
 The email system consists of three focused classes that provide clear separation of concerns:
 
 - **EmailMessage**: Fluent API for composing email messages
-- **EmailTemplate**: Template processing (conditionals, variables)  
+- **EmailTemplate**: Template processing (conditionals, variables)
 - **EmailSender**: All sending logic with service selection and fallback
+
+**Inbound email forwarding** is handled by the Email Forwarding plugin — see [Email Forwarding Plugin](email_forwarding_plugin.md) for setup, admin usage, and server configuration.
 
 ## Architecture
 
