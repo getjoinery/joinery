@@ -83,6 +83,10 @@ function cart_logic($get_vars, $post_vars){
 			}
 		}
 		$cart->determine_billing_user($_POST, false);
+		// For free orders, go directly to charge processing
+		if ($cart->get_total() <= 0 && !empty($_POST['complete_order'])) {
+			return LogicResult::redirect('/cart_charge');
+		}
 		return LogicResult::redirect('/cart');
 	}
 	else {
@@ -112,14 +116,21 @@ function cart_logic($get_vars, $post_vars){
 	// Section 2: Coupon - shown if coupons active
 	if ($settings->get_setting('coupons_active')) {
 		$coupon_state = ($contact_state == 'completed') ? 'active' : 'pending';
-		if (!empty($cart->coupon_codes)) {
+		// Coupon is completed if codes were applied OR if billing is already complete (user passed through coupon)
+		if (!empty($cart->coupon_codes) || $cart->is_billing_user_complete()) {
 			$coupon_state = 'completed';
+		}
+		$coupon_summary = '';
+		if (!empty($cart->coupon_codes)) {
+			$coupon_summary = htmlspecialchars(implode(', ', $cart->coupon_codes), ENT_QUOTES, 'UTF-8') . ' applied';
+		} else if ($cart->is_billing_user_complete()) {
+			$coupon_summary = 'No coupon';
 		}
 		$sections['coupon'] = array(
 			'title' => 'Coupon Code',
 			'state' => $coupon_state,
 			'number' => count($sections) + 1,
-			'summary' => !empty($cart->coupon_codes) ? htmlspecialchars(implode(', ', $cart->coupon_codes), ENT_QUOTES, 'UTF-8') . ' applied' : '',
+			'summary' => $coupon_summary,
 		);
 	}
 
@@ -185,6 +196,11 @@ function cart_logic($get_vars, $post_vars){
 		}
 	}
 	unset($section);
+
+	// Free orders with all sections completed: re-open billing so user can click "Complete Order"
+	if (!$found_active && $cart->get_total() <= 0 && !isset($sections['payment'])) {
+		$sections['billing']['state'] = 'active';
+	}
 
 	$page_vars['sections'] = $sections;
 

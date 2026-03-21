@@ -993,11 +993,10 @@ class StripeHelper {
 		  $error = "Sorry, we weren't able to connect to the Stripe api.";
 		} 
 		*/
-		catch (Exception $e) {	
+		catch (Exception $e) {
 			$error = "Sorry, we weren't able to store your card. " . $e->getMessage();
 			error_log($error);
-			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);	
-			exit;
+			throw new SystemDisplayableError($error);
 			/*		
 			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
 
