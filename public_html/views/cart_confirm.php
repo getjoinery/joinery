@@ -74,7 +74,7 @@ $page->public_header([
 
             <!-- Optional Survey -->
             <?php
-            $confirmation_surveys = $session->get_session_item('confirmation_surveys');
+            $confirmation_surveys = $session->get_saved_item('confirmation_surveys');
             if (!empty($confirmation_surveys)):
                 require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));
                 require_once(PathHelper::getIncludePath('data/questions_class.php'));

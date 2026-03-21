@@ -626,6 +626,9 @@
             'privacy': privacy,
             'password': password
         };
+        if (andComplete) {
+            fields['complete_order'] = '1';
+        }
         for (var key in fields) {
             var input = document.createElement('input');
             input.type = 'hidden';
