@@ -93,10 +93,11 @@ function get_discount($full_price){
 		}
 		
 		$current_time = gmdate('Y-m-d H:i:s');
-		if($this->get('ccd_start_time') && $this->get('ccd_start_time') < $current_time){
+		// Reject if coupon hasn't started yet (start_time is in the future)
+		if($this->get('ccd_start_time') && $this->get('ccd_start_time') > $current_time){
 			return false;
 		}
-		
+		// Reject if coupon has expired (end_time is in the past)
 		if($this->get('ccd_end_time') && $this->get('ccd_end_time') < $current_time){
 			return false;
 		}
