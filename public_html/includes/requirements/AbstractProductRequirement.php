@@ -145,6 +145,9 @@ abstract class AbstractProductRequirement {
         return static::LABEL;
     }
 
+    /** Return form group for card-based layout: 'info', 'address', or 'questions'. */
+    public function getFormGroup() { return 'info'; }
+
     /** Render form fields for this requirement. */
     public function render_fields($formwriter, $product, $existing_data = []) {}
 

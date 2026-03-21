@@ -14,6 +14,8 @@ class AddressRequirement extends AbstractProductRequirement {
 
     const LABEL = 'Address';
 
+    public function getFormGroup() { return 'address'; }
+
     public function render_fields($formwriter, $product, $existing_data = []) {
         $user = isset($existing_data['user']) ? $existing_data['user'] : null;
         $new_address_display = true;

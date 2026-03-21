@@ -17,6 +17,8 @@ class QuestionRequirement extends AbstractProductRequirement {
 
     const LABEL = 'Question';
 
+    public function getFormGroup() { return 'questions'; }
+
     /** @var Question|null Cached Question object */
     private $question = null;
 

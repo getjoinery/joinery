@@ -383,6 +383,27 @@ class ShoppingCart {
 		return FALSE;
 	}
 
+	public function update_item($item_index, $form_data) {
+		if (!isset($this->items[$item_index])) {
+			return FALSE;
+		}
+		list($quantity, $product, $old_data, $price, $discount, $product_version) = $this->items[$item_index];
+
+		$new_product_version = $product->get_product_versions(TRUE, $form_data['product_version']);
+		$price = $product->get_price($new_product_version, $form_data);
+		$discount = $product->total_coupon_discount($price, $new_product_version, $this->coupon_codes);
+
+		$this->items[$item_index] = array($quantity, $product, $form_data, $price, $discount, $new_product_version);
+		return TRUE;
+	}
+
+	public function get_item($item_index) {
+		if (!isset($this->items[$item_index])) {
+			return NULL;
+		}
+		return $this->items[$item_index];
+	}
+
 	public function get_hash() {
 		// Return a hash of this shopping cart, so between pages we can compare and make
 		// sure the contents of the cart haven't been changed

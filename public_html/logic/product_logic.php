@@ -76,11 +76,21 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	$page_vars['user'] = $user;
 
-	if ($post_vars || isset($get_vars['cart'])) {
+	// Handle edit_item mode: pre-fill form with existing cart item data
+	$edit_item_index = isset($get_vars['edit_item']) ? intval($get_vars['edit_item']) : null;
+	if ($edit_item_index !== null && !$post_vars) {
+		$cart = $session->get_shopping_cart();
+		$cart_item = $cart->get_item($edit_item_index);
+		if ($cart_item) {
+			$page_vars['edit_item_index'] = $edit_item_index;
+			$page_vars['prefill_data'] = $cart_item[2]; // form_data is element [2]
+		}
+	}
+
+	if ($post_vars) {
 
 		try {
 			list($form_data, $display_data) = $product->validate_form($post_vars, $session);
-			$page_vars['display_data'] = $display_data;
 		}
 		catch (BasicProductRequirementException $e) {
 			return LogicResult::error($e->getMessage());
@@ -89,23 +99,23 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		try {
 			$cart = $session->get_shopping_cart();
 
-			//IF USER ENTERED AN EXTRA DONATION CREATE THAT ITEM
-			if($post_vars['user_price']){
-				$extra_donation = new Product(Product::PRODUCT_ID_OPTIONAL_DONATION, TRUE);
-				$cart->add_item($extra_donation, $form_data);
+			// Check if we're updating an existing cart item
+			$edit_index = isset($post_vars['edit_item_index']) ? intval($post_vars['edit_item_index']) : null;
+			if ($edit_index !== null && $cart->get_item($edit_index) !== null) {
+				$cart->update_item($edit_index, $form_data);
+			} else {
+				// New item — add to cart
+				if($post_vars['user_price']){
+					$extra_donation = new Product(Product::PRODUCT_ID_OPTIONAL_DONATION, TRUE);
+					$cart->add_item($extra_donation, $form_data);
+				}
+				$cart->add_item($product, $form_data);
 			}
-
-			$cart->add_item($product, $form_data);
 		}
 		catch (ShoppingCartException $e) {
 			return LogicResult::error($e->getMessage());
 		}
 
-		$form_key = md5(serialize($form_data) . time());
-		$session->save_session_item($form_key, $form_data);
-		$page_vars['display_empty_form'] = FALSE;
-
-		// Redirect to cart after successful addition
 		return LogicResult::redirect('/cart');
 	}
 
