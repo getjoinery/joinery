@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Redesign the checkout flow from the current two-page layout (product page form + cart/payment page) into a modern single-page accordion checkout. The new design consolidates all information collection into progressive, collapsible sections on one page, following the pattern used by Amazon, Under Armour, and Louis Vuitton. The redesign also adds support for survey/custom questions at checkout and accommodates all information types the system may need to collect, even if not all are enabled initially.
+Redesign the checkout flow into a streamlined two-page experience: a refreshed product page collecting all per-item data, and a modern single-page accordion checkout handling contact, coupon, billing, and payment. The product page groups requirements into logical card sections. The cart page uses progressive disclosure with collapsible accordion sections, following the pattern used by Amazon, Under Armour, and Louis Vuitton. The redesign also integrates the survey system and removes the legacy extra info collection system.
 
 ## Problem Statement
 
@@ -33,10 +33,9 @@ Redesign the checkout flow from the current two-page layout (product page form +
 3. **Early email capture** for cart recovery potential
 4. **Guest-first checkout** with optional account creation
 5. **Smart field reuse** -- don't ask for the same info twice
-6. **Survey/question support** as a dedicated checkout section
-7. **All possible information types supported** in the section model, even if not all enabled
-8. **Mobile-first responsive design**
-9. **Accessible** -- keyboard navigable, screen reader compatible, WCAG 2.1 AA
+6. **Survey integration** -- required surveys on product page, optional/post-event surveys on confirmation page
+7. **Mobile-first responsive design**
+8. **Accessible** -- keyboard navigable, screen reader compatible, WCAG 2.1 AA
 
 ## Accordion Section Design
 
@@ -68,108 +67,31 @@ When collapsed after completion:
 
 ### Section Order and Content
 
-The checkout consists of up to 8 sections, with sections dynamically shown/hidden based on product configuration and site settings. The section order is carefully designed to capture the most valuable information first (email for cart recovery) and progress logically.
+The checkout accordion has up to 4 sections. Per-item data (registrant name, address, questions, required surveys) is collected on the product page before items enter the cart -- not in the accordion. The accordion handles only shared checkout concerns.
 
 ---
 
 #### Section 1: Contact Information (Always shown)
 
-**Purpose:** Capture email early for cart abandonment recovery. Identify returning users.
+**Purpose:** Capture billing email for account creation/attachment and cart abandonment recovery.
 
 **Fields:**
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| Email Address | email input | Yes | First field captured -- enables recovery emails |
-| Phone Number | tel input | Conditional | Shown if PhoneNumberRequirement is configured on product |
+| Email Address | email input | Yes | Used as the billing/account email |
+
+**Pre-fill logic:** If cart items contain emails (from EmailRequirement on the product page), default to the first one entered. The user can change it.
 
 **Behavior:**
-- If user is logged in: Pre-fill email, show "Logged in as [name] ([email])" with [Change] link. Auto-complete this section.
+- If user is logged in: Pre-fill email from profile, show "Logged in as [name] ([email])" with [Change] link. Auto-complete this section.
 - If email matches existing account: Show inline message: "Welcome back! [Log in](/login) for faster checkout, or continue as guest." Do NOT block checkout.
 - On completing this section: Store email in session immediately for potential cart recovery use.
 
-**Collapsed summary:** `jeremy@example.com` or `jeremy@example.com | (555) 123-4567`
+**Collapsed summary:** `jeremy@example.com`
 
 ---
 
-#### Section 2: Registrant / Attendee Information (Shown when product has FullNameRequirement or other identity requirements)
-
-**Purpose:** Collect identity information about who is being registered/purchasing.
-
-**Fields:**
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| First Name | text | Yes | From FullNameRequirement |
-| Last Name | text | Yes | From FullNameRequirement |
-| Date of Birth | date picker | Conditional | From DOBRequirement if configured |
-| Newsletter Signup | checkbox | No | From NewsletterSignupRequirement if configured |
-
-**Smart field reuse:** If the user is logged in and this section collects the same name as the billing section would, pre-fill from user profile. If the product's FullNameRequirement is the billing contact, mark it and skip re-asking in the billing section.
-
-**Collapsed summary:** `Jeremy Tunnell` or `Jeremy Tunnell | DOB: Jan 15, 1985`
-
----
-
-#### Section 3: Shipping / Address (Shown when product has AddressRequirement)
-
-**Purpose:** Collect physical address when needed (physical products, events requiring location info).
-
-**Fields:**
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| Country | dropdown | Yes | Default to most common country for site |
-| Address Line 1 | text | Yes | Street address |
-| Address Line 2 | text | No | Apartment, suite, unit |
-| City | text | Yes | |
-| State/Province | dropdown or text | Yes | Dynamic based on country selection |
-| ZIP/Postal Code | text | Yes | Auto-lookup city/state when possible |
-
-**Enhancement:** Integrate address autocomplete (Google Places API) if API key is configured in settings. The setting `google_places_api_key` controls this. If not set, show standard fields.
-
-**Collapsed summary:** `123 Main St, Nashville, TN 37201, US`
-
----
-
-#### Section 4: Product Options (Shown when product has multiple versions OR UserPriceRequirement)
-
-**Purpose:** Select product version/tier and handle pricing options.
-
-**Fields:**
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| Product Version | radio buttons or dropdown | Yes | Only if multiple ProductVersions exist |
-| Custom Amount | currency input | Conditional | From UserPriceRequirement (donations, pay-what-you-want) |
-
-**Display:** Show version cards with name, description, and price for each option. Highlight recommended/popular version if configured.
-
-**Collapsed summary:** `Premium Plan - $29.99/month` or `Custom Amount: $50.00`
-
----
-
-#### Section 5: Additional Questions (Shown when product has QuestionRequirements)
-
-**Purpose:** Collect survey/custom question responses configured for this product.
-
-**Fields:** Dynamically rendered from the product's QuestionRequirement instances. Each question renders according to its type:
-
-| Question Type | Rendered As |
-|---------------|-------------|
-| text | Text input or textarea |
-| dropdown | Select dropdown |
-| checkbox | Checkbox |
-| date | Date picker |
-| confirmation | Checkbox with agreement text |
-
-**Design considerations:**
-- Group questions visually with a brief intro: "Please answer the following questions about your registration."
-- Clearly mark required vs optional questions.
-- Use conditional display when possible -- if question A's answer triggers question B, use progressive disclosure within this section.
-- Maximum of ~5-7 questions in this section to avoid overwhelming users. If more questions are needed, consider splitting into the post-purchase survey system instead.
-
-**Collapsed summary:** Show count: `3 of 3 questions answered` or brief answers if only 1-2 questions.
-
----
-
-#### Section 6: Coupon Code (Shown when `coupons_active` setting is enabled)
+#### Section 2: Coupon Code (Shown when `coupons_active` setting is enabled)
 
 **Purpose:** Apply discount codes.
 
@@ -189,33 +111,30 @@ The checkout consists of up to 8 sections, with sections dynamically shown/hidde
 
 ---
 
-#### Section 7: Billing & Account (Always shown)
+#### Section 3: Billing & Account (Always shown)
 
-**Purpose:** Collect billing identity and optional account creation.
+**Purpose:** Confirm billing identity and optional account creation.
 
-**Fields when NOT logged in:**
+**Read-only summary:**
+- Name: pre-filled from cart item registrant data (first item with FullNameRequirement). [Change] link makes fields editable inline. If no cart item has a name, show editable First Name / Last Name fields instead.
+- Email: pre-filled from Contact section. [Change] link opens Contact section for editing.
+
+**Active fields when NOT logged in:**
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| Billing First Name | text | Yes | Pre-fill from Section 2 if available |
-| Billing Last Name | text | Yes | Pre-fill from Section 2 if available |
-| Billing Email | email | Yes | Pre-fill from Section 1; read-only with [Change] link back to Section 1 |
 | Create Password | password | Optional | "Create an account for faster checkout next time" -- checkbox to reveal |
 | Terms & Privacy | checkbox | Yes | "I agree to the [Terms of Use] and [Privacy Policy]" |
 
-**Fields when logged in:**
-- Show confirmed billing identity (name + email from profile) with [Change] link.
+**When logged in:**
+- Name and email shown from profile (read-only).
 - Terms & Privacy checkbox still required.
 - This section can auto-complete if user is logged in and has agreed to terms previously (store agreement timestamp).
-
-**Smart behavior:**
-- "Same as registrant information" checkbox at top -- if checked, pre-fill from Section 2 and collapse fields to read-only summary.
-- If email in Section 1 matches an existing account, prompt login but don't require it.
 
 **Collapsed summary:** `Jeremy Tunnell (jeremy@example.com) | Account will be created`
 
 ---
 
-#### Section 8: Payment (Always shown when total > 0; hidden for free orders)
+#### Section 4: Payment (Always shown when total > 0; hidden for free orders)
 
 **Purpose:** Collect payment and complete the order.
 
@@ -226,7 +145,7 @@ The checkout consists of up to 8 sections, with sections dynamically shown/hidde
 
 **For Stripe Checkout mode (`checkout_type == 'stripe_checkout'`):**
 - **Special case:** Stripe Checkout redirects the user away from the page to Stripe's hosted payment form, then back. This is incompatible with an inline accordion payment section.
-- **Approach:** The accordion collects all non-payment information (contact, registrant, address, questions, coupon, billing). The final section is NOT a payment form — instead it is an **Order Review** section summarizing everything, with a prominent [Pay with Stripe] button.
+- **Approach:** The accordion collects all non-payment information (contact, coupon, billing). The final section is NOT a payment form — instead it is an **Order Review** section summarizing everything, with a prominent [Pay with Stripe] button.
 - Clicking [Pay with Stripe] does a final server-side validation of all sections, saves everything to session/cart, then redirects to Stripe's hosted checkout.
 - On return from Stripe, the existing `cart_charge_logic.php` flow processes the order as it does today.
 - The accordion's last section header reads "Review & Pay" instead of "Payment".
@@ -258,14 +177,120 @@ The checkout consists of up to 8 sections, with sections dynamically shown/hidde
 
 ### Sections Not Currently Needed But Architecturally Supported
 
-These sections are defined in the architecture but hidden by default. They can be enabled via settings or product configuration in the future:
+These sections could be added to the accordion in the future:
 
-| Future Section | Would Appear Between | Purpose |
-|----------------|---------------------|---------|
-| **Delivery Method** | Sections 3 and 4 | Shipping method selection (standard, express, pickup) |
-| **Gift Options** | Sections 5 and 6 | Gift wrapping, gift message, send to different address |
-| **Donation/Tip** | Sections 6 and 7 | Optional donation add-on at checkout |
-| **Membership Selection** | Section 4 | Tier selection for subscription products (overlap with product options) |
+| Future Section | Purpose |
+|----------------|---------|
+| **Delivery Method** | Shipping method selection (standard, express, pickup) |
+| **Gift Options** | Gift wrapping, gift message, send to different address |
+| **Donation/Tip** | Optional donation add-on at checkout |
+
+## Product Page Design
+
+The product page is the first step in the purchase flow and collects all per-item data. It gets a UI refresh to match the clean, card-based style of the accordion checkout.
+
+### Layout
+
+**Desktop (>768px):** Two-column layout.
+- **Left column:** Product info (image, name, description, price, version selector)
+- **Right column:** Grouped requirement form fields in cards, with [Add to Cart] at the bottom
+
+**Mobile (<768px):** Single column -- product info stacked above the form.
+
+### Desktop Layout
+```
++--------------------------------------------------------------+
+|  [Standard site navigation header]                            |
++--------------------------------------------------------------+
+|  Home > Products > Product Name                               |
++--------------------------------------------------------------+
+|                                                               |
+|  +------------------------+  +---------------------------+   |
+|  |                        |  |                           |   |
+|  |  [Product Image]       |  |  Your Information         |   |
+|  |                        |  |  +---------------------+  |   |
+|  |  Product Name           |  |  | First Name [      ] |  |   |
+|  |  $29.99                |  |  | Last Name  [      ] |  |   |
+|  |                        |  |  | Email      [      ] |  |   |
+|  |  [Version 1] [V2] [V3]|  |  +---------------------+  |   |
+|  |                        |  |                           |   |
+|  |  Description text here |  |  Additional Questions     |   |
+|  |  lorem ipsum dolor sit |  |  +---------------------+  |   |
+|  |  amet, consectetur...  |  |  | Q1: How did you...  |  |   |
+|  |                        |  |  | [Dropdown       v]  |  |   |
+|  |                        |  |  |                     |  |   |
+|  |                        |  |  | Q2: Dietary needs?  |  |   |
+|  |                        |  |  | [Text area      ]   |  |   |
+|  |                        |  |  +---------------------+  |   |
+|  |                        |  |                           |   |
+|  |                        |  |      [Add to Cart]        |   |
+|  |                        |  |                           |   |
+|  +------------------------+  +---------------------------+   |
+|                                                               |
++--------------------------------------------------------------+
+```
+
+### Mobile Layout
+```
++---------------------------+
+|  [Site Navigation]        |
++---------------------------+
+| Home > Products > Name    |
++---------------------------+
+|                           |
+|  [Product Image]          |
+|                           |
+|  Product Name             |
+|  $29.99                   |
+|                           |
+|  [Version 1] [V2] [V3]   |
+|                           |
+|  Description text...      |
+|                           |
+|  Your Information         |
+|  +---------------------+  |
+|  | First Name [      ]  |  |
+|  | Last Name  [      ]  |  |
+|  | Email      [      ]  |  |
+|  +---------------------+  |
+|                           |
+|  Additional Questions     |
+|  +---------------------+  |
+|  | Q1: How did you...   |  |
+|  | [Dropdown        v]  |  |
+|  +---------------------+  |
+|                           |
+|      [Add to Cart]        |
+|                           |
++---------------------------+
+```
+
+### Product Info (Left Column)
+
+- **Product image:** Displayed if available, otherwise a styled placeholder
+- **Product name:** Prominent heading
+- **Price:** Large, bold, primary color. If on sale, show original price with strikethrough and sale price
+- **Version selector:** If multiple product versions exist, show as styled radio cards (name, description, price per version). Selected version updates the displayed price. If only one version, hide the selector
+- **Description:** Product description below the version selector
+
+### Requirement Form (Right Column)
+
+Requirements are grouped into visual card sections. Each card has a subtle header label and groups related fields:
+
+**Card grouping logic:**
+- **"Your Information"** -- FullNameRequirement, EmailRequirement, PhoneNumberRequirement, DOBRequirement, NewsletterSignupRequirement
+- **"Address"** -- AddressRequirement (only shown if configured)
+- **"Additional Questions"** -- QuestionRequirement instances and required survey questions (`evt_survey_display = 'required_before_purchase'`)
+
+If only one group has fields, skip the card headers and show fields directly.
+
+**Card styling:** Same border-radius, shadow, and spacing as the accordion sections on the cart page. Use `var(--color-light)` background with white input fields.
+
+**[Add to Cart] button:** Full-width at the bottom of the right column. Same primary button styling as the cart's [Place Order]. Disabled with spinner on click to prevent double-submission.
+
+### Navigation
+
+The product page keeps the **standard site header** (not the minimal checkout header). The user is still browsing, not in checkout mode. Breadcrumbs show: Home > Products > Product Name.
 
 ## Order Summary Sidebar
 
@@ -275,7 +300,7 @@ A sticky sidebar on the right side, always visible as the user scrolls through a
 **Contents:**
 - Product name and version
 - Product thumbnail (if available)
-- Registrant name (once entered in Section 2)
+- Registrant name (from cart item data, collected on product page)
 - Quantity (currently always 1 per cart item; architecture supports multiples)
 - Individual item price
 - Coupon discount (when applied)
@@ -283,7 +308,8 @@ A sticky sidebar on the right side, always visible as the user scrolls through a
 - Total
 
 **Behavior:**
-- Updates in real-time as sections are completed (registrant name appears, coupon applied, etc.)
+- Updates in real-time as sections are completed (coupon applied, etc.)
+- Per-item data (registrant name, answers to questions) shown under each item with an [Edit] link. Clicking [Edit] navigates to `/product/{slug}?edit_item={index}` with fields pre-filled from the cart item data. Submitting updates the existing cart item in place and redirects back to `/cart`.
 - Item removal link (if multiple items in cart)
 - "Add another item" link back to products page
 
@@ -306,23 +332,14 @@ A sticky sidebar on the right side, always visible as the user scrolls through a
 |  |  [1] Contact Information     [done] |  | Order        |   |
 |  |    jeremy@example.com    [Edit]     |  | Summary      |   |
 |  |                                     |  |              |   |
-|  |  [2] Registrant Info        [done]  |  | Product X    |   |
-|  |    Jeremy Tunnell        [Edit]     |  | $29.99       |   |
-|  |                                     |  |              |   |
-|  |  [3] Additional Questions  [ACTIVE] |  | ----------   |   |
-|  |    +----------------------------+   |  | Total:       |   |
-|  |    | Q1: How did you hear...    |   |  | $29.99       |   |
-|  |    | [Dropdown           v]     |   |  |              |   |
-|  |    |                            |   |  |              |   |
-|  |    | Q2: Special needs?         |   |  |              |   |
-|  |    | [Text area             ]   |   |  |              |   |
-|  |    |                            |   |  |              |   |
+|  |  [2] Coupon Code            [ACTIVE]|  | Product X    |   |
+|  |    +----------------------------+   |  | Jeremy T.    |   |
+|  |    | [Enter coupon    ] [Apply] |   |  | $29.99       |   |
 |  |    |          [Continue]        |   |  |              |   |
-|  |    +----------------------------+   |  |              |   |
-|  |                                     |  |              |   |
-|  |  [4] Coupon Code             [---]  |  |              |   |
-|  |  [5] Billing & Account       [---]  |  |              |   |
-|  |  [6] Payment                 [---]  |  |              |   |
+|  |    +----------------------------+   |  | ----------   |   |
+|  |                                     |  | Total:       |   |
+|  |  [3] Billing & Account       [---]  |  | $29.99       |   |
+|  |  [4] Payment                 [---]  |  |              |   |
 |  |                                     |  |              |   |
 |  +-------------------------------------+  +--------------+   |
 |                                                               |
@@ -341,23 +358,14 @@ A sticky sidebar on the right side, always visible as the user scrolls through a
 | [1] Contact Info   [done] |
 |   jeremy@...    [Edit]    |
 |                           |
-| [2] Registrant     [done] |
-|   Jeremy T.     [Edit]    |
-|                           |
-| [3] Questions    [ACTIVE] |
+| [2] Coupon       [ACTIVE] |
 | +----------------------+  |
-| | Q1: How did you...   |  |
-| | [Dropdown        v]  |  |
-| |                       |  |
-| | Q2: Special needs?   |  |
-| | [_______________]    |  |
-| |                       |  |
+| | [Enter coupon] [Apply]|  |
 | |      [Continue]       |  |
 | +----------------------+  |
 |                           |
-| [4] Coupon         [---]  |
-| [5] Billing        [---]  |
-| [6] Payment        [---]  |
+| [3] Billing        [---]  |
+| [4] Payment        [---]  |
 |                           |
 +---------------------------+
 ```
@@ -388,19 +396,19 @@ The checkout redesign evolves the existing `/cart` page in place rather than cre
 - `/ajax/checkout_ajax.php` -- AJAX endpoints for section validation, coupon apply/remove, email check, Stripe session creation
 
 **Modified files:**
+- `/views/product.php` -- UI refresh with card-based grouped requirements, renders survey questions when `evt_survey_display = 'required_before_purchase'`
+- `/logic/product_logic.php` -- Remove confirm-order review step (Add to Cart validates and adds to cart in one step, then redirects to `/cart`). Support for survey requirement validation and processing
 - `/views/cart.php` -- Redesigned with accordion UI, order summary sidebar, login modal, checkout-mode header
 - `/logic/cart_logic.php` -- Refactored to support AJAX section validation. Extract billing validation into a reusable function callable from both the page POST flow (fallback) and the AJAX endpoint
-- `/includes/PublicPage.php` (or theme override) -- Add `noheader` header option for minimal header
 - `/views/cart_confirm.php` -- Add inline post-purchase survey rendering
+- `/includes/PublicPage.php` (or theme override) -- Add `noheader` header option for minimal header
+- `/includes/ShoppingCart.php` -- Add `update_item($index, $form_data)` method for editing per-item data from the cart page
 
 **Unchanged:**
-- `/views/product.php` -- Product page stays as-is (per-item info collected here)
-- `/logic/product_logic.php` -- No changes needed (already redirects to `/cart`)
 - `/logic/cart_charge_logic.php` -- Payment processing stays the same
 - `serve.php` -- No new routes needed
 - `/data/` model classes -- No changes to data layer
 - `/includes/requirements/` -- Product requirements render on product page as before
-- `/includes/ShoppingCart.php` -- Cart session management unchanged
 - `/includes/StripeHelper.php` -- Stripe integration unchanged
 - `/includes/PaypalHelper.php` -- PayPal integration unchanged
 
@@ -438,14 +446,14 @@ POST /ajax/checkout_ajax
 {
     "action": "validate_section",
     "section": "contact",
-    "data": { "email": "...", "phone": "..." }
+    "data": { "email": "..." }
 }
 
 Response:
 {
     "valid": true,
     "summary": "jeremy@example.com",
-    "next_section": "registrant"
+    "next_section": "coupon"
 }
 
 // Or on error:
@@ -482,14 +490,14 @@ Response:
 2. Session stores a `checkout_data` array keyed by section:
    ```php
    $_SESSION['checkout_data'] = [
-       'contact' => ['email' => '...', 'phone' => '...'],
+       'contact' => ['email' => '...'],
        'billing' => ['first_name' => '...', 'last_name' => '...', ...],
    ];
    ```
    Note: Per-item data (registrant, address, questions) is already stored in the cart items via the product page flow. The checkout session only tracks the shared checkout fields.
 3. On [Place Order], the checkout logic:
    - Validates all sections server-side
-   - Creates ShoppingCart item with collected form data (maps to existing cart structure)
+   - Merges checkout_data (contact, billing) with existing cart items
    - Calls existing `cart_charge_logic.php` for payment processing
    - All existing post-purchase hooks, emails, and requirement `post_purchase()` methods fire as before
 
@@ -527,24 +535,73 @@ Key functions:
 - `updateOrderSummary()` -- refresh sidebar totals after coupon changes
 - Event listeners for [Continue], [Edit], coupon [Apply]/[Remove] buttons
 
+## Data Collection Architecture
+
+Data is collected at two points in the user journey:
+
+### Product Page (per-item, before purchase)
+
+All per-item data is collected on the product page before adding to cart, using the product requirements system:
+
+- **Standard requirements:** name, email, address, DOB, phone, newsletter signup
+- **Custom questions:** QuestionRequirement instances from `qst_questions` table (admins configure these per product for any data they need -- dietary restrictions, experience level, etc.)
+- **Required pre-event surveys:** When an event has `evt_svy_survey_id` set and `evt_survey_display = 'required_before_purchase'`, survey questions render on the product page as a requirement. Must be answered before adding to cart. Answers saved to `sva_survey_answers` via `post_purchase()`.
+
+### Confirmation Page / Post-Event (after purchase)
+
+Optional and post-event surveys are presented after purchase:
+
+- **Optional surveys:** Rendered inline on `cart_confirm.php`. If not completed, followed up via email and profile page reminders.
+- **Post-event surveys:** Triggered by a scheduled task after the event date -- sends email with survey link, shows reminder on profile page.
+- Uses the existing survey infrastructure (`survey_logic.php`, `SurveyQuestion`, `SurveyAnswer`) unchanged.
+
+### Cleanup
+
+- `/profile/event_register_finish` page -- deleted
+- `evt_collect_extra_info` flag and hardcoded extra info fields (`evr_health_notes`, `evr_first_event`, `evr_recording_consent`, `evr_other_events`, `evr_extra_info_completed`) -- removed
+- `more_info_required` email flag in `cart_charge_logic.php` -- removed
+- Profile page "extra info incomplete" reminders (currently commented out) -- removed
+
+### Admin Configuration
+
+**Event edit page (`admin_event_edit.php`):**
+- Survey dropdown (currently commented out) gets uncommented -- selects which survey to link to the event
+- New `evt_survey_display` dropdown controlling when/how the survey is presented:
+  - `none` -- No survey (default)
+  - `required_before_purchase` -- Survey questions on product page, must answer to buy
+  - `optional_at_confirmation` -- Survey shown on confirmation page, reminders if skipped
+  - `after_event` -- Survey sent via email/profile after event date passes
+
+### Database Changes
+
+- Uncomment survey dropdown in `admin_event_edit.php` (lines 262-290)
+- Add `evt_survey_display` field to events: `none`, `required_before_purchase`, `optional_at_confirmation`, `after_event`
+- Remove `evt_survey_required` from events table (replaced by `evt_survey_display`)
+- Add `evr_survey_completed` field to `evr_event_registrants` for tracking
+- Remove `evt_collect_extra_info` from events table
+- Remove extra info columns from event_registrants table (`evr_extra_info_completed`, `evr_health_notes`, `evr_first_event`, `evr_recording_consent`, `evr_other_events`)
+
 ## Migration Strategy
 
-### Phase 1: Redesign cart.php in place
+### Phase 1: Accordion checkout
 - Rebuild `/views/cart.php` with accordion UI
 - Refactor `/logic/cart_logic.php` to support AJAX section validation
 - Create `/ajax/checkout_ajax.php` for section validation endpoints
-- Create `/includes/CheckoutSectionRenderer.php`
 - Add checkout-mode header to PublicPage
+- Remove extra info system (`evt_collect_extra_info`, hardcoded fields, `/profile/event_register_finish`, `more_info_required` flag)
 
-### Phase 2: Test and iterate
+### Phase 2: Test, iterate, and enable surveys
 - Test all payment modes (Stripe Checkout, Stripe Regular, PayPal, free orders)
 - Test logged-in vs guest flows
 - Refine mobile experience
-- Gather feedback on section ordering
+- Uncomment survey dropdown in `admin_event_edit.php`
+- Add `evt_survey_display` field to event edit
+- Implement required pre-event surveys on product page
 
-### Phase 3: Polish
-- Add post-purchase survey to cart_confirm.php
+### Phase 3: Post-purchase surveys and polish
+- Add optional/post-event survey rendering to `cart_confirm.php`
 - Add survey reminders to profile page and confirmation emails
+- Add scheduled task for post-event survey email triggers
 - Accessibility audit and fixes
 - Edge case handling (session timeout, payment errors)
 
@@ -556,9 +613,9 @@ Key functions:
 - Show a brief "No payment required" note
 
 ### Subscription Products
-- Product Options section shows subscription terms (monthly/yearly, trial period)
+- Subscription terms (monthly/yearly, trial period) are shown on the product page via the version selector
 - Payment section notes "You will be charged [amount] every [period]"
-- Only one subscription per checkout (enforce in product options)
+- Only one subscription per checkout (enforced when adding to cart)
 
 ### Multiple Cart Items
 - Per-item information (registrant, address, questions) is collected on the product page when each item is added to cart, NOT in the accordion checkout.
@@ -617,15 +674,22 @@ Key functions:
 - [ ] Free product checkout (payment section hidden)
 - [ ] Subscription product checkout
 - [ ] Coupon application and removal
-- [ ] All product requirement types render correctly in appropriate sections
-- [ ] Question/survey requirements render and validate
-- [ ] Address autocomplete (if configured)
+- [ ] All product requirement types render correctly on product page
+- [ ] Question/survey requirements render and validate on product page
+- [ ] Edit cart item from order summary (navigate to product page, pre-fill, update in place)
 - [ ] Stripe Checkout mode payment
 - [ ] Stripe Regular mode payment
 - [ ] PayPal payment
 - [ ] Error handling for all payment failure types
 - [ ] Session timeout recovery
 - [ ] Browser back button behavior within accordion
+- [ ] Product page card grouping (Your Information, Address, Additional Questions)
+- [ ] Product page version selector updates price
+- [ ] Required pre-event survey renders on product page (`required_before_purchase`)
+- [ ] Optional survey renders on confirmation page (`optional_at_confirmation`)
+- [ ] Post-event survey email sent after event date (`after_event`)
+- [ ] Survey completion tracked via `evr_survey_completed`
+- [ ] Survey reminders on profile page for incomplete surveys
 
 ### Mobile Testing
 - [ ] Accordion sections open/close smoothly
@@ -653,25 +717,32 @@ Key functions:
 ## Implementation Priority
 
 **Phase 1 (Core):**
-1. Build accordion UI component in `cart.php` (open/close, state management)
+1. Product page UI refresh (card-based grouped requirements, remove confirm step)
+2. Build accordion UI component in `cart.php` (open/close, state management)
 3. Implement Contact, Billing, and Payment sections
 4. Create `/ajax/checkout_ajax.php` with section validation endpoints
-5. Order summary sidebar (sticky desktop, collapsible mobile)
-6. End-to-end flow working with all payment modes
+5. Order summary sidebar with per-item [Edit] links (sticky desktop, collapsible mobile)
+6. Add `update_item()` to ShoppingCart for editing cart items in place
+7. End-to-end flow working with all payment modes
+8. Remove extra info system (hardcoded fields, `/profile/event_register_finish`, `more_info_required` flag)
 
 **Phase 2 (Enhancements):**
-7. Coupon section with AJAX apply/remove
-8. Login modal for existing email detection
-9. Checkout-mode header in PublicPage
-10. Smart pre-fill (contact email -> billing email, logged-in user auto-complete)
-11. Mobile-optimized layout
-12. Progress indicator
+9. Coupon section with AJAX apply/remove
+10. Login modal for existing email detection
+11. Checkout-mode header in PublicPage
+12. Smart pre-fill (contact email -> billing, logged-in user auto-complete)
+13. Mobile-optimized layout
+14. Progress indicator
+15. Uncomment and enable survey-event link in `admin_event_edit.php`
+16. Add `evt_survey_display` field to event edit
+17. Implement required pre-event surveys on product page
 
-**Phase 3 (Survey & Polish):**
-13. Post-purchase survey on cart_confirm.php
-14. Survey reminders on profile page and in confirmation emails
-15. Accessibility audit and fixes
-16. Edge case handling (session timeout, payment errors, back button)
+**Phase 3 (Post-Purchase Surveys & Polish):**
+18. Optional/post-event survey on `cart_confirm.php`
+19. Survey reminders on profile page and in confirmation emails
+20. Scheduled task for post-event survey email triggers
+21. Accessibility audit and fixes
+22. Edge case handling (session timeout, payment errors, back button)
 
 ## Related Files
 
@@ -692,9 +763,21 @@ Key functions:
 - `/data/order_items_class.php` -- Order item model
 - `/data/questions_class.php` -- Questions for surveys
 
+### Survey system (to enable and connect):
+- `/adm/admin_event_edit.php` -- Survey dropdown (currently commented out, lines 262-290)
+- `/adm/admin_surveys.php` -- Survey list admin
+- `/adm/admin_survey_edit.php` -- Survey editor admin
+- `/adm/admin_survey_answers.php` -- View survey answers
+- `/logic/survey_logic.php` -- Survey display and submission logic
+- `/views/survey_finish.php` -- Survey completion view
+- `/data/surveys_class.php` -- Survey model
+- `/data/survey_questions_class.php` -- Survey question model
+- `/data/survey_answers_class.php` -- Survey answer model
+- `/data/events_class.php` -- `evt_svy_survey_id`, `evt_survey_display` fields
+- `/data/event_registrants_class.php` -- future `evr_survey_completed` field
+
 ### Reference specs:
 - `/specs/implemented/checkout_improvements.md` -- Security fixes already implemented
-- `/specs/event_extra_info_and_surveys.md` -- Survey system status
 
 ## Resolved Design Decisions
 
@@ -703,18 +786,36 @@ Key functions:
 3. **Cart abandonment emails:** Out of scope. Early email capture in Section 1 lays the groundwork for a future cart recovery email system.
 4. **Login modal:** Use a modal overlay on the checkout page. The existing login logic already supports AJAX requests and `lbx_` field naming.
 5. **Post-purchase surveys:** Display prominently on the confirmation page (`cart_confirm.php`). Also persist reminders via email and profile page until the survey is completed.
+6. **Event extra info:** Removed entirely. Admins use QuestionRequirements on products to collect any per-item data they need.
 
-## Post-Purchase Survey on Confirmation Page
+## Survey Integration
 
-When a product or event has an associated survey (`evt_svy_survey_id` or a future `pro_svy_survey_id` field), the confirmation page (`cart_confirm.php`) should:
+Events link to a survey via `evt_svy_survey_id` (which survey) and `evt_survey_display` (when/how to present it). See "Data Collection Architecture" above for how these fit into the two collection points.
 
-1. **Display the survey inline** below the order summary, with a clear heading: "We'd love your feedback" or similar.
-2. **Use the existing survey rendering** (`survey_logic.php`, `SurveyQuestion`, `SurveyAnswer` classes) to render the questions directly on the confirmation page.
-3. **Submit via AJAX** so the user stays on the confirmation page and sees a "Thank you!" message on completion.
+### `required_before_purchase`
+
+- Survey questions render on the **product page** as part of per-item data collection
+- User must answer all questions before adding to cart
+- Answers saved to `sva_survey_answers` via the requirement's `post_purchase()` hook, linked to `evr_event_registrant_id`
+- `evr_survey_completed` set to `true` at purchase time
+
+### `optional_at_confirmation`
+
+1. **Display the survey inline** on `cart_confirm.php` below the order summary, with a heading like "We'd love your feedback"
+2. **Use the existing survey rendering** (`survey_logic.php`, `SurveyQuestion`, `SurveyAnswer` classes) to render questions directly on the confirmation page
+3. **Submit via AJAX** so the user stays on the confirmation page and sees a "Thank you!" message on completion
 4. **If not completed on the confirmation page**, persist reminders:
-   - **Email:** Include survey link in the purchase confirmation email (or a follow-up email).
-   - **Profile page:** Show a prominent reminder/alert linking to the survey until `evr_survey_completed` is true.
-5. **Link survey answers to the order/registration** via `evr_event_registrant_id` or `ord_order_id` so results can be viewed per-event or per-product in admin.
+   - **Email:** Include survey link in the purchase confirmation email
+   - **Profile page:** Show a prominent reminder/alert linking to the survey until `evr_survey_completed` is true
+5. **Link survey answers to the registration** via `evr_event_registrant_id` so results can be viewed per-event in admin
+
+### `after_event`
+
+- Survey is NOT shown at checkout or on the confirmation page
+- Confirmation page may note: "We'll send you a feedback survey after the event"
+- A scheduled task checks for events that have ended and sends survey emails to registrants where `evr_survey_completed` is not true
+- Profile page shows survey reminder after the event date passes
+- Survey link goes to the existing `/survey` view
 
 ## Future Work
 
@@ -722,4 +823,4 @@ When a product or event has an associated survey (`evt_svy_survey_id` or a futur
 - **Cart abandonment email recovery:** Build on the early email capture from Section 1 to send automated "you left items in your cart" emails. Industry data shows 41% open rate and 20-30% revenue recovery.
 - **Delivery method section:** Add a section between Address and Product Options for shipping method selection (standard, express, pickup) when physical product shipping is supported.
 - **Gift options section:** Gift wrapping, gift message, and alternate shipping address for gift recipients.
-- **Post-purchase survey analytics:** Admin dashboard for survey results per product/event, export functionality, completion rate tracking.
+- **Survey analytics dashboard:** Admin dashboard for survey results per product/event, export functionality, completion rate tracking.
