@@ -125,11 +125,14 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - ❌ WRONG: `<a href="/admin/admin_user_edit.php?id=1">` - Query parameters will be lost!
 - ✅ CORRECT: `<a href="/admin/admin_user_edit?id=1">` - Routes properly with parameters
 
-**Main Entry:** `serve.php` processes all requests via RouteHelper
-**Theme Override:** Checks `/theme/[theme]/views/` first, then `/views/` fallback
-**Plugin Routes:** Admin pages auto-discovered at `/plugins/{plugin}/admin/*`
+**Three things to know about routing:**
+1. **Adding a page requires no route config.** Create `views/foo.php` and `/foo` works automatically. Add `logic/foo_logic.php` for business logic — it's auto-loaded.
+2. **You only need a serve.php route** for model-based routes (`/post/{slug}`), feature flags (`check_setting`), permission gates (`min_permission`), wildcards (`/admin/*`), or custom logic.
+3. **Views resolve through the theme chain:** `theme/{theme}/views/` → `plugins/{plugin}/views/` → `views/` → 404.
 
-For complete details on themes, plugins, and routing: **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)**
+**📖 [Routing Documentation](docs/routing.md)** — Full guide with route options, common patterns, and debugging
+
+For themes and plugins: **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)**
 
 ### Documentation Index
 
@@ -149,6 +152,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
 - [Photo System](docs/photo_system.md) - Photo management and uploads
 - [Plugin Developer Guide](docs/plugin_developer_guide.md) - Plugin development, routing, themes
+- [Routing](docs/routing.md) - URL routing, view fallback, route configuration
 - [Product Purchase Hooks](docs/product_purchase_hooks.md) - Purchase event hooks
 - [Publish/Upgrade System Analysis](docs/publish_upgrade_system_analysis.md) - Publishing workflow
 - [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
@@ -499,7 +503,7 @@ Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 2. Add business logic: `/logic/[feature]_logic.php`
 3. Create view template: `/views/[feature].php`
 4. Add admin interface: `/adm/admin_[feature].php`
-5. Add route to `serve.php` if needed
+5. Add route to `serve.php` if needed (most pages don't — see [Routing](docs/routing.md#when-you-do-need-a-servephp-route))
 6. Add data migrations in `/migrations/` if needed (for settings, data updates only)
 7. Define deletion strategy (`$foreign_key_actions`, soft-delete cascading) — see [Deletion System](docs/deletion_system.md)
 
