@@ -79,6 +79,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	    'usr_allowed_ips' => array('type'=>'jsonb'),
 	    'usr_force_password_change' => array('type'=>'bool', 'default'=>false),
+	    'usr_bio' => array('type'=>'varchar(500)'),
+	    'usr_date_of_birth' => array('type'=>'date'),
+	    'usr_gender' => array('type'=>'varchar(30)'),
+	    'usr_profile_visibility' => array('type'=>'varchar(20)', 'default'=>'members_only'),
 	);
 
 private static function UcName($string) {
