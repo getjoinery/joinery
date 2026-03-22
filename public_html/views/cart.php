@@ -433,12 +433,12 @@
         <h3 style="margin: 0 0 1.5rem;">Log In</h3>
         <div id="login-modal-error" style="color: var(--color-danger, #dc3545); font-size: 0.875rem; margin-bottom: 1rem; display: none;"></div>
         <div style="margin-bottom: 1rem;">
-            <label for="lbx_email" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Email</label>
-            <input type="email" id="lbx_email" name="lbx_email" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;" autocomplete="email">
+            <label for="login_modal_email" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Email</label>
+            <input type="email" id="login_modal_email" name="email" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;" autocomplete="email">
         </div>
         <div style="margin-bottom: 1.5rem;">
-            <label for="lbx_password" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Password</label>
-            <input type="password" id="lbx_password" name="lbx_password" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;" autocomplete="current-password">
+            <label for="login_modal_password" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Password</label>
+            <input type="password" id="login_modal_password" name="password" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;" autocomplete="current-password">
         </div>
         <button onclick="submitLogin()" class="btn btn-primary" style="width: 100%;">Log In</button>
         <div style="margin-top: 1rem; text-align: center;">
@@ -713,10 +713,10 @@
     function showLoginModal() {
         var modal = document.getElementById('login-modal');
         modal.style.display = 'flex';
-        var emailInput = document.getElementById('lbx_email');
+        var emailInput = document.getElementById('login_modal_email');
         var contactVal = document.getElementById('contact_email');
         if (emailInput && contactVal) emailInput.value = contactVal.value;
-        document.getElementById('lbx_password').focus();
+        document.getElementById('login_modal_password').focus();
     }
 
     function closeLoginModal() {
@@ -724,8 +724,8 @@
     }
 
     function submitLogin() {
-        var email = document.getElementById('lbx_email').value.trim();
-        var password = document.getElementById('lbx_password').value;
+        var email = document.getElementById('login_modal_email').value.trim();
+        var password = document.getElementById('login_modal_password').value;
         var errorEl = document.getElementById('login-modal-error');
 
         if (!email || !password) {
@@ -733,27 +733,25 @@
             return;
         }
 
-        var formData = new FormData();
-        formData.append('lbx_email', email);
-        formData.append('lbx_password', password);
+        // Submit as a real form POST to /login with redirect back to /cart
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/login';
 
-        fetch('/login', {
-            method: 'POST',
-            body: formData,
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        })
-        .then(function(r) { return r.text(); })
-        .then(function(text) {
-            // On successful login, reload the checkout page
-            if (text.indexOf('error') === -1 && text.indexOf('Error') === -1 && text.indexOf('Invalid') === -1) {
-                window.location.reload();
-            } else {
-                if (errorEl) { errorEl.textContent = 'Invalid email or password. Please try again.'; errorEl.style.display = 'block'; }
-            }
-        })
-        .catch(function() {
-            if (errorEl) { errorEl.textContent = 'Login failed. Please try again.'; errorEl.style.display = 'block'; }
-        });
+        var fields = {
+            'email': email,
+            'password': password,
+            'redirect': '/cart'
+        };
+        for (var key in fields) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = key;
+            input.value = fields[key];
+            form.appendChild(input);
+        }
+        document.body.appendChild(form);
+        form.submit();
     }
 
     // Progress bar update
