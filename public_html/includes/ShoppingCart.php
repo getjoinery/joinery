@@ -41,29 +41,27 @@ class ShoppingCart {
 	}
 	
 	public function can_add_to_cart($product_version){
-		//PRODUCT MUST HAVE A PRODUCT VERSION 
+		//PRODUCT MUST HAVE A PRODUCT VERSION
 		if(!$product_version->key){
 			return false;
 		}
-		
-		
-		
-		//PAYPAL CHECKOUT CAN ONLY DO ONE SUBSCRIPTION AT A TIME, OR ONLY NON SUBSCRIPTION ITEMS.  ENFORCE THIS IF PAYPAL IS ENABLED.
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('use_paypal_checkout')){
-			if($this->count_items() > 0 && $product_version->is_subscription()){
-				return false;
-			}
-			else if($this->get_recurring_total() > 0){
-				return false;
-			}
-			else{
-				return true;
-			}
-		}
-		else{
-			return true;
-		}
+
+		return true;
+	}
+
+	/**
+	 * Check if PayPal is available for the current cart contents.
+	 * PayPal cannot handle: mixed subscription + non-subscription items, or multiple subscriptions.
+	 * This is checked at payment time, not at add-to-cart time, so Stripe users aren't restricted.
+	 */
+	public function is_paypal_available(){
+		$num_recurring = $this->get_num_recurring();
+		$num_non_recurring = $this->get_num_non_recurring();
+
+		// PayPal can handle: all non-recurring, or exactly one subscription alone
+		if ($num_recurring == 0) return true;
+		if ($num_recurring == 1 && $num_non_recurring == 0) return true;
+		return false;
 	}
 
 	public function add_item($product, $form_data) {

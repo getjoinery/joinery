@@ -102,19 +102,7 @@
                     }
                     echo $formwriter->end_form();
                     $product->output_javascript($formwriter, []);
-                elseif ($product_version && !$cart->can_add_to_cart($product_version)): ?>
-                    <div class="alert alert-warning">
-                        <?php
-                        if ($product_version->is_subscription()) {
-                            echo $cart->get_num_recurring()
-                                ? 'You cannot add more than one subscription to the cart.'
-                                : 'You cannot add a subscription to a cart that contains other items. Please check out first or clear your cart.';
-                        } else {
-                            echo 'You cannot add an item to a cart containing a subscription. Please check out first or clear your cart.';
-                        }
-                        ?>
-                    </div>
-                <?php endif; ?>
+                endif; ?>
 
                 <div style="padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--color-border, #eee);">
                     <a href="/products" style="color: var(--color-muted); text-decoration: none; font-size: 0.9375rem;">&#8592; Back to Products</a>
