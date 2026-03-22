@@ -1029,6 +1029,27 @@ class StripeHelper {
 		$result = $this->stripe->customers->allPaymentMethods($stripe_user_id, ['limit' => 20]);
 		return $result;
 	}
+
+	/**
+	 * Create a Stripe Billing Portal session for payment method management.
+	 */
+	public function create_billing_portal_session($stripe_customer_id, $return_url) {
+		return $this->stripe->billingPortal->sessions->create([
+			'customer' => $stripe_customer_id,
+			'return_url' => $return_url,
+		]);
+	}
+
+	/**
+	 * Get recent invoices for a Stripe customer.
+	 */
+	public function get_customer_invoices($stripe_customer_id, $limit = 10) {
+		$invoices = $this->stripe->invoices->all([
+			'customer' => $stripe_customer_id,
+			'limit' => $limit,
+		]);
+		return $invoices->data;
+	}
 	
 	/*  WE ARE NO LONGER USING PLANS  
 	public function get_subscription_plan($plan_name){
