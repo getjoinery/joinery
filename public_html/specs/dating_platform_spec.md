@@ -14,7 +14,7 @@
 | 1.1 Extended User Profiles | **DONE** | Fields added to `users_class.php` (2026-03-22) |
 | 1.2 Notification Center | **DONE** | Data model, logic, views, AJAX all implemented. Notification preferences not yet built. |
 | 1.3 User Discovery / Member Directory | Not started | Deferred to Phase 2 per plan |
-| 1.4 Like / Favorite System | Not started | Separate spec: [Like System Spec](like_system_spec.md) |
+| 1.4 Reaction System | **DONE** | Separate spec: [Reaction System Spec](implemented/reaction_system_spec.md) (2026-03-22) |
 | 1.5 Block System | Not started | |
 | 1.6 Report System | Not started | |
 | 1.7 Messaging Enhancements | Not started | Basic point-to-point messaging exists (`msg_messages`), but no conversation threading, read status, or conversation models |
@@ -86,9 +86,9 @@ See **[Notification Center Spec](notification_center_spec.md)** for full details
 
 **Geolocation Support:** See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for PostGIS setup, geocoding, spatial indexing on the address table, and distance queries.
 
-### 1.4 Like / Favorite System -- STATUS: Not started (separate spec)
+### 1.4 Reaction System -- STATUS: DONE (2026-03-22, separate spec)
 
-See **[Like System Spec](like_system_spec.md)** for full details. Polymorphic `entity_type` + `entity_id` pattern (same as EntityPhoto, ChangeTracking). Works with any entity: users, events, posts, products, etc. Dating plugin adds match semantics on top.
+See **[Reaction System Spec](implemented/reaction_system_spec.md)** for full details. Polymorphic `entity_type` + `entity_id` pattern (same as EntityPhoto, ChangeTracking). Works with any entity: users, events, posts, products, etc. Supports likes, favorites, bookmarks, passes. Dating plugin adds match semantics on top.
 
 ### 1.5 Block System -- STATUS: Not started
 
@@ -214,7 +214,7 @@ Prompts are stored in a settings/config table. Users pick 3 prompts and write an
 
 ### 2.3 Match System -- STATUS: Not started
 
-**Core like system** (1.4) handles the raw like/pass data. The dating plugin adds match detection.
+**Core reaction system** (1.4) handles the raw like/pass data. The dating plugin adds match detection.
 
 **New Model: `dating_matches`** (plugin data model)
 - `dtm_dating_match_id` (serial, primary key)
@@ -227,7 +227,7 @@ Prompts are stored in a settings/config table. Users pick 3 prompts and write an
 - Unique constraint on (user_id_1, user_id_2)
 
 **Match Logic:**
-1. User A likes User B (creates `user_likes` row with target_type='user')
+1. User A likes User B (creates `rct_reactions` row with entity_type='user')
 2. System checks: does User B already have a like for User A?
 3. If yes: create `dating_matches` row, create conversation, send notifications to both
 4. If no: just store the like, optionally notify B ("Someone new likes you" for free tier, or show who for premium)
@@ -257,7 +257,7 @@ FROM usr_users u
 JOIN dtp_dating_profiles dp ON u.usr_user_id = dp.dtp_usr_user_id
 JOIN usa_users_addrs a ON a.usa_usr_user_id = u.usr_user_id AND a.usa_is_default = TRUE
 WHERE ST_DWithin(a.usa_geography, ST_SetSRID(ST_MakePoint(:my_lng, :my_lat), 4326)::geography, :max_distance_meters)
-  AND u.usr_user_id NOT IN (SELECT ulk_target_id FROM ulk_user_likes WHERE ulk_usr_user_id = :user_id AND ulk_target_type = 'user')
+  AND u.usr_user_id NOT IN (SELECT rct_entity_id FROM rct_reactions WHERE rct_usr_user_id = :user_id AND rct_entity_type = 'user' AND rct_delete_time IS NULL)
   AND u.usr_user_id NOT IN (SELECT ubl_blocked_usr_user_id FROM ubl_user_blocks WHERE ubl_usr_user_id = :user_id)
   AND dp.dtp_is_active = true
   AND dp.dtp_looking_for IN (:my_gender, 'everyone')
@@ -384,7 +384,7 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 data/
   notifications_class.php          # In-app notifications
   notification_preferences_class.php
-  user_likes_class.php             # Generic like/favorite
+  reactions_class.php              # Generic reaction system (like/favorite/bookmark/pass)
   user_blocks_class.php            # Block system
   user_reports_class.php           # Report system
   conversations_class.php          # Conversation threading
@@ -405,7 +405,7 @@ adm/
 
 ajax/
   notifications_ajax.php           # Mark read, get count
-  like_ajax.php                    # Like/unlike actions
+  reaction_ajax.php                # Reaction toggle/status/count
 
 # Dating plugin
 plugins/dating/
@@ -438,7 +438,7 @@ plugins/dating/
 ### Key Integration Points
 
 **Dating plugin hooks into core:**
-- `user_likes` -> match detection fires on new like where target_type='user'
+- `reactions` -> match detection fires on new reaction where entity_type='user'
 - `conversations` -> auto-created on match
 - `notifications` -> sent on match, new message, new like (if premium)
 - `user_blocks` -> enforced in discovery queries

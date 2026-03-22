@@ -1,86 +1,86 @@
 # Social Features
 
-Core platform features for user-to-user interaction: likes/favorites, blocking, and reporting. These are generic systems used by any interactive site -- the dating plugin and others add domain-specific behavior on top.
+Core platform features for user-to-user interaction: reactions (likes, favorites, bookmarks), blocking, and reporting. These are generic systems used by any interactive site -- the dating plugin and others add domain-specific behavior on top.
 
 ---
 
-## Like / Favorite System
+## Reaction System
 
-A polymorphic like system that works with any entity type. Uses the same `entity_type` + `entity_id` pattern as EntityPhoto and ChangeTracking.
+A polymorphic reaction system that works with any entity type. Supports likes, favorites, bookmarks, passes, and any other reaction type. Uses the same `entity_type` + `entity_id` pattern as EntityPhoto and ChangeTracking.
 
-**Spec:** [Like System Spec](/specs/like_system_spec.md)
+**Spec:** [Reaction System Spec](/specs/implemented/reaction_system_spec.md)
 
 ### Data Model
 
-**Table:** `ulk_user_likes`
+**Table:** `rct_reactions`
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `ulk_user_like_id` | int8, serial, PK | |
-| `ulk_usr_user_id` | int4, FK | User who liked |
-| `ulk_entity_type` | varchar(50) | 'user', 'event', 'post', 'product', etc. |
-| `ulk_entity_id` | int4 | ID of liked entity |
-| `ulk_like_type` | varchar(20) | 'like', 'favorite', 'pass', 'bookmark' (default 'like') |
-| `ulk_create_time` | timestamp | |
-| `ulk_delete_time` | timestamp | Soft delete (unlike) |
+| `rct_reaction_id` | int8, serial, PK | |
+| `rct_usr_user_id` | int4, FK | User who reacted |
+| `rct_entity_type` | varchar(50) | 'user', 'event', 'post', 'product', etc. |
+| `rct_entity_id` | int4 | ID of target entity |
+| `rct_reaction_type` | varchar(20) | 'like', 'favorite', 'pass', 'bookmark' (default 'like') |
+| `rct_create_time` | timestamp | |
+| `rct_delete_time` | timestamp | Soft delete (unreact) |
 
-**Classes:** `UserLike` (single), `MultiUserLike` (collection) in `data/user_likes_class.php`
+**Classes:** `Reaction` (single), `MultiReaction` (collection) in `data/reactions_class.php`
 
 ### Usage
 
-**Check if a user liked something:**
+**Check if a user has reacted:**
 ```php
-require_once(PathHelper::getIncludePath('data/user_likes_class.php'));
+require_once(PathHelper::getIncludePath('data/reactions_class.php'));
 
-$is_liked = UserLike::has_liked($user_id, 'event', $event_id);
+$is_liked = Reaction::has_reacted($user_id, 'event', $event_id);
 ```
 
-**Toggle a like (like if not liked, unlike if already liked):**
+**Toggle a reaction (react if not reacted, unreact if already reacted):**
 ```php
-$result = UserLike::toggle_like($user_id, 'event', $event_id);
-// $result = ['action' => 'liked'|'unliked', 'like' => $like_obj]
+$result = Reaction::toggle($user_id, 'event', $event_id);
+// $result = ['action' => 'reacted'|'unreacted', 'reaction' => $reaction_obj]
 
-// With a specific like type:
-$result = UserLike::toggle_like($user_id, 'post', $post_id, 'bookmark');
+// With a specific reaction type:
+$result = Reaction::toggle($user_id, 'post', $post_id, 'bookmark');
 ```
 
-**Get like count for an entity:**
+**Get reaction count for an entity:**
 ```php
-$count = UserLike::get_like_count('event', $event_id);
+$count = Reaction::get_count('event', $event_id);
 ```
 
-**Get all entities a user has liked:**
+**Get all entities a user has reacted to:**
 ```php
 // All likes
-$likes = UserLike::get_user_likes($user_id);
+$reactions = Reaction::get_user_reactions($user_id);
 
 // Only event favorites
-$favorites = UserLike::get_user_likes($user_id, 'event', 'favorite');
+$favorites = Reaction::get_user_reactions($user_id, 'event', 'favorite');
 ```
 
-**Query with MultiUserLike:**
+**Query with MultiReaction:**
 ```php
-$likes = new MultiUserLike(
+$reactions = new MultiReaction(
     ['entity_type' => 'event', 'entity_id' => $event_id, 'deleted' => false],
-    ['ulk_create_time' => 'DESC']
+    ['rct_create_time' => 'DESC']
 );
-$likes->load();
+$reactions->load();
 ```
 
-### Like Button (UI Component)
+### Reaction Button (UI Component)
 
-Drop a like button into any view:
+Drop a reaction button into any view:
 
 ```php
 // Basic like button with count
-UserLike::render_like_button('event', $event_id);
+Reaction::render_button('event', $event_id);
 
-// Customized
-UserLike::render_like_button('post', $post_id, [
-    'like_type' => 'bookmark',
+// Customized bookmark button
+Reaction::render_button('post', $post_id, [
+    'reaction_type' => 'bookmark',
     'show_count' => false,
-    'icon_liked' => 'fas fa-bookmark',
-    'icon_unliked' => 'far fa-bookmark',
+    'icon_active' => 'fas fa-bookmark',
+    'icon_inactive' => 'far fa-bookmark',
     'css_class' => 'btn-sm'
 ]);
 ```
@@ -89,25 +89,24 @@ The button handles AJAX toggling and state updates automatically. User must be l
 
 ### AJAX Endpoint
 
-**File:** `ajax/like_ajax.php`
+**File:** `ajax/reaction_ajax.php`
 
 | Action | Method | Params | Response |
 |--------|--------|--------|----------|
-| `toggle` | POST | `entity_type`, `entity_id`, `like_type` (opt) | `{success, action, count}` |
-| `status` | GET | `entity_type`, `entity_id` | `{liked, count}` |
+| `toggle` | POST | `entity_type`, `entity_id`, `reaction_type` (opt) | `{success, action, count}` |
+| `status` | GET | `entity_type`, `entity_id` | `{reacted, count}` |
 | `count` | GET | `entity_type`, `entity_id` | `{count}` |
 
 ### Entity Types
 
-Any entity with a primary key can be liked. Common types:
+Any entity with a primary key can be reacted to. Common types:
 
-| `entity_type` | Entity | Typical `like_type` |
-|---------------|--------|---------------------|
+| `entity_type` | Entity | Typical `reaction_type` |
+|---------------|--------|-------------------------|
 | `user` | Users (dating, follows) | like, pass, super_like |
 | `event` | Events | favorite, interested |
 | `post` | Blog posts | like |
 | `product` | Products | favorite, bookmark |
 | `location` | Locations | favorite |
 
-Plugins can introduce new entity types and like types without schema changes.
-
+Plugins can introduce new entity types and reaction types without schema changes.
