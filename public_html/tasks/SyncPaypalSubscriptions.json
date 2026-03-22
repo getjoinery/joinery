@@ -1,0 +1,7 @@
+{
+    "name": "Sync PayPal Subscriptions",
+    "description": "Checks PayPal subscription status for all active PayPal subscriptions. Safety net for missed webhooks — detects cancellations, expirations, and payment failures. This exists because the PayPal webhook integration is newer and less proven than Stripe's. Stripe does not need a sync task because its webhook system has been reliable in production. If the PayPal webhook proves equally reliable over time, this task's frequency can be reduced or it can be disabled.",
+    "default_frequency": "daily",
+    "default_time": "06:00:00",
+    "config_fields": {}
+}

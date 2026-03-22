@@ -167,12 +167,25 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$payment_method = in_array($funding_source, $valid_sources) ? $funding_source : 'paypal';
 
 			if($_GET['subscription']){
+				// Verify PayPal subscription ID if provided
+				$paypal_sub_id = isset($_GET['paypal_subscription_id']) ? trim($_GET['paypal_subscription_id']) : null;
+				if ($paypal_sub_id) {
+					$sub_details = $paypal->subDetails($paypal_sub_id);
+					if (!$sub_details || !in_array($sub_details['status'] ?? '', ['ACTIVE', 'APPROVED'])) {
+						return _checkout_error('PayPal subscription could not be verified. Please try again.');
+					}
+				}
+
 				$order->set('ord_status', Order::STATUS_PAID);
 				$order->set('ord_payment_method', $payment_method);
 				$order->set('ord_raw_response', json_encode($payment));
+				if ($paypal_sub_id) {
+					$order->set('ord_paypal_order_id', $paypal_sub_id);
+				}
 				$order->save();
 
 				$payment_service = 'paypal';
+				// Store subscription ID on order items after they're created (see below)
 			}
 			else if($payment['status']=='COMPLETED'){
 				$order->set('ord_status', Order::STATUS_PAID);
@@ -388,8 +401,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$order_item->save();
 				$order->set('ord_stripe_subscription_id_temp', NULL);
 				$order->save();
-				
-			}	
+
+			}
+			else if($payment_service == 'paypal' && isset($_GET['paypal_subscription_id']) && $_GET['paypal_subscription_id']){
+				$order_item->set('odi_status', OrderItem::STATUS_PAID);
+				$order_item->set('odi_paypal_subscription_id', $_GET['paypal_subscription_id']);
+				$order_item->set('odi_subscription_status', 'active');
+				$order_item->save();
+			}
 					
 			
 			//SEND NOTIFICATION

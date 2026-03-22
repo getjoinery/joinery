@@ -324,44 +324,56 @@ function change_tier_logic($get, $post) {
                         throw new Exception('Subscription cancellation is not currently available. Please contact support for assistance.');
                     }
 
-                    // Validate subscription ID exists
-                    $subscription_id = $current_subscription->get('odi_stripe_subscription_id');
-                    if (!$subscription_id) {
+                    // Determine payment system and validate subscription ID
+                    $paypal_sub_id = $current_subscription->get('odi_paypal_subscription_id');
+                    $stripe_sub_id = $current_subscription->get('odi_stripe_subscription_id');
+
+                    if (!$paypal_sub_id && !$stripe_sub_id) {
                         throw new Exception('Your subscription is not linked to a payment processor. Please contact support.');
                     }
 
-                    if ($page_vars['settings']['subscription_cancellation_timing'] == 'immediate') {
-                        // Immediate cancellation
-                        try {
-                            $result = $stripe_helper->cancel_subscription(
-                                $subscription_id,
-                                'immediate'
+                    if ($paypal_sub_id) {
+                        // PayPal cancellation — always immediate (PayPal doesn't support end-of-period via API)
+                        require_once(PathHelper::getIncludePath('includes/PaypalHelper.php'));
+                        $paypal = new PaypalHelper();
+                        $result = $paypal->cancel_subscription($paypal_sub_id);
+
+                        if ($result) {
+                            $current_subscription->set('odi_subscription_cancelled_time', 'now()');
+                            $current_subscription->set('odi_subscription_status', 'canceled');
+                            $current_subscription->save();
+
+                            SubscriptionTier::removeUserFromAllTiers($user_id);
+
+                            ChangeTracking::logChange(
+                                'subscription_tier', null, $user_id, 'tier_removed',
+                                $current_tier_level, null, 'subscription_cancelled',
+                                'order_item', $current_subscription->key, $user_id
                             );
+
+                            $page_vars['success_message'] = 'Your subscription has been cancelled successfully.';
+                        } else {
+                            throw new Exception('Unable to cancel your PayPal subscription. Please try again or cancel directly at paypal.com.');
+                        }
+                    } else if ($page_vars['settings']['subscription_cancellation_timing'] == 'immediate') {
+                        // Stripe immediate cancellation
+                        try {
+                            $result = $stripe_helper->cancel_subscription($stripe_sub_id, 'immediate');
                         } catch (Exception $e) {
                             throw new Exception('Failed to cancel your subscription with the payment processor: ' . $e->getMessage());
                         }
 
                         if ($result) {
-                            // Mark as cancelled immediately
                             $current_subscription->set('odi_subscription_cancelled_time', 'now()');
                             $current_subscription->set('odi_subscription_status', 'canceled');
                             $current_subscription->save();
 
-                            // Remove user from tier immediately
                             SubscriptionTier::removeUserFromAllTiers($user_id);
 
-                            // Log the change
                             ChangeTracking::logChange(
-                                'subscription_tier',
-                                null,
-                                $user_id,
-                                'tier_removed',
-                                $current_tier_level,
-                                null,
-                                'subscription_cancelled',
-                                'order_item',
-                                $current_subscription->key,
-                                $user_id
+                                'subscription_tier', null, $user_id, 'tier_removed',
+                                $current_tier_level, null, 'subscription_cancelled',
+                                'order_item', $current_subscription->key, $user_id
                             );
 
                             $page_vars['success_message'] = 'Your subscription has been cancelled successfully.';
@@ -372,18 +384,14 @@ function change_tier_logic($get, $post) {
                             throw new Exception('Unable to cancel your subscription. Please try again or contact support.');
                         }
                     } else {
-                        // End-of-period cancellation
+                        // Stripe end-of-period cancellation
                         try {
-                            $result = $stripe_helper->cancel_subscription(
-                                $subscription_id,
-                                'period_end'
-                            );
+                            $result = $stripe_helper->cancel_subscription($stripe_sub_id, 'period_end');
                         } catch (Exception $e) {
                             throw new Exception('Failed to schedule subscription cancellation with the payment processor: ' . $e->getMessage());
                         }
 
                         if ($result) {
-                            // Set future cancellation date
                             $current_subscription->set('odi_subscription_cancel_at_period_end', true);
                             $current_subscription->save();
 
@@ -406,27 +414,44 @@ function change_tier_logic($get, $post) {
                         throw new Exception('Your subscription has expired and cannot be reactivated. Please purchase a new subscription.');
                     }
 
-                    // Validate subscription ID exists
-                    $subscription_id = $current_subscription->get('odi_stripe_subscription_id');
-                    if (!$subscription_id) {
+                    // Determine payment system
+                    $paypal_sub_id = $current_subscription->get('odi_paypal_subscription_id');
+                    $stripe_sub_id = $current_subscription->get('odi_stripe_subscription_id');
+
+                    if (!$paypal_sub_id && !$stripe_sub_id) {
                         throw new Exception('Your subscription is not linked to a payment processor. Please contact support.');
                     }
 
-                    // Attempt reactivation
-                    try {
-                        $subscription = $stripe_helper->reactivate_subscription($subscription_id);
-                    } catch (Exception $e) {
-                        throw new Exception('Failed to reactivate your subscription with the payment processor: ' . $e->getMessage());
-                    }
+                    if ($paypal_sub_id) {
+                        require_once(PathHelper::getIncludePath('includes/PaypalHelper.php'));
+                        $paypal = new PaypalHelper();
+                        $result = $paypal->activate_subscription($paypal_sub_id);
 
-                    if ($subscription) {
-                        // Clear cancellation flags in database
-                        $current_subscription->set('odi_subscription_cancel_at_period_end', false);
-                        $current_subscription->save();
+                        if ($result) {
+                            $current_subscription->set('odi_subscription_cancel_at_period_end', false);
+                            $current_subscription->set('odi_subscription_cancelled_time', null);
+                            $current_subscription->set('odi_subscription_status', 'active');
+                            $current_subscription->save();
 
-                        $page_vars['success_message'] = 'Your subscription has been reactivated successfully. Billing will continue as normal.';
+                            $page_vars['success_message'] = 'Your subscription has been reactivated successfully.';
+                        } else {
+                            throw new Exception('Unable to reactivate your PayPal subscription. Please try again or contact support.');
+                        }
                     } else {
-                        throw new Exception('Unable to reactivate your subscription. Please try again or contact support.');
+                        try {
+                            $subscription = $stripe_helper->reactivate_subscription($stripe_sub_id);
+                        } catch (Exception $e) {
+                            throw new Exception('Failed to reactivate your subscription with the payment processor: ' . $e->getMessage());
+                        }
+
+                        if ($subscription) {
+                            $current_subscription->set('odi_subscription_cancel_at_period_end', false);
+                            $current_subscription->save();
+
+                            $page_vars['success_message'] = 'Your subscription has been reactivated successfully. Billing will continue as normal.';
+                        } else {
+                            throw new Exception('Unable to reactivate your subscription. Please try again or contact support.');
+                        }
                     }
                     break;
 

@@ -1,6 +1,6 @@
 {
     "name": "Send Post-Event Survey Emails",
-    "description": "Sends survey invitation emails to registrants of events that have ended and have evt_survey_display set to after_event. Only contacts registrants who have not yet completed the survey.",
+    "description": "Sends survey invitation emails to registrants of events that have ended and have evt_survey_display set to after_event. Only contacts registrants who have not yet completed the survey. Runs daily so surveys go out the day after an event ends. Does not re-send to users who have already completed the survey.",
     "default_frequency": "daily",
     "default_time": "10:00:00",
     "config_fields": {}
