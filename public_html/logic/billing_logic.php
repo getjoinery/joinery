@@ -130,7 +130,33 @@ function billing_logic($get, $post) {
         }
     }
 
-    // Fall back to local order history if no Stripe invoices
+    // Try PayPal transaction history if no Stripe invoices
+    if (empty($page_vars['invoices']) && $current_subscription && $current_subscription->get('odi_paypal_subscription_id')) {
+        try {
+            require_once(PathHelper::getIncludePath('includes/PaypalHelper.php'));
+            $paypal = new PaypalHelper();
+            $transactions = $paypal->get_subscription_transactions(
+                $current_subscription->get('odi_paypal_subscription_id'),
+                date('Y-m-d\TH:i:s\Z', strtotime('-1 year')),
+                date('Y-m-d\TH:i:s\Z')
+            );
+            if (!empty($transactions['transactions'])) {
+                foreach ($transactions['transactions'] as $txn) {
+                    $page_vars['invoices'][] = array(
+                        'date' => date('M j, Y', strtotime($txn['time'] ?? $txn['create_time'] ?? 'now')),
+                        'description' => $txn['payer_name']['given_name'] ?? 'Subscription payment',
+                        'amount' => number_format(floatval($txn['amount_with_breakdown']['gross_amount']['value'] ?? 0), 2),
+                        'status' => strtolower($txn['status'] ?? 'completed'),
+                        'pdf_url' => null,
+                    );
+                }
+            }
+        } catch (Exception $e) {
+            // PayPal transaction lookup failed
+        }
+    }
+
+    // Fall back to local order history if no Stripe or PayPal invoices
     if (empty($page_vars['invoices'])) {
         $orders = new MultiOrder(
             array('user_id' => $user_id),
