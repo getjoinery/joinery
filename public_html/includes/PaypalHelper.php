@@ -132,9 +132,9 @@ class PaypalHelper{
           "plan_id": "'.$plan_id.'",
         });
       },
-      onApprove: function(data, actions) {    
-		// Go to the return URL page
-		window.location.href = "'.$this->return_url.'?subscription=1";
+      onApprove: function(data, actions) {
+		// Go to the return URL page with subscription ID
+		window.location.href = "'.$this->return_url.'?subscription=1&paypal_subscription_id=" + encodeURIComponent(data.subscriptionID);
       },
 	  onError: function(err) {
 		alert("An error occurred during the payment. Please try again.");
@@ -275,9 +275,18 @@ class PaypalHelper{
 		
 		// Prepare the data as an associative array
 	
+		// Strip HTML and truncate description to PayPal's 127 char limit
+		$description = trim(strip_tags($product->get('pro_description') ?? ''));
+		if (strlen($description) > 127) {
+			$description = substr($description, 0, 124) . '...';
+		}
+		if (empty($description)) {
+			$description = $product->get('pro_name');
+		}
+
 		$postData = array(
-			"name" => $product->get('pro_name'), 
-			"description" => $product->get('pro_description'),
+			"name" => $product->get('pro_name'),
+			"description" => $description,
 			"type" => "DIGITAL",  //PHYSICAL, DIGITAL, OR SERVICE
 			//"category" => "SOFTWARE",  //Category, see:  https://developer.paypal.com/docs/api/catalog-products/v1/#products_create
 			//"image_url" => "https://example.com/streaming.jpg",
@@ -509,9 +518,135 @@ class PaypalHelper{
 	
 	
 	
+	/**
+	 * Cancel a PayPal subscription.
+	 */
+	public function cancel_subscription($subscription_id, $reason = 'Customer requested cancellation') {
+		$access_token = $this->getAccessToken();
+		$curl = curl_init();
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => $this->endpoint . '/v1/billing/subscriptions/' . $subscription_id . '/cancel',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CUSTOMREQUEST => 'POST',
+			CURLOPT_POSTFIELDS => json_encode(array('reason' => $reason)),
+			CURLOPT_HTTPHEADER => array(
+				'Content-Type: application/json',
+				"Authorization: Basic $access_token"
+			),
+		));
+		$response = curl_exec($curl);
+		$http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+		curl_close($curl);
+		return $http_code === 204;
+	}
+
+	/**
+	 * Suspend (pause) a PayPal subscription.
+	 */
+	public function suspend_subscription($subscription_id, $reason = 'Customer requested pause') {
+		$access_token = $this->getAccessToken();
+		$curl = curl_init();
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => $this->endpoint . '/v1/billing/subscriptions/' . $subscription_id . '/suspend',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CUSTOMREQUEST => 'POST',
+			CURLOPT_POSTFIELDS => json_encode(array('reason' => $reason)),
+			CURLOPT_HTTPHEADER => array(
+				'Content-Type: application/json',
+				"Authorization: Basic $access_token"
+			),
+		));
+		$response = curl_exec($curl);
+		$http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+		curl_close($curl);
+		return $http_code === 204;
+	}
+
+	/**
+	 * Reactivate a suspended PayPal subscription.
+	 */
+	public function activate_subscription($subscription_id, $reason = 'Customer requested reactivation') {
+		$access_token = $this->getAccessToken();
+		$curl = curl_init();
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => $this->endpoint . '/v1/billing/subscriptions/' . $subscription_id . '/activate',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CUSTOMREQUEST => 'POST',
+			CURLOPT_POSTFIELDS => json_encode(array('reason' => $reason)),
+			CURLOPT_HTTPHEADER => array(
+				'Content-Type: application/json',
+				"Authorization: Basic $access_token"
+			),
+		));
+		$response = curl_exec($curl);
+		$http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+		curl_close($curl);
+		return $http_code === 204;
+	}
+
+	/**
+	 * Get subscription transaction history.
+	 */
+	public function get_subscription_transactions($subscription_id, $start_time, $end_time) {
+		$access_token = $this->getAccessToken();
+		$curl = curl_init();
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => $this->endpoint . '/v1/billing/subscriptions/' . $subscription_id
+				. '/transactions?start_time=' . urlencode($start_time) . '&end_time=' . urlencode($end_time),
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_HTTPHEADER => array("Authorization: Basic $access_token"),
+		));
+		$response = curl_exec($curl);
+		curl_close($curl);
+		return json_decode($response, true);
+	}
+
+	/**
+	 * Verify a PayPal webhook signature.
+	 */
+	public function verify_webhook_signature($headers, $body) {
+		$settings = Globalvars::get_instance();
+		$webhook_id = StripeHelper::isTestMode()
+			? $settings->get_setting('paypal_webhook_id_test')
+			: $settings->get_setting('paypal_webhook_id');
+
+		if (!$webhook_id) {
+			error_log("PayPal webhook ID not configured");
+			return false;
+		}
+
+		$access_token = $this->getAccessToken();
+		$verify_data = array(
+			'auth_algo' => $headers['PAYPAL-AUTH-ALGO'] ?? '',
+			'cert_url' => $headers['PAYPAL-CERT-URL'] ?? '',
+			'transmission_id' => $headers['PAYPAL-TRANSMISSION-ID'] ?? '',
+			'transmission_sig' => $headers['PAYPAL-TRANSMISSION-SIG'] ?? '',
+			'transmission_time' => $headers['PAYPAL-TRANSMISSION-TIME'] ?? '',
+			'webhook_id' => $webhook_id,
+			'webhook_event' => json_decode($body, true),
+		);
+
+		$curl = curl_init();
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => $this->endpoint . '/v1/notifications/verify-webhook-signature',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CUSTOMREQUEST => 'POST',
+			CURLOPT_POSTFIELDS => json_encode($verify_data),
+			CURLOPT_HTTPHEADER => array(
+				'Content-Type: application/json',
+				"Authorization: Basic $access_token"
+			),
+		));
+		$response = curl_exec($curl);
+		curl_close($curl);
+
+		$result = json_decode($response, true);
+		return isset($result['verification_status']) && $result['verification_status'] === 'SUCCESS';
+	}
+
 	protected function getAccessToken(){
 		return $access_token=base64_encode($this->api_key.':'.$this->api_secret_key);
 	}
-	
-	
+
+
 }
