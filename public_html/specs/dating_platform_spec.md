@@ -2,7 +2,33 @@
 
 **Purpose:** Define what's needed to build a dating site on Joinery, separated into reusable core platform features vs. dating-specific plugin features. MVP-focused.
 
-**Last Updated:** 2026-02-07
+**Last Updated:** 2026-03-22
+
+---
+
+## Implementation Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Core Platform** | | |
+| 1.1 Extended User Profiles | **DONE** | Fields added to `users_class.php` (2026-03-22) |
+| 1.2 Notification Center | **DONE** | Data model, logic, views, AJAX all implemented. Notification preferences not yet built. |
+| 1.3 User Discovery / Member Directory | Not started | Deferred to Phase 2 per plan |
+| 1.4 Like / Favorite System | Not started | Separate spec: [Like System Spec](like_system_spec.md) |
+| 1.5 Block System | Not started | |
+| 1.6 Report System | Not started | |
+| 1.7 Messaging Enhancements | Not started | Basic point-to-point messaging exists (`msg_messages`), but no conversation threading, read status, or conversation models |
+| **Dating Plugin** | | |
+| 2.1 Dating Profile | Not started | `plugins/dating/` directory does not exist |
+| 2.2 Dating Preferences | Not started | |
+| 2.3 Match System | Not started | |
+| 2.4 Discovery Engine | Not started | |
+| 2.5 Message Gating | Not started | |
+| 2.6 Admin Verification | Not started | |
+| 2.7 Interest Tags | Not started | Groups system exists but no interest category integration |
+| **Infrastructure** | | |
+| Geolocation / PostGIS | Not started | PostGIS extension not installed; spec exists |
+| Pictures Refactor | **DONE** | `EntityPhoto` model implemented (`eph_entity_photos` table) |
 
 ---
 
@@ -21,7 +47,7 @@ This separation means the core work benefits every Joinery site, and the dating 
 
 These are new core features that fill gaps in the platform for ANY interactive/social use case.
 
-### 1.1 Extended User Profiles
+### 1.1 Extended User Profiles -- STATUS: DONE (2026-03-22)
 
 **Problem:** Users currently have only name, email, photo, phone, timezone. Any community or membership platform needs richer profiles.
 
@@ -37,11 +63,11 @@ These are core user attributes. The `usr_users` table already has profile-type f
 
 **Principle:** Core features go in core tables. Plugin-specific fields (dating preferences, relationship goals, etc.) go in plugin tables. Address and geography data stays in the address table where it belongs.
 
-### 1.2 Notification Center
+### 1.2 Notification Center -- STATUS: DONE
 
 See **[Notification Center Spec](notification_center_spec.md)** for full details on the in-app notification system, data models (`notifications`, `notification_preferences`), existing UI scaffolding, and delivery strategy.
 
-### 1.3 User Discovery / Member Directory
+### 1.3 User Discovery / Member Directory -- STATUS: Not started (Phase 2)
 
 **Problem:** No way to browse or search other users. Membership orgs, professional networks, and community platforms all need a member directory.
 
@@ -60,22 +86,11 @@ See **[Notification Center Spec](notification_center_spec.md)** for full details
 
 **Geolocation Support:** See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for PostGIS setup, geocoding, spatial indexing on the address table, and distance queries.
 
-### 1.4 Like / Favorite System
+### 1.4 Like / Favorite System -- STATUS: Not started (separate spec)
 
-**Problem:** No way for users to express interest in other users, bookmark content, or favorite items. Useful across social, marketplace, and community platforms.
+See **[Like System Spec](like_system_spec.md)** for full details. Polymorphic `entity_type` + `entity_id` pattern (same as EntityPhoto, ChangeTracking). Works with any entity: users, events, posts, products, etc. Dating plugin adds match semantics on top.
 
-**New Model: `user_likes`**
-- `ulk_user_like_id` (serial, primary key)
-- `ulk_usr_user_id` (int4, FK) - User doing the liking
-- `ulk_target_type` (varchar 50) - 'user', 'post', 'product', 'event', etc.
-- `ulk_target_id` (int4) - ID of liked entity
-- `ulk_like_type` (varchar 20, default 'like') - 'like', 'super_like', 'pass' (extensible by plugins)
-- `ulk_create_time` / `ulk_delete_time` (timestamps)
-- Unique constraint on (user_id, target_type, target_id)
-
-This is a **generic** like system. The dating plugin adds semantics on top (mutual = match, pass = don't show again, super_like = premium feature).
-
-### 1.5 Block System
+### 1.5 Block System -- STATUS: Not started
 
 **Problem:** Any platform where users interact needs the ability to block other users. Blocked users can't see your profile, message you, or appear in your results.
 
@@ -93,7 +108,7 @@ This is a **generic** like system. The dating plugin adds semantics on top (mutu
 - Profile viewing (404 or "user not found")
 - Notification generation (suppress)
 
-### 1.6 Report System
+### 1.6 Report System -- STATUS: Not started
 
 **Problem:** Any platform with user-generated content or user interaction needs content/user reporting and admin moderation. This is non-negotiable for safety.
 
@@ -114,7 +129,7 @@ This is a **generic** like system. The dating plugin adds semantics on top (mutu
 - Action buttons: dismiss, warn user, disable user, permanent ban
 - Report statistics dashboard
 
-### 1.7 Messaging Enhancements
+### 1.7 Messaging Enhancements -- STATUS: Not started
 
 **Problem:** The existing messaging model is functional but minimal. Interactive platforms need conversation threading and read status.
 
@@ -153,7 +168,7 @@ Option B: New conversation model with messages as children:
 
 These features only make sense for a dating site. Built as a standard Joinery plugin at `plugins/dating/`.
 
-### 2.1 Dating Profile
+### 2.1 Dating Profile -- STATUS: Not started
 
 **New Model: `dating_profiles`** (plugin data model)
 - `dtp_dating_profile_id` (serial, primary key)
@@ -179,7 +194,7 @@ Instead of a free-form bio only (which is already in core `usr_users` as `usr_bi
 
 Prompts are stored in a settings/config table. Users pick 3 prompts and write answers. Stored as JSON in `dtp_prompts`. Admin can manage available prompts.
 
-### 2.2 Dating Preferences / Dealbreakers
+### 2.2 Dating Preferences / Dealbreakers -- STATUS: Not started
 
 **New Model: `dating_preferences`** (plugin data model)
 - `dpr_dating_preference_id` (serial, primary key)
@@ -197,7 +212,7 @@ Prompts are stored in a settings/config table. Users pick 3 prompts and write an
 - Age range and distance are always hard filters
 - Other preferences are soft (affect ranking) unless marked as dealbreakers in the JSON field
 
-### 2.3 Match System
+### 2.3 Match System -- STATUS: Not started
 
 **Core like system** (1.4) handles the raw like/pass data. The dating plugin adds match detection.
 
@@ -219,7 +234,7 @@ Prompts are stored in a settings/config table. Users pick 3 prompts and write an
 
 **Unmatch:** Either user can unmatch. This soft-deletes the match, hides the conversation, and prevents future likes (or allows re-liking after a cooldown, configurable).
 
-### 2.4 Discovery Engine
+### 2.4 Discovery Engine -- STATUS: Not started
 
 This is the core dating experience -- "who should I see next?"
 
@@ -258,7 +273,7 @@ LIMIT 20 OFFSET :offset;
 - Grid view option (see multiple profiles at once)
 - Profile detail modal / page
 
-### 2.5 Message Gating
+### 2.5 Message Gating -- STATUS: Not started
 
 **Dating-specific messaging rule:** Only matched users can message each other.
 
@@ -270,7 +285,7 @@ LIMIT 20 OFFSET :offset;
 
 **Configurable:** Setting `dating_message_requires_match` (bool, default true). Site admin could disable this to allow open messaging.
 
-### 2.6 Admin Verification (Simple MVP)
+### 2.6 Admin Verification (Simple MVP) -- STATUS: Not started
 
 **Why MVP:** Users on dating platforms have heightened safety concerns. A "Verified" badge dramatically increases trust and engagement. The MVP version is simple and low-effort.
 
@@ -284,7 +299,7 @@ LIMIT 20 OFFSET :offset;
 
 **Not MVP:** AI selfie matching, government ID upload, video verification. These are post-launch enhancements.
 
-### 2.7 Interest Tags
+### 2.7 Interest Tags -- STATUS: Not started
 
 **Approach:** Leverage the existing **groups system** with a new category.
 

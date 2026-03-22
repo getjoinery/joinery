@@ -1,242 +1,213 @@
-# Change Subscription Page Specification
+# Billing Page Specification
+
+**Status:** Active
+**URL:** `/profile/billing`
+**Updated:** 2026-03-22
 
 ## Overview
-Create a generic subscription management page at `/profile/change-subscription` that handles billing and subscription administration **without** tier-based logic. This complements the tier-specific `/profile/change-tier` page.
 
-## Purpose
-Provide subscription management for:
-- Single-product businesses (no tiers needed)
-- Billing cycle changes (monthly ↔ yearly)
-- Payment method updates
-- Billing history and invoices
-- Subscription pause/resume (if supported)
-- Generic cancellation interface
+A billing management page on the user profile for viewing and managing payment details, billing history, and billing cycle preferences. This page is separate from `/profile/change-tier` (which handles plan selection) — this page handles the money side.
 
-## URL
-`/profile/change-subscription`
+## Context
 
-## Files to Create
+The subscription plan management page (`/profile/change-tier`) already handles upgrade, downgrade, cancel, and reactivate. This page complements it with three billing-specific features that don't belong on the plan selection page.
 
-### 1. Logic File: `/logic/change_subscription_logic.php`
-**Function:** `change_subscription_logic($get, $post)`
+---
 
-**Responsibilities:**
-- Session validation (redirect to login if not authenticated)
-- Load user's active subscription(s) from `order_items` table
-- Handle POST actions for subscription management
-- Integration with StripeHelper for billing operations
-- Return subscription data via LogicResult::render()
+## Feature 1: Payment Method Management
 
-**POST Actions:**
-1. **`action=change_billing_cycle`**
-   - Switch between monthly/yearly billing
-   - Parameters: `new_price_id` (Stripe price ID)
-   - Use `StripeHelper::change_subscription()` to update subscription
-   - Pro-rate immediately or schedule for next period (configurable)
+**What:** Display the card on file and let the user update it via Stripe's billing portal.
 
-2. **`action=update_payment_method`**
-   - Redirect to Stripe customer portal for payment method management
-   - Use `StripeHelper::create_billing_portal_session()`
-   - Return URL: `/profile/change-subscription?payment_updated=1`
+**Payment system compatibility:**
 
-3. **`action=cancel_subscription`**
-   - Cancel subscription at period end or immediately (based on settings)
-   - Use `StripeHelper::cancel_subscription()`
-   - Mark `odi_subscription_cancelled_time` in order_items
-   - Option to provide cancellation reason (save to change_tracking)
+| Payment System | Supported | Notes |
+|---------------|-----------|-------|
+| Stripe | Yes | Full support via Billing Portal API |
+| PayPal | No | PayPal manages payment methods within PayPal — users update their card/bank at paypal.com, not on our site |
+| Free orders | N/A | No payment method to manage |
 
-4. **`action=reactivate_subscription`**
-   - Reactivate cancelled subscription before period end
-   - Use `StripeHelper::reactivate_subscription()`
-   - Clear `odi_subscription_cancel_at_period_end` flag
+**Show this section when:** User has an active Stripe subscription (`odi_stripe_subscription_id` is set on any active order item) AND order was paid via Stripe (`ord_payment_method` is `stripe` or `stripe_checkout`).
 
-5. **`action=pause_subscription`** (future enhancement)
-   - Pause subscription for 1-3 months
-   - Use Stripe subscription schedules
-   - Track pause duration in order_items
+**Hide this section when:** User's subscription was purchased via PayPal, or user has no active subscription.
 
-**Page Variables Returned:**
+**Implementation:**
+- Add `create_billing_portal_session($customer_id, $return_url)` to StripeHelper (~10 lines, wraps `\Stripe\BillingPortal\Session::create`)
+- Display: card brand icon, last 4 digits, expiry (from existing `get_payment_methods()`)
+- "Update Payment Method" button POSTs `action=update_payment_method`
+- Logic creates billing portal session, redirects user to Stripe
+- Stripe redirects back to `/profile/billing?payment_updated=1`
+- Show success message on return
+
+**For PayPal subscribers:** Show a note: "Your subscription is managed through PayPal. To update your payment method, visit [paypal.com](https://paypal.com)."
+
+---
+
+## Feature 2: Billing Cycle Switcher
+
+**What:** Switch between monthly and yearly billing for the current subscription without changing tiers.
+
+**Payment system compatibility:**
+
+| Payment System | Supported | Notes |
+|---------------|-----------|-------|
+| Stripe | Yes | Uses existing `StripeHelper::change_subscription()` |
+| PayPal | No | PayPal subscription plan changes require cancelling and re-subscribing. No in-place cycle change API. |
+| Free orders | N/A | No billing cycle |
+
+**Show this section when:** User has an active Stripe subscription AND the current product has multiple ProductVersions with different `prv_price_type` values (e.g., both `month` and `year` versions exist).
+
+**Hide this section when:** Only one billing cycle option exists for the product, OR subscription is via PayPal, OR subscription is cancelled.
+
+**Implementation:**
+- Load ProductVersions for the user's current product where `prv_price_type` differs from current
+- Calculate and display savings: "Save X% with yearly billing" (compare annual cost of monthly vs yearly price)
+- Toggle or button submits `action=change_billing_cycle` with `new_price_id`
+- Calls existing `StripeHelper::change_subscription()` — prorate based on `subscription_downgrade_timing` setting
+- Show confirmation before switching: "Your billing will change from $X/month to $Y/year. You'll be charged the prorated difference today."
+
+**For PayPal subscribers:** Show a note: "To change your billing cycle, please cancel your current subscription and re-subscribe with the new billing option."
+
+---
+
+## Feature 3: Invoice / Billing History
+
+**What:** Table of past invoices with dates, amounts, and PDF download links.
+
+**Payment system compatibility:**
+
+| Payment System | Supported | Notes |
+|---------------|-----------|-------|
+| Stripe | Yes | Full invoice API with hosted PDF links |
+| PayPal | Partial | Can show order history from local database, but no PayPal-hosted invoice PDFs |
+| Free orders | Yes | Show from local order history (amount = $0) |
+
+**Show this section when:** User has any past orders (not just subscriptions — one-time purchases too).
+
+**Implementation:**
+- For Stripe customers: Add `get_customer_invoices($customer_id, $limit)` to StripeHelper. Returns invoice date, amount, status, and `invoice_pdf` URL.
+- For all users: Fall back to local order history from `ord_orders` table if no Stripe customer ID or for non-Stripe orders.
+- Display: Date, Description (product name), Amount, Status (Paid/Failed/Refunded), Download link
+- Limit to 10 most recent, with "View all" link if more exist
+- Stripe invoices include PDF download; local-only orders show "Receipt emailed" instead
+
+---
+
+## Page Layout
+
+```
+/profile/billing
+
++------------------------------------------+
+| Billing & Payment                        |
++------------------------------------------+
+|                                          |
+|  Payment Method                          |
+|  +------------------------------------+  |
+|  | Visa •••• 4242    Expires 12/25    |  |
+|  |            [Update Payment Method]  |  |
+|  +------------------------------------+  |
+|  (or PayPal note, or hidden entirely)    |
+|                                          |
+|  Billing Cycle                           |
+|  +------------------------------------+  |
+|  | Currently: Monthly ($7.99/mo)      |  |
+|  | Switch to: Yearly ($79.99/yr)      |  |
+|  |            Save 17%! [Switch]      |  |
+|  +------------------------------------+  |
+|  (or hidden if only one cycle option)    |
+|                                          |
+|  Billing History                         |
+|  +------------------------------------+  |
+|  | Date    | Description | Amt | PDF  |  |
+|  | Mar 1   | Premium     | $7.99| ⬇  |  |
+|  | Feb 1   | Premium     | $7.99| ⬇  |  |
+|  | Jan 1   | Premium     | $7.99| ⬇  |  |
+|  +------------------------------------+  |
+|                                          |
++------------------------------------------+
+```
+
+## Files to Create/Modify
+
+**New files:**
+- `/views/profile/billing.php` — View
+- `/logic/billing_logic.php` — Logic
+
+**Modified files:**
+- `/includes/StripeHelper.php` — Add `create_billing_portal_session()` and `get_customer_invoices()`
+
+**No new routes needed** — `/profile/billing` resolves automatically via the view fallback system.
+
+## StripeHelper Methods to Add
+
 ```php
-$page_vars = array(
-    'user' => User object,
-    'subscriptions' => MultiOrderItem (active subscriptions),
-    'has_active_subscription' => boolean,
-    'current_subscription' => OrderItem or null,
-    'subscription_status' => 'active'|'canceled'|'past_due'|'expired',
-    'period_end' => timestamp,
-    'cancel_at_period_end' => boolean,
-    'current_product' => Product object,
-    'current_version' => ProductVersion object,
-    'billing_cycle' => 'month'|'year',
-    'alternative_versions' => array of ProductVersion objects (for cycle switching),
-    'invoices' => array of recent invoices from Stripe,
-    'payment_method' => array (last4, brand, exp_month, exp_year),
-    'next_billing_date' => timestamp,
-    'next_billing_amount' => decimal,
-    'settings' => array(
-        'cancellation_enabled' => boolean,
-        'cancellation_timing' => 'immediate'|'end_of_period',
-        'billing_cycle_changes_enabled' => boolean,
-        'pause_subscription_enabled' => boolean,
-    ),
-    'success_message' => string (if action succeeded),
-    'error_message' => string (if action failed),
-);
+/**
+ * Create a Stripe Billing Portal session for payment method management.
+ * @param string $stripe_customer_id
+ * @param string $return_url URL to redirect back to after portal
+ * @return \Stripe\BillingPortal\Session
+ */
+public function create_billing_portal_session($stripe_customer_id, $return_url) {
+    return $this->stripe->billingPortal->sessions->create([
+        'customer' => $stripe_customer_id,
+        'return_url' => $return_url,
+    ]);
+}
+
+/**
+ * Get recent invoices for a Stripe customer.
+ * @param string $stripe_customer_id
+ * @param int $limit
+ * @return array of invoice objects
+ */
+public function get_customer_invoices($stripe_customer_id, $limit = 10) {
+    $invoices = $this->stripe->invoices->all([
+        'customer' => $stripe_customer_id,
+        'limit' => $limit,
+    ]);
+    return $invoices->data;
+}
 ```
 
-### 2. View File: `/views/profile/change-subscription.php`
-**Template:** Clean, modern UI using PublicPage and FormWriter
+## Visibility Logic Summary
 
-**Sections:**
+The page itself is always accessible at `/profile/billing` for any logged-in user. Individual sections show/hide based on what's applicable:
 
-#### A. Subscription Overview Card
-- Current plan name and description
-- Billing cycle (monthly/yearly)
-- Next billing date and amount
-- Status badge (Active, Cancelled, Past Due)
-- If cancelled: Show cancellation date and "Access until" message
-
-#### B. Billing Cycle Switcher
-- Show if `alternative_versions` exist
-- Toggle or button interface to switch monthly ↔ yearly
-- Display savings amount for yearly (e.g., "Save 17% with yearly billing")
-- Form submits `action=change_billing_cycle` with `new_price_id`
-- Disabled if subscription is cancelled
-
-#### C. Payment Method Section
-- Display current payment method (Visa •••• 4242, Expires 12/25)
-- "Update Payment Method" button
-- Links to Stripe billing portal via `action=update_payment_method`
-- Show "Payment method updated" success message if `?payment_updated=1`
-
-#### D. Billing History Table
-- Last 10 invoices from Stripe
-- Columns: Date, Description, Amount, Status, Download Link
-- Pagination for >10 invoices (future enhancement)
-- Use Stripe invoice PDF links for downloads
-
-#### E. Subscription Actions
-**Cancel Subscription Button:**
-- Red/warning styled button
-- Shows modal/confirmation dialog with:
-  - "Are you sure you want to cancel?"
-  - Impact statement ("Access until [date]" or "Immediate cancellation")
-  - Optional: Cancellation reason dropdown/textarea
-  - Confirm/Keep Subscription buttons
-- Only shows if `cancellation_enabled` setting is true
-- Disabled if already cancelled
-
-**Reactivate Subscription Button:**
-- Green/success styled button
-- Only shows if subscription is cancelled but not yet expired
-- Simple confirmation: "Resume your subscription?"
-- Submits `action=reactivate_subscription`
-
-**Pause Subscription Button:** (future enhancement)
-- Only shows if `pause_subscription_enabled` setting is true
-- Modal to select pause duration (1-3 months)
-- Explains billing will resume after pause period
-
-#### F. Additional Features
-- Link to contact support for downgrades/special requests
-- Link to `/profile/change-tier` if tiers are enabled (feature flag)
-- Subscription FAQ/Help section (collapsible)
-
-### 3. Settings to Add (via admin or migration)
-Add to `stg_settings` table:
 ```
-subscription_billing_cycle_changes_enabled = 1
-subscription_pause_enabled = 0 (future)
-subscription_cancellation_requires_reason = 0
-subscription_invoice_history_limit = 10
+Payment Method section:
+  SHOW IF:  has Stripe subscription (odi_stripe_subscription_id set)
+  SHOW AS:  "Update via PayPal" note IF ord_payment_method is paypal/venmo
+  HIDE IF:  no active subscription and no Stripe customer ID
+
+Billing Cycle section:
+  SHOW IF:  has active Stripe subscription
+            AND product has multiple price_type versions
+            AND subscription is not cancelled
+  HIDE IF:  PayPal subscription, or single cycle option, or cancelled
+
+Billing History section:
+  ALWAYS SHOW (for any user with past orders)
+  SOURCE:   Stripe invoices if Stripe customer, else local ord_orders
 ```
 
-## UI/UX Guidelines
+## Settings
 
-### Design Principles:
-1. **Clarity** - User always knows their current status and next billing date
-2. **Safety** - Destructive actions (cancel) require confirmation
-3. **Transparency** - Show exact charges, dates, and impact of changes
-4. **Helpfulness** - Provide alternative actions (e.g., pause instead of cancel)
-
-### Visual Hierarchy:
-1. Current subscription status (most prominent)
-2. Quick actions (change cycle, update payment)
-3. Billing history (reference information)
-4. Cancellation (least prominent, requires scrolling)
-
-### Mobile Responsive:
-- Stack cards vertically on mobile
-- Ensure buttons are touch-friendly (min 44px height)
-- Collapse billing history table to card layout on small screens
-
-## Integration Points
-
-### StripeHelper Methods Required:
-- `change_subscription($subscription_id, $item_id, $new_price_id)` ✅ (already exists)
-- `cancel_subscription($subscription_id, $timing)` ✅ (already exists)
-- `reactivate_subscription($subscription_id)` ✅ (already exists)
-- `create_billing_portal_session($customer_id, $return_url)` - **Need to add**
-- `get_customer_invoices($customer_id, $limit)` - **Need to add**
-- `get_payment_method($payment_method_id)` - **Need to add**
-
-### Database Schema:
-No schema changes required - uses existing tables:
-- `order_items` - Subscription data
-- `orders` - Order history
-- `products` - Product information
-- `product_versions` - Pricing/billing cycle options
-- `stg_settings` - Feature flags
-
-### Error Handling:
-- Stripe API errors → Display friendly message, log to error_log
-- Invalid subscription state → Redirect to `/pricing`
-- Missing payment method → Show "Payment required" message
-- Network issues → "Please try again" with retry button
-
-## Success Criteria
-1. ✅ User can view current subscription status and billing details
-2. ✅ User can switch billing cycles (monthly ↔ yearly) in one click
-3. ✅ User can update payment method via Stripe portal
-4. ✅ User can view/download invoices
-5. ✅ User can cancel subscription with proper confirmation
-6. ✅ User can reactivate cancelled subscription before expiry
-7. ✅ All actions show clear success/error messages
-8. ✅ Page works for single-product subscriptions (no tier logic)
-9. ✅ Mobile responsive and accessible
+No new settings needed — reuses existing subscription settings from change-tier:
+- `subscription_cancellation_enabled`
+- `subscription_cancellation_timing`
+- `subscription_downgrades_enabled`
 
 ## Testing Checklist
-- [ ] Active subscription displays correctly
-- [ ] Cancelled subscription shows expiry date
-- [ ] Billing cycle switcher calculates savings correctly
-- [ ] Payment method update redirects to Stripe portal and back
-- [ ] Invoices load from Stripe API
-- [ ] Cancel subscription updates database and Stripe
-- [ ] Reactivate subscription clears cancellation
-- [ ] Settings flags properly enable/disable features
-- [ ] Error messages display for Stripe API failures
-- [ ] Works on mobile/tablet/desktop viewports
 
-## Future Enhancements
-1. **Subscription Pause** - Temporary hold for 1-3 months
-2. **Upgrade Prompts** - If tiers exist, show "Upgrade to unlock..." messages
-3. **Usage Metering** - Display usage stats for usage-based billing
-4. **Multiple Subscriptions** - Handle users with >1 active subscription
-5. **Proration Preview** - Show exact charges before billing cycle change
-6. **Cancellation Surveys** - Collect feedback on why users cancel
-7. **Win-back Offers** - Show discount when user attempts to cancel
-8. **Referral Credits** - Display account credits/referral bonuses
-
-## Notes
-- This page is **tier-agnostic** - it manages subscription billing only
-- For tier changes (upgrade/downgrade), users should use `/profile/change-tier`
-- Works with or without the subscription_tiers system
-- Can be used standalone for simple subscription businesses
-- ControlD plugin should NOT override this page (use change-tier for tier management)
-
-## Timeline Estimate
-- Logic file: 4-6 hours
-- View file: 4-6 hours
-- StripeHelper additions: 2-3 hours
-- Testing: 2-3 hours
-- **Total: ~12-18 hours**
+- [ ] Stripe subscriber sees payment method with last 4 and expiry
+- [ ] "Update Payment Method" redirects to Stripe portal and back
+- [ ] PayPal subscriber sees "managed through PayPal" note instead of update button
+- [ ] User with no subscription sees billing history only (no payment method or cycle sections)
+- [ ] Billing cycle switcher shows correct savings percentage
+- [ ] Cycle switch calls Stripe and updates subscription
+- [ ] Cycle switcher hidden for PayPal subscriptions
+- [ ] Cycle switcher hidden when only one cycle option exists
+- [ ] Billing history shows Stripe invoices with PDF download links
+- [ ] Billing history falls back to local orders for non-Stripe purchases
+- [ ] Page accessible but sections appropriately empty for users with no purchase history
+- [ ] Mobile responsive

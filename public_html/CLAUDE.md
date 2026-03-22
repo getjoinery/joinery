@@ -158,6 +158,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
 - [Scheduled Tasks](docs/scheduled_tasks.md) - Scheduled task system, cron runner, and task development
 - [Settings](docs/settings.md) - System settings management
+- [Social Features](docs/social_features.md) - Like/favorite system, block system, report system
 - [Subscription Tiers](docs/subscription_tiers.md) - Subscription and tier system
 - [Theme Integration Instructions](docs/theme_integration_instructions.md) - Theme setup and integration
 - [Validation](docs/validation.md) - Input validation patterns
