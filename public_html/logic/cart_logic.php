@@ -21,6 +21,11 @@ function cart_logic($get_vars, $post_vars){
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
+	// Set return URL so login redirects back to checkout
+	if (!$session->get_user_id()) {
+		$session->set_return('/cart');
+	}
+
 	$cart = $session->get_shopping_cart();
 
 	// Handle item removal
