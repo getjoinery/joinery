@@ -155,10 +155,29 @@ public function get_subscription_transactions($subscription_id, $start_time, $en
   ```
 - Same pattern for `reactivate` action.
 
-**Billing page (from billing spec):**
-- Payment method section: Show "Managed through PayPal" with link to paypal.com (PayPal doesn't offer a hosted portal like Stripe's Billing Portal — this is a genuine platform limitation)
-- Billing cycle section: Show "To change billing cycle, cancel and re-subscribe" (PayPal doesn't support in-place plan revision for pricing changes)
-- Billing history section: Use `get_subscription_transactions()` to show PayPal transaction history
+**Billing page (`/profile/billing` — already implemented):**
+
+The billing page (`logic/billing_logic.php` + `views/profile/billing.php`) already exists with full Stripe support and PayPal placeholders. The PayPal integration points are:
+
+1. **Payment method section** — Already shows "Your subscription is managed through PayPal" with a link to paypal.com/myaccount/autopay/ when `$payment_system === 'paypal'`. No changes needed.
+
+2. **Billing cycle section** — Already shows "To change your billing cycle, cancel and re-subscribe" message when `$payment_system === 'paypal'`. No changes needed.
+
+3. **Billing history section** — Currently falls back to local order history for non-Stripe users. After Phase 3 is implemented, update `billing_logic.php` to call `PaypalHelper::get_subscription_transactions()` when a PayPal subscription ID is available:
+   ```php
+   // In billing_logic.php, after the Stripe invoice lookup:
+   if (empty($page_vars['invoices']) && $current_subscription && $current_subscription->get('odi_paypal_subscription_id')) {
+       $paypal = new PaypalHelper();
+       $transactions = $paypal->get_subscription_transactions(
+           $current_subscription->get('odi_paypal_subscription_id'),
+           date('Y-m-d\TH:i:s\Z', strtotime('-1 year')),
+           date('Y-m-d\TH:i:s\Z')
+       );
+       // Map PayPal transactions to the same invoice array format
+   }
+   ```
+
+4. **Payment system detection** — Already checks `odi_paypal_subscription_id` in billing_logic.php (line ~48). Once Phase 1 stores the PayPal subscription ID, this detection will work automatically.
 
 ### Phase 5: Sync Subscription Status
 
@@ -202,6 +221,11 @@ The existing cart restriction (can't mix subscriptions with non-subscription ite
 - `/includes/PaypalHelper.php` — Fix `output_paypal_subscription_checkout_code()` to pass subscription ID back
 - `/logic/cart_charge_logic.php` — Store PayPal subscription ID on checkout
 - `/logic/change_tier_logic.php` — Add PayPal paths for cancel/reactivate actions
+- `/logic/billing_logic.php` — Add PayPal transaction history lookup (minor — the page already handles PayPal display, just needs the API call once `get_subscription_transactions()` exists)
+
+**Already done (no changes needed):**
+- `/views/profile/billing.php` — PayPal payment method message and billing cycle message already implemented
+- `/logic/billing_logic.php` — PayPal detection via `odi_paypal_subscription_id` already in place
 
 ## Testing Plan
 
@@ -212,8 +236,9 @@ The existing cart restriction (can't mix subscriptions with non-subscription ite
 - [ ] Cancel subscription from change-tier page works for PayPal subscriptions
 - [ ] Reactivate suspended subscription works
 - [ ] Subscription status displays correctly on profile for PayPal subscribers
-- [ ] Billing page shows "Managed through PayPal" for payment method
-- [ ] Billing page shows transaction history from PayPal API
+- [ ] Billing page shows "Managed through PayPal" for payment method (already implemented)
+- [ ] Billing page shows "cancel and re-subscribe" for billing cycle (already implemented)
+- [ ] Billing page shows transaction history from PayPal API (after Phase 3+4)
 - [ ] SyncPaypalSubscriptions scheduled task updates stale statuses
 - [ ] Cart restriction still prevents mixing subscription + non-subscription items
 
