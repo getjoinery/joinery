@@ -329,18 +329,22 @@
                             <?php endif; ?>
 
                             <?php if ($settings->get_setting('use_paypal_checkout') && !empty($page_vars['paypal_helper'])): ?>
+                            <?php if ($cart->is_paypal_available()): ?>
                             <div style="<?php if ($settings->get_setting('checkout_type')): ?>border-top: 1px solid var(--color-border, #eee); padding-top: 1.5rem; margin-top: 1.5rem;<?php endif; ?>">
                                 <h5 style="margin-bottom: 1rem;">Pay with PayPal</h5>
                                 <?php
                                 if ($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0) {
                                     echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id']);
-                                } elseif ($cart->get_num_recurring() == 0) {
-                                    echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
                                 } else {
-                                    echo '<div class="alert alert-info">PayPal subscriptions must be purchased individually.</div>';
+                                    echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
                                 }
                                 ?>
                             </div>
+                            <?php else: ?>
+                            <div style="border-top: 1px solid var(--color-border, #eee); padding-top: 1.5rem; margin-top: 1.5rem; color: var(--color-muted); font-size: 0.875rem;">
+                                PayPal is not available for carts containing a mix of subscriptions and other items. You can pay with Stripe, or check out subscriptions separately.
+                            </div>
+                            <?php endif; ?>
                             <?php endif; ?>
 
                             <div style="margin-top: 1.5rem; text-align: center; color: var(--color-muted); font-size: 0.8125rem;">
