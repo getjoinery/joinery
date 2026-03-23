@@ -87,7 +87,37 @@ class MyTaskName implements ScheduledTaskInterface {
 }
 ```
 
-### 3. Activate via Admin
+### 3. (Optional) Add Dry Run Support
+
+Tasks can implement the `ScheduledTaskDryRunnable` interface to support preview/dry run from the admin UI. This is especially useful for email tasks where you want to see what would be sent without actually sending.
+
+```php
+class MyTaskName implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
+    public function run(array $config) {
+        // ... normal execution with side effects
+    }
+
+    public function dryRun(array $config) {
+        // Perform all read/computation logic but skip side effects
+        // (no sending emails, no deleting records, no API calls)
+
+        return array(
+            'status' => 'success',
+            'message' => 'Would process 5 items',
+            'html' => $preview_html,  // Optional: rendered in admin UI
+        );
+    }
+}
+```
+
+**Return keys:**
+- `status` (string, required) — Same as `run()`: `success`, `skipped`, `error`
+- `message` (string, required) — Summary of what *would* happen (e.g., "Would send 5 events to 42 recipients")
+- `html` (string, optional) — HTML preview displayed inline on the admin page (e.g., the email body)
+
+When a task implements this interface, a **Dry Run** button appears alongside **Run Now** in the admin UI. Tasks that don't implement it simply won't show the button.
+
+### 4. Activate via Admin
 
 Navigate to **Admin > System > Scheduled Tasks**. The task appears under "Available Tasks". Click **Activate** to create the database row and enable scheduling.
 
@@ -174,8 +204,9 @@ Note: Docker containers may not have `cron` installed by default. Install with `
 
 **Sections:**
 - **Cron Status Warning** — Shown when cron hasn't run in 30+ minutes
-- **Active Tasks** — Table with schedule, status, edit/run now/deactivate controls
+- **Active Tasks** — Table with schedule, status, edit/run now/dry run/deactivate controls
 - **Edit Form** — Schedule day/time and task-specific config fields
+- **Dry Run Preview** — Shown after a dry run; displays the task's HTML preview with a "no email was sent" banner
 - **Available Tasks** — Discovered but not yet activated tasks with activate button
 
 ## Plugin Integration

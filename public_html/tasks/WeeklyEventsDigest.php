@@ -5,7 +5,7 @@
  * Scheduled task that queries upcoming events for the next 7 days,
  * builds an HTML email, and queues it through the existing bulk email pipeline.
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -17,7 +17,7 @@ require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-class WeeklyEventsDigest implements ScheduledTaskInterface {
+class WeeklyEventsDigest implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
 
 	/**
 	 * Run the weekly events digest.
@@ -39,7 +39,94 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 
 		$mailing_list = new MailingList($mailing_list_id, true);
 
-		// 2. Get upcoming events with recurring series expanded (7-day window)
+		// Build the digest HTML
+		$build = $this->buildDigestHtml();
+		if ($build['status'] !== 'success') {
+			return $build;
+		}
+
+		$html = $build['html'];
+		$event_count = $build['event_count'];
+
+		// Create Email record
+		$email = new Email(null);
+		$email->set('eml_subject', 'Upcoming Events This Week');
+		$email->set('eml_message_html', $html);
+		$email->set('eml_message_template_html', 'blank_template');
+		$email->set('eml_status', Email::EMAIL_QUEUED);
+		$email->set('eml_type', Email::TYPE_MARKETING);
+		$email->set('eml_mlt_mailing_list_id', $mailing_list_id);
+		$email->set('eml_scheduled_time', 'now()');
+		$email->save();
+
+		// Populate EmailRecipient records from mailing list subscribers
+		$subscribers = $mailing_list->get_subscribed_users('object');
+		$recipient_count = 0;
+
+		foreach ($subscribers as $user) {
+			$user_email = $user->get('usr_email');
+			if (!$user_email) {
+				continue;
+			}
+
+			$recipient = new EmailRecipient(null);
+			$recipient->set('erc_eml_email_id', $email->key);
+			$recipient->set('erc_usr_user_id', $user->key);
+			$recipient->set('erc_email', $user_email);
+			$recipient->set('erc_name', $user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
+			$recipient->save();
+			$recipient_count++;
+		}
+
+		if ($recipient_count === 0) {
+			// No recipients - clean up the email record
+			$email->permanent_delete();
+			return array('status' => 'skipped', 'message' => 'Mailing list has no subscribers with email addresses');
+		}
+
+		return array('status' => 'success', 'message' => 'Queued digest with ' . $event_count . ' event(s) to ' . $recipient_count . ' recipient(s)');
+	}
+
+	/**
+	 * Dry run: build and return the digest HTML without sending.
+	 *
+	 * @param array $config  Task-specific configuration (expects 'mailing_list_id')
+	 * @return array  Array with 'status', 'message', and 'html'
+	 */
+	public function dryRun(array $config) {
+		$mailing_list_id = $config['mailing_list_id'] ?? null;
+
+		// Build the digest HTML
+		$build = $this->buildDigestHtml();
+		if ($build['status'] !== 'success') {
+			return $build;
+		}
+
+		// Count recipients without creating records
+		$recipient_count = 0;
+		if ($mailing_list_id && MailingList::check_if_exists($mailing_list_id)) {
+			$mailing_list = new MailingList($mailing_list_id, true);
+			$subscribers = $mailing_list->get_subscribed_users('object');
+			foreach ($subscribers as $user) {
+				if ($user->get('usr_email')) {
+					$recipient_count++;
+				}
+			}
+		}
+
+		return array(
+			'status' => 'success',
+			'message' => 'Would send ' . $build['event_count'] . ' event(s) to ' . $recipient_count . ' recipient(s)',
+			'html' => $build['html'],
+		);
+	}
+
+	/**
+	 * Build the digest HTML from upcoming events. No side effects.
+	 *
+	 * @return array  'status', 'message', 'html', 'event_count'
+	 */
+	private function buildDigestHtml() {
 		$settings = Globalvars::get_instance();
 		$site_tz_string = $settings->get_setting('default_timezone');
 		if (!$site_tz_string) {
@@ -52,7 +139,7 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			$range_end
 		);
 
-		// 3. Filter to events starting within the next 7 days (standalone events may extend beyond range_end)
+		// Filter to events starting within the next 7 days
 		$utc_tz = new DateTimeZone('UTC');
 		$cutoff = new DateTime('+7 days', $utc_tz);
 		$upcoming_events = [];
@@ -66,12 +153,11 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			}
 		}
 
-		// 4. If none, return success with message
 		if (empty($upcoming_events)) {
-			return array('status' => 'success', 'message' => 'No upcoming events in the next 7 days');
+			return array('status' => 'success', 'message' => 'No upcoming events in the next 7 days', 'html' => '', 'event_count' => 0);
 		}
 
-		// 5. Build HTML for each event
+		// Build HTML for each event
 		$site_url = LibraryFunctions::get_absolute_url('');
 		$event_blocks = array();
 
@@ -81,7 +167,6 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			$name = htmlspecialchars($is_virtual ? $event->evt_name : $event->get('evt_name'));
 
 			if ($is_virtual) {
-				// Virtual instances link to the parent event
 				$event_url = $site_url . '/event/' . ($event->evt_link ?: $event->parent_event_id);
 			} else {
 				$event_url = $event->get_url('full');
@@ -139,7 +224,6 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 			$event_blocks[] = $block;
 		}
 
-		// 6. Wrap in heading, intro, and "View All Events" button
 		$event_count = count($upcoming_events);
 		$html = '<h2 style="margin-bottom: 16px;">Upcoming Events This Week</h2>';
 		$html .= '<p style="margin-bottom: 20px;">Here are the upcoming events for the next 7 days:</p>';
@@ -148,43 +232,6 @@ class WeeklyEventsDigest implements ScheduledTaskInterface {
 		$html .= '<a href="' . htmlspecialchars($site_url) . '/events" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">View All Events</a>';
 		$html .= '</div>';
 
-		// 7. Create Email record
-		$email = new Email(null);
-		$email->set('eml_subject', 'Upcoming Events This Week');
-		$email->set('eml_message_html', $html);
-		$email->set('eml_message_template_html', 'blank_template');
-		$email->set('eml_status', Email::EMAIL_QUEUED);
-		$email->set('eml_type', Email::TYPE_MARKETING);
-		$email->set('eml_mlt_mailing_list_id', $mailing_list_id);
-		$email->set('eml_scheduled_time', 'now()');
-		$email->save();
-
-		// 8. Populate EmailRecipient records from mailing list subscribers
-		$subscribers = $mailing_list->get_subscribed_users('object');
-		$recipient_count = 0;
-
-		foreach ($subscribers as $user) {
-			$user_email = $user->get('usr_email');
-			if (!$user_email) {
-				continue;
-			}
-
-			$recipient = new EmailRecipient(null);
-			$recipient->set('erc_eml_email_id', $email->key);
-			$recipient->set('erc_usr_user_id', $user->key);
-			$recipient->set('erc_email', $user_email);
-			$recipient->set('erc_name', $user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
-			$recipient->save();
-			$recipient_count++;
-		}
-
-		if ($recipient_count === 0) {
-			// No recipients - clean up the email record
-			$email->permanent_delete();
-			return array('status' => 'skipped', 'message' => 'Mailing list has no subscribers with email addresses');
-		}
-
-		// 9. Return success
-		return array('status' => 'success', 'message' => 'Queued digest with ' . $event_count . ' event(s) to ' . $recipient_count . ' recipient(s)');
+		return array('status' => 'success', 'message' => '', 'html' => $html, 'event_count' => $event_count);
 	}
 }

@@ -6,7 +6,7 @@
  * Task classes are paired with a JSON config file that declares
  * metadata and configurable parameters.
  *
- * @version 1.1
+ * @version 1.2
  */
 interface ScheduledTaskInterface {
     /**
@@ -24,4 +24,26 @@ interface ScheduledTaskInterface {
      * @return string|array  Status string, or array('status'=>'...', 'message'=>'...')
      */
     public function run(array $config);
+}
+
+/**
+ * ScheduledTaskDryRunnable
+ *
+ * Optional interface for tasks that support dry run / preview mode.
+ * Tasks implementing this will get a "Dry Run" button in the admin UI.
+ *
+ * The dryRun() method should perform all read/computation logic but
+ * skip any side effects (sending emails, deleting records, calling APIs).
+ *
+ * Return array keys:
+ * - 'status'  (string)  Required. Same as run(): 'success', 'skipped', 'error'.
+ * - 'message' (string)  Required. Human-readable summary (e.g., "Would send 5 events to 42 recipients").
+ * - 'html'    (string)  Optional. HTML preview to display in the admin UI (e.g., email body).
+ */
+interface ScheduledTaskDryRunnable {
+    /**
+     * @param array $config  Task-specific configuration from sct_task_config
+     * @return array  Array with 'status', 'message', and optionally 'html'
+     */
+    public function dryRun(array $config);
 }
