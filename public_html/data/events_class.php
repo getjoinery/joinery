@@ -1265,7 +1265,7 @@ class MultiEvent extends SystemMultiBase {
         }
 
         if (isset($this->options['status_not_cancelled'])) {
-            $filters['evt_status'] = '= 1 OR evt_status = 2';
+            $filters['(evt_status'] = '= 1 OR evt_status = 2)';
         }
 
         if (isset($this->options['deleted'])) {
