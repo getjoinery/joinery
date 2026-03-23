@@ -5,7 +5,7 @@
  * Handles task discovery, activation, deactivation, configuration,
  * and run-now functionality.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -44,6 +44,24 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 		}
 		elseif ($action === 'run_now' && isset($post_vars['sct_scheduled_task_id'])) {
 			$result = _handle_run_now($post_vars['sct_scheduled_task_id']);
+			$message = $result['message'] ?? null;
+			$error = $result['error'] ?? null;
+		}
+		elseif ($action === 'dry_run' && isset($post_vars['sct_scheduled_task_id'])) {
+			$result = _handle_dry_run($post_vars['sct_scheduled_task_id']);
+			if (isset($result['html'])) {
+				// Dry run with HTML preview — don't redirect, render inline
+				$session->save_message(new DisplayMessage(
+					$result['message'] ?? 'Dry run complete',
+					'Dry Run',
+					$page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT,
+					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				// Store preview HTML in session for display after redirect
+				$_SESSION['dry_run_preview_html'] = $result['html'];
+				return LogicResult::redirect('/admin/admin_scheduled_tasks');
+			}
 			$message = $result['message'] ?? null;
 			$error = $result['error'] ?? null;
 		}
@@ -121,6 +139,30 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 		$site_timezone = 'America/New_York';
 	}
 
+	// Determine which active tasks support dry run
+	require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+	$dry_run_supported = array();
+	foreach ($active_tasks as $task) {
+		$task_class = $task->get('sct_task_class');
+		$task_file = $task->resolve_task_file();
+		if ($task_file && file_exists($task_file)) {
+			require_once($task_file);
+			if (class_exists($task_class)) {
+				$ref = new ReflectionClass($task_class);
+				if ($ref->implementsInterface('ScheduledTaskDryRunnable')) {
+					$dry_run_supported[$task->key] = true;
+				}
+			}
+		}
+	}
+
+	// Retrieve dry run preview HTML from session (if any)
+	$dry_run_preview_html = null;
+	if (isset($_SESSION['dry_run_preview_html'])) {
+		$dry_run_preview_html = $_SESSION['dry_run_preview_html'];
+		unset($_SESSION['dry_run_preview_html']);
+	}
+
 	// Get session messages
 	$display_messages = $session->get_messages('/admin/admin_scheduled_tasks');
 
@@ -134,6 +176,8 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 		'mailing_lists' => $mailing_lists,
 		'site_timezone' => $site_timezone,
 		'display_messages' => $display_messages,
+		'dry_run_supported' => $dry_run_supported,
+		'dry_run_preview_html' => $dry_run_preview_html,
 	));
 }
 
@@ -303,6 +347,45 @@ function _handle_run_now($task_id) {
 		$task->set('sct_last_run_message', substr($e->getMessage(), 0, 500));
 		$task->save();
 		return array('error' => 'Task error: ' . $e->getMessage());
+	}
+}
+
+/**
+ * Handle "Dry Run" action.
+ */
+function _handle_dry_run($task_id) {
+	require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+
+	$task = new ScheduledTask($task_id, true);
+	$task_class = $task->get('sct_task_class');
+	$task_file = $task->resolve_task_file();
+
+	if (!$task_file) {
+		return array('error' => 'Could not resolve class file for ' . $task_class);
+	}
+
+	try {
+		require_once($task_file);
+
+		if (!class_exists($task_class)) {
+			return array('error' => 'Class ' . $task_class . ' not found.');
+		}
+
+		$task_instance = new $task_class();
+
+		if (!($task_instance instanceof ScheduledTaskDryRunnable)) {
+			return array('error' => 'Task does not support dry run.');
+		}
+
+		$config = $task->get_task_config();
+		$result = $task_instance->dryRun($config);
+
+		$display = 'Dry run of "' . $task->get('sct_name') . '": ' . ($result['message'] ?? $result['status'] ?? 'complete');
+		$result['message'] = $display;
+
+		return $result;
+	} catch (Exception $e) {
+		return array('error' => 'Dry run error: ' . $e->getMessage());
 	}
 }
 

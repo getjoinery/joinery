@@ -5,7 +5,7 @@
  * Shows active tasks and available (discovered) tasks.
  * Supports activate, deactivate, configure, and run-now actions.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -101,6 +101,19 @@ if (!empty($display_messages)) {
 		echo '</div>';
 	}
 	$session->clear_clearable_messages();
+}
+
+// =====================================================
+// DRY RUN PREVIEW (if present)
+// =====================================================
+if (!empty($dry_run_preview_html)) {
+	$pageoptions = array('title' => 'Dry Run Preview');
+	$page->begin_box($pageoptions);
+	echo '<div style="border: 2px dashed #0dcaf0; padding: 20px; border-radius: 4px; background: #f8f9fa;">';
+	echo '<p style="margin: 0 0 12px 0; color: #0dcaf0; font-weight: bold; font-size: 0.85em; text-transform: uppercase;">Preview — no email was sent</p>';
+	echo $dry_run_preview_html;
+	echo '</div>';
+	$page->end_box();
 }
 
 // =====================================================
@@ -217,6 +230,14 @@ if (empty($active_tasks)) {
 			'hidden' => ['action' => 'run_now', 'sct_scheduled_task_id' => $task->key],
 			'class'  => 'btn btn-sm btn-soft me-1',
 		]);
+
+		// Dry Run button (only if task implements ScheduledTaskDryRunnable)
+		if (!empty($dry_run_supported[$task->key])) {
+			echo AdminPage::action_button('Dry Run', '/admin/admin_scheduled_tasks', [
+				'hidden' => ['action' => 'dry_run', 'sct_scheduled_task_id' => $task->key],
+				'class'  => 'btn btn-sm btn-outline-info me-1',
+			]);
+		}
 
 		// Deactivate/Reactivate button
 		if ($is_active) {
