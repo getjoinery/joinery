@@ -36,6 +36,7 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	    'msg_usr_user_id_recipient' => array('type'=>'int4'),
 	    'msg_usr_user_id_sender' => array('type'=>'int4'),
 	    'msg_evt_event_id' => array('type'=>'int4'),
+	    'msg_cnv_conversation_id' => array('type'=>'int8'),
 	    'msg_body' => array('type'=>'text', 'required'=>true),
 	    'msg_sent_time' => array('type'=>'timestamp(6)', 'required'=>true),
 	    'msg_delete_time' => array('type'=>'timestamp(6)'),
@@ -83,6 +84,10 @@ class MultiMessage extends SystemMultiBase {
 
 		if (isset($this->options['event_id_only'])) {
 			$filters['msg_evt_event_id'] = '= '.$this->options['event_id_only'].' AND msg_usr_user_id_recipient IS NULL';
+		}
+
+		if (isset($this->options['conversation_id'])) {
+			$filters['msg_cnv_conversation_id'] = [$this->options['conversation_id'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['deleted'])) {

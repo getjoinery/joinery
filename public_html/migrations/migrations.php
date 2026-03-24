@@ -1300,3 +1300,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Messaging Active Setting (v91) ==========
+	$migration = array();
+	$migration['database_version'] = '91';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'messaging_active'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('messaging_active', '1', 1, now(), now(), 'general')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

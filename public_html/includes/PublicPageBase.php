@@ -335,7 +335,32 @@ abstract class PublicPageBase {
 			}
 		}
 
-		// 5. Site information
+		// 5. Messages
+		$menu_data['messages'] = [
+			'enabled' => false,
+			'unread_count' => 0,
+			'view_all_link' => '/profile/conversations',
+		];
+
+		if ($is_logged_in) {
+			try {
+				$msg_unread = isset($_SESSION['message_unread_count']) ? $_SESSION['message_unread_count'] : null;
+				if ($msg_unread === null) {
+					require_once(PathHelper::getIncludePath('data/conversations_class.php'));
+					$msg_unread = Conversation::get_unread_count($session->get_user_id());
+					$_SESSION['message_unread_count'] = $msg_unread;
+				}
+				$menu_data['messages'] = [
+					'enabled' => true,
+					'unread_count' => (int)$msg_unread,
+					'view_all_link' => '/profile/conversations',
+				];
+			} catch (Exception $e) {
+				// Conversation system not yet installed — keep disabled
+			}
+		}
+
+		// 6. Site information
 		$menu_data['site_info'] = [
 			'site_name' => $settings->get_setting('site_name', 'Joinery', true),
 			'site_description' => $settings->get_setting('site_description', '', true),
@@ -1272,6 +1297,23 @@ abstract class PublicPageBase {
 	 * Render the notification bell icon for the header.
 	 * Called from each theme's top_right_menu(). Themes can override for custom markup.
 	 */
+	public function render_message_icon($menu_data = null) {
+		if ($menu_data === null) {
+			$menu_data = $this->get_menu_data();
+		}
+		$messages = $menu_data['messages'];
+		if (!$messages['enabled']) {
+			return;
+		}
+		$unread = (int)$messages['unread_count'];
+		echo '<a href="' . htmlspecialchars($messages['view_all_link'], ENT_QUOTES, 'UTF-8') . '" class="header-messages-link" title="Messages">';
+		echo '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 4l-10 8L2 4"/></svg>';
+		if ($unread > 0) {
+			echo '<span class="messages-count">' . $unread . '</span>';
+		}
+		echo '</a>';
+	}
+
 	public function render_notification_icon($menu_data = null) {
 		if ($menu_data === null) {
 			$menu_data = $this->get_menu_data();
