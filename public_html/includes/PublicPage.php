@@ -33,6 +33,9 @@ class PublicPage extends PublicPageBase {
             echo '</a>';
         }
 
+        // Messages
+        $this->render_message_icon($menu_data);
+
         // Notifications
         $this->render_notification_icon($menu_data);
 

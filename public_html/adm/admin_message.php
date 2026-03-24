@@ -73,6 +73,9 @@
 		echo '<strong>Event:</strong> ('.$event->key.') <a href="/admin/admin_event?evt_event_id='.$event->key.'">'.$event->get('evt_name') .'</a><br />';
 	}
 	echo '<strong>Sent:</strong> '.LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $session->get_timezone()) .'<br />';
+	if($message->get('msg_cnv_conversation_id')){
+		echo '<strong>Conversation:</strong> <a href="/admin/admin_conversation?cnv_conversation_id='.$message->get('msg_cnv_conversation_id').'">#'.$message->get('msg_cnv_conversation_id').'</a><br />';
+	}
 	echo '<strong>Message:</strong><br /> '.$message->get('msg_body').'<br />';
 	if($message->get('msg_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($message->get('msg_delete_time'), 'UTC', $session->get_timezone()).'<br />';
