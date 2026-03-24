@@ -17,7 +17,7 @@
 | 1.4 Reaction System | **DONE** | Separate spec: [Reaction System Spec](implemented/reaction_system_spec.md) (2026-03-22) |
 | 1.5 Block System | Not started | |
 | 1.6 Report System | Not started | |
-| 1.7 Messaging Enhancements | Not started | Basic point-to-point messaging exists (`msg_messages`), but no conversation threading, read status, or conversation models |
+| 1.7 Messaging Enhancements | **DONE** | Separate spec: [Messaging Enhancements Spec](messaging_enhancements_spec.md) (2026-03-24) |
 | **Dating Plugin** | | |
 | 2.1 Dating Profile | Not started | `plugins/dating/` directory does not exist |
 | 2.2 Dating Preferences | Not started | |
@@ -129,38 +129,9 @@ See **[Reaction System Spec](implemented/reaction_system_spec.md)** for full det
 - Action buttons: dismiss, warn user, disable user, permanent ban
 - Report statistics dashboard
 
-### 1.7 Messaging Enhancements -- STATUS: Not started
+### 1.7 Messaging Enhancements -- STATUS: DONE (2026-03-24)
 
-**Problem:** The existing messaging model is functional but minimal. Interactive platforms need conversation threading and read status.
-
-**Enhancements to existing `messages` or new `conversations` model:**
-
-Option A: Add fields to existing messages:
-- `msg_is_read` (bool, default false)
-- `msg_read_time` (timestamp)
-- `msg_conversation_id` (int4) - Group messages into conversations
-
-Option B: New conversation model with messages as children:
-
-**New Model: `conversations`**
-- `cnv_conversation_id` (serial, primary key)
-- `cnv_create_time` / `cnv_update_time` / `cnv_delete_time` (timestamps)
-- `cnv_last_message_time` (timestamp) - For sorting conversations
-
-**New Model: `conversation_participants`**
-- `cnp_conversation_participant_id` (serial, primary key)
-- `cnp_cnv_conversation_id` (int4, FK)
-- `cnp_usr_user_id` (int4, FK)
-- `cnp_last_read_time` (timestamp) - For unread indicators
-- `cnp_is_muted` (bool, default false)
-- `cnp_delete_time` (timestamp) - User can "delete" conversation for themselves
-
-**Recommendation:** Option B. Conversations as a first-class entity supports group messaging in the future and cleanly separates "conversation metadata" from "message content." The existing `messages` table gets a `msg_cnv_conversation_id` FK added.
-
-**UI Enhancements:**
-- Conversation list view (inbox) with most recent message preview
-- Unread conversation count in header
-- Read indicators in conversation view
+See **[Messaging Enhancements Spec](implemented/messaging_enhancements_spec.md)** for full details. Conversation threading, read status, inbox UI, AJAX messaging, header unread count, and admin moderation all implemented.
 
 ---
 

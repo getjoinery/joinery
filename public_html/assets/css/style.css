@@ -243,7 +243,9 @@ table { width: 100%; border-collapse: collapse; }
 .header-right { display: flex; align-items: center; gap: 1rem; }
 .header-icons { display: flex; align-items: center; gap: 0.75rem; }
 .header-icons a { color: rgba(255,255,255,0.85); font-size: 1.1rem; position: relative; }
-.header-icons .cart-count {
+.header-icons .cart-count,
+.header-icons .messages-count,
+.header-icons .notifications-count {
     position: absolute; top: -6px; right: -8px;
     background: var(--color-primary); color: #fff;
     font-size: 0.625rem; width: 16px; height: 16px;
