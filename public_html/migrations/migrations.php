@@ -1308,3 +1308,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Subscription Email Templates (v92) ==========
+	$migration = array();
+	$migration['database_version'] = '92';
+	$migration['test'] = "SELECT count(1) as count FROM emt_email_templates WHERE emt_name = 'subscription_created'";
+	$migration['migration_sql'] = NULL;
+	$migration['migration_file'] = 'migration_subscription_email_templates.php';
+	$migrations[] = $migration;
+
