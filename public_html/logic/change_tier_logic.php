@@ -11,6 +11,7 @@ function change_tier_logic($get, $post) {
     require_once(PathHelper::getIncludePath('data/order_items_class.php'));
     require_once(PathHelper::getIncludePath('data/orders_class.php'));
     require_once(PathHelper::getIncludePath('data/change_tracking_class.php'));
+    require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
     $page_vars = array();
     $settings = Globalvars::get_instance();
@@ -77,10 +78,31 @@ function change_tier_logic($get, $post) {
         }
     }
 
+    // Detect PayPal provider
+    $is_paypal = false;
+    if ($current_subscription) {
+        if ($current_subscription->get('odi_paypal_subscription_id')) {
+            $is_paypal = true;
+        } else {
+            // Also check the order's payment method
+            $sub_order_id = $current_subscription->get('odi_ord_order_id');
+            if ($sub_order_id) {
+                $sub_order = new Order($sub_order_id, TRUE);
+                if ($sub_order->key) {
+                    $payment_method = $sub_order->get('ord_payment_method');
+                    if ($payment_method === 'paypal' || $payment_method === 'venmo') {
+                        $is_paypal = true;
+                    }
+                }
+            }
+        }
+    }
+
     $page_vars['current_subscription'] = $current_subscription;
     $page_vars['has_active_subscription'] = $has_active_subscription;
     $page_vars['has_cancelled_subscription'] = $has_cancelled_subscription;
     $page_vars['is_expired'] = $is_expired;
+    $page_vars['is_paypal'] = $is_paypal;
 
     // Handle POST actions
     if (isset($post['action'])) {
@@ -98,6 +120,11 @@ function change_tier_logic($get, $post) {
         try {
             switch ($post['action']) {
                 case 'upgrade':
+                    // Block upgrade for PayPal subscribers
+                    if ($is_paypal) {
+                        throw new Exception('PayPal subscriptions cannot be upgraded directly. Please cancel your current subscription and subscribe to a new plan.');
+                    }
+
                     // Validate product selection
                     if (!isset($post['product_id'])) {
                         throw new Exception('Please select a plan to upgrade to.');
@@ -201,11 +228,29 @@ function change_tier_logic($get, $post) {
                     // Update user's tier
                     $tier_result = SubscriptionTier::handleProductPurchase($user, $product, $new_order_item, $order);
 
+                    // Send upgrade email
+                    try {
+                        $current_tier_display = $current_tier ? $current_tier->get('sbt_display_name') : 'Free';
+                        EmailSender::sendTemplate('subscription_upgraded', $user->get('usr_email'), [
+                            'recipient' => $user->export_as_array(),
+                            'tier_name' => $new_tier->get('sbt_display_name'),
+                            'previous_tier_name' => $current_tier_display,
+                            'next_billing_date' => date('F j, Y', $updated_subscription->current_period_end),
+                        ]);
+                    } catch (Exception $e) {
+                        error_log('Subscription upgrade email failed: ' . $e->getMessage());
+                    }
+
                     // Success message
                     $page_vars['success_message'] = 'Successfully upgraded to ' . $new_tier->get('sbt_display_name');
                     break;
 
                 case 'downgrade':
+                    // Block downgrade for PayPal subscribers
+                    if ($is_paypal) {
+                        throw new Exception('PayPal subscriptions cannot be downgraded directly. Please cancel your current subscription and subscribe to a new plan.');
+                    }
+
                     // Check if downgrades are enabled
                     if (!$page_vars['settings']['subscription_downgrades_enabled']) {
                         throw new Exception('Plan downgrades are not currently available. Please contact support for assistance.');
@@ -314,6 +359,19 @@ function change_tier_logic($get, $post) {
                     // Update user's tier (use 'subscription_change' reason to allow downgrades)
                     $tier_result = $new_tier->addUser($user_id, 'subscription_change', 'order', $order->key, null);
 
+                    // Send downgrade email
+                    try {
+                        $current_tier_display = $current_tier ? $current_tier->get('sbt_display_name') : 'Free';
+                        EmailSender::sendTemplate('subscription_downgraded', $user->get('usr_email'), [
+                            'recipient' => $user->export_as_array(),
+                            'tier_name' => $new_tier->get('sbt_display_name'),
+                            'previous_tier_name' => $current_tier_display,
+                            'effective_date' => 'Immediately',
+                        ]);
+                    } catch (Exception $e) {
+                        error_log('Subscription downgrade email failed: ' . $e->getMessage());
+                    }
+
                     // Success message
                     $page_vars['success_message'] = 'Successfully downgraded to ' . $new_tier->get('sbt_display_name');
                     break;
@@ -351,11 +409,23 @@ function change_tier_logic($get, $post) {
                                 'order_item', $current_subscription->key, $user_id
                             );
 
+                            // Send cancellation email
+                            try {
+                                $tier_display = $current_tier ? $current_tier->get('sbt_display_name') : 'your plan';
+                                EmailSender::sendTemplate('subscription_cancelled', $user->get('usr_email'), [
+                                    'recipient' => $user->export_as_array(),
+                                    'tier_name' => $tier_display,
+                                    'access_end_date' => 'Immediately',
+                                ]);
+                            } catch (Exception $e) {
+                                error_log('Subscription cancel email failed: ' . $e->getMessage());
+                            }
+
                             $page_vars['success_message'] = 'Your subscription has been cancelled successfully.';
                         } else {
                             throw new Exception('Unable to cancel your PayPal subscription. Please try again or cancel directly at paypal.com.');
                         }
-                    } else if ($page_vars['settings']['subscription_cancellation_timing'] == 'immediate') {
+                    } else if (strtolower($page_vars['settings']['subscription_cancellation_timing']) == 'immediate') {
                         // Stripe immediate cancellation
                         try {
                             $result = $stripe_helper->cancel_subscription($stripe_sub_id, 'immediate');
@@ -376,6 +446,18 @@ function change_tier_logic($get, $post) {
                                 'order_item', $current_subscription->key, $user_id
                             );
 
+                            // Send cancellation email
+                            try {
+                                $tier_display = $current_tier ? $current_tier->get('sbt_display_name') : 'your plan';
+                                EmailSender::sendTemplate('subscription_cancelled', $user->get('usr_email'), [
+                                    'recipient' => $user->export_as_array(),
+                                    'tier_name' => $tier_display,
+                                    'access_end_date' => 'Immediately',
+                                ]);
+                            } catch (Exception $e) {
+                                error_log('Subscription cancel email failed: ' . $e->getMessage());
+                            }
+
                             $page_vars['success_message'] = 'Your subscription has been cancelled successfully.';
                             if ($page_vars['settings']['subscription_cancellation_prorate']) {
                                 $page_vars['success_message'] .= ' A prorated refund will be processed to your payment method.';
@@ -393,9 +475,23 @@ function change_tier_logic($get, $post) {
 
                         if ($result) {
                             $current_subscription->set('odi_subscription_cancel_at_period_end', true);
+                            $current_subscription->set('odi_subscription_cancelled_time', $current_subscription->get('odi_subscription_period_end'));
                             $current_subscription->save();
 
                             $cancellation_date = date('F j, Y', strtotime($current_subscription->get('odi_subscription_period_end')));
+
+                            // Send cancellation email
+                            try {
+                                $tier_display = $current_tier ? $current_tier->get('sbt_display_name') : 'your plan';
+                                EmailSender::sendTemplate('subscription_cancelled', $user->get('usr_email'), [
+                                    'recipient' => $user->export_as_array(),
+                                    'tier_name' => $tier_display,
+                                    'access_end_date' => $cancellation_date,
+                                ]);
+                            } catch (Exception $e) {
+                                error_log('Subscription cancel email failed: ' . $e->getMessage());
+                            }
+
                             $page_vars['success_message'] = "Your subscription will be cancelled on {$cancellation_date}. You will retain access until then.";
                         } else {
                             throw new Exception('Unable to schedule your subscription cancellation. Please try again or contact support.');
@@ -433,6 +529,19 @@ function change_tier_logic($get, $post) {
                             $current_subscription->set('odi_subscription_status', 'active');
                             $current_subscription->save();
 
+                            // Send reactivation email
+                            try {
+                                $tier_display = $current_tier ? $current_tier->get('sbt_display_name') : 'your plan';
+                                $period_end = $current_subscription->get('odi_subscription_period_end');
+                                EmailSender::sendTemplate('subscription_reactivated', $user->get('usr_email'), [
+                                    'recipient' => $user->export_as_array(),
+                                    'tier_name' => $tier_display,
+                                    'next_billing_date' => $period_end ? date('F j, Y', strtotime($period_end)) : '',
+                                ]);
+                            } catch (Exception $e) {
+                                error_log('Subscription reactivate email failed: ' . $e->getMessage());
+                            }
+
                             $page_vars['success_message'] = 'Your subscription has been reactivated successfully.';
                         } else {
                             throw new Exception('Unable to reactivate your PayPal subscription. Please try again or contact support.');
@@ -447,6 +556,19 @@ function change_tier_logic($get, $post) {
                         if ($subscription) {
                             $current_subscription->set('odi_subscription_cancel_at_period_end', false);
                             $current_subscription->save();
+
+                            // Send reactivation email
+                            try {
+                                $tier_display = $current_tier ? $current_tier->get('sbt_display_name') : 'your plan';
+                                $period_end = $current_subscription->get('odi_subscription_period_end');
+                                EmailSender::sendTemplate('subscription_reactivated', $user->get('usr_email'), [
+                                    'recipient' => $user->export_as_array(),
+                                    'tier_name' => $tier_display,
+                                    'next_billing_date' => $period_end ? date('F j, Y', strtotime($period_end)) : '',
+                                ]);
+                            } catch (Exception $e) {
+                                error_log('Subscription reactivate email failed: ' . $e->getMessage());
+                            }
 
                             $page_vars['success_message'] = 'Your subscription has been reactivated successfully. Billing will continue as normal.';
                         } else {
@@ -535,7 +657,7 @@ function change_tier_logic($get, $post) {
                 $tier_data['message'] = 'Downgrades require support assistance';
             } else {
                 $tier_data['action_type'] = 'downgrade';
-                $tier_data['button_text'] = ($page_vars['settings']['subscription_downgrade_timing'] == 'immediate')
+                $tier_data['button_text'] = (strtolower($page_vars['settings']['subscription_downgrade_timing']) == 'immediate')
                     ? 'Downgrade Now'
                     : 'Downgrade at Period End';
                 $tier_data['button_enabled'] = true;
@@ -551,7 +673,7 @@ function change_tier_logic($get, $post) {
 
     if ($has_active_subscription && !$has_cancelled_subscription) {
         $page_vars['show_cancel_button'] = $page_vars['settings']['subscription_cancellation_enabled'];
-        $page_vars['cancel_button_text'] = ($page_vars['settings']['subscription_cancellation_timing'] == 'immediate')
+        $page_vars['cancel_button_text'] = (strtolower($page_vars['settings']['subscription_cancellation_timing']) == 'immediate')
             ? 'Cancel Immediately'
             : 'Cancel at Period End';
     }
