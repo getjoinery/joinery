@@ -146,10 +146,12 @@ class EmailTemplate {
         }
         
         // Initialize template values
+        $settings = Globalvars::get_instance();
         $this->template_values = array(
             'template_name' => $this->template_name,
             'web_dir' => LibraryFunctions::get_absolute_url(''),
             'email_vars' => $this->_generate_email_vars(),
+            'site_name' => $settings->get_setting('site_name'),
         );
         
         $this->inner_html = null;
