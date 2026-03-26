@@ -196,6 +196,21 @@ class SubscriptionTier extends SystemBase {
                 'subscription_expired'
             );
 
+            // Send expiration email
+            try {
+                require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+                require_once(PathHelper::getIncludePath('data/users_class.php'));
+                $user = new User($user_id, TRUE);
+                if ($user->key) {
+                    EmailSender::sendTemplate('subscription_expired', $user->get('usr_email'), [
+                        'recipient' => $user->export_as_array(),
+                        'tier_name' => $current_tier->get('sbt_display_name'),
+                    ]);
+                }
+            } catch (Exception $e) {
+                error_log('Subscription expiration email failed: ' . $e->getMessage());
+            }
+
             // In-app notification: subscription expired
             try {
                 require_once(PathHelper::getIncludePath('data/notifications_class.php'));

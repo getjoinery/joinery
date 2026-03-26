@@ -59,6 +59,10 @@ Price Area
 					<p class="mt-2 text-danger">Your subscription has expired</p>
 				<?php endif; ?>
 
+				<?php if (!empty($page_vars['is_paypal']) && $page_vars['has_active_subscription']): ?>
+					<p class="mt-2" style="color: #6c757d;">Your subscription is managed through PayPal. To change your plan, cancel your current subscription and subscribe to a new tier.</p>
+				<?php endif; ?>
+
 				<div class="pricing-tabs">
 					<div class="switch-area">
 						<a href="/profile/change-tier?period=month" class="toggler <?php echo (!isset($_GET['period']) || $_GET['period'] == 'month') ? 'toggler--is-active' : ''; ?> ms-0" id="filt-monthly">Monthly</a>
@@ -127,6 +131,8 @@ Price Area
 								<?php endif; ?>
 
 								<?php if ($tier_data['action_type'] == 'current'): ?>
+									<a class="th-btn btn-fw style-radius" style="cursor: not-allowed; opacity: 0.6;"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
+								<?php elseif (!empty($page_vars['is_paypal']) && ($tier_data['action_type'] == 'upgrade' || $tier_data['action_type'] == 'downgrade')): ?>
 									<a class="th-btn btn-fw style-radius" style="cursor: not-allowed; opacity: 0.6;"><?php echo htmlspecialchars($tier_data['button_text']); ?></a>
 								<?php elseif ($tier_data['button_enabled'] && !empty($tier_data['products'])): ?>
 									<?php if (count($tier_data['products']) == 1): ?>

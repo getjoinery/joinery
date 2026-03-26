@@ -1316,3 +1316,11 @@
 	$migration['migration_file'] = 'migration_subscription_email_templates.php';
 	$migrations[] = $migration;
 
+	// ========== Drop legacy paypal_webhook_events table (v93) ==========
+	$migration = array();
+	$migration['database_version'] = '93';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'paypal_webhook_events' AND table_schema = 'public') THEN 0 ELSE 1 END as count";
+	$migration['migration_sql'] = "DROP TABLE IF EXISTS paypal_webhook_events";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
