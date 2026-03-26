@@ -64,6 +64,12 @@ $formwriter = $page->getFormWriter('tier_form');
         </div>
         <?php endif; ?>
 
+        <?php if (!empty($page_vars['is_paypal']) && $page_vars['has_active_subscription']): ?>
+        <div class="alert" style="background: #e2e3e5; border-left: 4px solid #6c757d; padding: 1rem 1.25rem; border-radius: 4px; margin-bottom: 1.5rem;">
+            Your subscription is managed through PayPal. To change your plan, cancel your current subscription and subscribe to a new tier.
+        </div>
+        <?php endif; ?>
+
         <?php if ($page_vars['show_reactivate_button']): ?>
         <div style="margin-bottom: 1.5rem; text-align: center;">
             <?php $formwriter->begin_form(); ?>
@@ -123,6 +129,10 @@ $formwriter = $page->getFormWriter('tier_form');
 
                     <?php if ($tier_data['action_type'] == 'current'): ?>
                         <button class="btn" style="width: 100%; background: #e9ecef; color: #6c757d; cursor: not-allowed;" disabled>
+                            <?php echo htmlspecialchars($tier_data['button_text']); ?>
+                        </button>
+                    <?php elseif (!empty($page_vars['is_paypal']) && ($tier_data['action_type'] == 'upgrade' || $tier_data['action_type'] == 'downgrade')): ?>
+                        <button class="btn" style="width: 100%; background: #e9ecef; color: #adb5bd; cursor: not-allowed;" disabled>
                             <?php echo htmlspecialchars($tier_data['button_text']); ?>
                         </button>
                     <?php elseif ($tier_data['button_enabled'] && !empty($tier_data['products'])): ?>
