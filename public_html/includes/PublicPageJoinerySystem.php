@@ -103,6 +103,14 @@ class PublicPageJoinerySystem extends PublicPageBase {
     }
 
     // =====================================================================
+    // Base assets — joinery-system provides its own complete CSS; skip base
+    // =====================================================================
+    protected function render_base_assets() {
+        // Intentionally empty — joinery-system's style.css is self-contained.
+        // Base assets (base.css, assets/css/style.css) would conflict.
+    }
+
+    // =====================================================================
     // Table classes
     // =====================================================================
     protected function getTableClasses() {
@@ -542,7 +550,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
         }
         $has_sidebar = !empty($options['vertical_menu']);
         ?>
-  <div class="admin-layout" id="top">
+  <div class="admin-layout<?php echo $has_sidebar ? '' : ' no-sidebar'; ?>" id="top">
 
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
@@ -570,9 +578,22 @@ class PublicPageJoinerySystem extends PublicPageBase {
 
     <div class="main-content">
       <header class="topbar">
+        <?php if ($has_sidebar): ?>
         <button class="topbar-hamburger" type="button" aria-label="Toggle sidebar">
           <span></span><span></span><span></span>
         </button>
+        <?php else: ?>
+        <a href="/" class="topbar-home" title="Back to site" style="display:flex;align-items:center;gap:0.5rem;text-decoration:none;color:var(--body-color);font-weight:600;font-size:0.9375rem;white-space:nowrap;">
+          <?php
+          $logo_link = $settings->get_setting('logo_link');
+          if ($logo_link) {
+              echo '<img src="' . htmlspecialchars($logo_link) . '" alt="" style="height:24px;width:auto;">';
+          } else { ?>
+          <svg width="22" height="22" viewBox="0 0 40 40" fill="none" style="flex-shrink:0"><circle cx="20" cy="20" r="20" fill="var(--primary, #2A7BE4)"/><text x="21" y="30" text-anchor="middle" font-family="Arial,sans-serif" font-size="26" font-weight="900" fill="white">J</text></svg>
+          <?php } ?>
+          <span><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
+        </a>
+        <?php endif; ?>
 
         <?php if ($has_sidebar && !empty($options['vertical_menu'])):
           // Build topbar breadcrumb from active menu items
@@ -596,7 +617,17 @@ class PublicPageJoinerySystem extends PublicPageBase {
           <?php endif; ?>
         <?php endif; ?>
 
-        <?php if (!$has_sidebar && (empty($options['hide_horizontal_menu']) || !$options['hide_horizontal_menu'])): ?>
+        <?php if (!empty($options['member_nav']) && is_array($options['member_nav'])): ?>
+        <nav style="display:flex;align-items:center;gap:0.25rem;margin-left:1rem;">
+          <?php
+          $current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+          foreach ($options['member_nav'] as $nav_item) {
+              $is_active = ($current_path === $nav_item['url'] || (isset($nav_item['match']) && strpos($current_path, $nav_item['match']) === 0));
+              echo '<a class="nav-link' . ($is_active ? ' active' : '') . '" href="' . htmlspecialchars($nav_item['url']) . '">' . htmlspecialchars($nav_item['label']) . '</a>';
+          }
+          ?>
+        </nav>
+        <?php elseif (!$has_sidebar && (empty($options['hide_horizontal_menu']) || !$options['hide_horizontal_menu'])): ?>
         <nav style="display:flex;align-items:center;gap:0.25rem;margin-left:1rem;">
           <?php
           $menu_data = $this->get_menu_data();
