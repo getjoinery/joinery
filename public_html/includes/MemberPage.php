@@ -42,7 +42,7 @@ class MemberPage extends PublicPage {
         if ($settings->get_setting('messaging_active')) {
             $nav[] = array('label' => 'Messages', 'url' => '/profile/conversations', 'match' => '/profile/conversation');
         }
-        $nav[] = array('label' => 'Notifications', 'url' => '/profile/notifications');
+        $nav[] = array('label' => 'Notifications', 'url' => '/notifications');
         $nav[] = array('label' => 'Account', 'url' => '/profile/account_edit', 'match' => '/profile/account');
 
         return $nav;

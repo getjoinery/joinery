@@ -1,7 +1,7 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 	require_once(PathHelper::getThemeFilePath('event_sessions_course_logic.php', 'logic'));
 
 	$page_vars = process_logic(event_sessions_course_logic($_GET, $_POST));
@@ -11,7 +11,7 @@
 		exit();
 	}
 
-	$page = new PublicPage();
+	$page = new MemberPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Sessions',
@@ -20,7 +20,7 @@
 			'Event' => '',
 		),
 	);
-	$page->public_header($hoptions, NULL);
+	$page->member_header($hoptions, NULL);
 
 	$session_name = 'Session ' . $page_vars['event_session']->get('evs_session_number') . ' — ' . $page_vars['event_session']->get('evs_title');
 ?>
@@ -183,5 +183,5 @@
 </section>
 
 <?php
-$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
+$page->member_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

@@ -91,7 +91,7 @@ if ($has_actions):
 		</a>
 		<?php endif; ?>
 		<?php if ($page_vars['unread_notifications'] > 0): ?>
-		<a href="/profile/notifications" style="text-decoration:none;color:inherit;white-space:nowrap;">
+		<a href="/notifications" style="text-decoration:none;color:inherit;white-space:nowrap;">
 			<strong><?php echo $page_vars['unread_notifications']; ?></strong> new notification<?php echo $page_vars['unread_notifications'] != 1 ? 's' : ''; ?>
 		</a>
 		<?php endif; ?>
@@ -119,7 +119,7 @@ if ($has_actions):
 		</div>
 	</a>
 	<?php endif; ?>
-	<a href="/profile/notifications" class="card" style="text-decoration:none;color:inherit;">
+	<a href="/notifications" class="card" style="text-decoration:none;color:inherit;">
 		<div class="card-body" style="text-align:center;padding:1rem;">
 			<div style="font-size:1.75rem;font-weight:700;color:<?php echo $page_vars['unread_notifications'] > 0 ? 'var(--warning)' : 'var(--primary)'; ?>;"><?php echo (int)$page_vars['unread_notifications']; ?></div>
 			<div style="font-size:0.8125rem;color:var(--muted);">Notifications</div>
@@ -187,7 +187,7 @@ if ($has_actions):
 		<div class="card mb-3">
 			<div class="card-header bg-body-tertiary" style="display:flex;justify-content:space-between;align-items:center;">
 				<h6 class="mb-0">Recent Notifications</h6>
-				<a href="/profile/notifications" style="font-size:0.8125rem;">View all</a>
+				<a href="/notifications" style="font-size:0.8125rem;">View all</a>
 			</div>
 			<div class="card-body">
 				<?php if (count($page_vars['recent_notifications']) == 0): ?>

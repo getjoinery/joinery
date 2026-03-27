@@ -6,16 +6,15 @@
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('notifications_logic.php', 'logic'));
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 
 $page_vars = process_logic(notifications_logic($_GET, $_POST));
 
-$page = new PublicPage();
-$page->public_header([
+$page = new MemberPage();
+$page->member_header([
 	'title' => $page_vars['title'],
 ]);
 
-echo PublicPage::BeginPage($page_vars['title']);
 ?>
 
 <div class="notifications-page">
@@ -187,6 +186,5 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <?php
-echo PublicPage::EndPage();
-$page->public_footer();
+$page->member_footer();
 ?>

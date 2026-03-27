@@ -1,13 +1,13 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic'));
 
 	$page_vars = process_logic(contact_preferences_logic($_GET, $_POST));
 	$messages = $page_vars['messages'];
 
-	$page = new PublicPage();
+	$page = new MemberPage();
 	$hoptions=array(
 		'title'=>'Contact Preferences',
 		'breadcrumbs' => array(
@@ -15,7 +15,7 @@
 			'Contact Preferences' => '',
 		),
 	);
-	$page->public_header($hoptions);
+	$page->member_header($hoptions);
 ?>
 
 <!-- Page Title -->
@@ -81,5 +81,5 @@
 </section>
 
 <?php
-$page->public_footer($foptions=array());
+$page->member_footer($foptions=array());
 ?>

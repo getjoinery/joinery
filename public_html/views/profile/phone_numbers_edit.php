@@ -1,13 +1,13 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 	require_once(PathHelper::getThemeFilePath('phone_numbers_edit_logic.php', 'logic'));
 
 	$page_vars = process_logic(phone_numbers_edit_logic($_GET, $_POST));
 	extract($page_vars);
 
-	$page = new PublicPage();
+	$page = new MemberPage();
 	$hoptions=array(
 		'title'=>'Edit Phone Number',
 		'breadcrumbs' => array(
@@ -15,7 +15,7 @@
 			'Edit Phone Number' => '',
 		),
 	);
-	$page->public_header($hoptions);
+	$page->member_header($hoptions);
 ?>
 
 <!-- Page Title -->
@@ -77,5 +77,5 @@
 </section>
 
 <?php
-$page->public_footer($foptions=array('track'=>TRUE));
+$page->member_footer($foptions=array('track'=>TRUE));
 ?>

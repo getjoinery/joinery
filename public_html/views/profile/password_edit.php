@@ -1,12 +1,12 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 	require_once(PathHelper::getThemeFilePath('password_edit_logic.php', 'logic'));
 
 	$page_vars = process_logic(password_edit_logic($_GET, $_POST));
 
-	$page = new PublicPage();
+	$page = new MemberPage();
 	$hoptions=array(
 		'title'=>$page_vars['page_title'],
 		'breadcrumbs' => array(
@@ -14,7 +14,7 @@
 			$page_vars['page_title'] => '',
 		),
 	);
-	$page->public_header($hoptions);
+	$page->member_header($hoptions);
 ?>
 
 <!-- Page Title -->
@@ -74,5 +74,5 @@
 </section>
 
 <?php
-$page->public_footer($foptions=array('track'=>TRUE));
+$page->member_footer($foptions=array('track'=>TRUE));
 ?>

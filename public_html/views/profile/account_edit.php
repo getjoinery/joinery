@@ -1,12 +1,12 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 	require_once(PathHelper::getThemeFilePath('account_edit_logic.php', 'logic'));
 
 	$page_vars = process_logic(account_edit_logic($_GET, $_POST));
 
-	$page = new PublicPage();
+	$page = new MemberPage();
 	$hoptions=array(
 		'title'=>'Account Edit',
 		'breadcrumbs' => array(
@@ -14,7 +14,7 @@
 			'Account Edit' => '',
 		),
 	);
-	$page->public_header($hoptions);
+	$page->member_header($hoptions);
 
 	foreach($page_vars['display_messages'] AS $display_message) {
 		if($display_message->identifier == 'userbox') {
@@ -100,5 +100,5 @@ PhotoHelper::render_photo_scripts('grid', 'user', $page_vars['user']->key, [
     'confirm_delete_msg' => 'Remove this photo?',
 ]);
 
-$page->public_footer($foptions=array('track'=>TRUE));
+$page->member_footer($foptions=array('track'=>TRUE));
 ?>
