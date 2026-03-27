@@ -1736,8 +1736,22 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar
 HTML5 PublicPage.php follows the same structure as Bootstrap themes — the only difference is:
 - Load **one CSS file** (your consolidated `style.css`) instead of multiple framework files
 - Load **one JS file** (your `script.js`) instead of jQuery + Bootstrap + plugins
-- Use `$this->global_includes_top($options)` in `<head>` for system CSS/JS
+- Use `$this->global_includes_top($options)` in `<head>` for system meta tags, tracking, and base assets
 - Include mobile menu toggle JS inline in the footer (after `script.js`)
+
+**Base Asset Loading:**
+
+`PublicPageBase::global_includes_top()` calls `$this->render_base_assets()` which loads `base.css`, `assets/css/style.css`, and `base.js`. These provide fallback styles for themes that don't style every element.
+
+If your theme provides **complete CSS** (like `PublicPageJoinerySystem`), override `render_base_assets()` to prevent conflicts:
+
+```php
+protected function render_base_assets() {
+    // This theme provides its own complete CSS; base assets would conflict.
+}
+```
+
+Themes that rely on the base assets for fallback styling should not override this method.
 
 **Key pattern — always include:**
 ```php
@@ -1859,7 +1873,8 @@ Beyond the standard validation checklist, HTML5 themes must verify:
 - [ ] No jQuery references anywhere — all JS is vanilla
 - [ ] No icon font references — all icons are Unicode or inline SVG
 - [ ] Mobile menu works with vanilla JS toggle (no Bootstrap collapse)
-- [ ] `global_includes_top()` called in `<head>` section of PublicPage.php
+- [ ] `global_includes_top()` called in `<head>` section of PublicPage.php (loads meta tags + base assets)
+- [ ] If theme provides complete CSS, `render_base_assets()` overridden to empty to prevent conflicts
 - [ ] `$options = parent::public_header_common($options)` called inside `<head>` in `public_header()` (injects admin bar, tracking, settings defaults)
 - [ ] Comment reply toggle uses vanilla JS `addEventListener` (not jQuery)
 - [ ] Single consolidated CSS file loads in header (not multiple framework files)
