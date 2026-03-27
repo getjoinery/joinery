@@ -1,29 +1,31 @@
 <?php
 // tests/email/suites/AuthenticationTests.php
+require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
+
 class AuthenticationTests {
     private array $config;
     private $runner;
-    
+
     public function __construct(array $config, $runner = null) {
         $this->config = $config;
         $this->runner = $runner;
     }
-    
+
     public function run(): array {
         $results = [];
-        
+
         $results['domain_settings'] = $this->testDomainSettings();
         $results['spf_record'] = $this->testSPFRecord();
         $results['dkim_config'] = $this->testDKIMConfiguration();
         $results['dmarc_policy'] = $this->testDMARCPolicy();
-        
+
         return $results;
     }
-    
+
     private function testDomainSettings(): array {
         $settings = Globalvars::get_instance();
         $defaultEmail = $settings->get_setting('defaultemail');
-        
+
         if (!$defaultEmail || strpos($defaultEmail, '@') === false) {
             return [
                 'passed' => false,
@@ -31,9 +33,9 @@ class AuthenticationTests {
                 'details' => ['defaultemail' => $defaultEmail ?: 'Not set']
             ];
         }
-        
+
         $domain = substr($defaultEmail, strpos($defaultEmail, '@') + 1);
-        
+
         return [
             'passed' => !empty($domain),
             'message' => $domain ? "Email domain: $domain" : 'Could not extract domain',
@@ -43,133 +45,81 @@ class AuthenticationTests {
             ]
         ];
     }
-    
+
     private function testSPFRecord(): array {
         $settings = Globalvars::get_instance();
         $mailgunDomain = $settings->get_setting('mailgun_domain');
-        
+
         if (!$mailgunDomain) {
             return [
                 'passed' => false,
                 'message' => 'Cannot test SPF without Mailgun domain setting',
             ];
         }
-        
-        $domain = $mailgunDomain;
-        
-        // Simple DNS TXT record check for SPF
-        $txtRecords = @dns_get_record($domain, DNS_TXT);
-        $spfFound = false;
-        $spfRecord = '';
-        
-        if ($txtRecords) {
-            foreach ($txtRecords as $record) {
-                if (isset($record['txt']) && strpos($record['txt'], 'v=spf1') === 0) {
-                    $spfFound = true;
-                    $spfRecord = $record['txt'];
-                    break;
-                }
-            }
-        }
-        
+
+        $check = DnsAuthChecker::checkSPF($mailgunDomain);
+
         return [
-            'passed' => $spfFound,
-            'message' => $spfFound ? 'SPF record found' : 'No SPF record found',
+            'passed' => $check['status'] !== 'fail',
+            'message' => $check['status'] !== 'fail' ? 'SPF record found' : 'No SPF record found',
             'details' => [
-                'domain' => $domain,
-                'spf_record' => $spfRecord ?: 'None found',
-                'dns_lookup_success' => $txtRecords !== false,
+                'domain' => $mailgunDomain,
+                'spf_record' => $check['record'] ?: 'None found',
+                'status' => $check['status'],
+                'detail' => $check['detail'],
             ]
         ];
     }
-    
+
     private function testDKIMConfiguration(): array {
         $settings = Globalvars::get_instance();
         $mailgunDomain = $settings->get_setting('mailgun_domain');
-        
+
         if (!$mailgunDomain) {
             return [
                 'passed' => false,
                 'message' => 'Cannot test DKIM without Mailgun domain setting',
             ];
         }
-        
-        $domain = $mailgunDomain;
-        
-        // Check common DKIM selectors, including Mailgun's 'mx' selector
-        $commonSelectors = ['mx', 'default', 'mail', 'dkim', 'key1', 'selector1'];
-        $dkimFound = false;
-        $foundSelector = '';
-        
-        foreach ($commonSelectors as $selector) {
-            $dkimDomain = "$selector._domainkey.$domain";
-            $txtRecords = @dns_get_record($dkimDomain, DNS_TXT);
-            
-            if ($txtRecords) {
-                foreach ($txtRecords as $record) {
-                    if (isset($record['txt']) && (strpos($record['txt'], 'v=DKIM1') !== false || strpos($record['txt'], 'k=rsa') !== false)) {
-                        $dkimFound = true;
-                        $foundSelector = $selector;
-                        break 2;
-                    }
-                }
-            }
-        }
-        
+
+        $check = DnsAuthChecker::checkDKIM($mailgunDomain);
+
         return [
-            'passed' => $dkimFound,
-            'message' => $dkimFound ? "DKIM record found (selector: $foundSelector)" : 'No DKIM records found',
+            'passed' => $check['status'] === 'pass',
+            'message' => $check['status'] === 'pass' ? 'DKIM record found (selector: ' . $check['selector'] . ')' : 'No DKIM records found',
             'details' => [
-                'domain' => $domain,
-                'checked_selectors' => $commonSelectors,
-                'found_selector' => $foundSelector ?: 'None',
+                'domain' => $mailgunDomain,
+                'checked_selectors' => $check['selectors_checked'],
+                'found_selector' => $check['selector'] ?: 'None',
             ]
         ];
     }
-    
+
     private function testDMARCPolicy(): array {
         $settings = Globalvars::get_instance();
         $mailgunDomain = $settings->get_setting('mailgun_domain');
-        
+
         if (!$mailgunDomain) {
             return [
                 'passed' => false,
                 'message' => 'Cannot test DMARC without Mailgun domain setting',
             ];
         }
-        
-        $domain = $mailgunDomain;
-        $dmarcDomain = "_dmarc.$domain";
-        
-        $txtRecords = @dns_get_record($dmarcDomain, DNS_TXT);
-        $dmarcFound = false;
-        $dmarcRecord = '';
-        $policy = 'none';
-        
-        if ($txtRecords) {
-            foreach ($txtRecords as $record) {
-                if (isset($record['txt']) && strpos($record['txt'], 'v=DMARC1') === 0) {
-                    $dmarcFound = true;
-                    $dmarcRecord = $record['txt'];
-                    
-                    // Extract policy
-                    if (preg_match('/p=([^;]+)/', $dmarcRecord, $matches)) {
-                        $policy = trim($matches[1]);
-                    }
-                    break;
-                }
-            }
-        }
-        
+
+        $check = DnsAuthChecker::checkDMARC($mailgunDomain);
+        $policy = $check['policy'] ?: 'none';
+
         return [
-            'passed' => $dmarcFound,
-            'message' => $dmarcFound ? "DMARC policy found: $policy" . ($policy === 'none' ? ' (monitoring mode, no enforcement)' : '') : 'No DMARC policy found',
+            'passed' => $check['status'] !== 'fail',
+            'message' => $check['status'] !== 'fail'
+                ? 'DMARC policy found: ' . $policy . ($policy === 'none' ? ' (monitoring mode, no enforcement)' : '')
+                : 'No DMARC policy found',
             'details' => [
-                'domain' => $domain,
-                'dmarc_domain' => $dmarcDomain,
-                'dmarc_record' => $dmarcRecord ?: 'None found',
+                'domain' => $mailgunDomain,
+                'dmarc_domain' => '_dmarc.' . $mailgunDomain,
+                'dmarc_record' => $check['record'] ?: 'None found',
                 'policy' => $policy,
-                'dns_lookup_success' => $txtRecords !== false,
+                'status' => $check['status'],
             ]
         ];
     }

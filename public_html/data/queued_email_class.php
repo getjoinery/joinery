@@ -25,6 +25,7 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	const DELETED = 5; // Email is deleted
 	const ERROR_SENDING = 6; // There was an error sending the email
 	const NORMAL_MAILER_ERROR = 7; // This was an error email from the non-recurring mailer
+	const PERMANENT_FAILURE = 8; // Email has exceeded max retry attempts
 
 	public static $status_to_text = array(
 		self::QUEUED => 'Queued',
@@ -34,6 +35,7 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 		self::ERROR_SENDING => 'Error Sending',
 		self::DELETED => 'Deleted',
 		self::NORMAL_MAILER_ERROR => 'Non-Recurring Email Error',
+		self::PERMANENT_FAILURE => 'Permanent Failure',
 	);
 
 		/**
@@ -62,6 +64,7 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	    'equ_timestamp' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'equ_status' => array('type'=>'int2', 'default'=>0),
 	    'equ_ers_recurring_email_log_id' => array('type'=>'int4'),
+	    'equ_retry_count' => array('type'=>'int2', 'default'=>0),
 	);
 
 function get_status() {
@@ -91,7 +94,13 @@ function get_status() {
 		}
 	}
 
-	function send() {
+	/**
+	 * Send the queued email via EmailSender (with service selection + fallback)
+	 *
+	 * @param bool $queue_on_failure If true, EmailSender will queue the email on failure.
+	 *        Pass false when retrying to prevent infinite re-queuing.
+	 */
+	function send($queue_on_failure = true) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
@@ -99,9 +108,10 @@ function get_status() {
 
 		// Load the email and double check its status before we send it
 		$this->load();
-		if ($this->get('equ_status') !== self::READY_TO_SEND) {
+		if ($this->get('equ_status') != self::READY_TO_SEND) {
+			$dblink->rollBack();
 			throw new QueuedEmailException(
-				'Attemping to send a Queued Email which is not in the correct state.  Aborting...');
+				'Attempting to send a Queued Email which is not in the correct state. Aborting...');
 		}
 
 		// Set this email to locked
@@ -110,25 +120,30 @@ function get_status() {
 
 		$dblink->commit();
 
-		// Now send it!
-		$mailer = new systemmailer();
-		$mailer->isHTML(true);
-		$mailer->Subject = $this->get('equ_subject');
-		$mailer->Body = $this->get('equ_body');
-		$mailer->setFrom($this->get('equ_from'), $this->get('equ_from_name'));
-		$mailer->addAddress($this->get('equ_to'), $this->get('equ_to_name'));
-		
+		// Build EmailMessage and send via EmailSender (service selection + fallback)
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		$message = EmailMessage::create(
+			$this->get('equ_to'),
+			$this->get('equ_subject'),
+			$this->get('equ_body')
+		);
+		$message->from($this->get('equ_from'), $this->get('equ_from_name'));
+
+		$sender = new EmailSender();
+		$result = $sender->send($message, $queue_on_failure);
+
 		$dblink->beginTransaction();
 
 		$this->load();
 
-		if ($mailer->send()) {
+		if ($result) {
 			$this->set('equ_status', self::SENT);
 			$this->update_stats_sent();
 		} else {
 			$this->set('equ_status', self::ERROR_SENDING);
 		}
 
+		$this->save();
 		$dblink->commit();
 	}
 

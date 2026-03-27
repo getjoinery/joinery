@@ -1,6 +1,12 @@
 {
     "name": "Send Queued Emails",
-    "description": "Sends bulk emails that are queued and past their scheduled send date",
+    "description": "Sends bulk emails that are queued and past their scheduled send date, and retries failed transactional emails",
     "default_frequency": "every_run",
-    "config_fields": {}
+    "config_fields": {
+        "max_retries": {
+            "label": "Maximum retry attempts for failed emails",
+            "type": "number",
+            "default": 3
+        }
+    }
 }
