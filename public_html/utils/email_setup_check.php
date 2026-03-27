@@ -440,11 +440,13 @@ $page->admin_header([
 $page->admin_footer();
 
 // EmailAuthChecker class definition
+require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
+
 class EmailAuthChecker {
     private $domain;
     private $results = [];
     private $is_comprehensive;
-    
+
     public function __construct($domain, $is_comprehensive = false) {
         $this->domain = strtolower(trim($domain));
         $this->is_comprehensive = $is_comprehensive;
@@ -819,39 +821,29 @@ class EmailAuthChecker {
     }
     
     private function isDKIMRecord($record) {
-        // More comprehensive DKIM record detection
-        $record = strtolower($record);
-        
-        // Check for explicit DKIM version
-        if (strpos($record, 'v=dkim1') !== false) {
+        // Delegate basic detection to shared class
+        if (DnsAuthChecker::isDKIMRecord($record)) {
             return true;
         }
-        
-        // Check for key type indicators
-        if (strpos($record, 'k=rsa') !== false || strpos($record, 'k=ed25519') !== false) {
-            return true;
-        }
-        
-        // Check for public key presence (p= tag with substantial content)
-        if (preg_match('/p=([a-zA-Z0-9+\/=]{100,})/', $record)) {
-            return true;
-        }
-        
+
+        // Additional comprehensive detection for the deep-dive tool
+        $record_lower = strtolower($record);
+
         // Check for hash algorithms (h= tag)
-        if (strpos($record, 'h=sha256') !== false || strpos($record, 'h=sha1') !== false) {
+        if (strpos($record_lower, 'h=sha256') !== false || strpos($record_lower, 'h=sha1') !== false) {
             return true;
         }
-        
+
         // Check for service type (s= tag)
-        if (strpos($record, 's=email') !== false || strpos($record, 's=*') !== false) {
+        if (strpos($record_lower, 's=email') !== false || strpos($record_lower, 's=*') !== false) {
             return true;
         }
-        
+
         // Look for Base64-encoded public key patterns
         if (preg_match('/[a-zA-Z0-9+\/]{200,}={0,2}/', $record)) {
             return true;
         }
-        
+
         return false;
     }
     
