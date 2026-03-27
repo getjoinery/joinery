@@ -1,6 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 require_once(PathHelper::getThemeFilePath('billing_logic.php', 'logic'));
 
 $page_vars = process_logic(billing_logic($_GET, $_POST));
@@ -17,8 +17,8 @@ $show_cycle_switcher = $page_vars['show_cycle_switcher'];
 $invoices            = $page_vars['invoices'];
 $session             = SessionControl::get_instance();
 
-$page = new PublicPage();
-$page->public_header([
+$page = new MemberPage();
+$page->member_header([
     'title'         => 'Billing & Payment',
     'is_valid_page' => $is_valid_page,
 ]);
@@ -250,5 +250,5 @@ $page->public_header([
 </section>
 
 <?php
-$page->public_footer(['track' => true]);
+$page->member_footer(['track' => true]);
 ?>

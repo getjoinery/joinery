@@ -1,12 +1,12 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 	require_once(PathHelper::getThemeFilePath('subscriptions_logic.php', 'logic'));
 
 	$page_vars = process_logic(subscriptions_logic($_GET, $_POST));
 
-	$page = new PublicPage();
+	$page = new MemberPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
 		'title' => 'My Subscriptions',
@@ -15,7 +15,7 @@
 			'Subscriptions' => '',
 		),
 	);
-	$page->public_header($hoptions, NULL);
+	$page->member_header($hoptions, NULL);
 ?>
 
 <!-- Page Title -->
@@ -120,5 +120,5 @@
 </section>
 
 <?php
-$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
+$page->member_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

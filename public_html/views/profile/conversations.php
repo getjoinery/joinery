@@ -6,16 +6,14 @@
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('conversations_logic.php', 'logic'));
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 
 $page_vars = process_logic(conversations_logic($_GET, $_POST));
 
-$page = new PublicPage();
-$page->public_header([
+$page = new MemberPage();
+$page->member_header([
 	'title' => $page_vars['title'],
 ]);
-
-echo PublicPage::BeginPage($page_vars['title']);
 
 $session = SessionControl::get_instance();
 $conversations = $page_vars['conversations'];
@@ -124,6 +122,5 @@ $other_users = $page_vars['other_users'];
 </style>
 
 <?php
-echo PublicPage::EndPage();
-$page->public_footer();
+$page->member_footer();
 ?>
