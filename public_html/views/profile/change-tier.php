@@ -1,11 +1,11 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 require_once(PathHelper::getThemeFilePath('change_tier_logic.php', 'logic'));
 
 $page_vars = process_logic(change_tier_logic($_GET, $_POST));
 
-$page = new PublicPage();
+$page = new MemberPage();
 $hoptions = array(
     'title' => 'Change Tier',
     'breadcrumbs' => array(
@@ -13,7 +13,7 @@ $hoptions = array(
         'Change Tier' => '',
     ),
 );
-$page->public_header($hoptions, NULL);
+$page->member_header($hoptions, NULL);
 
 $formwriter = $page->getFormWriter('tier_form');
 ?>
@@ -191,5 +191,5 @@ $formwriter = $page->getFormWriter('tier_form');
 </section>
 
 <?php
-$page->public_footer($hoptions, NULL);
+$page->member_footer($hoptions, NULL);
 ?>

@@ -1,16 +1,16 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
 	require_once(PathHelper::getThemeFilePath('event_withdraw_logic.php', 'logic'));
 
 	$page_vars = process_logic(event_withdraw_logic($_GET, $_POST));
 
-	$page = new PublicPage();
+	$page = new MemberPage();
 	$hoptions=array(
 		'title'=>'Withdraw from Event/Course'
 	);
-	$page->public_header($hoptions);
+	$page->member_header($hoptions);
 ?>
 
 <!-- Page Title -->
@@ -76,5 +76,5 @@
 </section>
 
 <?php
-$page->public_footer();
+$page->member_footer();
 ?>
