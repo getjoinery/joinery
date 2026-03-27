@@ -20,6 +20,10 @@ function billing_logic($get, $post) {
         return LogicResult::redirect('/login');
     }
 
+    if (!$settings->get_setting('products_active') || !$settings->get_setting('subscriptions_active')) {
+        return LogicResult::redirect('/profile');
+    }
+
     $user_id = $session->get_user_id();
     $user = new User($user_id, TRUE);
     $page_vars['user'] = $user;
