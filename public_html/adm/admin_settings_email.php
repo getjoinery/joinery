@@ -318,6 +318,75 @@
 		echo '</div>';
 		echo '</div>';
 
+		// DNS Authentication Status (on-demand)
+		$run_dns_check = isset($_GET['run_dns_check']);
+		$mailgun_domain_for_dns = $settings->get_setting('mailgun_domain');
+		$default_email_for_dns = $settings->get_setting('defaultemail');
+		$dns_domain = $mailgun_domain_for_dns;
+		if (!$dns_domain && $default_email_for_dns && strpos($default_email_for_dns, '@') !== false) {
+			$dns_domain = substr($default_email_for_dns, strpos($default_email_for_dns, '@') + 1);
+		}
+
+		if ($dns_domain) {
+			echo '<div class="row mt-3">';
+			echo '<div class="col-md-12">';
+			echo '<h5>Email Authentication Status';
+			if (!$run_dns_check) {
+				echo ' <a href="?run_dns_check=1' . ($run_validation ? '&run_validation=1' : '') . '" class="btn btn-outline-primary btn-sm ms-2">Check DNS</a>';
+			}
+			echo '</h5>';
+
+			if ($run_dns_check) {
+				require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
+				$dns_results = DnsAuthChecker::quickCheck($dns_domain);
+
+				echo '<div class="alert alert-light border">';
+				echo '<strong>Domain:</strong> ' . htmlspecialchars($dns_domain) . '<br/>';
+
+				// SPF
+				$spf = $dns_results['spf'];
+				echo '<strong>SPF:</strong> ';
+				if ($spf['status'] === 'pass') {
+					echo '<span class="text-success">&#10003; ' . htmlspecialchars($spf['detail']) . '</span>';
+				} elseif ($spf['status'] === 'warn') {
+					echo '<span class="text-warning">&#9888; ' . htmlspecialchars($spf['detail']) . '</span>';
+				} else {
+					echo '<span class="text-danger">&#10007; ' . htmlspecialchars($spf['detail']) . '</span>';
+				}
+				echo '<br/>';
+
+				// DKIM
+				$dkim = $dns_results['dkim'];
+				echo '<strong>DKIM:</strong> ';
+				if ($dkim['status'] === 'pass') {
+					echo '<span class="text-success">&#10003; ' . htmlspecialchars($dkim['detail']) . '</span>';
+				} else {
+					echo '<span class="text-danger">&#10007; ' . htmlspecialchars($dkim['detail']) . '</span>';
+				}
+				echo '<br/>';
+
+				// DMARC
+				$dmarc = $dns_results['dmarc'];
+				echo '<strong>DMARC:</strong> ';
+				if ($dmarc['status'] === 'pass') {
+					echo '<span class="text-success">&#10003; ' . htmlspecialchars($dmarc['detail']) . '</span>';
+				} elseif ($dmarc['status'] === 'warn') {
+					echo '<span class="text-warning">&#9888; ' . htmlspecialchars($dmarc['detail']) . '</span>';
+				} else {
+					echo '<span class="text-danger">&#10007; ' . htmlspecialchars($dmarc['detail']) . '</span>';
+				}
+				echo '<br/>';
+
+				echo '<div class="mt-2">';
+				echo '<a href="/utils/email_setup_check?domain=' . urlencode($dns_domain) . '" class="btn btn-outline-secondary btn-sm">Detailed Analysis</a>';
+				echo '</div>';
+				echo '</div>';
+			}
+
+			echo '</div>';
+			echo '</div>';
+		}
+
 		// Mailgun section with two-column layout and API validation
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';

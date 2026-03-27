@@ -30,38 +30,46 @@ class EmailSender {
     
     /**
      * Main sending method with clean interface
+     *
+     * @param EmailMessage $message The email to send
+     * @param bool $queue_on_failure If true, save to equ_queued_emails on total failure for later retry.
+     *        Pass false when sending from the retry task to prevent infinite re-queuing.
+     * @return bool True if sent successfully
      */
-    public function send(EmailMessage $message) {
+    public function send(EmailMessage $message, $queue_on_failure = true) {
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
         }
-        
+
         // Validate
         $errors = $message->validate();
         if (!empty($errors)) {
             throw new Exception('Invalid email message: ' . implode(', ', $errors));
         }
-        
+
         // Use service selection with fallback (moved logic from EmailTemplate)
         $settings = Globalvars::get_instance();
         $service = $settings->get_setting('email_service') ?: 'mailgun';
         $fallback = $settings->get_setting('email_fallback_service') ?: 'smtp';
-        
+
         $result = $this->sendWithService($service, $message);
-        
+
         if (!$result && $fallback && $fallback !== $service) {
             $this->logEmailDebug("Primary service $service failed, trying fallback $fallback");
             $fallback_result = $this->sendWithService($fallback, $message);
-            
+
             if ($fallback_result) {
                 $this->logEmailDebug("Fallback service $fallback succeeded");
                 return true;
             }
-            
-            $this->logEmailDebug("Both primary and fallback services failed, email queued for retry");
+
+            $this->logEmailDebug("Both primary and fallback services failed");
+            if ($queue_on_failure) {
+                $this->queueForRetry($message);
+            }
         }
-        
+
         return $result;
     }
     
@@ -414,6 +422,36 @@ class EmailSender {
         return $sender->getServiceType();
     }
     
+    /**
+     * Queue a failed email for later retry via the SendQueuedEmails scheduled task.
+     * Saves one row per recipient into equ_queued_emails with ERROR_SENDING status.
+     */
+    private function queueForRetry(EmailMessage $message) {
+        try {
+            require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
+
+            $fromName = $message->getFromName() ?: '';
+
+            foreach ($message->getRecipients() as $recipient) {
+                $queued = new QueuedEmail(NULL);
+                $queued->set('equ_from', $message->getFrom());
+                $queued->set('equ_from_name', $fromName);
+                $queued->set('equ_to', $recipient['email']);
+                $queued->set('equ_to_name', $recipient['name'] ?? '');
+                $queued->set('equ_subject', $message->getSubject());
+                $queued->set('equ_body', $message->getHtmlBody() ?: $message->getTextBody());
+                $queued->set('equ_status', QueuedEmail::ERROR_SENDING);
+                $queued->set('equ_retry_count', 0);
+                $queued->save();
+            }
+
+            $count = count($message->getRecipients());
+            $this->logEmailDebug("Queued $count recipient(s) for retry");
+        } catch (Exception $e) {
+            error_log("[EmailSender] Failed to queue email for retry: " . $e->getMessage());
+        }
+    }
+
     /**
      * Debug logging (moved from EmailTemplate)
      * Made public to support deprecated EmailTemplate methods
