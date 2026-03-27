@@ -90,6 +90,11 @@
                         <a href="/product/recurring-donation" class="btn btn-primary">Start a New Subscription</a>
                     </div>
                     <?php endif; ?>
+
+                    <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border, #eee); display: flex; gap: 1.5rem; flex-wrap: wrap;">
+                        <a href="/profile/change-tier" style="font-size: 0.875rem;">Change Subscription Plan</a>
+                        <a href="/profile/billing" style="font-size: 0.875rem;">Manage Payment Method</a>
+                    </div>
                 </div>
             </div>
             <?php endif; ?>

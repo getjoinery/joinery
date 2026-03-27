@@ -28,6 +28,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$session->check_permission(0);
 	$session->set_return();
 
+	if (!$settings->get_setting('products_active') || !$settings->get_setting('subscriptions_active')) {
+		return LogicResult::redirect('/profile');
+	}
+
 	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
 
