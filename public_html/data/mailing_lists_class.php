@@ -259,48 +259,6 @@ function get_subscribed_users($return='object'){
 
 	}	
 
-	/*
-	function resubscribe_to_mailing_list() {
-
-		//TODO NEED TO HANDLE ALL CONTACT PREFERENCE POSSIBILITIES
-		$this->set('usr_contact_preferences', 1);
-		if($this->get('usr_contact_preference_last_changed') != 1){
-			$this->set('usr_contact_preference_last_changed', 'NOW()');
-		}
-		$this->subscribe_to_contact_type(User::NEWSLETTER);
-
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('mailchimp_api_key')){
-			$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
-
-			$merge_values = [
-				"FNAME" => $this->get('usr_first_name'),
-				"LNAME" => $this->get('usr_last_name'),
-				"MMERGE3" => 'Yes',
-			];
-
-			$post_params = [
-				"status" => "subscribed", 
-				"merge_fields" => $merge_values,
-			];
-
-			try {
-				$return = $mailchimp 
-					->lists($settings->get_setting('mailchimp_list_id'))
-					->members(md5($this->get('usr_email')))
-					->patch($post_params);
-			} catch (Exception $e) {
-				throw new SystemDisplayablePermanentError(
-				'There was an error and we were unable to update your contact preferences.');
-				exit();	
-			}	
-		
-		}
-		$this->save();
-		return TRUE;
-	}
-	*/
-
 	function unsubscribe_from_mailchimp_list($user_id) {
 		
 		$user = new User($user_id, TRUE);

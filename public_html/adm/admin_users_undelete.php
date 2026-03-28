@@ -73,8 +73,8 @@ else{
 		echo '<div class="fields full">';
 		echo '<p>This will undelete this user ('.$user->display_name() . ').</p>';
 
-	$formwriter->hiddeninput('confirm', ['value' => 1]);
-	$formwriter->hiddeninput('usr_user_id', ['value' => $usr_user_id]);
+	$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+	$formwriter->hiddeninput('usr_user_id', '', ['value' => $usr_user_id]);
 
 	$formwriter->submitbutton('btn_submit', 'Submit');
 

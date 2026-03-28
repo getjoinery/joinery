@@ -79,15 +79,35 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::redirect($_SERVER['REQUEST_URI']);
 	}
 	
-	//TODO: HANDLE COMMENT THREADING
+	// Load top-level comments
 	$comments = new MultiComment(
 		array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'has_parent_id'=>false),
 		array('comment_id'=>'DESC'),
 		NULL,
-		NULL);	
+		NULL);
 	$comments->load();
 	$page_vars['comments'] = $comments;
-	$numcomments = $comments->count_all();		
+	$numcomments = $comments->count_all();
+
+	// Load replies (comments with a parent) and group by parent ID
+	$replies_by_parent = array();
+	$all_replies = new MultiComment(
+		array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'has_parent_id'=>true),
+		array('comment_id'=>'ASC'),
+		NULL,
+		NULL);
+	if ($all_replies->count_all()) {
+		$all_replies->load();
+		foreach ($all_replies as $reply) {
+			$parent_id = $reply->get('cmt_comment_id_parent');
+			if (!isset($replies_by_parent[$parent_id])) {
+				$replies_by_parent[$parent_id] = array();
+			}
+			$replies_by_parent[$parent_id][] = $reply;
+		}
+		$numcomments += $all_replies->count_all();
+	}
+	$page_vars['replies_by_parent'] = $replies_by_parent;
 	$page_vars['numcomments'] = $numcomments;	
 	
 	

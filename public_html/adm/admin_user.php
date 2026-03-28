@@ -297,8 +297,8 @@ array(
 										}
 
 										$optionvals = $group_drops->get_dropdown_array();
-										$formwriter->hiddeninput('action', ['value' => 'add_to_group']);
-										$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
+										$formwriter->hiddeninput('action', '', ['value' => 'add_to_group']);
+										$formwriter->hiddeninput('usr_user_id', '', ['value' => $user->key]);
 										$formwriter->dropinput('grp_group_id', 'Add to group', [
 											'options' => $optionvals,
 											'validation' => ['required' => true]
@@ -435,8 +435,8 @@ foreach($event_ids_for_user as $event_id) {
 }
 
 $optionvals = $events->get_dropdown_array();
-$formwriter->hiddeninput('action', ['value' => 'add_to_event']);
-$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
+$formwriter->hiddeninput('action', '', ['value' => 'add_to_event']);
+$formwriter->hiddeninput('usr_user_id', '', ['value' => $user->key]);
 $formwriter->dropinput('evt_event_id', 'Add to event', [
 	'options' => $optionvals,
 	'validation' => ['required' => true]

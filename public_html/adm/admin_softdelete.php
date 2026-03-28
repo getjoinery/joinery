@@ -30,8 +30,8 @@ echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will delete this user ('.$user->display_name() . ').</p>';
 
-$formwriter->hiddeninput('confirm', ['value' => 1]);
-$formwriter->hiddeninput('usr_user_id', ['value' => $usr_user_id]);
+$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+$formwriter->hiddeninput('usr_user_id', '', ['value' => $usr_user_id]);
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 

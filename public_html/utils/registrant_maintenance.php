@@ -40,22 +40,6 @@
 		}
 		*/
 
-		//ADD THE USER TO ANY EVENTS ATTACHED TO BUNDLES RECENTLY
-		/*
-		if($event_registrant->get('evr_grp_group_id')){
-			$group = new Group($event_registrant->get('evr_grp_group_id'), TRUE);
-			$event = new Event($event_registrant->get('evr_evt_event_id'), TRUE);
-			$group_members = $group->get_member_list();
-			foreach ($group_members as $group_member){
-				//ADD THE USER TO THE EVENT
-				$event_registrant = $event->add_registrant($user->key, NULL, $event_registrant->get('evr_grp_group_id'), NULL);
-
-				//TODO: THE RECORDING CONSENT BOX
-
-			}
-		}
-		*/
-
 		//SET EXPIRED USER ANY EVENTS WHERE THE SUBSCRIPTION IS NO LONGER ACTIVE
 		if($event_registrant->get('evr_odi_order_item_id')){
 			$order_item = new OrderItem($event_registrant->get('evr_odi_order_item_id'), TRUE);

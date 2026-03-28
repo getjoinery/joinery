@@ -41,34 +41,51 @@ class PaypalHelper{
 	}
 	
 	public function build_item_array($cart_items){
-		//TODO: QUANTITY $item['quantity'], RECURRING $item['recurring']
+		// Recurring items are handled separately via output_paypal_subscription_checkout_code()
+		$line_items = array();
+		$order_total = 0;
 
-		$purchase_units = array();
 		foreach ($cart_items as $item) {
-			if(!$item['recurring']){
-
-				$purchase_unit = array();
-				$purchase_unit['reference_id'] = $item['name'];
-
-				$amount = array();
-				$amount['currency_code'] = $this->currency;
-				$amount['value'] = ($item['price'] - $item['discount']);
-
-				$purchase_unit['amount'] = $amount;
-
-				$purchase_units[] = $purchase_unit;
+			if($item['recurring']){
+				continue;
 			}
+
+			$unit_price = $item['price'] - $item['discount'];
+			$line_total = $unit_price * $item['quantity'];
+			$order_total += $line_total;
+
+			$line_items[] = array(
+				'name' => $item['name'],
+				'quantity' => (string)$item['quantity'],
+				'unit_amount' => array(
+					'currency_code' => $this->currency,
+					'value' => number_format($unit_price, 2, '.', ''),
+				),
+			);
 		}
 
-		$intent = "CAPTURE";
+		if(empty($line_items)){
+			return false;
+		}
 
-		$data = [
-			"intent" => $intent,
-			"purchase_units" => $purchase_units,
-		];	
+		$purchase_unit = array(
+			'amount' => array(
+				'currency_code' => $this->currency,
+				'value' => number_format($order_total, 2, '.', ''),
+				'breakdown' => array(
+					'item_total' => array(
+						'currency_code' => $this->currency,
+						'value' => number_format($order_total, 2, '.', ''),
+					),
+				),
+			),
+			'items' => $line_items,
+		);
 
-		return $data;
-		
+		return [
+			"intent" => "CAPTURE",
+			"purchase_units" => [$purchase_unit],
+		];
 	}
 	
 	public function output_paypal_checkout_code($data){

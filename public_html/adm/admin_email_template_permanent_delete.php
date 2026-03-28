@@ -30,8 +30,8 @@ echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will permanently delete this email_template ('.$email_template->get('emt_name') . ').</p>';
 
-$formwriter->hiddeninput('confirm', ['value' => 1]);
-$formwriter->hiddeninput('emt_email_template_id', ['value' => $emt_email_template_id]);
+$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+$formwriter->hiddeninput('emt_email_template_id', '', ['value' => $emt_email_template_id]);
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 

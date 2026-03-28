@@ -106,7 +106,7 @@
 
 	// Include the primary key as hidden field when editing existing record
 	if ($page_content->key) {
-		$formwriter->hiddeninput('pac_page_content_id', ['value' => $page_content->key]);
+		$formwriter->hiddeninput('pac_page_content_id', '', ['value' => $page_content->key]);
 	}
 
 	$formwriter->textinput('pac_location_name', 'Name for this content', [
@@ -160,7 +160,7 @@
 			]);
 
 			$formwriter->begin_form();
-			$formwriter->hiddeninput('pac_page_content_id', ['value' => $page_content->key]);
+			$formwriter->hiddeninput('pac_page_content_id', '', ['value' => $page_content->key]);
 			$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
 				'options' => $optionvals
 			]);

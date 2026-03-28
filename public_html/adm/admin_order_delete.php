@@ -30,8 +30,8 @@ echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will administratively delete this order ('.$order->key . ').  It will NOT refund any charges.</p>';
 
-$formwriter->hiddeninput('confirm', ['value' => 1]);
-$formwriter->hiddeninput('ord_order_id', ['value' => $ord_order_id]);
+$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+$formwriter->hiddeninput('ord_order_id', '', ['value' => $ord_order_id]);
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 

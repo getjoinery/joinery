@@ -81,17 +81,17 @@
 	]);
 
 	if(isset($_REQUEST['waiting_list'])){
-		$formwriter->hiddeninput('waiting_list', ['value' => 1]);
+		$formwriter->hiddeninput('waiting_list', '', ['value' => 1]);
 	}
 
 	if($page_vars['event']){
-		$formwriter->hiddeninput('evt_event_id', ['value' => $page_vars['event']->key]);
+		$formwriter->hiddeninput('evt_event_id', '', ['value' => $page_vars['event']->key]);
 	}
 	else if($page_vars['group']){
-		$formwriter->hiddeninput('grp_group_id', ['value' => $page_vars['group']->key]);
+		$formwriter->hiddeninput('grp_group_id', '', ['value' => $page_vars['group']->key]);
 	}
 	else{
-		$formwriter->hiddeninput('usr_user_id', ['value' => $page_vars['recipient']->key]);
+		$formwriter->hiddeninput('usr_user_id', '', ['value' => $page_vars['recipient']->key]);
 	}
 
 	$formwriter->submitbutton('submit_button', 'Submit');

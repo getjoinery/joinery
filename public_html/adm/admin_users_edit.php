@@ -90,7 +90,7 @@ $formwriter->textarea('usr_allowed_ips', 'Allowed Login IPs', [
 	'helptext' => 'One per line. Supports exact IPs, CIDR (104.23.0.0/16), or wildcards (104.23.*). Leave blank to allow any IP.'
 ]);
 
-$formwriter->hiddeninput('usr_user_id', ['value' => $user->key]);
+$formwriter->hiddeninput('usr_user_id', '', ['value' => $user->key]);
 
 $formwriter->submitbutton('submit_button', 'Submit');
 $formwriter->end_form();

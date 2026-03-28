@@ -1142,8 +1142,7 @@ class ModelTester {
         $model_class = $this->model_class;
         
         // Only test uniqueness if explicitly defined in the model
-        // TODO: When models have a way to specify unique constraints, use that instead
-        
+        // Note: Models support 'unique' => true in $field_specifications, checked by check_unique_constraints()
         // For now, only check email fields as they are commonly unique
         // and failing to enforce uniqueness on emails can cause real issues
         foreach ($model_class::$field_specifications as $field => $spec) {

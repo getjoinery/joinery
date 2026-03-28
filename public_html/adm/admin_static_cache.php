@@ -459,7 +459,7 @@ if (!empty($display_messages)) {
                     'placeholder' => '/page/about or https://example.com/page',
                     'validation' => ['required' => true]
                 ]);
-                $formwriter->hiddeninput('action', ['value' => 'diagnose_url']);
+                $formwriter->hiddeninput('action', '', ['value' => 'diagnose_url']);
                 $formwriter->submitbutton('btn_diagnose', 'Diagnose URL');
                 $formwriter->end_form();
 
@@ -636,7 +636,7 @@ if (!empty($display_messages)) {
                     'placeholder' => '/page/about?param=value',
                     'validation' => ['required' => true]
                 ]);
-                $formwriter->hiddeninput('action', ['value' => 'invalidate_url']);
+                $formwriter->hiddeninput('action', '', ['value' => 'invalidate_url']);
                 $formwriter->submitbutton('btn_invalidate', 'Invalidate Cache');
                 $formwriter->end_form();
                 ?>
@@ -652,7 +652,7 @@ if (!empty($display_messages)) {
                     'placeholder' => '/page/dynamic',
                     'validation' => ['required' => true]
                 ]);
-                $formwriter->hiddeninput('action', ['value' => 'mark_nostatic']);
+                $formwriter->hiddeninput('action', '', ['value' => 'mark_nostatic']);
                 $formwriter->submitbutton('btn_nostatic', 'Mark as Non-Cacheable');
                 $formwriter->end_form();
                 ?>

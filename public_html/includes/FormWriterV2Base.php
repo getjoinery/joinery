@@ -991,14 +991,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options (use 'value' key to set the hidden field value)
      */
     public function hiddeninput($name, $label = '', $options = []) {
-        // TODO: There are 59 places in the codebase using the incorrect two-argument pattern:
-        //       hiddeninput('name', ['value' => x]) instead of hiddeninput('name', '', ['value' => x])
-        //       These should be updated to use the correct three-argument convention.
-        //       Search pattern: grep -r "hiddeninput([^,]*, \[" --include="*.php"
-        //
-        // Support both calling conventions for backwards compatibility:
-        // hiddeninput('name', '', ['value' => x])  - correct convention
-        // hiddeninput('name', ['value' => x])      - legacy shorthand (label is ignored anyway)
+        // Support legacy two-argument pattern for backwards compatibility
         if (is_array($label)) {
             $options = $label;
             $label = '';
@@ -3871,7 +3864,7 @@ class AjaxSearchSelect {
                     ],
                 ],
             ]);
-            $output .= $this->hiddeninput("antispam_question_answer", ['value' => strtolower($correct_answer)]);
+            $output .= $this->hiddeninput("antispam_question_answer", '', ['value' => strtolower($correct_answer)]);
             return $output;
         }
         else{

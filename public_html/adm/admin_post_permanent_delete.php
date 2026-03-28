@@ -30,8 +30,8 @@ echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will permanently delete this post ('.$post->get('pst_title') . ').</p>';
 
-$formwriter->hiddeninput('confirm', ['value' => 1]);
-$formwriter->hiddeninput('pst_post_id', ['value' => $pst_post_id]);
+$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+$formwriter->hiddeninput('pst_post_id', '', ['value' => $pst_post_id]);
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 
