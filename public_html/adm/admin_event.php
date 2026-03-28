@@ -319,7 +319,28 @@
 
 						<?php if($event->get('evt_description')): ?>
 							<p class="<?php echo $event->get('evt_short_description') ? 'mt-3' : ''; ?>"><strong>Full Description:</strong></p>
-							<div><?php echo $event->get('evt_description'); ?></div>
+							<div id="evt-description-wrap" style="max-height: 6em; overflow: hidden; position: relative;">
+								<div id="evt-description-inner"><?php echo $event->get('evt_description'); ?></div>
+							</div>
+							<a href="#" id="evt-description-toggle" style="display: none; margin-top: 0.5rem; font-size: 0.8rem;">Show all</a>
+							<script>
+							document.addEventListener('DOMContentLoaded', function(){
+								var wrap = document.getElementById('evt-description-wrap');
+								var inner = document.getElementById('evt-description-inner');
+								var toggle = document.getElementById('evt-description-toggle');
+								if (inner.scrollHeight > wrap.clientHeight) {
+									toggle.style.display = 'inline-block';
+								}
+								var expanded = false;
+								toggle.addEventListener('click', function(e){
+									e.preventDefault();
+									expanded = !expanded;
+									wrap.style.maxHeight = expanded ? 'none' : '6em';
+									wrap.style.overflow = expanded ? 'visible' : 'hidden';
+									toggle.textContent = expanded ? 'Show less' : 'Show all';
+								});
+							});
+							</script>
 						<?php endif; ?>
 					</div>
 				</div>

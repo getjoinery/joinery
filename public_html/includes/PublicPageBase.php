@@ -561,8 +561,8 @@ abstract class PublicPageBase {
 	 * should override this method with an empty body to prevent conflicts.
 	 */
 	protected function render_base_assets() {
-		echo '<link rel="stylesheet" href="/assets/css/base.css">' . "\n";
-		echo '<link rel="stylesheet" href="/assets/css/style.css">' . "\n";
+		echo '<link rel="stylesheet" href="/assets/css/base.css?v=2">' . "\n";
+		echo '<link rel="stylesheet" href="/assets/css/style.css?v=2">' . "\n";
 		echo '<script defer src="/assets/js/base.js?v=2"></script>' . "\n";
 	}
 
