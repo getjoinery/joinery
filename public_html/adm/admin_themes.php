@@ -154,7 +154,7 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                                 if (!empty($actions)) {
                                     echo '<div class="dropdown">';
-                                    echo '<button class="btn btn-soft-default dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-haspopup="true" aria-expanded="false">Actions</button>';
+                                    echo '<button class="btn btn-soft-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
                                     echo '<div class="dropdown-menu dropdown-menu-end py-0">';
                                     foreach ($actions as $label => $action) {
                                         echo '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';

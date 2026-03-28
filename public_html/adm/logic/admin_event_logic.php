@@ -26,7 +26,8 @@ function admin_event_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 	$session->set_return();
 
-	$event = new Event($get_vars['evt_event_id'], TRUE);
+	$evt_event_id = !empty($get_vars['evt_event_id']) ? $get_vars['evt_event_id'] : (!empty($post_vars['evt_event_id']) ? $post_vars['evt_event_id'] : null);
+	$event = new Event($evt_event_id, TRUE);
 
 	// Handle actions
 	if($get_vars['action'] == 'delete'){
@@ -159,7 +160,7 @@ function admin_event_logic($get_vars, $post_vars) {
 	$dropdown_button = '';
 	if (!empty($options['altlinks'])) {
 		$dropdown_button = '<div class="dropdown">';
-		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
+		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
 		foreach ($options['altlinks'] as $label => $url) {
 			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item">' . htmlspecialchars($label) . '</a>';

@@ -261,7 +261,7 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                     if (!empty($actions)) {
                         $action_cell = '<div class="dropdown">';
-                        $action_cell .= '<button class="btn btn-soft-default dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-haspopup="true" aria-expanded="false">Actions</button>';
+                        $action_cell .= '<button class="btn btn-soft-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
                         $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
                         foreach ($actions as $label => $action) {
                             $action_cell .= '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
