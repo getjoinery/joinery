@@ -234,21 +234,9 @@ $page->public_header($hoptions);
                                     <?php endif; ?>
 
                                     <!-- Nested Replies -->
-                                    <?php
-                                    $replies = new MultiComment(
-                                        array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'parent_id'=>$comment->key),
-                                        array('comment_id'=>'DESC'),
-                                        NULL,
-                                        NULL
-                                    );
-                                    $numreplies = $replies->count_all();
-
-                                    if($numreplies):
-                                        $replies->load();
-                                        ?>
+                                    <?php if(!empty($page_vars['replies_by_parent'][$comment->key])): ?>
                                         <ol class="children">
-                                            <?php foreach($replies as $reply): ?>
-                                                <?php if($reply->get('cmt_comment_id_parent') == $comment->key): ?>
+                                            <?php foreach($page_vars['replies_by_parent'][$comment->key] as $reply): ?>
                                                 <li class="comment">
                                                     <div class="comment-body">
                                                         <footer class="comment-meta">
@@ -270,7 +258,6 @@ $page->public_header($hoptions);
                                                         </div>
                                                     </div>
                                                 </li>
-                                                <?php endif; ?>
                                             <?php endforeach; ?>
                                         </ol>
                                     <?php endif; ?>

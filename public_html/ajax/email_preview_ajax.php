@@ -21,9 +21,6 @@
 	else{
 		$recipient = new User($session->get_user_id(), TRUE);
 		
-		//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-		//MAKE THE RECIPIENT THE CURRENT PERSON	
-		
 		if($email->get('eml_mlt_mailing_list_id')){
 			$mailing_list_id = $email->get('eml_mlt_mailing_list_id');
 			$mailing_list = new MailingList($mailing_list_id, TRUE);

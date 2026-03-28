@@ -230,7 +230,7 @@ $formwriter->begin_form();
 
 // Hidden field for edit mode - ensures POST contains the primary key
 if ($content->key) {
-	$formwriter->hiddeninput('pac_page_content_id', ['value' => $content->key]);
+	$formwriter->hiddeninput('pac_page_content_id', '', ['value' => $content->key]);
 }
 
 echo '<div class="row"><div class="col-md-8">';

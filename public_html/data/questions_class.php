@@ -226,9 +226,11 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 				NULL);  //OFFSET
 			$options->load();
 
+			if (!$options->count()) {
+				return;
+			}
 			$truevalue = $options->get(0)->get('qop_question_option_value');
 
-			//TODO ERROR CHECKING HERE
 			$formwriter->checkboxinput($field_name, $question_text, [
 				'checked' => ($value == $truevalue),
 				'value' => $truevalue,

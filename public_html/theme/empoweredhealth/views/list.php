@@ -106,7 +106,7 @@ $paget->public_header(array(
                         }
 
                         if(!$member_of_list){
-                            $formwriter->hiddeninput('mlt_mailing_list_id', ['value' => $mailing_list->key]);
+                            $formwriter->hiddeninput('mlt_mailing_list_id', '', ['value' => $mailing_list->key]);
                             $formwriter->checkboxinput('mlt_mailing_list_id_subscribe', 'Subscribe to this list.', [
                                 'checked' => true
                             ]);

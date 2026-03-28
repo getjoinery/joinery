@@ -147,7 +147,7 @@ $page->admin_header(array(
     if ($tier && $tier->key) {
         $formwriter->checkboxinput('sbt_is_active', 'Active');
     } else {
-        $formwriter->hiddeninput('sbt_is_active', ['value' => '1']);
+        $formwriter->hiddeninput('sbt_is_active', '', ['value' => '1']);
     }
 
     $formwriter->submitbutton('submit_button', ($tier && $tier->key) ? 'Update Tier' : 'Create Tier');

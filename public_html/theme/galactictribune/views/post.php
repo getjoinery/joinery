@@ -181,21 +181,9 @@
 					<?php endif; ?>
 
 					<!-- Replies -->
-					<?php
-					$replies = new MultiComment(
-						array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'parent_id'=>$comment->key),
-						array('comment_id'=>'DESC'),
-						NULL,
-						NULL
-					);
-					$numreplies = $replies->count_all();
-
-					if($numreplies):
-						$replies->load();
-						?>
+					<?php if(!empty($page_vars['replies_by_parent'][$comment->key])): ?>
 						<div class="mt-4 space-y-3">
-							<?php foreach($replies as $reply): ?>
-								<?php if($reply->get('cmt_comment_id_parent') == $comment->key): ?>
+							<?php foreach($page_vars['replies_by_parent'][$comment->key] as $reply): ?>
 								<div class="ml-6 pl-4 border-l-2 border-gray-200 py-3">
 									<h4 class="font-semibold text-gray-900 text-sm"><?php echo htmlspecialchars($reply->get('cmt_author_name')); ?></h4>
 									<p class="text-xs text-gray-500 mb-2"><?php echo LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York'); ?></p>
@@ -203,7 +191,6 @@
 										<?php echo $reply->get_sanitized_comment(); ?>
 									</p>
 								</div>
-								<?php endif; ?>
 							<?php endforeach; ?>
 						</div>
 					<?php endif; ?>

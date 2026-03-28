@@ -524,13 +524,10 @@ class StripeHelper {
 				$stripe_current_item = array(
 					'price_data' => $price_data,
 					'quantity' => $cart_item['quantity'],
-					//'metadata' => 
 				);
-				
-				$stripe_price = $this->get_or_create_price($cart_item['product_version'], $final_price);	
 
-				
-				//TODO add description "metadata" => 
+				$stripe_price = $this->get_or_create_price($cart_item['product_version'], $final_price);
+
 				if($cart_item['price'] > 0){
 					array_push($stripe_item_list, $stripe_current_item);		
 				}	
@@ -557,11 +554,8 @@ class StripeHelper {
 				$stripe_current_item = array(
 					'price_data' => $price_data,
 					'quantity' => $cart_item['quantity'],
-					//'metadata' => 
 				);
 
-				
-				//TODO add description "metadata" => 
 				if($final_price > 0){
 					array_push($stripe_item_list, $stripe_current_item);		
 				}	

@@ -30,8 +30,8 @@ echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will permanently delete this page_content ('.$page_content->get('pac_location_name') . ').</p>';
 
-$formwriter->hiddeninput('confirm', ['value' => 1]);
-$formwriter->hiddeninput('pac_page_content_id', ['value' => $pac_page_content_id]);
+$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+$formwriter->hiddeninput('pac_page_content_id', '', ['value' => $pac_page_content_id]);
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 

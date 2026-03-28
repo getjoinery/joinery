@@ -33,7 +33,7 @@ $formwriter->dateinput('startdate', 'Start Date (UTC Time)', [
 $formwriter->dateinput('enddate', 'End Date (UTC Time)', [
 	'value' => $page_vars['enddate']
 ]);
-$formwriter->hiddeninput('source', ['value' => 'form']);
+$formwriter->hiddeninput('source', '', ['value' => 'form']);
 $formwriter->submitbutton('submit_button', 'Submit');
 $formwriter->end_form();
 

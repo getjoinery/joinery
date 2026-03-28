@@ -165,49 +165,39 @@
 											echo '</div>';
 										}
 
-									$replies = new MultiComment(
-										array('post_id'=>$post->key, 'approved'=>true, 'deleted'=>false, 'parent_id'=>$comment->key),
-										array('comment_id'=>'DESC'),
-										NULL,
-										NULL);	 
-									$numreplies = $replies->count_all();
-
-									if($numreplies){
-										$replies->load();
+									if(!empty($page_vars['replies_by_parent'][$comment->key])){
 										echo '<ul role="list" class="-mb-8">';
-										foreach($replies as $reply){ 
-											if($reply->get('cmt_comment_id_parent') == $comment->key){
-												echo '
-												
-												<li>
-												  <div class="relative pb-8 mt-4">
-													<span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-													<div class="relative flex items-start space-x-3">
-													  <div class="relative">
-														<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/assets/images/blank-avatar.png" alt="">
+										foreach($page_vars['replies_by_parent'][$comment->key] as $reply){
+											echo '
 
-														<span class="absolute -bottom-0.5 -right-1 bg-white rounded-tl px-0.5 py-px">
-														  <!-- Heroicon name: solid/chat-alt -->
-														  <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-															<path fill-rule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clip-rule="evenodd" />
-														  </svg>
-														</span>
+											<li>
+											  <div class="relative pb-8 mt-4">
+												<span class="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
+												<div class="relative flex items-start space-x-3">
+												  <div class="relative">
+													<img class="h-10 w-10 rounded-full bg-gray-400 flex items-center justify-center ring-8 ring-white" src="/assets/images/blank-avatar.png" alt="">
+
+													<span class="absolute -bottom-0.5 -right-1 bg-white rounded-tl px-0.5 py-px">
+													  <!-- Heroicon name: solid/chat-alt -->
+													  <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+														<path fill-rule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clip-rule="evenodd" />
+													  </svg>
+													</span>
+												  </div>
+												  <div class="min-w-0 flex-1">
+													<div>
+													  <div class="text-sm">
+														<a href="#" class="font-medium text-gray-900">'.htmlspecialchars($reply->get('cmt_author_name')).'</a>
 													  </div>
-													  <div class="min-w-0 flex-1">
-														<div>
-														  <div class="text-sm">
-															<a href="#" class="font-medium text-gray-900">'.htmlspecialchars($reply->get('cmt_author_name')).'</a>
-														  </div>
-														  <p class="mt-0.5 text-sm text-gray-500">'. LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York').'</p>
-														</div>
-														<div class="mt-2 text-sm text-gray-700">
-														  <div>'.$reply->get_sanitized_comment().'</div>
-														</div>
-													  </div>
+													  <p class="mt-0.5 text-sm text-gray-500">'. LibraryFunctions::convert_time($reply->get('cmt_created_time'), 'UTC', 'America/New_York').'</p>
+													</div>
+													<div class="mt-2 text-sm text-gray-700">
+													  <div>'.$reply->get_sanitized_comment().'</div>
 													</div>
 												  </div>
-												</li>';
-											}
+												</div>
+											  </div>
+											</li>';
 										}
 										echo '</ul>';
 									}

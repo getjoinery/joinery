@@ -116,7 +116,7 @@ $paget->public_header(array(
                                 'readonly' => $readonlyvals
                             ]);
 
-                            $formwriter->hiddeninput('form_submitted', ['value' => 1]);
+                            $formwriter->hiddeninput('form_submitted', '', ['value' => 1]);
 
                             if(!$session->get_user_id()){
                                 $formwriter->antispam_question_input();

@@ -64,9 +64,9 @@ if(!$product_version->key){
 }
 else{
 	// Existing version - show price as read-only
-	$formwriter->hiddeninput('version_price', ['value' => '']);
-	$formwriter->hiddeninput('prv_price_type', ['value' => '']);
-	$formwriter->hiddeninput('prv_trial_period_days', ['value' => '']);
+	$formwriter->hiddeninput('version_price', '', ['value' => '']);
+	$formwriter->hiddeninput('prv_price_type', '', ['value' => '']);
+	$formwriter->hiddeninput('prv_trial_period_days', '', ['value' => '']);
 
 	echo '<div class="ctrlHolder"><p class="label">Current Price</p>';
 	echo '<div class="textInput"><strong>'.$currency_symbol . $product_version->get('prv_version_price') . ' / ' . $product_version->get('prv_price_type') . '</strong>';

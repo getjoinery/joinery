@@ -498,7 +498,6 @@ function get_leader() {
 			$this->set('evt_end_time_local', $local_end);
 		}
 
-		//TODO MAKE SURE PRODUCT IS ATTACHED BEFORE REGISTRATION
 	}
 
 	function export_as_array($session=NULL) { 

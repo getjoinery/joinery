@@ -85,7 +85,7 @@
 	$formwriter->dateinput('enddate', 'End Date', [
 		'value' => $display_enddate
 	]);
-	$formwriter->hiddeninput('source', ['value' => 'form']);
+	$formwriter->hiddeninput('source', '', ['value' => 'form']);
 	$formwriter->submitbutton('btn_submit', 'Submit');
 	$formwriter->end_form();	
 	
@@ -165,10 +165,8 @@
 				if($order){
 					array_push($rowvalues, '<a href="/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a> - ' . $description);
 				}
-				else{		
-					//TODO NOT WORKING				
-					//$payment_intent = $stripe->paymentIntents->retrieve($charge->payment_intent);
-					array_push($rowvalues, $description.' <a href="/admin/admin_orders">Details here</a>');
+				else{
+					array_push($rowvalues, $description.' <span class="text-muted">(No matching order — PI: '.htmlspecialchars(substr($charge->payment_intent, 0, 25)).'...)</span>');
 				}			
 			}
 			else{

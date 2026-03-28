@@ -424,8 +424,19 @@ class PluginManager extends AbstractExtensionManager {
                     $results['valid'] = false;
                     $results['errors'][] = "Required plugin not active: " . $dep_name;
                 }
-                
-                // TODO: Check version constraint when plugin versioning is implemented
+
+                // Check version constraint if specified
+                if ($dep_version && $dep_version !== '*') {
+                    $metadata = json_decode($dep_plugin->get('plg_metadata'), true);
+                    $installed_version = $metadata['version'] ?? '0.0.0';
+                    // Parse constraint like ">=1.0.0"
+                    if (preg_match('/^([<>=!]+)(.+)$/', $dep_version, $m)) {
+                        if (!version_compare($installed_version, trim($m[2]), $m[1])) {
+                            $results['valid'] = false;
+                            $results['errors'][] = "Plugin '$dep_name' version $installed_version does not satisfy constraint $dep_version";
+                        }
+                    }
+                }
             }
         }
         

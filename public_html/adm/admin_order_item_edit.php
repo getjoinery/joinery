@@ -108,7 +108,7 @@
 
 	// Always pass order ID (required for new items, helpful for existing)
 	$order_id_value = $order_item->key ? $order->key : (isset($_GET['ord_order_id']) ? $_GET['ord_order_id'] : $order->key);
-	$formwriter->hiddeninput('ord_order_id', ['value' => $order_id_value]);
+	$formwriter->hiddeninput('ord_order_id', '', ['value' => $order_id_value]);
 
 	if(!$order_item->key || !$order->is_stripe_order()){
 		$validation_opts = [];

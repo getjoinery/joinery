@@ -128,14 +128,14 @@ $settings = Globalvars::get_instance();
 						'options' => $list_options,
 						'checked' => $user_subscribed_list,
 					]);
-					$formwriter->hiddeninput('form_submitted', ['value' => 1]);
+					$formwriter->hiddeninput('form_submitted', '', ['value' => 1]);
 					?>
 					</div>
 				<?php else: ?>
 					<p class="lsu-list-name">Subscribe to <strong><?php echo htmlspecialchars($mailing_lists->get('mlt_name')); ?></strong></p>
 					<?php
-					$formwriter->hiddeninput('mlt_mailing_list_id', ['value' => $mailing_lists->key]);
-					$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', ['value' => 1]);
+					$formwriter->hiddeninput('mlt_mailing_list_id', '', ['value' => $mailing_lists->key]);
+					$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', '', ['value' => 1]);
 					?>
 				<?php endif; ?>
 				<div class="lsu-compact-row">
@@ -144,8 +144,8 @@ $settings = Globalvars::get_instance();
 			<?php else: ?>
 				<?php
 				if ($list_mode !== 'all' && $mailing_lists) {
-					$formwriter->hiddeninput('mlt_mailing_list_id', ['value' => $mailing_lists->key]);
-					$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', ['value' => 1]);
+					$formwriter->hiddeninput('mlt_mailing_list_id', '', ['value' => $mailing_lists->key]);
+					$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', '', ['value' => 1]);
 				}
 				?>
 				<div class="lsu-compact-row">
@@ -178,7 +178,7 @@ $settings = Globalvars::get_instance();
 							],
 						],
 					]);
-					$formwriter->hiddeninput('antispam_question_answer', ['value' => $antispam_answer]);
+					$formwriter->hiddeninput('antispam_question_answer', '', ['value' => $antispam_answer]);
 					echo '</div>';
 				}
 				$formwriter->honeypot_hidden_input();
@@ -248,12 +248,12 @@ $settings = Globalvars::get_instance();
 					'options' => $list_options,
 					'checked' => $user_subscribed_list,
 				]);
-				$formwriter->hiddeninput('form_submitted', ['value' => 1]);
+				$formwriter->hiddeninput('form_submitted', '', ['value' => 1]);
 				?>
 			<?php else: ?>
 				<?php
-				$formwriter->hiddeninput('mlt_mailing_list_id', ['value' => $mailing_lists->key]);
-				$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', ['value' => 1]);
+				$formwriter->hiddeninput('mlt_mailing_list_id', '', ['value' => $mailing_lists->key]);
+				$formwriter->hiddeninput('mlt_mailing_list_id_subscribe', '', ['value' => 1]);
 				?>
 			<?php endif; ?>
 

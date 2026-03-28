@@ -84,7 +84,7 @@
 	$formwriter->dateinput('enddate', 'End Date', [
 		'value' => $display_enddate
 	]);
-	$formwriter->hiddeninput('source', ['value' => 'form']);
+	$formwriter->hiddeninput('source', '', ['value' => 'form']);
 	$formwriter->submitbutton('submit_button', 'Submit');
 	$formwriter->end_form();	
 	
