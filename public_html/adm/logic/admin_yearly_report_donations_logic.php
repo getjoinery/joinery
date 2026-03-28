@@ -42,10 +42,10 @@ function admin_yearly_report_donations_logic($get_vars, $post_vars) {
 		$results[$user->usr_user_id]['email'] = $user->usr_email;
 		$results[$user->usr_user_id]['products'] = array();
 
-		$sql = "SELECT odi_price, odi_pro_product_id, odi_refund_amount FROM odi_order_items WHERE odi_usr_user_id = ".$user->usr_user_id." AND odi_status = 2 AND odi_price > 0 AND odi_status_change_time >= '".$startdate . "' and odi_status_change_time <= '" . $enddate . "'";
+		$sql = "SELECT odi_price, odi_pro_product_id, odi_refund_amount FROM odi_order_items WHERE odi_usr_user_id = ? AND odi_status = 2 AND odi_price > 0 AND odi_status_change_time >= ? AND odi_status_change_time <= ?";
 		try {
 			$r = $dblink->prepare($sql);
-			$success = $r->execute();
+			$success = $r->execute([$user->usr_user_id, $startdate, $enddate]);
 			$r->setFetchMode(PDO::FETCH_OBJ);
 		} catch(PDOException $e) {
 			$dbhelper->handle_query_error($e);

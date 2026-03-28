@@ -38,7 +38,7 @@ $page->public_header([
                 <ul class="grid-filter grid-filter-links" style="position: relative;">
                     <?php
                     foreach ($page_vars['tab_menus'] as $id => $name) {
-                        if ($id == $_REQUEST['type']) {
+                        if ($id == ($_REQUEST['type'] ?? '')) {
                             echo '<li class="activeFilter"><a href="/events?type=' . $id . '">' . $name . '</a></li>';
                         } else {
                             echo '<li><a href="/events?type=' . $id . '">' . $name . '</a></li>';
@@ -57,7 +57,7 @@ $page->public_header([
                 <select class="form-select" onchange="window.location.href=this.value;" style="margin-bottom: 1.5rem;">
                     <?php
                     foreach ($page_vars['tab_menus'] as $id => $name) {
-                        $selected = ($id == $_REQUEST['type']) ? 'selected' : '';
+                        $selected = ($id == ($_REQUEST['type'] ?? '')) ? 'selected' : '';
                         echo '<option value="/events?type=' . $id . '" ' . $selected . '>' . $name . '</option>';
                     }
                     ?>

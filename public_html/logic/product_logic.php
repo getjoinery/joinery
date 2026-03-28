@@ -27,11 +27,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	if($product){
 		$page_vars['product'] = $product;
 	}
-	else if($get_vars['product_id']){
+	else if(!empty($get_vars['product_id'])){
 		$product_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_id', NULL, TRUE, 'Product ID is required', TRUE, 'int');
 		$product = new Product($product_id, TRUE);
 	}
-	else if($post_vars['product_id']){
+	else if(!empty($post_vars['product_id'])){
 		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', NULL, TRUE, 'Product ID is required', TRUE, 'int');
 		$product = new Product($product_id, TRUE);
 	}
@@ -39,7 +39,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		require_once(LibraryFunctions::display_404_page());
 	}
 
-	if($get_vars['product_version_id']){
+	if(!empty($get_vars['product_version_id'])){
 		$product_version_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_version_id', NULL, FALSE, '', TRUE, 'int');
 		$product_version = new ProductVersion($product_version_id, TRUE);
 		$page_vars['product_version'] = $product_version;
@@ -64,7 +64,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	$page_vars['product'] = $product;
 
-	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')];
+	$page_vars['currency_symbol'] = Product::$currency_symbols[strtolower($settings->get_setting('site_currency'))] ?? '$';
 
 	$page_vars['display_empty_form'] = TRUE;
 

@@ -42,10 +42,10 @@ class Survey extends SystemBase {	public static $prefix = 'svy';
 function get_users_who_answered() {
 
 		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();	
-		$sql = 'SELECT count(*) as count, sva_usr_user_id FROM sva_survey_answers WHERE sva_svy_survey_id='.$this->key.' GROUP BY sva_usr_user_id';
+		$dblink = $dbhelper->get_db_link();
+		$sql = 'SELECT count(*) as count, sva_usr_user_id FROM sva_survey_answers WHERE sva_svy_survey_id = ? GROUP BY sva_usr_user_id';
 		$q = $dblink->prepare($sql);
-		$success = $q->execute();
+		$success = $q->execute([$this->key]);
 		$q->setFetchMode(PDO::FETCH_OBJ);
 
 		return $q;
@@ -54,10 +54,10 @@ function get_users_who_answered() {
 	function get_num_users_who_answered() {
 
 		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();	
-		$sql = 'SELECT COUNT(DISTINCT sva_usr_user_id) as count FROM sva_survey_answers WHERE sva_svy_survey_id='.$this->key;
+		$dblink = $dbhelper->get_db_link();
+		$sql = 'SELECT COUNT(DISTINCT sva_usr_user_id) as count FROM sva_survey_answers WHERE sva_svy_survey_id = ?';
 		$q = $dblink->prepare($sql);
-		$success = $q->execute();
+		$success = $q->execute([$this->key]);
 		$q->setFetchMode(PDO::FETCH_OBJ);
 
 		return $q->fetch()->count;;

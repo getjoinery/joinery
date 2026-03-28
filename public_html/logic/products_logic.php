@@ -22,14 +22,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::error('This feature is turned off');			
 	}
 
-	if($get_vars['numperpage']){
+	if(!empty($get_vars['numperpage'])){
 		$numperpage = $get_vars['numperpage'];
 	}
 	else{
 		$numperpage = 12;
 	}
 	$page_vars['numperpage'] = $numperpage;
-	$offset = $get_vars['offset'];
+	$offset = $get_vars['offset'] ?? 0;
 	$page_vars['offset'] = $offset;
 	if(!$offset){
 		$offsetdisp = 1;
@@ -39,26 +39,26 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	$page_vars['offsetdisp'] = $offsetdisp;
 	
-	if($get_vars['sort']){
+	if(!empty($get_vars['sort'])){
 		$sort = $get_vars['sort'];
 	}
 	else{
 		$sort = 'product_id';
 	}
-	
-	if($get_vars['sdirection']){
+
+	if(!empty($get_vars['sdirection'])){
 		$sdirection = $get_vars['sdirection'];
 	}
 	else{
 		$sdirection = 'DESC';
 	}
-	
-	$searchterm = $get_vars['searchterm'];
+
+	$searchterm = $get_vars['searchterm'] ?? '';
 	
 	$searches = array();
 	$searches['is_active'] = TRUE;
 	
-	if($get_vars['subscriptions'] == 'all'){
+	if(($get_vars['subscriptions'] ?? '') == 'all'){
 		//NO FILTER
 	}
 
@@ -90,7 +90,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$numrecords = $products->count_all();		
 	$page_vars['numrecords'] = $numrecords;
 	
-	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')]; 
+	$page_vars['currency_symbol'] = Product::$currency_symbols[strtolower($settings->get_setting('site_currency'))] ?? '$';
 	
 	$page_vars['pager'] = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	

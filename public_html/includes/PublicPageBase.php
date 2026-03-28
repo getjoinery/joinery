@@ -650,9 +650,9 @@ abstract class PublicPageBase {
 			$options['meta_description'] = $settings->get_setting('site_description');
 		}
 
-		if(empty($options['noheader']) && !$options['is_404'] && $options['is_valid_page'] ){ 
+		if(empty($options['noheader']) && !$options['is_404'] && ($options['is_valid_page'] ?? false) ){
 			//TRACKING
-			if(!$_SESSION['permission'] || $_SESSION['permission'] == 0){
+			if(!($_SESSION['permission'] ?? 0) || ($_SESSION['permission'] ?? 0) == 0){
 				$session->save_visitor_event(1, $options['is_404']);
 			}
 		}

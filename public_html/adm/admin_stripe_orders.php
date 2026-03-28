@@ -57,23 +57,6 @@
 		//$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
 	}
 
-	/*
-	$search_criteria = NULL;
-	if($user_id){
-		$search_criteria = array();
-		if($user_id){
-			$search_criteria['user_id'] = $user_id;
-		}
-	}
-
-	$orders = new MultiOrder(
-		$search_criteria,
-		array($consort=>$consdirection),
-		$numperpage,
-		$conoffset);
-	$numrecords = $orders->count_all();
-	$orders->load();
-	*/
 	if(!$_GET['print-format']){
 		$page = new AdminPage();
 		$page->admin_header(

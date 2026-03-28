@@ -25,7 +25,7 @@
                 <p class="text-muted">Add yourself to the waiting list, and we will notify you as soon as registration is available.</p>
             </div>
 
-            <?php if ($page_vars['display_message']): ?>
+            <?php if ($page_vars['display_message'] ?? false): ?>
                 <div class="alert alert-<?php echo $page_vars['message_type'] == 'error' ? 'danger' : ($page_vars['message_type'] == 'success' ? 'success' : 'info'); ?>" role="alert">
                     <h6 class="alert-heading mb-2">Success</h6>
                     <?php echo $page_vars['display_message']; ?>
