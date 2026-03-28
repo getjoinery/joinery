@@ -202,8 +202,8 @@ public function get_requirement_info($output='text') {
 	//THIS FUNCTION GIVES AN ESTIMATE OF PRICE FOR DISPLAY PURPOSES
 	public function get_readable_price($product_version_id=NULL){
 		$settings = Globalvars::get_instance(); 
-		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
-		
+		$currency_symbol = Product::$currency_symbols[strtolower($settings->get_setting('site_currency'))] ?? '$';
+
 		if($this->key == Product::PRODUCT_ID_OPTIONAL_DONATION){
 			//IT IS AN OPTIONAL DONATION
 			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
@@ -623,7 +623,7 @@ public function get_requirement_info($output='text') {
 
 	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL, $prefill_data=NULL) {
 		$settings = Globalvars::get_instance();
-		$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
+		$currency_symbol = Product::$currency_symbols[strtolower($settings->get_setting('site_currency'))] ?? '$';
 
 		$versions = $this->get_product_versions();
 

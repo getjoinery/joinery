@@ -163,10 +163,10 @@ function admin_user_logic($get_vars, $post_vars) {
 	$dblink = $dbhelper->get_db_link();
 
 	// Get total count of logins
-	$sql_count = 'SELECT COUNT(*) as count FROM log_logins WHERE log_usr_user_id='.$user->key;
+	$sql_count = 'SELECT COUNT(*) as count FROM log_logins WHERE log_usr_user_id = ?';
 	try{
 		$q_count = $dblink->prepare($sql_count);
-		$q_count->execute();
+		$q_count->execute([$user->key]);
 		$num_logins = $q_count->fetch(PDO::FETCH_OBJ)->count;
 	}
 	catch(PDOException $e){
@@ -174,14 +174,14 @@ function admin_user_logic($get_vars, $post_vars) {
 	}
 
 	// Get logins with limit
-	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id='.$user->key.' ORDER BY log_login_time DESC';
+	$sql = 'SELECT * FROM log_logins WHERE log_usr_user_id = ? ORDER BY log_login_time DESC';
 	if (!$show_all) {
 		$sql .= ' LIMIT 10';
 	}
 
 	try{
 		$q = $dblink->prepare($sql);
-		$count = $q->execute();
+		$count = $q->execute([$user->key]);
 		$q->setFetchMode(PDO::FETCH_OBJ);
 	}
 	catch(PDOException $e){

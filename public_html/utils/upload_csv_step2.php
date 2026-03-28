@@ -16,11 +16,11 @@ $connector = new DbConnector();
 GenerateHeader(2);
 
 if(isset($_GET['promoid'])){
-	$promoid=$_GET['promoid'];
+	$promoid = (int)$_GET['promoid'];
 	$getvars = "?promoid=$promoid";
 }
 else if(isset($_GET['emailid'])){
-	$emailid=$_GET['emailid'];
+	$emailid = (int)$_GET['emailid'];
 	$getvars = "?emailid=$emailid";
 }
 else{
