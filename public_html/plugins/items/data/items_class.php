@@ -53,9 +53,7 @@ class Item extends SystemBase {
 		}
 
 		if ($this->key) {
-			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			//TODO MOVE OUT OF CONTENTVERSION
-			ContentVersion::NewVersion(ContentVersion::TYPE_ITEM, $this->key, $this->get('itm_body'), $this->get('itm_name'), $this->get('itm_name'));			
+			ContentVersion::NewVersion(ContentVersion::TYPE_ITEM, $this->key, $this->get('itm_body'), $this->get('itm_name'), $this->get('itm_name'));
 		}
 		
 		parent::save($debug);

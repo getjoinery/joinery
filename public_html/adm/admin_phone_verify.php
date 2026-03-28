@@ -52,7 +52,7 @@
 	$formwriter->dropinput("phn_phone_carrier", "Choose your phone carrier to resend text", [
 		'options' => PhoneNumber::$phone_carriers
 	]);
-	$formwriter->hiddeninput("sendcode", ['value' => 1]);
+	$formwriter->hiddeninput("sendcode", '', ['value' => 1]);
 	$formwriter->submitbutton('btn_resend', 'Resend');
 	$formwriter->end_form();
 

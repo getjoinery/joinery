@@ -35,14 +35,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}	
 	
 	
-	//TODO:  WORK IN PROGRESS...SCRIPT FILENAMES
-	/*
-	if($page->get('pac_script_filename')){
-		//THIS IS A STANDALONE FILE
-		include($page->get('pac_script_filename'));
-		exit();
-	}	
-	*/
 	return LogicResult::render($page_vars);
 }
 ?>

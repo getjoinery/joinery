@@ -149,7 +149,6 @@
 		$sender = $sender_user_id ? new User($sender_user_id, TRUE) : null;
 
 		if ($sender) {
-			//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
 			$test_message = EmailMessage::fromTemplate($email->get('eml_message_template_html'), array(
 					'subject' => 'COPY: '.$email->get('eml_subject'),
 					'preview_text' => $email->get('eml_preview_text'),

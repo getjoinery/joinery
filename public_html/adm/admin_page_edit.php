@@ -183,7 +183,7 @@
 			]);
 
 			$formwriter->begin_form();
-			$formwriter->hiddeninput('pag_page_id', ['value' => $page->key]);
+			$formwriter->hiddeninput('pag_page_id', '', ['value' => $page->key]);
 			$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
 				'options' => $optionvals
 			]);

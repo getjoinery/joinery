@@ -207,29 +207,18 @@ public static $phone_carriers = array(
 	}	
 	
 	function get_phone_string() {
-		//TODO FORMAT PHONE NUMBERS
-		return $this->get_formatted_country_code(). ' ' .$this->get('phn_phone_number');
-		/*
-		switch(strlen($this->get('phn_phone_number'))) {
-			case 7:
-				return preg_replace(
-					"/([0-9a-zA-Z]{3})([0-9a-zA-Z]{4})/",
-					"$1-$2",
-					$this->get('phn_phone_number'));
-			case 10:
-				return preg_replace(
-					"/([0-9a-zA-Z]{3})([0-9a-zA-Z]{3})([0-9a-zA-Z]{4})/",
-					"($1) $2-$3",
-					$this->get('phn_phone_number'));
-			case 11:
-				return preg_replace(
-					"/([0-9a-zA-Z]{1})([0-9a-zA-Z]{3})([0-9a-zA-Z]{3})([0-9a-zA-Z]{4})/",
-					"$1($2) $3-$4",
-					$this->get('phn_phone_number'));
-			default:
-				return $this->get('phn_phone_number');
+		$country_code = $this->get_formatted_country_code();
+		$digits = preg_replace('/[^0-9]/', '', $this->get('phn_phone_number'));
+
+		// North America (country code +1): format as (xxx) xxx-xxxx
+		if ($country_code === '+1' && strlen($digits) === 10) {
+			return '+1 (' . substr($digits, 0, 3) . ') ' . substr($digits, 3, 3) . '-' . substr($digits, 6);
 		}
-		*/
+
+		// All other numbers: group digits in blocks of 3-4 for readability
+		// e.g., +44 20 7946 0958, +49 170 123 4567
+		$formatted = implode(' ', str_split($digits, 4));
+		return $country_code . ' ' . $formatted;
 	}
 	
 	function get_formatted_country_code(){

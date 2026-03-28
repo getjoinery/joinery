@@ -225,14 +225,6 @@ private static function UcAddress($string) {
 		}
 		*/
 
-		//TODO MORE ADDRESS CHECKING
-		// If there is no city/state, grab it based of the zip code
-		/*
-		if (!$address->get('usa_city') || !$address->get('usa_state')) {
-			$address->update_city_state_from_zip();
-		}
-		*/
-
 		// If there is a duplicate address, just return that one seamlessly!
 		if($new_address){
 			$duplicate = $address->check_for_duplicate();
@@ -475,18 +467,6 @@ private static function UcAddress($string) {
 	}
 
 	function prepare() {
-
-		//TODO MORE CHECKING FOR US
-		// Only pull the first 5 digits of the zip code
-		//$this->set('usa_zip_code_id', substr($this->get('usa_zip_code_id'), 0, 5));
-
-		//if (!is_numeric($this->get('usa_zip_code_id'))) {
-		//	throw new DisplayableAddressException('The zip code you entered must be either 5 or 9 digits.  Please double check your zip code is in the proper format.');
-		//}
-
-		//if ($this->get('usa_state') && !array_key_exists($this->get('usa_state'), self::$states)) {
-		//	throw new DisplayableAddressException('The state you have entered is invalid.  Please go back and double check you have entered a valid 2 letter state code.');
-		//}
 
 		// Get information about the zip code
 		/*

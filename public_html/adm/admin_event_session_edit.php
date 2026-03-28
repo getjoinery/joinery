@@ -127,9 +127,8 @@
 	}
 	else if($_POST){
 
-		//TODO FIX THIS FROM HAVING TO BE DONE
-
-		if(!$_POST['evs_vid_video_id']){
+		// Normalize empty optional foreign keys to NULL for database compatibility
+		if(empty($_POST['evs_vid_video_id'])){
 			$_POST['evs_vid_video_id'] = NULL;
 		}
 

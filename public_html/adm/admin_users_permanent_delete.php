@@ -101,8 +101,8 @@ if ($dry_run['can_delete']) {
 		echo '<div class="fields full">';
 		echo '<p><strong>WARNING:</strong> This will permanently delete this user and affect ' . $dry_run['total_affected'] . ' records as shown above.</p>';
 
-	$formwriter->hiddeninput('confirm', ['value' => 1]);
-	$formwriter->hiddeninput('usr_user_id', ['value' => $usr_user_id]);
+	$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+	$formwriter->hiddeninput('usr_user_id', '', ['value' => $usr_user_id]);
 
 	$formwriter->submitbutton('btn_delete', 'Permanently Delete User', ['class' => 'btn-danger']);
 	echo ' <a href="/admin/admin_users" class="btn btn-secondary">Cancel</a>';

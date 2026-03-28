@@ -30,8 +30,8 @@ echo '<fieldset><h4>Confirm Delete</h4>';
 	echo '<div class="fields full">';
 	echo '<p>WARNING:  This will permanently delete this group ('.$group->get('grp_name') . ').</p>';
 
-$formwriter->hiddeninput('confirm', ['value' => 1]);
-$formwriter->hiddeninput('grp_group_id', ['value' => $grp_group_id]);
+$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+$formwriter->hiddeninput('grp_group_id', '', ['value' => $grp_group_id]);
 
 $formwriter->submitbutton('btn_submit', 'Submit');
 

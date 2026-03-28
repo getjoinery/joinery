@@ -129,9 +129,6 @@ function admin_users_message_logic($get, $post) {
 					// Template variables handled in new system below
 				}
 
-				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-				// Recipient added in new system above
-
 				$message = new Message(NULL);
 				$message->set('msg_usr_user_id_sender', $sender->key);
 				$message->set('msg_usr_user_id_recipient', $recipient_user->key);
@@ -244,9 +241,6 @@ function admin_users_message_logic($get, $post) {
 			foreach ($group_members as $group_member){
 
 				$recipient_user = new User($group_member->get('grm_foreign_key_id'), TRUE);
-
-				//TODO NEED TO INTEGRATE THE MAILGUN CLASS WITH THE EMAIL CLASS
-				// Recipient added in new system above
 
 				$message = new Message(NULL);
 				$message->set('msg_usr_user_id_sender', $sender->key);

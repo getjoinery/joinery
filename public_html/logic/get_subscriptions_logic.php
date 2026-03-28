@@ -57,8 +57,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$subs = $stripe_helper->get_subscriptions(['limit' => 5, 'customer' => $stripe_customer_id, 'status' => 'all']);
 		}
 		catch(Exception $e){
-			//TODO: DISPLAY ERROR NOTICE IN TABLE BELOW
 			$subs = array();
+			echo '<li class="text-muted">Unable to load subscription data. Please try again later.</li>';
 		}
 
 		foreach($subs as $sub) {

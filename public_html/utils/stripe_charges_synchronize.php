@@ -58,12 +58,6 @@
 		$display_enddate = gmdate("Y-m-d", $enddate);
 	}
 
-	//TODO: MAKE THIS WORK TRANSPARENTLY
-	if($stripe_helper->test_mode){
-		throw new SystemDisplayableError("In test mode. Charges synchronize not available.");
-		exit();	
-	}
-
 
 
 	
@@ -194,7 +188,6 @@
 									if($verbose){
 										echo 'Found order from charge id by using subscription<br>';
 									}
-									//TODO LATER ADD THE INVOICE TO THE ORDER TABLE	
 								}
 							} 
 						}
@@ -269,10 +262,20 @@
 					$order_item->set('odi_pro_product_id', 5); //THIS IS THE PRODUCT ID FOR SUBSCRIPTION PAYMENTS
 					$order_item->set('odi_usr_user_id', $order_user->key);
 					$order_item->set('odi_price', $charge->amount/100);
-					//TODO: DECIDE IF SUBSCRIPTION PAYMENTS ARE MARKED AS SUBSCRIPTIONS
-					//$order_item->set('odi_is_subscription', true);
-					//$order_item->set('odi_stripe_subscription_id', );
 					$order_item->set('odi_stripe_foreign_invoice_id', $charge->invoice);
+
+					// Look up subscription ID from the invoice
+					if ($charge->invoice) {
+						$sync_invoices = new MultiStripeInvoice(array('stripe_foreign_invoice_id' => $charge->invoice));
+						if ($sync_invoices->count_all()) {
+							$sync_invoices->load();
+							$sync_invoice = $sync_invoices->get(0);
+							if ($sync_invoice->get('siv_stripe_subscription_id')) {
+								$order_item->set('odi_is_subscription', true);
+								$order_item->set('odi_stripe_subscription_id', $sync_invoice->get('siv_stripe_subscription_id'));
+							}
+						}
+					}
 					$order_item->set('odi_status', OrderItem::STATUS_PAID);
 					//SET THE CREATE TIME TO THE ONE IN STRIPE
 					$created_time = date("Y-m-d H:i:s", $charge->created);

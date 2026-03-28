@@ -383,7 +383,6 @@
 		
 		// Checkout Configuration Section
 		echo '<h4>Checkout Configuration</h4>';
-		//TODO: FIX STRIPE CHECKOUT WEBHOOK FOR NEW API VERSION
 		$optionvals = array('stripe_regular'=>"Stripe Regular", 'stripe_checkout' => 'Stripe Checkout', 'none' => 'None');
 		$formwriter->dropinput('checkout_type', 'Checkout Type', [
 			'options' => $optionvals,

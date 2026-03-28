@@ -6,7 +6,6 @@
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-// require("phpunit.php"); // TODO: Check if phpunit.php exists and update path
 require_once(PathHelper::getComposerAutoloadPath());
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;

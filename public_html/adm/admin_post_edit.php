@@ -197,7 +197,7 @@
 		]);
 
 		$formwriter->begin_form();
-		$formwriter->hiddeninput('pst_post_id', ['value' => $post->key]);
+		$formwriter->hiddeninput('pst_post_id', '', ['value' => $post->key]);
 		$formwriter->dropinput("cnv_content_version_id", "Load another version", [
 			'options' => $optionvals
 		]);

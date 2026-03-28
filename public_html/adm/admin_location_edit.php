@@ -155,7 +155,7 @@
 		$formwriter = $page->getFormWriter('form_load_version');
 
 		echo $formwriter->begin_form();
-		$formwriter->hiddeninput('loc_location_id', ['value' => $location->key]);
+		$formwriter->hiddeninput('loc_location_id', '', ['value' => $location->key]);
 		$formwriter->dropinput('cnv_content_version_id', 'Load another version', [
 			'options' => $optionvals
 		]);

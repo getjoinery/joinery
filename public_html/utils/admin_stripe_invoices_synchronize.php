@@ -21,12 +21,6 @@
 
 	$stripe_helper = new StripeHelper();
 	
-	//TODO: MAKE THIS WORK TRANSPARENTLY
-	if($stripe_helper->test_mode){
-		throw new SystemDisplayableError("In test mode. Invoices synchronize not available.");
-		exit();	
-	}
-	
 	$numperpage = 100;
 	$currpage = LibraryFunctions::fetch_variable('currpage', 1, 0, '');
 	$nextpage = $currpage + 1;
@@ -155,10 +149,14 @@
 				$invoice->set('siv_description', $stripe_invoice->description);
 				$invoice->set('siv_stripe_charge_id', $stripe_invoice->charge);
 				$invoice->set('siv_stripe_payment_intent_id', $stripe_invoice->payment_intent);
-				
-				//TODO Check if the invoice has been refunded
-				
-				
+
+				// Flag refunded invoices in the description
+				if ($stripe_invoice->status === 'void' || $stripe_invoice->status === 'uncollectible') {
+					$invoice->set('siv_description', ($stripe_invoice->description ?: '') . ' [' . strtoupper($stripe_invoice->status) . ']');
+				} else if ($stripe_invoice->amount_paid == 0 && $stripe_invoice->total > 0) {
+					$invoice->set('siv_description', ($stripe_invoice->description ?: '') . ' [REFUNDED]');
+				}
+
 				//FIND THE USER.  TRY SUBSCRIPTION ID FIRST, THEN TRY EMAIL
 				$found=0;
 				if($stripe_invoice->subscription){

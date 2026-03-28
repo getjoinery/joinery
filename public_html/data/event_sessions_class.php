@@ -184,17 +184,6 @@ public static function GetBySessionNumber($event_id, $session_number){
 			throw new eventException('This request has no data.');
 		}
 		
-		//TODO MAKE SURE PRODUCT IS ATTACHED BEFORE REGISTRATION
-		
-		/*
-		if (!$this->get('evs_travel_type')) {
-			throw new DisplayableeventException('You must select a travel preference.');
-		}
-
-		if ($this->get('evs_expires_time') != $old_expiry->format(DATE_ATOM)) { 
-			$this->set('evs_expiry_email_sent', FALSE);
-		}
-		*/
 	}
 	
 	function record_analytic($user_id, $type=1){

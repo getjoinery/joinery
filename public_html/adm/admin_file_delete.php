@@ -40,8 +40,8 @@
 	echo '<br /><br />';
 	echo '<p>WARNING: This will permanently delete this file ('.$file->get('fil_name').').</p>';
 
-	$formwriter->hiddeninput('confirm', ['value' => 1]);
-	$formwriter->hiddeninput('fil_file_id', ['value' => $fil_file_id]);
+	$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+	$formwriter->hiddeninput('fil_file_id', '', ['value' => $fil_file_id]);
 
 	$formwriter->submitbutton('btn_delete', 'Delete this file permanently', ['class' => 'btn-danger']);
 

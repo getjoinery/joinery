@@ -117,9 +117,9 @@ else{
 		$formwriter->textinput('odi_refund_note', 'Refund description or reason', [
 			'value' => $order_item->get('odi_refund_note')
 		]);
-		$formwriter->hiddeninput('confirm', ['value' => 1]);
-		$formwriter->hiddeninput('charge_id', ['value' => $charge_id]);
-		$formwriter->hiddeninput('order_item_id', ['value' => $order_item->key]);
+		$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+		$formwriter->hiddeninput('charge_id', '', ['value' => $charge_id]);
+		$formwriter->hiddeninput('order_item_id', '', ['value' => $order_item->key]);
 
 		$formwriter->submitbutton('submit_button', 'Submit');
 	}
