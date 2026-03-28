@@ -36,17 +36,17 @@
 	$formwriter->hiddeninput("prevformname", "register");
 
 	$formwriter->textinput("usr_first_name", "First Name", [
-		'value' => @$form_fields->usr_first_name,
+		'value' => $form_fields->usr_first_name ?? '',
 		'maxlength' => 32
 	]);
 	$formwriter->textinput("usr_last_name", "Last Name", [
-		'value' => @$form_fields->usr_last_name,
+		'value' => $form_fields->usr_last_name ?? '',
 		'maxlength' => 32
 	]);
 
 	if($nickname_display){
 		$formwriter->textinput("usr_nickname", $nickname_display, [
-			'value' => @$form_fields->usr_nickname,
+			'value' => $form_fields->usr_nickname ?? '',
 			'maxlength' => 32
 		]);
 	}

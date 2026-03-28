@@ -182,14 +182,11 @@ class ProductTester {
             }
             
             // Load coupon codes if provided
-            // TEMPORARILY DISABLED - hanging issue
-            /*
             if (isset($specifications['coupon_codes']) && is_array($specifications['coupon_codes'])) {
                 $this->coupon_codes = $specifications['coupon_codes'];
                 echo "Creating " . count($this->coupon_codes) . " coupon codes for testing...<br>\n";
                 $this->createCouponCodes();
             }
-            */
             
             echo "Testing " . count($specifications['products']) . " products...<br><br>\n";
             

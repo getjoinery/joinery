@@ -1,8 +1,7 @@
 <?php
 	set_time_limit(3600); // Allow script to run for up to 1 hour
 	
-	$_SERVER['DOCUMENT_ROOT'] = __DIR__ . '/..';
-	require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/PathHelper.php');
+	require_once(__DIR__ . '/../includes/PathHelper.php');
 
 	// Determine if running from command line or web
 	$is_cli = (php_sapi_name() === 'cli');

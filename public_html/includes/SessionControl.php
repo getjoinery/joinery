@@ -764,41 +764,43 @@ class SessionControl{
 
 
 	function get_permission() {
-		
-		return $_SESSION['permission'] ?? 0;	
-		
-		// If there is no logged in user or the user's IP doesn't match the one they logged in with
-		// they have a permission level of 0
-		//TODO REMOVED TEMPORARILY
-		if (!$this->get_user_id() || $_SERVER['REMOTE_ADDR'] != $_SESSION['ip_address']) {
+		if (!$this->get_user_id()) {
 			return 0;
 		}
-		// Otherwise return their permission level
-		return $_SESSION['permission'];
+
+		// Check for major IP change (different /16 subnet) as a session hijack indicator
+		if (isset($_SESSION['ip_address']) && isset($_SERVER['REMOTE_ADDR'])) {
+			if ($this->_is_major_ip_change($_SESSION['ip_address'], $_SERVER['REMOTE_ADDR'])) {
+				return 0;
+			}
+		}
+
+		return $_SESSION['permission'] ?? 0;
+	}
+
+	/**
+	 * Detect a major IP change (different /16 subnet) that may indicate session hijacking.
+	 * Allows minor changes within the same ISP (e.g., mobile carrier, load balancer).
+	 * Only checks IPv4; IPv6 addresses are not compared (returns false).
+	 */
+	private function _is_major_ip_change($stored_ip, $current_ip) {
+		if (!filter_var($stored_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
+			|| !filter_var($current_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+			return false;
+		}
+		$stored_octets = explode('.', $stored_ip);
+		$current_octets = explode('.', $current_ip);
+		return ($stored_octets[0] != $current_octets[0] || $stored_octets[1] != $current_octets[1]);
 	}
 
 	function check_permission($level, $msgtext=NULL){
 		//IF NOT LOGGED IN OR IF IP ADDRESS HAS CHANGED FOR LOGGED IN USER, REDIRECT TO LOGIN SCREEN
 		$ipchange = FALSE;
-		/*
-		//TEMPORARILY DISABLE IP CHANGE CHECKING ON ADMIN
-		if(isset($_SESSION['loggedin'])) {
-			if(filter_var($_SESSION['ip_address'], FILTER_VALIDATE_IP) && filter_var($_SERVER['REMOTE_ADDR'], FILTER_VALIDATE_IP)) {
-				$ips = str_split('.', $_SESSION['ip_address']);
-				$ipr = str_split('.', $_SERVER['REMOTE_ADDR']);
-				if ($ips[0] != $ipr[0] || $ips[1] != $ipr[1]) {
-					$ipchange = TRUE;
-				}
-			}
-			else {
-			  $ipchange = FALSE;
-			}
+		if(isset($_SESSION['loggedin']) && isset($_SESSION['ip_address']) && isset($_SERVER['REMOTE_ADDR'])) {
+			$ipchange = $this->_is_major_ip_change($_SESSION['ip_address'], $_SERVER['REMOTE_ADDR']);
 		}
 
-
-		if(!isset($_SESSION['loggedin']) || ($ipchange && $_SESSION['permission'] >= 5)){
-		*/
-		if(!isset($_SESSION['loggedin'])){
+		if(!isset($_SESSION['loggedin']) || ($ipchange && ($_SESSION['permission'] ?? 0) >= 5)){
 			if (count($_POST)) {
 				$query_string = http_build_query($_POST);
 			} else {

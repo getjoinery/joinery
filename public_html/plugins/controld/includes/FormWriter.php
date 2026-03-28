@@ -66,16 +66,6 @@ class FormWriter extends FormWriterV2Bootstrap {
 	protected $button_primary_class = 'th-btn';
 	protected $button_secondary_class = 'th-btn style2';
 
-	function begin_form($class, $method, $action, $charset = 'UTF-8', $onsubmit = NULL){
-		$output = '<form class="'.htmlspecialchars($class, ENT_QUOTES, 'UTF-8').'" id="'. htmlspecialchars($this->formid, ENT_QUOTES, 'UTF-8').'" name="'. htmlspecialchars($this->formid, ENT_QUOTES, 'UTF-8').'" method="'. htmlspecialchars($method, ENT_QUOTES, 'UTF-8').'" action="'. htmlspecialchars($action, ENT_QUOTES, 'UTF-8').'" accept-charset="'. htmlspecialchars($charset, ENT_QUOTES, 'UTF-8').'">';
-		return $output;
-	}
-
-	function end_form(){
-		return '</form>';
-	}
-
-	// All button methods are inherited from FormWriterV2Bootstrap
-	// This provides a complete FormWriter implementation for ControlD theme
+	// begin_form() and end_form() are inherited from FormWriterV2Bootstrap
 }
 ?>

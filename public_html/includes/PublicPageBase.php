@@ -665,6 +665,18 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * Render the site logo (image + text fallback)
+	 * Override in theme-specific PublicPage subclasses for custom markup
+	 */
+	public function get_logo() {
+		$settings = Globalvars::get_instance();
+		if ($settings->get_setting('logo_link')) {
+			echo '<img src="' . htmlspecialchars($settings->get_setting('logo_link'), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8') . '" class="logo-img">';
+		}
+		echo '<span class="logo-text">' . htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8') . '</span>';
+	}
+
+	/**
 	 * Render an alert/notification message
 	 * Override in subclasses for framework-specific markup
 	 *

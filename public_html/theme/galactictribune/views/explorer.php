@@ -4,10 +4,10 @@
 	// LibraryFunctions is now guaranteed available - line removed
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-	require_once(PathHelper::getIncludePath('data/points_class.php'));
-
 	echo 'turned off';
 	exit;
+
+	require_once(PathHelper::getIncludePath('data/points_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$node_dir = $settings->get_setting('node_dir');
