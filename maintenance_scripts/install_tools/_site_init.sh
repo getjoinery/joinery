@@ -502,6 +502,24 @@ else
 fi
 
 # =============================================================================
+# LOG ROTATION SETUP
+# =============================================================================
+
+log "Setting up log rotation..."
+
+LOGROTATE_TEMPLATE="${SCRIPT_DIR}/logrotate_joinery.conf"
+LOGROTATE_DEST="/etc/logrotate.d/joinery-${SITENAME}"
+
+if [ -f "$LOGROTATE_TEMPLATE" ]; then
+    cp "$LOGROTATE_TEMPLATE" "$LOGROTATE_DEST"
+    sed -i "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "$LOGROTATE_DEST"
+    chmod 644 "$LOGROTATE_DEST"
+    log "Log rotation configured: $LOGROTATE_DEST"
+else
+    log_error "Warning: logrotate template not found at $LOGROTATE_TEMPLATE (non-fatal)"
+fi
+
+# =============================================================================
 # CRON SETUP
 # =============================================================================
 

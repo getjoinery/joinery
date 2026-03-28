@@ -136,7 +136,7 @@ function authenticate_write($data) {
 			return false;
 		}
 		
-		$plugin_dir = $_SERVER['DOCUMENT_ROOT'] . '/plugins/' . $plugin_name;
+		$plugin_dir = PathHelper::getIncludePath('plugins/' . $plugin_name);
 		return is_dir($plugin_dir);
 	}
 	
@@ -150,7 +150,7 @@ function authenticate_write($data) {
 			return null;
 		}
 		
-		$metadata_file = $_SERVER['DOCUMENT_ROOT'] . '/plugins/' . $plugin_name . '/plugin.json';
+		$metadata_file = PathHelper::getIncludePath('plugins/' . $plugin_name . '/plugin.json');
 		if (!file_exists($metadata_file)) {
 			return null;
 		}
@@ -649,7 +649,7 @@ class MultiPlugin extends SystemMultiBase {
      * @return array Array of plugin data with activation info
      */
     public static function get_all_plugins_with_status() {
-        $plugins_dir = $_SERVER['DOCUMENT_ROOT'] . '/plugins';
+        $plugins_dir = PathHelper::getIncludePath('plugins');
         $plugins = array();
         
         if (!is_dir($plugins_dir)) {

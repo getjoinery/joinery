@@ -207,7 +207,7 @@ array(
 										try {
 											$tier = new SubscriptionTier($change->get('cht_entity_id'), TRUE);
 											$new_value = htmlspecialchars($tier->get('sbt_display_name')) . ' (' . $new_value . ')';
-										} catch (Exception $e) {}
+										} catch (Exception $e) { /* Tier may have been deleted */ }
 									}
 								?>
 								<div class="mb-1">
@@ -222,7 +222,7 @@ array(
 													require_once(PathHelper::getIncludePath('data/users_class.php'));
 													$changed_by = new User($change->get('cht_changed_by_usr_user_id'), TRUE);
 													echo ' by ' . htmlspecialchars($changed_by->display_name());
-												} catch (Exception $e) {}
+												} catch (Exception $e) { /* User may have been deleted */ }
 											?>
 										<?php endif; ?>)
 									<?php endif; ?>
