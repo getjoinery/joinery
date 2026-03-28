@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 2.1 - Added cron for scheduled tasks
+# VERSION 2.2 - Added log rotation
 #
 # Usage:
 #   docker build \
@@ -89,5 +89,8 @@ CMD set +H && \
     echo "*/15 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
     chmod 644 /etc/cron.d/scheduled-tasks && \
     echo "" >> /etc/cron.d/scheduled-tasks && \
+    echo "0 2 * * * root /usr/sbin/logrotate /etc/logrotate.d/joinery-${SITENAME} > /dev/null 2>&1" > /etc/cron.d/logrotate-joinery && \
+    chmod 644 /etc/cron.d/logrotate-joinery && \
+    echo "" >> /etc/cron.d/logrotate-joinery && \
     service cron start && \
     apache2ctl -D FOREGROUND
