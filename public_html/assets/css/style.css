@@ -115,6 +115,37 @@ table { width: 100%; border-collapse: collapse; }
 .col-11 { width: 91.666%; }
 .col-12 { width: 100%; }
 
+/* Responsive columns — must come after base .col-* so media queries win the cascade */
+@media (min-width: 576px) {
+    .col-sm-4 { width: 33.333%; }
+    .col-sm-6 { width: 50%; }
+    .col-sm-12 { width: 100%; }
+}
+@media (min-width: 768px) {
+    .col-md-3 { width: 25%; }
+    .col-md-4 { width: 33.333%; }
+    .col-md-6 { width: 50%; }
+    .col-md-8 { width: 66.666%; }
+    .col-md-12 { width: 100%; }
+}
+@media (min-width: 992px) {
+    .col-lg-3 { width: 25%; }
+    .col-lg-4 { width: 33.333%; }
+    .col-lg-5 { width: 41.667%; }
+    .col-lg-6 { width: 50%; }
+    .col-lg-7 { width: 58.333%; }
+    .col-lg-8 { width: 66.666%; }
+    .col-lg-9 { width: 75%; }
+    .col-lg-12 { width: 100%; }
+}
+@media (min-width: 1200px) {
+    .col-xl-3 { width: 25%; }
+    .col-xl-4 { width: 33.333%; }
+    .col-xl-6 { width: 50%; }
+    .col-xl-8 { width: 66.666%; }
+    .col-xl-12 { width: 100%; }
+}
+
 /* Simple CSS Grid shortcuts */
 .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem; }
