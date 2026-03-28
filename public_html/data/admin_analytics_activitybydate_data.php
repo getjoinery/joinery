@@ -11,16 +11,16 @@ switch ($interval)
 	case 0:
 		$sqlinterval = "day";
 		break;
-	case 1;
+	case 1:
 		$sqlinterval = "week";
 		break;
-	case 2;
+	case 2:
 		$sqlinterval = "month";
 		break;
-	case 3;
+	case 3:
 		$sqlinterval = "quarter";
 		break;
-	case 4;
+	case 4:
 		$sqlinterval = "year";
 		break;
 	default:

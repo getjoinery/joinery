@@ -804,23 +804,23 @@ class MultiAddress extends SystemMultiBase {
         }
 
         if (isset($this->options['address1_lower'])) {
-            $filters['LOWER(usa_address1)'] = '= \''.strtolower($this->options['address1_lower']).'\'';
+            $filters['LOWER(usa_address1)'] = [strtolower($this->options['address1_lower']), PDO::PARAM_STR];
         }
 
         if (isset($this->options['address2_lower'])) {
-            $filters['LOWER(usa_address2)'] = '= \''.strtolower($this->options['address2_lower']).'\'';
+            $filters['LOWER(usa_address2)'] = [strtolower($this->options['address2_lower']), PDO::PARAM_STR];
         }
 
         if (isset($this->options['city_lower'])) {
-            $filters['LOWER(usa_city)'] = '= \''.strtolower($this->options['city_lower']).'\'';
+            $filters['LOWER(usa_city)'] = [strtolower($this->options['city_lower']), PDO::PARAM_STR];
         }
 
         if (isset($this->options['state_lower'])) {
-            $filters['LOWER(usa_state)'] = '= \''.strtolower($this->options['state_lower']).'\'';
+            $filters['LOWER(usa_state)'] = [strtolower($this->options['state_lower']), PDO::PARAM_STR];
         }
 
         if (isset($this->options['zip_code_lower'])) {
-            $filters['LOWER(usa_zip_code_id)'] = '= \''.strtolower($this->options['zip_code_lower']).'\'';
+            $filters['LOWER(usa_zip_code_id)'] = [strtolower($this->options['zip_code_lower']), PDO::PARAM_STR];
         }
 
         if (isset($this->options['zip_code'])) {

@@ -90,7 +90,7 @@
                 <?php elseif (!$product->is_sold_out() && ($edit_item_index !== null || $cart->can_add_to_cart($product_version))):
                     $formwriter = $page->getFormWriter('product_form', ['action' => $product->get_url(), 'method' => 'POST']);
                     echo $formwriter->begin_form();
-                    echo $formwriter->hiddeninput('product_id', $product_id);
+                    echo $formwriter->hiddeninput('product_id', $product->key);
                     if ($edit_item_index !== null) {
                         echo $formwriter->hiddeninput('edit_item_index', $edit_item_index);
                     }

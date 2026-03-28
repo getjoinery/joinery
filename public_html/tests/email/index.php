@@ -164,10 +164,10 @@ if ($action === 'run_tests') {
                     </form>
                     
                     <div class="d-grid gap-2">
-                        <a href="/admin/admin_settings.php#email-settings" class="btn btn-outline-secondary btn-sm">
+                        <a href="/admin/admin_settings#email-settings" class="btn btn-outline-secondary btn-sm">
                             Email Settings
                         </a>
-                        <a href="/admin/admin_debug_email_logs.php" class="btn btn-outline-info btn-sm">
+                        <a href="/admin/admin_debug_email_logs" class="btn btn-outline-info btn-sm">
                             View Debug Logs
                         </a>
                         <a href="/tests/email/legacy/email_test_harness.php" class="btn btn-outline-warning btn-sm">
@@ -179,7 +179,7 @@ if ($action === 'run_tests') {
                     
                     <div class="d-grid gap-2">
                         <h6 class="text-muted">Related Tools</h6>
-                        <a href="/utils/email_setup_check.php" class="btn btn-outline-primary btn-sm">
+                        <a href="/utils/email_setup_check" class="btn btn-outline-primary btn-sm">
                             <i class="fas fa-dns"></i> Domain Authentication Checker
                         </a>
                         <a href="/tests/email/auth_analysis.php" class="btn btn-outline-info btn-sm">

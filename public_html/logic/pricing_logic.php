@@ -70,7 +70,7 @@ function pricing_logic($get_vars, $post_vars){
 
 	$page_vars['tier_display_data'] = $tier_display_data;
 	$page_vars['numrecords'] = count($tier_display_data);
-	$page_vars['currency_symbol'] = Product::$currency_symbols[$settings->get_setting('site_currency')];
+	$page_vars['currency_symbol'] = Product::$currency_symbols[strtolower($settings->get_setting('site_currency'))] ?? '$';
 
 	return LogicResult::render($page_vars);
 }

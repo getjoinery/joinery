@@ -247,7 +247,7 @@ function get_leader() {
 		$searches['event_id'] = $this->key;
 		$searches['future'] = 'now()';
 		$event_sessions_future = new MultiEventSessions($searches,
-			array('start_time'=>'ASC'), $limit,
+			array('start_time'=>'ASC'), 1,
 		0);
 		$num_future_sessions = $event_sessions_future->count_all();
 		$event_sessions_future->load();	
@@ -1122,6 +1122,10 @@ function get_leader() {
 	 * @return Event|null
 	 */
 	public function _get_materialized_instance_for_date($date) {
+		// Validate date format to prevent SQL errors from bot-generated garbage URLs
+		if (!$date || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+			return null;
+		}
 		$dbconnector = DbConnector::get_instance();
 		$dblink = $dbconnector->get_db_link();
 		$sql = "SELECT evt_event_id FROM evt_events WHERE evt_parent_event_id = ? AND evt_materialized_instance_date = ? AND evt_delete_time IS NULL LIMIT 1";

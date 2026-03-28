@@ -68,9 +68,10 @@ $page->public_header($page_options);
                             $is_cancelled    = (!$is_virtual_event && $event->get('evt_status') == Event::STATUS_CANCELED);
                             $cancelled_badge = $is_cancelled ? ' <span class="badge bg-danger ms-2">Cancelled</span>' : '';
 
+                            $tz = $evt_get('evt_timezone') ?: 'America/New_York';
+
                             if ($is_virtual_event) {
                                 if ($evt_get('evt_start_time')) {
-                                    $tz       = $evt_get('evt_timezone') ?: 'America/New_York';
                                     $start_str = LibraryFunctions::convert_time($evt_get('evt_start_time'), 'UTC', $tz, 'D, M j, Y g:i a T');
                                     echo '<p class="mb-2" style="font-size: 1.0625rem; color: var(--color-muted);">&#128197; ' . $start_str;
                                     if ($evt_get('evt_end_time')) {
