@@ -6,7 +6,7 @@
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('notifications_logic.php', 'logic'));
-require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
+require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
 
 $page_vars = process_logic(notifications_logic($_GET, $_POST));
 

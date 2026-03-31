@@ -1,6 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
+require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('change_tier_logic.php', 'logic'));
 
 $page_vars = process_logic(change_tier_logic($_GET, $_POST));

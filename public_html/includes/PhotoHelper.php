@@ -11,7 +11,7 @@
  *   PhotoHelper::render_photo_card('grid', 'event', $id, $photos, $options);
  *   PhotoHelper::render_photo_scripts('grid', 'event', $id, $options);
  *
- * @version 1.0.0
+ * @version 1.1.0
  * @see /specs/profile_picture_upload_spec.md
  */
 
@@ -108,10 +108,10 @@ class PhotoHelper {
 		?>
 		<div class="card mt-3">
 			<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
-				<h6 class="mb-0"><span class="fas fa-images me-2"></span><?php echo $card_title; ?></h6>
+				<h6 class="mb-0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:0.5rem; vertical-align:text-bottom;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><?php echo $card_title; ?></h6>
 				<?php if ($editable): ?>
 				<button type="button" class="btn btn-primary btn-sm" id="<?php echo $prefix; ?>-upload-btn">
-					<span class="fas fa-plus me-1"></span>Upload
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-right:0.25rem; vertical-align:text-bottom;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Upload
 				</button>
 				<input type="file" id="<?php echo $prefix; ?>-upload-input" accept="image/*" style="display:none;">
 				<?php endif; ?>
@@ -120,7 +120,7 @@ class PhotoHelper {
 				<div id="<?php echo $prefix; ?>-grid" class="row g-2">
 					<?php if (count($photos) == 0): ?>
 						<div id="<?php echo $prefix; ?>-empty" class="col-12 text-center text-muted py-4">
-							<span class="fas fa-image fa-3x mb-2 d-block opacity-25"></span>
+							<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.25; margin-bottom:0.5rem; display:block; margin-left:auto; margin-right:auto;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
 							<?php echo $empty_message; ?>
 						</div>
 					<?php endif; ?>
@@ -133,22 +133,22 @@ class PhotoHelper {
 									 class="img-fluid rounded" alt=""
 									 style="width:100%; aspect-ratio:<?php echo $aspect_ratio; ?>; object-fit:cover; pointer-events:none;">
 								<?php if (isset($options['primary_file_id']) && $photo->get('eph_fil_file_id') == $options['primary_file_id']): ?>
-									<span class="position-absolute top-0 start-0 m-1 text-warning" title="Primary photo"
-										  style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
-										<span class="fas fa-star"></span>
+									<span class="position-absolute top-0 start-0 text-warning" title="Primary photo"
+										  style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px; margin:0.25rem; line-height:1;">
+										<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
 									</span>
 								<?php elseif ($editable): ?>
-									<a href="#" class="position-absolute top-0 start-0 m-1 text-white joinery-photo-set-primary-btn"
+									<a href="#" class="position-absolute top-0 start-0 text-white joinery-photo-set-primary-btn"
 									   data-photo-id="<?php echo $photo->key; ?>" title="Set as primary"
-									   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
-										<span class="far fa-star"></span>
+									   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px; margin:0.25rem; line-height:1; text-decoration:none;">
+										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l6.91-1.01z"/></svg>
 									</a>
 								<?php endif; ?>
 								<?php if ($editable): ?>
-								<a href="#" class="position-absolute top-0 end-0 m-1 text-white joinery-photo-delete-btn"
+								<a href="#" class="position-absolute top-0 end-0 text-white joinery-photo-delete-btn"
 								   data-photo-id="<?php echo $photo->key; ?>" title="Remove photo"
-								   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px;">
-									<span class="fas fa-times-circle"></span>
+								   style="background:rgba(0,0,0,0.5); border-radius:50%; padding:2px 4px; margin:0.25rem; line-height:1; text-decoration:none;">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
 								</a>
 								<?php endif; ?>
 							</div>
@@ -205,7 +205,7 @@ class PhotoHelper {
 						if (data.error) {
 							alert('Upload failed: ' + data.error);
 							btnUpload.disabled = false;
-							btnUpload.innerHTML = '<span class="fas fa-plus me-1"></span>Upload';
+							btnUpload.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-right:0.25rem; vertical-align:text-bottom;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Upload';
 							return;
 						}
 						window.location.reload();
@@ -213,7 +213,7 @@ class PhotoHelper {
 					.catch(function(err) {
 						alert('Upload failed: ' + err.message);
 						btnUpload.disabled = false;
-						btnUpload.innerHTML = '<span class="fas fa-plus me-1"></span>Upload';
+						btnUpload.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-right:0.25rem; vertical-align:text-bottom;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Upload';
 					});
 
 					this.value = '';
@@ -278,7 +278,7 @@ class PhotoHelper {
 					var remaining = grid.querySelectorAll('.joinery-photo-item');
 					if (remaining.length === 0) {
 						grid.innerHTML = '<div id="' + prefix + '-empty" class="col-12 text-center text-muted py-4">' +
-							'<span class="fas fa-image fa-3x mb-2 d-block opacity-25"></span>' +
+							'<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.25; margin-bottom:0.5rem; display:block; margin-left:auto; margin-right:auto;"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>' +
 							<?php echo json_encode($options['empty_message']); ?> + '</div>';
 					}
 				})

@@ -5,7 +5,7 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
+require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('orders_profile_logic.php', 'logic'));
 
