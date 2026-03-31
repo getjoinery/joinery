@@ -17,10 +17,10 @@ function admin_events_logic($get_vars, $post_vars) {
 	$searches = array();
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '', $get_vars);
-	$sort = LibraryFunctions::fetch_variable('sort', 'start_time', 0, '', $get_vars);
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '', $get_vars);
+	$sort = LibraryFunctions::fetch_variable('sort', 'end_time', 0, '', $get_vars);
+	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '', $get_vars);
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '', $get_vars);
-	$filter = LibraryFunctions::fetch_variable('filter', 'all', 0, '', $get_vars);
+	$filter = LibraryFunctions::fetch_variable('filter', 'active', 0, '', $get_vars);
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
 	if($_SESSION['permission'] < 10){
@@ -36,7 +36,11 @@ function admin_events_logic($get_vars, $post_vars) {
 		}
 	}
 
-	if($filter == 'all'){
+	if($filter == 'active'){
+		$breadcrumb_array = array('Events'=>'Active & Upcoming');
+		$searches['recurring_or_future'] = true;
+	}
+	else if($filter == 'all'){
 		$breadcrumb_array = array('Events'=>'All Events');
 		$searches['exclude_past_materialized'] = true;
 	}

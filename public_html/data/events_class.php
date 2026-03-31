@@ -1315,6 +1315,10 @@ class MultiEvent extends SystemMultiBase {
             $filters['(evt_parent_event_id'] = "IS NULL OR evt_start_time > now() OR evt_start_time IS NULL)";
         }
 
+        if (isset($this->options['recurring_or_future']) && $this->options['recurring_or_future']) {
+            $filters['((evt_recurrence_type'] = "IS NOT NULL AND evt_recurrence_type != '') OR evt_end_time > now() OR (evt_end_time IS NULL AND evt_start_time > now()) OR (evt_end_time IS NULL AND evt_start_time IS NULL))";
+        }
+
         return $this->_get_resultsv2('evt_events', $filters, $this->order_by, $only_count, $debug);
     }
 
