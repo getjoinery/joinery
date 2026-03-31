@@ -37,8 +37,8 @@
 	);
 
 	$table_options = array(
-		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Date'=>'start_time'),
-		'filteroptions'=>array("Future Events"=>"future", "All Events"=>"all", "Series"=>"series"),
+		'sortoptions'=>array("Event ID"=>"event_id", "Event Name"=>"name", 'Start Date'=>'start_time', 'End Date'=>'end_time'),
+		'filteroptions'=>array("Active & Upcoming"=>"active", "Future Events"=>"future", "All Events"=>"all", "Series"=>"series"),
 		'altlinks' => $altlinks,
 		'title' => 'Events',
 		'search_on' => TRUE
