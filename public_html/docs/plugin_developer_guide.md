@@ -370,6 +370,7 @@ Themes can range from simple presentation layers to complex integrations with mu
 │   └── images/
 └── includes/                   # Theme-specific classes
     ├── PublicPage.php          # Theme-specific PublicPage implementation
+    ├── MemberPage.php          # Member area page wrapper override (optional)
     └── FormWriter.php          # Theme-specific FormWriter (optional)
 ```
 
@@ -388,6 +389,7 @@ Themes can range from simple presentation layers to complex integrations with mu
 ├── assets/
 └── includes/
     ├── PublicPage.php          # Bootstrap/UIKit/WordPress-specific implementation
+    ├── MemberPage.php          # Custom member area wrapper (optional)
     └── ThemeHelper.php         # Theme-specific utilities
 ```
 
@@ -504,6 +506,37 @@ class PublicPage extends PublicPageBase {
     }
 }
 ```
+
+**MemberPage Override (Member/Profile Area):**
+
+`MemberPage` is the page wrapper for all `/profile/*` member area pages (analogous to `AdminPage` for admin pages). By default it uses the `joinery-system` theme regardless of the active public theme. Themes and plugin-theme providers can override it to re-skin the entire member area.
+
+Profile views load MemberPage via the theme resolution chain:
+```php
+require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
+```
+
+This means the system checks: `theme/{theme}/includes/MemberPage.php` → `plugins/{plugin}/includes/MemberPage.php` → `includes/MemberPage.php`.
+
+To provide a custom member area, create `theme/{theme}/includes/MemberPage.php`:
+```php
+// theme/my-theme/includes/MemberPage.php
+class MemberPage extends PublicPage {
+    public function member_header($options = array()) {
+        // Custom member area header using your theme's styling
+    }
+
+    public function member_footer($options = array()) {
+        // Custom member area footer
+    }
+
+    protected function get_member_nav() {
+        // Custom navigation items
+    }
+}
+```
+
+The base `MemberPage` in `includes/MemberPage.php` serves as the default and reference implementation.
 
 ### Asset Management
 

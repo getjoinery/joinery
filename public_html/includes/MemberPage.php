@@ -1,12 +1,16 @@
 <?php
 /**
- * MemberPage — page wrapper for the /profile member area.
+ * MemberPage — default page wrapper for the /profile member area.
  *
- * Analogous to AdminPage: always uses the joinery-system theme regardless
+ * Analogous to AdminPage: by default uses the joinery-system theme regardless
  * of the active public theme.  No admin sidebar — uses a member-specific
  * horizontal nav and lets each view manage its own card layout.
  *
- * @version 1.1
+ * Theme-overridable: profile views load this via getThemeFilePath(), so themes
+ * can provide their own MemberPage at theme/{theme}/includes/MemberPage.php
+ * to re-skin the entire member area.
+ *
+ * @version 1.2
  */
 require_once(__DIR__ . '/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/PublicPageJoinerySystem.php'));

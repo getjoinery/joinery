@@ -1,7 +1,7 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('includes/MemberPage.php'));
+	require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('phone_numbers_edit_logic.php', 'logic'));
 
 	$page_vars = process_logic(phone_numbers_edit_logic($_GET, $_POST));
