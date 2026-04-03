@@ -20,6 +20,10 @@ class SdDevice extends SystemBase {
 	public static $tablename = 'sdd_devices';
 	public static $pkey_column = 'sdd_device_id';
 
+	protected static $foreign_key_actions = [
+		'sdd_usr_user_id' => ['action' => 'permanent_delete'],
+	];
+
 	public static $field_specifications = array(
 	    'sdd_device_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sdd_device_name' => array('type'=>'varchar(64)'),
