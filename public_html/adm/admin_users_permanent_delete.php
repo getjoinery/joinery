@@ -51,17 +51,21 @@ if (!$dry_run['can_delete']) {
 	// Dependencies
 	foreach ($dry_run['dependencies'] as $dep) {
 		$badge_class = match($dep['action']) {
-			'cascade' => 'bg-danger',
+			'cascade', 'permanent_delete' => 'bg-danger',
 			'set_value' => 'bg-warning',
 			'null' => 'bg-info',
 			'prevent' => 'bg-secondary',
 			default => 'bg-secondary'
 		};
+		$badge_label = match($dep['action']) {
+			'permanent_delete' => 'RECURSIVE DELETE',
+			default => strtoupper($dep['action'])
+		};
 
 		echo '<tr>';
 		echo '<td>' . htmlspecialchars($dep['table']) . '</td>';
 		echo '<td>' . htmlspecialchars($dep['column']) . '</td>';
-		echo '<td><span class="badge ' . $badge_class . '">' . strtoupper($dep['action']) . '</span></td>';
+		echo '<td><span class="badge ' . $badge_class . '">' . $badge_label . '</span></td>';
 		echo '<td>' . intval($dep['count']) . '</td>';
 		echo '<td>';
 		if ($dep['action'] === 'set_value') {

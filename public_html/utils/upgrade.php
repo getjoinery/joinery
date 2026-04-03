@@ -35,7 +35,7 @@
 
 	if ($is_cli) {
 		// Parse command line arguments
-		$options = getopt("", ["verbose", "force-upgrade", "confirm-downgrade", "dry-run"]);
+		$options = getopt("", ["verbose", "force-upgrade", "confirm-downgrade", "dry-run", "refresh-archives"]);
 		$verbose = isset($options['verbose']);
 		$force_upgrade = isset($options['force-upgrade']);
 		$confirm_downgrade_cli = isset($options['confirm-downgrade']);
@@ -134,12 +134,24 @@
 		$session->check_permission(8);
 	}
 
-	// Handle refresh archives request
-	if (isset($_POST['refresh_archives']) && $_POST['refresh_archives'] == '1') {
-		header('Content-Type: application/json');
+	// Handle refresh archives request (web POST or CLI --refresh-archives)
+	$do_refresh = (!$is_cli && isset($_POST['refresh_archives']) && $_POST['refresh_archives'] == '1')
+	           || ($is_cli && isset($options['refresh-archives']));
+
+	if ($do_refresh) {
+		if (!$is_cli) header('Content-Type: application/json');
 		$result = request_archive_refresh();
-		echo json_encode($result);
-		exit;
+		if ($is_cli) {
+			if ($result['success']) {
+				upgrade_echo("Archives refreshed successfully. Proceeding with upgrade...\n");
+			} else {
+				upgrade_echo("Archive refresh failed: " . ($result['error'] ?? 'Unknown error') . "\n");
+				exit(1);
+			}
+		} else {
+			echo json_encode($result);
+			exit;
+		}
 	}
 
 	$dbhelper = DbConnector::get_instance();
