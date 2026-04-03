@@ -284,8 +284,8 @@ Career Area
     <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/swiper-bundle.min.css">
     <!-- Theme Custom CSS -->
     <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/style.css">
-    <!-- ControlD Plugin CSS -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/controld-plugin.css">
+    <!-- ScrollDaddy Plugin CSS -->
+    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css">
 
     <!-- Facebook Open Graph Meta Tags -->
     <meta property="og:title" content="Scrolldaddy - Take Control of Your Browsing">
@@ -744,8 +744,8 @@ Career Area
 
     <!-- Main Js File -->
     <script src="/plugins/scrolldaddy/assets/js/main.js"></script>
-    <!-- ControlD Plugin JS -->
-    <script src="/plugins/scrolldaddy/assets/js/controld-plugin.js"></script>
+    <!-- ScrollDaddy Plugin JS -->
+    <script src="/plugins/scrolldaddy/assets/js/scrolldaddy-plugin.js"></script>
 
 </body>
 

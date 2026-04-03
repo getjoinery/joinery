@@ -2,7 +2,7 @@
 /**
  * Uninstall function for scrolldaddy plugin.
  * Removes only scrolldaddy-specific settings.
- * Does NOT drop ctld_ tables — they are shared with the controld plugin.
+ * Does NOT drop ctld_ tables — they are the active data tables for this plugin.
  * @return bool True on success, false on failure
  */
 function scrolldaddy_uninstall() {

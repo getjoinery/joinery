@@ -6,10 +6,10 @@
     "asset_fallback_theme": "falcon",
     "assets": {
         "css": [
-            "/plugins/scrolldaddy/assets/css/controld-plugin.css"
+            "/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css"
         ],
         "js": [
-            "/plugins/scrolldaddy/assets/js/controld-plugin.js"
+            "/plugins/scrolldaddy/assets/js/scrolldaddy-plugin.js"
         ]
     }
 }

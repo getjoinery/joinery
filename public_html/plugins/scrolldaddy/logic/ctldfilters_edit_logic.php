@@ -47,7 +47,6 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 				$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile2';
 				$profile = CtldProfile::createProfile($profile_name, $user);
 				$device->set('cdd_cdp_ctldprofile_id_secondary', $profile->key);
-				$device->set('cdd_profile_id_secondary', $profile->get('cdp_profile_id'));
 				$device->save();
 			}
 		}		

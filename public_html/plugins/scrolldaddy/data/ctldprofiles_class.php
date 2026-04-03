@@ -21,7 +21,6 @@ class CtldProfile extends SystemBase {
 
 	public static $field_specifications = array(
 	    'cdp_ctldprofile_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'cdp_profile_id' => array('type'=>'varchar(64)'),
 	    'cdp_usr_user_id' => array('type'=>'int4'),
 	    'cdp_is_active' => array('type'=>'bool'),
 	    'cdp_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -30,7 +29,6 @@ class CtldProfile extends SystemBase {
 	    'cdp_schedule_end' => array('type'=>'varchar(5)'),
 	    'cdp_schedule_days' => array('type'=>'varchar(128)'),
 	    'cdp_schedule_timezone' => array('type'=>'varchar(64)'),
-	    'cdp_schedule_id' => array('type'=>'varchar(64)'),
 	    'cdp_safesearch' => array('type'=>'bool', 'default'=>false),
 	    'cdp_safeyoutube' => array('type'=>'bool', 'default'=>false),
 	);
@@ -75,7 +73,6 @@ class CtldProfile extends SystemBase {
 	function delete_profile_from_device(){
 		$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_primary', $this->key);
 		if($device){
-			$device->set('cdd_profile_id_primary', NULL);
 			$device->set('cdd_cdp_ctldprofile_id_primary', NULL);
 			$device->save();
 			return true;
@@ -83,7 +80,6 @@ class CtldProfile extends SystemBase {
 
 		$device = CtldDevice::GetByColumn('cdd_cdp_ctldprofile_id_secondary', $this->key);
 		if($device){
-			$device->set('cdd_profile_id_secondary', NULL);
 			$device->set('cdd_cdp_ctldprofile_id_secondary', NULL);
 			$device->save();
 			return true;
@@ -234,7 +230,6 @@ class CtldProfile extends SystemBase {
 
 	function permanent_delete_schedule(){
 		if($this->get('cdp_schedule_start') || $this->get('cdp_schedule_days')){
-			$this->set('cdp_schedule_id', NULL);
 			$this->set('cdp_schedule_start', NULL);
 			$this->set('cdp_schedule_end', NULL);
 			$this->set('cdp_schedule_days', NULL);
@@ -389,14 +384,6 @@ class MultiCtldProfile extends SystemMultiBase {
 
         if (isset($this->options['user_id'])) {
             $filters['cdp_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
-        }
-
-        if (isset($this->options['profile_id_primary'])) {
-            $filters['cdp_profile_id_primary'] = [$this->options['profile_id_primary'], PDO::PARAM_INT];
-        }
-
-        if (isset($this->options['profile_id_secondary'])) {
-            $filters['cdp_profile_id_secondary'] = [$this->options['profile_id_secondary'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['active'])) {

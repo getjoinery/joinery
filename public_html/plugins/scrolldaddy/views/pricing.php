@@ -1,6 +1,6 @@
 <?php
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic', 'system', null, 'controld'));
+	require_once(PathHelper::getThemeFilePath('pricing_logic.php', 'logic'));
 	// PathHelper is already loaded
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 

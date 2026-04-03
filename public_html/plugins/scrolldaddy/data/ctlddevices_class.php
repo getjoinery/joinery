@@ -22,18 +22,14 @@ class CtldDevice extends SystemBase {
 
 	public static $field_specifications = array(
 	    'cdd_ctlddevice_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'cdd_device_id' => array('type'=>'varchar(64)'),
 	    'cdd_device_name' => array('type'=>'varchar(64)'),
 	    'cdd_device_type' => array('type'=>'varchar(32)'),
-	    'cdd_profile_id_primary' => array('type'=>'varchar(64)'),
-	    'cdd_profile_id_secondary' => array('type'=>'varchar(64)'),
 	    'cdd_cdp_ctldprofile_id_primary' => array('type'=>'int4'),
 	    'cdd_cdp_ctldprofile_id_secondary' => array('type'=>'int4'),
 	    'cdd_usr_user_id' => array('type'=>'int4'),
 	    'cdd_is_active' => array('type'=>'bool'),
 	    'cdd_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'cdd_delete_time' => array('type'=>'timestamp(6)'),
-	    'cdd_controld_resolver' => array('type'=>'varchar(128)'),
 	    'cdd_deactivation_pin' => array('type'=>'varchar(10)'),
 	    'cdd_timezone' => array('type'=>'varchar(64)'),
 	    'cdd_allow_device_edits' => array('type'=>'int4'),
