@@ -76,12 +76,12 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 			echo $formwriter->textinput('sdr_hostname', 'Add Site', ['maxlength' => 255]);
 
 			$optionvals = [
-				'Block' => 0,
-				'Allow' => 1,
+				0 => 'Block',
+				1 => 'Allow',
 			];
 			echo '</td><td>';
 
-			echo $formwriter->dropinput('sdr_action', '&nbsp;', ['options' => $optionvals]);
+			echo $formwriter->dropinput('sdr_action', '', ['options' => $optionvals]);
 			echo '</td><td>';
 			echo '<br>';
 			echo $formwriter->submitbutton('btn_submit', 'New Rule', ['class' => 'btn btn-primary']);

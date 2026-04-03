@@ -111,13 +111,13 @@ $profile_choice = $page_vars['profile_choice'];
 
 	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'scrolldaddy_advanced_filters', false)){
 		echo '<h5>Ad and Malware</h5>';
-		$optionvals = array(0 => "No blocking", 'ads_small'=>"Light blocking", 'ads_medium'=>'Medium blocking' /*, 'ads'=>'Aggressive blocking'*/);
+		$optionvals = array(0 => "No blocking", 'ads_small'=>"Light blocking", 'ads_medium'=>'Medium blocking', 'ads'=>'Aggressive blocking');
 		$formwriter->dropinput('block_ads', 'Ads', [
 			'options' => $optionvals,
 			'value' => $filters['ads']
 		]);
 
-		$optionvals = array(0 => "No blocking",/* 'malware'=>"Light blocking", */'ip_malware'=>'Medium blocking' /*, 'ai_malware'=>'Aggressive blocking'*/);
+		$optionvals = array(0 => "No blocking", 'malware'=>"Light blocking", 'ip_malware'=>'Medium blocking', 'ai_malware'=>'Aggressive blocking');
 		$formwriter->dropinput('block_malware', 'Malware', [
 			'options' => $optionvals,
 			'value' => $filters['malware']
