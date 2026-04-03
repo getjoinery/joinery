@@ -769,13 +769,30 @@ class SessionControl{
 		}
 
 		// Check for major IP change (different /16 subnet) as a session hijack indicator
-		if (isset($_SESSION['ip_address']) && isset($_SERVER['REMOTE_ADDR'])) {
-			if ($this->_is_major_ip_change($_SESSION['ip_address'], $_SERVER['REMOTE_ADDR'])) {
+		$client_ip = $this->_get_client_ip();
+		if (isset($_SESSION['ip_address']) && $client_ip) {
+			if ($this->_is_major_ip_change($_SESSION['ip_address'], $client_ip)) {
 				return 0;
 			}
 		}
 
 		return $_SESSION['permission'] ?? 0;
+	}
+
+	/**
+	 * Get the real client IP address, accounting for Cloudflare and reverse proxies.
+	 * Prefers CF-Connecting-IP (Cloudflare), falls back to X-Forwarded-For, then REMOTE_ADDR.
+	 */
+	private function _get_client_ip() {
+		if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+			return $_SERVER['HTTP_CF_CONNECTING_IP'];
+		}
+		if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+			// X-Forwarded-For can contain multiple IPs; the first is the real client
+			$ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+			return trim($ips[0]);
+		}
+		return $_SERVER['REMOTE_ADDR'] ?? '';
 	}
 
 	/**
@@ -796,8 +813,9 @@ class SessionControl{
 	function check_permission($level, $msgtext=NULL){
 		//IF NOT LOGGED IN OR IF IP ADDRESS HAS CHANGED FOR LOGGED IN USER, REDIRECT TO LOGIN SCREEN
 		$ipchange = FALSE;
-		if(isset($_SESSION['loggedin']) && isset($_SESSION['ip_address']) && isset($_SERVER['REMOTE_ADDR'])) {
-			$ipchange = $this->_is_major_ip_change($_SESSION['ip_address'], $_SERVER['REMOTE_ADDR']);
+		$client_ip = $this->_get_client_ip();
+		if(isset($_SESSION['loggedin']) && isset($_SESSION['ip_address']) && $client_ip) {
+			$ipchange = $this->_is_major_ip_change($_SESSION['ip_address'], $client_ip);
 		}
 
 		if(!isset($_SESSION['loggedin']) || ($ipchange && ($_SESSION['permission'] ?? 0) >= 5)){
@@ -868,7 +886,7 @@ class SessionControl{
 
 		$_SESSION['loggedin'] = TRUE;
 		$_SESSION['usr_user_id'] = $user->key;
-		$_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'];
+		$_SESSION['ip_address'] = $this->_get_client_ip();
 		$_SESSION['timezone'] = $user->get('usr_timezone');
 
 		if ($mode === 'admin') {
