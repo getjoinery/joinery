@@ -727,6 +727,31 @@ abstract class SystemBase {
 	
 	
 	/**
+	 * Map a database table name to its PHP model class name.
+	 * Uses discover_model_classes() with static caching.
+	 *
+	 * @param string $table_name The database table name (e.g., 'sdd_devices')
+	 * @return string|null The class name (e.g., 'SdDevice') or null if not found
+	 */
+	protected static function getModelClassForTable($table_name) {
+		static $table_to_class_map = null;
+
+		if ($table_to_class_map === null) {
+			$table_to_class_map = [];
+			$classes = LibraryFunctions::discover_model_classes([
+				'require_tablename' => true,
+				'require_field_specifications' => true,
+				'include_plugins' => true,
+			]);
+			foreach ($classes as $class_name) {
+				$table_to_class_map[$class_name::$tablename] = $class_name;
+			}
+		}
+
+		return $table_to_class_map[$table_name] ?? null;
+	}
+
+	/**
 	 * Perform a dry run of deletion to see what would be affected
 	 * Returns structured array of all actions that would be taken
 	 */
@@ -779,6 +804,29 @@ abstract class SystemBase {
 					$results['blocking_reasons'][] = $rule['del_message'] ??
 						"Cannot delete: {$count} record(s) in {$dep_table} depend on this record";
 					$dependency['blocks_deletion'] = true;
+				} elseif ($rule['del_action'] === 'permanent_delete') {
+					// Recursively count what model-level permanent_delete would affect
+					$model_class = self::getModelClassForTable($dep_table);
+					if ($model_class) {
+						$dep_pkey = $model_class::$pkey_column;
+						$select_sql = "SELECT {$dep_pkey} FROM {$dep_table} WHERE {$dep_column} = ?";
+						$select_stmt = $db->prepare($select_sql);
+						$select_stmt->execute([$this->key]);
+						while ($row = $select_stmt->fetch(PDO::FETCH_ASSOC)) {
+							$obj = new $model_class($row[$dep_pkey], true);
+							$sub_result = $obj->permanent_delete_dry_run();
+							$results['total_affected'] += $sub_result['total_affected'];
+							if (!$sub_result['can_delete']) {
+								$results['can_delete'] = false;
+								$results['blocking_reasons'] = array_merge(
+									$results['blocking_reasons'],
+									$sub_result['blocking_reasons']
+								);
+							}
+						}
+					} else {
+						$results['total_affected'] += $count;
+					}
 				} else {
 					// Add to total affected count for all non-prevent actions
 					$results['total_affected'] += $count;
@@ -860,6 +908,35 @@ abstract class SystemBase {
 								$set_sql = "UPDATE {$dep_table} SET {$dep_column} = ? WHERE {$dep_column} = ?";
 								$set_stmt = $db->prepare($set_sql);
 								$set_stmt->execute([$value, $this->key]);
+							}
+							break;
+
+						case 'permanent_delete':
+							// Load each dependent record as a model object and call its permanent_delete()
+							// This enables custom cascade logic (e.g., SdDevice cleans up profiles/filters)
+							$model_class = self::getModelClassForTable($dep_table);
+							if ($model_class) {
+								$dep_pkey = $model_class::$pkey_column;
+								if($debug){
+									echo "permanent_delete: Loading {$count} {$dep_table} records via {$model_class}<br>";
+								} else {
+									$select_sql = "SELECT {$dep_pkey} FROM {$dep_table} WHERE {$dep_column} = ?";
+									$select_stmt = $db->prepare($select_sql);
+									$select_stmt->execute([$this->key]);
+									while ($row = $select_stmt->fetch(PDO::FETCH_ASSOC)) {
+										$obj = new $model_class($row[$dep_pkey], true);
+										$obj->permanent_delete($debug);
+									}
+								}
+							} else {
+								// Fallback to flat cascade if model class not found
+								if($debug){
+									echo "permanent_delete fallback: DELETE FROM {$dep_table} WHERE {$dep_column} = {$this->key}<br>";
+								} else {
+									$del_sql = "DELETE FROM {$dep_table} WHERE {$dep_column} = ?";
+									$del_stmt = $db->prepare($del_sql);
+									$del_stmt->execute([$this->key]);
+								}
 							}
 							break;
 					}
