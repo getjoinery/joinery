@@ -311,9 +311,15 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 		if (!$internal_url) {
 			return;
 		}
+		$api_key = $settings->get_setting('scrolldaddy_dns_api_key');
 		$ch = curl_init(rtrim($internal_url, '/') . '/reload');
+		$headers = array('Content-Length: 0');
+		if ($api_key) {
+			$headers[] = 'X-API-Key: ' . $api_key;
+		}
 		curl_setopt_array($ch, array(
 			CURLOPT_POST           => true,
+			CURLOPT_HTTPHEADER     => $headers,
 			CURLOPT_TIMEOUT        => 5,
 			CURLOPT_RETURNTRANSFER => true,
 		));
