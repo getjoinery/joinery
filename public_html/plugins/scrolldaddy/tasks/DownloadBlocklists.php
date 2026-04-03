@@ -14,7 +14,7 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 
 	/**
 	 * Category-to-source mapping.
-	 * Keys must match filter keys used in cdf_ctldfilters (cdf_filter_pk column).
+	 * Keys must match filter keys used in sdf_filters (sdf_filter_key column).
 	 * Values are single URL strings or arrays of URLs (merged and deduplicated).
 	 */
 	const SOURCES = array(

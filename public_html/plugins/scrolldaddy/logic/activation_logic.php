@@ -1,14 +1,14 @@
 <?php
 
-function ctld_activation_logic($get_vars, $post_vars){
+function activation_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldfilters_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
 
 	$page_vars = array();
 
@@ -28,11 +28,11 @@ function ctld_activation_logic($get_vars, $post_vars){
 	$tier = SubscriptionTier::GetUserTier($user->key);
 	$page_vars['tier'] = $tier;
 
-	$device = new CtldDevice($device_id, TRUE);
+	$device = new SdDevice($device_id, TRUE);
 	$page_vars['device'] = $device;
 
 	$dns_host = $settings->get_setting('scrolldaddy_dns_host');
-	$resolver_uid = $device->get('cdd_resolver_uid');
+	$resolver_uid = $device->get('sdd_resolver_uid');
 
 	// Build DoH URL for this device
 	$doh_url = '';

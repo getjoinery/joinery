@@ -9,11 +9,11 @@ $routes = [
         ],
         // Profile management routes
         '/profile/device_edit' => [
-            'view' => 'views/profile/ctlddevice_edit',
+            'view' => 'views/profile/device_edit',
             'plugin_specify' => 'scrolldaddy'
         ],
         '/profile/filters_edit' => [
-            'view' => 'views/profile/ctldfilters_edit',
+            'view' => 'views/profile/filters_edit',
             'plugin_specify' => 'scrolldaddy'
         ],
         '/profile/devices' => [
@@ -24,8 +24,8 @@ $routes = [
             'view' => 'views/profile/rules',
             'plugin_specify' => 'scrolldaddy'
         ],
-        '/profile/ctld_activation' => [
-            'view' => 'views/profile/ctld_activation',
+        '/profile/activation' => [
+            'view' => 'views/profile/activation',
             'plugin_specify' => 'scrolldaddy'
         ],
         // Public pages

@@ -3,9 +3,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('ctlddevice_edit_logic.php', 'logic', 'system', null, 'scrolldaddy'));
+require_once(PathHelper::getThemeFilePath('device_edit_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
-$page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
+$page_vars = process_logic(device_edit_logic($_GET, $_POST));
 	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$num_devices =  $page_vars['num_devices'];
@@ -15,7 +15,7 @@ $page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
 	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => 'Device Add/Edit', 
+		'title' => 'Device Add/Edit',
 		'breadcrumbs' => array (
 			'My Profile' => '/profile',
 			'Add/Edit Device' => ''),
@@ -23,14 +23,14 @@ $page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('Add/Edit Device', $hoptions);
-	
+
 	$name = 'New Device';
-	if($device->get('cdd_device_name')){
+	if($device->get('sdd_device_name')){
 		$name = $device->get_readable_name();
 	}
 
 	$formwriter = $page->getFormWriter('form1', [
-		'action' => '/profile/ctlddevice_edit'
+		'action' => '/profile/device_edit'
 	]);
 
 	// Note: FormWriter v2 handles validation differently - validation rules applied per-field
@@ -39,19 +39,19 @@ $page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
 	$formwriter->begin_form();
 	if($device->key){
 		?>
-                        <div class="job-content">
-                            <div class="job-post_date">
-								<h3><?php echo $name; ?></h3>
-                                <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
-                                <div class="icon"><a href="/profile/ctlddevice_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a></div>
-                            </div>
+                    <div class="job-content">
+                        <div class="job-post_date">
+							<h3><?php echo $name; ?></h3>
+                            <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
+                            <div class="icon"><a href="/profile/device_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a></div>
                         </div>
+                    </div>
 	<?php
 
 		$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
 	}
 
-	if($device->get('cdd_device_name')){
+	if($device->get('sdd_device_name')){
 		$name = $device->get_readable_name();
 	}
 	else{
@@ -63,7 +63,7 @@ $page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
 		'maxlength' => 255
 	]);
 
-	if(!$device->get('cdd_device_type')){
+	if(!$device->get('sdd_device_type')){
 		$optionvals = [
 			'Windows Computer' => 'desktop-windows',
 			'Mac Computer' => 'desktop-mac',
@@ -78,16 +78,16 @@ $page_vars = process_logic(ctlddevice_edit_logic($_GET, $_POST));
 
 	if($device->are_filters_editable()){
 		$optionvals = array(0=>"Only on Sundays", 1=>"Anytime");
-		$formwriter->dropinput('cdd_allow_device_edits', 'I want to be able to edit my blocked sites', [
+		$formwriter->dropinput('sdd_allow_device_edits', 'I want to be able to edit my blocked sites', [
 			'options' => $optionvals,
-			'value' => $device->get('cdd_allow_device_edits')
+			'value' => $device->get('sdd_allow_device_edits')
 		]);
 	}
 
 	$optionvals = Address::get_timezone_drop_array();
-	$formwriter->dropinput('cdd_timezone', 'Time zone for scheduling', [
+	$formwriter->dropinput('sdd_timezone', 'Time zone for scheduling', [
 		'options' => $optionvals,
-		'value' => $device->get('cdd_timezone')
+		'value' => $device->get('sdd_timezone')
 	]);
 
 	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);

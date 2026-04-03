@@ -7,11 +7,11 @@ function devices_logic($get_vars, $post_vars){
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevice_backups_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldservices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldfilters_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldprofiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/device_backups_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
 
 	$page_vars = array();
 
@@ -33,12 +33,12 @@ function devices_logic($get_vars, $post_vars){
 	$tier = SubscriptionTier::GetUserTier($user->key);
 	$page_vars['tier'] = $tier;
 
-	$devices = new MultiCtldDevice(
+	$devices = new MultiSdDevice(
 		array(
-		'user_id' => $user->key, 
+		'user_id' => $user->key,
 		'deleted' => false
-		), 
-		
+		),
+
 	);
 	$num_devices = $devices->count_all();
 	$devices->load();
@@ -46,7 +46,7 @@ function devices_logic($get_vars, $post_vars){
 	$page_vars['devices'] = $devices;
 
 	//DELETED DEVICES
-	$deleted_devices = new MultiCtldDeviceBackup(
+	$deleted_devices = new MultiSdDeviceBackup(
 		array(
 		'user_id' => $user->key
 		), 
@@ -69,7 +69,7 @@ function devices_logic($get_vars, $post_vars){
 	$last_seen = array();
 	if($dns_internal_url && $dns_api_key){
 		foreach($devices as $device){
-			$uid = $device->get('cdd_resolver_uid');
+			$uid = $device->get('sdd_resolver_uid');
 			if(!$uid) continue;
 			$url = rtrim($dns_internal_url, '/') . '/device/' . $uid . '/seen';
 			$ch = curl_init($url);
@@ -92,11 +92,11 @@ function devices_logic($get_vars, $post_vars){
 	$num_blocks_always = array();
 	$num_blocks_scheduled = array();
 	foreach($devices as $device){
-		$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
+		$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
 		$num_blocks_always[$device->key] += $profile->count_blocks();
 
-		if($device->get('cdd_cdp_ctldprofile_id_secondary')){
-			$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+		if($device->get('sdd_sdp_profile_id_secondary')){
+			$profile = new SdProfile($device->get('sdd_sdp_profile_id_secondary'), TRUE);
 			$num_blocks_scheduled[$device->key] += $profile->count_blocks();
 		}
 	}
@@ -106,7 +106,7 @@ function devices_logic($get_vars, $post_vars){
 	//SCHEDULE STRING
 	foreach($devices as $device){
 
-		if($profile->get('cdp_schedule_start')){
+		if($profile->get('sdp_schedule_start')){
 			
 			$primary_arr = $device->get_time_to_active_profile('primary');
 			if(!$primary_arr){
@@ -120,7 +120,7 @@ function devices_logic($get_vars, $post_vars){
 			}
 			$scheduled_string['primary'][$device->key] = '<span class="duration">'.$primary_time.'</span>';
 			
-			if($device->get('cdd_cdp_ctldprofile_id_secondary')){
+			if($device->get('sdd_sdp_profile_id_secondary')){
 				$secondary_arr = $device->get_time_to_active_profile('secondary');
 				if(!$secondary_arr){
 					$primary_time = '';

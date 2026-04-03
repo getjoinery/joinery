@@ -1,14 +1,14 @@
 <?php
 
-function ctlddevice_edit_logic($get_vars, $post_vars){
+function device_edit_logic($get_vars, $post_vars){
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldprofiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
 
 	$page_vars = array();
 
@@ -29,7 +29,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 	}
 	$page_vars['tier'] = $tier;
 
-	$devices = new MultiCtldDevice(
+	$devices = new MultiSdDevice(
 		array(
 		'user_id' => $user->key,
 		'deleted' => false
@@ -40,7 +40,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 
 	$device = null;
 	if($_REQUEST['device_id']){
-		$device = new CtldDevice($_REQUEST['device_id'], TRUE);
+		$device = new SdDevice($_REQUEST['device_id'], TRUE);
 		$device->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_vars['device'] = $device;
 	}
@@ -56,9 +56,9 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 				$device_name = 'user'.$user->key . '-' . $device_name;
 			}
 
-			$device->set('cdd_timezone', strip_tags($_POST['cdd_timezone']));
-			$device->set('cdd_device_name', $device_name);
-			$device->set('cdd_allow_device_edits', $_POST['cdd_allow_device_edits']);
+			$device->set('sdd_timezone', strip_tags($_POST['sdd_timezone']));
+			$device->set('sdd_device_name', $device_name);
+			$device->set('sdd_allow_device_edits', $_POST['sdd_allow_device_edits']);
 			$device->prepare();
 			$device->save();
 
@@ -67,7 +67,7 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 		else{
 			// Create new device — check device limit
 			$max_devices = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_max_devices', 0);
-			$current_devices = new MultiCtldDevice([
+			$current_devices = new MultiSdDevice([
 				'user_id' => $user->key,
 				'deleted' => false
 			]);
@@ -75,16 +75,16 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 				return LogicResult::error("You have reached your device limit of {$max_devices}.");
 			}
 
-			$empty_device = new CtldDevice(NULL);
+			$empty_device = new SdDevice(NULL);
 			$empty_device->save();
 			$empty_device->load();
 
 			// Create the primary profile
 			$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile1';
-			$profile1 = CtldProfile::createProfile($profile_name, $user);
+			$profile1 = SdProfile::createProfile($profile_name, $user);
 
 			$profile2 = null;
-			$device = CtldDevice::createDevice($empty_device, $profile1, $profile2, $_POST);
+			$device = SdDevice::createDevice($empty_device, $profile1, $profile2, $_POST);
 		}
 
 		return LogicResult::redirect('/profile/devices');
@@ -92,8 +92,8 @@ function ctlddevice_edit_logic($get_vars, $post_vars){
 	else{
 
 		if(!$device){
-			$device = new CtldDevice(NULL);
-			$device->set('cdd_timezone', 'America/New_York');
+			$device = new SdDevice(NULL);
+			$device->set('sdd_timezone', 'America/New_York');
 			$page_vars['device'] = $device;
 		}
 

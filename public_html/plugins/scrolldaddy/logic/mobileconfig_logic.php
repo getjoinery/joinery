@@ -1,11 +1,11 @@
 <?php
 
-function ctld_mobileconfig_logic($get_vars, $post_vars){
+function mobileconfig_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
 
 	$page_vars = array();
 
@@ -21,11 +21,11 @@ function ctld_mobileconfig_logic($get_vars, $post_vars){
 	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
 
-	$device = new CtldDevice($device_id, TRUE);
+	$device = new SdDevice($device_id, TRUE);
 	$page_vars['device'] = $device;
 
 	$dns_host = $settings->get_setting('scrolldaddy_dns_host');
-	$resolver_uid = $device->get('cdd_resolver_uid');
+	$resolver_uid = $device->get('sdd_resolver_uid');
 
 	$doh_url = '';
 	if($dns_host && $resolver_uid){

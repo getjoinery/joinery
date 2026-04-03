@@ -3,9 +3,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('ctlddevice_soft_delete_logic.php', 'logic', 'system', null, 'scrolldaddy'));
+require_once(PathHelper::getThemeFilePath('device_soft_delete_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
-$page_vars = process_logic(ctlddevice_soft_delete_logic($_GET, $_POST));
+$page_vars = process_logic(device_soft_delete_logic($_GET, $_POST));
 	$device = $page_vars['device'];
 	$user = $page_vars['user'];
 	$session = SessionControl::get_instance();
@@ -14,7 +14,7 @@ $page_vars = process_logic(ctlddevice_soft_delete_logic($_GET, $_POST));
 	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => 'Device Add/Edit', 
+		'title' => 'Device Add/Edit',
 		'breadcrumbs' => array (
 			'My Profile' => '/profile',
 			'Delete Device' => ''),
@@ -23,23 +23,23 @@ $page_vars = process_logic(ctlddevice_soft_delete_logic($_GET, $_POST));
 
 	echo PublicPage::BeginPage('Delete Device', $hoptions);
 
-	$formwriter = $page->getFormWriter('delete_form', ['action' => '/profile/ctlddevice_soft_delete', 'method' => 'POST']);
+	$formwriter = $page->getFormWriter('delete_form', ['action' => '/profile/device_soft_delete', 'method' => 'POST']);
 
 
 	echo $formwriter->begin_form();
-	
+
 		?>
-                        <div class="job-content">
-                            <div class="job-post_date">
-								<h3><?php echo $name; ?></h3>
-                                <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
-                                <!--<div class="icon"><a href="/profile/ctlddevice_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a></div>-->
-                            </div>
+                    <div class="job-content">
+                        <div class="job-post_date">
+							<h3><?php echo $name; ?></h3>
+                            <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
+                            <!--<div class="icon"><a href="/profile/device_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a></div>-->
                         </div>
+                    </div>
 	<?php
 
 	$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
-	
+
 	echo '<p>You are about to delete this device. </p>';
 
 	echo $formwriter->submitbutton('btn_submit', 'Confirm Delete', ['class' => 'btn btn-primary']);

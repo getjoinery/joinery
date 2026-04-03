@@ -1,16 +1,16 @@
 <?php
 
-function ctlddevice_soft_delete_logic($get_vars, $post_vars){
+function device_delete_logic($get_vars, $post_vars){
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldprofiles_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldfilters_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldservices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
 
 	$page_vars = array();
 
@@ -28,14 +28,12 @@ function ctlddevice_soft_delete_logic($get_vars, $post_vars){
 	$tier = SubscriptionTier::GetUserTier($user->key);
 	$page_vars['tier'] = $tier;
 
-	$device = new CtldDevice($_REQUEST['device_id'], TRUE);
+	$device = new SdDevice($_REQUEST['device_id'], TRUE);
 	$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 	$page_vars['device'] = $device;
 
-	if(isset($_POST['device_id'])){
-		$device->set('cdd_is_active', false);
-		$device->set('cdd_delete_time', 'now()');
-		$device->save();
+	if(isset($_POST['confirm'])){
+		$device->permanent_delete();
 
 		return LogicResult::redirect('/profile/devices');
 	}
