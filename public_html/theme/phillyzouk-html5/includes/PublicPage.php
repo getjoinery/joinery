@@ -51,7 +51,9 @@ class PublicPage extends PublicPageBase {
 		$_GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
+		ob_start();
 		$options = parent::public_header_common($options);
+		$_head_inject = ob_get_clean();
 
 		$menu_data = $this->get_menu_data();
 		$site_name = $settings->get_setting('site_name', true, true) ?: 'Phillyzouk';
@@ -68,6 +70,7 @@ class PublicPage extends PublicPageBase {
     <meta name="description" content="<?php echo htmlspecialchars($description); ?>">
     <title><?php echo htmlspecialchars($title); ?></title>
 
+    <?php echo $_head_inject; ?>
     <?php $this->global_includes_top($options); ?>
 
     <link rel="stylesheet" href="/theme/phillyzouk-html5/assets/css/style.css">
