@@ -528,13 +528,9 @@ Production Docker server hosting multiple client sites. Each site runs in its ow
 - `scrolldaddy` - ScrollDaddy web app (port 8087); DB exposed on port 9087
 
 ### ScrollDaddy DNS Server
-**IP:** `45.56.103.84`
-**SSH Key:** `~/.ssh/id_ed25519_claude` (no passphrase)
-**Binary:** `/usr/local/bin/scrolldaddy-dns` (systemd service: `scrolldaddy-dns`)
-**Logs:** `/var/log/scrolldaddy/dns.log`
-**Internal API:** `http://localhost:8053` — `/reload` (POST), `/stats` (GET), `/test` (GET); all require `X-API-Key` header
-
-To deploy a new DNS server binary: build on the test server (`cd scrolldaddy-dns && go build -o scrolldaddy-dns ./cmd/dns`), copy to DNS server, restart service.
+**IP:** `45.56.103.84` | **SSH Key:** `~/.ssh/id_ed25519_claude` | **Service:** `scrolldaddy-dns`
+**Logs:** `/var/log/scrolldaddy/dns.log` | **API (localhost:8053):** `/reload`, `/stats`, `/test` (require `X-API-Key`)
+**Deploy:** `ssh root@45.56.103.84 'bash -s' < scrolldaddy-dns/deploy.sh`
 
 ### Browser Testing (MCP)
 A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
