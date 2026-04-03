@@ -35,11 +35,14 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 		'typo'          => 'https://phishing.army/download/phishing_army_blocklist_extended.txt',
 
 		// Adult content
-		'porn'          => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/nsfw.txt',
+		'porn'          => 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts',
 		'porn_strict'   => 'https://nsfw.oisd.nl/domainswild',
 
 		// Gambling
-		'gambling'      => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/gambling.txt',
+		'gambling'      => array(
+			'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts',
+			'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/gambling/domains',
+		),
 
 		// Social media
 		'social'        => 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts',
@@ -52,11 +55,10 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 
 		// UT1 Toulouse categories
 		'dating'        => 'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/dating/domains',
-		'drugs'         => 'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/drugs/domains',
+		'drugs'         => 'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/drogue/domains',
 		'games'         => 'https://raw.githubusercontent.com/olbat/ut1-blacklists/master/blacklists/games/domains',
 
 		// DNS/network bypass
-		'ddns'          => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/dyndns.txt',
 		'dnsvpn'        => 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/doh.txt',
 	);
 
