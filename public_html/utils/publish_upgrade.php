@@ -1,8 +1,19 @@
 <?php
-	// PathHelper, Globalvars, SessionControl are pre-loaded - no need to require them
-	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
+	$is_cli = php_sapi_name() === 'cli';
+
+	if ($is_cli) {
+		// CLI bootstrap: load core dependencies manually (session/AdminPage not available)
+		require_once(__DIR__ . '/../includes/PathHelper.php');
+		require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+		require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+		require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
+	} else {
+		// Web: PathHelper, Globalvars, SessionControl are pre-loaded
+		require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+		require_once(PathHelper::getIncludePath('data/upgrades_class.php'));
+	}
 
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
@@ -16,10 +27,53 @@
 	}
 
 	// =====================================================
+	// CLI MODE: parse arguments and populate $_REQUEST
+	// Usage: php publish_upgrade.php [major.minor] ["release notes"]
+	// If version omitted, auto-detects next minor version.
+	// =====================================================
+	if ($is_cli) {
+		$cli_args = array_slice($argv, 1);
+
+		// Parse version argument (e.g. "3.27" or "3" "27")
+		$cli_major = null;
+		$cli_minor = null;
+		$cli_notes = '';
+
+		if (!empty($cli_args[0]) && strpos($cli_args[0], '.') !== false) {
+			[$cli_major, $cli_minor] = explode('.', $cli_args[0], 2);
+			$cli_notes = $cli_args[1] ?? 'CLI publish';
+		} elseif (!empty($cli_args[0]) && is_numeric($cli_args[0])) {
+			$cli_major = $cli_args[0];
+			$cli_minor = $cli_args[1] ?? null;
+			$cli_notes = $cli_args[2] ?? 'CLI publish';
+		} else {
+			$cli_notes = $cli_args[0] ?? 'CLI publish';
+		}
+
+		// Auto-detect next version if not specified
+		if ($cli_major === null || $cli_minor === null) {
+			$latest = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1);
+			$latest->load();
+			if ($latest->count() > 0) {
+				$last = $latest->get(0);
+				$cli_major = $cli_major ?? $last->get('upg_major_version');
+				$cli_minor = $cli_minor ?? ($last->get('upg_minor_version') + 1);
+			} else {
+				$cli_major = $cli_major ?? 1;
+				$cli_minor = $cli_minor ?? 0;
+			}
+		}
+
+		$_REQUEST['version_major'] = $cli_major;
+		$_REQUEST['version_minor'] = $cli_minor;
+		$_REQUEST['release_notes'] = $cli_notes;
+	}
+
+	// =====================================================
 	// REMOTE ARCHIVE REFRESH HANDLER
 	// =====================================================
 	// Handle remote archive refresh requests (before session check - uses IP auth)
-	if (isset($_GET['refresh-archives']) && $_GET['refresh-archives'] == '1') {
+	if (!$is_cli && isset($_GET['refresh-archives']) && $_GET['refresh-archives'] == '1') {
 		header('Content-Type: application/json');
 
 		// Check if feature is enabled (accepts '1' or 'true' as enabled)
@@ -83,11 +137,26 @@
 		exit;
 	}
 
-	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+	if ($is_cli) {
+		$session = null;
+	} else {
+		$session = SessionControl::get_instance();
+		$session->check_permission(8);
+	}
 
 	// Increase execution time for large zip file creation (5 minutes)
 	set_time_limit(300);
+
+	// Output helper: strips HTML for CLI, flushes for web
+	function publish_output($text) {
+		global $is_cli;
+		if ($is_cli) {
+			echo strip_tags(str_replace(['<br>', '<br />', '<br/>'], "\n", $text)) . "\n";
+		} else {
+			echo $text;
+			flush();
+		}
+	}
 
 	// Handle delete request - process before rendering page
 	if(isset($_REQUEST['delete']) && is_numeric($_REQUEST['delete'])){
@@ -137,15 +206,14 @@
 		$existing->load();
 
 		if ($existing->count() > 0) {
-			echo "Version {$version_major}.{$version_minor} already exists. Please use a different version number.<br>";
+			publish_output("Version {$version_major}.{$version_minor} already exists. Please use a different version number.");
 			exit;
 		}
 
 		// Generate fresh install SQL file before creating archive
 		// Use form-provided version consistently for both archive and SQL filenames
 		$version = $version_major . '.' . $version_minor;
-		echo "Generating install SQL file (version $version)...<br>";
-		flush();
+		publish_output("Generating install SQL file (version $version)...");
 
 		$create_sql_cmd = sprintf(
 			'php %s %s',
@@ -168,15 +236,14 @@
 			die("ERROR: Generated SQL file not found at $sql_source\n");
 		}
 
-		echo "Generated install SQL file version $version (compressed)<br>";
-		flush();
+		publish_output("Generated install SQL file version $version (compressed)");
 
 		$file_output_folder = $full_site_dir.'/static_files';
 
 		// Check if directory is writable by current process
 		if(!is_writable($file_output_folder)){
-			echo $file_output_folder . ' must be writable.  Aborting upgrade.<br>';
-			echo 'It is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3).'<br>';
+			publish_output($file_output_folder . ' must be writable.  Aborting upgrade.');
+			publish_output('It is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3));
 			exit;
 		}
 
@@ -197,23 +264,20 @@
 			die("ERROR: Required file $sql_source not found. Cannot create archive.\n");
 		}
 
-		echo "All required directories and files present<br>";
-		flush();
+		publish_output("All required directories and files present");
 
 		// Also update the on-disk copy for Docker builds that copy directly from disk
 		$ondisk_sql_path = $full_site_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz';
 		if (copy($sql_source, $ondisk_sql_path)) {
-			echo "Updated on-disk install SQL at $ondisk_sql_path<br>";
+			publish_output("Updated on-disk install SQL at $ondisk_sql_path");
 		} else {
-			echo "<span style='color: orange;'>Warning: Could not update on-disk SQL at $ondisk_sql_path</span><br>";
+			publish_output("Warning: Could not update on-disk SQL at $ondisk_sql_path");
 		}
-		flush();
 
 		// =====================================================
 		// Create CORE archive (no themes or plugins)
 		// =====================================================
-		echo '<strong>Creating core archive...</strong><br>';
-		flush();
+		publish_output("Creating core archive...");
 
 		$core_filename = 'joinery-core-' . $version_major . '.' . $version_minor . '.tar.gz';
 		$core_output_location = $file_output_folder . '/' . $core_filename;
@@ -279,7 +343,7 @@
 		}
 
 		$core_size_mb = round(filesize($core_output_location) / 1048576, 2);
-		echo "Core archive created: $core_filename ({$core_size_mb} MB)<br>";
+		publish_output("Core archive created: $core_filename ({$core_size_mb} MB)");
 
 		// Store the version info in the database (using core filename)
 		$upgrade = new Upgrade(NULL);
@@ -293,8 +357,7 @@
 		// =====================================================
 		// Create individual THEME archives
 		// =====================================================
-		echo '<br><strong>Creating individual theme archives...</strong><br>';
-		flush();
+		publish_output("\nCreating individual theme archives...");
 
 		$themes_dir = $file_output_folder . '/themes';
 		if (!is_dir($themes_dir)) {
@@ -311,7 +374,7 @@
 			$is_stock = $theme_data['is_stock'] ?? true;
 
 			if (!$is_stock) {
-				echo "- Skipping {$theme_name} (not stock)<br>";
+				publish_output("- Skipping {$theme_name} (not stock)");
 				continue;
 			}
 
@@ -329,17 +392,16 @@
 
 			if (file_exists($theme_archive)) {
 				$theme_size_kb = round(filesize($theme_archive) / 1024, 1);
-				echo "- {$theme_name}-{$theme_version}.tar.gz ({$theme_size_kb} KB)<br>";
+				publish_output("- {$theme_name}-{$theme_version}.tar.gz ({$theme_size_kb} KB)");
 			} else {
-				echo "- ERROR: Failed to create archive for {$theme_name}<br>";
+				publish_output("- ERROR: Failed to create archive for {$theme_name}");
 			}
 		}
 
 		// =====================================================
 		// Create individual PLUGIN archives
 		// =====================================================
-		echo '<br><strong>Creating individual plugin archives...</strong><br>';
-		flush();
+		publish_output("\nCreating individual plugin archives...");
 
 		$plugins_dir = $file_output_folder . '/plugins';
 		if (!is_dir($plugins_dir)) {
@@ -356,7 +418,7 @@
 			$is_stock = $plugin_data['is_stock'] ?? true;
 
 			if (!$is_stock) {
-				echo "- Skipping {$plugin_name} (not stock)<br>";
+				publish_output("- Skipping {$plugin_name} (not stock)");
 				continue;
 			}
 
@@ -374,13 +436,13 @@
 
 			if (file_exists($plugin_archive)) {
 				$plugin_size_kb = round(filesize($plugin_archive) / 1024, 1);
-				echo "- {$plugin_name}-{$plugin_version}.tar.gz ({$plugin_size_kb} KB)<br>";
+				publish_output("- {$plugin_name}-{$plugin_version}.tar.gz ({$plugin_size_kb} KB)");
 			} else {
-				echo "- ERROR: Failed to create archive for {$plugin_name}<br>";
+				publish_output("- ERROR: Failed to create archive for {$plugin_name}");
 			}
 		}
 
-		echo '<br><strong>All archives created successfully!</strong><br>';
+		publish_output("\nAll archives created successfully!");
 
 	}
 	else{
