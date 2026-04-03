@@ -34,14 +34,17 @@ The system:
 
 ### 2. Deletion Actions
 
-Four actions are available:
+Five actions are available:
 
 | Action | Description | Use Case |
 |--------|-------------|----------|
-| `cascade` | Delete dependent records | Logs, sessions, temporary data |
+| `cascade` | Delete dependent records via flat SQL | Logs, sessions, leaf data with no children |
+| `permanent_delete` | Load each record as a model and call its `permanent_delete()` | Records with custom deletion logic or their own child dependencies |
 | `set_value` | Set foreign key to specific value | Set to DELETED_USER sentinel value |
 | `null` | Set foreign key to NULL | Optional relationships |
 | `prevent` | Block deletion if dependents exist | Critical references that can't be orphaned |
+
+**`cascade` vs `permanent_delete`**: Use `cascade` (the default) for leaf tables that have no children and no custom deletion logic. Use `permanent_delete` when the dependent model has its own `permanent_delete()` override or has child tables that need recursive cleanup. `permanent_delete` is slower (loads each record individually) but enables multi-level cascading.
 
 ### 3. Default Behavior
 
