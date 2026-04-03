@@ -28,7 +28,7 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 	echo PublicPage::BeginPage('Custom Rules', $hoptions);
 	
 	$name = 'New Device';
-	if($device->get('cdd_device_name')){
+	if($device->get('sdd_device_name')){
 		$name = $device->get_readable_name();
 	}
 
@@ -46,8 +46,8 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 	foreach($rules as $rule){
 
 			echo '<tr>
-			  <td>'.$rule->get('cdr_rule_hostname').'</td>';
-			  if($rule->get('cdr_rule_action') == 0){
+			  <td>'.$rule->get('sdr_hostname').'</td>';
+			  if($rule->get('sdr_action') == 0){
 					echo '<td>Block</td>';
 			  }
 			  else{
@@ -73,15 +73,15 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 			$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
 			$formwriter->hiddeninput('profile_choice', '', ['value' => $profile_choice]);
 			echo '<tr><td>';
-			echo $formwriter->textinput('cdr_rule_hostname', 'Add Site', ['maxlength' => 255]);
+			echo $formwriter->textinput('sdr_hostname', 'Add Site', ['maxlength' => 255]);
 
 			$optionvals = [
 				'Block' => 0,
 				'Allow' => 1,
 			];
 			echo '</td><td>';
-			
-			echo $formwriter->dropinput('cdr_rule_action', '&nbsp;', ['options' => $optionvals]);
+
+			echo $formwriter->dropinput('sdr_action', '&nbsp;', ['options' => $optionvals]);
 			echo '</td><td>';
 			echo '<br>';
 			echo $formwriter->submitbutton('btn_submit', 'New Rule', ['class' => 'btn btn-primary']);

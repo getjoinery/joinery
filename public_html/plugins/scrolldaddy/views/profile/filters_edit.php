@@ -4,9 +4,9 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('ctldfilters_edit_logic.php', 'logic', 'system', null, 'scrolldaddy'));
+require_once(PathHelper::getThemeFilePath('filters_edit_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
-$page_vars = process_logic(ctldfilters_edit_logic($_GET, $_POST));
+$page_vars = process_logic(filters_edit_logic($_GET, $_POST));
 $profile_choice = $page_vars['profile_choice'];
 	$profile =  $page_vars['profile'];
 	$tier = $page_vars['tier'];
@@ -19,7 +19,7 @@ $profile_choice = $page_vars['profile_choice'];
 	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => 'Device Add/Edit', 
+		'title' => 'Device Add/Edit',
 		'breadcrumbs' => array (
 			'My Profile' => '/profile',
 			'Add/Edit Device' => ''),
@@ -27,35 +27,35 @@ $profile_choice = $page_vars['profile_choice'];
 	$page->public_header($hoptions,NULL);
 
 	echo PublicPage::BeginPage('Add/Edit Filters', $hoptions);
-	
+
 	$name = 'New Device';
-	if($device->get('cdd_device_name')){
+	if($device->get('sdd_device_name')){
 		$name = $device->get_readable_name();
 	}
 
 	$formwriter = $page->getFormWriter('form1', [
-		'action' => '/profile/ctldfilters_edit'
+		'action' => '/profile/filters_edit'
 	]);
 
 	// Note: FormWriter v2 handles validation differently - validation rules applied per-field
 	// The set_validate() method is not available in v2
 
 	$formwriter->begin_form();
-	
+
 		?>
-                        <div class="job-content">
-                            <div class="job-post_date">
-								<h3><?php echo $name; ?></h3>
-                                <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
-                                <div class="icon"><a href="/profile/rules?device_id=<?php echo $device->key; ?>&profile_choice=<?php echo $profile_choice; ?>"><i class="fa-regular fa-list"></i> Custom Rules</a>
-								
-								<?php if($profile_choice == 'secondary'){ ?>
-								&nbsp;&nbsp;&nbsp;<a href="/profile/ctldprofile_delete?profile_id=<?php echo $profile->key; ?>"><i class="fa-regular fa-trash"></i> Delete profile</a>
-								<?php } ?>
-								
-								</div>
-                            </div>
+                    <div class="job-content">
+                        <div class="job-post_date">
+							<h3><?php echo $name; ?></h3>
+                            <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
+                            <div class="icon"><a href="/profile/rules?device_id=<?php echo $device->key; ?>&profile_choice=<?php echo $profile_choice; ?>"><i class="fa-regular fa-list"></i> Custom Rules</a>
+
+							<?php if($profile_choice == 'secondary'){ ?>
+							&nbsp;&nbsp;&nbsp;<a href="/profile/profile_delete?profile_id=<?php echo $profile->key; ?>"><i class="fa-regular fa-trash"></i> Delete profile</a>
+							<?php } ?>
+
+							</div>
                         </div>
+                    </div>
 	<?php
 
 	if($device){
@@ -64,7 +64,7 @@ $profile_choice = $page_vars['profile_choice'];
 
 	$formwriter->hiddeninput('action', '', ['value' => 'edit']);
 	$formwriter->hiddeninput('profile_choice', '', ['value' => $profile_choice]);
-	
+
 	//ONLY ALLOW EDITS IF IT IS EDIT DAY OR IF USER IS NEW
 	if($device->are_filters_editable()){
 		echo '<h5>Social Media</h5>';
@@ -127,7 +127,7 @@ $profile_choice = $page_vars['profile_choice'];
 
 		$formwriter->checkboxinput('block_typo', 'Phishing sites', ['value' => 1, 'checked' => $filters['typo']]);
 	}
-	
+
 	if($profile_choice == 'secondary'){
 		if($session->get_permission() > 8 || $device->are_filters_editable()){
 			echo '<h5>Block above sites</h5>';
@@ -162,14 +162,14 @@ $profile_choice = $page_vars['profile_choice'];
 
 			$formwriter->dropinput('start_time', 'Time to start blocking', [
 			'options' => $optionvals,
-			'value' => $profile->get('cdp_schedule_start')
+			'value' => $profile->get('sdp_schedule_start')
 		]);
 
 		echo '</div>';
 		echo '<div class="col-md-6">';
 		$formwriter->dropinput('end_time', 'Time to end blocking', [
 			'options' => $optionvals,
-			'value' => $profile->get('cdp_schedule_end')
+			'value' => $profile->get('sdp_schedule_end')
 		]);
 		echo '</div>';
 		echo '</div>';
@@ -183,7 +183,7 @@ $profile_choice = $page_vars['profile_choice'];
 			'sat' => 'Saturday',
 			'sun' => 'Sunday',
 		);
-		$checkedvals =  unserialize($profile->get('cdp_schedule_days'));
+		$checkedvals =  unserialize($profile->get('sdp_schedule_days'));
 		$formwriter->checkboxList('days_blocked', 'Days of the week', [
 			'options' => $optionvals,
 			'checked' => $checkedvals

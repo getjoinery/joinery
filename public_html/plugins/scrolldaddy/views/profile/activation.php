@@ -3,9 +3,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('ctld_activation_logic.php', 'logic', 'system', null, 'scrolldaddy'));
+require_once(PathHelper::getThemeFilePath('activation_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
-$page_vars = process_logic(ctld_activation_logic($_GET, $_POST));
+$page_vars = process_logic(activation_logic($_GET, $_POST));
 	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$user = $page_vars['user'];
@@ -25,7 +25,7 @@ $page_vars = process_logic(ctld_activation_logic($_GET, $_POST));
 
 	echo PublicPage::BeginPage('Device Setup', $hoptions);
 
-	if($device->get('cdd_is_active')){
+	if($device->get('sdd_is_active')){
 
 		$device_name = strip_tags($device->get_readable_name());
 		$doh_url_safe = htmlspecialchars($doh_url);
@@ -98,7 +98,7 @@ $page_vars = process_logic(ctld_activation_logic($_GET, $_POST));
 									</ol>
 								</div>
 							</div>
-							<a class="th-btn style5" href="/profile/ctld_mobileconfig?device_id='.$device->key.'">Download Profile</a>
+							<a class="th-btn style5" href="/profile/mobileconfig?device_id='.$device->key.'">Download Profile</a>
 						</div>
 					</div>
 				</div>
@@ -122,7 +122,7 @@ $page_vars = process_logic(ctld_activation_logic($_GET, $_POST));
 									</ol>
 								</div>
 							</div>
-							<a class="th-btn style5" href="/profile/ctld_mobileconfig?device_id='.$device->key.'">Download Profile</a>
+							<a class="th-btn style5" href="/profile/mobileconfig?device_id='.$device->key.'">Download Profile</a>
 						</div>
 					</div>
 				</div>

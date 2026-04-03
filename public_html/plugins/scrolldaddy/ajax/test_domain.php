@@ -8,7 +8,7 @@
 
 header('Content-Type: application/json');
 
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
+require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
 
 $session = SessionControl::get_instance();
 $settings = Globalvars::get_instance();
@@ -41,7 +41,7 @@ if ($domain === '' || strpos($domain, '.') === false) {
 
 // Load device and verify ownership
 try {
-	$device = new CtldDevice($device_id, TRUE);
+	$device = new SdDevice($device_id, TRUE);
 	$device->authenticate_read(array(
 		'current_user_id' => $session->get_user_id(),
 		'current_user_permission' => $session->get_permission(),
@@ -51,7 +51,7 @@ try {
 	exit;
 }
 
-$resolver_uid = $device->get('cdd_resolver_uid');
+$resolver_uid = $device->get('sdd_resolver_uid');
 if (!$resolver_uid) {
 	echo json_encode(array('success' => false, 'message' => 'Device has not been activated yet'));
 	exit;

@@ -1,16 +1,16 @@
 <?php
 
-function ctldprofile_delete_logic($get_vars, $post_vars){
+function profile_delete_logic($get_vars, $post_vars){
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	
+
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldprofiles_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldfilters_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldservices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
 
 	$page_vars = array();
 
@@ -28,11 +28,11 @@ function ctldprofile_delete_logic($get_vars, $post_vars){
 	$tier = SubscriptionTier::GetUserTier($user->key);
 	$page_vars['tier'] = $tier;
 
-	$profile = new CtldProfile($_REQUEST['profile_id'], TRUE);
+	$profile = new SdProfile($_REQUEST['profile_id'], TRUE);
 	$profile->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
-	if(isset($_POST['confirm'])){	
-		$profile->permanent_delete();			
+	if(isset($_POST['confirm'])){
+		$profile->permanent_delete();
 
 		return LogicResult::redirect('/profile/devices');
 	}
@@ -44,5 +44,5 @@ function ctldprofile_delete_logic($get_vars, $post_vars){
 		return LogicResult::render($page_vars);
 	}
 }
-	
+
 ?>

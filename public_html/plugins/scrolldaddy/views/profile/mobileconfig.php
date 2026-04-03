@@ -1,9 +1,9 @@
 <?php
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getThemeFilePath('ctld_mobileconfig_logic.php', 'logic', 'system', null, 'scrolldaddy'));
+require_once(PathHelper::getThemeFilePath('mobileconfig_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
-$page_vars = process_logic(ctld_mobileconfig_logic($_GET, $_POST));
+$page_vars = process_logic(mobileconfig_logic($_GET, $_POST));
 $device = $page_vars['device'];
 $doh_url = $page_vars['doh_url'];
 $dns_host = $page_vars['dns_host'];
