@@ -524,7 +524,7 @@ class RouteHelper {
                 
                 $activePlugins = PluginHelper::getActivePlugins();
                 foreach ($activePlugins as $pluginName => $pluginHelper) {
-                    if ($pluginHelper->includeFile($route_type . '/' . $file)) {
+                    if ($pluginHelper->includeFile($route_type . '/' . $file . '.php')) {
                         return true;
                     }
                 }
