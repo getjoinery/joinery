@@ -1,7 +1,7 @@
 # ControlD Replacement: Self-Hosted DNS Filtering Service
 
 **Status:** Draft
-**Plugin:** controld (Scrolldaddy)
+**Plugin:** scrolldaddy (new plugin, parallel to existing controld plugin)
 **Scope:** Replace ControlD cloud API with a self-hosted DNS filtering service that replicates ControlD's architecture
 **Related spec:** [ScrollDaddy DNS Service](scrolldaddy_dns_service.md) -- full Go application specification
 
@@ -73,11 +73,11 @@ Currently, every management action makes TWO writes: one to the local database A
 
 2. **Apache Reverse Proxy** (host-level) -- Uses the existing Joinery deployment pattern: Apache on the Docker host with Certbot for Let's Encrypt TLS. Proxies `dns.scrolldaddy.app` traffic to the Go service port inside the container. Same pattern already used for site domains.
 
-3. **Joinery Plugin (modified)** -- The existing PHP plugin, with ControlDHelper replaced by direct database writes. No external API calls needed.
+3. **Scrolldaddy Plugin (new)** -- A new Joinery plugin (`plugins/scrolldaddy/`), created by copying the existing `controld` plugin and removing all ControlD API dependencies. The original `controld` plugin remains untouched as a fallback. Both plugins share the same database tables (`ctld_` prefixed), so switching between them requires no data migration.
 
 4. **Blocklist Downloader** -- A Joinery scheduled task (PHP) using the existing scheduled task framework. Runs periodically to fetch community blocklist URLs, parse them, and store domains in the database.
 
-5. **Blocklist Admin Page** -- A plugin admin page at `plugins/controld/admin/admin_blocklist_sources.php` for managing blocklist source URLs.
+5. **Blocklist Admin Page** -- A plugin admin page at `plugins/scrolldaddy/admin/admin_blocklist_sources.php` for managing blocklist source URLs.
 
 6. **Container Install Script** -- A bash script (`install_scrolldaddy_dns.sh`) that installs Go, compiles the DNS service binary, and configures supervisord to run it alongside Apache and PostgreSQL inside the Docker container.
 
@@ -145,7 +145,7 @@ Index: `CREATE INDEX idx_blocklist_domain ON bld_blocklist_domains(bld_category_
 
 ### Blocklist Downloader (Joinery Scheduled Task)
 
-Uses the existing Joinery scheduled task framework. Two files in `plugins/controld/tasks/`:
+Uses the existing Joinery scheduled task framework. Two files in `plugins/scrolldaddy/tasks/`:
 
 **`DownloadBlocklists.json`**
 ```json
@@ -194,7 +194,7 @@ function run(array $config):
 
 ### Admin Page for Blocklist Sources
 
-**Location:** `plugins/controld/admin/admin_blocklist_sources.php`
+**Location:** `plugins/scrolldaddy/admin/admin_blocklist_sources.php`
 
 A standard Joinery admin table page (following the patterns in `docs/admin_pages.md`) that allows admins to:
 - View all blocklist sources with columns: Name, Category, URL, Format, Active, Last Downloaded, Domain Count
@@ -206,7 +206,7 @@ A standard Joinery admin table page (following the patterns in `docs/admin_pages
 
 **Route:** Auto-discovered as a plugin admin page at `/admin/admin_blocklist_sources` via the existing plugin admin route discovery.
 
-**Logic file:** `plugins/controld/admin/logic/admin_blocklist_sources_logic.php`
+**Logic file:** `plugins/scrolldaddy/admin/logic/admin_blocklist_sources_logic.php`
 
 ### Service Blocking
 
@@ -232,15 +232,32 @@ The existing `ControlDHelper::$services` array already has the service keys and 
 
 ---
 
-## 4. Changes to the Joinery Plugin
+## 4. New Scrolldaddy Plugin (copy-then-convert)
 
-### 4.1 Remove ControlDHelper.php entirely
+### 4.0 Plugin Strategy: Copy First, Then Convert
 
-Every place that calls `new ControlDHelper()` and makes API calls is replaced with direct database operations. The DNS service reads from the same database.
+The `scrolldaddy` plugin is created by **copying the entire `controld` plugin** to `plugins/scrolldaddy/`, then incrementally removing ControlD API dependencies. This approach:
 
-The static `$filters` and `$services` arrays currently defined in ControlDHelper need to move. They should become either:
-- Static arrays in the relevant data model class (CtldFilter, CtldService)
-- Or a new standalone helper file (without any API logic)
+- Starts with a fully working plugin on day one
+- Allows incremental conversion (one logic file at a time)
+- Keeps the original `controld` plugin untouched as a fallback
+- Both plugins share the same database tables (`ctld_` prefixed) -- switching requires only changing which plugin is active
+
+**Copy steps:**
+1. `cp -r plugins/controld/ plugins/scrolldaddy/`
+2. Update `plugin.json`: name, description, version (reset to 1.0.0)
+3. Update `serve.php`: change route prefix from `/controld` to `/scrolldaddy`
+4. Update `settings_form.php`: replace `controld_key` setting with `scrolldaddy_dns_host` and `scrolldaddy_dns_internal_url`
+5. Update `theme.json` if needed (display name, asset paths)
+6. Update CSS/JS asset paths to reference `plugins/scrolldaddy/assets/`
+7. All data classes stay the same (same table names, same class names) -- they are imported from the scrolldaddy plugin's own `data/` directory but point to the same `ctld_` tables
+8. New columns (`cdd_resolver_uid`, `cdp_safesearch`, `cdp_safeyoutube`) are added to existing data class `$field_specifications` -- the controld plugin ignores them harmlessly
+
+**After copying, the conversion work is:**
+
+### 4.1 Remove ControlDHelper.php
+
+Delete `plugins/scrolldaddy/includes/ControlDHelper.php`. Move the static `$filters` and `$services` arrays to a new lightweight file (`plugins/scrolldaddy/includes/ScrollDaddyHelper.php`) that contains only the data arrays and utility methods -- no API calls, no curl
 
 ### 4.2 Device Creation (ctlddevice_edit_logic.php + CtldDevice)
 
@@ -364,37 +381,37 @@ Note: Android's Private DNS uses DNS-over-TLS (DoT), not DoH. The Go service han
 
 ### 5.1 Settings Changes
 
-| Old Setting | New Setting | Purpose |
-|------------|-------------|---------|
-| `controld_key` | Remove | No external API key needed |
-| -- | `scrolldaddy_dns_host` | DNS service hostname (e.g., `dns.scrolldaddy.app`) |
-| -- | `scrolldaddy_dns_internal_url` | Internal URL to DNS service for reload/stats (e.g., `http://localhost:8053`) |
+The scrolldaddy plugin uses its own settings (prefixed `scrolldaddy_`). The controld plugin's `controld_key` setting is left untouched.
 
-### 5.2 Existing Table Changes
+| Setting | Purpose |
+|---------|---------|
+| `scrolldaddy_dns_host` | DNS service hostname (e.g., `dns.scrolldaddy.app`) |
+| `scrolldaddy_dns_internal_url` | Internal URL to DNS service for reload/stats (e.g., `http://localhost:8053`) |
 
-**CtldDevice (cdd_ctlddevices):**
+### 5.2 Existing Table Changes (additive only)
 
-| Field | Change | Notes |
-|-------|--------|-------|
-| `cdd_device_id` | Rename/repurpose to `cdd_resolver_uid` | Unique DoH path identifier (generated locally) |
-| `cdd_controld_resolver` | Remove | Was ControlD's resolver endpoint |
-| `cdd_profile_id_primary` | Remove | Was ControlD's remote profile ID (redundant with `cdd_cdp_ctldprofile_id_primary`) |
-| `cdd_profile_id_secondary` | Remove | Was ControlD's remote profile ID (redundant) |
-| `cdd_is_active` | Simplify | Set to true on creation (always active) |
-| All other fields | Keep | device_name, device_type, user_id, timezone, deactivation_pin, allow_device_edits, etc. |
+Because both plugins share the same tables, changes are **additive only** -- new columns are added, no columns are removed or renamed. The controld plugin ignores the new columns; the scrolldaddy plugin ignores the ControlD-specific columns.
 
-**CtldProfile (cdp_ctldprofiles):**
+**CtldDevice (cdd_ctlddevices) -- add columns:**
 
-| Field | Change | Notes |
-|-------|--------|-------|
-| `cdp_profile_id` | Remove | Was ControlD's remote profile ID |
-| `cdp_schedule_id` | Remove | Was ControlD's remote schedule ID |
-| `cdp_safesearch` | Add (bool) | Per-profile SafeSearch toggle |
-| `cdp_safeyoutube` | Add (bool) | Per-profile SafeYouTube toggle |
-| `cdp_schedule_days` | Change format | Convert from PHP `serialize()` to `json_encode()`. Data migration needed for existing rows. |
-| All other schedule fields | Keep | cdp_schedule_start, end, timezone |
+| Field | Type | Notes |
+|-------|------|-------|
+| `cdd_resolver_uid` | varchar(32) | Unique DoH path identifier, generated locally via `bin2hex(random_bytes(16))`. The scrolldaddy plugin populates this on device creation. The controld plugin ignores it. |
 
-**CtldFilter, CtldService, CtldRule:** No structural changes needed. These tables already store the right data -- they just no longer need to be "synced" to a remote API.
+Existing ControlD-specific columns (`cdd_device_id`, `cdd_controld_resolver`, `cdd_profile_id_primary`, `cdd_profile_id_secondary`) stay in place -- they are used by the controld plugin and ignored by scrolldaddy.
+
+**CtldProfile (cdp_ctldprofiles) -- add columns:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `cdp_safesearch` | boolean, default false | Per-profile SafeSearch toggle |
+| `cdp_safeyoutube` | boolean, default false | Per-profile SafeYouTube toggle |
+
+Existing ControlD-specific columns (`cdp_profile_id`, `cdp_schedule_id`) stay in place.
+
+**Schedule days format:** `cdp_schedule_days` currently uses PHP `serialize()`. The scrolldaddy plugin will write JSON (`json_encode()`), and its logic files will read with `json_decode()`. A data migration converts existing serialized rows to JSON format. The controld plugin also handles JSON fine since `json_decode` is used in newer code paths. If rollback to controld is needed, the JSON format is compatible.
+
+**CtldFilter, CtldService, CtldRule:** No changes needed. These tables already store the right data -- the scrolldaddy plugin just stops syncing them to a remote API.
 
 ### 5.3 New Tables
 
@@ -600,88 +617,105 @@ After Certbot, all traffic to `https://dns.scrolldaddy.app/resolve/{uid}` is pro
 
 ## 7. Implementation Plan
 
-### Phase 1: Blocklist Infrastructure (PHP only, no Go yet)
+### Phase 1: Go DNS Service
 
-Build the data layer and admin tooling first so blocklists are ready when the DNS service comes online.
+Build the core service first and prove it works against the existing database before touching anything on the PHP side. The existing controld plugin data (devices, profiles, filters, rules) provides real test data.
 
-1. Create data model classes for `bls_blocklist_sources`, `bld_blocklist_domains`, `svd_service_domains` in `plugins/controld/data/`
-2. Create admin page `plugins/controld/admin/admin_blocklist_sources.php` with logic file
-3. Build the `DownloadBlocklists` scheduled task (`plugins/controld/tasks/`)
-4. Populate `bls_blocklist_sources` with community blocklist URLs for initial categories (ads, malware, porn at minimum)
-5. Test: activate the scheduled task, run manually, verify domains populate in DB
+**1a. Blocklist infrastructure (prerequisite -- the Go service needs blocklist data to read):**
+1. Create data model classes for `bls_blocklist_sources`, `bld_blocklist_domains`, `svd_service_domains` -- these are new tables, added via the controld plugin's data directory initially (or standalone scripts) so they exist before the Go service starts
+2. Populate `bls_blocklist_sources` with community blocklist URLs for initial categories
+3. Run a one-time blocklist download to populate `bld_blocklist_domains`
+4. Add `cdd_resolver_uid` column to `cdd_ctlddevices` and populate existing devices with generated UIDs
+5. Add `cdp_safesearch` and `cdp_safeyoutube` columns to `cdp_ctldprofiles`
 
-### Phase 2: Go DNS Service
+**1b. Go DNS service:**
+1. Install Go on test server (`sudo apt install golang-go`)
+2. Create `scrolldaddy-dns/` Go project with full directory structure per **[scrolldaddy_dns_service.md](scrolldaddy_dns_service.md)**
+3. Implement all modules: config, db, cache, doh, dot, resolver, upstream
+4. Test locally against the test database -- verify it reads existing devices/profiles/filters/rules, resolves queries, blocks domains
 
-Build and test the core DNS service per **[scrolldaddy_dns_service.md](scrolldaddy_dns_service.md)**.
+**Deliverable:** A working DNS service running on the test server that can resolve DoH queries, block domains based on profile/category, and read all config from the existing Joinery database.
 
-1. Create `scrolldaddy-dns/` Go project with full directory structure
-2. Implement all modules: config, db, cache, doh, dot, resolver, upstream
-3. Test locally against the test database
+### Phase 2: Copy Plugin & Convert
 
-**Deliverable:** A working DNS service that can resolve queries, block domains based on profile/category, and read config from the Joinery database.
+With the Go service proven, create the new scrolldaddy plugin and strip out ControlD dependencies.
 
-### Phase 3: Container Installation
+**2a. Copy and rebrand the plugin:**
+1. `cp -r plugins/controld/ plugins/scrolldaddy/`
+2. Update `plugin.json` (name: "ScrollDaddy", version: "1.0.0", description updated)
+3. Update `serve.php` route prefix from `/controld` to `/scrolldaddy`
+4. Update `settings_form.php`: replace `controld_key` with `scrolldaddy_dns_host` and `scrolldaddy_dns_internal_url`
+5. Update `theme.json` display name
+6. Update asset paths in CSS/JS references to `plugins/scrolldaddy/assets/`
+7. Verify the copied plugin loads and works identically to controld (it still has ControlDHelper at this point -- that is fine, it is a working copy)
+
+**2b. Remove ControlD API dependency:**
+1. Create `ScrollDaddyHelper.php` -- move `$filters` and `$services` arrays from ControlDHelper, no API methods
+2. Delete `ControlDHelper.php` from the scrolldaddy plugin
+3. Update all `require` / `new ControlDHelper()` references to use ScrollDaddyHelper
+4. Simplify `ctlddevice_edit_logic.php` -- generate resolver UID locally, no API calls for device/profile creation
+5. Simplify `ctldfilters_edit_logic.php` / `CtldProfile::update_remote_filters()` -- just update local DB
+6. Simplify `CtldProfile::update_remote_services()` -- just update local DB
+7. Simplify `rules_logic.php` / `CtldProfile::add_rule()` / `delete_rule()` -- just update local DB
+8. Simplify `CtldProfile::add_or_edit_schedule()` -- just update local DB
+9. Simplify `CtldDevice::permanent_delete()` -- just delete local records
+10. Simplify `ctld_activation_logic.php` / `CtldDevice::check_activate()` -- auto-activate on creation
+11. Simplify `ctlddevice_soft_delete_logic.php` -- just update local DB, no API call
+12. Update views to show DoH resolver URL instead of ControlD setup instructions
+13. Update activation page to show DoH/DoT setup URLs instead of ControlD app downloads
+14. Data migration: convert existing `cdp_schedule_days` from PHP `serialize()` to `json_encode()` format
+
+**2c. Blocklist admin & scheduled task (inside the new scrolldaddy plugin):**
+1. Create admin page `plugins/scrolldaddy/admin/admin_blocklist_sources.php` with logic file
+2. Build the `DownloadBlocklists` scheduled task (`plugins/scrolldaddy/tasks/`)
+3. Move the blocklist data model classes into `plugins/scrolldaddy/data/`
+
+### Phase 3: Container Infrastructure & Deployment
 
 1. Create `install_scrolldaddy_dns.sh` (Section 6.3)
 2. Modify `Dockerfile.template` to include Go compilation and supervisord (Section 6.4)
 3. Update `install.sh` port mapping (Section 6.5)
 4. Set up host-level Apache reverse proxy for DNS domain (Section 6.6)
-5. Configure DNS records (Section 6.7)
+5. Configure DNS records (Section 6.7) -- should already be done by now
 6. Test end-to-end: build container, verify DNS service starts, test DoH resolution via public URL
 
-### Phase 4: Plugin Refactor
+### Phase 4: Advanced Features & Polish
 
-1. Remove `ControlDHelper.php`; move `$filters` and `$services` arrays to appropriate data classes
-2. Simplify `CtldDevice::createDevice()` -- generate resolver UID locally, no API calls
-3. Simplify `CtldProfile::createProfile()` -- just create DB row
-4. Simplify `CtldProfile::update_remote_filters()` -- just update local DB
-5. Simplify `CtldProfile::update_remote_services()` -- just update local DB
-6. Simplify `CtldProfile::add_rule()` / `delete_rule()` -- just update local DB
-7. Simplify `CtldProfile::add_or_edit_schedule()` -- just update local DB
-8. Simplify `CtldDevice::permanent_delete()` -- just delete local records
-9. Simplify `CtldDevice::check_activate()` -- auto-activate on creation
-10. Simplify soft delete logic -- just update local DB, no API call
-11. Update views to show DoH resolver URL instead of ControlD setup instructions
-12. Update activation page to show DoH/DoT URLs instead of ControlD app downloads
-13. Update `settings_form.php` to remove controld_key, add new settings
-
-### Phase 5: Scheduling & Advanced Features
-
-1. Add SafeSearch/SafeYouTube fields to CtldProfile and filter edit UI
+1. Add SafeSearch/SafeYouTube UI to filter edit page
 2. Service-level blocking: populate `svd_service_domains` with service domain lists
-
-### Phase 6: Cleanup
-
-1. Remove unused database fields (cdd_controld_resolver, cdp_profile_id, cdp_schedule_id, etc.)
-2. Update test suite
 3. Update documentation references
-4. Consider renaming ctld* prefixes to scd* (scrolldaddy) -- optional, cosmetic
+4. Test switching between controld and scrolldaddy plugins to verify fallback works
 
 ---
 
 ## 8. What Changes, What Stays, What's New
 
-### Simplified (less code)
+### Controld Plugin
+- **Untouched** -- The existing `plugins/controld/` directory is not modified at all. It remains as a working fallback if the self-hosted DNS service has issues.
+
+### Scrolldaddy Plugin (new, forked from controld)
+- **ControlDHelper.php** -- Replaced with lightweight `ScrollDaddyHelper.php` (data arrays only, no API calls)
 - **Device creation** -- 2 DB inserts instead of 5 API calls + 2 DB inserts
 - **Filter toggling** -- 1 DB update instead of API call + DB update
-- **Rule management** -- 1 DB operation instead of API call + DB operation
-- **Schedule management** -- 1 DB update instead of API call + DB update
-- **Device deletion** -- DB deletes only, no API calls
-- **ControlDHelper.php** -- Deleted entirely (1749 lines removed)
+- **Rule/schedule/delete operations** -- DB-only, no API calls
+- **All views/templates** -- Carried over from controld (minor text changes for DoH URLs)
+- **All business logic** -- Carried over (edit restrictions, deactivation PINs, tier limits)
+- **Database tables** -- Shared with controld (`ctld_` prefix). New columns added, no columns removed.
+- **Filter/service category keys** -- Same keys, same UI
 
-### Unchanged
-- **All views/templates** -- Device dashboard, filter editor, rule editor (minor text changes only)
-- **All business logic** -- Edit restrictions, deactivation PINs, subscription tier limits
-- **All data model classes** -- Same tables, same fields (minus a few removed columns)
-- **Filter category keys** -- Same keys (ads, porn, malware, etc.), same UI
-- **Service blocking keys** -- Same keys (spotify, facebook, etc.), same UI
-- **Scheduling model** -- Same primary/secondary profile concept, same schedule fields
-
-### New
-- **ScrollDaddy DNS Service** -- Go binary (written by Claude, see [scrolldaddy_dns_service.md](scrolldaddy_dns_service.md))
-- **Blocklist management** -- Download scheduled task, admin page, new data model classes
+### New Infrastructure
+- **ScrollDaddy DNS Service** -- Go binary (see [scrolldaddy_dns_service.md](scrolldaddy_dns_service.md))
+- **Blocklist management** -- Download scheduled task, admin page, 3 new data model classes
 - **Container infrastructure** -- supervisord, Go compilation, additional port mappings
 - **Per-profile SafeSearch/SafeYouTube** -- DNS rewrites in Go service
+
+### Switching Between Plugins
+Both plugins share the same database tables. To switch:
+1. Disable one plugin, enable the other (in Joinery plugin settings)
+2. No data migration needed -- device, profile, filter, rule data is the same
+3. The controld plugin syncs to ControlD's cloud API; the scrolldaddy plugin relies on the local Go DNS service
+4. ControlD-specific columns (`cdd_device_id`, `cdd_controld_resolver`, `cdp_profile_id`, `cdp_schedule_id`) are ignored by scrolldaddy
+5. Scrolldaddy-specific columns (`cdd_resolver_uid`, `cdp_safesearch`, `cdp_safeyoutube`) are ignored by controld
 
 ### Uses Existing Joinery Systems
 - **Scheduled tasks** -- Blocklist downloader uses existing ScheduledTaskInterface, auto-discovered, admin-configurable
@@ -713,6 +747,8 @@ Build and test the core DNS service per **[scrolldaddy_dns_service.md](scrolldad
 
 6. **Fallback behavior:** DECIDED — Serve from cached data if DB goes down. SERVFAIL if cache was never loaded. Supervisord restarts the process if it crashes. See DNS service spec Section 14.
 
-7. **Table/class renaming:** DECIDED — Not now. Possible future cleanup to rename `ctld*` prefixes to `scd*` (scrolldaddy), but zero functional benefit and large refactor scope.
+7. **Table/class renaming:** DECIDED — Not applicable. The scrolldaddy plugin shares tables with the controld plugin (`ctld_` prefix) to enable switching between them. The data classes keep their existing names (CtldDevice, CtldProfile, etc.). Renaming would break the shared-table approach.
+
+9. **Plugin strategy:** DECIDED — Create a new `plugins/scrolldaddy/` plugin by copying the existing `plugins/controld/` plugin, then converting it. The controld plugin stays untouched as a fallback. Both plugins share the same database tables (`ctld_` prefix). Switching requires only changing which plugin is active -- no data migration.
 
 8. **Wildcard TLS for DoT:** DECIDED — Domain registered at Namecheap, DNS managed by Cloudflare. Use `certbot` with the `certbot-dns-cloudflare` plugin for automated wildcard cert issuance and renewal for `*.dns.scrolldaddy.app`. Requires a Cloudflare API token with DNS edit permissions, stored in a credentials file on the Docker host. Command: `certbot certonly --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini -d "*.dns.scrolldaddy.app"`. The resulting cert/key files are mounted into the container for the Go service to use for DoT.
