@@ -3,7 +3,7 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic', 'system', null, 'controld'));	
+	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic'));
 
 	$page_vars = process_logic(contact_preferences_logic($_GET, $_POST));
 

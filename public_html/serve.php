@@ -150,7 +150,7 @@ $routes = [
     'custom' => [
         // Plugin admin discovery
         '/plugins/{plugin}/admin/*' => function($params, $settings, $session, $template_directory) {
-            // $params is URL segments: [0]="", [1]="plugins", [2]="controld", [3]="admin", [4]="admin_ctld_account"
+            // $params is URL segments: [0]="", [1]="plugins", [2]="scrolldaddy", [3]="admin", [4]="admin_ctld_account"
             $plugin = $params[2] ?? '';
             $admin_page = $params[4] ?? 'index';
             $admin_file = "plugins/{$plugin}/admin/{$admin_page}.php";

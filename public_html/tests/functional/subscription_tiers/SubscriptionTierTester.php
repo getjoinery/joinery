@@ -406,7 +406,7 @@ class SubscriptionTierTester {
         $tier->addUser($this->test_user_id, 'manual', 'test', null, 1);
 
         // Get feature
-        $max_devices = SubscriptionTier::getUserFeature($this->test_user_id, 'controld_max_devices', 1);
+        $max_devices = SubscriptionTier::getUserFeature($this->test_user_id, 'scrolldaddy_max_devices', 1);
         echo "<p>User's max_devices: <strong>$max_devices</strong></p>";
 
         // Get tier display
