@@ -1,0 +1,12 @@
+{
+    "name": "ScrollDaddy",
+    "version": "1.0.0",
+    "description": "Self-hosted DNS filtering service - local replacement for ControlD cloud API",
+    "author": "System Developer",
+    "is_stock": true,
+    "provides_theme": true,
+    "requires": {
+        "php": ">=8.0",
+        "extensions": []
+    }
+}

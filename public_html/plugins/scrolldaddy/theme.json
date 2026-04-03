@@ -1,0 +1,15 @@
+{
+    "display_name": "ScrollDaddy Theme",
+    "description": "ScrollDaddy self-hosted DNS filtering service complete theme",
+    "version": "1.0.0",
+    "author": "System Developer",
+    "asset_fallback_theme": "falcon",
+    "assets": {
+        "css": [
+            "/plugins/scrolldaddy/assets/css/controld-plugin.css"
+        ],
+        "js": [
+            "/plugins/scrolldaddy/assets/js/controld-plugin.js"
+        ]
+    }
+}
