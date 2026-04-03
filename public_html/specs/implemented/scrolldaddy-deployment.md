@@ -2,8 +2,8 @@
 
 **Status:** Draft
 **Related specs:**
-- [ScrollDaddy DNS Service](scrolldaddy_dns_service.md) — Go application spec
-- [ControlD to ScrollDaddy Migration](controld_to_pihole_migration.md) — Plugin conversion spec
+- [ScrollDaddy DNS Service](scrolldaddy-dns-service.md) — Go application spec
+- [ControlD to ScrollDaddy Migration](scrolldaddy-migration.md) — Plugin conversion spec
 
 ---
 
