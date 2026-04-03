@@ -1324,3 +1324,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== ScrollDaddy blocklist version tracking (v94) ==========
+	$migration = array();
+	$migration['database_version'] = '94';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'scrolldaddy_blocklist_version'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('scrolldaddy_blocklist_version', '', 1, now(), now(), 'scrolldaddy')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
