@@ -70,7 +70,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 			}
 		}
 
-		if($profile == 'primary'){
+		if($profile_choice == 'primary'){
 
 			//NOW FIGURE OUT WHAT UPDATES WE HAVE TO THE FILTERS
 			$profile->update_remote_filters($_POST);

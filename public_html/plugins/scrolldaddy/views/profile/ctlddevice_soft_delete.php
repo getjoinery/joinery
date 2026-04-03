@@ -3,7 +3,7 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('ctlddevice_soft_delete_logic.php', 'logic', 'system', null, 'controld'));
+require_once(PathHelper::getThemeFilePath('ctlddevice_soft_delete_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
 $page_vars = process_logic(ctlddevice_soft_delete_logic($_GET, $_POST));
 	$device = $page_vars['device'];

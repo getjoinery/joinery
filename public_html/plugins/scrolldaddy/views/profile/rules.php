@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('rules_logic.php', 'logic', 'system', null, 'controld'));
+require_once(PathHelper::getThemeFilePath('rules_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
 $page_vars = process_logic(rules_logic($_GET, $_POST));
 	$profile_choice = $page_vars['profile_choice'];
