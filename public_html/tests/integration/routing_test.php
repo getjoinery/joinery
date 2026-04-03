@@ -520,8 +520,7 @@ class HttpRoutingTestRunner {
         $test_cases = [
             // Existing admin page (should require auth)
             ['/admin/admin_users', [301, 302, 401, 403], 'Existing admin page (should require auth)'],
-			['/plugins/controld/admin/admin_ctld_account', [301, 302, 401, 403], 'Existing plugin admin page (should require auth)'],
-            
+
             // Admin page that doesn't exist
             ['/admin/definitely-fake-admin-page', [404, 401, 403], 'Admin page (does not exist)'],
         ];

@@ -3,7 +3,7 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('account_edit_logic.php', 'logic', 'system', null, 'controld'));	
+	require_once(PathHelper::getThemeFilePath('account_edit_logic.php', 'logic'));
 	
 	$page_vars = process_logic(account_edit_logic($_GET, $_POST));
 
