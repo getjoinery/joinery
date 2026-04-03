@@ -105,7 +105,7 @@ function authenticate_write($data) {
 			case 'error':
 				return '<span class="badge bg-danger">Error</span>';
 			case 'uninstalled':
-				return '<span class="badge bg-dark text-white"><i class="fas fa-times-circle"></i> Uninstalled</span>';
+				return '<span class="badge bg-light text-dark border border-secondary"><i class="fas fa-times-circle"></i> Uninstalled</span>';
 			default:
 				// Legacy support
 				if ($this->is_active()) {

@@ -189,12 +189,12 @@ else{
 							</div>
 							<div class="author-info">
 								<h3 class="company-name">Test a Domain</h3>
-								<div style="display:flex; gap:8px; margin-top:6px;">
-									<input type="text" class="scd-test-input" data-device-id="'.$device->key.'" placeholder="e.g. facebook.com" style="flex:1; padding:6px 10px; border:1px solid #ddd; border-radius:4px; font-size:14px;">
-									<button type="button" class="th-btn style5 scd-test-btn" data-device-id="'.$device->key.'">Test</button>
-								</div>
 								<div class="scd-test-result" id="scd-result-'.$device->key.'" style="display:none; margin-top:8px;"></div>
 							</div>
+						</div>
+						<div style="display:flex; gap:8px;">
+							<input type="text" class="scd-test-input" data-device-id="'.$device->key.'" placeholder="e.g. facebook.com" style="padding:6px 10px; border:1px solid #ddd; border-radius:4px; font-size:14px; width:160px;">
+							<button type="button" class="th-btn style5 scd-test-btn" data-device-id="'.$device->key.'">Test</button>
 						</div>
 					</div>
 					</div>
