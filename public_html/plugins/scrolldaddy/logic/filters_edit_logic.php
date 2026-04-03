@@ -1,14 +1,14 @@
 <?php
 
-function ctldfilters_edit_logic($get_vars, $post_vars){
+function filters_edit_logic($get_vars, $post_vars){
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	
+
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctlddevices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/ctldprofiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
 
 	$page_vars = array();
 
@@ -29,27 +29,27 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 	if(isset($_POST['action'])){
 		$profile_choice = LibraryFunctions::fetch_variable_local($post_vars, 'profile_choice', 0, 'required', 'Profile choice is required.', 'safemode', NULL);
 		$page_vars['profile_choice'] = $profile_choice;
-	
+
 		$device_id = LibraryFunctions::fetch_variable_local($post_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
-		$device = new CtldDevice($device_id, TRUE);
+		$device = new SdDevice($device_id, TRUE);
 		$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_vars['device'] = $device;
-		
+
 		if($profile_choice == 'primary'){
-			$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
+			$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
 		}
 		else{
 			//CREATE THE SECOND PROFILE IF NEEEDED (SCHEDULED STUFF)
-			if($device->get('cdd_cdp_ctldprofile_id_secondary')){
-				$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+			if($device->get('sdd_sdp_profile_id_secondary')){
+				$profile = new SdProfile($device->get('sdd_sdp_profile_id_secondary'), TRUE);
 			}
 			else{
 				$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile2';
-				$profile = CtldProfile::createProfile($profile_name, $user);
-				$device->set('cdd_cdp_ctldprofile_id_secondary', $profile->key);
+				$profile = SdProfile::createProfile($profile_name, $user);
+				$device->set('sdd_sdp_profile_id_secondary', $profile->key);
 				$device->save();
 			}
-		}		
+		}
 		$page_vars['profile'] = $profile;
 
 		//CHANGE DROPDOWN STRUCTURE
@@ -60,7 +60,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 				$_POST['block_malware'] = 0;
 			}
 		}
-		
+
 		if(isset($_POST['block_ads'])){
 			if($_POST['block_ads'] != 0){
 				$new_key = 'block_'.$_POST['block_ads'];
@@ -77,7 +77,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 
 		}
 		else{
-			
+
 			//NOW FIGURE OUT WHAT UPDATES WE HAVE TO THE FILTERS
 			$profile->update_remote_filters($_POST);
 			$profile->update_remote_services($_POST);
@@ -90,26 +90,26 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 	else{
 		$profile_choice = LibraryFunctions::fetch_variable_local($get_vars, 'profile_choice', 0, 'required', 'Profile choice is required.', 'safemode', NULL);
 		$page_vars['profile_choice'] = $profile_choice;
-		
+
 		$device_id = LibraryFunctions::fetch_variable_local($get_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
-		$device = new CtldDevice($device_id, TRUE);
+		$device = new SdDevice($device_id, TRUE);
 		$device->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_vars['device'] = $device;
-			
+
 		if($profile_choice == 'primary'){
-			$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_primary'), TRUE);
+			$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
 		}
 		else{
-			if($device->get('cdd_cdp_ctldprofile_id_secondary')){
-				$profile = new CtldProfile($device->get('cdd_cdp_ctldprofile_id_secondary'), TRUE);
+			if($device->get('sdd_sdp_profile_id_secondary')){
+				$profile = new SdProfile($device->get('sdd_sdp_profile_id_secondary'), TRUE);
 			}
 			else{
-				$profile = new CtldProfile(NULL);
+				$profile = new SdProfile(NULL);
 			}
 		}
 		$page_vars['profile'] = $profile;
-		
-		$filters = new MultiCtldFilter(
+
+		$filters = new MultiSdFilter(
 				array(
 					'profile_id' => $profile->key,
 				),
@@ -121,7 +121,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		$filter_out = array();
 
 		foreach($filters as $filter){
-			$filter_out[$filter->get('cdf_filter_pk')] = $filter->get('cdf_is_active');
+			$filter_out[$filter->get('sdf_filter_key')] = $filter->get('sdf_is_active');
 		}
 
 		//DROPDOWN FORMATTING
@@ -133,7 +133,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		}
 		else if($filter_out['ads_small']){
 			$filter_out['ads'] = 'ads_small';
-		}	
+		}
 
 		//DROPDOWN FORMATTING
 		if($filter_out['malware']){
@@ -145,10 +145,10 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		else if($filter_out['ai_malware']){
 			$filter_out['malware'] = 'ai_malware';
 		}
-		
+
 		$page_vars['filters'] = $filter_out;
 
-		$services = new MultiCtldService(
+		$services = new MultiSdService(
 				array(
 					'profile_id' => $profile->key,
 				),
@@ -159,7 +159,7 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 		//$page_vars['num_services'] = $num_devices;
 		$service_out = array();
 		foreach($services as $service){
-			$service_out[$service->get('cds_service_pk')] = $service->get('cds_is_active');
+			$service_out[$service->get('sds_service_key')] = $service->get('sds_is_active');
 		}
 
 		$page_vars['services'] = $service_out;
@@ -168,5 +168,5 @@ function ctldfilters_edit_logic($get_vars, $post_vars){
 
 	return LogicResult::render($page_vars);
 }
-	
+
 ?>

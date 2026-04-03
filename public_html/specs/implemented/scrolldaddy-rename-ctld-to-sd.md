@@ -108,84 +108,80 @@ Note: `/profile/device_edit` and `/profile/filters_edit` are already clean at th
 
 ---
 
-## Phase 1: Database Migration
+## Phase 1: Database Renames
 
-Add to `plugins/scrolldaddy/migrations/migrations.php`. This migration must be run **before** deploying the code changes.
+Run this directly in psql before deploying the code changes. No file needed — copy/paste into the psql session or run via `! psql -U postgres -d joinerytest` from the CLI:
 
-```php
-// Migration: Rename ctld tables and columns to sd naming
-// Run via admin utilities > Run Migrations
-$migrations[] = array(
-    'version' => 'scrolldaddy_rename_ctld_to_sd',
-    'description' => 'Rename ctld-prefixed tables and columns to sd prefix',
-    'sql' => "
-        -- ── Profiles table ────────────────────────────────────────────────
-        ALTER TABLE cdp_ctldprofiles RENAME TO sdp_profiles;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_ctldprofile_id TO sdp_profile_id;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_usr_user_id TO sdp_usr_user_id;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_is_active TO sdp_is_active;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_create_time TO sdp_create_time;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_delete_time TO sdp_delete_time;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_start TO sdp_schedule_start;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_end TO sdp_schedule_end;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_days TO sdp_schedule_days;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_timezone TO sdp_schedule_timezone;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_safesearch TO sdp_safesearch;
-        ALTER TABLE sdp_profiles RENAME COLUMN cdp_safeyoutube TO sdp_safeyoutube;
+```sql
+BEGIN;
 
-        -- ── Devices table ─────────────────────────────────────────────────
-        ALTER TABLE cdd_ctlddevices RENAME TO sdd_devices;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_ctlddevice_id TO sdd_device_id;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_device_name TO sdd_device_name;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_device_type TO sdd_device_type;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_cdp_ctldprofile_id_primary TO sdd_sdp_profile_id_primary;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_cdp_ctldprofile_id_secondary TO sdd_sdp_profile_id_secondary;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_usr_user_id TO sdd_usr_user_id;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_is_active TO sdd_is_active;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_create_time TO sdd_create_time;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_delete_time TO sdd_delete_time;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_deactivation_pin TO sdd_deactivation_pin;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_timezone TO sdd_timezone;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_allow_device_edits TO sdd_allow_device_edits;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_activate_time TO sdd_activate_time;
-        ALTER TABLE sdd_devices RENAME COLUMN cdd_resolver_uid TO sdd_resolver_uid;
+-- Profiles
+ALTER TABLE cdp_ctldprofiles RENAME TO sdp_profiles;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_ctldprofile_id TO sdp_profile_id;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_usr_user_id TO sdp_usr_user_id;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_is_active TO sdp_is_active;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_create_time TO sdp_create_time;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_delete_time TO sdp_delete_time;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_start TO sdp_schedule_start;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_end TO sdp_schedule_end;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_days TO sdp_schedule_days;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_schedule_timezone TO sdp_schedule_timezone;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_safesearch TO sdp_safesearch;
+ALTER TABLE sdp_profiles RENAME COLUMN cdp_safeyoutube TO sdp_safeyoutube;
 
-        -- ── Filters table ─────────────────────────────────────────────────
-        ALTER TABLE cdf_ctldfilters RENAME TO sdf_filters;
-        ALTER TABLE sdf_filters RENAME COLUMN cdf_ctldfilter_id TO sdf_filter_id;
-        ALTER TABLE sdf_filters RENAME COLUMN cdf_cdp_ctldprofile_id TO sdf_sdp_profile_id;
-        ALTER TABLE sdf_filters RENAME COLUMN cdf_filter_pk TO sdf_filter_key;
-        ALTER TABLE sdf_filters RENAME COLUMN cdf_is_active TO sdf_is_active;
+-- Devices
+ALTER TABLE cdd_ctlddevices RENAME TO sdd_devices;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_ctlddevice_id TO sdd_device_id;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_device_name TO sdd_device_name;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_device_type TO sdd_device_type;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_cdp_ctldprofile_id_primary TO sdd_sdp_profile_id_primary;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_cdp_ctldprofile_id_secondary TO sdd_sdp_profile_id_secondary;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_usr_user_id TO sdd_usr_user_id;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_is_active TO sdd_is_active;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_create_time TO sdd_create_time;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_delete_time TO sdd_delete_time;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_deactivation_pin TO sdd_deactivation_pin;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_timezone TO sdd_timezone;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_allow_device_edits TO sdd_allow_device_edits;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_activate_time TO sdd_activate_time;
+ALTER TABLE sdd_devices RENAME COLUMN cdd_resolver_uid TO sdd_resolver_uid;
 
-        -- ── Rules table ───────────────────────────────────────────────────
-        ALTER TABLE cdr_ctldrules RENAME TO sdr_rules;
-        ALTER TABLE sdr_rules RENAME COLUMN cdr_ctldrule_id TO sdr_rule_id;
-        ALTER TABLE sdr_rules RENAME COLUMN cdr_cdp_ctldprofile_id TO sdr_sdp_profile_id;
-        ALTER TABLE sdr_rules RENAME COLUMN cdr_rule_hostname TO sdr_hostname;
-        ALTER TABLE sdr_rules RENAME COLUMN cdr_is_active TO sdr_is_active;
-        ALTER TABLE sdr_rules RENAME COLUMN cdr_rule_action TO sdr_action;
-        ALTER TABLE sdr_rules RENAME COLUMN cdr_rule_via TO sdr_via;
+-- Filters
+ALTER TABLE cdf_ctldfilters RENAME TO sdf_filters;
+ALTER TABLE sdf_filters RENAME COLUMN cdf_ctldfilter_id TO sdf_filter_id;
+ALTER TABLE sdf_filters RENAME COLUMN cdf_cdp_ctldprofile_id TO sdf_sdp_profile_id;
+ALTER TABLE sdf_filters RENAME COLUMN cdf_filter_pk TO sdf_filter_key;
+ALTER TABLE sdf_filters RENAME COLUMN cdf_is_active TO sdf_is_active;
 
-        -- ── Services table ────────────────────────────────────────────────
-        ALTER TABLE cds_ctldservices RENAME TO sds_services;
-        ALTER TABLE sds_services RENAME COLUMN cds_ctldservice_id TO sds_service_id;
-        ALTER TABLE sds_services RENAME COLUMN cds_cdp_ctldprofile_id TO sds_sdp_profile_id;
-        ALTER TABLE sds_services RENAME COLUMN cds_service_pk TO sds_service_key;
-        ALTER TABLE sds_services RENAME COLUMN cds_is_active TO sds_is_active;
+-- Rules
+ALTER TABLE cdr_ctldrules RENAME TO sdr_rules;
+ALTER TABLE sdr_rules RENAME COLUMN cdr_ctldrule_id TO sdr_rule_id;
+ALTER TABLE sdr_rules RENAME COLUMN cdr_cdp_ctldprofile_id TO sdr_sdp_profile_id;
+ALTER TABLE sdr_rules RENAME COLUMN cdr_rule_hostname TO sdr_hostname;
+ALTER TABLE sdr_rules RENAME COLUMN cdr_is_active TO sdr_is_active;
+ALTER TABLE sdr_rules RENAME COLUMN cdr_rule_action TO sdr_action;
+ALTER TABLE sdr_rules RENAME COLUMN cdr_rule_via TO sdr_via;
 
-        -- ── Device backups table ──────────────────────────────────────────
-        ALTER TABLE cdb_ctlddevice_backups RENAME TO sddb_device_backups;
-        ALTER TABLE sddb_device_backups RENAME COLUMN cdb_ctlddevice_backup_id TO sddb_device_backup_id;
-        ALTER TABLE sddb_device_backups RENAME COLUMN cdb_device_backup_name TO sddb_device_backup_name;
-        ALTER TABLE sddb_device_backups RENAME COLUMN cdb_usr_user_id TO sddb_usr_user_id;
-        ALTER TABLE sddb_device_backups RENAME COLUMN cdb_create_time TO sddb_create_time;
-        ALTER TABLE sddb_device_backups RENAME COLUMN cdb_delete_time TO sddb_delete_time;
-        ALTER TABLE sddb_device_backups RENAME COLUMN cdb_deactivation_pin TO sddb_deactivation_pin;
-    "
-);
+-- Services
+ALTER TABLE cds_ctldservices RENAME TO sds_services;
+ALTER TABLE sds_services RENAME COLUMN cds_ctldservice_id TO sds_service_id;
+ALTER TABLE sds_services RENAME COLUMN cds_cdp_ctldprofile_id TO sds_sdp_profile_id;
+ALTER TABLE sds_services RENAME COLUMN cds_service_pk TO sds_service_key;
+ALTER TABLE sds_services RENAME COLUMN cds_is_active TO sds_is_active;
+
+-- Device backups
+ALTER TABLE cdb_ctlddevice_backups RENAME TO sddb_device_backups;
+ALTER TABLE sddb_device_backups RENAME COLUMN cdb_ctlddevice_backup_id TO sddb_device_backup_id;
+ALTER TABLE sddb_device_backups RENAME COLUMN cdb_device_backup_name TO sddb_device_backup_name;
+ALTER TABLE sddb_device_backups RENAME COLUMN cdb_usr_user_id TO sddb_usr_user_id;
+ALTER TABLE sddb_device_backups RENAME COLUMN cdb_create_time TO sddb_create_time;
+ALTER TABLE sddb_device_backups RENAME COLUMN cdb_delete_time TO sddb_delete_time;
+ALTER TABLE sddb_device_backups RENAME COLUMN cdb_deactivation_pin TO sddb_deactivation_pin;
+
+COMMIT;
 ```
 
-**Note on legacy columns:** The DB may still contain obsolete ctld columns that were already removed from `field_specifications` (`cdd_device_id`, `cdd_profile_id_primary`, `cdd_profile_id_secondary`, `cdp_profile_id`, `cdp_schedule_id`, `cdd_controld_resolver`). These were not removed by the migration above because they aren't referenced in code. They can be left in place or dropped with additional `ALTER TABLE ... DROP COLUMN` statements — add those if desired.
+**Note on legacy columns:** The DB may also contain orphaned ctld columns (`cdd_device_id`, `cdd_profile_id_primary`, `cdd_profile_id_secondary`, `cdp_profile_id`, `cdp_schedule_id`, `cdd_controld_resolver`) that are already unused. Drop them in the same session if desired, before `COMMIT`.
 
 ---
 
@@ -641,7 +637,7 @@ After implementation, run these checks before marking complete:
 
 - [ ] `php -l` on every modified PHP file — zero syntax errors
 - [ ] Run `validate_php_file.php` on every modified PHP file — no unresolved method calls
-- [ ] Run the DB migration on the test site and verify all 6 tables exist with new names
+- [ ] Run the Phase 1 SQL block in psql and verify it commits cleanly
 - [ ] Run `psql -U postgres -d joinerytest -c "\d sdp_profiles"` — verify all column renames applied
 - [ ] Browser test: `/profile/devices` loads correctly
 - [ ] Browser test: `/profile/device_edit?device_id=X` loads and submits correctly
@@ -657,7 +653,7 @@ After implementation, run these checks before marking complete:
 
 ## Implementation Notes
 
-- **Migration must run first.** The code changes and DB migration must be deployed atomically — run the migration, then deploy code. If code goes live before migration runs, the site breaks.
+- **DB renames must run first.** Run the Phase 1 SQL block in psql, then deploy the code. If code goes live before the DB renames run, the site breaks.
 - **The `bld_blocklist_domains` table is unaffected.** It uses `bld_` prefix and category keys like `'ads'`, `'malware'` — no changes needed.
 - **The `stg_settings` table is unaffected.** Settings like `scrolldaddy_dns_internal_url` and `scrolldaddy_dns_api_key` keep their names.
 - **No admin files exist** in `plugins/scrolldaddy/admin/` — nothing to update there.

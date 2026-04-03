@@ -78,7 +78,7 @@ else{
 										</div>
 										<div class="author-info">
 											<h3 class="company-name">Deactivation Pin</h3>
-											<h5 class="price">'.$deleted_device->get('cdb_deactivation_pin').'</h5>
+											<h5 class="price">'.$deleted_device->get('sddb_deactivation_pin').'</h5>
 
 										</div>
 									</div>
@@ -92,7 +92,7 @@ else{
 	
 	foreach($devices as $device){
 
-		if($device->get('cdd_is_active')){	
+		if($device->get('sdd_is_active')){	
 			if($device->get_active_profile() == 'primary'){
 				$primary_icon = 'fa-shield-check';
 				$secondary_icon = 'fa-shield-slash';
@@ -122,7 +122,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<span class="date"><i class="fa-regular fa-check"></i>Active: '.$device->get_active_profile('readable').$seen_label.'</span>
-									<div class="icon"><a href="/profile/ctld_activation?device_id='.$device->key.'" title="Connection Details"><i class="fa-regular fa-circle-info"></i></a> <a href="/profile/device_edit?device_id='.$device->key.'"><i class="fa-regular fa-edit"></i></a></div>
+									<div class="icon"><a href="/profile/activation?device_id='.$device->key.'" title="Connection Details"><i class="fa-regular fa-circle-info"></i></a> <a href="/profile/device_edit?device_id='.$device->key.'"><i class="fa-regular fa-edit"></i></a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
 								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
@@ -142,7 +142,7 @@ else{
 								</div>
 								<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=primary">Edit</a>
 							</div>';
-							if($device->get('cdd_cdp_ctldprofile_id_secondary')){
+							if($device->get('sdd_sdp_profile_id_secondary')){
 									echo '
 								<br>
 								<div class="job-post_author">
@@ -207,7 +207,7 @@ else{
 						<div class="job-post style2">
 							<div class="job-content">
 								<div class="job-post_date">
-									<a href="/profile/ctld_activation?device_id='.$device->key.'"><span class="date"><i class="fa-regular fa-exclamation"></i>Needs Activation</span></a>
+									<a href="/profile/activation?device_id='.$device->key.'"><span class="date"><i class="fa-regular fa-exclamation"></i>Needs Activation</span></a>
 									<div class="icon"><a href="/profile/device_edit?device_id='.$device->key.'"><i class="fa-regular fa-edit"></i></a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
@@ -225,7 +225,7 @@ else{
 
 									</div>
 								</div>
-								<a class="th-btn style5" href="/profile/ctld_activation?device_id='.$device->key.'">Activate</a>
+								<a class="th-btn style5" href="/profile/activation?device_id='.$device->key.'">Activate</a>
 							</div>
 							
 						</div>
@@ -243,7 +243,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<h3 class="box-title">Add a Device</h3>
-									<a class="th-btn style5" href="/profile/ctlddevice_edit">Add</a>
+									<a class="th-btn style5" href="/profile/device_edit">Add</a>
 								</div>
 								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
 								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
