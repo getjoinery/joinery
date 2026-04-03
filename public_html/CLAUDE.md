@@ -409,50 +409,6 @@ if ($obj->get('start_time') > $now_utc) { /* future */ }
 
 **Do NOT use `new DateTime()` directly** except when a third-party library requires DateTime objects (e.g., Spatie calendar-links).
 
-### File Loading Methods
-
-**Two primary methods for including files:**
-
-1. **`PathHelper::getIncludePath()`** - Direct file loading, no overrides
-   ```php
-   // Standard pattern for all non-overridable files
-   require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));  // System files
-   require_once(PathHelper::getIncludePath('data/users_class.php'));          // Data models
-   require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php')); // Plugin files
-   ```
-
-2. **`PathHelper::getThemeFilePath()`** - Theme-aware file resolution with override chain
-   ```php
-   // Files that can be overridden by themes
-   require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-   require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic'));
-   require_once(PathHelper::getThemeFilePath('profile.php', 'views'));
-
-   // With explicit plugin context (5th parameter)
-   require_once(PathHelper::getThemeFilePath('devices_logic.php', 'logic', 'system', null, 'controld'));
-
-   // Parameters: filename, subdirectory, path_format, theme_name, plugin_name
-   ```
-
-   **Override chain:** theme/{theme}/path → plugins/{plugin}/path → /path
-   **Format:** Always use two parameters - filename and subdirectory separately
-
-**When to use each:**
-- `PathHelper::getIncludePath()`: All standard files - system includes, data models, plugin files (no override capability)
-- `PathHelper::getThemeFilePath()`: Files that themes/plugins should be able to override (views, logic, customizable includes)
-
-**Examples:**
-```php
-// Standard files - use getIncludePath
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
-
-// Theme-overridable files - use getThemeFilePath
-require_once(PathHelper::getThemeFilePath('profile.php', 'views'));
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-```
-
 ### Handling Logic Function Results
 
 ```php
@@ -496,6 +452,9 @@ $session->check_permission(5); // Requires permission level 5 (admin minimum)
 
 ### Deployment Scripts
 Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
+
+### Deploying to Production
+Both steps can be run from the CLI. To publish: `php utils/publish_upgrade.php ["release notes"]` (auto-detects next version) or `php utils/publish_upgrade.php 3.27 "release notes"`. To apply on the remote site: `php utils/upgrade.php --verbose`.
 
 ## Development Workflow
 
@@ -545,36 +504,7 @@ public static $field_specifications = array(
 ```
 
 #### When to Use Migrations
-Migrations are executed by running `update_database` from the admin utilities page — they do not run automatically on page load.
-
-Migrations in `/migrations/migrations.php` are ONLY for:
-- **Data migrations** (updating existing data)
-- **Settings insertions** (adding configuration values)  
-- **Non-structural changes** (stored procedures, triggers, etc.)
-
-```php
-// Data migration example - ONLY for data changes, not structure
-$migration['database_version'] = '0.XX';
-$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'setting_name'";
-$migration['migration_sql'] = 'INSERT INTO stg_settings (stg_name, stg_value) VALUES (\'setting_name\', \'value\');';
-$migration['migration_file'] = NULL;
-$migrations[] = $migration;
-
-// File-based migration for complex data updates
-$migration = array(); // CRITICAL: Clear previous migration data
-$migration['database_version'] = '0.XX';
-$migration['test'] = "SELECT count(1) as count FROM table WHERE condition";
-$migration['migration_file'] = 'migration_filename.php';
-$migration['migration_sql'] = NULL;
-$migrations[] = $migration;
-```
-
-**Critical Rules:**
-1. **NEVER add table/column/constraint changes to migrations** - use data class specifications
-2. **ALWAYS clear the `$migration` array between migrations**
-3. **File-based migrations MUST define a function matching the filename**
-4. **Set unused fields to NULL explicitly**
-5. **Migrations are ONLY for data changes, not schema changes**
+Migrations are executed by running `update_database` from the admin utilities page — they do not run automatically on page load. Migrations are ONLY for data changes (settings insertions, data updates) — never for schema changes. See **📖 [Deploy and Upgrade](docs/deploy_and_upgrade.md)** for syntax and rules.
 
 ## Development Environment
 
