@@ -19,7 +19,9 @@ class PublicPage extends PublicPageBase {
      */
     public function public_header($options = array()) {
         // Call common header functionality
+        ob_start();
         $this->public_header_common($options);
+        $_head_inject = ob_get_clean();
 
         // Get menu data from PublicPageBase
         $menu_data = $this->get_menu_data();
@@ -35,6 +37,7 @@ class PublicPage extends PublicPageBase {
 
             <title><?php echo htmlspecialchars($options['title'] ?? $menu_data['site_info']['site_name'] ?? 'Galactic Tribune'); ?></title>
 
+            <?php echo $_head_inject; ?>
             <script src="<?php echo PathHelper::getThemeFilePath('jquery-3.4.1.min.js', 'assets/js', 'web'); ?>"></script>
             <script src="<?php echo PathHelper::getThemeFilePath('jquery.validate-1.9.1.js', 'assets/js', 'web'); ?>"></script>
 

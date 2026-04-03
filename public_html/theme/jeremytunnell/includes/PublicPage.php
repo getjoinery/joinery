@@ -60,7 +60,9 @@ class PublicPage extends PublicPageBase {
 		$_GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
+		ob_start();
 		$options = parent::public_header_common($options);
+		$_head_inject = ob_get_clean();
 
 		// Get menu data from PublicPageBase
 		$menu_data = $this->get_menu_data();
@@ -77,6 +79,7 @@ class PublicPage extends PublicPageBase {
 
 		<title><?php echo $options['title']; ?></title>
 
+		<?php echo $_head_inject; ?>
 		<?php $this->global_includes_top($options); ?>
 		
 		<link rel="dns-prefetch" href="//fonts.googleapis.com">

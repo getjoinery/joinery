@@ -55,9 +55,11 @@ class PublicPage extends PublicPageBase {
 		$_GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
+		ob_start();
 		$options = parent::public_header_common($options);
+		$_head_inject = ob_get_clean();
 		?>
-		
+
 	<!DOCTYPE html>
 <html lang="en-gb" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:fb="http://ogp.me/ns/fb#">
 
@@ -69,6 +71,7 @@ class PublicPage extends PublicPageBase {
 
 		<title><?php echo $options['title']; ?></title>
 
+		<?php echo $_head_inject; ?>
 		<?php $this->global_includes_top(); ?>
   <base href="/">
   <link rel="shortcut icon" type="image/png" href="img/favicon.png" >

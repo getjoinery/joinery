@@ -180,9 +180,11 @@ Career Area
 		$_GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
+		ob_start();
 		$options = parent::public_header_common($options);
-	
-	
+		$_head_inject = ob_get_clean();
+
+
 		$profile_menu = array();
 		$logged_out_menu = array();
 		if ($session->get_user_id()){ 
@@ -230,6 +232,7 @@ Career Area
         <meta name="keywords" content="adblocker, social media blocker, adult content filter, malware blocker">
 
 		<title><?php echo $options['title']; ?></title>
+				<?php echo $_head_inject; ?>
 				<?php $this->global_includes_top($options); ?>
 				
 				
