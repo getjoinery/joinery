@@ -535,6 +535,10 @@ Navigate to `/admin/admin_user_login_as?usr_user_id={id}` while logged in as a p
 
 Production Docker server hosting multiple client sites. Each site runs in its own container.
 
+**Claude superuser** (permission 10, exists on all containers):
+- Email: `jeremy.tunnell+claude@gmail.com`
+- Password: `sKU^1cK1pVJCNAv`
+
 **Containers:**
 - `empoweredhealthtn` - Empowered Health (empoweredhealthtn.com)
 - `scrolldaddy` - ScrollDaddy web app (port 8087); DB exposed on port 9087
