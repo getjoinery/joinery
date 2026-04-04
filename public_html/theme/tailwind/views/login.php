@@ -74,7 +74,7 @@
                     <div>
                       <div class="flex items-center mb-0">
                         <input class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" type="checkbox" id="setcookie" name="setcookie" checked="checked" value="yes" />
-                        <label class="ml-2 text-sm text-gray-700 mb-0" for="setcookie">Remember me</label>
+                        <label class="ml-2 text-sm text-gray-700 mb-0" for="setcookie">Remember Me</label>
                       </div>
                     </div>
                     <div><a class="text-sm text-blue-600 hover:text-blue-700" href="<?php echo htmlspecialchars($forgot_link); ?>">Forgot Password?</a></div>
