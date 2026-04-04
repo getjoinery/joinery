@@ -66,6 +66,8 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
     
         'thm_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 
+        'thm_install_error' => array('type'=>'text', 'is_nullable'=>true),
+
     );
 
     public static $json_vars = array('thm_metadata');
@@ -76,46 +78,103 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
     public static function get_by_theme_name($theme_name) {
         return static::GetByColumn('thm_name', $theme_name);
     }
-    
+
     /**
-     * Activate this theme
+     * Get all themes from filesystem with their database status.
+     * Scans the theme/ directory and merges with database records.
+     * Unregistered filesystem themes appear with metadata from theme.json.
+     *
+     * @return array Array of theme data arrays (name, directory_exists, theme, is_active, etc.)
      */
-    public function activate() {
-        // Deactivate all other themes
-        $dbconnector = DbConnector::get_instance();
-        $dblink = $dbconnector->get_db_link();
-        
-        $sql = "UPDATE thm_themes SET thm_is_active = false, thm_status = 'installed' WHERE thm_is_active = true";
-        $q = $dblink->prepare($sql);
-        $q->execute();
-        
-        // Activate this theme
-        $this->set('thm_is_active', true);
-        $this->set('thm_status', 'active');
-        $this->save();
-        
-        // Update global theme setting
-        require_once(PathHelper::getIncludePath('data/settings_class.php'));
-        
-        // Try to find existing theme_template setting
-        $existing_setting = Setting::GetByColumn('stg_name', 'theme_template');
-        
-        if ($existing_setting) {
-            // Update existing setting
-            $existing_setting->set('stg_value', $this->get('thm_name'));
-            $existing_setting->save();
-        } else {
-            // Create new setting
-            $new_setting = new Setting(null);
-            $new_setting->set('stg_name', 'theme_template');
-            $new_setting->set('stg_value', $this->get('thm_name'));
-            $new_setting->set('stg_group_name', 'theme');
-            $new_setting->save();
+    public static function get_all_themes_with_status() {
+        $themes_dir = PathHelper::getAbsolutePath('theme');
+        $themes = array();
+
+        if (!is_dir($themes_dir)) {
+            return $themes;
         }
-        
-        return true;
+
+        // Load all DB records at once
+        $all_themes = new MultiTheme(array(), array('thm_name' => 'ASC'));
+        $all_themes->load();
+
+        $themes_lookup = array();
+        foreach ($all_themes as $theme) {
+            $themes_lookup[$theme->get('thm_name')] = $theme;
+        }
+
+        // Process each theme directory
+        $dirs = array_diff(scandir($themes_dir), array('.', '..'));
+        foreach ($dirs as $theme_name) {
+            $theme_path = $themes_dir . '/' . $theme_name;
+            if (!is_dir($theme_path)) continue;
+
+            $theme_data = array(
+                'name' => $theme_name,
+                'directory_exists' => true,
+            );
+
+            if (isset($themes_lookup[$theme_name])) {
+                $theme = $themes_lookup[$theme_name];
+                $theme_data['theme'] = $theme;
+                $theme_data['is_active'] = (bool)$theme->get('thm_is_active');
+                $theme_data['display_name'] = $theme->get('thm_display_name') ?: $theme_name;
+                $theme_data['description'] = $theme->get('thm_description');
+                $theme_data['version'] = $theme->get('thm_version') ?: '1.0.0';
+                $theme_data['author'] = $theme->get('thm_author') ?: 'Unknown';
+            } else {
+                // Not in DB — read from theme.json directly
+                $theme_data['theme'] = null;
+                $theme_data['is_active'] = false;
+                $manifest_path = $theme_path . '/theme.json';
+                if (file_exists($manifest_path)) {
+                    $metadata = json_decode(file_get_contents($manifest_path), true);
+                    if (json_last_error() === JSON_ERROR_NONE && $metadata) {
+                        $theme_data['display_name'] = $metadata['name'] ?? $theme_name;
+                        $theme_data['description'] = $metadata['description'] ?? null;
+                        $theme_data['version'] = $metadata['version'] ?? '1.0.0';
+                        $theme_data['author'] = $metadata['author'] ?? 'Unknown';
+                    } else {
+                        $theme_data['display_name'] = $theme_name;
+                        $theme_data['description'] = null;
+                        $theme_data['version'] = null;
+                        $theme_data['author'] = null;
+                    }
+                } else {
+                    $theme_data['display_name'] = $theme_name;
+                    $theme_data['description'] = null;
+                    $theme_data['version'] = null;
+                    $theme_data['author'] = null;
+                }
+            }
+
+            $themes[] = $theme_data;
+        }
+
+        // Add orphaned DB records (in DB but not on filesystem)
+        foreach ($themes_lookup as $theme_name => $theme) {
+            $theme_path = $themes_dir . '/' . $theme_name;
+            if (!is_dir($theme_path)) {
+                $themes[] = array(
+                    'name' => $theme_name,
+                    'directory_exists' => false,
+                    'theme' => $theme,
+                    'is_active' => (bool)$theme->get('thm_is_active'),
+                    'display_name' => $theme->get('thm_display_name') ?: $theme_name,
+                    'description' => 'Theme directory not found',
+                    'version' => $theme->get('thm_version'),
+                    'author' => $theme->get('thm_author'),
+                );
+            }
+        }
+
+        usort($themes, function($a, $b) {
+            return strcasecmp($a['display_name'], $b['display_name']);
+        });
+
+        return $themes;
     }
-    
+
     /**
      * Check if theme directory exists
      */

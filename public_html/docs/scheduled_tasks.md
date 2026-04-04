@@ -215,9 +215,17 @@ Note: Docker containers may not have `cron` installed by default. Install with `
 
 Tasks in `/plugins/{plugin}/tasks/` are discovered automatically alongside core tasks. Each needs both a `.json` and `.php` file.
 
-### Uninstall Cleanup
+### Plugin Ownership
 
-When a plugin is uninstalled, the system scans the plugin's `/tasks/` directory and permanently deletes any matching `sct_scheduled_tasks` rows. This happens in `Plugin::uninstall()`.
+Each plugin task record stores the owning plugin name in `sct_plugin_name`. This field is populated automatically when a task is activated via the admin UI for a task discovered in a plugin's `/tasks/` directory.
+
+### Plugin Lifecycle Behavior
+
+Plugin-owned tasks follow the plugin lifecycle:
+
+- **Plugin deactivated** — All tasks with matching `sct_plugin_name` are suspended (`sct_is_active = false`). They will not run until the plugin is reactivated.
+- **Plugin reactivated** — Suspended tasks are resumed (`sct_is_active = true`).
+- **Plugin uninstalled** — Task records with matching `sct_plugin_name` are permanently deleted (not just suspended).
 
 ## Related Files
 

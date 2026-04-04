@@ -21,7 +21,6 @@ $page = new AdminPage();
 // Build Options dropdown links
 $altlinks = array();
 $altlinks['Add New'] = '/admin/admin_themes?show_upload=1';
-$altlinks['Sync with Filesystem'] = '/admin/admin_themes?action=sync';
 $altlinks['Check for Updates'] = '/admin/admin_themes?action=check_updates';
 
 $page->admin_header(array(
@@ -74,7 +73,7 @@ $page->begin_box(array('altlinks' => $altlinks));
             <?php endif; ?>
             
             <!-- Themes Table -->
-            <h3>Installed Themes (<?= $themes->count() ?>)</h3>
+            <h3>Installed Themes (<?= count($themes) ?>)</h3>
             <table class="table table-striped">
                 <thead>
                     <tr>
@@ -88,16 +87,17 @@ $page->begin_box(array('altlinks' => $altlinks));
                 </thead>
                 <tbody>
                             <?php
-                            foreach ($themes as $theme) {
-                                $theme_name = $theme->get('thm_name');
-                                $display_name = $theme->get('thm_display_name') ?: $theme_name;
-                                $description = $theme->get('thm_description');
-                                $version = $theme->get('thm_version') ?: '1.0.0';
-                                $author = $theme->get('thm_author') ?: 'Unknown';
-                                $is_active = $theme->get('thm_is_active');
-                                $is_stock = $theme->get('thm_is_stock');
-                                $is_system = $theme->get('thm_is_system');
-                                $files_exist = $theme->theme_files_exist();
+                            foreach ($themes as $theme_data) {
+                                $theme_name = $theme_data['name'];
+                                $theme = $theme_data['theme']; // Theme model or null
+                                $display_name = $theme_data['display_name'] ?: $theme_name;
+                                $description = $theme_data['description'] ?? null;
+                                $version = $theme_data['version'] ?: '1.0.0';
+                                $author = $theme_data['author'] ?: 'Unknown';
+                                $is_active = $theme_data['is_active'] ?? false;
+                                $is_stock = $theme ? (bool)$theme->get('thm_is_stock') : true;
+                                $is_system = $theme ? (bool)$theme->get('thm_is_system') : false;
+                                $files_exist = $theme_data['directory_exists'];
 
                                 // Get status badge
                                 if (!$files_exist) {
@@ -137,18 +137,21 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     $actions['Activate'] = "javascript:submitAction('activate', '$theme_name')";
                                 }
 
-                                // System themes cannot be marked as custom or deleted
-                                if (!$is_system) {
-                                    if ($is_stock) {
-                                        $actions['Mark as Custom'] = "javascript:submitAction('mark_custom', '$theme_name')";
-                                    } else {
-                                        $actions['Mark as Stock'] = "javascript:submitAction('mark_stock', '$theme_name')";
-                                    }
+                                // Actions below require a DB record
+                                if ($theme) {
+                                    // System themes cannot be marked as custom or deleted
+                                    if (!$is_system) {
+                                        if ($is_stock) {
+                                            $actions['Mark as Custom'] = "javascript:submitAction('mark_custom', '$theme_name')";
+                                        } else {
+                                            $actions['Mark as Stock'] = "javascript:submitAction('mark_stock', '$theme_name')";
+                                        }
 
-                                    // Add delete option for themes with missing files or inactive themes
-                                    if (!$files_exist || !$is_active) {
-                                        $is_stock_theme = $is_stock ? 'true' : 'false';
-                                        $actions['Permanently Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "', $is_stock_theme)";
+                                        // Add delete option for themes with missing files or inactive themes
+                                        if (!$files_exist || !$is_active) {
+                                            $is_stock_theme = $is_stock ? 'true' : 'false';
+                                            $actions['Permanently Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "', $is_stock_theme)";
+                                        }
                                     }
                                 }
 
@@ -169,7 +172,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 echo '</tr>';
                             }
                             
-                            if ($themes->count() === 0) {
+                            if (count($themes) === 0) {
                                 echo '<tr><td colspan="6" class="text-center">No themes installed</td></tr>';
                             }
                             ?>
@@ -267,23 +270,6 @@ function submitAction(action, themeName) {
     
     document.body.appendChild(form);
     form.submit();
-}
-
-function syncThemes() {
-    if (confirm('Sync themes with filesystem? This will update the database registry with any changes.')) {
-        var form = document.createElement('form');
-        form.method = 'post';
-        form.style.display = 'none';
-        
-        var actionInput = document.createElement('input');
-        actionInput.type = 'hidden';
-        actionInput.name = 'action';
-        actionInput.value = 'sync';
-        form.appendChild(actionInput);
-        
-        document.body.appendChild(form);
-        form.submit();
-    }
 }
 
 function checkUpdates() {

@@ -157,23 +157,26 @@ class PluginManager extends AbstractExtensionManager {
     }
     
     /**
-     * Load metadata from plugin.json into model
+     * Load metadata from plugin.json into model.
+     * Calls parent for manifest validation, then sets plugin-specific fields.
+     *
      * @param Plugin $model Plugin model object
      * @param string $name Plugin name
      */
     protected function loadMetadataIntoModel($model, $name) {
-        $manifest_path = $this->getExtensionPath($name) . '/plugin.json';
-        if (!file_exists($manifest_path)) return;
-        
-        $metadata = json_decode(file_get_contents($manifest_path), true);
-        if (json_last_error() === JSON_ERROR_NONE && $metadata) {
-            $model->set('plg_metadata', json_encode($metadata));
-            $model->set('plg_is_stock', $metadata['is_stock'] ?? true);
-            $model->set('plg_installed_time', date('Y-m-d H:i:s'));
-            
-            // Load stock status
-            $model->load_stock_status();
-        }
+        $metadata = parent::loadMetadataIntoModel($model, $name);
+        if ($metadata === false) return; // Error already set by parent
+
+        $model->set('plg_metadata', json_encode($metadata));
+        $model->set('plg_is_stock', $metadata['is_stock'] ?? true);
+        $model->set('plg_installed_time', date('Y-m-d H:i:s'));
+    }
+
+    /**
+     * Returns the Multi class filter options for active plugins (used by sync() ghost detection).
+     */
+    protected function getActiveFilterOptions() {
+        return array('plg_active' => 1);
     }
     
     /**
@@ -511,8 +514,347 @@ class PluginManager extends AbstractExtensionManager {
         }
     }
     
+    // ========== Lifecycle: onActivate / onDeactivate / install / uninstall ==========
+
+    /**
+     * Called inside activate() transaction. Validates dependencies, runs plugin table updates,
+     * runs activate.php hook, registers deletion rules, sets plg_active and timestamps,
+     * and resumes suspended scheduled tasks.
+     *
+     * @param string $name Plugin name
+     * @param Plugin $model Plugin model
+     * @param PDO $dblink Database connection
+     * @throws Exception to roll back the transaction
+     */
+    protected function onActivate($name, $model, $dblink) {
+        // Re-validate dependencies
+        $validation = $this->validatePlugin($name);
+        if (!$validation['valid']) {
+            throw new Exception("Cannot activate plugin '$name': " . implode('; ', $validation['errors']));
+        }
+
+        // Run plugin table updates — picks up schema changes since install
+        require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+        $database_updater = new DatabaseUpdater();
+        $table_result = $database_updater->runPluginTablesOnly($name);
+        if (!$table_result['success']) {
+            throw new Exception("Plugin '$name' table update failed: " . implode('; ', $table_result['errors']));
+        }
+
+        // Run activate.php hook if it exists
+        $activate_file = PathHelper::getAbsolutePath("plugins/{$name}/activate.php");
+        if (file_exists($activate_file)) {
+            require_once($activate_file);
+            $activate_fn = $name . '_activate';
+            if (function_exists($activate_fn)) {
+                $activate_fn();
+            }
+        }
+
+        // Register deletion rules (non-fatal)
+        require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        try {
+            DeletionRule::registerModelsFromDiscovery([
+                'include_plugins' => true,
+                'plugin_filter' => $name
+            ]);
+        } catch (Exception $e) {
+            error_log("Failed to register deletion rules for plugin '$name': " . $e->getMessage());
+        }
+
+        // Set active flag and timestamps
+        $now = gmdate('Y-m-d H:i:s');
+        $model->set('plg_active', 1);
+        $model->set('plg_activated_time', $now);
+        $model->set('plg_last_activated_time', $now);
+        $model->set('plg_install_error', null);
+
+        // Resume scheduled tasks that belong to this plugin
+        require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+        $suspended = new MultiScheduledTask(array('plugin_name' => $name, 'active' => false, 'deleted' => false));
+        $suspended->load();
+        foreach ($suspended as $task) {
+            $task->set('sct_is_active', true);
+            $task->save();
+        }
+    }
+
+    /**
+     * Called inside deactivate() transaction. Checks theme provider and dependents,
+     * runs deactivate.php hook, removes deletion rules, sets plg_active=0 and timestamps,
+     * and suspends scheduled tasks.
+     *
+     * @param string $name Plugin name
+     * @param Plugin $model Plugin model
+     * @param PDO $dblink Database connection
+     * @throws Exception to roll back the transaction
+     */
+    protected function onDeactivate($name, $model, $dblink) {
+        // Block if this plugin is the active theme provider
+        require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+        try {
+            $plugin_helper = PluginHelper::getInstance($name);
+            if ($plugin_helper->isActiveThemeProvider()) {
+                throw new Exception("Cannot deactivate plugin '$name': it is the active theme provider. Switch to a different theme first.");
+            }
+        } catch (Exception $e) {
+            // If the exception is about theme provider, re-throw it
+            if (strpos($e->getMessage(), 'theme provider') !== false) {
+                throw $e;
+            }
+            // Otherwise plugin helper unavailable — proceed
+        }
+
+        // Block if other active plugins depend on this one
+        $dependents = $this->getDependents($name);
+        if (!empty($dependents)) {
+            throw new Exception("Cannot deactivate plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
+        }
+
+        // Run deactivate.php hook if it exists
+        $deactivate_file = PathHelper::getAbsolutePath("plugins/{$name}/deactivate.php");
+        if (file_exists($deactivate_file)) {
+            require_once($deactivate_file);
+            $deactivate_fn = $name . '_deactivate';
+            if (function_exists($deactivate_fn)) {
+                $deactivate_fn();
+            }
+        }
+
+        // Remove deletion rules
+        try {
+            $plugin_helper_instance = PluginHelper::getInstance($name);
+            $plugin_helper_instance->removePluginDeletionRules();
+        } catch (Exception $e) {
+            error_log("Failed to remove deletion rules for plugin '$name': " . $e->getMessage());
+        }
+
+        // Set inactive flag and timestamps
+        $model->set('plg_active', 0);
+        $model->set('plg_activated_time', null);
+        $model->set('plg_last_deactivated_time', gmdate('Y-m-d H:i:s'));
+
+        // Suspend scheduled tasks that belong to this plugin
+        require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+        $active_tasks = new MultiScheduledTask(array('plugin_name' => $name, 'active' => true, 'deleted' => false));
+        $active_tasks->load();
+        foreach ($active_tasks as $task) {
+            $task->set('sct_is_active', false);
+            $task->save();
+        }
+    }
+
+    /**
+     * Install a plugin — creates tables, runs migrations, sets status=inactive.
+     * Transaction-wrapped. Validates first; rolls back on failure.
+     *
+     * @param string $name Plugin name
+     * @throws Exception on failure
+     */
+    public function install($name) {
+        if (!$this->validateName($name)) {
+            throw new Exception("Invalid plugin name: $name");
+        }
+
+        $plugin_path = $this->getExtensionPath($name);
+        if (!is_dir($plugin_path)) {
+            throw new Exception("Plugin directory not found: $name");
+        }
+
+        // Get or create plugin record
+        $plugin = Plugin::get_by_plugin_name($name);
+        if (!$plugin) {
+            $plugin = new Plugin(null);
+            $plugin->set('plg_name', $name);
+        }
+
+        $dbconnector = DbConnector::get_instance();
+        $dblink = $dbconnector->get_db_link();
+
+        $this_transaction = false;
+        if (!$dblink->inTransaction()) {
+            $dblink->beginTransaction();
+            $this_transaction = true;
+        }
+
+        try {
+            // Validate dependencies
+            $validation = $this->validatePlugin($name);
+            if (!$validation['valid']) {
+                throw new Exception("Plugin validation failed: " . implode('; ', $validation['errors']));
+            }
+
+            // Create plugin tables
+            require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+            $database_updater = new DatabaseUpdater();
+            $table_result = $database_updater->runPluginTablesOnly($name);
+            if (!$table_result['success']) {
+                throw new Exception("Plugin table creation failed: " . implode('; ', $table_result['errors']));
+            }
+
+            // Run migrations
+            $migration_results = $this->runPendingMigrations($name);
+            $migration_errors = array();
+            foreach ($migration_results as $result) {
+                if (!empty($result['error'])) {
+                    $migration_errors[] = $result['error'];
+                }
+            }
+            if (!empty($migration_errors)) {
+                throw new Exception("Plugin migration failed: " . implode('; ', $migration_errors));
+            }
+
+            // Load metadata
+            $this->loadMetadataIntoModel($plugin, $name);
+
+            // Update status
+            $plugin->set('plg_installed_time', gmdate('Y-m-d H:i:s'));
+            $plugin->set('plg_status', 'inactive');
+            $plugin->set('plg_install_error', null);
+            $plugin->save();
+
+            if ($this_transaction) {
+                $dblink->commit();
+            }
+        } catch (Exception $e) {
+            if ($this_transaction && $dblink->inTransaction()) {
+                $dblink->rollBack();
+            }
+            // Record error on plugin
+            try {
+                $plugin->set('plg_status', 'error');
+                $plugin->set('plg_install_error', $e->getMessage());
+                $plugin->save();
+            } catch (Exception $save_error) {
+                // Ignore save errors during error reporting
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Uninstall a plugin — runs uninstall hook, removes deletion rules, deletes task records,
+     * dependency records, version records. Tables and files are preserved.
+     *
+     * Plugin must be inactive before calling.
+     *
+     * @param string $name Plugin name
+     * @throws Exception on failure
+     */
+    public function uninstall($name) {
+        $plugin = Plugin::get_by_plugin_name($name);
+        if (!$plugin) {
+            throw new Exception("Plugin '$name' not found in database.");
+        }
+
+        if ($plugin->is_active()) {
+            throw new Exception("Cannot uninstall active plugin '$name'. Deactivate it first.");
+        }
+
+        // Check dependents
+        $dependents = $this->getDependents($name);
+        if (!empty($dependents)) {
+            throw new Exception("Cannot uninstall plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
+        }
+
+        // Run uninstall hook
+        $uninstall_file = PathHelper::getAbsolutePath("plugins/{$name}/uninstall.php");
+        if (file_exists($uninstall_file)) {
+            require_once($uninstall_file);
+            $uninstall_fn = $name . '_uninstall';
+            if (function_exists($uninstall_fn)) {
+                $result = call_user_func($uninstall_fn);
+                if ($result === false) {
+                    throw new Exception("Plugin '$name' uninstall script returned failure.");
+                }
+            }
+        }
+
+        // Remove deletion rules
+        require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+        try {
+            $plugin_helper = PluginHelper::getInstance($name);
+            $plugin_helper->removePluginDeletionRules();
+        } catch (Exception $e) {
+            error_log("Failed to remove deletion rules for plugin '$name' during uninstall: " . $e->getMessage());
+        }
+
+        // Delete scheduled task records by plugin_name
+        require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+        $tasks = new MultiScheduledTask(array('plugin_name' => $name, 'deleted' => false));
+        $tasks->load();
+        foreach ($tasks as $task) {
+            $task->permanent_delete();
+        }
+
+        // Delete version tracking records
+        require_once(PathHelper::getIncludePath('data/plugin_versions_class.php'));
+        $versions = new MultiPluginVersion(array('plv_plugin_name' => $name));
+        $versions->load();
+        foreach ($versions as $version) {
+            $version->permanent_delete();
+        }
+
+        // Delete dependency records
+        require_once(PathHelper::getIncludePath('data/plugin_dependencies_class.php'));
+        $deps = new MultiPluginDependency(array('pld_plugin_name' => $name));
+        $deps->load();
+        foreach ($deps as $dep) {
+            $dep->permanent_delete();
+        }
+
+        // Update plugin record
+        $plugin->set('plg_status', 'uninstalled');
+        $plugin->set('plg_active', 0);
+        $plugin->set('plg_activated_time', null);
+        $plugin->set('plg_uninstalled_time', gmdate('Y-m-d H:i:s'));
+        $plugin->save();
+    }
+
+    /**
+     * Drop all plugin database tables. Uses regex to extract table names from
+     * *_class.php files (avoids loading classes with potentially missing deps).
+     * Also cleans up plm_plugin_migrations records.
+     *
+     * Call BEFORE deleting plugin files.
+     *
+     * @param string $name Plugin name
+     */
+    public function permanentDeleteTables($name) {
+        $dblink = DbConnector::get_instance()->get_db_link();
+        $data_dir = PathHelper::getAbsolutePath("plugins/{$name}/data");
+
+        if (!is_dir($data_dir)) {
+            return;
+        }
+
+        $class_files = glob($data_dir . '/*_class.php');
+        if (empty($class_files)) {
+            return;
+        }
+
+        foreach ($class_files as $class_file) {
+            $content = file_get_contents($class_file);
+            if (preg_match('/\$tablename\s*=\s*[\'"]([^\'"]+)[\'"]/', $content, $matches)) {
+                $tablename = $matches[1];
+                // Validate table name to prevent injection (should only be alphanumeric + underscore)
+                if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tablename)) {
+                    $dblink->exec("DROP TABLE IF EXISTS " . $tablename . " CASCADE");
+                }
+            }
+        }
+
+        // Clean up migration records
+        require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
+        $migrations = new MultiPluginMigration(array('plm_plugin_name' => $name));
+        $migrations->load();
+        foreach ($migrations as $migration) {
+            $migration->permanent_delete();
+        }
+    }
+
     // ========== Public API Methods (Backward Compatibility) ==========
-    
+
     /**
      * Sync filesystem plugins with database
      * @return array Array of newly synced plugin names

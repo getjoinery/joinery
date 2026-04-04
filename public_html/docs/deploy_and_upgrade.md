@@ -235,6 +235,22 @@ If manifest is missing, it's auto-generated with `is_stock: true`.
 
 ---
 
+## update_database Behavior
+
+### Advisory Lock
+
+`update_database.php` uses a PostgreSQL advisory lock (`pg_try_advisory_lock(99999)`) to prevent concurrent runs. If a second process tries to run while one is already in progress, it exits immediately with "already running." The lock is released automatically when the database connection closes.
+
+### Halt on Migration Failure
+
+Migrations stop on the **first failure** — subsequent migrations are skipped. Fix the failing migration and re-run `update_database.php` to continue.
+
+### Plugin Tables Excluded
+
+`update_database.php` always runs with `include_plugins => false`. Plugin tables are managed through the plugin activation workflow (`PluginManager::activate()` calls `DatabaseUpdater::runPluginTablesOnly()`), not through the core updater. This is intentional — core can't know about plugins at compile time.
+
+---
+
 ## DeploymentHelper API
 
 **Validation:**

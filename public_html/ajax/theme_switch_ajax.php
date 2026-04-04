@@ -11,6 +11,8 @@
 		require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
 		require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 		require_once(PathHelper::getIncludePath('data/settings_class.php'));
+		require_once(PathHelper::getIncludePath('data/themes_class.php'));
+		require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
 	} catch (Exception $e) {
 		echo json_encode(array('success' => false, 'message' => 'Failed to load dependencies: ' . $e->getMessage()));
 		exit;
@@ -51,31 +53,10 @@
 	}
 
 	try {
-		// Use MultiSetting to find the setting
-		$search_criteria = array('stg_name' => 'theme_template');
-		$settings_list = new MultiSetting($search_criteria);
-		$settings_list->load();
-		
-		$found = false;
-		foreach($settings_list as $setting) {
-			if($setting->get('stg_name') == 'theme_template'){
-				// Update existing setting
-				$setting->set('stg_value', $theme);
-				$setting->set('stg_update_time', 'NOW()'); 
-				$setting->set('stg_usr_user_id', $session->get_user_id());
-				$setting->prepare();
-				$setting->save();
-				$found = true;
-				break;
-			}
-		}
-		
-		if ($found) {
-			echo json_encode(array('success' => true, 'message' => 'Theme switched successfully'));
-		} else {
-			echo json_encode(array('success' => false, 'message' => 'Theme template setting not found'));
-		}
+		$theme_manager = ThemeManager::getInstance();
+		$theme_manager->activate($theme);
+		echo json_encode(array('success' => true, 'message' => 'Theme switched successfully'));
 	} catch (Exception $e) {
-		echo json_encode(array('success' => false, 'message' => 'Failed to save theme setting: ' . $e->getMessage()));
+		echo json_encode(array('success' => false, 'message' => 'Failed to switch theme: ' . $e->getMessage()));
 	}
 ?>

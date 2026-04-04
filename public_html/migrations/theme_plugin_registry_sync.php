@@ -86,7 +86,7 @@ function theme_plugin_registry_sync() {
 
         $theme = Theme::get_by_theme_name($current_theme);
         if ($theme) {
-            $theme->activate();
+            $theme_manager->activate($current_theme);
             echo "Theme '$current_theme' activated.\n";
         } else {
             echo "Warning: Current theme '$current_theme' not found in registry.\n";
