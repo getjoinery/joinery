@@ -1,0 +1,63 @@
+{
+    "title": "Linka Inspiration",
+    "description": "Inspiration section with staggered card layout",
+    "category": "blog",
+    "css_framework": "bootstrap",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "section_title",
+                "label": "Section Title",
+                "type": "textinput",
+                "default": "Inspiration"
+            },
+            {
+                "name": "cards",
+                "label": "Inspiration Cards",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "image",
+                        "label": "Image URL",
+                        "type": "textinput",
+                        "default": "/theme/linka-reference/assets/images/home-one/inspiration-img/1.jpg"
+                    },
+                    {
+                        "name": "category",
+                        "label": "Category Label",
+                        "type": "textinput",
+                        "default": "Lifestyle"
+                    },
+                    {
+                        "name": "title",
+                        "label": "Title",
+                        "type": "textinput",
+                        "default": "The Best Winter Fashion Trends to Try in 2024"
+                    },
+                    {
+                        "name": "date",
+                        "label": "Date",
+                        "type": "textinput",
+                        "default": "25 Mar 2024"
+                    },
+                    {
+                        "name": "link",
+                        "label": "Link",
+                        "type": "textinput",
+                        "default": "#"
+                    },
+                    {
+                        "name": "offset",
+                        "label": "Offset (staggered)",
+                        "type": "checkboxinput",
+                        "help": "Offset this card up for staggered look"
+                    }
+                ]
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
+}

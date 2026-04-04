@@ -1,0 +1,74 @@
+{
+    "title": "Linka Featured Card",
+    "description": "Featured blog/article card with image, category badge, date, and excerpt",
+    "category": "cards",
+    "css_framework": "bootstrap",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "image",
+                "label": "Image URL",
+                "type": "textinput",
+                "default": "/theme/linka-reference/assets/images/home-one/main-blog-img/1.jpg"
+            },
+            {
+                "name": "category",
+                "label": "Category Label",
+                "type": "textinput",
+                "default": "Lifestyle"
+            },
+            {
+                "name": "category_link",
+                "label": "Category Link",
+                "type": "textinput",
+                "default": "#"
+            },
+            {
+                "name": "author",
+                "label": "Author Name",
+                "type": "textinput",
+                "default": "Jhona Walker"
+            },
+            {
+                "name": "date",
+                "label": "Date",
+                "type": "textinput",
+                "default": "25 Mar 2024"
+            },
+            {
+                "name": "title",
+                "label": "Title",
+                "type": "textinput",
+                "default": "The two Important Tools to Reconnect Your Partner"
+            },
+            {
+                "name": "excerpt",
+                "label": "Excerpt",
+                "type": "textarea",
+                "default": "Lorem ipsum dolor sit amet consectetur adipisicing elit. Sed asperiores, sequi earum inventore consequuntur voluptates voluptatibus sint fugiat quaerat possimus."
+            },
+            {
+                "name": "link",
+                "label": "Read More Link",
+                "type": "textinput",
+                "default": "#"
+            },
+            {
+                "name": "show_author",
+                "label": "Show Author",
+                "type": "checkboxinput",
+                "default": true
+            },
+            {
+                "name": "show_excerpt",
+                "label": "Show Excerpt",
+                "type": "checkboxinput",
+                "default": true
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
+}

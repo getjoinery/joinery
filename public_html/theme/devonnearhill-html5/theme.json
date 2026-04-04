@@ -1,0 +1,11 @@
+{
+    "name": "devonnearhill-html5",
+    "display_name": "Devon Near Hill HTML5",
+    "version": "1.0.0",
+    "description": "Zero-dependency HTML5 version of the Devon Near Hill Tailwind theme",
+    "author": "Joinery Team",
+    "is_stock": true,
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterHTML5",
+    "publicPageBase": "PublicPageBase"
+}

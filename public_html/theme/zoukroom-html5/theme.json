@@ -1,0 +1,11 @@
+{
+    "name": "zoukroom-html5",
+    "display_name": "Zouk Room HTML5",
+    "version": "1.0.0",
+    "description": "Zero-dependency HTML5 version of the Zouk Room UIKit theme",
+    "author": "Joinery Team",
+    "is_stock": true,
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterHTML5",
+    "publicPageBase": "PublicPageBase"
+}

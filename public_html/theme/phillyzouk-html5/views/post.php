@@ -24,11 +24,11 @@ $page->public_header($hoptions);
                     <h1><?php echo htmlspecialchars($post->get('pst_title')); ?></h1>
                     <div class="post-meta">
                         <div class="post-meta-item">
-                            <span class="icon">&#128100;</span>
+                            <i class="bx bx-user"></i>
                             <a href="#"><?php echo htmlspecialchars($page_vars['author']->display_name()); ?></a>
                         </div>
                         <div class="post-meta-item">
-                            <span class="icon">&#128197;</span>
+                            <i class="bx bx-calendar"></i>
                             <?php echo date('M d, Y', strtotime($post->get('pst_published_time'))); ?>
                         </div>
                     </div>

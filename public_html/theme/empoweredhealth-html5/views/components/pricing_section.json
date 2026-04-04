@@ -1,0 +1,102 @@
+{
+    "title": "Pricing Section with Services Sidebar",
+    "description": "Dark background section with pricing cards on the left and a services sidebar on the right",
+    "category": "conversion",
+    "css_framework": "bootstrap",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput",
+                "default": "Book a Visit"
+            },
+            {
+                "name": "pricing_cards",
+                "label": "Pricing Cards",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "title",
+                        "label": "Card Title",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "description",
+                        "label": "Description (optional)",
+                        "type": "textarea"
+                    },
+                    {
+                        "name": "prices",
+                        "label": "Prices",
+                        "type": "repeater",
+                        "fields": [
+                            {
+                                "name": "service",
+                                "label": "Service Name",
+                                "type": "textinput"
+                            },
+                            {
+                                "name": "price",
+                                "label": "Price",
+                                "type": "textinput"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "button_text",
+                        "label": "Button Text",
+                        "type": "textinput",
+                        "default": "Contact to Book"
+                    },
+                    {
+                        "name": "button_url",
+                        "label": "Button URL",
+                        "type": "textinput",
+                        "default": "/contact"
+                    }
+                ]
+            },
+            {
+                "name": "sidebar_title",
+                "label": "Sidebar Title",
+                "type": "textinput",
+                "default": "Services"
+            },
+            {
+                "name": "services",
+                "label": "Services List",
+                "type": "repeater",
+                "fields": [
+                    {
+                        "name": "name",
+                        "label": "Service Name",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "url",
+                        "label": "URL",
+                        "type": "textinput",
+                        "default": "#"
+                    }
+                ]
+            },
+            {
+                "name": "sidebar_link_text",
+                "label": "Sidebar Link Text",
+                "type": "textinput",
+                "default": "Read more about our services"
+            },
+            {
+                "name": "sidebar_link_url",
+                "label": "Sidebar Link URL",
+                "type": "textinput",
+                "default": "#"
+            }
+        ]
+    },
+    "layout_defaults": {
+        "container_width": "standard",
+        "max_height": "default"
+    }
+}
