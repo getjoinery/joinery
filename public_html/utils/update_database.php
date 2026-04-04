@@ -96,7 +96,15 @@
 	*/
 
 	function update_database($verbose=false, $upgrade=false, $cleanup=false){
-		
+
+		// Acquire advisory lock to prevent concurrent runs
+		$lock_dblink = DbConnector::get_instance()->get_db_link();
+		$lock_result = $lock_dblink->query("SELECT pg_try_advisory_lock(99999)")->fetchColumn();
+		if (!$lock_result) {
+			echo "update_database is already running in another process. Exiting.\n";
+			return false;
+		}
+
 		// Use DatabaseUpdater class for all table operations
 		require_once(__DIR__ . '/../includes/DatabaseUpdater.php');
 		$database_updater = new DatabaseUpdater($verbose, $upgrade, $cleanup);
@@ -436,7 +444,8 @@
 						'status' => 'FAILED',
 						'message' => $result['error']
 					];
-					// Continue processing other migrations even if one fails
+					// Stop on first failure — later migrations may depend on earlier ones
+					break;
 				}
 			} else {
 				// Check if this was an error vs a normal skip

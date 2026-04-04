@@ -136,13 +136,11 @@ DeletionRule::registerModelsFromDiscovery([
 
 ### Plugin Models
 
-Plugin deletion rules are registered at multiple points:
+Plugin deletion rules are registered/removed through PluginManager lifecycle operations:
 
-1. **Plugin Install**: `PluginManager->postInstall()` registers rules for the new plugin
-2. **Plugin Activate**: `PluginHelper->activate()` registers rules for that plugin
-3. **Sync with Filesystem**: `PluginManager->syncWithFilesystem()` registers rules for ALL active plugins
-4. **Plugin Deactivate**: `PluginHelper->deactivate()` REMOVES rules for that plugin
-5. **Plugin Uninstall**: `Plugin->uninstall()` REMOVES rules for that plugin (after permanent_delete)
+1. **Plugin Activate**: `PluginManager::activate()` (`onActivate()`) registers rules for that plugin
+2. **Plugin Deactivate**: `PluginManager::deactivate()` (`onDeactivate()`) removes rules for that plugin
+3. **Plugin Uninstall**: `PluginManager::uninstall()` removes rules for that plugin
 
 ### Manual Registration
 
@@ -256,8 +254,8 @@ SELECT del_action, COUNT(*) FROM del_deletion_rules GROUP BY del_action;
 **Problem**: Deletion rules not registered for plugin
 **Solution**:
 - Check if plugin is active (`plg_active = 1`)
-- Run "Sync with Filesystem" from admin plugins page
-- Or manually: `PluginHelper::registerAllActiveDeletionRules()`
+- Deactivate and re-activate the plugin — activation re-registers deletion rules
+- Or from CLI: `PluginHelper::registerAllActiveDeletionRules()`
 
 **Problem**: Wrong action being applied
 **Solution**:

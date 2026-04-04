@@ -1,6 +1,6 @@
 ---
 title: Extension Lifecycle Hardening (Themes & Plugins)
-status: planned
+status: completed
 priority: high
 ---
 

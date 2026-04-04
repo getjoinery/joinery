@@ -27,7 +27,6 @@ $plugins = $page_vars['plugins'];
 // Build Options dropdown links
 $altlinks = array();
 $altlinks['Add New'] = '/admin/admin_plugins?show_upload=1';
-$altlinks['Sync with Filesystem'] = '/admin/admin_plugins?action=sync';
 $altlinks['Check for Updates'] = '/admin/admin_plugins?action=check_updates';
 
 $page->admin_header(array(
