@@ -2,7 +2,70 @@
 
 **Purpose:** Comprehensive feature list for testing coverage. Each feature is listed at a granular level suitable for creating individual test cases.
 
-**Last Updated:** 2026-02-05
+**Last Updated:** 2026-04-04
+
+---
+
+## Testing Strategy
+
+### How to Use This Document
+
+This inventory is the master checklist for system testing coverage. Each feature item is a candidate test case. Items are not marked complete until an automated test or documented manual test procedure covers them.
+
+**Workflow:**
+1. Pick a section by priority (see table below)
+2. Write tests for unchecked items
+3. Check the box (`[x]`) when a repeatable test exists (automated or documented manual)
+
+---
+
+### Test Types
+
+| Type | Location | What It Tests | When to Run |
+|------|----------|---------------|-------------|
+| **Model Tests** | `/tests/models/` | CRUD operations on all data model classes; auto-discovers all `data/*_class.php` files | Before any release; after schema changes |
+| **Email Tests** | `/tests/email/` | Email service config (SMTP/Mailgun), template rendering, delivery, DNS auth records | After email system changes; before bulk sends |
+| **Integration Tests** | `/tests/integration/` | Routing, error handling, PHPMailer, Mailgun API, external service wiring | After routing or integration changes |
+| **Functional Tests** | `/tests/functional/` | End-to-end business flows (product purchase, subscription lifecycle) | Before releases touching e-commerce |
+| **Browser Tests** | MCP Playwright | Page rendering, form interactions, UI state, visual layout | After theme or view changes |
+| **Manual Tests** | Human judgment | Third-party payment UIs, visual design, admin workflows, edge cases requiring context | Ad hoc; documented in this checklist |
+
+---
+
+### Priority Levels
+
+- **P1 — Critical Path**: Broken functionality blocks users or revenue. Must pass before any release.
+- **P2 — High Value**: Important user-facing features; test when the related area changes.
+- **P3 — Standard**: Supporting features; test periodically or when directly touched.
+
+---
+
+### Coverage Summary by Section
+
+| # | Section | Priority | Coverage | Notes |
+|---|---------|----------|----------|-------|
+| 1 | Authentication & Account Management | **P1** | ❌ Gap | No automated auth flow tests; all manual |
+| 2 | User Profile | **P2** | ❌ Gap | Model CRUD auto-covered; UI flows are manual |
+| 3 | Content Management System | **P2** | ⚠️ Partial | Blog/page model CRUD auto-covered; rendering is manual |
+| 4 | E-Commerce | **P1** | ⚠️ Partial | `ProductTester` covers product logic; cart/checkout UI is manual |
+| 5 | Event Management | **P1** | ❌ Gap | Model CRUD auto-covered; registration flows are manual |
+| 6 | Email System | **P2** | ✅ Covered | All 11 send patterns, SMTP/Mailgun, templates, DNS tested |
+| 7 | Surveys & Forms | **P3** | ⚠️ Partial | Model CRUD auto-covered; survey flow UI is manual |
+| 8 | File & Media Management | **P2** | ❌ Gap | No upload/access-control tests; all manual |
+| 9 | User Management (Admin) | **P2** | ⚠️ Partial | Model CRUD auto-covered; admin UI is manual |
+| 10 | Navigation & Menus | **P3** | ❌ Gap | Manual only |
+| 11 | URL Management | **P3** | ❌ Gap | Manual only |
+| 12 | Analytics & Statistics | **P3** | ❌ Gap | Manual only |
+| 13 | System Administration | **P2** | ⚠️ Partial | Error handling tested; settings/plugins are manual |
+| 14 | REST API | **P2** | ❌ Gap | No API endpoint tests exist |
+| 15 | Integrations | **P1** | ⚠️ Partial | Mailgun tested; Stripe webhooks, PayPal, Calendly are manual |
+| 16 | SEO & Public Features | **P3** | ❌ Gap | Manual only |
+| 17 | Theme System | **P3** | ❌ Gap | Visual/browser testing only |
+| 18 | Plugins | **P2** | ❌ Gap | No ControlD or Items plugin tests |
+| 19 | Security Features | **P1** | ❌ Gap | No security-specific tests; depends on model/integration tests |
+| 20 | Developer & Maintenance | **P3** | ⚠️ Partial | Tools exist; no automated validation of deployment scripts |
+
+**Legend:** ✅ Covered = repeatable automated tests exist | ⚠️ Partial = some coverage, gaps remain | ❌ Gap = manual testing only or no tests
 
 ---
 
@@ -778,6 +841,148 @@ Note: ControlD admin pages (admin_ctld_account, admin_ctld_accounts) were remove
 - [ ] Model tests (`/tests/models/`)
 - [ ] Plugin tests (`/plugins/{plugin}/tests/`)
 - [ ] Test database management
+
+---
+
+---
+
+## Testing Roadmap
+
+### P1: Immediate Priorities (Critical gaps with no coverage)
+
+#### 1. Authentication Flow Tests (Section 1)
+- **Type needed:** Browser/functional tests using MCP Playwright
+- **File to create:** `/tests/functional/auth/AuthTester.php`
+- **Key scenarios:**
+  - Registration with valid/invalid data; anti-spam question; AJAX email uniqueness check
+  - Login success (redirects to profile); login failure (error message shown)
+  - "Remember me" cookie: survives session close, honored on next visit
+  - Password reset: step 1 sends email; step 2 accepts valid code; rejects expired/invalid code
+  - Forced password change: redirect on login when `usr_force_password_change` is set
+  - Session permission enforcement: `/admin/*` routes reject unauthenticated users
+- **Test data required:** Dedicated test user account; email test mode enabled
+
+#### 2. Stripe Webhook Integration Tests (Section 15.1)
+- **Type needed:** Integration tests
+- **File to create:** `/tests/integration/stripe_webhook_test.php`
+- **Key scenarios:**
+  - Simulate `checkout.session.completed` with test fixture → verify order created
+  - Simulate subscription events (`customer.subscription.updated`, `.deleted`)
+  - Reject webhook with invalid signature
+  - Verify idempotency: replaying same event does not create duplicate order
+- **Approach:** Use Stripe test clock and test event JSON fixtures; call webhook handler directly with crafted POST bodies
+
+#### 3. E-Commerce Cart/Checkout Flow (Section 4.5–4.8)
+- **Type needed:** Functional/browser tests extending existing `ProductTester`
+- **File to extend:** `/tests/functional/products/ProductTester.php`
+- **Key scenarios:**
+  - Add product to cart → cart page shows item with correct price
+  - Remove item from cart → cart clears correctly
+  - Apply valid coupon code → discount applied; apply invalid code → error shown
+  - Proceed to Stripe checkout (test mode) → return URL creates order
+  - Order appears in user profile and admin order list
+- **Dependency:** Stripe test keys must be configured; product with known ID must exist
+
+#### 4. Security Validation Tests (Section 19)
+- **Type needed:** Integration tests
+- **File to create:** `/tests/integration/security_test.php`
+- **Key scenarios:**
+  - CSRF: submit form without `_csrf_token` → rejected
+  - Permission gates: request `/admin/admin_users` as unauthenticated → 302 to login
+  - Permission gates: request superadmin route as permission-5 admin → blocked
+  - File upload: upload disallowed extension (`.php`) → rejected
+  - File upload: access `/uploads/private-file.pdf` without auth → blocked
+  - SQL injection probe: parameter with `' OR 1=1 --` in search fields → no leakage
+
+---
+
+### P2: Short-Term Priorities (High-value gaps)
+
+#### 5. REST API Tests (Section 14)
+- **Type needed:** Integration tests
+- **File to create:** `/tests/integration/api_test.php`
+- **Key scenarios:**
+  - Valid API key (public + secret) → successful CRUD response
+  - Invalid secret key → 401 Unauthorized
+  - Request from non-allowed IP → 403 Forbidden
+  - GET `/api/v1/User/{id}` → returns user JSON matching expected shape
+  - POST to create record → record appears in database
+  - DELETE record → soft-deleted in database
+
+#### 6. Event Management Functional Tests (Section 5)
+- **Type needed:** Functional tests
+- **File to create:** `/tests/functional/events/EventTester.php`
+- **Key scenarios:**
+  - Event creation (admin) → appears on public listing
+  - User registers for event → appears in user profile and admin event registrant list
+  - Registration at capacity → subsequent registration goes to waiting list
+  - User withdraws → registration removed; waiting list user notified
+  - Calendar export: `.ics` file generated with correct date/location fields
+
+#### 7. File Upload/Access Tests (Section 8)
+- **Type needed:** Integration tests
+- **File to create:** `/tests/integration/file_upload_test.php`
+- **Key scenarios:**
+  - Upload `.jpg` within size limit → file stored, metadata saved, thumbnail generated
+  - Upload `.php` → rejected (extension not in `allowed_upload_extensions`)
+  - Upload file exceeding size limit → rejected with error message
+  - Access `/uploads/{private-file}` authenticated as owner → served
+  - Access `/uploads/{private-file}` unauthenticated → redirect to login or 403
+  - Access `/uploads/{private-file}` as different user without permission → blocked
+
+#### 8. Admin Interface Smoke Tests (Sections 9, 13)
+- **Type needed:** Browser smoke tests via MCP Playwright
+- **Approach:** Authenticate as permission-10 admin; verify each admin page loads without PHP errors
+- **Key pages to verify:** `/admin/admin_users`, `/admin/admin_settings`, `/admin/admin_plugins`, `/admin/admin_utilities`, `/admin/admin_errors`, `/admin/admin_event_list`, `/admin/admin_products`
+- **Pass criteria:** Page returns HTTP 200; no "Fatal error" or "Warning:" in body
+
+---
+
+### P3: Long-Term Improvements
+
+#### 9. Mailing List / Inbound Email Tests (Section 6.4, 6.7)
+- Simulate Mailgun inbound webhook POST → verify email stored in `iem_inbound_emails`
+- Mailing list subscription: user subscribes → appears in list registrants
+- Unsubscribe: user unsubscribes → removed from list
+
+#### 10. ControlD Plugin Tests (Section 18.3)
+- Device CRUD via model auto-discovery (should already work if class follows patterns)
+- Activation workflow: device created → activated → profile applied
+- Profile management: filter toggle → change persisted to ControlD API
+
+#### 11. Test Infrastructure Improvements
+- Create `/tests/index.php` master dashboard linking all test suites (email, models, integration, functional)
+- Add test data fixtures: a known-state database snapshot that can be restored before test runs
+- Document per-section manual test procedures for features that will remain manual
+- Add routing test coverage for plugin routes (currently `routing_test.php` covers core only)
+
+---
+
+### Test Dependency Map
+
+Run tests in this order to avoid dependency failures:
+
+```
+Model Tests          — No dependencies; run first
+    ↓
+Email Tests          — Requires: Mailgun/SMTP configured; email_test_mode=1; test recipient set
+    ↓
+Integration Tests    — Requires: web server running; database accessible
+    ↓
+Functional Tests     — Requires: Stripe test keys; test user; test products exist
+    ↓
+Browser Tests        — Requires: full stack running; test data loaded
+```
+
+### Test Data Requirements
+
+Before running functional or browser tests, verify:
+- Test admin account exists: `jeremy.tunnell+claude@gmail.com` (permission level 10)
+- `email_test_mode = 1` in settings (prevents real emails during tests)
+- `email_test_recipient` set to a monitored inbox
+- Stripe test publishable and secret keys configured (not live keys)
+- At least one active product exists with a known product ID
+- At least one subscription tier exists for subscription flow tests
 
 ---
 
