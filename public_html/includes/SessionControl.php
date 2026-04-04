@@ -884,6 +884,9 @@ class SessionControl{
 				'This account is currently de-activated.  Please contact us to resolve the situation.');
 		}
 
+		// Regenerate session ID to prevent session fixation attacks
+		session_regenerate_id(true);
+
 		$_SESSION['loggedin'] = TRUE;
 		$_SESSION['usr_user_id'] = $user->key;
 		$_SESSION['ip_address'] = $this->_get_client_ip();

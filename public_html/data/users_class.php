@@ -564,8 +564,8 @@ private static function UcName($string) {
 	
 	public static function GeneratePassword($password) {
 		$password = trim($password);
-		if (strlen($password) < 5) {
-			throw new DisplayableUserException('Your password must be at least 5 characters');
+		if (strlen($password) < 8) {
+			throw new DisplayableUserException('Your password must be at least 8 characters');
 		}
 
 		if (strstr(' ', $password) !== FALSE) {

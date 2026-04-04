@@ -59,17 +59,29 @@ abstract class PublicPageBase {
 				header('Location: ' . $location);
 				exit;
 			}
-			
-			//header('Strict-Transport-Security: max-age=3153600');
-			//header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
-			//header("Content-Security-Policy-Report-Only: default-src https:");
+
+			// Only set HSTS if explicitly enabled in settings
+			if ($settings->get_setting('enable_hsts', false, true)) {
+				header('Strict-Transport-Security: max-age=86400; includeSubDomains');
+			}
 		}
-		//header('X-Frame-Options: SAMEORIGIN');
-		//header('X-Content-Type-Options: nosniff');
-		//header('Referrer-Policy: unsafe-url');
-		
+		// X-Content-Type-Options is always sent (prevents MIME sniffing)
+		header('X-Content-Type-Options: nosniff');
+		// X-Permitted-Cross-Domain-Policies is always sent (prevents Flash/PDF cross-domain requests)
+		header('X-Permitted-Cross-Domain-Policies: none');
+
+		// X-Frame-Options only if enabled in settings (prevents clickjacking)
+		if ($settings->get_setting('enable_x_frame_options', false, true)) {
+			header('X-Frame-Options: SAMEORIGIN');
+		}
+
+		// Referrer-Policy only if enabled in settings (controls URL leakage)
+		if ($settings->get_setting('enable_referrer_policy', false, true)) {
+			header('Referrer-Policy: strict-origin-when-cross-origin');
+		}
+
 	}
-	
+
 	/**
 	 * Get a FormWriter instance appropriate for this page
 	 * Loads the theme's FormWriter via the standard theme override chain
@@ -632,15 +644,26 @@ abstract class PublicPageBase {
 				header('Location: ' . $location);
 				exit;
 			}
-			
-			//header('Strict-Transport-Security: max-age=3153600');
-			//header("Content-Security-Policy: default-src https: youtube.com vimeo.com fonts.googleapis.com fonts.gstatic.com; style-src https: 'unsafe-inline'; script-src https: 'unsafe-inline'");
-			//header("Content-Security-Policy-Report-Only: default-src https:");
-		}
-		//header('X-Frame-Options: SAMEORIGIN');
-		//header('X-Content-Type-Options: nosniff');
-		//header('Referrer-Policy: unsafe-url');
 
+			// Only set HSTS if explicitly enabled in settings
+			if ($settings->get_setting('enable_hsts', false, true)) {
+				header('Strict-Transport-Security: max-age=86400; includeSubDomains');
+			}
+		}
+		// X-Content-Type-Options is always sent (prevents MIME sniffing)
+		header('X-Content-Type-Options: nosniff');
+		// X-Permitted-Cross-Domain-Policies is always sent (prevents Flash/PDF cross-domain requests)
+		header('X-Permitted-Cross-Domain-Policies: none');
+
+		// X-Frame-Options only if enabled in settings (prevents clickjacking)
+		if ($settings->get_setting('enable_x_frame_options', false, true)) {
+			header('X-Frame-Options: SAMEORIGIN');
+		}
+
+		// Referrer-Policy only if enabled in settings (controls URL leakage)
+		if ($settings->get_setting('enable_referrer_policy', false, true)) {
+			header('Referrer-Policy: strict-origin-when-cross-origin');
+		}
 
 		if(!isset($options['title']) || !$options['title']){
 			$options['title'] = $settings->get_setting('site_name');
@@ -1390,20 +1413,30 @@ abstract class PublicPageBase {
 				<div class="joinery-admin-bar-theme-dropdown joinery-admin-bar-dropdown">
 					<span class="joinery-admin-bar-theme-current">Theme: <?php echo htmlspecialchars($theme_template); ?></span>
 					<div class="joinery-admin-bar-dropdown-content">
-						<?php 
+						<?php
 						// Display directory themes
-						foreach ($directory_themes as $theme_key => $theme_obj): 
+						foreach ($directory_themes as $theme_key => $theme_obj):
 							if (method_exists($theme_obj, 'get')) {
 								$display_name = $theme_obj->get('display_name', $theme_key);
+								$is_plugin_theme = $theme_obj->get('is_plugin_theme', false);
 							} else {
 								$display_name = $theme_key;
+								$is_plugin_theme = false;
 							}
-							?>
-							<a href="#" onclick="joineryAdminBarSwitchTheme('<?php echo htmlspecialchars($theme_key); ?>'); return false;" 
-							   <?php echo ($theme_key == $theme_template) ? 'style="font-weight: bold !important;"' : ''; ?>>
+							$is_active = ($theme_key == $theme_template);
+							if ($is_plugin_theme): ?>
+								<a href="/admin/admin_settings"
+								   <?php echo $is_active ? 'style="font-weight: bold !important;"' : ''; ?>>
+									<?php echo htmlspecialchars($display_name); ?> &#x2192;
+									<?php echo $is_active ? ' ✓' : ''; ?>
+								</a>
+							<?php else: ?>
+							<a href="#" onclick="joineryAdminBarSwitchTheme('<?php echo htmlspecialchars($theme_key); ?>'); return false;"
+							   <?php echo $is_active ? 'style="font-weight: bold !important;"' : ''; ?>>
 								<?php echo htmlspecialchars($display_name); ?>
-								<?php echo ($theme_key == $theme_template) ? ' ✓' : ''; ?>
+								<?php echo $is_active ? ' ✓' : ''; ?>
 							</a>
+							<?php endif; ?>
 						<?php endforeach; ?>
 
 					</div>

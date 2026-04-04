@@ -48,10 +48,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			RequestLogger::log('password_reset', 'reset_request', false, [
 				'note' => 'Password reset for unknown email: ' . $email,
 			]);
-			$page_vars['message_type'] = 'error';
-			$page_vars['message_title'] = 'Email not found';
-			$page_vars['message'] = '
-			We could not find that email address.  Please use your back button to go back and double check the one you entered.';
+			// Return same success message to prevent user enumeration
+			$page_vars['message_type'] = 'success';
+			$page_vars['message_title'] = 'Reset code sent';
+			$page_vars['message'] = 'Next step: Check your email for a message from us with a link to enter your new password.  If you don not receive an email from us within a few minutes, please check your spam folder.';
 		}
 
 	}

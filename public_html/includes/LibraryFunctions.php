@@ -492,19 +492,17 @@ class LibraryFunctions {
 	}
 
 	static function str_rand($length=8) {
-		$code = md5(uniqid('', TRUE));
-		return substr($code, 0, $length);
+		return substr(bin2hex(random_bytes(ceil($length / 2))), 0, $length);
 	}
 
 	static function random_string($length=16) {
-		// Because the str_rand function only uses 0-9A-F chars
-		$chars = 'abcdefghijklmnopqrstuvwxwz0123456789';
+		$chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+		$max = strlen($chars) - 1;
 		$string = '';
 		for ($i = 0; $i < $length; $i++) {
-			$rand_key = mt_rand(0, strlen($chars));
-			$string  .= substr($chars, $rand_key, 1);
+			$string .= $chars[random_int(0, $max)];
 		}
-		return str_shuffle($string);
+		return $string;
 	}
 
 	static function any_state_to_abbr($state) {
