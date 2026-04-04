@@ -56,7 +56,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
       </div>
       <div class="mt-6 flex items-center justify-between">
         <div class="flex items-center">
-          <?php echo $formwriter->checkboxinput("Remember me", "setcookie", NULL, "normal", 'yes', "yes", ''); ?>
+          <?php echo $formwriter->checkboxinput("Remember Me", "setcookie", NULL, "normal", 'yes', "yes", ''); ?>
         </div>
         <a href="<?php echo $forgot_link; ?>" class="text-sm"> Forgot your password? </a>
       </div>
