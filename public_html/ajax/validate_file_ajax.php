@@ -1,8 +1,16 @@
 <?php
 	require_once(__DIR__ . '/../includes/PathHelper.php');
-	
+
 	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-	
+	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+
+	$session = SessionControl::get_instance();
+	if ($session->get_permission() < 5) {
+		http_response_code(403);
+		echo 'false';
+		exit;
+	}
+
 	$file_path = NULL;
 	if (!empty($_GET['apache_error_log'])) {
 		$file_path = $_GET['apache_error_log'];

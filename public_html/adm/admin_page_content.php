@@ -51,8 +51,8 @@
 	}
 
 	$page->begin_box($options);
-	echo '<strong>Label:</strong> '.$page_content->get('pac_location_name').'<br />';
-	echo '<strong>Content Slug:</strong> '.$page_content->get('pac_link').' (*!**' . $page_content->get('pac_link') . '**!*) <br />';
+	echo '<strong>Label:</strong> '.htmlspecialchars($page_content->get('pac_location_name')).'<br />';
+	echo '<strong>Content Slug:</strong> '.htmlspecialchars($page_content->get('pac_link')).' (*!**' . htmlspecialchars($page_content->get('pac_link')) . '**!*) <br />';
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($page_content->get('pac_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 	if($page_content->get('pac_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($page_content->get('pac_delete_time'), 'UTC', $session->get_timezone()).'<br />';

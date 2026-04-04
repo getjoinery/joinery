@@ -152,43 +152,33 @@ class SessionControl{
 	}
 
 	public function save_user_to_cookie() {
-		/*
-		//MAXIMUM SECURITY
-		if ($this->get_user_id()) {
-			$ip = explode('.', $_SERVER['REMOTE_ADDR']);
-			// Lets store the first segment of their IP, so we can only allow people from the same
-			// segment to log back in from a "Remember me" (which for 99% of people will work, and
-			// prevent a lot of cookie stealing attacks)
-			$first_segment = $ip[0];
-			// This remember me cookie only lasts for 90 days
-			$expire_time = time() + (90 * 24 * 60 * 60);
-			setcookie(
-				'tt',
-				implode(';',
-					array(
-						LibraryFunctions::Encode($this->get_user_id(), 'user_id'),
-						LibraryFunctions::Encode($first_segment, 'ip_address'),
-						LibraryFunctions::Encode($expire_time, 'expiration_date'),
-						sha1(
-							$this->get_user_id() . $first_segment . $expire_time .
-							'Ifz4lU5Bmwmbi17f2W4CW1I3XKrJmrWmc19bDAUBMNqyPVDEBfvBLUHQqxCk261')
-						)),
-				$expire_time);
-		}
-		*/
-		//MEDIUM SECURITY
-		if ($this->get_user_id()) {
-			// This remember me cookie lasts for 365 days
-			$expire_time = time() + (365 * 24 * 60 * 60);
-			$cookie_value = implode(';', array(
-				LibraryFunctions::Encode($this->get_user_id(), 'user_id'),
-				LibraryFunctions::Encode($expire_time, 'expiration_date'),
-				sha1(
-					$this->get_user_id() . $expire_time .
-					'Ifz4lU5Bmwmbi17f2W4CW1I3XKrJmrWmc19bDAUBMNqyPVDEBfvBLUHQqxCk261')
-			));
-			$this->set_secure_cookie('tt', $cookie_value, $expire_time);
-		}		
+		if (!$this->get_user_id()) return;
+
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$user = new User($this->get_user_id(), TRUE);
+
+		// Generate cryptographically secure random token (64 hex chars)
+		$raw_token = bin2hex(random_bytes(32));
+		$token_hash = hash('sha256', $raw_token);
+		$expires = time() + (90 * 24 * 60 * 60); // 90 days
+
+		// Load existing tokens, decode if string, prune expired ones
+		$tokens = $user->get('usr_remember_tokens');
+		if (is_string($tokens)) $tokens = json_decode($tokens, true);
+		if (!is_array($tokens)) $tokens = [];
+		$tokens = array_values(array_filter($tokens, fn($t) => ($t['expires'] ?? 0) > time()));
+
+		// Append new token
+		$tokens[] = [
+			'hash'    => $token_hash,
+			'expires' => $expires,
+			'created' => time(),
+		];
+
+		$user->set('usr_remember_tokens', json_encode($tokens));
+		$user->save();
+
+		$this->set_secure_cookie('tt', $raw_token, $expires);
 	}
 
 	public function save_session_item($key, $value) {
@@ -450,109 +440,78 @@ class SessionControl{
 	}
 
 	public function get_user_from_cookie() {
-		if (!empty($_COOKIE['tt'])) {
-			$cookie_contents = explode(';', $_COOKIE['tt']);
-			if (count($cookie_contents) == 4) {
-				//MAXIMUM SECURITY
-				list($user_hash, $ip_segment_hash, $expire_time_hash, $hash) = explode(';', $_COOKIE['tt']);
-				$user = LibraryFunctions::decode($user_hash, 'user_id');
-				$ip_segment = LibraryFunctions::decode($ip_segment_hash, 'ip_address');
-				$expire_time = LibraryFunctions::decode($expire_time_hash, 'expiration_date');
-				
+		if (empty($_COOKIE['tt'])) return FALSE;
 
-				$ip = explode('.', $_SERVER['REMOTE_ADDR']);
-				$first_segment = $ip[0];
+		$raw_token = $_COOKIE['tt'];
 
-				$check_hash = sha1(
-					$user . $ip_segment . $expire_time .
-					'Ifz4lU5Bmwmbi17f2W4CW1I3XKrJmrWmc19bDAUBMNqyPVDEBfvBLUHQqxCk261');
+		// Validate format — must be exactly 64 hex chars
+		if (!preg_match('/^[0-9a-f]{64}$/', $raw_token)) {
+			$this->delete_cookie('tt');
+			return FALSE;
+		}
 
-				if ($user === FALSE || $ip_segment === FALSE || $expire_time === FALSE || $check_hash != $hash || $expire_time < time() || $ip_segment != $first_segment) {
-					// If the user, ip segment, expire time or hash are invalid, or the cookie has expired, delete it
-					// Also, if the user is signing in with a different first segment of their IP, also kill it
-					$this->delete_cookie('tt');
-					return FALSE;
-				}
+		$token_hash = hash('sha256', $raw_token);
 
-				require_once(PathHelper::getIncludePath('data/users_class.php'));
-				// Now one last check to make sure this is a valid user
-				try {
-					$user_obj = new User($user, TRUE);
-				} catch (UserException $e) {
-					// Invalid user
-					$this->delete_cookie('tt');
-					return FALSE;
-				} catch (Exception $e) {
-					// Because any other exceptions will perpetuate out from here and try to regain
-					// the session (which will recursively lead to problems), lets just catch them
-					// here and say we can't get the user at this point in time.
-					// Don't reset the cookie though, because it could very well valid and we are
-					// having database issues for example.
-					error_log('EXCEPTION: (on session creation)' . $e->getTraceAsString() . ' | ' . $e->getCode() . ' | ' . $e->getMessage());
-					return FALSE;
-				}
+		// Find the user whose token array contains this hash
+		$dbconnector = DbConnector::get_instance();
+		$dblink = $dbconnector->get_db_link();
+		try {
+			$sql = "SELECT usr_user_id FROM usr_users
+					WHERE usr_remember_tokens IS NOT NULL
+					AND usr_remember_tokens::jsonb @> :token_search::jsonb
+					AND usr_delete_time IS NULL";
+			$q = $dblink->prepare($sql);
+			$q->bindValue(':token_search', json_encode([['hash' => $token_hash]]), PDO::PARAM_STR);
+			$q->execute();
+			$row = $q->fetch(PDO::FETCH_OBJ);
+		} catch (PDOException $e) {
+			// Don't delete cookie on DB errors — it may still be valid
+			error_log('EXCEPTION: (remember-me lookup) ' . $e->getMessage());
+			return FALSE;
+		}
 
-				if ($user_obj->actions_allowed() === TRUE) {
-					// If they get to this point, its valid so log them in
-					$this->store_session_variables($user_obj);
-					LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
-					return TRUE;
-				} else {
-					$this->delete_cookie('tt');
-					return FALSE;
-				}
-			}
-			else if(count($cookie_contents) == 3){
-				//MEDIUM SECURITY
-				list($user_hash, $expire_time_hash, $hash) = explode(';', $_COOKIE['tt']);
-				$user = LibraryFunctions::decode($user_hash, 'user_id');
-				$expire_time = LibraryFunctions::decode($expire_time_hash, 'expiration_date');
+		if (!$row) {
+			$this->delete_cookie('tt');
+			return FALSE;
+		}
 
-				$check_hash = sha1(
-					$user . $expire_time .
-					'Ifz4lU5Bmwmbi17f2W4CW1I3XKrJmrWmc19bDAUBMNqyPVDEBfvBLUHQqxCk261');
+		// Load user and verify token expiration
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		try {
+			$user_obj = new User($row->usr_user_id, TRUE);
+		} catch (Exception $e) {
+			error_log('EXCEPTION: (on session creation) ' . $e->getMessage());
+			return FALSE;
+		}
 
-				if ($user === FALSE  || $expire_time === FALSE || $check_hash != $hash || $expire_time < time()) {
-					// If the user, expire time or hash are invalid, or the cookie has expired, delete it
-					$this->delete_cookie('tt');
-					return FALSE;
-				}
+		$tokens = $user_obj->get('usr_remember_tokens');
+		if (is_string($tokens)) $tokens = json_decode($tokens, true);
+		if (!is_array($tokens)) {
+			$this->delete_cookie('tt');
+			return FALSE;
+		}
 
-				require_once(PathHelper::getIncludePath('data/users_class.php'));
-				// Now one last check to make sure this is a valid user
-				try {
-					$user_obj = new User($user, TRUE);
-				} catch (UserException $e) {
-					// Invalid user
-					$this->delete_cookie('tt');
-					return FALSE;
-				} catch (Exception $e) {
-					// Because any other exceptions will perpetuate out from here and try to regain
-					// the session (which will recursively lead to problems), lets just catch them
-					// here and say we can't get the user at this point in time.
-					// Don't reset the cookie though, because it could very well valid and we are
-					// having database issues for example.
-					error_log('EXCEPTION: (on session creation)' . $e->getTraceAsString() . ' | ' . $e->getCode() . ' | ' . $e->getMessage());
-					return FALSE;
-				}
-
-				if ($user_obj->actions_allowed() === TRUE) {
-					// If they get to this point, its valid so log them in
-					$this->store_session_variables($user_obj);
-					LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
-					return TRUE;
-				} else {
-					$this->delete_cookie('tt');
-					return FALSE;
-				}				
-			}
-			else{				
-				// Cookie is invalid, delete it!
-				$this->delete_cookie('tt');
-				return FALSE;
+		$matched = null;
+		foreach ($tokens as $token) {
+			if (($token['hash'] ?? '') === $token_hash) {
+				$matched = $token;
+				break;
 			}
 		}
-		return FALSE;
+
+		if (!$matched || ($matched['expires'] ?? 0) < time()) {
+			$this->delete_cookie('tt');
+			return FALSE;
+		}
+
+		if ($user_obj->actions_allowed() !== TRUE) {
+			$this->delete_cookie('tt');
+			return FALSE;
+		}
+
+		$this->store_session_variables($user_obj);
+		LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
+		return TRUE;
 	}
 
 	public static function get_instance(){
@@ -565,6 +524,28 @@ class SessionControl{
 	function logout() {
 		if($this->get_user_id()) {
 			LoginClass::StoreUserLogout($this->get_user_id());
+		}
+
+		// Remove this device's remember-me token from the user's token list
+		if (!empty($_COOKIE['tt']) && $this->get_user_id()) {
+			$raw_token = $_COOKIE['tt'];
+			if (preg_match('/^[0-9a-f]{64}$/', $raw_token)) {
+				try {
+					require_once(PathHelper::getIncludePath('data/users_class.php'));
+					$token_hash = hash('sha256', $raw_token);
+					$user = new User($this->get_user_id(), TRUE);
+					$tokens = $user->get('usr_remember_tokens');
+					if (is_string($tokens)) $tokens = json_decode($tokens, true);
+					if (is_array($tokens)) {
+						$tokens = array_values(array_filter($tokens, fn($t) => ($t['hash'] ?? '') !== $token_hash));
+						$user->set('usr_remember_tokens', json_encode($tokens));
+						$user->save();
+					}
+				} catch (Exception $e) {
+					// Non-fatal — session is being destroyed anyway
+					error_log('EXCEPTION: (logout token cleanup) ' . $e->getMessage());
+				}
+			}
 		}
 
 		$_SESSION = array();

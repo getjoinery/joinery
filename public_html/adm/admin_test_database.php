@@ -161,23 +161,34 @@ function copyLiveToTest($live_db, $test_db, $db_user) {
     // Set password for PostgreSQL commands
     putenv("PGPASSWORD={$password}");
 
+    // Escape all shell arguments up front
+    $esc_user = escapeshellarg($db_user);
+    $esc_test = escapeshellarg($test_db);
+    $esc_live = escapeshellarg($live_db);
+
     $output = [];
     $return_var = 0;
 
-    // Step 1: Terminate connections to test database
-    $terminate_sql = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{$test_db}' AND pid <> pg_backend_pid();";
-    exec("psql -U {$db_user} -d postgres -c \"{$terminate_sql}\" 2>&1", $output, $return_var);
+    // Step 1: Terminate connections to test database via PDO (avoids shell + SQL injection risk)
+    try {
+        $pdo = new PDO("pgsql:host=localhost;port=5432;dbname=postgres", $db_user, $password);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $stmt = $pdo->prepare("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()");
+        $stmt->execute([$test_db]);
+    } catch (PDOException $e) {
+        // Non-fatal — continue even if we can't terminate connections
+    }
 
     // Step 2: Drop test database
-    exec("dropdb -U {$db_user} --if-exists {$test_db} 2>&1", $output, $return_var);
+    exec("dropdb -U {$esc_user} --if-exists {$esc_test} 2>&1", $output, $return_var);
     if ($return_var !== 0) {
         // Try again after a brief pause
         sleep(2);
-        exec("dropdb -U {$db_user} --if-exists {$test_db} 2>&1", $output, $return_var);
+        exec("dropdb -U {$esc_user} --if-exists {$esc_test} 2>&1", $output, $return_var);
     }
 
     // Step 3: Create empty test database
-    exec("createdb -U {$db_user} {$test_db} 2>&1", $output, $return_var);
+    exec("createdb -U {$esc_user} {$esc_test} 2>&1", $output, $return_var);
     if ($return_var !== 0) {
         putenv("PGPASSWORD");
         return [
@@ -187,7 +198,7 @@ function copyLiveToTest($live_db, $test_db, $db_user) {
     }
 
     // Step 4: Dump live and restore to test (works even with active connections on live)
-    $dump_restore_cmd = "pg_dump -U {$db_user} {$live_db} | psql -U {$db_user} -d {$test_db} 2>&1";
+    $dump_restore_cmd = "pg_dump -U {$esc_user} {$esc_live} | psql -U {$esc_user} -d {$esc_test} 2>&1";
     exec($dump_restore_cmd, $output, $return_var);
 
     // Clear password from environment

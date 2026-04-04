@@ -14,9 +14,6 @@ function admin_analytics_users_logic($get_vars, $post_vars) {
 	$mintotal = (int)LibraryFunctions::fetch_variable('mintotal', 2, 0, '');
 	$disabled = LibraryFunctions::fetch_variable("usr_is_disabled", 1, 0, '');
 
-	$sqlstart = "'".$startdate."'";
-	$sqlend = "'".$enddate."'";
-
 	//Get Data
 	$sql_domains = "select substring(usr_email from '.*@(.*)') as edomain, count(*) as edomaincount from usr_users where usr_signup_date > :startdate and usr_signup_date < :enddate";
 	if (!$disabled)
@@ -30,8 +27,8 @@ function admin_analytics_users_logic($get_vars, $post_vars) {
 
 	try{
 		$q = $dblink->prepare($sql_domains);
-		$q->bindParam(':startdate', $sqlstart, PDO::PARAM_STR);
-		$q->bindParam(':enddate', $sqlend, PDO::PARAM_STR);
+		$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
+		$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
 		if (!$disabled)
 		{
 			$q->bindParam(':disabled', $disabled, PDO::PARAM_INT);
@@ -60,8 +57,8 @@ function admin_analytics_users_logic($get_vars, $post_vars) {
 
 	try{
 		$q = $dblink->prepare($sql_verifieds);
-		$q->bindParam(':startdate', $sqlstart, PDO::PARAM_STR);
-		$q->bindParam(':enddate', $sqlend, PDO::PARAM_STR);
+		$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
+		$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
 		if (!$disabled)
 		{
 			$q->bindParam(':disabled', $disabled, PDO::PARAM_INT);
