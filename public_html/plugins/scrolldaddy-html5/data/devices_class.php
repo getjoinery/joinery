@@ -40,6 +40,7 @@ class SdDevice extends SystemBase {
 	    'sdd_allow_device_edits' => array('type'=>'int4'),
 	    'sdd_activate_time' => array('type'=>'timestamp(6)'),
 	    'sdd_resolver_uid' => array('type'=>'varchar(32)'),
+	    'sdd_log_queries' => array('type'=>'bool', 'default'=>'false'),
 	);
 
 	function prepare() {}
