@@ -80,6 +80,19 @@ abstract class PublicPageBase {
 			header('Referrer-Policy: strict-origin-when-cross-origin');
 		}
 
+		// TODO (security): Implement Content-Security-Policy.
+		// The codebase has ~28 inline <script> blocks across views and includes, so
+		// strict CSP (no unsafe-inline) requires either:
+		//   (a) A nonce system: generate a per-request nonce, inject it into every
+		//       inline <script> tag via the page object, and include it in the header.
+		//   (b) Move all inline scripts to external .js files.
+		// Recommended approach: add Content-Security-Policy-Report-Only first with a
+		// strict policy and a report-uri endpoint to identify violations in production
+		// before enforcing. Known external origins to allowlist: js.stripe.com,
+		// www.paypal.com, embed.acuityscheduling.com, www.google.com, www.hcaptcha.com,
+		// cdn.tailwindcss.com, cdnjs.cloudflare.com, cdn.jsdelivr.net,
+		// fonts.googleapis.com, fonts.gstatic.com.
+
 	}
 
 	/**
