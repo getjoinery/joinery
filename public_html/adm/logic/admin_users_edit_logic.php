@@ -16,6 +16,10 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 	// Load or create user
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($post_vars['edit_primary_key_value'])) {
+		// Verify POST user ID matches GET parameter to prevent cross-user form submission
+		if (isset($get_vars['usr_user_id']) && (int)$post_vars['edit_primary_key_value'] !== (int)$get_vars['usr_user_id']) {
+			return LogicResult::error('User ID mismatch.');
+		}
 		$user = new User($post_vars['edit_primary_key_value'], TRUE);
 	} elseif (isset($get_vars['usr_user_id'])) {
 		$user = new User($get_vars['usr_user_id'], TRUE);

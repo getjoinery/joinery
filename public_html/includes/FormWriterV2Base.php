@@ -190,6 +190,13 @@ abstract class FormWriterV2Base {
     /**
      * Initialize CSRF token
      */
+    // TODO (security): CSRF protection currently covers form submissions only.
+    // AJAX endpoints in ajax/*.php do not validate CSRF tokens. With SameSite=Lax
+    // on the session cookie, cross-site POST CSRF is largely mitigated, but explicit
+    // token validation on state-changing AJAX endpoints (conversations, reactions,
+    // notifications, entity_photos, checkout) would provide defence-in-depth.
+    // Implementation would require passing a CSRF token in JS requests and a
+    // server-side validation helper callable outside of FormWriter.
     protected function initializeCSRF() {
         // Start session if not already started
         if (session_status() === PHP_SESSION_NONE) {
