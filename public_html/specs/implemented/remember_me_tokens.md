@@ -1,6 +1,6 @@
 ---
 title: Remember-Me Token Replacement (H2)
-status: planned
+status: completed
 priority: high
 ---
 
