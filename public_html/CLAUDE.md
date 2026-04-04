@@ -522,9 +522,7 @@ Migrations are executed by running `update_database` from the admin utilities pa
 
 This is the live test server where changes can be verified in a browser.
 
-**Admin Login (Permission 10):**
-- Email: `jeremy.tunnell+claude@gmail.com`
-- Password: `sKU^1cK1pVJCNAv`
+**Admin Login (Permission 10):** See Claude memory for credentials.
 
 **Log In As Another User:**
 Navigate to `/admin/admin_user_login_as?usr_user_id={id}` while logged in as a permission-10 admin. This switches the session to that user and redirects to `/`. To find a user's ID, go to `/admin/admin_users` and click the user — the URL will show `?usr_user_id=N`.
@@ -535,9 +533,7 @@ Navigate to `/admin/admin_user_login_as?usr_user_id={id}` while logged in as a p
 
 Production Docker server hosting multiple client sites. Each site runs in its own container.
 
-**Claude superuser** (permission 10, exists on all containers):
-- Email: `jeremy.tunnell+claude@gmail.com`
-- Password: `sKU^1cK1pVJCNAv`
+**Claude superuser** (permission 10, exists on all containers): See Claude memory for credentials.
 
 **Containers:**
 - `empoweredhealthtn` - Empowered Health (empoweredhealthtn.com)
