@@ -179,7 +179,7 @@
 		$num_options = 0;
 		foreach ($question_options as $question_option) {
 			$num_options++;
-			echo $question_option->get('qop_question_option_label') . ' - '.  $question_option->get('qop_question_option_value').' (<a href="/admin/admin_question_edit?qop_question_option_id='. $question_option->key .'&qst_question_id='. $question->key .'&action=remove_question_option">delete</a>)<br>';
+			echo htmlspecialchars($question_option->get('qop_question_option_label')) . ' - '. htmlspecialchars($question_option->get('qop_question_option_value')).' (<a href="/admin/admin_question_edit?qop_question_option_id='. $question_option->key .'&qst_question_id='. $question->key .'&action=remove_question_option">delete</a>)<br>';
 
 		}
 		echo '</ul>';

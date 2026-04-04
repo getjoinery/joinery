@@ -82,7 +82,7 @@
 
 	$page->begin_box($options);
 
-	echo '<p>By: '.$comment->get('cmt_author_name').' at '.LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', $session->get_timezone()).'<br>';
+	echo '<p>By: '.htmlspecialchars($comment->get('cmt_author_name')).' at '.LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', $session->get_timezone()).'<br>';
 	echo 'On: <a href="'.$post->get_url().'">'.$post->get('pst_title').'</a><br>';
 	if($comment->get('cmt_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($comment->get('cmt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
@@ -94,7 +94,7 @@
 		echo 'Status: Unapproved';
 	}
 	echo '<br><br>';
-	?><p><?php echo $comment->get('cmt_body'); ?></p>
+	?><p><?php echo nl2br(htmlspecialchars($comment->get('cmt_body'))); ?></p>
 
 <?php
 	$page->end_box();

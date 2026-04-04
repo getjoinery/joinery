@@ -32,7 +32,7 @@
 	$options['altlinks'] += array('Delete Coupon Code' => '/admin/admin_coupon_code?action=remove&ccd_coupon_code_id='.$coupon_code->key);
 	$page->begin_box($options);
 
-	echo '<br /><strong>Code:</strong> '.$coupon_code->get('ccd_code') . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';
+	echo '<br /><strong>Code:</strong> '.htmlspecialchars($coupon_code->get('ccd_code')) . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';
 
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
@@ -53,17 +53,17 @@
 
 	echo '<br /><strong>Max uses:</strong> ';
 	if($coupon_code->get('ccd_max_uses') > 0){
-		echo $coupon_code->get('ccd_max_uses');
+		echo htmlspecialchars($coupon_code->get('ccd_max_uses'));
 	}
 	else{
 		echo 'Unlimited';
 	}
 
 	if($coupon_code->get('ccd_amount_discount')){
-		echo '<br /><strong>Discount:</strong> '.$currency_symbol.$coupon_code->get('ccd_amount_discount') .$stackable.'<br />';
+		echo '<br /><strong>Discount:</strong> '.$currency_symbol.htmlspecialchars($coupon_code->get('ccd_amount_discount')) .$stackable.'<br />';
 	}
 	else{
-		echo '<br /><strong>Discount:</strong> '.$coupon_code->get('ccd_percent_discount') .'%'.$stackable.'<br />';
+		echo '<br /><strong>Discount:</strong> '.htmlspecialchars($coupon_code->get('ccd_percent_discount')) .'%'.$stackable.'<br />';
 	}
 
 	if($coupon_code->get('ccd_start_time')){
