@@ -29,10 +29,11 @@ function rules_logic($get_vars, $post_vars){
 	$page_vars['tier'] = $tier;
 
 	// Determine context: base profile (device_id) or scheduled block (block_id)
-	$block_id = LibraryFunctions::fetch_variable_local(
-		isset($_POST['action']) ? $post_vars : $get_vars,
-		'block_id', NULL, '', '', 'safemode', 'int'
-	);
+	// Check both POST and GET — the hidden input carries it on form submit, query string on GET
+	$block_id = LibraryFunctions::fetch_variable_local($post_vars, 'block_id', NULL, '', '', 'safemode', 'int');
+	if (!$block_id) {
+		$block_id = LibraryFunctions::fetch_variable_local($get_vars, 'block_id', NULL, '', '', 'safemode', 'int');
+	}
 	$page_vars['block_id'] = $block_id;
 	$page_vars['context'] = $block_id ? 'block' : 'base';
 
