@@ -127,7 +127,7 @@ $routes = [
         
         // System routes with placeholders
         '/api/v1/*' => ['view' => 'api/apiv1'],
-        '/admin/*' => ['view' => 'adm/{path}'],
+        '/admin/*' => ['view' => 'adm/{path}', 'min_permission' => 5],
         '/ajax/*' => ['view' => 'ajax/{file}'],
         '/utils/*' => ['view' => 'utils/{file}'],
         '/tests/*' => ['view' => 'tests/{path}', 'min_permission' => 10],  // Test routes probably shouldn't be in production

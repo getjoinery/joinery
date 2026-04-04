@@ -112,9 +112,6 @@ class Activation {
 		while(1) {
 			$act_code = trim(LibraryFunctions::str_rand($length));
 
-			$sql = "SELECT COUNT(1) as count FROM act_activation_codes
-				WHERE act_code = '$act_code'";
-
 			$q = DbConnector::GetPreparedStatement(
 				'SELECT 1 FROM act_activation_codes WHERE act_code = ?');
 			$q->bindValue(1, $act_code, PDO::PARAM_STR);

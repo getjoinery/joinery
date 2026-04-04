@@ -20,6 +20,14 @@ function admin_settings_logic($get, $post) {
 
 	if($post){
 
+		// Validate: plugin theme requires a plugin to be selected
+		if (isset($post['theme_template']) && $post['theme_template'] === 'plugin' && empty($post['active_theme_plugin'])) {
+			return LogicResult::render(array(
+				'run_validation' => $run_validation,
+				'error_message' => 'You must select an Active Theme Plugin when using "Plugin Provided Theme".'
+			));
+		}
+
 		if($settings->get_setting('preview_image') != $post['preview_image']){
 			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
 			$search_criteria = array();
@@ -96,7 +104,8 @@ function admin_settings_logic($get, $post) {
 	}
 
 	return LogicResult::render(array(
-		'run_validation' => $run_validation
+		'run_validation' => $run_validation,
+		'error_message' => null
 	));
 }
 ?>
