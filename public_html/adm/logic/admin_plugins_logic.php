@@ -63,13 +63,16 @@ function admin_plugins_logic($get, $post) {
 			// Sync doesn't require plugin name either
 			try {
 				$plugin_manager = new PluginManager();
-				$sync_result = $plugin_manager->sync();
+				$sync_result = $plugin_manager->syncWithFilesystem();
 				$parts = array();
 				if (!empty($sync_result['added'])) {
 					$parts[] = count($sync_result['added']) . " added";
 				}
 				if (!empty($sync_result['updated'])) {
 					$parts[] = count($sync_result['updated']) . " updated";
+				}
+				if (!empty($sync_result['table_messages'])) {
+					$parts[] = count($sync_result['table_messages']) . " table changes";
 				}
 
 				if (empty($parts)) {

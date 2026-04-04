@@ -520,6 +520,23 @@ class PluginManager extends AbstractExtensionManager {
     public function syncWithFilesystem() {
         $result = parent::sync();
 
+        // Update database tables for all active plugins
+        // This ensures new data classes in existing plugins get their tables created
+        require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+        require_once(PathHelper::getIncludePath('data/plugins_class.php'));
+        $database_updater = new DatabaseUpdater();
+        $active_plugins = new MultiPlugin(['plg_active' => 1]);
+        $active_plugins->load();
+        $table_messages = [];
+        foreach ($active_plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            $table_result = $database_updater->runPluginTablesOnly($plugin_name);
+            if (!empty($table_result['messages'])) {
+                $table_messages = array_merge($table_messages, $table_result['messages']);
+            }
+        }
+        $result['table_messages'] = $table_messages;
+
         // Register deletion rules for ALL active plugins
         // This ensures deletion rules are up-to-date even if plugin code changed
         require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
