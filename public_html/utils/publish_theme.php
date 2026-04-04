@@ -9,7 +9,7 @@
  *   ?download=name&type=plugin - Download a plugin archive
  *   ?core              - Redirect to core archive download
  *
- * Version: 1.0.0
+ * Version: 1.1.0
  */
 
 // Standalone script - load minimal requirements
@@ -44,9 +44,11 @@ if (isset($_GET['list']) && $_GET['list'] === 'themes') {
             if ($is_stock) {
                 $themes[] = [
                     'name' => $theme_data['name'] ?? basename(dirname($json_file)),
+                    'directory_name' => basename(dirname($json_file)),
                     'display_name' => $theme_data['display_name'] ?? $theme_data['displayName'] ?? $theme_data['name'] ?? basename(dirname($json_file)),
                     'version' => $theme_data['version'] ?? '1.0.0',
                     'description' => $theme_data['description'] ?? '',
+                    'author' => $theme_data['author'] ?? '',
                     'is_system' => $theme_data['is_system'] ?? $theme_data['system'] ?? false,
                     'is_stock' => true,
                 ];
@@ -73,9 +75,11 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
             if ($is_stock) {
                 $plugins[] = [
                     'name' => basename(dirname($json_file)),
+                    'directory_name' => basename(dirname($json_file)),
                     'display_name' => $plugin_data['name'] ?? basename(dirname($json_file)),
                     'version' => $plugin_data['version'] ?? '1.0.0',
                     'description' => $plugin_data['description'] ?? '',
+                    'author' => $plugin_data['author'] ?? '',
                     'is_system' => $plugin_data['is_system'] ?? $plugin_data['system'] ?? false,
                     'is_stock' => true,
                 ];

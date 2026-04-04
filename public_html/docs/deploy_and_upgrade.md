@@ -315,6 +315,40 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 
 ---
 
+## Marketplace
+
+The marketplace admin page lets superadmins browse themes and plugins available on the upgrade server and install them with one click.
+
+**Admin Page:** System > Marketplace (permission level 8)
+**Files:** `adm/admin_marketplace.php`, `adm/logic/admin_marketplace_logic.php`
+
+### How It Works
+
+1. Fetches catalog from the upgrade server (`publish_theme.php?list=themes` and `?list=plugins`)
+2. Compares with locally installed themes/plugins
+3. Shows a card grid with install buttons for items not yet installed
+4. Install downloads the tar.gz archive and extracts it via `AbstractExtensionManager::installFromTarGz()`
+5. After install, files are on disk and synced to the database — user must activate separately via Themes or Plugins admin page
+
+### Prerequisites
+
+- `upgrade_source` setting must be configured (URL of the upgrade server)
+- The upgrade server must have `upgrade_server_active` enabled
+
+### Overwrite Protection
+
+- **Stock extensions** (or those without a manifest) can be reinstalled/replaced from the marketplace
+- **Custom extensions** (`is_stock: false` in manifest) are protected — the marketplace refuses to overwrite them
+
+### Catalog Endpoint Fields
+
+The `publish_theme.php` catalog endpoints (`?list=themes`, `?list=plugins`) include:
+- `name` — display name (unchanged for backward compatibility)
+- `directory_name` — filesystem directory name (used for matching and downloads)
+- `display_name`, `version`, `description`, `author`, `is_system`, `is_stock`
+
+---
+
 ## Related Documentation
 
 - **[CLAUDE.md](/CLAUDE.md)** - System architecture and development guidelines
@@ -326,4 +360,4 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 
 ---
 
-*Last Updated: 2026-01-26*
+*Last Updated: 2026-04-04*
