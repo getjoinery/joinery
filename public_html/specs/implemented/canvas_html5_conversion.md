@@ -263,6 +263,8 @@ DO NOT try to write the file yourself — just return the HTML.
 - **Image paths**: Use relative paths like `images/about/1.jpg` or `demos/...` -- both directories are symlinked
 - **Screenshots**: Save to `/tmp`, NOT to `public_html`
 
+---
+
 ## Quality Criteria
 
 1. **Visual fidelity** -- side-by-side screenshot comparison passes
