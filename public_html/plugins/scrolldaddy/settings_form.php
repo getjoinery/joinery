@@ -16,4 +16,8 @@ $formwriter->textinput('scrolldaddy_dns_internal_url', 'ScrollDaddy Internal URL
     'value' => $settings->get_setting('scrolldaddy_dns_internal_url'),
     'placeholder' => 'e.g. http://127.0.0.1:8053'
 ]);
+$formwriter->passwordinput('scrolldaddy_dns_api_key', 'ScrollDaddy DNS API Key', [
+    'value' => $settings->get_setting('scrolldaddy_dns_api_key'),
+    'placeholder' => 'API key for DNS server management endpoints',
+]);
 ?>
