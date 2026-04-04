@@ -45,9 +45,15 @@ try {
         ? $settings->get_setting('paypal_webhook_id_test')
         : $settings->get_setting('paypal_webhook_id');
 
-    // Only verify if webhook ID is configured (skip during initial setup)
-    if ($webhook_id && !$paypal->verify_webhook_signature($headers, $body)) {
+    // Reject if webhook ID is not configured — verification cannot be skipped
+    if (!$webhook_id) {
+        error_log("PayPal webhook: webhook ID not configured, rejecting request");
+        http_response_code(400);
+        exit;
+    }
+    if (!$paypal->verify_webhook_signature($headers, $body)) {
         error_log("PayPal webhook: signature verification failed");
+        http_response_code(400);
         exit;
     }
 } catch (Exception $e) {
