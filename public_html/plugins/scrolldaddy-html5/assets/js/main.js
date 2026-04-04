@@ -1,1125 +1,251 @@
-(function ($) {
+(function () {
     "use strict";
-    /*=================================
-      JS Index Here
-    ==================================*/
-    /*
-    01. On Load Function
-    02. Preloader
-    03. Mobile Menu Active
-    04. Sticky fix
-    05. Scroll To Top
-    06. Set Background Image Color & Mask
-    07. Global Slider
-    08. Custom Animaiton For Slider
-    09. Ajax Contact Form
-    10. Search Box Popup
-    11. Popup Sidemenu
-    12. Magnific Popup
-    13. Section Position
-    14. Filter
-    15. Counter Up
-    16. AS Tab
-    17. Shape Mockup
-    18. Progress Bar Animation
-    19. Price Slider
-    21. Indicator
-    22. Circle Progress
-    00. Woocommerce Toggle
-    00. Right Click Disable
-  */
-    /*=================================
-      JS Index End
-  ==================================*/
-    /*
 
-  /*---------- 01. On Load Function ----------*/
-    $(window).on("load", function () {
-        $(".preloader").fadeOut();
+    /* 1. Preloader */
+    window.addEventListener('load', function () {
+        var preloader = document.querySelector('.preloader');
+        if (preloader) preloader.style.display = 'none';
+    });
+    document.querySelectorAll('.preloaderCls').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            var preloader = document.querySelector('.preloader');
+            if (preloader) preloader.style.display = 'none';
+        });
     });
 
-    /*---------- 02. Preloader ----------*/
-    if ($(".preloader").length > 0) {
-        $(".preloaderCls").each(function () {
-            $(this).on("click", function (e) {
-                e.preventDefault();
-                $(".preloader").css("display", "none");
-            });
-        });
-    }
-    // $('select').niceSelect(); 
-    if ($('.nice-select').length) {
-        $('.nice-select').niceSelect();
-    }
-
-
-    /*---------- 03. Mobile Menu Active ----------*/
-    $.fn.thmobilemenu = function (options) {
-        var opt = $.extend({
-                menuToggleBtn: ".th-menu-toggle",
-                bodyToggleClass: "th-body-visible",
-                subMenuClass: "th-submenu",
-                subMenuParent: "th-item-has-children",
-                subMenuParentToggle: "th-active",
-                meanExpandClass: "th-mean-expand",
-                appendElement: '<span class="th-mean-expand"></span>',
-                subMenuToggleClass: "th-open",
-                toggleSpeed: 400,
-            },
-            options
-        );
-
-        return this.each(function () {
-            var menu = $(this); // Select menu
-
-            // Menu Show & Hide
-            function menuToggle() {
-                menu.toggleClass(opt.bodyToggleClass);
-
-                // collapse submenu on menu hide or show
-                var subMenu = "." + opt.subMenuClass;
-                $(subMenu).each(function () {
-                    if ($(this).hasClass(opt.subMenuToggleClass)) {
-                        $(this).removeClass(opt.subMenuToggleClass);
-                        $(this).css("display", "none");
-                        $(this).parent().removeClass(opt.subMenuParentToggle);
-                    }
-                });
-            }
-
-            // Class Set Up for every submenu
-            menu.find("li").each(function () {
-                var submenu = $(this).find("ul");
-                submenu.addClass(opt.subMenuClass);
-                submenu.css("display", "none");
-                submenu.parent().addClass(opt.subMenuParent);
-                submenu.prev("a").append(opt.appendElement);
-                submenu.next("a").append(opt.appendElement);
-            });
-
-            // Toggle Submenu
-            function toggleDropDown($element) {
-                if ($($element).next("ul").length > 0) {
-                    $($element).parent().toggleClass(opt.subMenuParentToggle);
-                    $($element).next("ul").slideToggle(opt.toggleSpeed);
-                    $($element).next("ul").toggleClass(opt.subMenuToggleClass);
-                } else if ($($element).prev("ul").length > 0) {
-                    $($element).parent().toggleClass(opt.subMenuParentToggle);
-                    $($element).prev("ul").slideToggle(opt.toggleSpeed);
-                    $($element).prev("ul").toggleClass(opt.subMenuToggleClass);
+    /* 2. Mobile Menu */
+    var menuWrapper = document.querySelector('.th-menu-wrapper');
+    var menuToggle = document.querySelector('.th-menu-toggle');
+    if (menuWrapper && menuToggle) {
+        // Add submenu classes and expand togglers
+        menuWrapper.querySelectorAll('li').forEach(function (li) {
+            var submenu = li.querySelector('ul');
+            if (submenu) {
+                submenu.classList.add('th-submenu');
+                submenu.style.display = 'none';
+                li.classList.add('th-item-has-children');
+                var link = li.querySelector(':scope > a');
+                if (link) {
+                    var expander = document.createElement('span');
+                    expander.className = 'th-mean-expand';
+                    link.appendChild(expander);
                 }
             }
+        });
 
-            // Submenu toggle Button
-            var expandToggler = "." + opt.meanExpandClass;
-            $(expandToggler).each(function () {
-                $(this).on("click", function (e) {
-                    e.preventDefault();
-                    toggleDropDown($(this).parent());
-                });
+        function closeMenu() {
+            menuWrapper.classList.remove('th-body-visible');
+            menuWrapper.querySelectorAll('.th-submenu.th-open').forEach(function (sub) {
+                sub.classList.remove('th-open');
+                sub.style.display = 'none';
+                sub.parentElement.classList.remove('th-active');
             });
+        }
 
-            // Menu Show & Hide On Toggle Btn click
-            $(opt.menuToggleBtn).each(function () {
-                $(this).on("click", function () {
-                    menuToggle();
-                });
-            });
+        menuToggle.addEventListener('click', function (e) {
+            e.stopPropagation();
+            menuWrapper.classList.toggle('th-body-visible');
+        });
 
-            // Hide Menu On out side click
-            menu.on("click", function (e) {
+        // Click on overlay (outside the inner div) closes menu
+        menuWrapper.addEventListener('click', closeMenu);
+        var innerMenu = menuWrapper.querySelector('.th-mobile-menu');
+        if (innerMenu) {
+            innerMenu.addEventListener('click', function (e) { e.stopPropagation(); });
+        }
+
+        // Submenu expand/collapse
+        menuWrapper.querySelectorAll('.th-mean-expand').forEach(function (expander) {
+            expander.addEventListener('click', function (e) {
+                e.preventDefault();
                 e.stopPropagation();
-                menuToggle();
-            });
-
-            // Stop Hide full menu on menu click
-            menu.find("div").on("click", function (e) {
-                e.stopPropagation();
+                var parentLi = this.closest('li');
+                var submenu = parentLi && parentLi.querySelector('.th-submenu');
+                if (!submenu) return;
+                var isOpen = submenu.classList.contains('th-open');
+                submenu.classList.toggle('th-open', !isOpen);
+                submenu.style.display = isOpen ? 'none' : 'block';
+                parentLi.classList.toggle('th-active', !isOpen);
             });
         });
-    };
+    }
 
-    $(".th-menu-wrapper").thmobilemenu();
+    /* 3. Sticky Header */
+    var stickyWrapper = document.querySelector('.sticky-wrapper');
+    if (stickyWrapper) {
+        window.addEventListener('scroll', function () {
+            stickyWrapper.classList.toggle('sticky', window.scrollY > 500);
+        });
+    }
 
-    /*---------- 04. Sticky fix ----------*/
-    $(window).scroll(function () {
-        var topPos = $(this).scrollTop();
-        if (topPos > 500) {
-            $('.sticky-wrapper').addClass('sticky');
-        } else {
-            $('.sticky-wrapper').removeClass('sticky')
-        }
-    })
-
-    /*----------- 04.1.  One Page Nav ----------*/
-    function onePageNav(element) {
-        if ($(element).length > 0) {
-            $(element).each(function () {
-                var link = $(this).find('a');
-                $(this).find(link).each(function () {
-                    $(this).on('click', function () {
-                        var target = $(this.getAttribute('href'));
-                        if (target.length) {
-                            event.preventDefault();
-                            $('html, body').stop().animate({
-                                scrollTop: target.offset().top - 10
-                            }, 1000);
-                        };
-
-                    });
-                });
-            })
-        }
-    };
-    onePageNav('.onepage-nav');
-    onePageNav('.scroll-down');
-
-    /*---------- 05. Scroll To Top ----------*/
-    // progressAvtivation
-    if ($('.scroll-top')) {
-
-        var scrollTopbtn = document.querySelector('.scroll-top');
-        var progressPath = document.querySelector('.scroll-top path');
+    /* 4. Scroll To Top with SVG progress circle */
+    var scrollTopBtn = document.querySelector('.scroll-top');
+    var progressPath = document.querySelector('.scroll-top path');
+    if (scrollTopBtn && progressPath) {
         var pathLength = progressPath.getTotalLength();
-        progressPath.style.transition = progressPath.style.WebkitTransition = 'none';
+        progressPath.style.transition = 'none';
         progressPath.style.strokeDasharray = pathLength + ' ' + pathLength;
         progressPath.style.strokeDashoffset = pathLength;
         progressPath.getBoundingClientRect();
-        progressPath.style.transition = progressPath.style.WebkitTransition = 'stroke-dashoffset 10ms linear';
-        var updateProgress = function () {
-            var scroll = $(window).scrollTop();
-            var height = $(document).height() - $(window).height();
-            var progress = pathLength - (scroll * pathLength / height);
-            progressPath.style.strokeDashoffset = progress;
+        progressPath.style.transition = 'stroke-dashoffset 10ms linear';
+
+        function updateScrollProgress() {
+            var scroll = window.scrollY;
+            var height = document.documentElement.scrollHeight - window.innerHeight;
+            progressPath.style.strokeDashoffset = pathLength - (scroll * pathLength / height);
+            scrollTopBtn.classList.toggle('show', scroll > 50);
         }
-        updateProgress();
-        $(window).scroll(updateProgress);
-        var offset = 50;
-        var duration = 750;
-        jQuery(window).on('scroll', function () {
-            if (jQuery(this).scrollTop() > offset) {
-                jQuery(scrollTopbtn).addClass('show');
-            } else {
-                jQuery(scrollTopbtn).removeClass('show');
-            }
-        });
-        jQuery(scrollTopbtn).on('click', function (event) {
-            event.preventDefault();
-            jQuery('html, body').animate({
-                scrollTop: 0
-            }, duration);
-            return false;
-        })
-    }
+        window.addEventListener('scroll', updateScrollProgress);
+        updateScrollProgress();
 
-    /*---------- 06. Set Background Image Color & Mask ----------*/
-    if ($("[data-bg-src]").length > 0) {
-        $("[data-bg-src]").each(function () {
-            var src = $(this).attr("data-bg-src");
-            $(this).css("background-image", "url(" + src + ")");
-            $(this).removeAttr("data-bg-src").addClass("background-image");
+        scrollTopBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
     }
 
-    if ($('[data-bg-color]').length > 0) {
-        $('[data-bg-color]').each(function () {
-            var color = $(this).attr('data-bg-color');
-            $(this).css('background-color', color);
-            $(this).removeAttr('data-bg-color');
-        });
-    };
-
-    $('[data-border]').each(function () {
-        var borderColor = $(this).data('border');
-        $(this).css('--th-border-color', borderColor);
+    /* 5. Background image / color / mask from data attributes */
+    document.querySelectorAll('[data-bg-src]').forEach(function (el) {
+        el.style.backgroundImage = 'url(' + el.getAttribute('data-bg-src') + ')';
+        el.classList.add('background-image');
+        el.removeAttribute('data-bg-src');
+    });
+    document.querySelectorAll('[data-bg-color]').forEach(function (el) {
+        el.style.backgroundColor = el.getAttribute('data-bg-color');
+        el.removeAttribute('data-bg-color');
+    });
+    document.querySelectorAll('[data-border]').forEach(function (el) {
+        el.style.setProperty('--th-border-color', el.getAttribute('data-border'));
+    });
+    document.querySelectorAll('[data-mask-src]').forEach(function (el) {
+        var mask = el.getAttribute('data-mask-src');
+        el.style.maskImage = 'url(' + mask + ')';
+        el.style.webkitMaskImage = 'url(' + mask + ')';
+        el.classList.add('bg-mask');
+        el.removeAttribute('data-mask-src');
     });
 
-    if ($('[data-mask-src]').length > 0) {
-        $('[data-mask-src]').each(function () {
-            var mask = $(this).attr('data-mask-src');
-            $(this).css({
-                'mask-image': 'url(' + mask + ')',
-                '-webkit-mask-image': 'url(' + mask + ')'
-            });
-            $(this).addClass('bg-mask');
-            $(this).removeAttr('data-mask-src');
-        });
-    };
-
-
-
-    /*----------- 07. Global Slider ----------*/
-
-    $('.th-slider').each(function () {
-
-        var thSlider = $(this);
-        var settings = $(this).data('slider-options');
-
-        // Store references to the navigation Slider
-        var prevArrow = thSlider.find('.slider-prev');
-        var nextArrow = thSlider.find('.slider-next');
-        var paginationEl = thSlider.find('.slider-pagination');
-
-        var autoplayconditon = settings['autoplay'];
-
-        var sliderDefault = {
-            slidesPerView: 1,
-            spaceBetween: settings['spaceBetween'] ? settings['spaceBetween'] : 24,
-            loop: settings['loop'] == false ? false : true,
-            speed: settings['speed'] ? settings['speed'] : 1000,
-            autoplay: autoplayconditon ? autoplayconditon : {
-                delay: 6000,
-                disableOnInteraction: false
-            },
-            navigation: {
-                nextEl: nextArrow.get(0),
-                prevEl: prevArrow.get(0),
-            },
-            pagination: {
-                el: paginationEl.get(0),
-                clickable: true,
-                renderBullet: function (index, className) {
-                    return '<span class="' + className + '" aria-label="Go to Slide ' + (index + 1) + '"></span>';
-                },
-            },
-        };
-
-        var options = JSON.parse(thSlider.attr('data-slider-options'));
-        options = $.extend({}, sliderDefault, options);
-        var swiper = new Swiper(thSlider.get(0), options); // Assign the swiper variable
-
-        if ($('.slider-area').length > 0) {
-            $('.slider-area').closest(".container").parent().addClass("arrow-wrap");
+    /* 6. Counter number animation (triggered on scroll into view) */
+    var counterEls = document.querySelectorAll('.counter-number');
+    if (counterEls.length) {
+        function animateCounter(el) {
+            var target = parseFloat(el.textContent.replace(/[^0-9.]/g, ''));
+            if (isNaN(target)) return;
+            var startTime = null;
+            var duration = 1500;
+            function step(ts) {
+                if (!startTime) startTime = ts;
+                var progress = Math.min((ts - startTime) / duration, 1);
+                el.textContent = Math.round(progress * target);
+                if (progress < 1) requestAnimationFrame(step);
+                else el.textContent = target;
+            }
+            requestAnimationFrame(step);
         }
-
-    });
-
-
-
-
-
-
-    // Function to add animation classes
-    function animationProperties() {
-        $('[data-ani]').each(function () {
-            var animationName = $(this).data('ani');
-            $(this).addClass(animationName);
-        });
-
-        $('[data-ani-delay]').each(function () {
-            var delayTime = $(this).data('ani-delay');
-            $(this).css('animation-delay', delayTime);
-        });
-    }
-    animationProperties();
-
-    // Add click event handlers for external slider arrows based on data attributes
-    $('[data-slider-prev], [data-slider-next]').on('click', function () {
-        var sliderSelector = $(this).data('slider-prev') || $(this).data('slider-next');
-        var targetSlider = $(sliderSelector);
-
-        if (targetSlider.length) {
-            var swiper = targetSlider[0].swiper;
-
-            if (swiper) {
-                if ($(this).data('slider-prev')) {
-                    swiper.slidePrev();
-                } else {
-                    swiper.slideNext();
-                }
-            }
-        }
-    });
-
-    /*-------------- 08. Slider Tab -------------*/
-    $.fn.activateSliderThumbs = function (options) {
-        var opt = $.extend({
-                sliderTab: false,
-                tabButton: ".tab-btn",
-            },
-            options
-        );
-
-        return this.each(function () {
-            var $container = $(this);
-            var $thumbs = $container.find(opt.tabButton);
-            var $line = $('<span class="indicator"></span>').appendTo($container);
-
-            var sliderSelector = $container.data("slider-tab");
-            var $slider = $(sliderSelector);
-
-            var swiper = $slider[0].swiper;
-
-            $thumbs.on("click", function (e) {
-                e.preventDefault();
-                var clickedThumb = $(this);
-
-                clickedThumb.addClass("active").siblings().removeClass("active");
-                linePos(clickedThumb, $container);
-
-                if (opt.sliderTab) {
-                    var slideIndex = clickedThumb.index();
-                    swiper.slideTo(slideIndex);
-                }
-            });
-
-            if (opt.sliderTab) {
-                swiper.on("slideChange", function () {
-                    var activeIndex = swiper.realIndex;
-                    var $activeThumb = $thumbs.eq(activeIndex);
-
-                    $activeThumb.addClass("active").siblings().removeClass("active");
-                    linePos($activeThumb, $container);
-                });
-
-                var initialSlideIndex = swiper.activeIndex;
-                var $initialThumb = $thumbs.eq(initialSlideIndex);
-                $initialThumb.addClass("active").siblings().removeClass("active");
-                linePos($initialThumb, $container);
-            }
-
-            function linePos($activeThumb) {
-                var thumbOffset = $activeThumb.position();
-
-                var marginTop = parseInt($activeThumb.css('margin-top')) || 0;
-                var marginLeft = parseInt($activeThumb.css('margin-left')) || 0;
-
-                $line.css("--height-set", $activeThumb.outerHeight() + "px");
-                $line.css("--width-set", $activeThumb.outerWidth() + "px");
-                $line.css("--pos-y", thumbOffset.top + marginTop + "px");
-                $line.css("--pos-x", thumbOffset.left + marginLeft + "px");
-            }
-        });
-    };
-
-    if ($(".testi-thumb").length) {
-        $(".testi-thumb").activateSliderThumbs({
-            sliderTab: true,
-            tabButton: ".tab-btn",
-        });
-    }
-
-
-    if ($(".feature-thumb").length) {
-        $(".feature-thumb").activateSliderThumbs({
-            sliderTab: true,
-            tabButton: ".tab-btn",
-        });
-    }
-
-    /*----------- 09. Ajax Contact Form ----------*/
-    var form = ".ajax-contact";
-    var invalidCls = "is-invalid";
-    var $email = '[name="email"]';
-    var $validation =
-        '[name="name"],[name="email"],[name="subject"],[name="number"],[name="message"]'; // Must be use (,) without any space
-    var formMessages = $(".form-messages");
-
-    function sendContact() {
-        var formData = $(form).serialize();
-        var valid;
-        valid = validateContact();
-        if (valid) {
-            jQuery
-                .ajax({
-                    url: $(form).attr("action"),
-                    data: formData,
-                    type: "POST",
-                })
-                .done(function (response) {
-                    // Make sure that the formMessages div has the 'success' class.
-                    formMessages.removeClass("error");
-                    formMessages.addClass("success");
-                    // Set the message text.
-                    formMessages.text(response);
-                    // Clear the form.
-                    $(
-                        form +
-                        ' input:not([type="submit"]),' +
-                        form +
-                        " textarea"
-                    ).val("");
-                })
-                .fail(function (data) {
-                    // Make sure that the formMessages div has the 'error' class.
-                    formMessages.removeClass("success");
-                    formMessages.addClass("error");
-                    // Set the message text.
-                    if (data.responseText !== "") {
-                        formMessages.html(data.responseText);
-                    } else {
-                        formMessages.html(
-                            "Oops! An error occured and your message could not be sent."
-                        );
+        if ('IntersectionObserver' in window) {
+            var counterObserver = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) {
+                        animateCounter(entry.target);
+                        counterObserver.unobserve(entry.target);
                     }
                 });
-        }
-    }
-
-    function validateContact() {
-        var valid = true;
-        var formInput;
-
-        function unvalid($validation) {
-            $validation = $validation.split(",");
-            for (var i = 0; i < $validation.length; i++) {
-                formInput = form + " " + $validation[i];
-                if (!$(formInput).val()) {
-                    $(formInput).addClass(invalidCls);
-                    valid = false;
-                } else {
-                    $(formInput).removeClass(invalidCls);
-                    valid = true;
-                }
-            }
-        }
-        unvalid($validation);
-
-        if (
-            !$($email).val() ||
-            !$($email)
-            .val()
-            .match(/^([\w-\.]+@([\w-]+\.)+[\w-]{2,4})?$/)
-        ) {
-            $($email).addClass(invalidCls);
-            valid = false;
+            }, { threshold: 0.5 });
+            counterEls.forEach(function (el) { counterObserver.observe(el); });
         } else {
-            $($email).removeClass(invalidCls);
-            valid = true;
+            counterEls.forEach(animateCounter);
         }
-        return valid;
     }
 
-    $(form).on("submit", function (element) {
-        element.preventDefault();
-        sendContact();
-    });
-
-    /*---------- 10. Search Box Popup ----------*/
-    function popupSarchBox($searchBox, $searchOpen, $searchCls, $toggleCls) {
-        $($searchOpen).on("click", function (e) {
+    /* 7. Popup video (YouTube) using <dialog> */
+    document.querySelectorAll('.popup-video').forEach(function (link) {
+        link.addEventListener('click', function (e) {
             e.preventDefault();
-            $($searchBox).addClass($toggleCls);
+            var href = this.getAttribute('href') || this.href;
+            var embedUrl = href.replace('watch?v=', 'embed/') + '?autoplay=1&rel=0';
+            var dialog = document.createElement('dialog');
+            dialog.style.cssText = 'padding:0;border:none;background:#000;max-width:90vw;width:860px;border-radius:8px;';
+            dialog.innerHTML =
+                '<form method="dialog" style="position:absolute;top:8px;right:12px;z-index:1">' +
+                '<button style="background:rgba(0,0,0,.6);border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;border-radius:50%;width:36px;height:36px;">&times;</button>' +
+                '</form>' +
+                '<iframe src="' + embedUrl + '" width="100%" height="480" frameborder="0" allow="autoplay;fullscreen" allowfullscreen style="display:block"></iframe>';
+            document.body.appendChild(dialog);
+            dialog.showModal();
+            dialog.addEventListener('close', function () { dialog.remove(); });
         });
-        $($searchBox).on("click", function (e) {
-            e.stopPropagation();
-            $($searchBox).removeClass($toggleCls);
-        });
-        $($searchBox)
-            .find("form")
-            .on("click", function (e) {
-                e.stopPropagation();
-                $($searchBox).addClass($toggleCls);
-            });
-        $($searchCls).on("click", function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            $($searchBox).removeClass($toggleCls);
-        });
-    }
-    popupSarchBox(
-        ".popup-search-box",
-        ".searchBoxToggler",
-        ".searchClose",
-        "show"
-    );
-
-    /*---------- 11. Popup Sidemenu ----------*/
-    function popupSideMenu($sideMenu, $sideMunuOpen, $sideMenuCls, $toggleCls) {
-        // Sidebar Popup
-        $($sideMunuOpen).on('click', function (e) {
-            e.preventDefault();
-            $($sideMenu).addClass($toggleCls);
-        });
-        $($sideMenu).on('click', function (e) {
-            e.stopPropagation();
-            $($sideMenu).removeClass($toggleCls)
-        });
-        var sideMenuChild = $sideMenu + ' > div';
-        $(sideMenuChild).on('click', function (e) {
-            e.stopPropagation();
-            $($sideMenu).addClass($toggleCls)
-        });
-        $($sideMenuCls).on('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            $($sideMenu).removeClass($toggleCls);
-        });
-    };
-    popupSideMenu('.sidemenu-wrapper', '.sideMenuToggler', '.sideMenuCls', 'show');
-
-    /*----------- 12. Magnific Popup ----------*/
-    /* magnificPopup img view */
-    $(".popup-image").magnificPopup({
-        type: "image",
-        mainClass: 'mfp-zoom-in',
-        removalDelay: 260,
-        gallery: {
-            enabled: true,
-        },
     });
 
-    /* magnificPopup video view */
-    $(".popup-video").magnificPopup({
-        type: "iframe",
-        mainClass: 'mfp-zoom-in',
-        removalDelay: 260,
-    });
+    /* 8. Pricing switch (monthly / yearly) */
+    var filtMonthly = document.getElementById('filt-monthly');
+    var filtYearly = document.getElementById('filt-yearly');
+    var switcher = document.getElementById('switcher');
+    var monthly = document.getElementById('monthly');
+    var yearly = document.getElementById('yearly');
 
-    /* magnificPopup video view */
-    $(".popup-content").magnificPopup({
-        type: "inline",
-        midClick: true,
-    });
-
-
-    /************lettering js***********/
-    function injector(t, splitter, klass, after) {
-        var a = t.text().split(splitter),
-            inject = '';
-        if (a.length) {
-            $(a).each(function (i, item) {
-                inject += '<span class="' + klass + (i + 1) + '">' + item + '</span>' + after;
-            });
-            t.empty().append(inject);
-        }
-    }
-
-    var methods = {
-        init: function () {
-
-            return this.each(function () {
-                injector($(this), '', 'char', '');
-            });
-
-        },
-
-        words: function () {
-
-            return this.each(function () {
-                injector($(this), ' ', 'word', ' ');
-            });
-
-        },
-
-        lines: function () {
-
-            return this.each(function () {
-                var r = "eefec303079ad17405c889e092e105b0";
-                // Because it's hard to split a <br/> tag consistently across browsers,
-                // (*ahem* IE *ahem*), we replaces all <br/> instances with an md5 hash 
-                // (of the word "split").  If you're trying to use this plugin on that 
-                // md5 hash string, it will fail because you're being ridiculous.
-                injector($(this).children("br").replaceWith(r).end(), r, 'line', '');
-            });
-
-        }
-    };
-
-    $.fn.lettering = function (method) {
-        // Method calling logic
-        if (method && methods[method]) {
-            return methods[method].apply(this, [].slice.call(arguments, 1));
-        } else if (method === 'letters' || !method) {
-            return methods.init.apply(this, [].slice.call(arguments, 0)); // always pass an array
-        }
-        $.error('Method ' + method + ' does not exist on jQuery.lettering');
-        return this;
-    };
-
-    $(".hero-title-anime").lettering();
-    /*---------- 13. Section Position ----------*/
-    // Interger Converter
-    function convertInteger(str) {
-        return parseInt(str, 10);
-    }
-
-    $.fn.sectionPosition = function (mainAttr, posAttr) {
-        $(this).each(function () {
-            var section = $(this);
-
-            function setPosition() {
-                var sectionHeight = Math.floor(section.height() / 2), // Main Height of section
-                    posData = section.attr(mainAttr), // where to position
-                    posFor = section.attr(posAttr), // On Which section is for positioning
-                    topMark = "top-half", // Pos top
-                    bottomMark = "bottom-half", // Pos Bottom
-                    parentPT = convertInteger($(posFor).css("padding-top")), // Default Padding of  parent
-                    parentPB = convertInteger($(posFor).css("padding-bottom")); // Default Padding of  parent
-
-                if (posData === topMark) {
-                    $(posFor).css(
-                        "padding-bottom",
-                        parentPB + sectionHeight + "px"
-                    );
-                    section.css("margin-top", "-" + sectionHeight + "px");
-                } else if (posData === bottomMark) {
-                    $(posFor).css(
-                        "padding-top",
-                        parentPT + sectionHeight + "px"
-                    );
-                    section.css("margin-bottom", "-" + sectionHeight + "px");
-                }
-            }
-            setPosition(); // Set Padding On Load
+    if (filtMonthly && filtYearly && switcher && monthly && yearly) {
+        filtMonthly.addEventListener('click', function () {
+            switcher.checked = false;
+            filtMonthly.classList.add('toggler--is-active');
+            filtYearly.classList.remove('toggler--is-active');
+            monthly.classList.remove('hide');
+            yearly.classList.add('hide');
         });
-    };
-
-    var postionHandler = "[data-sec-pos]";
-    if ($(postionHandler).length) {
-        $(postionHandler).imagesLoaded(function () {
-            $(postionHandler).sectionPosition("data-sec-pos", "data-pos-for");
+        filtYearly.addEventListener('click', function () {
+            switcher.checked = true;
+            filtYearly.classList.add('toggler--is-active');
+            filtMonthly.classList.remove('toggler--is-active');
+            monthly.classList.add('hide');
+            yearly.classList.remove('hide');
+        });
+        switcher.addEventListener('click', function () {
+            filtYearly.classList.toggle('toggler--is-active');
+            filtMonthly.classList.toggle('toggler--is-active');
+            monthly.classList.toggle('hide');
+            yearly.classList.toggle('hide');
         });
     }
 
-    /*----------- serviceAccordion ----------*/
-
-    $('#serviceAccordion').on('show.bs.collapse', function (event) {
-        var activeIndex = $(event.target).closest('.accordion-item').index();
-        $('.th-accordion_images img').removeClass('active');
-        $('.th-accordion_images img').eq(activeIndex).addClass('active');
+    /* 9. Animation classes from data-ani / data-ani-delay attributes */
+    document.querySelectorAll('[data-ani]').forEach(function (el) {
+        el.classList.add(el.getAttribute('data-ani'));
+    });
+    document.querySelectorAll('[data-ani-delay]').forEach(function (el) {
+        el.style.animationDelay = el.getAttribute('data-ani-delay');
     });
 
-    // Show the first tab and hide the rest
-    $('.accordion-item-wrapp li:first-child').addClass('active');
-    $('.according-img-tab').hide();
-    $('.according-img-tab:first').show();
-
-    // Click function
-    $('.accordion-item-wrapp .accordion-item-content').mouseenter(function () {
-        $('.accordion-item-wrapp .accordion-item-content').removeClass('active');
-        // $(this).addClass('active');
-        $('.according-img-tab').hide();
-
-        var activeTab = $(this).find('.accordion-tab-item').attr('data-bs-target');
-        $(activeTab).fadeIn();
-        return false;
+    /* 10. Shape mockup: position shapes from data attributes */
+    document.querySelectorAll('.shape-mockup').forEach(function (el) {
+        ['top', 'right', 'bottom', 'left'].forEach(function (pos) {
+            var val = el.getAttribute('data-' + pos);
+            if (val) { el.style[pos] = val; el.removeAttribute('data-' + pos); }
+        });
+        if (el.parentElement) el.parentElement.classList.add('shape-mockup-wrap');
     });
 
-    /*----------- 15. Filter ----------*/
-     /*----------- 15. Filter ----------*/  
-     $(".filter-active").imagesLoaded(function () {
-        var $filter = ".filter-active",
-            $filterItem = ".filter-item",
-            $filterMenu = ".filter-menu-active";
-
-        if ($($filter).length > 0) {
-            var $grid = $($filter).isotope({
-                itemSelector: $filterItem,
-                filter: "*",
-                masonry: {
-                    // use outer width of grid-sizer for columnWidth
-                    columnWidth: 1,
-                },
-            });
-
-            // filter items on button click
-            $($filterMenu).on("click", "button", function () {
-                var filterValue = $(this).attr("data-filter");
-                $grid.isotope({
-                    filter: filterValue,
-                });
-            });
-
-            // Menu Active Class
-            $($filterMenu).on("click", "button", function (event) {
-                event.preventDefault();
-                $(this).addClass("active");
-                $(this).siblings(".active").removeClass("active");
-            });
-        }
-    });
-
-    $(".masonary-active").imagesLoaded(function () {
-        var $filter = ".masonary-active",
-            $filterItem = ".filter-item";
-
-        if ($($filter).length > 0) {
-            $($filter).isotope({
-                itemSelector: $filterItem,
-                filter: "*",
-                masonry: {
-                    // use outer width of grid-sizer for columnWidth
-                    columnWidth: 1,
-                },
-            });
-        }
-    });
-
-    $(".masonary-active, .woocommerce-Reviews .comment-list").imagesLoaded(function () {
-        var $filter = ".masonary-active, .woocommerce-Reviews .comment-list",
-            $filterItem = ".filter-item, .woocommerce-Reviews .comment-list li";
-
-        if ($($filter).length > 0) {
-            $($filter).isotope({
-                itemSelector: $filterItem,
-                filter: "*",
-                masonry: {
-                    // use outer width of grid-sizer for columnWidth
-                    columnWidth: 1,
-                },
-            });
-        }
-        $('[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
-            $($filter).isotope({
-                filter: "*",
-            });
+    /* 11. Tilt effect on hover (replaces tilt.js) */
+    document.querySelectorAll('.tilt-active').forEach(function (el) {
+        el.style.transition = 'transform 0.1s ease';
+        el.addEventListener('mousemove', function (e) {
+            var rect = el.getBoundingClientRect();
+            var x = (e.clientX - rect.left) / rect.width - 0.5;
+            var y = (e.clientY - rect.top) / rect.height - 0.5;
+            el.style.transform = 'perspective(1000px) rotateY(' + (x * 7) + 'deg) rotateX(' + (-y * 7) + 'deg)';
+        });
+        el.addEventListener('mouseleave', function () {
+            el.style.transform = 'perspective(1000px) rotateY(0deg) rotateX(0deg)';
         });
     });
 
-    /*----------- 15. Counter Up ----------*/
-    $(".counter-number").counterUp({
-        delay: 10,
-        time: 1000,
+    /* 12. CSS custom property color overrides from data attributes */
+    document.querySelectorAll('[theme-color]').forEach(function (el) {
+        el.style.setProperty('--theme-color', el.getAttribute('theme-color'));
+        el.removeAttribute('theme-color');
+    });
+    document.querySelectorAll('[title-color]').forEach(function (el) {
+        el.style.setProperty('--title-color', el.getAttribute('title-color'));
+        el.removeAttribute('title-color');
     });
 
-    /*----------- 17. Shape Mockup ----------*/
-    $.fn.shapeMockup = function () {
-        var $shape = $(this);
-        $shape.each(function () {
-            var $currentShape = $(this),
-                shapeTop = $currentShape.data("top"),
-                shapeRight = $currentShape.data("right"),
-                shapeBottom = $currentShape.data("bottom"),
-                shapeLeft = $currentShape.data("left");
-            $currentShape
-                .css({
-                    top: shapeTop,
-                    right: shapeRight,
-                    bottom: shapeBottom,
-                    left: shapeLeft,
-                })
-                .removeAttr("data-top")
-                .removeAttr("data-right")
-                .removeAttr("data-bottom")
-                .removeAttr("data-left")
-                .parent()
-                .addClass("shape-mockup-wrap");
-        });
-    };
-
-    if ($(".shape-mockup")) {
-        $(".shape-mockup").shapeMockup();
-    }
-
-    /*----------- 18. Progress Bar Animation ----------*/
-    $('.progress-bar').waypoint(function () {
-        $('.progress-bar').css({
-            animation: "animate-positive 1.8s",
-            opacity: "1"
-        });
-    }, {
-        offset: '75%'
-    });
-
-    /*----------- 19. Price Slider ----------*/
-    $(".price_slider").slider({
-        range: true,
-        min: 10,
-        max: 100,
-        values: [10, 75],
-        slide: function (event, ui) {
-            $(".from").text("$" + ui.values[0]);
-            $(".to").text("$" + ui.values[1]);
-        }
-    });
-    $(".from").text("$" + $(".price_slider").slider("values", 0));
-    $(".to").text("$" + $(".price_slider").slider("values", 1));
-
-    /*----------- 20. Tilt Active ----------*/
-    $('.tilt-active').tilt({
-        maxTilt: 7,
-        perspective: 1000,
-    })
-
-    /*---------- 22. Circle Progress ----------*/
-    function animateElements() {
-        $('.feature-circle .progressbar').each(function () {
-            var pathColor = $(this).attr('data-path-color');
-            var elementPos = $(this).offset().top;
-            var topOfWindow = $(window).scrollTop();
-            var percent = $(this).find('.circle').attr('data-percent');
-            var percentage = parseInt(percent, 10) / parseInt(100, 10);
-            var animate = $(this).data('animate');
-            if (elementPos < topOfWindow + $(window).height() - 30 && !animate) {
-                $(this).data('animate', true);
-                $(this).find('.circle').circleProgress({
-                    startAngle: -Math.PI / 2,
-                    value: percent / 100,
-                    size: 100,
-                    thickness: 6,
-                    emptyFill: "#33425A",
-                    lineCap: 'round',
-                    fill: {
-                        color: pathColor,
-                    }
-                }).on('circle-animation-progress', function (event, progress, stepValue) {
-                    $(this).find('.circle-num').text((stepValue * 100).toFixed(0) + "%");
-                }).stop();
-            }
-        });
-
-        $('.skill-circle .progressbar').each(function () {
-            var pathColor = $(this).attr('data-path-color');
-            var elementPos = $(this).offset().top;
-            var topOfWindow = $(window).scrollTop();
-            var percent = $(this).find('.circle').attr('data-percent');
-            var percentage = parseInt(percent, 10) / parseInt(100, 10);
-            var animate = $(this).data('animate');
-            if (elementPos < topOfWindow + $(window).height() - 30 && !animate) {
-                $(this).data('animate', true);
-                $(this).find('.circle').circleProgress({
-                    startAngle: -Math.PI / 2,
-                    value: percent / 100,
-                    size: 176,
-                    thickness: 8,
-                    emptyFill: "#EFF1F9",
-                    lineCap: 'round',
-                    fill: {
-                        color: pathColor,
-                    }
-                }).on('circle-animation-progress', function (event, progress, stepValue) {
-                    $(this).find('.circle-num').text((stepValue * 100).toFixed(0) + "%");
-                }).stop();
-            }
-        });
-    }
-
-    // Show animated elements
-    animateElements();
-    $(window).scroll(animateElements);
-
-
-    /*  footer animation  */
-    $(".th-screen").length && $(window).on("scroll", function () {
-            ! function (t, a = 0) {
-                var i = $(window).scrollTop(),
-                    o = i + $(window).height(),
-                    s = $(t).offset().top;
-                return s + $(t).height() - parseInt(a) <= o && s >= i
-            }
-            (".th-screen", 200) ? $(".th-screen").removeClass("th-visible"): $(".th-screen").addClass("th-visible")
-        }),
-
-
-
-
-        /*----------- 00. Woocommerce Toggle ----------*/
-        // Ship To Different Address
-        $("#ship-to-different-address-checkbox").on("change", function () {
-            if ($(this).is(":checked")) {
-                $("#ship-to-different-address")
-                    .next(".shipping_address")
-                    .slideDown();
-            } else {
-                $("#ship-to-different-address").next(".shipping_address").slideUp();
-            }
-        });
-
-    // Login Toggle
-    $(".woocommerce-form-login-toggle a").on("click", function (e) {
-        e.preventDefault();
-        $(".woocommerce-form-login").slideToggle();
-    });
-
-    // Coupon Toggle
-    $(".woocommerce-form-coupon-toggle a").on("click", function (e) {
-        e.preventDefault();
-        $(".woocommerce-form-coupon").slideToggle();
-    });
-
-    // Woocommerce Shipping Method
-    $(".shipping-calculator-button").on("click", function (e) {
-        e.preventDefault();
-        $(this).next(".shipping-calculator-form").slideToggle();
-    });
-
-    // Woocommerce Payment Toggle
-    $('.wc_payment_methods input[type="radio"]:checked')
-        .siblings(".payment_box")
-        .show();
-    $('.wc_payment_methods input[type="radio"]').each(function () {
-        $(this).on("change", function () {
-            $(".payment_box").slideUp();
-            $(this).siblings(".payment_box").slideDown();
-        });
-    });
-
-    // Woocommerce Rating Toggle
-    $(".rating-select .stars a").each(function () {
-        $(this).on("click", function (e) {
-            e.preventDefault();
-            $(this).siblings().removeClass("active");
-            $(this).parent().parent().addClass("selected");
-            $(this).addClass("active");
-        });
-    });
-
-    // Quantity Plus Minus ---------------------------
-
-    $(".quantity-plus").each(function () {
-        $(this).on("click", function (e) {
-            e.preventDefault();
-            var $qty = $(this).siblings(".qty-input");
-            var currentVal = parseInt($qty.val(), 10);
-            if (!isNaN(currentVal)) {
-                $qty.val(currentVal + 1);
-            }
-        });
-    });
-
-    $(".quantity-minus").each(function () {
-        $(this).on("click", function (e) {
-            e.preventDefault();
-            var $qty = $(this).siblings(".qty-input");
-            var currentVal = parseInt($qty.val(), 10);
-            if (!isNaN(currentVal) && currentVal > 1) {
-                $qty.val(currentVal - 1);
-            }
-        });
-    });
-
-    // /*----------- 00.Color Scheme ----------*/
-    $('.color-switch-btns button').each(function () {
-        // Get color for button
-        const button = $(this);
-        const color = button.data('color');
-        button.css('--theme-color', color);
-
-        // Change theme color on click
-        button.on('click', function () {
-            const clickedColor = $(this).data('color');
-            $('body').css('--theme-color', clickedColor);
-        });
-    });
-    if ($('[theme-color]').length > 0) {
-        $('[theme-color]').each(function () {
-            var $color = $(this).attr('theme-color');
-            $(this).get(0).style.setProperty('--theme-color', $color);
-            $(this).removeAttr('theme-color');
-        });
-    };
-    if ($('[title-color]').length > 0) {
-        $('[title-color]').each(function () {
-            var $color = $(this).attr('title-color');
-            $(this).get(0).style.setProperty('--title-color', $color);
-            $(this).removeAttr('title-color');
-        });
-    };
-
-    $(document).on('click', '.switchIcon', function () {
-        $('.color-scheme-wrap').toggleClass('active');
-    });
-
-    // /*----------- Pricing-switch & Tab ----------*/
-    var e = document.getElementById("filt-monthly"),
-        d = document.getElementById("filt-yearly"),
-        t = document.getElementById("switcher"),
-        m = document.getElementById("monthly"),
-        y = document.getElementById("yearly");
-
-
-    if ($('.pricing-tabs').length) {
-        e.addEventListener("click", function () {
-            t.checked = false;
-            e.classList.add("toggler--is-active");
-            d.classList.remove("toggler--is-active");
-            m.classList.remove("hide");
-            y.classList.add("hide");
-        });
-
-        d.addEventListener("click", function () {
-            t.checked = true;
-            d.classList.add("toggler--is-active");
-            e.classList.remove("toggler--is-active");
-            m.classList.add("hide");
-            y.classList.remove("hide");
-        });
-
-        t.addEventListener("click", function () {
-            d.classList.toggle("toggler--is-active");
-            e.classList.toggle("toggler--is-active");
-            m.classList.toggle("hide");
-            y.classList.toggle("hide");
-        });
-    }
-
-
-    $(document).ready(function () {
-        var mySwiper = new Swiper(".featureSlide", {
-            autoplay: {
-                delay: 5000,
-                disableOnInteraction: false
-            },
-            speed: 500,
-            direction: "horizontal",
-            navigation: {
-                nextEl: ".swiper-button-next",
-                prevEl: ".swiper-button-prev"
-            },
-            pagination: {
-                el: ".swiper-pagination",
-                type: "progressbar"
-            },
-            loop: false,
-            effect: "slide",
-            spaceBetween: 30,
-            on: {
-                init: function () {
-                    $(".swiper-pagination-custom .swiper-pagination-switch").removeClass("active");
-                    $(".swiper-pagination-custom .swiper-pagination-switch").eq(0).addClass("active");
-                },
-                slideChangeTransitionStart: function () {
-                    $(".swiper-pagination-custom .swiper-pagination-switch").removeClass("active");
-                    $(".swiper-pagination-custom .swiper-pagination-switch").eq(mySwiper.realIndex).addClass("active");
-                }
-            }
-        });
-        $(".swiper-pagination-custom .swiper-pagination-switch").click(function () {
-            mySwiper.slideTo($(this).index());
-            $(".swiper-pagination-custom .swiper-pagination-switch").removeClass("active");
-            $(this).addClass("active");
-        });
-    });
-    /* ==================================================
-			# Wow Init
-		 ===============================================*/
-    var wow = new WOW({
-        boxClass: 'wow',
-        animateClass: 'animated',
-        offset: 0,
-        mobile: true,
-        live: true
-    });
-    new WOW().init();
-
-    /* Main js */
-    /* -----------------*/
-
-
-    // /*----------- 00. Right Click Disable ----------*/
-    //   window.addEventListener('contextmenu', function (e) {
-    //     // do something here... 
-    //     e.preventDefault();  
-    //   }, false); 
-
-    // /*----------- 00. Inspect Element Disable ----------*/
-    //   document.onkeydown = function (e) {
-    //     if (event.keyCode == 123) { 
-    //       return false;
-    //     }
-    //     if (e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) {
-    //       return false;
-    //     }
-    //     if (e.ctrlKey && e.shiftKey && e.keyCode == 'C'.charCodeAt(0)) {
-    //       return false;
-    //     }
-    //     if (e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) {
-    //       return false;
-    //     }
-    //     if (e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) { 
-    //       return false;
-    //     }
-    //   }   
-
-})(jQuery);
+})();

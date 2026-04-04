@@ -271,7 +271,7 @@ Career Area
 	    All CSS File
 	============================== -->
     <!-- Responsive utilities (replaces Bootstrap grid/display classes) -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy-html5/assets/css/responsive-utils.css">
+    <link rel="stylesheet" href="/plugins/scrolldaddy-html5/assets/css/responsive-utils.css?v=5">
     <!-- Icon overrides (zero-dependency Unicode replacements) -->
     <link rel="stylesheet" href="/plugins/scrolldaddy-html5/assets/css/icons-override.css">
     <!-- Theme Custom CSS -->
@@ -708,9 +708,9 @@ Career Area
 	<!-- Joinery Validation (Pure JS, no jQuery dependency) -->
 	<script src="/assets/js/joinery-validate.js"></script>
     <!-- Main Js File -->
-    <script src="/plugins/scrolldaddy-html5/assets/js/main.js"></script>
+    <script src="/plugins/scrolldaddy-html5/assets/js/main.js?v=2"></script>
     <!-- ScrollDaddy Plugin JS -->
-    <script src="/plugins/scrolldaddy-html5/assets/js/scrolldaddy-plugin.js"></script>
+    <script src="/plugins/scrolldaddy-html5/assets/js/scrolldaddy-plugin.js?v=2"></script>
 
 </body>
 
