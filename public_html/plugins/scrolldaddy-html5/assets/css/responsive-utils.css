@@ -1,0 +1,68 @@
+/**
+ * Bootstrap-compatible responsive utilities
+ * Provides only the specific classes used in PublicPage.php header/footer
+ * so Bootstrap itself is not needed as a dependency.
+ */
+
+/* --- Display utilities --- */
+.d-none    { display: none !important; }
+.d-block   { display: block !important; }
+.d-flex    { display: flex !important; }
+.d-inline-block { display: inline-block !important; }
+
+/* lg breakpoint (992px) */
+@media (min-width: 992px) {
+    .d-lg-none         { display: none !important; }
+    .d-lg-block        { display: block !important; }
+    .d-lg-flex         { display: flex !important; }
+    .d-lg-inline-block { display: inline-block !important; }
+}
+
+/* --- Grid system (flexbox row/column) --- */
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    margin-right: -12px;
+    margin-left: -12px;
+}
+.row > * {
+    padding-right: 12px;
+    padding-left: 12px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Remove horizontal gutters */
+.gx-0 { margin-right: 0; margin-left: 0; }
+.gx-0 > * { padding-right: 0; padding-left: 0; }
+
+/* Auto-width column */
+.col-auto { flex: 0 0 auto; width: auto; }
+
+/* Alignment helpers */
+.align-items-center    { align-items: center !important; }
+.justify-content-between { justify-content: space-between !important; }
+.justify-content-center  { justify-content: center !important; }
+
+/* md breakpoint (768px) */
+@media (min-width: 768px) {
+    .col-md-6 { flex: 0 0 auto; width: 50%; }
+}
+
+/* xl breakpoint (1200px) */
+@media (min-width: 1200px) {
+    .col-xl-4   { flex: 0 0 auto; width: 33.3333%; }
+    .col-xl-6   { flex: 0 0 auto; width: 50%; }
+    .col-xl-auto { flex: 0 0 auto; width: auto; }
+}
+
+/* xxl breakpoint (1400px) */
+@media (min-width: 1400px) {
+    .col-xxl-3 { flex: 0 0 auto; width: 25%; }
+}
+
+/* --- Spacing (subset used in header/footer) --- */
+.mb-15 { margin-bottom: 15px !important; }
+.mt-n1 { margin-top: -0.25rem !important; }
