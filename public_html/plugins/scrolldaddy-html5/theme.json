@@ -1,0 +1,17 @@
+{
+    "display_name": "ScrollDaddy HTML5 Theme",
+    "description": "ScrollDaddy self-hosted DNS filtering service complete theme - HTML5 zero-dependency version",
+    "version": "1.0.0",
+    "author": "System Developer",
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterV2HTML5",
+    "asset_fallback_theme": "default",
+    "assets": {
+        "css": [
+            "/plugins/scrolldaddy-html5/assets/css/scrolldaddy-plugin.css"
+        ],
+        "js": [
+            "/plugins/scrolldaddy-html5/assets/js/scrolldaddy-plugin.js"
+        ]
+    }
+}
