@@ -1339,3 +1339,11 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Marketplace admin menu entry (v96) ==========
+	$migration = array();
+	$migration['database_version'] = '96';
+	$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system-marketplace'";
+	$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_slug, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon) SELECT 'Marketplace', 'system-marketplace', amu_admin_menu_id, 'admin_marketplace', 4, 8, 0, 'store' FROM amu_admin_menus WHERE amu_slug = 'system'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
