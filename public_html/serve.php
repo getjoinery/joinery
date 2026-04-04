@@ -129,8 +129,8 @@ $routes = [
         '/api/v1/*' => ['view' => 'api/apiv1'],
         '/admin/*' => ['view' => 'adm/{path}', 'min_permission' => 5],
         '/ajax/*' => ['view' => 'ajax/{file}'],
-        '/utils/*' => ['view' => 'utils/{file}'],
-        '/tests/*' => ['view' => 'tests/{path}', 'min_permission' => 10],  // Test routes probably shouldn't be in production
+        '/utils/*' => ['view' => 'utils/{file}', 'min_permission' => 5],
+        '/tests/*' => ['view' => 'tests/{path}', 'min_permission' => 10],
         
         // Optional: Explicit route for views directory access (if needed)
         '/views/*' => ['view' => 'views/{path}'],
