@@ -5,63 +5,62 @@ require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
 $page_vars = process_logic(index_logic($_GET, $_POST));
 $page = new PublicPage();
 $page->public_header(array(
-    'title' => 'Home',
+    'title' => 'Home - Phillyzouk Modern Blog',
     'showheader' => true
 ));
 ?>
 
-<!-- Hero Section -->
-<section class="hero-section">
+<!-- Start Hero Area -->
+<section class="main-blog-area pt-100 pb-70">
     <div class="container">
-        <div class="hero-content">
-            <div class="hero-text">
-                <span class="featured-badge">Welcome</span>
-                <h1><?php echo htmlspecialchars(Globalvars::get_instance()->get_setting('site_name', true, true) ?: 'Phillyzouk'); ?></h1>
-                <p><?php echo htmlspecialchars(Globalvars::get_instance()->get_setting('site_description', true, true) ?: ''); ?></p>
-                <a href="/events" class="cta-button">View Events</a>
-            </div>
-            <div class="hero-image">
-                <img src="/uploads/hero/DSC02831-edited_6uit40q2_xdnz67g0.jpg" alt="<?php echo htmlspecialchars(Globalvars::get_instance()->get_setting('site_name', true, true)); ?>">
+        <div class="single-main-blog-item">
+            <img src="/uploads/hero/DSC02831-edited_6uit40q2_xdnz67g0.jpg" alt="Philly Zouk">
+            <div class="main-blog-content">
+                <a href="#">
+                    <h3>Welcome to Philly Zouk</h3>
+                </a>
             </div>
         </div>
     </div>
 </section>
+<!-- End Hero Area -->
 
-<!-- About Info Area -->
+<!-- Start About Info Area -->
 <section class="contact-info-area pt-100 pb-70">
-    <div class="container">
-        <div class="row">
-            <div class="col-lg-3 col-md-6">
-                <div class="single-contact-info">
-                    <span class="ci-icon">&#10084;</span>
-                    <h3>Our Passion</h3>
-                    <p>We are dedicated to celebrating the art of dance and bringing our community together through movement and music.</p>
-                </div>
-            </div>
-            <div class="col-lg-3 col-md-6">
-                <div class="single-contact-info">
-                    <span class="ci-icon">&#128101;</span>
-                    <h3>Community</h3>
-                    <p>Join dancers of all levels in a welcoming environment where everyone can express themselves and grow together.</p>
-                </div>
-            </div>
-            <div class="col-lg-3 col-md-6">
-                <div class="single-contact-info">
-                    <span class="ci-icon">&#127925;</span>
-                    <h3>Styles</h3>
-                    <p>We offer classes, socials, and weekenders for Brazilian Zouk dancing.</p>
-                </div>
-            </div>
-            <div class="col-lg-3 col-md-6">
-                <div class="single-contact-info">
-                    <span class="ci-icon">&#128197;</span>
-                    <h3>Events</h3>
-                    <p>Participate in our performances, workshops, and social events throughout the year celebrating dance culture.</p>
-                </div>
-            </div>
-        </div>
-    </div>
+	<div class="container">
+		<div class="row">
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-heart"></i>
+					<h3>Our Passion</h3>
+					<p>We are dedicated to celebrating the art of dance and bringing our community together through movement and music.</p>
+				</div>
+			</div>
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-group"></i>
+					<h3>Community</h3>
+					<p>Join dancers of all levels in a welcoming environment where everyone can express themselves and grow together.</p>
+				</div>
+			</div>
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-music"></i>
+					<h3>Styles</h3>
+					<p>We offer classes, socials, and weekenders for Brazilian Zouk dancing.</p>
+				</div>
+			</div>
+			<div class="col-lg-3 col-sm-6">
+				<div class="single-contact-info">
+					<i class="bx bx-calendar-event"></i>
+					<h3>Events</h3>
+					<p>Participate in our performances, workshops, and social events throughout the year celebrating dance culture.</p>
+				</div>
+			</div>
+		</div>
+	</div>
 </section>
+<!-- End About Info Area -->
 
 <!-- List Signup -->
 <div class="container" style="margin-top: 3rem; margin-bottom: 3rem;">
@@ -116,11 +115,11 @@ echo ComponentRenderer::render(null, 'list_signup', [
                                         <?php endif; ?>
                                         <ul>
                                             <li>
-                                                <span class="icon">&#128197;</span>
-                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'M d, Y'); ?>
+                                                <i class="bx bx-calendar"></i>
+                                                <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'D, M d, Y'); ?>
                                             </li>
                                             <li>
-                                                <span class="icon">&#128336;</span>
+                                                <i class="bx bx-time"></i>
                                                 <?php echo LibraryFunctions::convert_time($evt_start, 'UTC', $evt_tz, 'g:i A'); ?>
                                             </li>
                                         </ul>
@@ -169,7 +168,7 @@ echo ComponentRenderer::render(null, 'list_signup', [
                                     <h4><?php echo htmlspecialchars($post->get('pst_title')); ?></h4>
                                 </a>
                                 <span class="post-date">
-                                    <span class="icon" style="filter: grayscale(1);">&#128197;</span>
+                                    <i class="bx bx-calendar"></i>
                                     <?php echo date('M d, Y', strtotime($post->get('pst_published_time'))); ?>
                                 </span>
                             </div>

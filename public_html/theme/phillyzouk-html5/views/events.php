@@ -31,13 +31,13 @@ $page->public_header(array(
         <!-- Subscribe to Calendar -->
         <div class="text-center mb-5">
             <a href="/events/calendar.ics" class="text-muted small">
-                &#128197; Subscribe to Calendar
+                <i class="bx bx-calendar-plus"></i> Subscribe to Calendar
             </a>
         </div>
 
         <?php if(empty($page_vars['events'])){ ?>
             <div class="text-center p-5">
-                <p style="font-size: 64px; color: #ddd;">&#128197;</p>
+                <i class="bx bx-calendar-x" style="font-size: 64px; color: #ddd;"></i>
                 <h3 class="mt-3">No Events Found</h3>
                 <p class="text-muted">There are no events in this category right now.</p>
             </div>
@@ -104,13 +104,13 @@ $page->public_header(array(
                                 <ul>
                                     <?php if($date_str): ?>
                                     <li>
-                                        <span class="icon" style="filter: grayscale(1);">&#128197;</span>
+                                        <i class="bx bx-calendar"></i>
                                         <?php echo $date_str; ?>
                                     </li>
                                     <?php endif; ?>
                                     <?php if($time_str): ?>
                                     <li>
-                                        <span class="icon" style="filter: grayscale(1);">&#128336;</span>
+                                        <i class="bx bx-time"></i>
                                         <?php echo $time_str; ?>
                                     </li>
                                     <?php endif; ?>
@@ -119,7 +119,7 @@ $page->public_header(array(
                                     <h3><?php echo htmlspecialchars($evt_name); ?></h3>
                                 </a>
                                 <?php if($instructor_str): ?>
-                                    <p class="mb-1"><span style="color: #d80650;">&#128100;</span> <?php echo htmlspecialchars($instructor_str); ?></p>
+                                    <p class="mb-1"><i class="bx bx-user" style="color: #d80650;"></i> <?php echo htmlspecialchars($instructor_str); ?></p>
                                 <?php endif; ?>
                                 <a href="<?php echo $event_url; ?>" class="read-more">View Event</a>
                             </div>

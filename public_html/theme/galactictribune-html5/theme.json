@@ -1,0 +1,11 @@
+{
+  "name": "galactictribune-html5",
+  "display_name": "Galactic Tribune HTML5",
+  "version": "1.0.0",
+  "description": "Zero-dependency HTML5 version of the Galactic Tribune theme",
+  "author": "Joinery Team",
+  "is_stock": true,
+  "cssFramework": "html5",
+  "formWriterBase": "FormWriterHTML5",
+  "publicPageBase": "PublicPageBase"
+}
