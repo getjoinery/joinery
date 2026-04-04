@@ -1927,6 +1927,143 @@ Use these as working examples when creating new HTML5 themes:
 
 The system automatically adds canonical URL tags to all public pages. It uses your `webDir` setting as configured and strips pagination parameters (`offset`, `page`, `page_offset`, `p`). No additional configuration needed. See the implementation in `PublicPageBase::get_canonical_url()` (includes/PublicPageBase.php:429-459).
 
+## Converting Bootstrap/jQuery Themes to Zero-Dependency HTML5
+
+These lessons apply to any theme conversion where you are stripping Bootstrap, jQuery, or other
+framework dependencies from an existing theme to produce a zero-dependency HTML5 version.
+
+### Visual Verification Strategy
+
+**Full-page screenshot comparison with ImageMagick is the most accurate way to verify visual parity.**
+Don't rely on spot-checking individual sections — take full-page screenshots of both versions and
+diff them:
+
+```bash
+# Take full-page screenshots of both themes (via Playwright, browser, etc.)
+# Then compare with ImageMagick:
+compare original.png converted.png diff.png
+# Or get a numeric similarity score:
+magick compare -metric RMSE original.png converted.png /dev/null 2>&1
+```
+
+File size of full-page PNGs is also a quick proxy — if the original is 427,976 bytes and the
+conversion is 427,975 bytes, the pages are nearly pixel-identical.
+
+**Do section-by-section verification at a fixed viewport width (e.g. 1280px)** by scrolling to
+specific pixel offsets and screenshotting. This catches spacing/padding issues that full-page
+thumbnails compress away.
+
+### The "Invisible Dependency" Problem
+
+The most dangerous category of bugs is **classes that silently do nothing** when their CSS definition
+is missing. No error appears — the page just looks slightly wrong.
+
+Commercial theme CSS files typically depend on Bootstrap (or Tailwind) for utility classes but
+don't document that dependency. When you strip Bootstrap, things like `.text-center`, `.d-flex`,
+`.container`, `.btn`, `.mb-4` silently stop working because the theme CSS never defined them
+— Bootstrap did.
+
+**How to find these systematically:**
+1. Grep all view templates for `class="..."` and extract every class name used
+2. Grep the theme's own CSS for each class name
+3. Any class that appears in templates but NOT in theme CSS was being provided by Bootstrap
+4. Build a `responsive-utils.css` (or equivalent) defining only the missing classes
+
+**Common categories of missing classes:**
+
+| Category | Examples | Impact when missing |
+|----------|---------|---------------------|
+| Container/grid | `.container`, `.row`, `.col-*` | Content touches edges, columns stack |
+| Display | `.d-flex`, `.d-none`, `.d-block` | Layout breaks |
+| Flex | `.align-items-center`, `.justify-content-between` | Alignment off |
+| Spacing | `.mb-4`, `.mt-3`, `.px-4`, `.py-2` | Spacing wrong throughout |
+| Text | `.text-center`, `.text-sm` | Centering and sizing lost |
+| Buttons | `.btn`, `.btn-primary` | Submit buttons are unstyled browser defaults |
+| Cards | `.border`, `.rounded`, `.shadow` | Card appearance missing |
+
+**Watch for CSS variables too.** Bootstrap defines variables like `--bs-gutter-x` and `--bs-gutter-y`
+that theme CSS references in `calc()` expressions. Without the variable definition, the calc
+evaluates to 0 and gutters disappear.
+
+### Tailwind/Bootstrap Class Name Mixing
+
+View templates often use a mix of Bootstrap and Tailwind class names (e.g. Bootstrap's
+`align-items-center` alongside Tailwind's `items-center`, or `d-flex` alongside `flex`).
+Always scan templates for BOTH naming conventions and define aliases:
+
+```css
+/* Bootstrap name */
+.d-flex          { display: flex !important; }
+/* Tailwind name — same effect, different class */
+.flex            { display: flex !important; }
+```
+
+### jQuery → Vanilla JS: What Actually Changes
+
+A ~1,100-line jQuery `main.js` typically collapses to ~220 lines of vanilla JS. The reduction
+comes from removing jQuery wrapper overhead, not from removing features.
+
+**Things that have direct 1:1 vanilla equivalents** (just translate):
+- DOM selection, class toggling, event binding, attribute access, style changes
+
+**Things that need a different approach entirely:**
+- **Scroll-triggered animations:** Replace jQuery scroll-position math with `IntersectionObserver`
+- **Popup video (Magnific Popup, lightbox, etc.):** Replace with native `<dialog>` + `showModal()`
+- **Counter animations:** `IntersectionObserver` + `requestAnimationFrame`
+- **Form validation (jQuery Validate):** The Joinery `JoineryValidation` system handles this
+
+**Things that silently break without jQuery (no console error):**
+- `$(document).ready()` calls — the function just never runs, no error thrown
+- Any `$('.selector')` usage — `$` is undefined but may be swallowed by try/catch in other scripts
+- These are the hardest to find because there's zero visible error. Search ALL view files for `$(`
+  and `jQuery(` after removing jQuery.
+
+### Cache Busting Is Non-Negotiable
+
+CSS/JS files are often served with aggressive `max-age` headers (12+ hours). After ANY change to
+a CSS or JS file, bump its `?v=N` query string in the `<link>` or `<script>` tag — otherwise the
+old cached version will persist and you'll think your fix didn't work. This has caused multiple
+hours of debugging changes that "didn't take effect."
+
+### CSS Dead Section Removal
+
+Large commercial theme CSS files (20,000+ lines) contain huge sections for features you'll
+never use (WooCommerce, products, wishlists, etc.). These are safe to remove:
+
+**How to identify dead sections:** Search the CSS for section headers (usually `/*--- Section Name ---*/`),
+then grep your templates for any class defined in that section. If no template uses any class from
+a section, the whole section is dead.
+
+**Python line-range removal** is cleaner than sed for multi-thousand-line deletions:
+```bash
+python3 -c "
+lines = open('style.css').readlines()
+keep = lines[:start] + lines[end:]  # 0-indexed line numbers
+open('style.css', 'w').writelines(keep)
+"
+```
+
+### FormWriter API Gotcha
+
+When converting views from Bootstrap-era FormWriter, the `checkboxinput()` argument order changed:
+- **Old API:** `(label, name, value, type, checked, unchecked, extra)` — 7 args, label first
+- **Current V2 API:** `(name, label, options)` — 3 args, name first
+
+If a checkbox shows its field name (e.g. "setcookie") instead of its label, the args are swapped.
+
+### Plugin Database Tables
+
+`update_database.php` does NOT create plugin tables by default (`include_plugins: false`).
+After cloning or creating a new plugin, create its tables with:
+```bash
+php -r "
+require_once('includes/PathHelper.php');
+require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+\$u = new DatabaseUpdater();
+\$u->runPluginTablesOnly('plugin-name');
+"
+```
+
 ## Final Tips
 
 1. Start with a simple layout first (homepage only)
