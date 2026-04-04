@@ -247,17 +247,47 @@ $page->admin_footer();
 ?>
 ```
 
-### Plugin Installation & Activation Lifecycle
+### Plugin Lifecycle
 
-When a plugin is **installed** via the admin Plugins page, the system:
+**PluginManager is the single entry point for all lifecycle operations.** Plugin models (`Plugin`, `PluginHelper`) are pure CRUD — never call lifecycle methods directly on them.
+
+```
+Discovery → Install → Activate ↔ Deactivate → Uninstall → Permanent Delete
+```
+
+**Install** (`PluginManager::install($name)`)
 1. Validates plugin structure and dependencies
-2. Creates database tables automatically from data class `$field_specifications` (via `DatabaseUpdater::runPluginTablesOnly()`)
-3. Runs any `.sql` migration files found in `plugins/{name}/migrations/` (via `PluginManager::runPendingMigrations()`)
+2. Creates/updates database tables from data class `$field_specifications` (via `DatabaseUpdater::runPluginTablesOnly()`)
+3. Runs pending `.sql` migration files in `plugins/{name}/migrations/`
 4. Records the plugin in `plg_plugins` with status `inactive`
 
-When a plugin is **activated**, it sets `plg_active = 1`. No additional table or migration processing occurs.
+**Activate** (`PluginManager::activate($name)`)
+1. Re-validates dependencies
+2. Runs `DatabaseUpdater::runPluginTablesOnly()` — picks up any `$field_specifications` changes since install
+3. Runs `activate.php` hook (calls `{plugin_name}_activate()` if defined)
+4. Registers deletion rules via PluginHelper
+5. Resumes any suspended scheduled tasks for this plugin
+6. Sets `plg_active = 1`
 
-**Important:** The core `update_database.php` script explicitly **excludes plugins** (`include_plugins => false`). Plugin tables are only created during the install step above. If you need to add columns to an existing plugin table, you must uninstall and reinstall the plugin, or manually run the database updater for the plugin.
+**Developer workflow for schema changes** — If you add columns to `$field_specifications` on an already-installed plugin: modify the class, then deactivate → activate. Activation re-runs `runPluginTablesOnly()` which picks up the new columns.
+
+**Deactivate** (`PluginManager::deactivate($name)`)
+1. Runs `deactivate.php` hook
+2. Removes deletion rules for this plugin
+3. Suspends active scheduled tasks (`sct_is_active = false`) — tasks resume on reactivation
+4. Sets `plg_active = 0`
+
+**Uninstall** (`PluginManager::uninstall($name)`)
+- Runs `uninstall.php` hook
+- Removes deletion rules
+- Deletes scheduled task records (not just suspended — permanently removed)
+- Deletes version and dependency records
+- Sets status to `uninstalled`, preserves plugin files and database tables
+- Allows reinstall (tables/data preserved)
+
+**Permanent Delete** — Drops plugin database tables, removes migration records, deletes plugin files and DB record. Cannot be undone.
+
+**Important:** The core `update_database.php` script explicitly **excludes plugins** (`include_plugins => false`). This is intentional — core can't know about plugins at compile time. Schema updates happen through the activate workflow above.
 
 ### Table Creation (Automatic)
 
@@ -326,6 +356,45 @@ return [
     ]
 ];
 ```
+
+### Plugin Settings Form
+
+If your plugin has configurable settings, create a `settings_form.php` file in your plugin directory. The admin settings page (`/adm/admin_settings`) **automatically discovers and includes** this file — no registration required.
+
+```
+plugins/my-plugin/settings_form.php
+```
+
+The file is included inside an already-open FormWriter form, so you output fields directly using `$formwriter`. The variables `$formwriter`, `$settings`, and `$session` are all available in scope.
+
+```php
+<?php
+// plugins/my-plugin/settings_form.php
+// $formwriter, $settings, and $session are already available
+
+echo '<p>Configure My Plugin settings below.</p>';
+
+$formwriter->textinput('my_plugin_api_url', 'API URL', [
+    'value' => $settings->get_setting('my_plugin_api_url'),
+    'placeholder' => 'e.g. https://api.example.com',
+]);
+
+$formwriter->passwordinput('my_plugin_api_key', 'API Key', [
+    'value' => $settings->get_setting('my_plugin_api_key'),
+    'placeholder' => 'Your API key',
+]);
+
+$formwriter->checkboxinput('my_plugin_enabled', 'Enable My Plugin', [
+    'value' => $settings->get_setting('my_plugin_enabled'),
+]);
+```
+
+**Rules:**
+- All setting names **must be prefixed** with your plugin name (e.g. `my_plugin_`) to avoid collisions with core settings or other plugins.
+- Use `$settings->get_setting('name')` to read current values — this handles missing rows gracefully.
+- Use `passwordinput` for secrets (API keys, tokens) so the value is masked in the browser.
+- The form submit is handled by the settings page — your fields are saved automatically alongside all other settings.
+- Use a migration to INSERT the setting row(s) into `stg_settings` so they exist on fresh installs (see Migration System above).
 
 ### Uninstall Script
 

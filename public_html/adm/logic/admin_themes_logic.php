@@ -24,18 +24,8 @@ function admin_themes_logic($get, $post) {
 				switch ($action) {
 					case 'activate':
 						$theme_name = $post['theme_name'];
-						$theme = Theme::get_by_theme_name($theme_name);
-						if ($theme) {
-							$theme->activate();
-							// Re-sync component types for new theme
-							$component_result = $theme_manager->syncComponentTypes();
-							$message = "Theme '$theme_name' activated successfully.";
-							if ($component_result['created'] > 0 || $component_result['updated'] > 0 || $component_result['deactivated'] > 0) {
-								$message .= " Components: {$component_result['created']} added, {$component_result['updated']} updated, {$component_result['deactivated']} deactivated.";
-							}
-						} else {
-							$error = "Theme not found.";
-						}
+						$theme_manager->activate($theme_name);
+						$message = "Theme '$theme_name' activated successfully.";
 						break;
 
 					case 'mark_stock':
@@ -67,34 +57,6 @@ function admin_themes_logic($get, $post) {
 						}
 						break;
 
-					case 'sync':
-						$sync_result = $theme_manager->sync();
-						$parts = array();
-						if (!empty($sync_result['added'])) {
-							$parts[] = count($sync_result['added']) . " themes added";
-						}
-						if (!empty($sync_result['updated'])) {
-							$parts[] = count($sync_result['updated']) . " themes updated";
-						}
-						// Component sync results (included in sync() call)
-						if (!empty($sync_result['components'])) {
-							$c = $sync_result['components'];
-							if ($c['created'] > 0 || $c['updated'] > 0 || $c['deactivated'] > 0) {
-								$comp_parts = array();
-								if ($c['created'] > 0) $comp_parts[] = "{$c['created']} added";
-								if ($c['updated'] > 0) $comp_parts[] = "{$c['updated']} updated";
-								if ($c['deactivated'] > 0) $comp_parts[] = "{$c['deactivated']} deactivated";
-								$parts[] = "components: " . implode(", ", $comp_parts);
-							}
-						}
-
-						if (empty($parts)) {
-							$message = "Filesystem sync completed. Everything is up to date.";
-						} else {
-							$message = "Sync completed: " . implode("; ", $parts) . ".";
-						}
-						break;
-
 					case 'upload':
 						if (isset($_FILES['theme_zip']) && $_FILES['theme_zip']['error'] === UPLOAD_ERR_OK) {
 							$theme_name = $theme_manager->installTheme($_FILES['theme_zip']['tmp_name']);
@@ -118,9 +80,8 @@ function admin_themes_logic($get, $post) {
 		}
 	}
 
-	// Load current themes
-	$themes = new MultiTheme(array(), array('thm_name' => 'ASC'));
-	$themes->load();
+	// Load current themes (filesystem + database merge)
+	$themes = Theme::get_all_themes_with_status();
 
 	return LogicResult::render(array(
 		'message' => $message,

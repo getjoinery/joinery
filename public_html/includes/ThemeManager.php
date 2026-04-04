@@ -129,25 +129,84 @@ class ThemeManager extends AbstractExtensionManager {
     }
     
     /**
-     * Load metadata from theme.json into model
+     * Load metadata from theme.json into model.
+     * Calls parent for manifest validation, then sets theme-specific fields.
+     *
      * @param Theme $model Theme model object
      * @param string $name Theme name
      */
     protected function loadMetadataIntoModel($model, $name) {
-        $manifest_path = $this->getExtensionPath($name) . '/theme.json';
-        if (!file_exists($manifest_path)) return;
+        $metadata = parent::loadMetadataIntoModel($model, $name);
+        if ($metadata === false) return; // Error already set by parent
 
-        $metadata = json_decode(file_get_contents($manifest_path), true);
-        if (json_last_error() === JSON_ERROR_NONE && $metadata) {
-            $model->set('thm_metadata', json_encode($metadata));
-            $model->set('thm_display_name', $metadata['name'] ?? $name);
-            $model->set('thm_description', $metadata['description'] ?? '');
-            $model->set('thm_version', $metadata['version'] ?? '1.0.0');
-            $model->set('thm_author', $metadata['author'] ?? 'Unknown');
-            $model->set('thm_is_stock', $metadata['is_stock'] ?? true);
-            // Load system flag from manifest
-            $model->set('thm_is_system', $metadata['system'] ?? false);
+        $model->set('thm_metadata', json_encode($metadata));
+        $model->set('thm_display_name', $metadata['name'] ?? $name);
+        $model->set('thm_description', $metadata['description'] ?? '');
+        $model->set('thm_version', $metadata['version'] ?? '1.0.0');
+        $model->set('thm_author', $metadata['author'] ?? 'Unknown');
+        $model->set('thm_is_stock', $metadata['is_stock'] ?? true);
+        $model->set('thm_is_system', $metadata['system'] ?? false);
+    }
+
+    /**
+     * Returns the Multi class filter options for active themes (used by sync() ghost detection).
+     */
+    protected function getActiveFilterOptions() {
+        return array('thm_is_active' => true);
+    }
+
+    /**
+     * Called inside activate() transaction. Validates theme classes, deactivates all
+     * other themes, sets thm_is_active, and updates the theme_template setting.
+     *
+     * @param string $name Theme name
+     * @param Theme $model Theme model
+     * @param PDO $dblink Database connection
+     * @throws Exception on validation failure
+     */
+    protected function onActivate($name, $model, $dblink) {
+        // Deactivate all other themes
+        $q = $dblink->prepare(
+            "UPDATE thm_themes SET thm_is_active = false, thm_status = 'installed' WHERE thm_is_active = true"
+        );
+        $q->execute();
+
+        // Set this theme active
+        $model->set('thm_is_active', true);
+
+        // Update the theme_template setting
+        require_once(PathHelper::getIncludePath('data/settings_class.php'));
+        $existing_setting = Setting::GetByColumn('stg_name', 'theme_template');
+        if ($existing_setting) {
+            $existing_setting->set('stg_value', $name);
+            $existing_setting->save();
+        } else {
+            $new_setting = new Setting(null);
+            $new_setting->set('stg_name', 'theme_template');
+            $new_setting->set('stg_value', $name);
+            $new_setting->set('stg_group_name', 'theme');
+            $new_setting->save();
         }
+    }
+
+    /**
+     * Post-commit hook: sync component types. Non-fatal — logged on failure.
+     *
+     * @param string $name Theme name
+     * @param Theme $model Theme model
+     */
+    protected function afterActivate($name, $model) {
+        $this->syncComponentTypes();
+    }
+
+    /**
+     * Theme deactivation is not supported directly.
+     * To change the active theme, activate a different one.
+     *
+     * @throws Exception always
+     */
+    protected function onDeactivate($name, $model, $dblink) {
+        throw new Exception("Cannot deactivate a theme directly. Activate a different theme instead.");
     }
     
     /**
@@ -192,18 +251,20 @@ class ThemeManager extends AbstractExtensionManager {
     }
     
     /**
-     * Set the active theme
+     * Set the active theme (alias for activate())
      * @param string $theme_name Theme name to activate
      * @return bool Success status
      */
     public function setActiveTheme($theme_name) {
-        $theme = Theme::get_by_theme_name($theme_name);
-        
-        if (!$theme) {
-            throw new Exception("Theme not found: $theme_name");
+        // Auto-sync if theme is in filesystem but not in DB
+        if (!Theme::get_by_theme_name($theme_name)) {
+            $theme_path = $this->getExtensionPath($theme_name);
+            if (is_dir($theme_path)) {
+                parent::sync();
+            }
         }
-        
-        return $theme->activate();
+        $this->activate($theme_name);
+        return true;
     }
     
     /**

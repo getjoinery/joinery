@@ -266,6 +266,12 @@ function _handle_activate($post_vars) {
 	$task->set('sct_task_class', $class_name);
 	$task->set('sct_is_active', true);
 
+	// Track owning plugin if this task came from a plugin
+	$source = $discovered[$class_name]['source'] ?? 'core';
+	if (strpos($source, 'plugin:') === 0) {
+		$task->set('sct_plugin_name', substr($source, strlen('plugin:')));
+	}
+
 	// Set defaults from JSON
 	$task->set('sct_frequency', $json_data['default_frequency'] ?? 'daily');
 	if (isset($json_data['default_day_of_week'])) {

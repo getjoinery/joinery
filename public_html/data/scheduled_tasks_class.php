@@ -31,6 +31,7 @@ class ScheduledTask extends SystemBase {
 		'sct_last_run_message'     => array('type'=>'varchar(500)', 'is_nullable'=>true),
 		'sct_create_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true, 'default'=>'now()'),
 		'sct_delete_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		'sct_plugin_name'          => array('type'=>'varchar(100)', 'is_nullable'=>true),
 	);
 
 	/**
@@ -273,6 +274,10 @@ class MultiScheduledTask extends SystemMultiBase {
 
 		if (isset($this->options['task_class'])) {
 			$filters['sct_task_class'] = [$this->options['task_class'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['plugin_name'])) {
+			$filters['sct_plugin_name'] = [$this->options['plugin_name'], PDO::PARAM_STR];
 		}
 
 		return $this->_get_resultsv2('sct_scheduled_tasks', $filters, $this->order_by, $only_count, $debug);

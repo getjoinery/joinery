@@ -472,6 +472,10 @@ php utils/upgrade.php --refresh-archives --verbose
 6. Add data migrations in `/migrations/` if needed (for settings, data updates only)
 7. Define deletion strategy (`$foreign_key_actions`, soft-delete cascading) — see [Deletion System](docs/deletion_system.md)
 
+**Plugin lifecycle operations go through PluginManager, not the Plugin model.** Plugin models are pure CRUD — never call activate/deactivate/install/uninstall on them directly. See [Plugin Developer Guide](docs/plugin_developer_guide.md).
+
+**Schema changes to plugin data classes take effect on next activate** — modify `$field_specifications`, then deactivate → activate the plugin. Do NOT run update_database for plugin tables; it deliberately excludes them.
+
 **Helper Class Integration:** Use RouteHelper for custom routing, ThemeHelper for asset management, and PathHelper for file operations instead of manual path handling.
 
 ### Specifications Management
