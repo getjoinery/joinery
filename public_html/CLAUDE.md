@@ -542,7 +542,15 @@ Production Docker server hosting multiple client sites. Each site runs in its ow
 ### ScrollDaddy DNS Server
 **IP:** `45.56.103.84` | **SSH Key:** `~/.ssh/id_ed25519_claude` | **Service:** `scrolldaddy-dns`
 **Logs:** `/var/log/scrolldaddy/dns.log` | **API (localhost:8053):** `/reload`, `/stats`, `/test` (require `X-API-Key`)
-**Deploy:** `ssh root@45.56.103.84 'bash -s' < scrolldaddy-dns/deploy.sh`
+
+**Deploy (build installer locally, copy to server, run):**
+```bash
+cd scrolldaddy-dns
+make release VERSION=1.x.x
+scp scrolldaddy-dns-installer.sh root@45.56.103.84:/tmp/
+ssh root@45.56.103.84 bash /tmp/scrolldaddy-dns-installer.sh --verbose
+```
+The installer auto-detects install vs upgrade. On fresh install it prompts to edit `/etc/scrolldaddy/scrolldaddy.env` before starting. On upgrade it stops, swaps binary, restarts, and auto-rolls back on failure.
 
 ### Browser Testing (MCP)
 A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
