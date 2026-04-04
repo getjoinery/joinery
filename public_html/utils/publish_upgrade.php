@@ -819,6 +819,12 @@
 		$core_filename = 'joinery-core-' . $version . '.tar.gz';
 		$core_output_location = $file_output_folder . '/' . $core_filename;
 
+		// Remove existing archive to avoid permission issues when rebuilding
+		// (CLI-created archives may be owned by a different user than the web process)
+		if (file_exists($core_output_location)) {
+			@unlink($core_output_location);
+		}
+
 		$core_temp_dir = sys_get_temp_dir() . '/joinery_core_' . uniqid();
 		if (mkdir($core_temp_dir, 0755, true)) {
 			mkdir($core_temp_dir . '/public_html', 0755, true);
@@ -889,6 +895,10 @@
 			$theme_version = $theme_data['version'] ?? '1.0.0';
 			$theme_archive = $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz';
 
+			if (file_exists($theme_archive)) {
+				@unlink($theme_archive);
+			}
+
 			$tar_cmd = sprintf(
 				'tar -czf %s -C %s %s 2>&1',
 				escapeshellarg($theme_archive),
@@ -918,6 +928,10 @@
 
 			$plugin_version = $plugin_data['version'] ?? '1.0.0';
 			$plugin_archive = $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz';
+
+			if (file_exists($plugin_archive)) {
+				@unlink($plugin_archive);
+			}
 
 			$tar_cmd = sprintf(
 				'tar -czf %s -C %s %s 2>&1',
