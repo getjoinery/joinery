@@ -573,22 +573,41 @@ private static function UcName($string) {
 			throw new DisplayableUserException('Your password cannot contain spaces.');
 		}
 
-		return password_hash($password, PASSWORD_BCRYPT);
+		return password_hash($password, PASSWORD_ARGON2ID);
 	}
 
 	function check_password($password) {
 		$password = trim($password);
+		$stored = trim($this->get('usr_password'));
 
-		//USE THE NEW VERSION FIRST, IF THAT FAILS TRY THE OLD VERSION
-		if(password_verify($password, trim($this->get('usr_password')))){
+		// Try modern PHP password_verify first (bcrypt or Argon2id)
+		if (password_verify($password, $stored)) {
+			// Silently upgrade hash to Argon2id if needed
+			if (password_needs_rehash($stored, PASSWORD_ARGON2ID)) {
+				try {
+					$this->set('usr_password', static::GeneratePassword($password));
+					$this->save();
+				} catch (Exception $e) {
+					error_log('Password rehash failed for user ' . $this->key . ': ' . $e->getMessage());
+				}
+			}
 			return true;
 		}
-		else{
-			$settings = Globalvars::get_instance();
-			require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
-			$hasher = new PasswordHash(8, TRUE);
-			return $hasher->CheckPassword($password, trim($this->get('usr_password')));
+
+		// Fall back to legacy phpass hashes and upgrade on success
+		require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
+		$hasher = new PasswordHash(8, TRUE);
+		if ($hasher->CheckPassword($password, $stored)) {
+			try {
+				$this->set('usr_password', static::GeneratePassword($password));
+				$this->save();
+			} catch (Exception $e) {
+				error_log('Password rehash failed for user ' . $this->key . ': ' . $e->getMessage());
+			}
+			return true;
 		}
+
+		return false;
 	}
 
 	/**
