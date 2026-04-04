@@ -2,6 +2,17 @@
 
 This document provides step-by-step instructions for integrating HTML/CSS templates into the Joinery platform as themes. Follow these instructions exactly to ensure successful theme integration.
 
+## How Theme Activation Works
+
+**CRITICAL:** The active visual theme is controlled by a **database setting**, not by any config file.
+
+- **To switch themes:** Update `theme_template` in `stg_settings` via Admin > Settings, or directly:
+  ```sql
+  UPDATE stg_settings SET stg_value = 'my-theme-name' WHERE stg_name = 'theme_template';
+  ```
+- Theme directories live in `public_html/theme/{theme-name}/`
+- The `site_template` setting in `config/Globalvars_site.php` is **not the visual theme** — it is the site installation directory identifier (e.g., `phillyzouk`, `joinerytest`). Almost never needs changing.
+
 ## Prerequisites
 
 Before starting, ensure you have:

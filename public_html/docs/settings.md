@@ -34,6 +34,17 @@ When `Globalvars::get_setting('setting_name')` is called for a non-existent sett
 
 This allows your code to work on fresh deployments without requiring migrations.
 
+## System-Managed Settings
+
+Some settings are managed by the system and should not be edited by hand via migrations or direct SQL — use the admin UI instead.
+
+| Setting name | What it controls | Where to change |
+|---|---|---|
+| `theme_template` | Active visual theme (e.g., `phillyzouk-html5`) | Admin > Settings |
+| `active_theme_plugin` | Plugin that provides the theme (if any) | Admin > Settings |
+
+**Do not confuse `theme_template` with `site_template` in `config/Globalvars_site.php`.** The latter is the site installation directory identifier and is almost never changed after setup.
+
 ## Adding New Settings
 
 ### For Core Settings
