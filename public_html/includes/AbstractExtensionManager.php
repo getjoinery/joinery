@@ -270,6 +270,78 @@ abstract class AbstractExtensionManager {
     }
 
     /**
+     * Install extension from a tar.gz archive.
+     * Mirrors installFromZip() but handles tar.gz format and supports
+     * replacing existing stock extensions.
+     *
+     * @param string $tar_path Path to tar.gz file
+     * @return string Extension name that was installed
+     * @throws Exception on failure
+     */
+    public function installFromTarGz($tar_path) {
+        if (!file_exists($tar_path)) {
+            throw new Exception("Archive not found: $tar_path");
+        }
+
+        $temp_dir = sys_get_temp_dir() . '/' . $this->extension_type . '_' . uniqid();
+        mkdir($temp_dir, 0775, true);
+
+        try {
+            // Extract tar.gz
+            $cmd = sprintf(
+                'tar -xzf %s -C %s 2>&1',
+                escapeshellarg($tar_path),
+                escapeshellarg($temp_dir)
+            );
+            $output = [];
+            $exit_code = 0;
+            exec($cmd, $output, $exit_code);
+
+            if ($exit_code !== 0) {
+                throw new Exception("Failed to extract archive: " . implode("\n", $output));
+            }
+
+            // Find and validate manifest (same as installFromZip)
+            $manifest_data = $this->findAndValidateManifest($temp_dir);
+            $extension_root = $manifest_data['root'];
+            $manifest = $manifest_data['manifest'];
+            $extension_name = $manifest_data['name'];
+
+            if (!$this->validateName($extension_name)) {
+                throw new Exception("Invalid {$this->extension_type} name: $extension_name");
+            }
+
+            // If already exists, check if safe to replace
+            $target_path = $this->getExtensionPath($extension_name);
+            if (is_dir($target_path)) {
+                $manifest_path = $target_path . '/' . $this->manifest_filename;
+                if (file_exists($manifest_path)) {
+                    $local_manifest = json_decode(file_get_contents($manifest_path), true);
+                    if (is_array($local_manifest) && isset($local_manifest['is_stock']) && !$local_manifest['is_stock']) {
+                        throw new Exception("Cannot replace custom {$this->extension_type} '$extension_name'. It is marked is_stock: false.");
+                    }
+                }
+                // Stock or no manifest — safe to delete and replace
+                $this->cleanup($target_path);
+            }
+
+            if (!rename($extension_root, $target_path)) {
+                throw new Exception("Failed to install {$this->extension_type} files");
+            }
+
+            $this->setPermissions($target_path);
+            $this->postInstall($extension_name, $manifest);
+            $this->cleanup($temp_dir);
+
+            return $extension_name;
+
+        } catch (Exception $e) {
+            $this->cleanup($temp_dir);
+            throw $e;
+        }
+    }
+
+    /**
      * Set proper permissions on extension directory
      * @param string $dir Directory path
      */
