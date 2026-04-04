@@ -54,6 +54,18 @@ class SessionControl{
 	var $currpermissioncheck;
 
 	private function __construct(){
+		// Set secure session cookie parameters before starting the session
+		$is_secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+			|| (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+			|| (!empty($_SERVER['HTTP_FORWARDED']) && preg_match('/proto=https/i', $_SERVER['HTTP_FORWARDED']))
+			|| (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+		session_set_cookie_params([
+			'lifetime' => 0,
+			'path'     => '/',
+			'secure'   => $is_secure,
+			'httponly' => true,
+			'samesite' => 'Lax',
+		]);
 		session_start();
 		if(!isset($_SESSION['saved_messages'])) {
 			$_SESSION['saved_messages'] = array();
@@ -780,6 +792,11 @@ class SessionControl{
 	 * Detect a major IP change (different /16 subnet) that may indicate session hijacking.
 	 * Allows minor changes within the same ISP (e.g., mobile carrier, load balancer).
 	 * Only checks IPv4; IPv6 addresses are not compared (returns false).
+	 *
+	 * TODO (security): Consider tightening to /24 for IPv4 and adding IPv6 prefix
+	 * comparison (first 64 bits). Current /16 tolerance and no IPv6 check reduces
+	 * false positives for roaming users but leaves headroom for session hijacking
+	 * within the same ISP or data center range.
 	 */
 	private function _is_major_ip_change($stored_ip, $current_ip) {
 		if (!filter_var($stored_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)

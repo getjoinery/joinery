@@ -155,6 +155,9 @@ create_config_file() {
     sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "$SITE_ROOT/config/Globalvars_site.php"
     # Also handle the legacy pattern with empty password
     sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
+    # Restrict config file — contains database credentials
+    chmod 640 "$SITE_ROOT/config/Globalvars_site.php"
+    chown root:www-data "$SITE_ROOT/config/Globalvars_site.php" 2>/dev/null || true
 }
 
 # In clone mode, delay config creation until clone completes successfully

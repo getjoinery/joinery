@@ -6,11 +6,9 @@
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));	
 	
 	$settings = Globalvars::get_instance();
-	
-	if($_REQUEST['password'] != 'setupinfo'){
-		echo 'Bad access password';
-		exit;
-	}
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(10);
 #
 # This is a test program for the portable PHP password hashing framework.
 #

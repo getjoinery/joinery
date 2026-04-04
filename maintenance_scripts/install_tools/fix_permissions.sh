@@ -74,10 +74,10 @@ if [ "$MODE" == "production" ]; then
     echo "  Setting permissions to 770 (secure)..."
     chmod -R 770 "$SITE_ROOT"
 
-    # Uploads always need 777 for web uploads to work properly
+    # Uploads: www-data (owner) and user1 (group) can write; others cannot
     if [ -d "$SITE_ROOT/uploads" ]; then
-        echo "  Setting uploads to 777..."
-        chmod -R 777 "$SITE_ROOT/uploads"
+        echo "  Setting uploads to 770..."
+        chmod -R 770 "$SITE_ROOT/uploads"
     fi
 else
     # Dev mode: 777 (everyone full access) - for development server only
