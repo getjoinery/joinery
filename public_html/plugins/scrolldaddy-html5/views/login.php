@@ -23,13 +23,13 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 ?>
 	<script type="text/javascript">
-	$(document).ready(function() {
-
-	<?php if (!$email) { ?>
-			$('#email').focus();
-	<?php } else { ?>
-			$('#password').focus();
-	<?php } ?>
+	document.addEventListener('DOMContentLoaded', function() {
+		<?php if (!$email) { ?>
+			var f = document.getElementById('email');
+		<?php } else { ?>
+			var f = document.getElementById('password');
+		<?php } ?>
+		if (f) f.focus();
 	});
 	</script>
 
@@ -56,7 +56,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
       </div>
       <div class="mt-6 flex items-center justify-between">
         <div class="flex items-center">
-          <?php echo $formwriter->checkboxinput("Remember Me", "setcookie", NULL, "normal", 'yes', "yes", ''); ?>
+          <?php echo $formwriter->checkboxinput("setcookie", "Remember Me"); ?>
         </div>
         <a href="<?php echo $forgot_link; ?>" class="text-sm"> Forgot your password? </a>
       </div>
