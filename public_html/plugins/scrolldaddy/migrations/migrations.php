@@ -43,6 +43,32 @@ return [
             $q->execute();
             return true;
         }
+    ],
+    [
+        'id' => '002_scrolldaddy_add_api_key',
+        'version' => '1.1.0',
+        'description' => 'Add ScrollDaddy DNS API key setting',
+        'up' => function($dbconnector) {
+            $dblink = $dbconnector->get_db_link();
+            $check_sql = "SELECT count(1) as count FROM stg_settings WHERE stg_name = ?";
+            $check_q = $dblink->prepare($check_sql);
+            $check_q->execute(['scrolldaddy_dns_api_key']);
+            $result = $check_q->fetch(PDO::FETCH_ASSOC);
+            if ($result['count'] == 0) {
+                $sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
+                        VALUES (?, ?, 1, NOW(), NOW(), 'general')";
+                $q = $dblink->prepare($sql);
+                $q->execute(['scrolldaddy_dns_api_key', '']);
+            }
+            return true;
+        },
+        'down' => function($dbconnector) {
+            $dblink = $dbconnector->get_db_link();
+            $sql = "DELETE FROM stg_settings WHERE stg_name = ?";
+            $q = $dblink->prepare($sql);
+            $q->execute(['scrolldaddy_dns_api_key']);
+            return true;
+        }
     ]
 ];
 ?>
