@@ -12,6 +12,7 @@ function devices_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/scheduled_blocks_class.php'));
 
 	$page_vars = array();
 
@@ -90,53 +91,23 @@ function devices_logic($get_vars, $post_vars){
 	
 	//COUNT THE ALWAYS ON BLOCKS
 	$num_blocks_always = array();
-	$num_blocks_scheduled = array();
 	foreach($devices as $device){
 		$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
-		$num_blocks_always[$device->key] += $profile->count_blocks();
-
-		if($device->get('sdd_sdp_profile_id_secondary')){
-			$profile = new SdProfile($device->get('sdd_sdp_profile_id_secondary'), TRUE);
-			$num_blocks_scheduled[$device->key] += $profile->count_blocks();
-		}
+		$num_blocks_always[$device->key] = $profile->count_blocks();
 	}
 	$page_vars['num_blocks_always'] = $num_blocks_always;
-	$page_vars['num_blocks_scheduled'] = $num_blocks_scheduled;
 
-	//SCHEDULE STRING
+	// LOAD SCHEDULED BLOCKS PER DEVICE
+	$scheduled_blocks = array();
 	foreach($devices as $device){
-
-		if($profile->get('sdp_schedule_start')){
-			
-			$primary_arr = $device->get_time_to_active_profile('primary');
-			if(!$primary_arr){
-				$primary_time = '';
-			}
-			else if($primary_arr['hours'] == 0 && $primary_arr['minutes'] == 0){
-				$primary_time = 'Active';
-			}
-			else{
-				$primary_time = 'Active in '.$primary_arr['hours'].' hours, '.$primary_arr['minutes'].' minutes';
-			}
-			$scheduled_string['primary'][$device->key] = '<span class="duration">'.$primary_time.'</span>';
-			
-			if($device->get('sdd_sdp_profile_id_secondary')){
-				$secondary_arr = $device->get_time_to_active_profile('secondary');
-				if(!$secondary_arr){
-					$primary_time = '';
-				}
-				else if($secondary_arr['hours'] == 0 && $secondary_arr['minutes'] == 0){
-					$secondary_time = 'Active';
-				}
-				else{
-					$secondary_time = 'Active in '.$secondary_arr['hours'].' hours, '.$secondary_arr['minutes'].' minutes';
-				}
-				$scheduled_string['secondary'][$device->key] = '<span class="duration">'.$secondary_time.'</span>';
-			}
-			
-		}
+		$blocks = new MultiSdScheduledBlock(
+			array('device_id' => $device->key),
+			array('sdb_scheduled_block_id' => 'ASC')
+		);
+		$blocks->load();
+		$scheduled_blocks[$device->key] = $blocks;
 	}
-	$page_vars['scheduled_string'] = $scheduled_string;
+	$page_vars['scheduled_blocks'] = $scheduled_blocks;
 	
 	return LogicResult::render($page_vars);	
 	

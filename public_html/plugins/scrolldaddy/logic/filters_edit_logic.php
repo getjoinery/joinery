@@ -27,29 +27,12 @@ function filters_edit_logic($get_vars, $post_vars){
 	$page_vars['tier'] = $tier;
 
 	if(isset($_POST['action'])){
-		$profile_choice = LibraryFunctions::fetch_variable_local($post_vars, 'profile_choice', 0, 'required', 'Profile choice is required.', 'safemode', NULL);
-		$page_vars['profile_choice'] = $profile_choice;
-
 		$device_id = LibraryFunctions::fetch_variable_local($post_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
 		$device = new SdDevice($device_id, TRUE);
 		$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_vars['device'] = $device;
 
-		if($profile_choice == 'primary'){
-			$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
-		}
-		else{
-			//CREATE THE SECOND PROFILE IF NEEEDED (SCHEDULED STUFF)
-			if($device->get('sdd_sdp_profile_id_secondary')){
-				$profile = new SdProfile($device->get('sdd_sdp_profile_id_secondary'), TRUE);
-			}
-			else{
-				$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile2';
-				$profile = SdProfile::createProfile($profile_name, $user);
-				$device->set('sdd_sdp_profile_id_secondary', $profile->key);
-				$device->save();
-			}
-		}
+		$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
 		$page_vars['profile'] = $profile;
 
 		//CHANGE DROPDOWN STRUCTURE
@@ -69,44 +52,18 @@ function filters_edit_logic($get_vars, $post_vars){
 			}
 		}
 
-		if($profile_choice == 'primary'){
+		$profile->update_remote_filters($_POST);
+		$profile->update_remote_services($_POST);
 
-			//NOW FIGURE OUT WHAT UPDATES WE HAVE TO THE FILTERS
-			$profile->update_remote_filters($_POST);
-			$profile->update_remote_services($_POST);
-
-		}
-		else{
-
-			//NOW FIGURE OUT WHAT UPDATES WE HAVE TO THE FILTERS
-			$profile->update_remote_filters($_POST);
-			$profile->update_remote_services($_POST);
-
-			$result = $profile->add_or_edit_schedule($device, $_POST);
-
-		}
 		return LogicResult::redirect('/profile/devices');
 	}
 	else{
-		$profile_choice = LibraryFunctions::fetch_variable_local($get_vars, 'profile_choice', 0, 'required', 'Profile choice is required.', 'safemode', NULL);
-		$page_vars['profile_choice'] = $profile_choice;
-
 		$device_id = LibraryFunctions::fetch_variable_local($get_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
 		$device = new SdDevice($device_id, TRUE);
 		$device->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_vars['device'] = $device;
 
-		if($profile_choice == 'primary'){
-			$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
-		}
-		else{
-			if($device->get('sdd_sdp_profile_id_secondary')){
-				$profile = new SdProfile($device->get('sdd_sdp_profile_id_secondary'), TRUE);
-			}
-			else{
-				$profile = new SdProfile(NULL);
-			}
-		}
+		$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
 		$page_vars['profile'] = $profile;
 
 		$filters = new MultiSdFilter(

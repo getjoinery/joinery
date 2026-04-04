@@ -11,8 +11,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$num_devices =  $page_vars['num_devices'];
 	$user = $page_vars['user'];
 	$num_blocks_always = $page_vars['num_blocks_always'];
-	$num_blocks_scheduled = $page_vars['num_blocks_scheduled'];
-	$scheduled_string = $page_vars['scheduled_string'];
+	$scheduled_blocks = $page_vars['scheduled_blocks'];
 	$num_deleted_devices =$page_vars['num_deleted_devices'];
 	$deleted_devices = $page_vars['deleted_devices'];
 	$last_seen = $page_vars['last_seen'] ?? array();
@@ -92,15 +91,7 @@ else{
 	
 	foreach($devices as $device){
 
-		if($device->get('sdd_is_active')){	
-			if($device->get_active_profile() == 'primary'){
-				$primary_icon = 'fa-shield-check';
-				$secondary_icon = 'fa-shield-slash';
-			}
-			else{
-				$primary_icon = 'fa-shield-slash';
-				$secondary_icon = 'fa-shield-check';
-			}
+		if($device->get('sdd_is_active')){
 			$seen_label = '';
 			if(isset($last_seen[$device->key])){
 				if($last_seen[$device->key]['seen']){
@@ -121,65 +112,74 @@ else{
 						<div class="job-post style2">
 							<div class="job-content">
 								<div class="job-post_date">
-									<span class="date"><i class="fa-regular fa-check"></i>Active: '.$device->get_active_profile('readable').$seen_label.'</span>
+									<span class="date"><i class="fa-regular fa-check"></i>Active'.$seen_label.'</span>
 									<div class="icon"><a href="/profile/activation?device_id='.$device->key.'" title="Connection Details"><i class="fa-regular fa-circle-info"></i></a> <a href="/profile/device_edit?device_id='.$device->key.'"><i class="fa-regular fa-edit"></i></a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
-								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
-								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
 							</div>
 							<div class="job-post_author">
 								<div class="job-wrapp">
 									<div class="job-author">
-										<i class="fa-regular '.$primary_icon.'"></i>
+										<i class="fa-regular fa-shield-check"></i>
 									</div>
 									<div class="author-info">
-										<h3 class="company-name">Default blocklist</h3>
-										<h5 class="price">'.$num_blocks_always[$device->key].' services blocked<!-- <span class="duration">Mon, Th, Fr, Sun</span>--></h5>
-										<h5 class="price">'.$scheduled_string['primary'][$device->key].'</h5>
-
+										<h3 class="company-name">Always-On Filters</h3>
+										<h5 class="price">'.$num_blocks_always[$device->key].' blocked</h5>
 									</div>
 								</div>
-								<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=primary">Edit</a>
+								<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'">Edit</a>
 							</div>';
-							if($device->get('sdd_sdp_profile_id_secondary')){
+
+							// SCHEDULED BLOCKS
+							$device_blocks = $scheduled_blocks[$device->key] ?? null;
+							$has_blocks = $device_blocks && count($device_blocks) > 0;
+
+							if($has_blocks){
+								foreach($device_blocks as $sblock){
+									$block_name = htmlspecialchars($sblock->get('sdb_name') ?: 'Unnamed');
+									$schedule_display = htmlspecialchars($sblock->get_schedule_display());
+									$rule_count = $sblock->count_rules();
+									$active_badge = $sblock->is_active_now() ? ' <span class="badge" style="background:#198754;color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;">Active now</span>' : '';
+
 									echo '
 								<br>
 								<div class="job-post_author">
 									<div class="job-wrapp">
 										<div class="job-author">
-											<i class="fa-regular '.$secondary_icon.'"></i>
+											<i class="fa-regular fa-clock"></i>
 										</div>
 										<div class="author-info">
-											<h3 class="company-name">Scheduled blocklist</h3>
-											
-											<h5 class="price">'.$num_blocks_scheduled[$device->key].' services blocked</h5>
-											<h5 class="price">'.$scheduled_string['secondary'][$device->key].'</h5>
-
+											<h3 class="company-name">'.$block_name.$active_badge.'</h3>
+											<h5 class="price">'.$schedule_display.' ('.$rule_count.' rules)</h5>
 										</div>
 									</div>
-									<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=secondary">Edit</a>
+									<div style="display:flex; gap:6px;">
+										<a class="th-btn style5" href="/profile/scheduled_block_edit?device_id='.$device->key.'&block_id='.$sblock->key.'">Edit</a>
+										<form method="POST" action="/profile/scheduled_block_edit" style="display:inline;" onsubmit="return confirm(\'Delete this scheduled block?\')">
+											<input type="hidden" name="action" value="delete">
+											<input type="hidden" name="block_id" value="'.$sblock->key.'">
+											<button type="submit" class="th-btn style5" style="background:#dc3545;border-color:#dc3545;">Delete</button>
+										</form>
+									</div>
 								</div>';
+								}
 							}
-							else{
-									echo '
-								<br>
-								<div class="job-post_author">
-									<div class="job-wrapp">
-										<div class="job-author">
-											<i class="fa-regular fa-shield-slash"></i>
-										</div>
-										<div class="author-info">
-											<h3 class="company-name">Scheduled blocklist</h3>
-											
-											<h5 class="price">None.</h5>
 
-										</div>
+							echo '
+							<br>
+							<div class="job-post_author">
+								<div class="job-wrapp">
+									<div class="job-author">
+										<i class="fa-regular fa-plus"></i>
 									</div>
-									<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'&profile_choice=secondary">Create</a>
-								</div>';								
-								
-							}
+									<div class="author-info">
+										<h3 class="company-name">Scheduled Blocks</h3>
+										<h5 class="price">'.($has_blocks ? '' : 'None.').'</h5>
+									</div>
+								</div>
+								<a class="th-btn style5" href="/profile/scheduled_block_edit?device_id='.$device->key.'">Add</a>
+							</div>';
+
 							echo '
 					<br>
 					<div class="job-post_author">
