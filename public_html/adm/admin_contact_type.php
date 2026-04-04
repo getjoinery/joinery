@@ -37,7 +37,7 @@
 
 	$page->begin_box($options);
 
-	echo '<h3>'.$contact_type->get('ctt_name').'</h3>';
+	echo '<h3>'.htmlspecialchars($contact_type->get('ctt_name')).'</h3>';
 
 	if($contact_type->get('ctt_delete_time')){
 		echo 'Status: Deleted at '.LibraryFunctions::convert_time($contact_type->get('ctt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
@@ -47,7 +47,7 @@
 	}
 
 	if($contact_type->get('ctt_mailchimp_list_id')){
-		echo 'Mailchimp integration active.  Mailchimp ID: '.$contact_type->get('ctt_mailchimp_list_id').'<br />';
+		echo 'Mailchimp integration active.  Mailchimp ID: '.htmlspecialchars($contact_type->get('ctt_mailchimp_list_id')).'<br />';
 	}
 	else{
 		echo 'Mailchimp integration inactive.';

@@ -463,8 +463,8 @@ abstract class SystemBase {
 		$sql .= implode(' AND ', $whereclauses);
 
 		if($this->key){
-			$sql .= ' AND '.static::$pkey_column.' != '.$this->key;
-		}	
+			$sql .= ' AND '.static::$pkey_column.' != :pkey';
+		}
 
 		try{
 			$q = $dblink->prepare($sql);
@@ -498,6 +498,9 @@ abstract class SystemBase {
 				else{
 					$q->bindValue(':param1', $value, PDO::PARAM_STR);
 				}
+			}
+			if($this->key){
+				$q->bindValue(':pkey', $this->key, PDO::PARAM_INT);
 			}
 			
 			

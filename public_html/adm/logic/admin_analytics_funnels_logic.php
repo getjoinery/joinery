@@ -52,7 +52,7 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 			vse_visitor_id,
 			MIN(vse_timestamp) AS step1_ts
 		  FROM vse_visitor_events
-		  WHERE vse_page = '$page_1'
+		  WHERE vse_page = :page1
 		  AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 		  GROUP BY vse_visitor_id
 		)";
@@ -64,7 +64,7 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 			  FROM vse_visitor_events v
 			  JOIN step1 s
 				ON v.vse_visitor_id = s.vse_visitor_id
-			  WHERE v.vse_page = '$page_2'
+			  WHERE v.vse_page = :page2
 				AND v.vse_timestamp > s.step1_ts
 				AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 			  GROUP BY v.vse_visitor_id
@@ -78,7 +78,7 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 			  FROM vse_visitor_events v
 			  JOIN step1 s
 				ON v.vse_visitor_id = s.vse_visitor_id
-			  WHERE v.vse_page = '$page_3'
+			  WHERE v.vse_page = :page3
 				AND v.vse_timestamp > s.step1_ts
 				AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 			  GROUP BY v.vse_visitor_id
@@ -92,7 +92,7 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 			  FROM vse_visitor_events v
 			  JOIN step1 s
 				ON v.vse_visitor_id = s.vse_visitor_id
-			  WHERE v.vse_page = '$page_4'
+			  WHERE v.vse_page = :page4
 				AND v.vse_timestamp > s.step1_ts
 				AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 			  GROUP BY v.vse_visitor_id
@@ -106,36 +106,36 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 			  FROM vse_visitor_events v
 			  JOIN step1 s
 				ON v.vse_visitor_id = s.vse_visitor_id
-			  WHERE v.vse_page = '$page_5'
+			  WHERE v.vse_page = :page5
 				AND v.vse_timestamp > s.step1_ts
 				AND vse_timestamp >= :startdate AND vse_timestamp <= :enddate
 			  GROUP BY v.vse_visitor_id
 			)";
 		}
 
-		$sql .= "SELECT '/' AS funnel_step, COUNT(*) AS visitors
+		$sql .= "SELECT :page1 AS funnel_step, COUNT(*) AS visitors
 		FROM step1";
 
 		if($page_2){
-			$sql .= " UNION ALL SELECT '$page_2' AS funnel_step, COUNT(*) AS visitors
+			$sql .= " UNION ALL SELECT :page2 AS funnel_step, COUNT(*) AS visitors
 			FROM step2
 			";
 		}
 
 		if($page_3){
-			$sql .= " UNION ALL SELECT '$page_3' AS funnel_step, COUNT(*) AS visitors
+			$sql .= " UNION ALL SELECT :page3 AS funnel_step, COUNT(*) AS visitors
 			FROM step3
 			";
 		}
 
 		if($page_4){
-			$sql .= " UNION ALL SELECT '$page_4' AS funnel_step, COUNT(*) AS visitors
+			$sql .= " UNION ALL SELECT :page4 AS funnel_step, COUNT(*) AS visitors
 			FROM step4
 			";
 		}
 
 		if($page_5){
-			$sql .= " UNION ALL SELECT '$page_5' AS funnel_step, COUNT(*) AS visitors
+			$sql .= " UNION ALL SELECT :page5 AS funnel_step, COUNT(*) AS visitors
 			FROM step5
 			";
 		}
@@ -145,6 +145,11 @@ function admin_analytics_funnels_logic($get_vars, $post_vars) {
 			$q = $dblink->prepare($sql);
 			$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
 			$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+			$q->bindParam(':page1', $page_1, PDO::PARAM_STR);
+			if($page_2) $q->bindParam(':page2', $page_2, PDO::PARAM_STR);
+			if($page_3) $q->bindParam(':page3', $page_3, PDO::PARAM_STR);
+			if($page_4) $q->bindParam(':page4', $page_4, PDO::PARAM_STR);
+			if($page_5) $q->bindParam(':page5', $page_5, PDO::PARAM_STR);
 			$success = $q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
 		}

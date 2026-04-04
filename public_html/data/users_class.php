@@ -78,6 +78,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_calendly_uri' => array('type'=>'varchar(255)'),
 	    'usr_stripe_customer_id_test' => array('type'=>'varchar(32)'),
 	    'usr_allowed_ips' => array('type'=>'jsonb'),
+	    'usr_remember_tokens' => array('type'=>'jsonb', 'is_nullable'=>true),
 	    'usr_force_password_change' => array('type'=>'bool', 'default'=>false),
 	    'usr_bio' => array('type'=>'varchar(500)'),
 	    'usr_date_of_birth' => array('type'=>'date'),

@@ -75,13 +75,13 @@
 		echo '</div>';
 	}
 
-	echo '<h3>'.$api_key->get('apk_name').'</h3>';
+	echo '<h3>'.htmlspecialchars($api_key->get('apk_name')).'</h3>';
 
 	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($api_key->get('apk_create_time'), 'UTC', $session->get_timezone()) .'<br />';
 
 	$rowvalues = array();
 
-	echo '<strong>Public key:</strong> '. $api_key->get('apk_public_key').'<br>';
+	echo '<strong>Public key:</strong> '. htmlspecialchars($api_key->get('apk_public_key')).'<br>';
 
 	// Display secret key status
 	if($show_secret) {

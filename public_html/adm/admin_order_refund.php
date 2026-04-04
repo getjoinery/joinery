@@ -105,7 +105,7 @@ else{
 
 	$formwriter->begin_form();
 
-	echo '<fieldset><h4>Confirm Refund ('.$product->get('pro_name').')</h4>';
+	echo '<fieldset><h4>Confirm Refund ('.htmlspecialchars($product->get('pro_name')).')</h4>';
 		echo '<div class="fields full">';
 		echo 'Total charge: ', $currency_symbol.$charge->amount/100 .'. '.$currency_symbol.$amount_refunded. ' refunded so far.';
 
