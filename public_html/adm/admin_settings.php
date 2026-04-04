@@ -16,6 +16,7 @@
 	$settings = Globalvars::get_instance();
 
 	$run_validation = $page_vars['run_validation'];
+	$error_message = $page_vars['error_message'] ?? null;
 
 	$page = new AdminPage();
 	$page->admin_header(	
@@ -241,7 +242,13 @@
 		<?php
 
 	$formwriter->begin_form();
-	
+
+	if ($error_message): ?>
+		<div class="alert alert-danger">
+			<?php echo htmlspecialchars($error_message); ?>
+		</div>
+	<?php endif;
+
 	if($_SESSION['permission'] == 10){
 		
 		echo '<b>NOTE: These settings will not override the settings if they are located in the Globalvars_site.php file in the /config directory</b><br>';
@@ -401,6 +408,12 @@
 			'value' => $protocol_mode_value,
 			'helptext' => 'Controls protocol for generated URLs and redirect behavior'
 		]);
+
+		$formwriter->checkboxinput('Enable HSTS Security Header', 'enable_hsts', NULL, 'normal', 1, $settings->get_setting('enable_hsts') ? 1 : 0, 'Strict-Transport-Security header forces HTTPS-only connections for 24 hours. Only enable on production sites with stable HTTPS configuration. Disable for test/development environments.');
+
+		$formwriter->checkboxinput('Enable X-Frame-Options Header', 'enable_x_frame_options', NULL, 'normal', 1, $settings->get_setting('enable_x_frame_options') ? 1 : 0, 'Prevents your site from being embedded in iframes on other websites (clickjacking protection). Safe to enable on all sites.');
+
+		$formwriter->checkboxinput('Enable Referrer-Policy Header', 'enable_referrer_policy', NULL, 'normal', 1, $settings->get_setting('enable_referrer_policy') ? 1 : 0, 'Controls what URL information is sent when users click links to external sites. Improves privacy but may affect analytics. Set to strict-origin-when-cross-origin.');
 
 		$formwriter->dropinput('debug_css', 'CSS Debug Mode (tailwind themes only)', [
 			'options' => [1 => 'Yes', 0 => 'No'],

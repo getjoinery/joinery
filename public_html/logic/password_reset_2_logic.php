@@ -7,6 +7,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
@@ -24,6 +25,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['act_code'] = $act_code;
 
 	if ($post_vars) {
+
+		if (!RequestLogger::check_rate_limit('password_reset_complete', 5, 900, false)) {
+			return LogicResult::error('Too many reset attempts. Please wait a few minutes and try again.');
+		}
 
 		$success = Activation::checkTempCode($act_code, 2);
 

@@ -5,6 +5,9 @@ function admin_analytics_users_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
+	$session = SessionControl::get_instance();
+	$session->check_permission(5);
+
 	$today = date("m-d-Y");
 	$startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 years")), 0, '');
 	$enddate = LibraryFunctions::fetch_variable('enddate', $today, 0, '');

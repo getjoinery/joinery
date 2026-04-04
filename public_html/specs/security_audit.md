@@ -31,7 +31,7 @@ Audited areas:
 
 ## Critical Findings
 
-### C1. Weak Cryptographic Token Generation (Password Resets, Activation Codes)
+### C1. ~~Weak Cryptographic Token Generation (Password Resets, Activation Codes)~~ **[FIXED]**
 
 **Files:**
 - `includes/LibraryFunctions.php:495` — `str_rand()` uses `md5(uniqid('', TRUE))`
@@ -129,7 +129,7 @@ WHERE vse_page = '$page_1'
 
 ---
 
-### C5. Missing Permission Checks on Admin Analytics Pages
+### C5. ~~Missing Permission Checks on Admin Analytics Pages~~ **[FIXED]**
 
 **Files:**
 - `adm/logic/admin_analytics_funnels_logic.php`
@@ -144,7 +144,7 @@ WHERE vse_page = '$page_1'
 
 ---
 
-### C6. No Session Regeneration on Login
+### C6. ~~No Session Regeneration on Login~~ **[FIXED]**
 
 **File:** `includes/SessionControl.php` — `store_session_variables()` method
 
@@ -156,7 +156,7 @@ WHERE vse_page = '$page_1'
 
 ---
 
-### C7. SQL Injection in Dead Code (Activation.php)
+### C7. ~~SQL Injection in Dead Code (Activation.php)~~ **[FIXED]**
 
 **File:** `includes/Activation.php:115-116`
 
@@ -185,7 +185,7 @@ $sql = "SELECT COUNT(1) as count FROM act_activation_codes WHERE act_code = '$ac
 
 ---
 
-### C9. No PHP Execution Prevention in Uploads Directory
+### C9. ~~No PHP Execution Prevention in Uploads Directory~~ **[FIXED]**
 
 **Location:** `/var/www/html/joinerytest/uploads/`
 
@@ -203,7 +203,7 @@ php_flag engine off
 
 ## High Severity Findings
 
-### H1. Weak Password Minimum — 5 Characters
+### H1. ~~Weak Password Minimum — 5 Characters~~ **[FIXED]**
 
 **File:** `data/users_class.php:567`
 
@@ -228,7 +228,7 @@ php_flag engine off
 
 ---
 
-### H3. No Route-Level Permission Enforcement for /admin/*
+### H3. ~~No Route-Level Permission Enforcement for /admin/*~~ **[FIXED]**
 
 **File:** `serve.php` — route definitions
 
@@ -241,7 +241,7 @@ php_flag engine off
 
 ---
 
-### H4. No Rate Limiting on Password Reset Token Submission
+### H4. ~~No Rate Limiting on Password Reset Token Submission~~ **[FIXED]**
 
 **File:** `logic/password_reset_2_logic.php`
 
@@ -314,7 +314,7 @@ exec("dropdb -U {$db_user} --if-exists {$test_db} 2>&1", ...);
 
 ## Medium Severity Findings
 
-### M1. User Enumeration via Password Reset
+### M1. ~~User Enumeration via Password Reset~~ **[FIXED]**
 
 **File:** `logic/password_reset_1_logic.php:46-55`
 
@@ -388,7 +388,7 @@ If `$webhook_id` is empty, signature verification is skipped entirely.
 
 ---
 
-### M8. Security Headers Disabled
+### M8. ~~Security Headers Disabled~~ **[FIXED]**
 
 **File:** `includes/PublicPageBase.php:63-68`
 
@@ -524,18 +524,20 @@ These areas are well-implemented and should be maintained:
 
 ## Remediation Roadmap
 
-### Phase 1 — Immediate (This Week)
+### Phase 1 — Immediate (This Week) -- **ALL DONE**
 
-| # | Finding | Effort | Risk Reduced |
-|---|---------|--------|-------------|
-| C1 | Replace `str_rand()` / `random_string()` with `random_bytes()` | Small | Account takeover via predicted tokens |
-| C6 | Add `session_regenerate_id(true)` on login | Small | Session fixation |
-| C7 | Delete dead SQL injection code in Activation.php | Trivial | Code quality |
-| C9 | Add `.htaccess` to uploads directory | Trivial | Remote code execution |
-| H1 | Increase password minimum to 12 | Small | Brute force |
-| H3 | Add `min_permission` to `/admin/*` route | Small | Unauthed admin access |
-| C5 | Add `check_permission()` to analytics logic files | Small | Unauthed analytics access |
-| H4 | Add rate limiting to password reset step 2 | Small | Token brute force |
+| # | Finding | Effort | Status |
+|---|---------|--------|--------|
+| C1 | Replace `str_rand()` / `random_string()` with `random_bytes()` | Small | **FIXED** |
+| C6 | Add `session_regenerate_id(true)` on login | Small | **FIXED** |
+| C7 | Delete dead SQL injection code in Activation.php | Trivial | **FIXED** |
+| C9 | Add `.htaccess` to uploads directory | Trivial | **FIXED** |
+| H1 | Increase password minimum to 12 | Small | **FIXED** |
+| H3 | Add `min_permission` to `/admin/*` route | Small | **FIXED** |
+| C5 | Add `check_permission()` to analytics logic files | Small | **FIXED** |
+| H4 | Add rate limiting to password reset step 2 | Small | **FIXED** |
+| M1 | Fix user enumeration in password reset | Small | **FIXED** |
+| M8 | Enable security headers (HSTS, X-Frame-Options, etc.) | Small | **FIXED** |
 
 ### Phase 2 — Short-Term (This Month)
 
