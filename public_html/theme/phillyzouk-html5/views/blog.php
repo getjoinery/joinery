@@ -68,16 +68,16 @@ $page->public_header($hoptions);
                                 <ul class="blog-meta">
                                     <li>
                                         <a href="#" class="admin">
-                                            <span class="icon">&#128100;</span>
+                                            <i class="bx bx-user"></i>
                                             By <?php echo htmlspecialchars($author->display_name()); ?>
                                         </a>
                                     </li>
                                     <li>
-                                        <span class="icon">&#128197;</span>
+                                        <i class="bx bx-calendar"></i>
                                         <?php echo date('d M Y', strtotime($post->get('pst_published_time'))); ?>
                                     </li>
                                 </ul>
-                                <a href="<?php echo $post->get_url(); ?>" class="read-more">Read More &#187;</a>
+                                <a href="<?php echo $post->get_url(); ?>" class="read-more">Read More <i class='bx bx-chevrons-right'></i></a>
                             </div>
                         </div>
 
@@ -92,7 +92,7 @@ $page->public_header($hoptions);
                     <ul class="pagination">
                         <?php if($page_vars['pager']->is_valid_page('-1')): ?>
                             <li class="page-item">
-                                <a class="page-link" href="<?php echo $page_vars['pager']->get_url('-1'); ?>">&#171;</a>
+                                <a class="page-link" href="<?php echo $page_vars['pager']->get_url('-1'); ?>"><i class='bx bx-chevrons-left'></i></a>
                             </li>
                         <?php endif; ?>
 
@@ -110,7 +110,7 @@ $page->public_header($hoptions);
 
                         <?php if($page_vars['pager']->is_valid_page('+1')): ?>
                             <li class="page-item">
-                                <a class="page-link" href="<?php echo $page_vars['pager']->get_url('+1'); ?>">&#187;</a>
+                                <a class="page-link" href="<?php echo $page_vars['pager']->get_url('+1'); ?>"><i class='bx bx-chevrons-right'></i></a>
                             </li>
                         <?php endif; ?>
                     </ul>

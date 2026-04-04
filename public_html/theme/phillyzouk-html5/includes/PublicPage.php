@@ -73,6 +73,7 @@ class PublicPage extends PublicPageBase {
     <?php echo $_head_inject; ?>
     <?php $this->global_includes_top($options); ?>
 
+    <link rel="stylesheet" href="/theme/phillyzouk-html5/assets/css/boxicons.min.css">
     <link rel="stylesheet" href="/theme/phillyzouk-html5/assets/css/style.css">
     <link rel="icon" type="image/png" href="/theme/phillyzouk-html5/assets/images/favicon.png">
 
@@ -247,6 +248,7 @@ class PublicPage extends PublicPageBase {
 
     <div class="go-top">&#8679;</div>
 
+    <script src="/assets/js/joinery-validate.js"></script>
     <script src="/theme/phillyzouk-html5/assets/js/script.js"></script>
     <script>
         // Mobile menu toggle
