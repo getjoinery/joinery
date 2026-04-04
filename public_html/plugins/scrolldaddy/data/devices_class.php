@@ -11,6 +11,7 @@ require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.
 require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
 require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/rules_class.php'));
 require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/device_backups_class.php'));
+require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/scheduled_blocks_class.php'));
 
 class SdDeviceException extends SystemBaseException {}
 
@@ -317,7 +318,14 @@ class SdDevice extends SystemBase {
 	}
 
 	function permanent_delete($debug = false){
-		// Delete secondary profile first if present
+		// Delete all scheduled blocks for this device
+		$blocks = new MultiSdScheduledBlock(['device_id' => $this->key]);
+		$blocks->load();
+		foreach ($blocks as $block) {
+			$block->permanent_delete();
+		}
+
+		// Delete secondary profile if present (legacy)
 		if($this->get('sdd_sdp_profile_id_secondary')){
 			$this->permanent_delete_profile('secondary');
 		}

@@ -522,6 +522,9 @@ This is the live test server where changes can be verified in a browser.
 - Email: `jeremy.tunnell+claude@gmail.com`
 - Password: `sKU^1cK1pVJCNAv`
 
+**Log In As Another User:**
+Navigate to `/admin/admin_user_login_as?usr_user_id={id}` while logged in as a permission-10 admin. This switches the session to that user and redirects to `/`. To find a user's ID, go to `/admin/admin_users` and click the user — the URL will show `?usr_user_id=N`.
+
 ### Docker Production Server (docker-prod)
 **IP:** `23.239.11.53`
 **SSH Key:** `~/.ssh/id_ed25519_claude` (no passphrase)
