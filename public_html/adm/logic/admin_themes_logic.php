@@ -26,6 +26,18 @@ function admin_themes_logic($get, $post) {
 						$theme_name = $post['theme_name'];
 						$theme_manager->activate($theme_name);
 						$message = "Theme '$theme_name' activated successfully.";
+
+						// Warn if activating a deprecated theme
+						$manifest_path = PathHelper::getAbsolutePath("theme/{$theme_name}/theme.json");
+						if (file_exists($manifest_path)) {
+							$manifest = json_decode(file_get_contents($manifest_path), true);
+							if (!empty($manifest['deprecated'])) {
+								$replacement = $manifest['superseded_by'] ?? null;
+								$message .= $replacement
+									? " Warning: this theme is deprecated. Use '$replacement' instead."
+									: " Warning: this theme is deprecated.";
+							}
+						}
 						break;
 
 					case 'mark_stock':

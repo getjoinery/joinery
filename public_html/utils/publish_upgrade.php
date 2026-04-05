@@ -369,12 +369,17 @@
 			$theme_dir = dirname($theme_json);
 			$theme_name = basename($theme_dir);
 
-			// Read theme.json for version and is_stock
+			// Read theme.json for version, is_stock, and deprecated
 			$theme_data = json_decode(file_get_contents($theme_json), true);
 			$is_stock = $theme_data['is_stock'] ?? true;
 
 			if (!$is_stock) {
 				publish_output("- Skipping {$theme_name} (not stock)");
+				continue;
+			}
+
+			if (!empty($theme_data['deprecated'])) {
+				publish_output("- Skipping {$theme_name} (deprecated)");
 				continue;
 			}
 
@@ -413,12 +418,17 @@
 			$plugin_dir = dirname($plugin_json);
 			$plugin_name = basename($plugin_dir);
 
-			// Read plugin.json for version and is_stock
+			// Read plugin.json for version, is_stock, and deprecated
 			$plugin_data = json_decode(file_get_contents($plugin_json), true);
 			$is_stock = $plugin_data['is_stock'] ?? true;
 
 			if (!$is_stock) {
 				publish_output("- Skipping {$plugin_name} (not stock)");
+				continue;
+			}
+
+			if (!empty($plugin_data['deprecated'])) {
+				publish_output("- Skipping {$plugin_name} (deprecated)");
 				continue;
 			}
 

@@ -391,9 +391,26 @@ class MultiPlugin extends SystemMultiBase {
             
             $plugin_data = array(
                 'name' => $plugin_name,
-                'directory_exists' => true
+                'directory_exists' => true,
+                'deprecated' => false,
+                'superseded_by' => null,
             );
-            
+
+            // Read manifest for deprecation metadata
+            $metadata_file = $plugin_path . '/plugin.json';
+            $metadata = null;
+            if (file_exists($metadata_file)) {
+                $metadata = json_decode(file_get_contents($metadata_file), true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    $metadata = null;
+                }
+            }
+
+            if ($metadata) {
+                $plugin_data['deprecated'] = !empty($metadata['deprecated']);
+                $plugin_data['superseded_by'] = $metadata['superseded_by'] ?? null;
+            }
+
             // Get plugin record if it exists
             if (isset($plugins_lookup[$plugin_name])) {
                 $plugin = $plugins_lookup[$plugin_name];
@@ -409,23 +426,12 @@ class MultiPlugin extends SystemMultiBase {
                 $plugin_data['plugin'] = null;
                 $plugin_data['is_active'] = false;
                 $plugin_data['status_badge'] = '<span class="badge bg-secondary">Inactive</span>';
-                
-                // Try to get metadata directly
-                $metadata_file = $plugin_path . '/plugin.json';
-                if (file_exists($metadata_file)) {
-                    $json_data = file_get_contents($metadata_file);
-                    $metadata = json_decode($json_data, true);
-                    if (json_last_error() === JSON_ERROR_NONE) {
-                        $plugin_data['display_name'] = isset($metadata['name']) ? $metadata['name'] : $plugin_name;
-                        $plugin_data['description'] = isset($metadata['description']) ? $metadata['description'] : null;
-                        $plugin_data['version'] = isset($metadata['version']) ? $metadata['version'] : null;
-                        $plugin_data['author'] = isset($metadata['author']) ? $metadata['author'] : null;
-                    } else {
-                        $plugin_data['display_name'] = $plugin_name;
-                        $plugin_data['description'] = null;
-                        $plugin_data['version'] = null;
-                        $plugin_data['author'] = null;
-                    }
+
+                if ($metadata) {
+                    $plugin_data['display_name'] = $metadata['name'] ?? $plugin_name;
+                    $plugin_data['description'] = $metadata['description'] ?? null;
+                    $plugin_data['version'] = $metadata['version'] ?? null;
+                    $plugin_data['author'] = $metadata['author'] ?? null;
                 } else {
                     $plugin_data['display_name'] = $plugin_name;
                     $plugin_data['description'] = null;
@@ -433,7 +439,7 @@ class MultiPlugin extends SystemMultiBase {
                     $plugin_data['author'] = null;
                 }
             }
-            
+
             $plugins[] = $plugin_data;
         }
         
@@ -444,6 +450,8 @@ class MultiPlugin extends SystemMultiBase {
                 $plugin_data = array(
                     'name' => $plugin_name,
                     'directory_exists' => false,
+                    'deprecated' => false,
+                    'superseded_by' => null,
                     'plugin' => $plugin,
                     'is_active' => $plugin->is_active(),
                     'status_badge' => '<span class="badge bg-warning">Missing</span>',
@@ -456,8 +464,11 @@ class MultiPlugin extends SystemMultiBase {
             }
         }
         
-        // Sort plugins by display name
+        // Sort plugins: deprecated last, then alphabetical
         usort($plugins, function($a, $b) {
+            $a_dep = !empty($a['deprecated']);
+            $b_dep = !empty($b['deprecated']);
+            if ($a_dep !== $b_dep) return $a_dep ? 1 : -1;
             return strcasecmp($a['display_name'], $b['display_name']);
         });
         
