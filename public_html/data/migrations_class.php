@@ -150,7 +150,7 @@ function authenticate_write($data) {
 			} elseif (isset($migration['migration_file']) && $migration['migration_file']) {
 				// File-based migration - check file exists first
 				$migration_file_path = __DIR__ . '/../migrations/' . $migration['migration_file'];
-				
+
 				if (!file_exists($migration_file_path)) {
 					return [
 						'should_run' => false,
@@ -158,7 +158,7 @@ function authenticate_write($data) {
 						'error' => true
 					];
 				}
-				
+
 				$migration_hash = md5_file($migration_file_path);
 				
 			} else {
@@ -263,7 +263,7 @@ function authenticate_write($data) {
 			} elseif (isset($migration['migration_file']) && $migration['migration_file']) {
 				// File-based migration
 				$migration_file_path = __DIR__ . '/../migrations/' . $migration['migration_file'];
-				
+
 				if (!file_exists($migration_file_path)) {
 					throw new MigrationException("Migration file not found: " . $migration['migration_file']);
 				}

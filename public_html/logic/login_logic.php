@@ -11,7 +11,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/login_class.php'));
 
 	//HANDLE ACTIVATION FIRST IF PRESENT
-	if ($get_vars['act_code']) {
+	if (!empty($get_vars['act_code'])) {
 		$act_code = $get_vars['act_code'];
 		$activated_user = NULL;
 		$activated = FALSE;

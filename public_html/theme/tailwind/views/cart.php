@@ -7,7 +7,7 @@
 	$page_vars = process_logic(cart_logic($_GET, $_POST));
 	$cart = $page_vars['cart'];
 	$currency_symbol = $page_vars['currency_symbol'];
-	$page_vars['currency_code'] = $currency_code;
+	$currency_code = $page_vars['currency_code'] ?? '';
 	$settings = Globalvars::get_instance();
 	$require_login = $page_vars['require_login'];
 

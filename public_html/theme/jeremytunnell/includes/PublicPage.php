@@ -4,6 +4,8 @@ require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
 class PublicPage extends PublicPageBase {
 
+	protected $menu_data = null;
+
 	// Implement abstract method from PublicPageBase
 	protected function getTableClasses() {
 		return [
@@ -65,7 +67,7 @@ class PublicPage extends PublicPageBase {
 		$_head_inject = ob_get_clean();
 
 		// Get menu data from PublicPageBase
-		$menu_data = $this->get_menu_data();
+		$this->menu_data = $this->get_menu_data();
 
 		?>
 <!DOCTYPE html>
@@ -74,7 +76,7 @@ class PublicPage extends PublicPageBase {
 		<base href="/">
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<meta name="description" content="<?php echo $options['description']; ?>">
+		<meta name="description" content="<?php echo $options['description'] ?? ''; ?>">
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
@@ -131,7 +133,7 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 <div class="slot-r">
 				<ul id="menu-main-menu" class="typology-nav typology-main-navigation">
 <?php
-	foreach($menu_data['main_menu'] as $menu_item) {
+	foreach($this->menu_data['main_menu'] as $menu_item) {
 		if (!empty($menu_item['submenu'])) {
 			// Parent menu item with dropdown
 			echo '<li class="menu-item menu-item-has-children menu-item-type-post_type menu-item-object-page">';
@@ -332,7 +334,7 @@ body,blockquote:before, q:before{font-family: 'Domine';font-weight: 400;}body,.t
 	<div class="widget typology-responsive-menu">
 					<ul id="menu-main-menu-1" class="typology-nav typology-main-navigation">
 <?php
-	foreach($menu_data['main_menu'] as $menu_item) {
+	foreach($this->menu_data['main_menu'] as $menu_item) {
 		if (!empty($menu_item['submenu'])) {
 			// Parent menu item with dropdown
 			echo '<li class="menu-item menu-item-has-children menu-item-type-post_type menu-item-object-page">';

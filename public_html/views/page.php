@@ -8,7 +8,7 @@
 
 	$paget = new PublicPage();
 	$page_header_options = array(
-		'is_valid_page' => $is_valid_page,
+		'is_valid_page' => $is_valid_page ?? false,
 		'title' => $page->get('pag_title')
 	);
 	if ($page->get_picture_link('hero')) {

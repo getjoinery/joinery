@@ -8,6 +8,7 @@
 	$page_vars = process_logic(post_logic($_GET, $_POST, $post));
 	$post = $page_vars['post'];
 	$session = $page_vars['session'];
+	$new_comment = $page_vars['new_comment'] ?? null;
 
 	$page = new PublicPage();
 	$hoptions = array(

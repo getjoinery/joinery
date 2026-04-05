@@ -167,6 +167,9 @@ if (isset($_GET['download'])) {
     header('Content-Length: ' . filesize($archive_path));
     header('Cache-Control: no-cache, must-revalidate');
 
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
     readfile($archive_path);
     exit;
 }
