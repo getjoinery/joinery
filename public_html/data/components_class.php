@@ -139,7 +139,8 @@ class Component extends SystemBase {
 	}
 
 	/**
-	 * Check if component type is available (active and not deleted)
+	 * Check if component type is available (active, not deleted, and
+	 * compatible with the active theme's CSS framework)
 	 *
 	 * @return bool True if component is available for use
 	 */
@@ -147,7 +148,23 @@ class Component extends SystemBase {
 		if ($this->get('com_delete_time')) {
 			return false;
 		}
-		return (bool)$this->get('com_is_active');
+		if (!(bool)$this->get('com_is_active')) {
+			return false;
+		}
+
+		// Check CSS framework compatibility with active theme
+		$component_framework = $this->get('com_css_framework');
+		if ($component_framework) {
+			$theme_helper = ThemeHelper::getInstance();
+			if ($theme_helper) {
+				$theme_framework = $theme_helper->getCssFramework();
+				if ($theme_framework && $component_framework !== $theme_framework) {
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	/**

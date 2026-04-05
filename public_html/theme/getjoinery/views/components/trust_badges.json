@@ -1,0 +1,18 @@
+{
+    "title": "Trust Badges",
+    "description": "Pill-style badge row for social proof and trust signals",
+    "category": "social_proof",
+    "config_schema": {
+        "fields": [
+            {
+                "name": "badges",
+                "label": "Badges",
+                "type": "repeater",
+                "fields": [
+                    {"name": "icon", "label": "SVG Icon Markup", "type": "textarea"},
+                    {"name": "text", "label": "Badge Text", "type": "textinput"}
+                ]
+            }
+        ]
+    }
+}

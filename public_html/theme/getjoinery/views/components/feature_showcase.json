@@ -1,0 +1,22 @@
+{
+    "title": "Feature Showcase",
+    "description": "Two-column feature detail with image placeholder and bullet list, supports alternating layout",
+    "category": "features",
+    "config_schema": {
+        "fields": [
+            {"name": "title", "label": "Feature Title", "type": "textinput", "default": "Member Management"},
+            {"name": "description", "label": "Description", "type": "textarea", "default": "Everything you need to organize, communicate with, and understand your members."},
+            {
+                "name": "bullets",
+                "label": "Feature Bullets",
+                "type": "repeater",
+                "fields": [
+                    {"name": "text", "label": "Bullet Text", "type": "textinput"}
+                ]
+            },
+            {"name": "image_url", "label": "Image URL", "type": "textinput", "default": "", "advanced": true},
+            {"name": "placeholder_text", "label": "Placeholder Text", "type": "textinput", "default": "Screenshot coming soon", "advanced": true},
+            {"name": "reverse", "label": "Reverse Layout", "type": "dropinput", "default": "no", "options": {"no": "Image Right", "yes": "Image Left"}, "advanced": true}
+        ]
+    }
+}

@@ -1,0 +1,15 @@
+{
+    "title": "Marketing Hero",
+    "description": "Full-width hero section with heading, subheading, and CTA buttons",
+    "category": "hero",
+    "config_schema": {
+        "fields": [
+            {"name": "heading", "label": "Heading", "type": "textinput", "default": "Membership software you can trust with your data"},
+            {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "Manage members, events, payments, and communications \u2014 all in one place. We host it for you, or you host it yourself."},
+            {"name": "primary_button_text", "label": "Primary Button Text", "type": "textinput", "default": "Start Free Trial"},
+            {"name": "primary_button_url", "label": "Primary Button URL", "type": "textinput", "default": "#"},
+            {"name": "secondary_button_text", "label": "Secondary Button Text", "type": "textinput", "default": "See How It Works"},
+            {"name": "secondary_button_url", "label": "Secondary Button URL", "type": "textinput", "default": "/features"}
+        ]
+    }
+}

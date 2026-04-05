@@ -1,0 +1,20 @@
+{
+    "title": "Audience Grid",
+    "description": "4-column grid showing target audiences with icons",
+    "category": "features",
+    "config_schema": {
+        "fields": [
+            {"name": "heading", "label": "Heading", "type": "textinput", "default": "Built for real organizations"},
+            {
+                "name": "audiences",
+                "label": "Audiences",
+                "type": "repeater",
+                "fields": [
+                    {"name": "icon", "label": "Icon Key", "type": "textinput"},
+                    {"name": "title", "label": "Title", "type": "textinput"},
+                    {"name": "description", "label": "Description", "type": "textarea"}
+                ]
+            }
+        ]
+    }
+}

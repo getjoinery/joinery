@@ -12,6 +12,11 @@ class PublicPage extends PublicPageBase {
         ];
     }
 
+    protected function render_base_assets() {
+        parent::render_base_assets();
+        echo '<link rel="stylesheet" href="/assets/css/style.css?v=2">' . "\n";
+    }
+
     public function get_logo() {
         $settings = Globalvars::get_instance();
         if ($settings->get_setting('logo_link')) {
