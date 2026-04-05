@@ -1347,3 +1347,23 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// =============================================================================
+	// VERSION CONSOLIDATION - Remove redundant settings
+	// =============================================================================
+
+	// ========== Remove deprecated database_version setting (v97) ==========
+	$migration = array();
+	$migration['database_version'] = '97';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'database_version'";
+	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'database_version';";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Remove deprecated db_migration_version setting (v98) ==========
+	$migration = array();
+	$migration['database_version'] = '98';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'db_migration_version'";
+	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'db_migration_version';";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

@@ -37,35 +37,43 @@
 		// Parse version argument (e.g. "3.27" or "3" "27")
 		$cli_major = null;
 		$cli_minor = null;
+		$cli_patch = null;
 		$cli_notes = '';
 
 		if (!empty($cli_args[0]) && strpos($cli_args[0], '.') !== false) {
-			[$cli_major, $cli_minor] = explode('.', $cli_args[0], 2);
+			$parts = explode('.', $cli_args[0], 3);
+			$cli_major = $parts[0];
+			$cli_minor = $parts[1] ?? null;
+			$cli_patch = $parts[2] ?? null;
 			$cli_notes = $cli_args[1] ?? 'CLI publish';
 		} elseif (!empty($cli_args[0]) && is_numeric($cli_args[0])) {
 			$cli_major = $cli_args[0];
 			$cli_minor = $cli_args[1] ?? null;
-			$cli_notes = $cli_args[2] ?? 'CLI publish';
+			$cli_patch = $cli_args[2] ?? null;
+			$cli_notes = $cli_args[3] ?? 'CLI publish';
 		} else {
 			$cli_notes = $cli_args[0] ?? 'CLI publish';
 		}
 
 		// Auto-detect next version if not specified
-		if ($cli_major === null || $cli_minor === null) {
+		if ($cli_major === null || $cli_minor === null || $cli_patch === null) {
 			$latest = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1);
 			$latest->load();
 			if ($latest->count() > 0) {
 				$last = $latest->get(0);
 				$cli_major = $cli_major ?? $last->get('upg_major_version');
-				$cli_minor = $cli_minor ?? ($last->get('upg_minor_version') + 1);
+				$cli_minor = $cli_minor ?? $last->get('upg_minor_version');
+				$cli_patch = $cli_patch ?? ($last->get('upg_patch_version') + 1);
 			} else {
-				$cli_major = $cli_major ?? 1;
-				$cli_minor = $cli_minor ?? 0;
+				$cli_major = $cli_major ?? 0;
+				$cli_minor = $cli_minor ?? 8;
+				$cli_patch = $cli_patch ?? 1;
 			}
 		}
 
 		$_REQUEST['version_major'] = $cli_major;
 		$_REQUEST['version_minor'] = $cli_minor;
+		$_REQUEST['version_patch'] = $cli_patch;
 		$_REQUEST['release_notes'] = $cli_notes;
 	}
 
@@ -174,7 +182,7 @@
 			}
 
 			// Delete the database record using permanent_delete
-			$version_string = $upgrade_to_delete->get('upg_major_version').'.'.$upgrade_to_delete->get('upg_minor_version');
+			$version_string = $upgrade_to_delete->get('upg_major_version').'.'.$upgrade_to_delete->get('upg_minor_version').'.'.$upgrade_to_delete->get('upg_patch_version');
 			$upgrade_to_delete->permanent_delete();
 
 			// Store success message in session and redirect to clean URL
@@ -191,28 +199,29 @@
 		}
 	}
 
-	if(isset($_REQUEST['version_major']) && isset($_REQUEST['version_minor'])){
+	if(isset($_REQUEST['version_major']) && isset($_REQUEST['version_minor']) && isset($_REQUEST['version_patch'])){
 
 		$version_major = $_REQUEST['version_major'];
 		$version_minor = $_REQUEST['version_minor'];
+		$version_patch = $_REQUEST['version_patch'];
 		$verbose = isset($_GET['verbose']) ? true : false;
 
 		// Check if this version already exists in the database
 		$existing = new MultiUpgrade(
-			array('major_version' => $version_major, 'minor_version' => $version_minor),
+			array('major_version' => $version_major, 'minor_version' => $version_minor, 'patch_version' => $version_patch),
 			array(),
 			1
 		);
 		$existing->load();
 
 		if ($existing->count() > 0) {
-			publish_output("Version {$version_major}.{$version_minor} already exists. Please use a different version number.");
+			publish_output("Version {$version_major}.{$version_minor}.{$version_patch} already exists. Please use a different version number.");
 			exit;
 		}
 
 		// Generate fresh install SQL file before creating archive
 		// Use form-provided version consistently for both archive and SQL filenames
-		$version = $version_major . '.' . $version_minor;
+		$version = $version_major . '.' . $version_minor . '.' . $version_patch;
 		publish_output("Generating install SQL file (version $version)...");
 
 		$create_sql_cmd = sprintf(
@@ -279,7 +288,7 @@
 		// =====================================================
 		publish_output("Creating core archive...");
 
-		$core_filename = 'joinery-core-' . $version_major . '.' . $version_minor . '.tar.gz';
+		$core_filename = 'joinery-core-' . $version . '.tar.gz';
 		$core_output_location = $file_output_folder . '/' . $core_filename;
 
 		// Create temporary directory for core archive staging
@@ -349,6 +358,7 @@
 		$upgrade = new Upgrade(NULL);
 		$upgrade->set('upg_major_version', $version_major);
 		$upgrade->set('upg_minor_version', $version_minor);
+		$upgrade->set('upg_patch_version', $version_patch);
 		$upgrade->set('upg_name', $core_filename);
 		$upgrade->set('upg_release_notes', $_REQUEST['release_notes']);
 		$upgrade->prepare();
@@ -501,7 +511,7 @@
 		$upgrades = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 10, 0);
 		$upgrades->load();
 		foreach ($upgrades as $upgrade){
-			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 500);
+			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). '.'. $upgrade->get('upg_patch_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 500);
 
 			// Check if archive file exists (supports both old .zip and new .tar.gz)
 			$archive_filename = $upgrade->get('upg_name');
@@ -519,7 +529,7 @@
 
 			// Add delete link
 			$delete_url = '/utils/publish_upgrade?delete=' . $upgrade->key;
-			$version_label = $upgrade->get('upg_major_version') . '.' . $upgrade->get('upg_minor_version');
+			$version_label = $upgrade->get('upg_major_version') . '.' . $upgrade->get('upg_minor_version') . '.' . $upgrade->get('upg_patch_version');
 			$version_string .= ' <a href="' . htmlspecialchars($delete_url) . '" onclick="return confirm(\'Are you sure you want to delete version ' . $version_label . '? This will delete both the archive file and database record.\');" style="color: #dc3545; margin-left: 10px;"><i class="fas fa-trash-alt"></i> Delete</a>';
 
 			echo $version_string.'<br />';
@@ -532,28 +542,18 @@
 		$formwriter->begin_form();
 
 		
-		$major = new MultiUpgrade(array(), array('major_version' => 'DESC'));
-		$major->load();
-		$count = $major->count_all();
-		if($count){
-			$major_temp =  $major->get(0);
-			$major_version = $major_temp->get('upg_major_version');
-		}
-		else{
+		$latest = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1);
+		$latest->load();
+		if ($latest->count() > 0) {
+			$last_upgrade = $latest->get(0);
+			$major_version = $last_upgrade->get('upg_major_version');
+			$minor_version = $last_upgrade->get('upg_minor_version');
+			$patch_version = $last_upgrade->get('upg_patch_version') + 1;
+		} else {
 			$major_version = 0;
+			$minor_version = 8;
+			$patch_version = 1;
 		}
-
-		$minor = new MultiUpgrade(array(), array('minor_version' => 'DESC'));
-		$minor->load();
-		$count = $minor->count_all();
-		if($count){
-			$minor_temp =  $minor->get(0);
-			$minor_version = $minor_temp->get('upg_minor_version') + 1;
-		}
-		else{
-			$minor_version = 0;
-		}
-
 
 		echo $formwriter->textinput('version_major', 'Major Version', [
 			'value' => $major_version,
@@ -561,6 +561,10 @@
 		]);
 		echo $formwriter->textinput('version_minor', 'Minor Version', [
 			'value' => $minor_version,
+			'validation' => ['required' => true]
+		]);
+		echo $formwriter->textinput('version_patch', 'Patch Version', [
+			'value' => $patch_version,
 			'validation' => ['required' => true]
 		]);
 		echo $formwriter->textbox('release_notes', 'Release notes', [
@@ -794,7 +798,8 @@
 		$upgrade = $latest->get(0);
 		$version_major = $upgrade->get('upg_major_version');
 		$version_minor = $upgrade->get('upg_minor_version');
-		$version = $version_major . '.' . $version_minor;
+		$version_patch = $upgrade->get('upg_patch_version');
+		$version = $version_major . '.' . $version_minor . '.' . $version_patch;
 
 		$maintenance_dir = $full_site_dir . '/maintenance_scripts/';
 		$file_output_folder = $full_site_dir . '/static_files';
