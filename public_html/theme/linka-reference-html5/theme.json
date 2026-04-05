@@ -1,7 +1,7 @@
 {
     "name": "linka-reference-html5",
     "display_name": "Linka Reference HTML5",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Zero-dependency HTML5 version of the Linka Reference theme",
     "author": "Joinery Team",
     "is_stock": true,

@@ -33,17 +33,13 @@
 	$page = new PublicPage();
 	$hoptions = array(
 		'is_valid_page' => $is_valid_page,
-		'title' => 'Jeremy Tunnell Blog',
-		'description' => 'Jeremy Tunnell blog.',
-		'banner' => 'Blog',
-		'submenu' => 'Blog',
+		'title' => 'Courses',
+		'description' => 'Browse available courses and events.',
 	);
-	$page->public_header($hoptions); 
+	$page->public_header($hoptions);
 
 	?>
 
-</header>	
-	
 <div class="uk-section uk-margin-top">
   <div class="uk-container">
     <div class="uk-grid-small uk-flex uk-flex-middle" data-uk-grid>

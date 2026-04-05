@@ -59,7 +59,7 @@ class PublicPage extends PublicPageBase {
 	}
 
 	public function public_header($options=array()) {
-		$_GLOBALS['page_header_loaded'] = true;
+		$GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
 		ob_start();

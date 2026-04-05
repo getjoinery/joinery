@@ -12,6 +12,19 @@ class PublicPage extends PublicPageBase {
         ];
     }
 
+    public static function BeginPage($title = '', $options = array()) {
+        $output = '<section class="generic-area section-gap">';
+        $output .= '<div class="container">';
+        if ($title) {
+            $output .= '<div class="row"><div class="col-lg-12"><h2>' . htmlspecialchars($title) . '</h2></div></div>';
+        }
+        return $output;
+    }
+
+    public static function EndPage($options = array()) {
+        return '</div></section>';
+    }
+
     public function public_header($options = array()) {
         $session = SessionControl::get_instance();
         $settings = Globalvars::get_instance();

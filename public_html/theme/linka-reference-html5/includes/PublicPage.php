@@ -19,6 +19,18 @@ class PublicPage extends PublicPageBase {
         ];
     }
 
+    public static function BeginPage($title = '', $options = array()) {
+        $output = '<div class="page-content-area">';
+        if ($title) {
+            $output .= '<div class="page-title-area"><div class="container"><h2>' . htmlspecialchars($title) . '</h2></div></div>';
+        }
+        return $output;
+    }
+
+    public static function EndPage($options = array()) {
+        return '</div><!-- .page-content-area -->';
+    }
+
     public function public_header($options = array()) {
         $session = SessionControl::get_instance();
         $settings = Globalvars::get_instance();
@@ -37,11 +49,8 @@ class PublicPage extends PublicPageBase {
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
         <meta name="description" content="<?php echo htmlspecialchars($description); ?>">
 
-        <!-- Bootstrap CSS (grid and base styles only) -->
+        <!-- Bootstrap CSS (grid and base styles only — no Bootstrap JS loaded) -->
         <link rel="stylesheet" href="/theme/linka-reference-html5/assets/css/bootstrap.min.css">
-        <!-- Owl Carousel CSS -->
-        <link rel="stylesheet" href="/theme/linka-reference-html5/assets/css/owl.theme.default.min.css">
-        <link rel="stylesheet" href="/theme/linka-reference-html5/assets/css/owl.carousel.min.css">
         <!-- Animate CSS -->
         <link rel="stylesheet" href="/theme/linka-reference-html5/assets/css/animate.min.css">
         <!-- Boxicons CSS -->
