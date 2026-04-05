@@ -4,11 +4,11 @@
 
 Five complementary tools provide deployment and upgrade capabilities:
 
-1. **deploy.sh** - Git-based deployment for development/production environments
-2. **upgrade.php** - Web-based upgrade system for client installations
-3. **publish_upgrade.php** - Package creation tool for distributing updates (core + themes + plugins)
-4. **publish_theme.php** - Individual theme/plugin publishing
-5. **install.sh** - Universal installer for Docker and bare-metal deployments
+1. **upgrade.php** - Web-based upgrade system for client installations (recommended)
+2. **publish_upgrade.php** - Package creation tool for distributing updates (core + themes + plugins)
+3. **publish_theme.php** - Individual theme/plugin publishing
+4. **install.sh** - Universal installer for Docker and bare-metal deployments
+5. **deploy.sh** - Git-based deployment for development environments (not recommended for production)
 
 The first four use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation.
 
@@ -44,6 +44,8 @@ Universal installer for Docker and bare-metal deployments. Supports `--themes` f
 ### deploy.sh
 
 **Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/deploy.sh`
+
+> **Note:** This script is functional but not recommended for production. Use `upgrade.php` for production deployments. `deploy.sh` is suitable for development environments where git-based deployment is convenient.
 
 ```bash
 # Basic deployment
