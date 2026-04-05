@@ -35,6 +35,7 @@ class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	    'upg_upgrade_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'upg_major_version' => array('type'=>'int4', 'required'=>true),
 	    'upg_minor_version' => array('type'=>'int4', 'required'=>true),
+	    'upg_patch_version' => array('type'=>'int4', 'default'=>0),
 	    'upg_name' => array('type'=>'varchar(64)', 'required'=>true),
 	    'upg_release_notes' => array('type'=>'text'),
 	    'upg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -68,7 +69,11 @@ class MultiUpgrade extends SystemMultiBase {
         if (isset($this->options['minor_version'])) {
             $filters['upg_minor_version'] = [$this->options['minor_version'], PDO::PARAM_INT];
         }
-        
+
+        if (isset($this->options['patch_version'])) {
+            $filters['upg_patch_version'] = [$this->options['patch_version'], PDO::PARAM_INT];
+        }
+
         return $this->_get_resultsv2('upg_upgrades', $filters, $this->order_by, $only_count, $debug);
     }
 
