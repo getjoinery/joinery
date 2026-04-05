@@ -110,6 +110,7 @@ $page->public_header([
             <li>Resell the hosted service without authorization.</li>
             <li>Use the service in a way that degrades performance for other customers (excessive API calls, automated scraping, etc.).</li>
         </ul>
+        <p>We also reserve the right to refuse or terminate hosted service for content we find unacceptable, at our sole discretion. Joinery is source-available and self-hostable &mdash; declining to host your content on our infrastructure does not prevent you from running the software on your own.</p>
         <p>We handle violations proportionally. A misconfigured email campaign gets a warning and help fixing it. Deliberate abuse gets terminated. We won't shut down your account over an honest mistake without talking to you first.</p>
 
         <!-- 9. API Usage -->
