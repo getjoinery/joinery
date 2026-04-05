@@ -11,9 +11,7 @@
 DEPLOY_VERSION="2.1"
 
 # Repository settings
-GITHUB_USER="getjoinery"
-GITHUB_TOKEN="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"
-REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/getjoinery/joinery.git"
+REPO_URL="git@github.com:getjoinery/joinery.git"
 
 # Function to show usage
 show_usage() {

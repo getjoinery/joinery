@@ -161,9 +161,7 @@ cleanup_and_rollback() {
 # Set up trap to run cleanup on script exit
 trap cleanup_and_rollback EXIT
 
-GITHUB_USER="getjoinery"
-GITHUB_TOKEN="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"
-REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/getjoinery/joinery.git"
+REPO_URL="git@github.com:getjoinery/joinery.git"
 
 # Theme/Plugin repository is same as main repo now (single repository)
 THEME_PLUGIN_REPO_URL="$REPO_URL"

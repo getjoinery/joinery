@@ -43,7 +43,7 @@ if [ "$MODE" = "setup" ]; then
     sudo rm -rf "$WEB_DIR"
     
     # Clone fresh from repository
-    git clone https://jeremytunnell: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@github.com/Tunnell-Software/membership.git "$WEB_DIR"
+    git clone git@github.com:getjoinery/joinery.git "$WEB_DIR"
     echo "  Cloned fresh repository"
 else
     echo "Updating main repository..."
@@ -58,7 +58,7 @@ fi
 if [ ! -d "$THEME_REPO_DIR" ]; then
     echo "Cloning theme/plugin repository..."
     mkdir -p /home/user1/joinery
-    git clone https://getjoinery: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@github.com/getjoinery/joinery.git "$THEME_REPO_DIR"
+    git clone git@github.com:getjoinery/joinery.git "$THEME_REPO_DIR"
 else
     echo "Updating theme/plugin repository..."
     cd "$THEME_REPO_DIR"
