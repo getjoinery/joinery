@@ -1,0 +1,19 @@
+{
+    "title": "Comparison Cards",
+    "description": "2x2 grid comparing Joinery advantages against typical platforms",
+    "category": "features",
+    "config_schema": {
+        "fields": [
+            {"name": "heading", "label": "Heading", "type": "textinput", "default": "How Joinery is different"},
+            {
+                "name": "comparisons",
+                "label": "Comparisons",
+                "type": "repeater",
+                "fields": [
+                    {"name": "ours", "label": "Our Advantage", "type": "textinput"},
+                    {"name": "theirs", "label": "Their Approach", "type": "textinput"}
+                ]
+            }
+        ]
+    }
+}
