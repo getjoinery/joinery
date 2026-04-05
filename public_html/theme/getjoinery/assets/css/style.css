@@ -727,6 +727,81 @@ p:last-child { margin-bottom: 0; }
     padding-left: 0;
 }
 
+/* ---------- Showcase ---------- */
+.showcase-card {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: start;
+    margin-bottom: 4rem;
+    padding-bottom: 4rem;
+    border-bottom: 1px solid var(--border);
+}
+.showcase-card:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+.showcase-image {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    transition: box-shadow var(--transition);
+}
+.showcase-image:hover {
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+}
+.showcase-image img {
+    width: 100%;
+    display: block;
+}
+.showcase-details h2 {
+    font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+}
+.showcase-details h2 a {
+    color: var(--primary-dark);
+    text-decoration: none;
+}
+.showcase-details h2 a:hover {
+    color: var(--accent);
+}
+.showcase-tagline {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+.showcase-details > p {
+    line-height: 1.7;
+    margin-bottom: 1.25rem;
+}
+.showcase-built-with {
+    background: var(--bg-alt);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+.showcase-built-with h4 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+.showcase-built-with ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.showcase-built-with li {
+    padding: 0.25rem 0;
+    font-size: 0.9rem;
+    color: var(--text);
+    line-height: 1.5;
+}
+
 /* ---------- Comparison Table ---------- */
 .comparison-table {
     width: 100%;
@@ -1081,6 +1156,9 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
     /* Feature showcase */
     .feature-showcase { grid-template-columns: 1fr; gap: 2rem; }
     .feature-showcase.reverse { direction: ltr; }
+
+    /* Showcase */
+    .showcase-card { grid-template-columns: 1fr; gap: 2rem; }
 
     /* About */
     .about-grid { grid-template-columns: 1fr; }

@@ -71,7 +71,7 @@ $check_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
             </div>
             <div class="commitment">
                 <h3><?= $check_svg ?> No data selling. No tracking. No ads.</h3>
-                <p>We make money from subscriptions, not from your members' data. We don't run analytics on your members' behavior. We don't sell access to your mailing lists. We don't show ads.</p>
+                <p>We make money from subscriptions, installation services, support contracts, and referral partnerships with infrastructure providers &mdash; not from your members' data. We don't run analytics on your members' behavior. We don't sell access to your mailing lists. We don't show ads.</p>
             </div>
             <div class="commitment">
                 <h3><?= $check_svg ?> Free for personal use.</h3>
@@ -90,10 +90,10 @@ $check_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
     <div class="container" style="max-width: 700px;">
         <h2 style="text-align: left; margin-bottom: 1.5rem;">The business model</h2>
         <p style="color: var(--text-muted); font-size: 1.05rem; line-height: 1.8; margin-bottom: 1.25rem;">
-            We sell hosted Joinery subscriptions. That's the business. You pay a monthly or annual fee, we run the infrastructure, handle updates, and provide support.
+            We sell hosted Joinery subscriptions. You pay a monthly or annual fee, we run the infrastructure, handle updates, and provide support. We also earn revenue from installation services (White Glove Install), commercial self-hosting licenses, support contracts, and referral partnerships with infrastructure providers we recommend (like Linode).
         </p>
         <p style="color: var(--text-muted); font-size: 1.05rem; line-height: 1.8; margin-bottom: 1.25rem;">
-            Commercial self-hosting licenses are a secondary revenue stream for businesses that prefer to run their own infrastructure.
+            Every revenue stream comes from providing a service or making a recommendation &mdash; never from selling, sharing, or exploiting your data.
         </p>
         <p style="color: var(--text-muted); font-size: 1.05rem; line-height: 1.8; margin-bottom: 1.25rem;">
             There is no venture capital. There is no pressure to "maximize engagement" or "monetize the user base." There are no growth-at-all-costs metrics driving product decisions.

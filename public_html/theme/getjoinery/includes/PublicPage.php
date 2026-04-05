@@ -73,7 +73,7 @@ class PublicPage extends PublicPageBase {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/theme/getjoinery/assets/css/style.css?v=2">
+    <link rel="stylesheet" href="/theme/getjoinery/assets/css/style.css?v=3">
 
     <?php
     if ($settings->get_setting('custom_css')) {
@@ -91,9 +91,11 @@ class PublicPage extends PublicPageBase {
             <a href="/features"<?php echo $request_path === '/features' ? ' class="active"' : ''; ?>>Features</a>
             <a href="/pricing"<?php echo $request_path === '/pricing' ? ' class="active"' : ''; ?>>Pricing</a>
             <a href="/developers"<?php echo $request_path === '/developers' ? ' class="active"' : ''; ?>>Developers</a>
+            <a href="/showcase"<?php echo $request_path === '/showcase' ? ' class="active"' : ''; ?>>Showcase</a>
             <a href="/philosophy"<?php echo $request_path === '/philosophy' ? ' class="active"' : ''; ?>>Philosophy</a>
             <a href="/about"<?php echo $request_path === '/about' ? ' class="active"' : ''; ?>>About</a>
-            <a href="/login" class="btn btn-primary btn-sm">Demo</a>
+            <?php // TODO: Re-enable demo/signup button when ready ?>
+            <?php // <a href="/login" class="btn btn-primary btn-sm">Demo</a> ?>
         </div>
 
         <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
@@ -117,6 +119,7 @@ class PublicPage extends PublicPageBase {
             <a href="/features">Features</a>
             <a href="/pricing">Pricing</a>
             <a href="/developers">Developers</a>
+            <a href="/showcase">Showcase</a>
             <a href="/philosophy">Philosophy</a>
             <a href="/about">About</a>
 <?php if ($settings->get_setting('social_github_link')): ?>

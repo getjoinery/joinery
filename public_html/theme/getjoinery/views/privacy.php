@@ -74,7 +74,8 @@ $page->public_header([
             <li>We do not build profiles of your members for our own use.</li>
             <li>We do not use cross-site or cross-device tracking.</li>
             <li>We do not contact your members directly for any marketing purpose.</li>
-            <li>We do not monetize your data in any way other than charging you for the service.</li>
+            <li>We do not monetize your data. Our revenue comes from subscriptions, services, and referral partnerships &mdash; never from your data.</li>
+            <li>We do not voluntarily disclose your data to law enforcement or government agencies. We comply with valid legal process (subpoenas, court orders, warrants) as required by law, but we do not volunteer information beyond what is legally compelled. If permitted by law, we will notify you before disclosing your data in response to legal process.</li>
         </ul>
 
         <!-- 4. Third-Party Services -->
