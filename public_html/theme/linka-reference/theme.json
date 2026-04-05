@@ -4,6 +4,9 @@
     "version": "1.0.0",
     "description": "Modern Blog & Magazine theme based on Linka template - reference implementation",
     "author": "Joinery Team",
+    "is_stock": true,
+    "deprecated": true,
+    "superseded_by": "linka-reference-html5",
     "cssFramework": "bootstrap",
     "formWriterBase": "FormWriterBootstrap",
     "publicPageBase": "PublicPageBase"

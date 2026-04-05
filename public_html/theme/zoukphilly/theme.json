@@ -5,6 +5,8 @@
   "description": "Custom theme for Zouk Philly",
   "author": "Joinery Team",
   "is_stock": true,
+  "deprecated": true,
+  "superseded_by": "zoukphilly-html5",
   "requires": {
     "php": ">=7.4",
     "joinery": ">=1.0.0"

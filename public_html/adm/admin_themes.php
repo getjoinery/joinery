@@ -97,6 +97,8 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 $is_active = $theme_data['is_active'] ?? false;
                                 $is_stock = $theme ? (bool)$theme->get('thm_is_stock') : true;
                                 $is_system = $theme ? (bool)$theme->get('thm_is_system') : false;
+                                $is_deprecated = !empty($theme_data['deprecated']);
+                                $superseded_by = $theme_data['superseded_by'] ?? null;
                                 $files_exist = $theme_data['directory_exists'];
 
                                 // Get status badge
@@ -115,6 +117,13 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     $type_badge = '<span class="badge bg-info">Stock</span>';
                                 } else {
                                     $type_badge = '<span class="badge bg-warning">Custom</span>';
+                                }
+
+                                if ($is_deprecated) {
+                                    $type_badge .= ' <span class="badge bg-dark">Deprecated</span>';
+                                    if ($superseded_by) {
+                                        $type_badge .= '<br><small class="text-muted">Replaced by ' . htmlspecialchars($superseded_by) . '</small>';
+                                    }
                                 }
 
                                 echo '<tr>';

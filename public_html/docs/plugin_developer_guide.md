@@ -157,6 +157,31 @@ require_once(__DIR__ . '/../../includes/Globalvars.php');
 }
 ```
 
+#### Deprecation Fields
+
+Plugins (and themes) support two optional deprecation fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `deprecated` | bool | `false` | Marks the extension as deprecated |
+| `superseded_by` | string | `null` | Directory name of the replacement extension |
+
+```json
+{
+    "name": "Old Plugin",
+    "version": "1.0.0",
+    "is_stock": true,
+    "deprecated": true,
+    "superseded_by": "new-plugin"
+}
+```
+
+**Effect of `deprecated: true`:**
+- Admin list pages show a "Deprecated" badge and sort the extension to the bottom
+- Activating a deprecated extension shows a warning message (activation is not blocked)
+- Deprecated extensions are excluded from deployment archives for new installs
+- Existing sites already running a deprecated extension continue to receive updates normally
+
 ### Data Models
 
 Plugins provide data models using the SystemBase pattern:
@@ -714,6 +739,8 @@ All themes should include a `theme.json` file for proper system integration:
   "publicPageBase": "PublicPageBase"
 }
 ```
+
+Themes also support the `deprecated` and `superseded_by` fields described in the [plugin.json Deprecation Fields](#deprecation-fields) section above. The behavior is identical for themes and plugins.
 
 ## ThemeHelper Enhanced Capabilities
 

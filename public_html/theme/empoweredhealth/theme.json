@@ -4,6 +4,9 @@
     "version": "1.0.0",
     "description": "Modern healthcare and wellness theme inspired by empoweredhealthtn.com",
     "author": "Joinery Team",
+    "is_stock": true,
+    "deprecated": true,
+    "superseded_by": "empoweredhealth-html5",
     "cssFramework": "bootstrap",
     "formWriterBase": "FormWriterBootstrap",
     "publicPageBase": "PublicPageBase"
