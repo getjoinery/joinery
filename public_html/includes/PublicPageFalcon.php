@@ -531,14 +531,14 @@ class PublicPageFalcon extends PublicPageBase {
 
 			<!-- Vertical Menu -->
 		  <?php 
-		  if($options['vertical_menu']){
+		  if(!empty($options['vertical_menu'])){
 				echo $this->vertical_menu($options['vertical_menu']);
 		  }
 		  ?>
-	
 
-		 <?php 
-		  if($options['vertical_menu']){
+
+		 <?php
+		  if(!empty($options['vertical_menu'])){
 			?>
 			<div class="content">
 			 

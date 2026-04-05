@@ -176,7 +176,7 @@ $page->public_header($page_options);
                         <p class="mb-3">&#127760; <a href="<?php echo $page_vars['location_object']->get('loc_website'); ?>" target="_blank"><?php echo $page_vars['location_object']->get('loc_website'); ?></a></p>
                         <?php endif; ?>
 
-                        <?php if ($page_vars['location_picture']): ?>
+                        <?php if (!empty($page_vars['location_picture'])): ?>
                         <div class="mb-3">
                             <img src="<?php echo $page_vars['location_picture']; ?>" style="width: 100%; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);" alt="<?php echo htmlspecialchars($page_vars['location_object']->get('loc_name')); ?>">
                         </div>

@@ -21,6 +21,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	// Handle recurring event instance resolution
+	if ($instance_date && !strtotime($instance_date)) {
+		require_once(LibraryFunctions::display_404_page());
+	}
+
 	if ($instance_date && $event->is_recurring_parent()) {
 		// Check if a materialized instance exists for this date
 		$materialized = $event->_get_materialized_instance_for_date($instance_date);

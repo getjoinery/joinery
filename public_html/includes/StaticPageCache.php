@@ -338,7 +338,7 @@ class StaticPageCache {
 
             foreach ($params as $key => $value) {
                 $key_lower = strtolower($key);
-                $value_lower = strtolower($value);
+                $value_lower = strtolower(is_array($value) ? implode(',', $value) : (string)$value);
 
                 foreach ($spam_params as $spam) {
                     if (strpos($key_lower, $spam) !== false || strpos($value_lower, $spam) !== false) {
@@ -502,7 +502,7 @@ class StaticPageCache {
             $spam_detected = false;
             foreach ($params as $key => $value) {
                 $key_lower = strtolower($key);
-                $value_lower = strtolower($value);
+                $value_lower = strtolower(is_array($value) ? implode(',', $value) : (string)$value);
 
                 // Check parameter names
                 foreach ($spam_params as $spam) {

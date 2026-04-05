@@ -57,34 +57,43 @@ Joinery uses a custom **JoineryValidation** library - pure JavaScript with no jQ
 | `remote` | AJAX validation | Server-side unique check |
 | `unique` | Unique value in database | Auto-generated from field_specifications |
 
-### JavaScript Validation Example
+### JavaScript Validation with FormWriterV2
+
+In FormWriterV2, client-side validation is **automatic** — no manual configuration required. Define validation rules in `$field_specifications` and `end_form()` emits the validation script automatically:
 
 ```php
 <?php
-// In a view or admin page
+// In data/example_class.php — define validation in field_specifications
+public static $field_specifications = array(
+    'exa_email' => array(
+        'type' => 'varchar(255)',
+        'required' => true,
+        'validation' => array(
+            'email' => true,
+            'messages' => array('email' => 'Please enter a valid email address')
+        )
+    ),
+    'exa_password' => array(
+        'type' => 'varchar(255)',
+        'required' => true,
+        'validation' => array(
+            'minlength' => 8,
+            'messages' => array('minlength' => 'Password must be at least 8 characters')
+        )
+    ),
+);
+
+// In your view — validation JS is output automatically by end_form()
 $formwriter = $page->getFormWriter('contact_form');
-
-$validation_rules = array();
-// Required field
-$validation_rules['email']['required']['value'] = 'true';
-
-// Email format validation
-$validation_rules['email']['email']['value'] = 'true';
-
-// Custom error message
-$validation_rules['email']['required']['message'] = '"Please enter your email address"';
-
-// Minimum length
-$validation_rules['password']['minlength']['value'] = '8';
-$validation_rules['password']['minlength']['message'] = '"Password must be at least 8 characters"';
-
-// Pattern matching (alphanumeric only)
-$validation_rules['username']['pattern']['value'] = '"/^[a-zA-Z0-9_]+$/"';
-
-// Output validation script
-echo $formwriter->set_validate($validation_rules);
+$formwriter->begin_form(['action' => '/contact', 'method' => 'POST']);
+$formwriter->textinput('exa_email', 'Email:', ['required' => true]);
+$formwriter->passwordinput('exa_password', 'Password:', ['required' => true]);
+$formwriter->submitbutton('btn_submit', 'Submit');
+$formwriter->end_form(); // <-- emits validation JS automatically
 ?>
 ```
+
+> **Note:** `set_validate()` was removed in the FormWriterV2 migration. It was a vestigial remnant of the old jQuery Validate integration and is no longer available. Any remaining `->set_validate(...)` calls are dead code and should be removed.
 
 ### Manual JavaScript Initialization
 
@@ -152,46 +161,35 @@ JoineryValidation automatically applies Bootstrap classes:
 
 ### Array Fields (Checkboxes, Multi-select)
 
-For fields with array notation `[]`, use the base name without brackets:
+For fields with array notation `[]`, use the base name without brackets in `field_specifications`:
 
 ```php
-// HTML field name: products_list[]
-$validation_rules['products_list']['required']['value'] = 'true';
-
-// HTML field name: event_ids[]
-$validation_rules['event_ids']['minlength']['value'] = '1';
-$validation_rules['event_ids']['minlength']['message'] = '"Select at least one event"';
+// field_specifications entry for a multi-select
+'product_ids' => array(
+    'type' => 'text',
+    'validation' => array('minlength' => 1, 'messages' => array('minlength' => 'Select at least one item'))
+)
 ```
 
 ### AJAX Validation (Remote Check)
 
-For server-side validation like checking username uniqueness:
+For server-side validation like checking username uniqueness, add a `remote` rule in `field_specifications`:
 
 ```php
-// In your form
-$validation_rules['username']['remote']['value'] = '"/ajax/check_username"';
-$validation_rules['username']['remote']['message'] = '"Username is already taken"';
-
-// With custom parameter name
-$validation_rules['email']['remote']['value'] = '{ url: "/ajax/check_email", dataFieldName: "user_email" }';
+'usr_username' => array(
+    'type' => 'varchar(64)',
+    'validation' => array(
+        'remote' => '/ajax/check_username',
+        'messages' => array('remote' => 'Username is already taken')
+    )
+)
 ```
 
-The AJAX endpoint receives the field value as `value` parameter (or custom name).
+The AJAX endpoint receives the field value as `value` parameter.
 
 ### Debug Mode
 
-Enable console logging during development:
-
-```php
-echo $formwriter->set_validate($validation_rules, NULL, true);  // true = debug mode
-```
-
-This logs:
-- Form initialization
-- Validation rules
-- Field validation attempts
-- Form submission status
-- Validation results
+Enable console logging during development by passing `debug: true` to `JoineryValidation.init()` in the Manual JavaScript Initialization section below.
 
 ---
 

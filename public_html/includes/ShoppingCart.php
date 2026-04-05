@@ -229,7 +229,7 @@ class ShoppingCart {
 			}			
 		}
 		else{
-			if($this->billing_user['billing_first_name'] && $this->billing_user['billing_last_name'] && $this->billing_user['billing_email'] && $this->billing_user['password'] && $this->billing_user['privacy']){
+			if($this->billing_user && $this->billing_user['billing_first_name'] && $this->billing_user['billing_last_name'] && $this->billing_user['billing_email'] && $this->billing_user['password'] && $this->billing_user['privacy']){
 				return 1;
 			}
 		}
@@ -241,14 +241,14 @@ class ShoppingCart {
 			$this->billing_user = NULL;
 		}
 		
-		if($data['billing_email']){
+		if(!empty($data['billing_email'])){
 				$this->billing_user['billing_first_name'] = $data['billing_first_name'];
 				$this->billing_user['billing_last_name'] = $data['billing_last_name'];
 				$this->billing_user['billing_email'] = strtolower(trim($data['billing_email']));
 				$this->billing_user['password'] = trim($data['password']);
 				$this->billing_user['privacy'] = $data['privacy'];
 		}
-		else if($data['existing_billing_email']){
+		else if(!empty($data['existing_billing_email'])){
 			//IF THE USER TYPED IN A NEW BILLING USER
 			if($data['existing_billing_email'] == 'A different person'){
 				$this->billing_user['billing_first_name'] = $data['billing_first_name'];

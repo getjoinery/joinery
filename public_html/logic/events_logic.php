@@ -12,8 +12,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$swaoffset = 0;
 	$swasort = 'start_time';
 	$swasdirection = 'ASC';
-	$searchterm = $get_vars['searchterm'];
-	$user_id = $get_vars['u'];
+	$searchterm = $get_vars['searchterm'] ?? '';
+	$user_id = $get_vars['u'] ?? null;
 	
 	$searches = array();
 	$searches['deleted'] = FALSE;
