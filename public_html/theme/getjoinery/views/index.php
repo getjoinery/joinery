@@ -40,7 +40,7 @@ echo ComponentRenderer::render(null, 'gj_feature_grid', [
         ['icon' => 'calendar', 'title' => 'Events & Registration', 'description' => 'Create events, manage signups, handle waitlists. Supports recurring schedules and custom questions.'],
         ['icon' => 'payments', 'title' => 'Payments & E-Commerce', 'description' => 'Stripe and PayPal built in. Sell memberships, products, and event tickets with zero platform fees.'],
         ['icon' => 'email', 'title' => 'Email & Communications', 'description' => 'Newsletters, mailing lists, and notifications. Works with Mailgun or self-hosted — your choice.'],
-        ['icon' => 'plugins', 'title' => 'Plugins & Themes', 'description' => 'Extend with plugins, customize with themes. 20+ themes included, from Bootstrap to zero-dependency HTML5.'],
+        ['icon' => 'plugins', 'title' => 'Plugins & Themes', 'description' => 'Extend with plugins, customize with themes. Full theme override system supports Bootstrap, Tailwind, or zero-dependency HTML5.'],
         ['icon' => 'shield', 'title' => 'Your Data, Your Rules', 'description' => 'Self-host anytime. Export everything. No lock-in, no data selling. Source available for full transparency.'],
     ],
     'link_text' => 'See All Features',

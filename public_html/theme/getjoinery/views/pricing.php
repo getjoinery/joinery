@@ -42,14 +42,13 @@ $dash_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
                     <li><?= $check_svg ?> 2 admin users</li>
                     <li><?= $check_svg ?> Unlimited events</li>
                     <li><?= $check_svg ?> Unlimited products</li>
-                    <li><?= $check_svg ?> 1,000 emails/mo</li>
+                    <li><?= $check_svg ?> Email via your Mailgun account</li>
                     <li><?= $check_svg ?> 2 GB storage</li>
                     <li><?= $check_svg ?> All themes & plugins</li>
                     <li><?= $check_svg ?> Full API access</li>
                     <li><?= $check_svg ?> 0% transaction fees</li>
                     <li><?= $check_svg ?> Custom domain</li>
                     <li><?= $dash_svg ?> Priority support</li>
-                    <li><?= $dash_svg ?> White-label</li>
                 </ul>
                 <a href="#" class="btn btn-secondary">Start Free Trial</a>
             </div>
@@ -66,14 +65,13 @@ $dash_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
                     <li><?= $check_svg ?> 5 admin users</li>
                     <li><?= $check_svg ?> Unlimited events</li>
                     <li><?= $check_svg ?> Unlimited products</li>
-                    <li><?= $check_svg ?> 5,000 emails/mo</li>
+                    <li><?= $check_svg ?> Email via your Mailgun account</li>
                     <li><?= $check_svg ?> 10 GB storage</li>
                     <li><?= $check_svg ?> All themes & plugins</li>
                     <li><?= $check_svg ?> Full API access</li>
                     <li><?= $check_svg ?> 0% transaction fees</li>
                     <li><?= $check_svg ?> Custom domain</li>
                     <li><?= $check_svg ?> Priority support</li>
-                    <li><?= $dash_svg ?> White-label</li>
                 </ul>
                 <a href="#" class="btn btn-primary">Start Free Trial</a>
             </div>
@@ -89,14 +87,13 @@ $dash_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
                     <li><?= $check_svg ?> Unlimited admins</li>
                     <li><?= $check_svg ?> Unlimited events</li>
                     <li><?= $check_svg ?> Unlimited products</li>
-                    <li><?= $check_svg ?> 25,000 emails/mo</li>
+                    <li><?= $check_svg ?> Email via your Mailgun account</li>
                     <li><?= $check_svg ?> 50 GB storage</li>
                     <li><?= $check_svg ?> All themes & plugins</li>
                     <li><?= $check_svg ?> Full API access</li>
                     <li><?= $check_svg ?> 0% transaction fees</li>
                     <li><?= $check_svg ?> Custom domain</li>
                     <li><?= $check_svg ?> Priority support</li>
-                    <li><?= $check_svg ?> White-label</li>
                 </ul>
                 <a href="#" class="btn btn-secondary">Start Free Trial</a>
             </div>
@@ -125,9 +122,6 @@ $dash_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
                 <p style="margin-top: 1rem;">
                     <a href="https://github.com/getjoinery/joinery" class="link-arrow" target="_blank">View on GitHub &rarr;</a>
                 </p>
-                <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.5rem;">
-                    Commercial license? <a href="mailto:hello@getjoinery.com">Contact us</a>
-                </p>
             </div>
 
             <div class="self-host-card" style="border-color: var(--accent);">
@@ -139,11 +133,49 @@ $dash_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
                     <li><?= $check_svg ?> Full Joinery installation</li>
                     <li><?= $check_svg ?> DNS and SSL configuration</li>
                     <li><?= $check_svg ?> Your domain, your server</li>
+                    <li><?= $check_svg ?> Community support via GitHub</li>
                     <li><?= $check_svg ?> No recurring charges</li>
                 </ul>
                 <p style="margin-top: 1rem;">
                     <a href="#" class="btn btn-primary btn-sm">Get Started</a>
                 </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Commercial License -->
+<section class="section">
+    <div class="container">
+        <div class="commercial-license-card">
+            <div class="commercial-license-content">
+                <div class="section-label">For Businesses</div>
+                <h2>Commercial Self-Hosting License</h2>
+                <p>Running Joinery for a commercial organization? The PolyForm Noncommercial license covers personal, educational, and nonprofit use. For everything else, a commercial license gives you full rights to run Joinery on your own infrastructure — with no recurring fees.</p>
+
+                <div class="commercial-license-features">
+                    <div class="commercial-feature-col">
+                        <ul>
+                            <li><?= $check_svg ?> Perpetual license — pay once, use forever</li>
+                            <li><?= $check_svg ?> All current features and themes included</li>
+                            <li><?= $check_svg ?> Run on your own servers with full control</li>
+                        </ul>
+                    </div>
+                    <div class="commercial-feature-col">
+                        <ul>
+                            <li><?= $check_svg ?> No per-member or per-transaction fees</li>
+                            <li><?= $check_svg ?> Optional annual updates subscription</li>
+                            <li><?= $check_svg ?> Priority support available as add-on</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <p class="commercial-pitch">Most membership platforms charge $50–200/month and take a cut of every transaction. A Joinery commercial license pays for itself in months — and then it's free forever.</p>
+
+                <div class="btn-group" style="margin-top: 1.5rem;">
+                    <a href="mailto:hello@getjoinery.com?subject=Commercial%20License%20Inquiry" class="btn btn-primary">Get a Quote</a>
+                    <a href="/philosophy" class="btn btn-secondary">Why We Price This Way</a>
+                </div>
             </div>
         </div>
     </div>

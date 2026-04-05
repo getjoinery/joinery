@@ -1,5 +1,9 @@
 # Plugin and Theme Developer Guide
 
+## Licensing
+
+The Joinery license includes a **plugin and theme exception**. Plugins and themes you create are yours — you may license them under any terms you choose, including commercial terms. The PolyForm Noncommercial license covers Joinery's core code, not your extensions. See the [Plugin and Theme Exception](../../LICENSE.md#plugin-and-theme-exception) in LICENSE.md for the full text.
+
 ## Overview
 
 This guide outlines the current plugin and theme architecture after implementing the hybrid plugin/theme system. The system provides clear separation of concerns between plugins (backend-only) and themes (user-facing routing and presentation), while enabling themes to seamlessly integrate with plugin functionality through a sophisticated view resolution system.

@@ -63,21 +63,20 @@ $features = [
         'bullets' => [
             ['text' => 'Newsletter sending with templates'],
             ['text' => 'Mailing lists with subscriber management'],
-            ['text' => 'Direct messaging between members'],
             ['text' => 'Notification system for events and updates'],
             ['text' => 'Works with Mailgun or self-hosted email'],
             ['text' => 'No third-party dependency required'],
         ],
     ],
     [
-        'title' => 'Content & Community',
-        'description' => 'Publish content, build community, and keep members engaged with built-in social features.',
+        'title' => 'Content & Pages',
+        'description' => 'A built-in CMS for publishing blog posts, building pages, and managing your site content — no external tools needed.',
         'bullets' => [
-            ['text' => 'Posts with categories and scheduling'],
-            ['text' => 'Pages with content blocks'],
-            ['text' => 'Photo galleries'],
-            ['text' => 'Comments and reactions'],
-            ['text' => 'Social features — following, messaging, likes'],
+            ['text' => 'Blog posts with categories, scheduling, and rich text'],
+            ['text' => 'Page builder with drag-and-drop component blocks'],
+            ['text' => 'WYSIWYG editor for easy content creation'],
+            ['text' => 'SEO-friendly URLs and meta descriptions'],
+            ['text' => 'Media management for images and files'],
         ],
     ],
     [
@@ -93,9 +92,9 @@ $features = [
     ],
     [
         'title' => 'Themes & Customization',
-        'description' => 'Make it yours. Choose from 20+ included themes or build your own with the theme override system.',
+        'description' => 'Make it yours. Choose from included themes or build your own with the theme override system.',
         'bullets' => [
-            ['text' => '20+ included themes'],
+            ['text' => 'Multiple included themes'],
             ['text' => 'Multiple CSS framework options (Tailwind, Bootstrap, zero-dependency HTML5)'],
             ['text' => 'Theme override system for deep customization'],
             ['text' => 'Mobile-responsive out of the box'],

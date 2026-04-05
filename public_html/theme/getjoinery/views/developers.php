@@ -5,7 +5,7 @@ require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
 $page = new PublicPage();
 $page->public_header([
     'title' => 'Developers — Joinery',
-    'description' => 'PostgreSQL. PHP 8.x. REST API. Plugin system. Theme engine. No magic, no lock-in, no nonsense.',
+    'description' => 'PostgreSQL. PHP 8.x. REST API. Plugin system. Theme engine. Readable code, no lock-in.',
     'showheader' => true,
 ]);
 ?>
@@ -13,7 +13,7 @@ $page->public_header([
 <!-- Hero -->
 <section class="hero">
     <h1>Built by a developer, for developers</h1>
-    <p>PostgreSQL. PHP 8.x. REST API. Plugin system. Theme engine. No magic, no lock-in, no nonsense.</p>
+    <p>PostgreSQL. PHP 8.x. REST API. Plugin system. Theme engine. Readable code, no lock-in.</p>
     <div class="btn-group btn-group-center">
         <a href="https://github.com/getjoinery/joinery" class="btn btn-primary" target="_blank">View on GitHub</a>
         <a href="#api" class="btn btn-secondary">API Docs</a>
@@ -34,11 +34,11 @@ $page->public_header([
             </div>
             <div class="arch-card">
                 <h4>Backend</h4>
-                <p>PHP 8.x, MVC-like architecture. Front-controller routing through serve.php. Logic layer with LogicResult pattern.</p>
+                <p>PHP 8.x, MVC-like architecture. Front-controller routing. Clean separation of data, logic, and views.</p>
             </div>
             <div class="arch-card">
                 <h4>Frontend</h4>
-                <p>Your choice — Tailwind, Bootstrap, or zero-dependency HTML5. No jQuery. Modern vanilla JavaScript throughout.</p>
+                <p>Zero-dependency HTML5 by default. Modern vanilla JavaScript. Bootstrap and Tailwind support also available.</p>
             </div>
             <div class="arch-card">
                 <h4>API</h4>
@@ -56,8 +56,51 @@ $page->public_header([
     </div>
 </section>
 
+<!-- Security -->
+<section class="section">
+    <div class="container">
+        <h2 class="section-title">Security</h2>
+        <p class="section-subtitle">Membership platforms hold sensitive data — names, emails, payment info, personal details. Security is not a feature here. It is the baseline.</p>
+
+        <div class="arch-grid">
+            <div class="arch-card">
+                <h4>SQL Injection Protection</h4>
+                <p>Every database query uses PDO prepared statements. There are no exceptions and no raw string concatenation paths. This is enforced structurally, not by convention.</p>
+            </div>
+            <div class="arch-card">
+                <h4>XSS Prevention</h4>
+                <p>All user-generated output is escaped with htmlspecialchars. The FormWriter system handles output encoding automatically so individual views cannot forget.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Authentication & Permissions</h4>
+                <p>Session-based authentication with role-based access control. Permission checks happen at the controller level before any data is loaded or rendered.</p>
+            </div>
+            <div class="arch-card">
+                <h4>CSRF Protection</h4>
+                <p>CSRF token generation is built into the FormWriter. Available on every form out of the box — no extra setup required.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Password Hashing</h4>
+                <p>Passwords are hashed with Argon2id — the current best practice. Legacy bcrypt hashes are automatically upgraded on next login. No plaintext, no MD5, no SHA.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Cookie Security</h4>
+                <p>All cookies are set with HttpOnly, SameSite=Lax, and Secure flags. Session cookies are not accessible to JavaScript and are scoped to prevent cross-site request attacks.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Source Available</h4>
+                <p>You can read every line of code that touches your members' data. No obfuscation, no compiled binaries, no trust-us black boxes.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Secure File Handling</h4>
+                <p>File uploads are validated by type and size, stored outside the web root where possible, and served through controlled handlers — not direct URLs.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
 <!-- REST API -->
-<section class="section" id="api">
+<section class="section section-alt" id="api">
     <div class="container">
         <div class="feature-showcase">
             <div class="feature-showcase-content">
@@ -93,7 +136,7 @@ curl -X POST \
 </section>
 
 <!-- Plugin System -->
-<section class="section section-alt">
+<section class="section">
     <div class="container">
         <div class="feature-showcase reverse">
             <div class="feature-showcase-content">
@@ -128,7 +171,7 @@ plugins/bookings/
 </section>
 
 <!-- Theme System -->
-<section class="section">
+<section class="section section-alt">
     <div class="container">
         <div class="feature-showcase">
             <div class="feature-showcase-content">
@@ -136,7 +179,7 @@ plugins/bookings/
                 <p>Themes control the entire visual presentation. The override chain lets you customize any view, template, or asset without modifying core files.</p>
                 <ul>
                     <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Override chain: theme &rarr; plugin &rarr; base</li>
-                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 20+ included themes</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Multiple included themes</li>
                     <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Bootstrap, Tailwind, or zero-dependency HTML5</li>
                     <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Component system for reusable sections</li>
                     <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> FormWriter adapts to your CSS framework</li>
@@ -150,7 +193,7 @@ plugins/bookings/
 </section>
 
 <!-- Self-Hosting -->
-<section class="section section-alt">
+<section class="section">
     <div class="container">
         <h2 class="section-title">Self-hosting</h2>
         <p class="section-subtitle">Run Joinery on your own infrastructure. Same software, complete control.</p>
@@ -162,38 +205,11 @@ plugins/bookings/
             </div>
             <div class="arch-card">
                 <h4>Installation</h4>
-                <p>Clone the repo, run the installer, configure your database. Or let us do it with White Glove Install ($249).</p>
+                <p>Clone the repo, run the installer, configure your database. Docker supported. Or let us do it with White Glove Install ($249).</p>
             </div>
             <div class="arch-card">
                 <h4>Updates</h4>
                 <p>Automated upgrade system. Run one command to pull the latest version and apply migrations.</p>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- Code Quality -->
-<section class="section">
-    <div class="container">
-        <h2 class="section-title">Code you can trust</h2>
-        <p class="section-subtitle">Clean architecture, security by default, and no unnecessary dependencies.</p>
-
-        <div class="diff-cards">
-            <div class="diff-card">
-                <div class="diff-ours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> No jQuery — modern vanilla JavaScript</div>
-                <div class="diff-theirs">Lighter pages, fewer dependencies, easier to audit</div>
-            </div>
-            <div class="diff-card">
-                <div class="diff-ours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> PDO prepared statements everywhere</div>
-                <div class="diff-theirs">SQL injection protection is not optional — it is structural</div>
-            </div>
-            <div class="diff-card">
-                <div class="diff-ours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Active Record pattern for all data models</div>
-                <div class="diff-theirs">Consistent, predictable data access across the codebase</div>
-            </div>
-            <div class="diff-card">
-                <div class="diff-ours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Automated deployment and upgrade system</div>
-                <div class="diff-theirs">One command to publish, one command to upgrade</div>
             </div>
         </div>
     </div>
