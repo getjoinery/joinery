@@ -584,6 +584,149 @@ p:last-child { margin-bottom: 0; }
     flex-shrink: 0;
 }
 
+/* ---------- Commercial License ---------- */
+.commercial-license-card {
+    background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+    border-radius: var(--radius-lg);
+    padding: 3rem;
+    color: #fff;
+}
+.commercial-license-card .section-label {
+    color: var(--accent-light);
+}
+.commercial-license-card h2 {
+    color: #fff;
+    margin-bottom: 1rem;
+}
+.commercial-license-card > .commercial-license-content > p {
+    color: #d6d3d1;
+    font-size: 1.05rem;
+    line-height: 1.7;
+    max-width: 720px;
+}
+.commercial-license-features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem 2rem;
+    margin: 1.5rem 0;
+}
+.commercial-feature-col ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+.commercial-feature-col li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #e7e5e4;
+    font-size: 0.95rem;
+}
+.commercial-feature-col li svg {
+    width: 16px;
+    height: 16px;
+    color: var(--accent-light);
+    flex-shrink: 0;
+}
+.commercial-pitch {
+    color: #fbbf24 !important;
+    font-weight: 500;
+    font-size: 0.95rem !important;
+    margin-top: 1.5rem;
+    font-style: italic;
+}
+.commercial-license-card .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.commercial-license-card .btn-primary:hover {
+    background: var(--accent-light);
+    border-color: var(--accent-light);
+}
+.commercial-license-card .btn-secondary {
+    border-color: rgba(255,255,255,0.3);
+    color: #fff;
+}
+.commercial-license-card .btn-secondary:hover {
+    border-color: #fff;
+    background: rgba(255,255,255,0.1);
+}
+
+/* ---------- Legal Content (Privacy, Terms) ---------- */
+.legal-content {
+    max-width: 800px;
+    margin: 0 auto;
+}
+.legal-content h1 {
+    font-size: 2.2rem;
+    margin-bottom: 0.25rem;
+}
+.legal-content .legal-updated {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+}
+.legal-content .legal-summary {
+    background: var(--accent-bg);
+    border: 1px solid #fde68a;
+    border-radius: var(--radius-lg);
+    padding: 1.5rem 2rem;
+    margin-bottom: 2.5rem;
+}
+.legal-content .legal-summary h2 {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+    color: var(--accent);
+}
+.legal-content .legal-summary ul {
+    list-style: none;
+    padding: 0;
+}
+.legal-content .legal-summary li {
+    padding: 0.35rem 0;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+.legal-content h2 {
+    font-size: 1.35rem;
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+.legal-content h2:first-of-type {
+    border-top: none;
+    padding-top: 0;
+}
+.legal-content .legal-summary + p { margin-bottom: 1rem; }
+.legal-content .legal-summary + p + ol { margin-bottom: 2rem; }
+.legal-content h3 {
+    font-size: 1.05rem;
+    margin-top: 1.25rem;
+    margin-bottom: 0.5rem;
+}
+.legal-content p {
+    margin-bottom: 0.75rem;
+    line-height: 1.7;
+    color: var(--text);
+}
+.legal-content ul, .legal-content ol {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+}
+.legal-content li {
+    margin-bottom: 0.35rem;
+    line-height: 1.6;
+}
+.legal-content .contact-list {
+    list-style: none;
+    padding-left: 0;
+}
+
 /* ---------- Comparison Table ---------- */
 .comparison-table {
     width: 100%;
@@ -931,6 +1074,8 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
     .pricing-cards { flex-direction: column; }
     .pricing-grid { grid-template-columns: 1fr; }
     .self-host-options { grid-template-columns: 1fr; }
+    .commercial-license-card { padding: 2rem; }
+    .commercial-license-features { grid-template-columns: 1fr; }
     .arch-grid { grid-template-columns: 1fr; }
 
     /* Feature showcase */

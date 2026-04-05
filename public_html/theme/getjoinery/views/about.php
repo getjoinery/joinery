@@ -23,7 +23,7 @@ $page->public_header([
             <h2>The project</h2>
             <p>Joinery is a full-featured membership and event management platform. It handles everything a small-to-medium organization needs: member management, event registration, payment processing, email communications, e-commerce, and more.</p>
             <p>What makes it different is the approach. Joinery is source-available. You can read every line of code. You can self-host it on your own infrastructure. You can export all your data at any time. There is no vendor lock-in, no data harvesting, and no transaction fees.</p>
-            <p>The platform includes 20+ themes, a plugin system for extensibility, a full REST API, and support for multiple CSS frameworks. It runs on PHP and PostgreSQL — a proven, well-understood stack.</p>
+            <p>The platform includes a theme system with multiple CSS framework options, a plugin system for extensibility, and a full REST API. It runs on PHP and PostgreSQL — a proven, well-understood stack.</p>
         </div>
     </div>
 </section>

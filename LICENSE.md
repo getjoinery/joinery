@@ -105,6 +105,24 @@ any warranty or condition, and the licensor will not be liable
 to you for any damages arising out of these terms or the use
 or nature of the software, under any kind of legal claim.***
 
+## Plugin and Theme Exception
+
+Plugins and themes that interface with the software through its
+plugin system, theme system, base classes, or APIs are not
+considered "changes or new works based on the software" for the
+purposes of this license. Authors of plugins and themes may
+license their own work under any terms they choose.
+
+This exception applies only to plugins and themes — self-contained
+modules that extend the software's functionality or appearance
+through its designated extension points. It does not apply to
+modifications of the software's core files, which remain subject
+to this license.
+
+Plugins and themes included in the official distribution of the
+software (those shipped by the licensor) are part of the software
+and are licensed under these same terms.
+
 ## Definitions
 
 The **licensor** is the individual or entity offering these
