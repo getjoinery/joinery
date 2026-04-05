@@ -60,12 +60,6 @@ Career Area
                             </div>-->
                             <div class="author-info">
                                 <h2 class="sec-title page-title mb-10"><?php echo $product->get('pro_name'); ?></h2>
-                                <!--<div class="job-meta">
-                                    <span class="location"><i class="fa-regular fa-location-dot me-2"></i>United
-                                        States</span>
-                                    <span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>
-                                    <span class="date"><i class="fa-regular fa-clock me-2"></i>1 Days Ago</span>
-                                </div>-->
                             </div>
                         </div>
                         <div class="job-description mb-40">

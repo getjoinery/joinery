@@ -52,7 +52,6 @@ else{
                         <div class="job-content">
                             <div class="job-post_date">
 								<h3><?php echo $name; ?></h3>
-                                <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
                                 <div class="icon"><a href="/profile/devices?showdeleted=1"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Deleted Devices</a></div>
                             </div>
                         </div>
@@ -211,8 +210,6 @@ else{
 									<div class="icon"><a href="/profile/device_edit?device_id='.$device->key.'"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
-								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
-								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
 							</div>
 							<div class="job-post_author">
 								<div class="job-wrapp">
@@ -245,8 +242,6 @@ else{
 									<h3 class="box-title">Add a Device</h3>
 									<a class="th-btn style5" href="/profile/device_edit">Add</a>
 								</div>
-								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
-								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
 							</div>
 
 						</div>
@@ -262,8 +257,6 @@ else{
 									<h3 class="box-title">Upgrade for more devices</h3>
 									<a class="th-btn style5" href="/profile/change-tier">Upgrade</a>
 								</div>
-								<!--<span class="location"><i class="fa-regular fa-location-dot me-2"></i>United States</span>
-								<span class="location"><i class="fa-light fa-briefcase me-2"></i>Full Time</span>-->
 							</div>
 
 						</div>
