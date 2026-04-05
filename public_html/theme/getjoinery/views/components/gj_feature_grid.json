@@ -1,0 +1,24 @@
+{
+    "title": "Feature Grid",
+    "description": "3-column grid of feature cards with icons, headings, and descriptions",
+    "category": "features",
+    "config_schema": {
+        "fields": [
+            {"name": "label", "label": "Section Label", "type": "textinput", "default": "Everything You Need"},
+            {"name": "heading", "label": "Heading", "type": "textinput", "default": "One platform, no duct tape"},
+            {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "Stop juggling five different services. Joinery handles members, events, payments, email, and more."},
+            {
+                "name": "features",
+                "label": "Features",
+                "type": "repeater",
+                "fields": [
+                    {"name": "icon", "label": "Icon Key", "type": "textinput"},
+                    {"name": "title", "label": "Title", "type": "textinput"},
+                    {"name": "description", "label": "Description", "type": "textarea"}
+                ]
+            },
+            {"name": "link_text", "label": "Bottom Link Text", "type": "textinput", "default": "See All Features", "advanced": true},
+            {"name": "link_url", "label": "Bottom Link URL", "type": "textinput", "default": "/features", "advanced": true}
+        ]
+    }
+}

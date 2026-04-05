@@ -1,0 +1,16 @@
+{
+    "title": "CTA Section",
+    "description": "Dark background call-to-action section with heading, text, and button",
+    "category": "cta",
+    "config_schema": {
+        "fields": [
+            {"name": "heading", "label": "Heading", "type": "textinput", "default": "Ready to own your membership platform?"},
+            {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "Start your free trial today. No credit card required."},
+            {"name": "button_text", "label": "Button Text", "type": "textinput", "default": "Start Free Trial"},
+            {"name": "button_url", "label": "Button URL", "type": "textinput", "default": "#"},
+            {"name": "secondary_text", "label": "Secondary Link Text", "type": "textinput", "default": ""},
+            {"name": "secondary_url", "label": "Secondary Link URL", "type": "textinput", "default": ""},
+            {"name": "style", "label": "Style", "type": "dropinput", "default": "dark", "options": {"dark": "Dark Background", "light": "Light Background"}, "advanced": true}
+        ]
+    }
+}

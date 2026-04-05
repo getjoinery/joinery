@@ -1,0 +1,22 @@
+{
+    "title": "Pricing Teaser",
+    "description": "Compact 3-tier pricing preview with link to full pricing page",
+    "category": "pricing",
+    "config_schema": {
+        "fields": [
+            {"name": "heading", "label": "Heading", "type": "textinput", "default": "Simple, honest pricing"},
+            {"name": "subheading", "label": "Subheading", "type": "textarea", "default": "All features included on every plan. No transaction fees. No surprises."},
+            {"name": "tier1_name", "label": "Tier 1 Name", "type": "textinput", "default": "Starter"},
+            {"name": "tier1_price", "label": "Tier 1 Price", "type": "textinput", "default": "$29"},
+            {"name": "tier1_note", "label": "Tier 1 Note", "type": "textinput", "default": "Up to 250 members"},
+            {"name": "tier2_name", "label": "Tier 2 Name", "type": "textinput", "default": "Organization"},
+            {"name": "tier2_price", "label": "Tier 2 Price", "type": "textinput", "default": "$59"},
+            {"name": "tier2_note", "label": "Tier 2 Note", "type": "textinput", "default": "Up to 2,000 members"},
+            {"name": "tier3_name", "label": "Tier 3 Name", "type": "textinput", "default": "Network"},
+            {"name": "tier3_price", "label": "Tier 3 Price", "type": "textinput", "default": "$99"},
+            {"name": "tier3_note", "label": "Tier 3 Note", "type": "textinput", "default": "Up to 10,000 members"},
+            {"name": "link_text", "label": "Link Text", "type": "textinput", "default": "See full pricing"},
+            {"name": "link_url", "label": "Link URL", "type": "textinput", "default": "/pricing"}
+        ]
+    }
+}
