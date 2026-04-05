@@ -32,8 +32,6 @@ $page_vars = process_logic(device_soft_delete_logic($_GET, $_POST));
                     <div class="job-content">
                         <div class="job-post_date">
 							<h3><?php echo $name; ?></h3>
-                            <!--<span class="date"><i class="fa-regular fa-trash"></i></span>-->
-                            <!--<div class="icon"><a href="/profile/device_delete?device_id=<?php echo $device->key; ?>"><i class="fa-regular fa-trash"></i> Delete</a></div>-->
                         </div>
                     </div>
 	<?php
