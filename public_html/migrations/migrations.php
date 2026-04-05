@@ -1335,7 +1335,7 @@
 	// ========== Backfill sct_plugin_name for existing scheduled tasks (v95) ==========
 	$migration = array();
 	$migration['database_version'] = '95';
-	$migration['migration_file'] = 'backfill_sct_plugin_name';
+	$migration['migration_file'] = 'backfill_sct_plugin_name.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 

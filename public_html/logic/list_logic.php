@@ -27,6 +27,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['session'] = $session;
 
 	
+	$page_vars['messages'] = [];
+
 	if($_POST){
 		
 		if(!$session->get_user_id()){
@@ -99,10 +101,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	
 	
-	$member_of_list = false;
+	$page_vars['member_of_list'] = false;
 	if($session->get_user_id()){
 		$page_vars['member_of_list'] = $mailing_list->is_user_in_list($session->get_user_id());
-	}	
+	}
 	
 	return LogicResult::render($page_vars);
 }

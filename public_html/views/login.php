@@ -5,6 +5,7 @@
 
     $page_vars = process_logic(login_logic($_GET, $_POST));
     $settings = $page_vars['settings'];
+    $email = $page_vars['email'] ?? null;
 
     if ($email) {
         $forgot_link = '/password-reset-1?e=' . rawurlencode(htmlspecialchars($email));
@@ -14,7 +15,7 @@
 
     $page = new PublicPage();
     $page->public_header([
-        'is_valid_page' => $is_valid_page,
+        'is_valid_page' => $is_valid_page ?? false,
         'title'         => 'Log In',
         'header_only'   => true,
     ]);

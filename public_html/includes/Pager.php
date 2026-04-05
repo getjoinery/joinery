@@ -112,6 +112,7 @@ class Pager{
 		if(is_null($this->offset)){
 			$this->offset = 0;
 		}
+		$this->offset = max(0, (int)$this->offset);
 
 		if($this->numrecords){
 			$this->numpagestotal = ceil($this->numrecords/$this->numperpage);	

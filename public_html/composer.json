@@ -8,7 +8,6 @@
         "kriswallsmith/buzz": "^1.2",
         "nyholm/psr7": "^1.3",
         "jhut89/mailchimp3php": "^3.2",
-        "verot/class.upload.php": "^2.1",
         "stripe/stripe-php": "^10.16",
         "phpmailer/phpmailer": "^6.10.0"
     },

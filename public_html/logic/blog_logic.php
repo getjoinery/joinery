@@ -28,8 +28,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		
 
 		
-		$params = explode("/", $_REQUEST['path']);
-		if($params[1] && $params[2]){
+		$path = $_REQUEST['path'] ?? '';
+		$params = explode("/", $path);
+		if (!empty($params[1]) && !empty($params[2])) {
 			$page_vars['posts'] = MultiPost::get_posts_for_tag($params[2], $numperpage, $page_offset);
 			$numrecords = MultiPost::get_num_posts_for_tag($params[2], $numperpage, $page_offset);
 			if(empty($page_vars['posts'])){

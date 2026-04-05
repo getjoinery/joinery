@@ -124,7 +124,7 @@ class RouteHelper {
      * @return bool True if file served, false if rejected or not found
      */
     public static function serveStaticFile($file_path, $cache_seconds = 43200, $exclude_from_cache = []) {
-        if (!file_exists($file_path)) {
+        if (!file_exists($file_path) || is_dir($file_path)) {
             return false;
         }
         

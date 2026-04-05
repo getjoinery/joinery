@@ -71,10 +71,10 @@ function display_title(){
 	static function add_comment($post_id, $session, $data){
 		$settings = Globalvars::get_instance();
 		if(!$session->get_user_id()){
-			if(strlen($data['email'] > 0)){
-				LibraryFunctions::display_404_page();			
+			if(!empty($data['email'])){
+				LibraryFunctions::display_404_page();
 			}
-			if(strlen($data['comment'] > 0)){
+			if(!empty($data['comment'])){
 				LibraryFunctions::display_404_page();			
 			}		
 
