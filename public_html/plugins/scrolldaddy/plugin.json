@@ -5,6 +5,8 @@
     "author": "System Developer",
     "is_stock": true,
     "provides_theme": true,
+    "deprecated": true,
+    "superseded_by": "scrolldaddy-html5",
     "requires": {
         "php": ">=8.0",
         "extensions": []

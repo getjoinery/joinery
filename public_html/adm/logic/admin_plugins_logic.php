@@ -86,6 +86,19 @@ function admin_plugins_logic($get, $post) {
 						$plugin_manager->activate($plugin_name);
 						$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" activated successfully.';
 						$message_type = 'success';
+
+						// Warn if activating a deprecated plugin
+						$manifest_path = PathHelper::getAbsolutePath("plugins/{$plugin_name}/plugin.json");
+						if (file_exists($manifest_path)) {
+							$manifest = json_decode(file_get_contents($manifest_path), true);
+							if (!empty($manifest['deprecated'])) {
+								$replacement = $manifest['superseded_by'] ?? null;
+								$message .= $replacement
+									? ' Warning: this plugin is deprecated. Use "' . htmlspecialchars($replacement) . '" instead.'
+									: ' Warning: this plugin is deprecated.';
+								$message_type = 'warning';
+							}
+						}
 					} catch (Exception $e) {
 						$message = 'Failed to activate plugin "' . htmlspecialchars($plugin_name) . '": ' . htmlspecialchars($e->getMessage());
 						$message_type = 'danger';

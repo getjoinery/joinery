@@ -172,6 +172,13 @@ $page->begin_box(array('altlinks' => $altlinks));
                     }
                 }
 
+                if (!empty($plugin['deprecated'])) {
+                    $status_cell .= ' <span class="badge bg-dark">Deprecated</span>';
+                    if (!empty($plugin['superseded_by'])) {
+                        $status_cell .= '<br><small class="text-muted">Replaced by ' . htmlspecialchars($plugin['superseded_by']) . '</small>';
+                    }
+                }
+
                 if (!$plugin['directory_exists']) {
                     $status_cell .= '<br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>';
                 }

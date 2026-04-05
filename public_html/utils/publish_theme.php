@@ -39,9 +39,10 @@ if (isset($_GET['list']) && $_GET['list'] === 'themes') {
     foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
         $theme_data = json_decode(file_get_contents($json_file), true);
         if ($theme_data) {
-            // Only include stock themes (is_stock defaults to true if not set)
+            // Only include stock, non-deprecated themes
             $is_stock = $theme_data['is_stock'] ?? true;
-            if ($is_stock) {
+            $is_deprecated = !empty($theme_data['deprecated']);
+            if ($is_stock && !$is_deprecated) {
                 $themes[] = [
                     'name' => $theme_data['name'] ?? basename(dirname($json_file)),
                     'directory_name' => basename(dirname($json_file)),
@@ -70,9 +71,10 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
     foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
         $plugin_data = json_decode(file_get_contents($json_file), true);
         if ($plugin_data) {
-            // Only include stock plugins (is_stock defaults to true if not set)
+            // Only include stock, non-deprecated plugins
             $is_stock = $plugin_data['is_stock'] ?? true;
-            if ($is_stock) {
+            $is_deprecated = !empty($plugin_data['deprecated']);
+            if ($is_stock && !$is_deprecated) {
                 $plugins[] = [
                     'name' => basename(dirname($json_file)),
                     'directory_name' => basename(dirname($json_file)),

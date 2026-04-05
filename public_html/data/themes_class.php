@@ -112,7 +112,24 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
             $theme_data = array(
                 'name' => $theme_name,
                 'directory_exists' => true,
+                'deprecated' => false,
+                'superseded_by' => null,
             );
+
+            // Read manifest for deprecation metadata
+            $manifest_path = $theme_path . '/theme.json';
+            $metadata = null;
+            if (file_exists($manifest_path)) {
+                $metadata = json_decode(file_get_contents($manifest_path), true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    $metadata = null;
+                }
+            }
+
+            if ($metadata) {
+                $theme_data['deprecated'] = !empty($metadata['deprecated']);
+                $theme_data['superseded_by'] = $metadata['superseded_by'] ?? null;
+            }
 
             if (isset($themes_lookup[$theme_name])) {
                 $theme = $themes_lookup[$theme_name];
@@ -126,20 +143,11 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
                 // Not in DB — read from theme.json directly
                 $theme_data['theme'] = null;
                 $theme_data['is_active'] = false;
-                $manifest_path = $theme_path . '/theme.json';
-                if (file_exists($manifest_path)) {
-                    $metadata = json_decode(file_get_contents($manifest_path), true);
-                    if (json_last_error() === JSON_ERROR_NONE && $metadata) {
-                        $theme_data['display_name'] = $metadata['name'] ?? $theme_name;
-                        $theme_data['description'] = $metadata['description'] ?? null;
-                        $theme_data['version'] = $metadata['version'] ?? '1.0.0';
-                        $theme_data['author'] = $metadata['author'] ?? 'Unknown';
-                    } else {
-                        $theme_data['display_name'] = $theme_name;
-                        $theme_data['description'] = null;
-                        $theme_data['version'] = null;
-                        $theme_data['author'] = null;
-                    }
+                if ($metadata) {
+                    $theme_data['display_name'] = $metadata['name'] ?? $theme_name;
+                    $theme_data['description'] = $metadata['description'] ?? null;
+                    $theme_data['version'] = $metadata['version'] ?? '1.0.0';
+                    $theme_data['author'] = $metadata['author'] ?? 'Unknown';
                 } else {
                     $theme_data['display_name'] = $theme_name;
                     $theme_data['description'] = null;
@@ -158,6 +166,8 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
                 $themes[] = array(
                     'name' => $theme_name,
                     'directory_exists' => false,
+                    'deprecated' => false,
+                    'superseded_by' => null,
                     'theme' => $theme,
                     'is_active' => (bool)$theme->get('thm_is_active'),
                     'display_name' => $theme->get('thm_display_name') ?: $theme_name,
@@ -169,6 +179,9 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
         }
 
         usort($themes, function($a, $b) {
+            $a_dep = !empty($a['deprecated']);
+            $b_dep = !empty($b['deprecated']);
+            if ($a_dep !== $b_dep) return $a_dep ? 1 : -1;
             return strcasecmp($a['display_name'], $b['display_name']);
         });
 
