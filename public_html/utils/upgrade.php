@@ -1,7 +1,4 @@
 <?php
-	// Upgrade script version - increment to trigger self-update on deployed sites
-	define('UPGRADE_SCRIPT_VERSION', '2.70.1');
-
 	// Detect CLI mode early to avoid loading unnecessary UI components
 	$is_cli = (php_sapi_name() === 'cli');
 
@@ -72,7 +69,7 @@
 		$major = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'));
 		$major->load();
 		$upgrade =  $major->get(0);
-		$version = $upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version');
+		$version = $upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). '.'. $upgrade->get('upg_patch_version');
 		$response['system_version'] = $version;
 		$response['upgrade_name'] = $upgrade->get('upg_name');
 		$response['release_date'] = $upgrade->get('upg_create_time');
