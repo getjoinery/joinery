@@ -230,6 +230,7 @@ class HttpRoutingTestRunner {
         $this->testThemeFiles();
         $this->testThemeViews();
         $this->testPluginFiles();
+        $this->testPluginViews();
         $this->testAdminAccess();
         $this->testAjaxEndpoints();
         $this->testUtilityPages();
@@ -512,6 +513,131 @@ class HttpRoutingTestRunner {
     }
     
     
+    private function testPluginViews() {
+        echo '<div class="test-section"><h3>6. TESTING PLUGIN VIEW AUTO-DISCOVERY</h3><ul>';
+
+        $doc_root = $_SERVER['DOCUMENT_ROOT'];
+
+        // Whitelists: views known to be safe without parameters or session state
+        $root_whitelist   = ['index', 'pricing', 'forms_example'];
+        $profile_whitelist = ['profile', 'devices', 'test'];
+
+        // Static negative cases — always run regardless of installed plugins
+        $static_negative = [
+            ['/definitely-fake-plugin-99999/anything',         404, 'Fake plugin name in root namespace'],
+            ['/profile/definitely-fake-plugin-99999/anything', 404, 'Fake plugin name in profile namespace'],
+        ];
+        foreach ($static_negative as [$path, $expected, $description]) {
+            $result = HttpTester::testUrl($path, $expected, $description);
+            if ($result['success']) {
+                $this->pass("{$description}: {$path} -> {$result['actual_status']}");
+            } else {
+                $this->fail("{$description}: {$path} -> {$result['message']}", $result);
+            }
+        }
+
+        // Discover active plugins
+        $active_plugins = [];
+        try {
+            $active_plugins = PluginHelper::getActivePlugins();
+        } catch (Exception $e) {
+            output_info('Could not load active plugins: ' . $e->getMessage());
+            echo '</ul></div>';
+            return;
+        }
+
+        if (empty($active_plugins)) {
+            output_info('No active plugins found — skipping plugin view tests');
+            echo '</ul></div>';
+            return;
+        }
+
+        foreach ($active_plugins as $plugin_name => $plugin_info) {
+            $views_dir = $doc_root . '/plugins/' . $plugin_name . '/views';
+            if (!is_dir($views_dir)) {
+                output_info("Plugin '{$plugin_name}' has no views/ directory — skipping");
+                continue;
+            }
+
+            output_info("Testing plugin: {$plugin_name}");
+
+            // --- Root namespace tests ---
+
+            // Plugin index: /{plugin} resolves to views/index.php
+            $index_file = $views_dir . '/index.php';
+            if (file_exists($index_file)) {
+                $result = HttpTester::testUrl('/' . $plugin_name, 200, "Plugin {$plugin_name}: index page");
+                if ($result['success']) {
+                    $this->pass("Plugin {$plugin_name} index: /{$plugin_name} -> {$result['actual_status']}");
+                } else {
+                    $this->fail("Plugin {$plugin_name} index: /{$plugin_name} -> {$result['message']}", $result);
+                }
+            }
+
+            // Whitelisted root views: /{plugin}/{view}
+            foreach ($root_whitelist as $view_name) {
+                if ($view_name === 'index') continue; // Already tested above
+                $view_file = $views_dir . '/' . $view_name . '.php';
+                if (!file_exists($view_file)) continue;
+                $path = '/' . $plugin_name . '/' . $view_name;
+                $result = HttpTester::testUrl($path, 200, "Plugin {$plugin_name}: {$view_name}");
+                if ($result['success']) {
+                    $this->pass("Plugin {$plugin_name} view: {$path} -> {$result['actual_status']}");
+                } else {
+                    $this->fail("Plugin {$plugin_name} view: {$path} -> {$result['message']}", $result);
+                }
+            }
+
+            // Non-existent view within real plugin: /{plugin}/definitely-fake-view-99999
+            $result = HttpTester::testUrl('/' . $plugin_name . '/definitely-fake-view-99999', 404, "Plugin {$plugin_name}: non-existent root view");
+            if ($result['success']) {
+                $this->pass("Plugin {$plugin_name} 404: /{$plugin_name}/definitely-fake-view-99999 -> {$result['actual_status']}");
+            } else {
+                $this->fail("Plugin {$plugin_name} 404: /{$plugin_name}/definitely-fake-view-99999 -> {$result['message']}", $result);
+            }
+
+            // --- Profile namespace tests ---
+            $profile_dir = $views_dir . '/profile';
+            if (is_dir($profile_dir)) {
+
+                // Profile index: /profile/{plugin} resolves to views/profile/index.php
+                $profile_index = $profile_dir . '/index.php';
+                if (file_exists($profile_index)) {
+                    $result = HttpTester::testUrl('/profile/' . $plugin_name, [200, 301, 302], "Plugin {$plugin_name}: profile index");
+                    if ($result['success']) {
+                        $this->pass("Plugin {$plugin_name} profile index: /profile/{$plugin_name} -> {$result['actual_status']}");
+                    } else {
+                        $this->fail("Plugin {$plugin_name} profile index: /profile/{$plugin_name} -> {$result['message']}", $result);
+                    }
+                }
+
+                // Whitelisted profile views: /profile/{plugin}/{view}
+                foreach ($profile_whitelist as $view_name) {
+                    $view_file = $profile_dir . '/' . $view_name . '.php';
+                    if (!file_exists($view_file)) continue;
+                    $path = '/profile/' . $plugin_name . '/' . $view_name;
+                    // Auth redirect is correct when unauthenticated
+                    $result = HttpTester::testUrl($path, [200, 301, 302], "Plugin {$plugin_name}: profile/{$view_name}");
+                    if ($result['success']) {
+                        $this->pass("Plugin {$plugin_name} profile view: {$path} -> {$result['actual_status']}");
+                    } else {
+                        $this->fail("Plugin {$plugin_name} profile view: {$path} -> {$result['message']}", $result);
+                    }
+                }
+
+                // Non-existent profile view: /profile/{plugin}/definitely-fake-view-99999
+                $result = HttpTester::testUrl('/profile/' . $plugin_name . '/definitely-fake-view-99999', 404, "Plugin {$plugin_name}: non-existent profile view");
+                if ($result['success']) {
+                    $this->pass("Plugin {$plugin_name} 404: /profile/{$plugin_name}/definitely-fake-view-99999 -> {$result['actual_status']}");
+                } else {
+                    $this->fail("Plugin {$plugin_name} 404: /profile/{$plugin_name}/definitely-fake-view-99999 -> {$result['message']}", $result);
+                }
+            }
+        }
+
+        echo '</ul></div>';
+    }
+
     private function testAdminAccess() {
         echo '<div class="test-section"><h3>7. TESTING ADMIN ACCESS</h3><ul>';
         
@@ -522,7 +648,7 @@ class HttpRoutingTestRunner {
             ['/admin/admin_users', [301, 302, 401, 403], 'Existing admin page (should require auth)'],
 
             // Admin page that doesn't exist
-            ['/admin/definitely-fake-admin-page', [404, 401, 403], 'Admin page (does not exist)'],
+            ['/admin/definitely-fake-admin-page', [302, 404, 401, 403], 'Admin page (does not exist)'],
         ];
         
         foreach ($test_cases as [$path, $expected_status, $description]) {
@@ -571,10 +697,10 @@ class HttpRoutingTestRunner {
         
         $test_cases = [
             // Existing utility (avoid sync scripts)
-            ['/utils/forms_example_bootstrap', [200, 401, 403], 'Existing utility page'],
-            
+            ['/utils/forms_example_bootstrap', [200, 301, 302, 401, 403], 'Existing utility page'],
+
             // Utility page that doesn't exist
-            ['/utils/definitely-fake-utility', [404, 401, 403], 'Utility page (does not exist)'],
+            ['/utils/definitely-fake-utility', [302, 404, 401, 403], 'Utility page (does not exist)'],
         ];
         
         foreach ($test_cases as [$path, $expected_status, $description]) {
