@@ -89,6 +89,14 @@ $page_vars = process_logic(device_edit_logic($_GET, $_POST));
 		'value' => $device->get('sdd_timezone')
 	]);
 
+	if ($device->key) {
+		$formwriter->dropinput('sdd_log_queries', 'Query Logging', [
+			'options' => array('0' => 'Off', '1' => 'On'),
+			'value' => $device->get('sdd_log_queries') ? '1' : '0'
+		]);
+		echo '<p style="font-size:13px; color:#6c757d; margin-top:-8px; margin-bottom:16px;">When on, your device\'s DNS queries are logged on the ScrollDaddy server. Logs include the domain name, query type (A/AAAA), result (blocked/allowed), and timestamp. No IP addresses are stored. You can view and clear your logs at any time.</p>';
+	}
+
 	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);
 	$formwriter->end_form();
 
