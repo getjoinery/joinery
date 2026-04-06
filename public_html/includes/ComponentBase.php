@@ -54,30 +54,9 @@ abstract class ComponentBase {
     }
     
     /**
-     * Get version
-     */
-    public function getVersion() { 
-        return $this->manifestData['version'] ?? '0.0.0'; 
-    }
-    
-    /**
-     * Get description
-     */
-    public function getDescription() { 
-        return $this->manifestData['description'] ?? ''; 
-    }
-    
-    /**
-     * Get author
-     */
-    public function getAuthor() { 
-        return $this->manifestData['author'] ?? ''; 
-    }
-    
-    /**
      * Get requirements
      */
-    public function getRequirements() {
+    protected function getRequirements() {
         return $this->manifestData['requires'] ?? [];
     }
     
@@ -127,15 +106,6 @@ abstract class ComponentBase {
     }
     
     /**
-     * Get URL path to component asset
-     */
-    public function getAssetUrl($path) {
-        // Remove leading slash if present
-        $path = ltrim($path, '/');
-        return '/' . $this->basePath . '/' . $path;
-    }
-    
-    /**
      * Get full filesystem path for component file
      */
     public function getIncludePath($path) {
@@ -167,28 +137,6 @@ abstract class ComponentBase {
     }
     
     /**
-     * Check if file exists in component
-     */
-    public function fileExists($path) {
-        return file_exists($this->getIncludePath($path));
-    }
-    
-    /**
-     * Get all files matching pattern in component
-     */
-    public function getFiles($pattern) {
-        $basePath = $this->getIncludePath('');
-        return glob($basePath . '/' . $pattern);
-    }
-    
-    /**
-     * Export manifest data as array
-     */
-    public function toArray() {
-        return $this->manifestData;
-    }
-    
-    /**
      * Get component type
      */
     public function getType() {
@@ -203,7 +151,5 @@ abstract class ComponentBase {
     }
     
     // Abstract methods that subclasses must implement
-    abstract public function initialize();
-    abstract public function isActive();
     abstract public function validate();
 }

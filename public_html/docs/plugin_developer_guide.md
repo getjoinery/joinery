@@ -393,7 +393,7 @@ class MyData extends SystemBase {
 
 ### Migration System
 
-**Current status:** The plugin migration runner (`PluginManager::runPendingMigrations()`) only processes `.sql` files in `plugins/{name}/migrations/`. The PHP `return []` format with `up`/`down` closures shown below is the intended future format but is **not yet executed automatically** during plugin installation.
+**Current status:** The migration runner only processes `.sql` files in `plugins/{name}/migrations/`. The PHP `return []` format with `up`/`down` closures shown below is the intended future format but is **not yet executed automatically** during plugin installation.
 
 **For settings, menu entries, and initial data**, use `.sql` migration files:
 
