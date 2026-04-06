@@ -112,7 +112,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="20,6 9,17 4,12"/></svg>Active'.$seen_label.'</span>
-									<div class="icon"><a href="/profile/activation?device_id='.$device->key.'" title="Connection Details"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></a> <a href="/profile/device_edit?device_id='.$device->key.'"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></a></div>
+									<div class="scd-actions-wrap"><button class="scd-actions-btn" aria-expanded="false" aria-label="Device actions"><svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="scd-actions-menu" role="menu"><a href="/profile/activation?device_id='.$device->key.'" role="menuitem">Connection Details</a><a href="/profile/device_edit?device_id='.$device->key.'" role="menuitem">Edit Device</a><a href="/profile/test?device_id='.$device->key.'" role="menuitem">Test a Domain/Page</a></div></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
 							</div>
@@ -177,25 +177,7 @@ else{
 									</div>
 								</div>
 								<a class="th-btn style5" href="/profile/scheduled_block_edit?device_id='.$device->key.'">Add</a>
-							</div>';
-
-							echo '
-					<br>
-					<div class="job-post_author">
-						<div class="job-wrapp">
-							<div class="job-author">
-								<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
 							</div>
-							<div class="author-info">
-								<h3 class="company-name">Test a Domain</h3>
-								<div class="scd-test-result" id="scd-result-'.$device->key.'" style="display:none; margin-top:8px;"></div>
-							</div>
-						</div>
-						<div style="display:flex; gap:8px;">
-							<input type="text" class="scd-test-input" data-device-id="'.$device->key.'" placeholder="e.g. facebook.com" style="padding:6px 10px; border:1px solid #ddd; border-radius:4px; font-size:14px; width:160px;">
-							<button type="button" class="th-btn style5 scd-test-btn" data-device-id="'.$device->key.'">Test</button>
-						</div>
-					</div>
 					</div>
 				</div>';
 
@@ -207,7 +189,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<a href="/profile/activation?device_id='.$device->key.'"><span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Needs Activation</span></a>
-									<div class="icon"><a href="/profile/device_edit?device_id='.$device->key.'"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></a></div>
+									<div class="icon"><a href="/profile/device_edit?device_id='.$device->key.'">Edit Device</a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
 							</div>
@@ -268,110 +250,29 @@ else{
 
 	echo PublicPage::EndPage();
 ?>
+<style>
+.scd-actions-wrap { position: relative; display: inline-block; }
+.scd-actions-btn { background: none; border: none; cursor: pointer; padding: 4px 6px; line-height: 1; border-radius: 4px; color: inherit; }
+.scd-actions-btn:hover { background: rgba(0,0,0,0.07); }
+.scd-actions-menu { display: none; position: absolute; right: 0; top: calc(100% + 4px); min-width: 190px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); z-index: 200; padding: 4px 0; }
+.scd-actions-menu.is-open { display: block; }
+.scd-actions-menu a { display: block; padding: 8px 16px; color: #333; text-decoration: none; font-size: 14px; white-space: nowrap; }
+.scd-actions-menu a:hover { background: #f5f5f5; }
+</style>
 <script>
-(function() {
-	function cleanDomain(input) {
-		var d = input.trim().toLowerCase();
-		d = d.replace(/^https?:\/\//, '');
-		d = d.replace(/[\/\?#].*$/, '');
-		d = d.replace(/\.+$/, '');
-		return d.trim();
-	}
-
-	function testDomain(deviceId) {
-		var input = document.querySelector('.scd-test-input[data-device-id="' + deviceId + '"]');
-		var resultDiv = document.getElementById('scd-result-' + deviceId);
-		var domain = cleanDomain(input.value);
-
-		if (!domain || domain.indexOf('.') === -1) {
-			resultDiv.style.display = 'block';
-			resultDiv.innerHTML = '<span style="color:#dc3545;">Please enter a valid domain (e.g. facebook.com)</span>';
-			return;
-		}
-
-		resultDiv.style.display = 'block';
-		resultDiv.innerHTML = '<span style="color:#6c757d;">Testing...</span>';
-
-		var xhr = new XMLHttpRequest();
-		xhr.open('GET', '/ajax/test_domain?device_id=' + deviceId + '&domain=' + encodeURIComponent(domain));
-		xhr.onload = function() {
-			if (xhr.status !== 200) {
-				resultDiv.innerHTML = '<span style="color:#dc3545;">Request failed. Please try again.</span>';
-				return;
-			}
-			var data;
-			try { data = JSON.parse(xhr.responseText); } catch(e) {
-				resultDiv.innerHTML = '<span style="color:#dc3545;">Invalid response.</span>';
-				return;
-			}
-			if (!data.success) {
-				resultDiv.innerHTML = '<span style="color:#dc3545;">' + escHtml(data.message) + '</span>';
-				return;
-			}
-			resultDiv.innerHTML = formatResult(data);
-		};
-		xhr.onerror = function() {
-			resultDiv.innerHTML = '<span style="color:#dc3545;">Network error. Please try again.</span>';
-		};
-		xhr.send();
-	}
-
-	var _svgAttrs = 'xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:4px;"';
-	var _icons = {
-		'xmark-circle': '<svg ' + _svgAttrs + '><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
-		'rotate':       '<svg ' + _svgAttrs + '><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
-		'check-circle': '<svg ' + _svgAttrs + '><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>',
-		'ban':          '<svg ' + _svgAttrs + '><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
-		'question-circle': '<svg ' + _svgAttrs + '><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
-	};
-
-	function formatResult(data) {
-		var iconKey, color, label;
-		if (data.result === 'BLOCKED') {
-			iconKey = 'xmark-circle'; color = '#dc3545'; label = 'Blocked';
-		} else if (data.result === 'FORWARDED' && (data.reason === 'safesearch_rewrite' || data.reason === 'safeyoutube_rewrite')) {
-			iconKey = 'rotate'; color = '#0d6efd'; label = 'Rewritten';
-		} else if (data.result === 'FORWARDED') {
-			iconKey = 'check-circle'; color = '#198754'; label = 'Allowed';
-		} else if (data.result === 'REFUSED') {
-			iconKey = 'ban'; color = '#dc3545'; label = 'Refused';
-		} else {
-			iconKey = 'question-circle'; color = '#6c757d'; label = data.result;
-		}
-
-		var html = '<div style="padding:8px 0;">';
-		html += '<div style="font-weight:600; color:' + color + ';">' + _icons[iconKey] + ' ' + escHtml(data.domain) + ' &mdash; ' + label + '</div>';
-		if (data.detail) {
-			html += '<div style="font-size:13px; color:#6c757d; margin-top:2px; padding-left:20px;">' + escHtml(data.detail) + '</div>';
-		}
-		if (data.profile) {
-			html += '<div style="font-size:13px; color:#6c757d; padding-left:20px;">Active profile: ' + escHtml(data.profile) + '</div>';
-		}
-		html += '</div>';
-		return html;
-	}
-
-	function escHtml(s) {
-		var div = document.createElement('div');
-		div.appendChild(document.createTextNode(s));
-		return div.innerHTML;
-	}
-
-	// Bind click handlers
-	document.querySelectorAll('.scd-test-btn').forEach(function(btn) {
-		btn.addEventListener('click', function() {
-			testDomain(this.getAttribute('data-device-id'));
+(function () {
+	document.addEventListener('click', function (e) {
+		var btn = e.target.closest('.scd-actions-btn');
+		// Close all open menus first
+		document.querySelectorAll('.scd-actions-menu.is-open').forEach(function (m) {
+			m.classList.remove('is-open');
+			m.previousElementSibling.setAttribute('aria-expanded', 'false');
 		});
-	});
-
-	// Bind Enter key on inputs
-	document.querySelectorAll('.scd-test-input').forEach(function(input) {
-		input.addEventListener('keydown', function(e) {
-			if (e.key === 'Enter') {
-				e.preventDefault();
-				testDomain(this.getAttribute('data-device-id'));
-			}
-		});
+		if (btn) {
+			var menu = btn.nextElementSibling;
+			menu.classList.add('is-open');
+			btn.setAttribute('aria-expanded', 'true');
+		}
 	});
 })();
 </script>

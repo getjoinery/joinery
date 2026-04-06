@@ -108,7 +108,7 @@ class PublicPage extends PublicPageBase {
 		//if($title){
 			
 		$output .= '
-    <div class="breadcumb-wrapper " data-bg-src="/plugins/scrolldaddy-html5/assets/img/bg/breadcumb-bg.jpg">
+    <div class="breadcumb-wrapper " data-bg-src="/plugins/scrolldaddy/assets/img/bg/breadcumb-bg.jpg">
         <div class="container">
            <div class="breadcumb-content">
                 <h1 class="breadcumb-title">'.$title.'</h1>
@@ -241,22 +241,22 @@ Career Area
 
     <!-- Favicons - Place favicon.ico in the root directory -->
 	<!--
-    <link rel="apple-touch-icon" sizes="57x57" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-57x57.png">
-    <link rel="apple-touch-icon" sizes="60x60" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-60x60.png">
-    <link rel="apple-touch-icon" sizes="72x72" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-72x72.png">
-    <link rel="apple-touch-icon" sizes="76x76" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-76x76.png">
-    <link rel="apple-touch-icon" sizes="114x114" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-114x114.png">
-    <link rel="apple-touch-icon" sizes="120x120" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-120x120.png">
-    <link rel="apple-touch-icon" sizes="144x144" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-144x144.png">
-    <link rel="apple-touch-icon" sizes="152x152" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-152x152.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/plugins/scrolldaddy-html5/assets/img/favicons/apple-icon-180x180.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="/plugins/scrolldaddy-html5/assets/img/favicons/android-icon-192x192.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/plugins/scrolldaddy-html5/assets/img/favicons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="96x96" href="/plugins/scrolldaddy-html5/assets/img/favicons/favicon-96x96.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/plugins/scrolldaddy-html5/assets/img/favicons/favicon-16x16.png">
-    <link rel="manifest" href="/plugins/scrolldaddy-html5/assets/img/favicons/manifest.json">
+    <link rel="apple-touch-icon" sizes="57x57" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-57x57.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-60x60.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-76x76.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-114x114.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-120x120.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-144x144.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/plugins/scrolldaddy/assets/img/favicons/apple-icon-180x180.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/plugins/scrolldaddy/assets/img/favicons/android-icon-192x192.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/plugins/scrolldaddy/assets/img/favicons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="/plugins/scrolldaddy/assets/img/favicons/favicon-96x96.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/plugins/scrolldaddy/assets/img/favicons/favicon-16x16.png">
+    <link rel="manifest" href="/plugins/scrolldaddy/assets/img/favicons/manifest.json">
     <meta name="msapplication-TileColor" content="#ffffff">
-    <meta name="msapplication-TileImage" content="/plugins/scrolldaddy-html5/assets/img/favicons/ms-icon-144x144.png">
+    <meta name="msapplication-TileImage" content="/plugins/scrolldaddy/assets/img/favicons/ms-icon-144x144.png">
     <meta name="theme-color" content="#ffffff">
 	-->
 
@@ -271,11 +271,11 @@ Career Area
 	    All CSS File
 	============================== -->
     <!-- Responsive utilities (replaces Bootstrap grid/display classes) -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy-html5/assets/css/responsive-utils.css?v=5">
+    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/responsive-utils.css?v=5">
     <!-- Theme Custom CSS -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy-html5/assets/css/style.css">
+    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/style.css">
     <!-- ScrollDaddy Plugin CSS -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy-html5/assets/css/scrolldaddy-plugin.css">
+    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css">
 
     <!-- Facebook Open Graph Meta Tags -->
     <meta property="og:title" content="Scrolldaddy - Take Control of Your Browsing">
@@ -309,7 +309,7 @@ Career Area
             <div class="loading-container">
                 <div class="loading"></div>
                 <div class="preloader-logo">
-                    <a class="icon-masking" href="home-hr-management.html"><span data-mask-src="/plugins/scrolldaddy-html5/assets/img/preloader.svg" class="mask-icon"></span><img src="/plugins/scrolldaddy-html5/assets/img/preloader.svg" alt="Sassa"></a>
+                    <a class="icon-masking" href="home-hr-management.html"><span data-mask-src="/plugins/scrolldaddy/assets/img/preloader.svg" class="mask-icon"></span><img src="/plugins/scrolldaddy/assets/img/preloader.svg" alt="Sassa"></a>
                 </div>
             </div>
         </div>
@@ -330,7 +330,7 @@ Career Area
             <button class="th-menu-toggle"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             <div class="mobile-logo">
 			<a class="icon-masking" href="/"><span data-mask-src="/static_files/scrolldaddylogonopadding.svg" class="mask-icon"></span><img src="/static_files/scrolldaddylogonopadding.svg" alt="ScrollDaddy" width="200"></a>
-               <!-- <a href="/"><img src="/plugins/scrolldaddy-html5/assets/img/logo.svg" alt="Sassa"></a>-->
+               <!-- <a href="/"><img src="/plugins/scrolldaddy/assets/img/logo.svg" alt="Sassa"></a>-->
             </div>
 
             <div class="th-mobile-menu">
@@ -526,7 +526,7 @@ Career Area
                             <div class="th-widget-about">
                                 <div class="about-logo">
 								<h3 class="hero-title">ScrollDaddy</h3>
-                                    <!--<a class="icon-masking" href="index.html"><span data-mask-src="/plugins/scrolldaddy-html5/assets/img/logo.svg" class="mask-icon"></span><img src="/plugins/scrolldaddy-html5/assets/img/logo.svg" alt="Sassa"></a>-->
+                                    <!--<a class="icon-masking" href="index.html"><span data-mask-src="/plugins/scrolldaddy/assets/img/logo.svg" class="mask-icon"></span><img src="/plugins/scrolldaddy/assets/img/logo.svg" alt="Sassa"></a>-->
                                 </div>
                                 <p class="about-text">Manage your screentime and protect against internet threats.</p>
                             </div>
@@ -613,9 +613,9 @@ Career Area
 	<!-- Joinery Validation (Pure JS, no jQuery dependency) -->
 	<script src="/assets/js/joinery-validate.js"></script>
     <!-- Main Js File -->
-    <script src="/plugins/scrolldaddy-html5/assets/js/main.js?v=2"></script>
+    <script src="/plugins/scrolldaddy/assets/js/main.js?v=2"></script>
     <!-- ScrollDaddy Plugin JS -->
-    <script src="/plugins/scrolldaddy-html5/assets/js/scrolldaddy-plugin.js?v=2"></script>
+    <script src="/plugins/scrolldaddy/assets/js/scrolldaddy-plugin.js?v=2"></script>
 
 </body>
 
