@@ -29,7 +29,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * '/robots.txt' => ['view' => 'views/robots']  // Dynamic content (PHP-generated)
  * '/api/v1/*' => ['view' => 'api/apiv1']       // Explicit view file
  * '/admin/*' => ['view' => 'adm/{path}']       // {path} placeholder for dynamic part
- * '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile']  // With fallback
+ * '/profile/*' => ['view' => 'views/profile/{path}']
  * '/ajax/*' => ['view' => 'ajax/{file}']       // Plugin override automatic
  * '/utils/*' => ['view' => 'utils/{file}']     // Plugin override automatic
  *
@@ -41,7 +41,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'view' => 'views/profile/item']  // Custom view path
  *
  * Mixed routes (model + path placeholders + fallbacks):
- * '/user/{action}' => ['model' => 'User', 'model_file' => 'data/users_class', 'view' => 'views/user/{action}', 'default_view' => 'views/user/profile']
+ * '/user/{action}' => ['model' => 'User', 'model_file' => 'data/users_class', 'view' => 'views/user/{action}']
  * 
  * NOTE: All routes set $is_valid_page = true by default
  * Use ['valid_page' => false] to override for non-tracked pages
@@ -84,7 +84,6 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - 'model_file' => 'path/to/model_class' - Explicit model file path (required when model specified)
  * - 'check_setting' => 'setting_name' - Only serve if setting is active
  * - 'valid_page' => false - Don't count this route for statistics (default: true)
- * - 'default_view' => 'path/file' - Fallback view when no specific file matches
  * - 'min_permission' => 10 - Minimum permission level required to access route (uses SessionControl)
  *
  * Custom routes:
@@ -139,7 +138,7 @@ $routes = [
         
         // Routes with special features
         '/profile' => ['view' => 'views/profile/profile'],
-        '/profile/*' => ['view' => 'views/profile/{path}', 'default_view' => 'views/profile/profile'],
+        '/profile/*' => ['view' => 'views/profile/{path}'],
         '/events' => ['view' => 'views/events', 'check_setting' => 'events_active'],
         
         // NOTE: Simple routes like '/login', '/register', '/logout', '/products', '/pricing', 

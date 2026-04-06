@@ -161,7 +161,7 @@
 		if ($is_cli) {
 			echo strip_tags(str_replace(['<br>', '<br />', '<br/>'], "\n", $text)) . "\n";
 		} else {
-			echo $text;
+			echo nl2br(htmlspecialchars($text)) . "<br>\n";
 			flush();
 		}
 	}

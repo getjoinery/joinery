@@ -26,7 +26,6 @@ The view fallback handles simple pages. You need an explicit route in `serve.php
 | **Permission gating** | `'min_permission' => 10` | Page requires login/role check before rendering |
 | **Wildcard routes** | `/admin/*` → `adm/{path}` | Maps a URL prefix to a different directory |
 | **Non-standard view path** | `/list/{slug}` → `views/list` | View file doesn't match the URL |
-| **Default view fallback** | `/profile/*` with `'default_view'` | Needs a fallback when no sub-path matches |
 | **Custom logic** | Homepage with logged-in redirect | Requires a closure with complex branching |
 
 **Rule of thumb:** If the URL path matches the view filename (minus `.php`), you don't need a route.
@@ -97,11 +96,7 @@ All view and model-based routes.
     // Wildcard — maps URL prefix to directory
     '/admin/*' => ['view' => 'adm/{path}'],
 
-    // Fallback view — tries {path}, falls back to default
-    '/profile/*' => [
-        'view' => 'views/profile/{path}',
-        'default_view' => 'views/profile/profile'
-    ],
+    '/profile/*' => ['view' => 'views/profile/{path}'],
 ]
 ```
 
@@ -115,7 +110,6 @@ All view and model-based routes.
 | `var_name` | No | Variable name for model instance in view scope (defaults to lowercase model name) |
 | `check_setting` | No | Setting name — route only serves if setting is truthy |
 | `min_permission` | No | Integer permission level required (uses `SessionControl::check_permission()`) |
-| `default_view` | No | Fallback view when primary view file not found |
 | `valid_page` | No | Set `false` to exclude from page statistics (default: `true`) |
 
 ### Custom Routes
