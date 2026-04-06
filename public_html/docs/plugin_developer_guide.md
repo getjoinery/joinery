@@ -10,20 +10,15 @@ This guide outlines the current plugin and theme architecture after implementing
 
 ## Current Architecture
 
-### Plugin Architecture (Backend-Only)
+### Plugin Architecture
 
-**Plugins are now backend-only components** that provide:
+**Plugins provide:**
 - Data models and business logic
-- Admin interfaces 
+- Admin interfaces
 - Database migrations
 - API endpoints and webhooks
 - Background processing
-
-**Plugins NO LONGER provide:**
-- User-facing routes (moved to themes)
-- Public views or templates
-- Static assets for public pages
-- Direct user interaction
+- User-facing views served under the plugin's URL namespace (see [Plugin URL Namespace](#plugin-url-namespace) below)
 
 ### Theme Architecture (Frontend + Routing)
 
@@ -52,10 +47,10 @@ The system now supports a hybrid approach where:
 Routes are processed in this order:
 1. **Static routes** - Direct file serving with caching
 2. **Theme routes** - Theme-specific routing (serve.php in theme directory)
-3. **Plugin routes** - Merged from theme serve.php that can include plugin routes
+3. **Plugin routes** - Merged from active plugin serve.php files (namespaced)
 4. **Custom routes** - Complex logic routes (in main serve.php)
 5. **Dynamic routes** - Standard view and model routes
-6. **Fallback** - 404 handling
+6. **View fallback** - Auto-discovery: theme → plugin namespace → base → 404
 
 #### View Resolution Chain
 
@@ -106,26 +101,84 @@ require_once(__DIR__ . '/../../includes/Globalvars.php');
 3. **Performance** - Files only loaded once
 4. **Maintainability** - Easier to refactor
 
+### Plugin Naming
+
+Plugin directory names appear directly in user-facing URLs (`/{pluginname}/*`, `/profile/{pluginname}/*`, `/admin/{pluginname}/*`), so choose them carefully:
+
+- **Must be distinctive** — avoid generic names like `events`, `billing`, `users`
+- **Use the product or brand name** — e.g. `scrolldaddy`, `email_forwarding`
+- **Short, lowercase, underscores for multi-word** — e.g. `email_forwarding` not `EmailForwarding`
+- **Must not match a reserved system segment** — the following names are rejected at activation:
+  `profile`, `admin`, `login`, `ajax`, `api`, `assets`, `theme`, `plugins`, `views`, `uploads`, `utils`, `tests`, `docs`, `specs`, `migrations`, `data`, `includes`, `logic`, `adm`
+- **Must not clash with existing base view filenames** — if `views/profile/billing.php` exists, a plugin named `billing` is rejected
+
+A plugin name that passes activation will own its URL namespace for the lifetime of the install. Choose something that won't conflict with other plugins or future system pages.
+
+### Plugin URL Namespace
+
+Every active plugin owns three URL prefixes automatically:
+
+| URL pattern | View file | Example |
+|-------------|-----------|---------|
+| `/{plugin}` | `plugins/{plugin}/views/index.php` | `/scrolldaddy` |
+| `/{plugin}/*` | `plugins/{plugin}/views/*.php` | `/scrolldaddy/pricing` |
+| `/profile/{plugin}` | `plugins/{plugin}/views/profile/index.php` | `/profile/scrolldaddy` |
+| `/profile/{plugin}/*` | `plugins/{plugin}/views/profile/*.php` | `/profile/scrolldaddy/devices` |
+| `/admin/{plugin}` | `plugins/{plugin}/views/admin/index.php` | `/admin/scrolldaddy` |
+| `/admin/{plugin}/*` | `plugins/{plugin}/views/admin/*.php` | `/admin/scrolldaddy/settings` |
+
+**Auto-discovery:** Create a view file and the URL works immediately — no serve.php entry needed. The router searches: theme override → plugin directory → base directory → 404.
+
+**Index convention:** When the URL has no trailing path (e.g. `/profile/scrolldaddy`), the router loads `index.php` from the corresponding views subdirectory.
+
+**Internal links must always use namespaced URLs:**
+```php
+// ✅ CORRECT
+<a href="/profile/scrolldaddy/devices">My Devices</a>
+
+// ❌ WRONG — only works on sites where this plugin IS the theme
+<a href="/profile/devices">My Devices</a>
+```
+
+**Plugin-as-theme shortcut:** When a plugin is set as the active theme (`theme_template = 'plugin'`), its views are found through theme resolution. Both `/profile/devices` (clean URL via theme) and `/profile/scrolldaddy/devices` (namespaced URL) resolve to the same file.
+
+**Adding permissions or model binding:** Use serve.php for routes that need more than a view file — but the route pattern must be within the namespace:
+```php
+// plugins/myplugin/serve.php
+$routes = [
+    'dynamic' => [
+        '/profile/myplugin/settings' => [
+            'view'           => 'views/profile/settings',
+            'min_permission' => 0,
+        ],
+    ],
+];
+```
+Routes outside the namespace are dropped with a logged warning.
+
 ### Required Plugin Structure
 
 ```
 /plugins/my-plugin/
-├── plugin.json                 # Plugin metadata
-├── data/                       # Data model classes
-│   └── my_data_class.php
-├── logic/                      # Business logic files using LogicResult pattern
-│   └── my_feature_logic.php       # See [Logic Architecture Guide](CLAUDE_logic_architecture.md)
-├── views/                      # Plugin view templates (if needed)
-│   └── my_view.php
-├── admin/                      # Admin interface files
-│   └── admin_my_plugin.php
-├── includes/                   # Helper classes and libraries
-│   └── MyPluginHelper.php
-├── hooks/                      # Event hooks
-│   └── my_hook.php
-├── migrations/                 # Database migrations
-│   └── migrations.php
-└── uninstall.php              # Clean uninstall script
+├── plugin.json                  # Plugin metadata
+├── serve.php                    # Only needed for routes requiring model/permission config
+├── views/
+│   ├── index.php                # /myplugin (landing page)
+│   ├── pricing.php              # /myplugin/pricing
+│   ├── profile/
+│   │   ├── index.php            # /profile/myplugin
+│   │   ├── dashboard.php        # /profile/myplugin/dashboard
+│   │   └── settings.php        # /profile/myplugin/settings
+│   └── admin/
+│       ├── index.php            # /admin/myplugin
+│       └── config.php           # /admin/myplugin/config
+├── data/                        # Data model classes
+├── logic/                       # Business logic (LogicResult pattern)
+├── admin/                       # Admin interface files (/adm/admin_*)
+├── ajax/                        # AJAX endpoints
+├── includes/                    # Helper classes and libraries
+├── migrations/                  # Database migrations
+└── uninstall.php               # Clean uninstall script
 ```
 
 ### Plugin.json Requirements
@@ -522,31 +575,24 @@ $routes = [
 ];
 ```
 
-**Plugin-Integrated Theme Routing:**
+**Plugin serve.php (namespaced routes only):**
 ```php
-// theme/sassa/serve.php - Example of plugin integration
+// plugins/controld/serve.php
 $routes = [
     'dynamic' => [
-        // ControlD plugin routes served by theme
-        '/profile/device_edit' => [
-            'view' => 'views/profile/ctlddevice_edit',
-            'plugin_specify' => 'controld'
+        // Routes must be within the plugin's namespace
+        '/profile/controld/device_edit' => [
+            'view'           => 'views/profile/device_edit',
+            'min_permission' => 0,
         ],
-        '/create_account' => [
-            'view' => 'views/create_account', 
-            'plugin_specify' => 'controld'
-        ],
-        
-        // Items plugin routes
-        '/items' => ['view' => 'views/items/list', 'plugin_specify' => 'items'],
-        '/item/{slug}' => [
-            'model' => 'Item',
-            'model_file' => 'plugins/items/data/items_class',
-            'view' => 'views/items/detail'
+        '/controld/create_account' => [
+            'view' => 'views/create_account',
         ],
     ],
 ];
 ```
+
+Note: The plugin name is extracted automatically from the URL pattern — no `plugin_specify` field is needed or supported.
 
 ### Plugin Integration in Themes
 
@@ -971,8 +1017,9 @@ This shows detailed routing information in HTML comments.
 
 **Views not resolving correctly:**
 - Check view path format in routes (should not start with `/`)
-- Test view resolution chain: theme → plugin → system
-- Ensure plugin_specify parameter matches actual plugin directory name
+- Test view resolution chain: theme → plugin namespace → base
+- For auto-discovered views, confirm URL matches `/profile/{pluginname}/...` pattern and file exists at `plugins/{pluginname}/views/profile/....php`
+- For explicit routes, confirm the route pattern is within the plugin namespace
 
 **CSS framework conflicts:**
 - Verify theme.json cssFramework matches actual implementation

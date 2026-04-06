@@ -32,9 +32,8 @@ No duplicate routes allowed - first match wins.
 ### 3. Plugin Detection
 
 Plugins are detected as "current" based on:
-- URL prefix matching (`/plugins/{name}/` or custom prefix)
-- Plugin-declared route prefixes in plugin.json
-- Optimized to check common patterns first, then scan directories only if needed
+- URL prefix matching (`/plugins/{name}/`)
+- Optimized to check the common `/plugins/` pattern first
 
 ### 4. Blank Theme
 

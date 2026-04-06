@@ -527,6 +527,25 @@ class PluginManager extends AbstractExtensionManager {
      * @throws Exception to roll back the transaction
      */
     protected function onActivate($name, $model, $dblink) {
+        // Reject plugin names that conflict with system URL segments.
+        // Plugin names appear directly in URLs (/{name}/*, /profile/{name}/*),
+        // so they must not collide with existing system paths.
+        $reserved_names = ['profile', 'admin', 'login', 'ajax', 'api', 'assets', 'theme',
+                           'plugins', 'views', 'uploads', 'utils', 'tests', 'docs', 'specs',
+                           'migrations', 'data', 'includes', 'logic', 'adm'];
+        if (in_array($name, $reserved_names)) {
+            throw new Exception("Plugin name '$name' is reserved and conflicts with system URLs. Choose a distinctive plugin name.");
+        }
+        // Also reject names that clash with existing base view filenames
+        // (e.g. if views/profile/billing.php exists, plugin 'billing' is blocked).
+        $base_views      = PathHelper::getAbsolutePath('views');
+        $profile_views   = PathHelper::getAbsolutePath('views/profile');
+        foreach ([$base_views, $profile_views] as $dir) {
+            if (file_exists($dir . '/' . $name . '.php')) {
+                throw new Exception("Plugin name '$name' conflicts with a system view. Choose a distinctive plugin name.");
+            }
+        }
+
         // Re-validate dependencies
         $validation = $this->validatePlugin($name);
         if (!$validation['valid']) {

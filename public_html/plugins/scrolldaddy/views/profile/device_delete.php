@@ -23,7 +23,7 @@ $page_vars = process_logic(device_delete_logic($_GET, $_POST));
 
 	echo PublicPage::BeginPage('Delete Device', $hoptions);
 
-	$formwriter = $page->getFormWriter('delete_form', ['action' => '/profile/device_delete', 'method' => 'POST']);
+	$formwriter = $page->getFormWriter('delete_form', ['action' => '/profile/scrolldaddy/device_delete', 'method' => 'POST']);
 
 
 	echo $formwriter->begin_form();

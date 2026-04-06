@@ -55,7 +55,7 @@ function filters_edit_logic($get_vars, $post_vars){
 		$profile->update_remote_filters($_POST);
 		$profile->update_remote_services($_POST);
 
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 	else{
 		$device_id = LibraryFunctions::fetch_variable_local($get_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');

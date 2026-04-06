@@ -15,7 +15,7 @@ $hoptions = array(
 	'is_valid_page' => $is_valid_page,
 	'title'         => 'Test a Domain/Page',
 	'breadcrumbs'   => array(
-		'Devices'            => '/profile/devices',
+		'Devices'            => '/profile/scrolldaddy/devices',
 		'Test a Domain/Page' => '',
 	),
 );
@@ -29,7 +29,7 @@ if (!$is_active) {
 			<div class="error-content">
 				<h2 class="error-title">Device Not Activated</h2>
 				<p class="error-text">The domain test feature requires an activated device. Please activate <strong>' . $device_name . '</strong> first.</p>
-				<a href="/profile/activation?device_id=' . $device_id . '" class="th-btn">Activate Device</a>
+				<a href="/profile/scrolldaddy/activation?device_id=' . $device_id . '" class="th-btn">Activate Device</a>
 			</div>
 		</div>
 	</section>';

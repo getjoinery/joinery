@@ -67,7 +67,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	  ?>
       </div>
       <div class="mt-6 text-center">
-        <a href="/pricing" class="underline">Sign up for an account</a>
+        <a href="/scrolldaddy/pricing" class="underline">Sign up for an account</a>
       </div>
     <?php echo $formwriter->end_form();	 ?>
   </div>
