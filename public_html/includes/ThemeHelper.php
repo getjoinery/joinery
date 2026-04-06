@@ -191,38 +191,6 @@ class ThemeHelper extends ComponentBase {
     }
     
     /**
-     * Switch active theme (system-level operation)
-     */
-    public static function switchTheme($themeName) {
-        // Validate new theme
-        try {
-            $newTheme = self::getInstance($themeName);
-            $validation = $newTheme->validate();
-            
-            if ($validation !== true) {
-                throw new Exception("Theme validation failed: " . implode(', ', $validation));
-            }
-        } catch (Exception $e) {
-            throw new Exception("Cannot switch to theme '{$themeName}': " . $e->getMessage());
-        }
-        
-        // Update database setting
-        $settings = Globalvars::get_instance();
-        $settings->set_setting('theme_template', $themeName);
-        
-        // Clear cached current theme instance
-        $oldTheme = $settings->get_setting('theme_template', true, true);
-        if (isset(self::$instances[$oldTheme])) {
-            unset(self::$instances[$oldTheme]);
-        }
-        
-        // Initialize new theme
-        $newTheme->initialize();
-        
-        return true;
-    }
-    
-    /**
      * Initialize all active themes (usually just one)
      */
     public static function initializeActive() {
