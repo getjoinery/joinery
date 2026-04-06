@@ -418,6 +418,14 @@ $page_vars = process_logic(profile_logic($_GET, $_POST));
 // Automatically handles redirects, errors, and data extraction
 ```
 
+### Theme Framework Rules
+
+**CRITICAL: Vanilla CSS and vanilla JS is the default for all themes and plugins. Never introduce Bootstrap, jQuery, or any other external JS/CSS framework unless the theme or plugin explicitly declares one (via `cssFramework` in `theme.json`) or one is specifically requested.**
+
+The admin interface is the only exception — it always runs Bootstrap and jQuery.
+
+To confirm what a theme uses, check `theme.json`: `"cssFramework": "html5"` (or absent) means vanilla only; `"cssFramework": "bootstrap"` means Bootstrap is available; `"cssFramework": "tailwind"` means Tailwind is available.
+
 ### Getting FormWriter Instances
 
 ```php
@@ -428,9 +436,12 @@ $formwriter = $page->getFormWriter('form1');
 $formwriter = $page->getFormWriter('form1');
 
 // In logic files or other contexts without a page object:
-// Directly require the appropriate FormWriter class for your context
-require_once(PathHelper::getIncludePath('includes/FormWriterBootstrap.php'));
-$formwriter = new FormWriterBootstrap('form1');
+// Use the class that matches the current theme's CSS framework:
+//   HTML5 themes → FormWriterV2HTML5
+//   Bootstrap themes → FormWriterV2Bootstrap
+//   Admin/utility scripts → FormWriterBootstrap (Bootstrap is always available in admin)
+require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+$formwriter = new FormWriterV2HTML5('form1');
 
 // The page->getFormWriter() method automatically detects the correct FormWriter for the theme
 ```
