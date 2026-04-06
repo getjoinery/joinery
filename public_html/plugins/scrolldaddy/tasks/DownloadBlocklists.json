@@ -1,7 +1,0 @@
-{
-    "name": "Download Blocklists",
-    "description": "Downloads domain blocklists from external sources and stores them in the database for DNS filtering. Triggers a DNS server cache reload when complete.",
-    "default_frequency": "daily",
-    "default_time": "04:00:00",
-    "config_fields": {}
-}
