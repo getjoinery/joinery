@@ -38,45 +38,6 @@ class PluginHelper extends ComponentBase {
     }
     
     /**
-     * Initialize plugin
-     */
-    public function initialize() {
-        // Only initialize if plugin is active
-        if (!$this->isActive()) {
-            return false;
-        }
-        
-        // Load plugin initialization file if it exists
-        $initFile = $this->getIncludePath('init.php');
-        if (file_exists($initFile)) {
-            require_once($initFile);
-        }
-        
-        // Load plugin functions file if it exists
-        $functionsFile = $this->getIncludePath('functions.php');
-        if (file_exists($functionsFile)) {
-            require_once($functionsFile);
-        }
-        
-        // Register plugin routes if custom routing exists
-        if ($this->hasCustomRouting()) {
-            $this->registerRoutes();
-        }
-        
-        // Register admin menu items
-        if ($this->hasAdminInterface()) {
-            $this->registerAdminMenu();
-        }
-        
-        // Run plugin migrations if needed
-        if ($this->hasMigrations()) {
-            $this->checkMigrations();
-        }
-        
-        return true;
-    }
-    
-    /**
      * Register plugin routes with the system
      */
     private function registerRoutes() {
@@ -88,42 +49,9 @@ class PluginHelper extends ComponentBase {
     }
     
     /**
-     * Register admin menu items
-     */
-    private function registerAdminMenu() {
-        $menuItems = $this->getAdminMenuItems();
-        
-        if (!empty($menuItems) && class_exists('AdminMenuRegistry')) {
-            foreach ($menuItems as $item) {
-                AdminMenuRegistry::addMenuItem(
-                    $item['title'] ?? '',
-                    $item['url'] ?? '',
-                    $item['permission'] ?? 5,
-                    $item['icon'] ?? '',
-                    $item['parent'] ?? null
-                );
-            }
-        }
-    }
-    
-    /**
-     * Check and run pending migrations
-     */
-    private function checkMigrations() {
-        $migrationsFile = $this->getMigrationsPath();
-        if (file_exists($migrationsFile)) {
-            // This would integrate with the migration system
-            // The actual migration runner would handle this
-            if (class_exists('MigrationRunner')) {
-                MigrationRunner::registerPluginMigrations($this->name, $migrationsFile);
-            }
-        }
-    }
-    
-    /**
      * Check if plugin is currently active
      */
-    public function isActive() {
+    protected function isActive() {
         $settings = Globalvars::get_instance();
 
         // If this plugin is the active theme provider, it's always active
@@ -269,77 +197,19 @@ class PluginHelper extends ComponentBase {
     }
 
     // Plugin-specific getters
-    
-    /**
-     * Check if plugin has admin interface
-     */
-    public function hasAdminInterface() {
-        return is_dir($this->getIncludePath('adm'));
-    }
-    
-    /**
-     * Check if plugin has custom routing
-     */
-    public function hasCustomRouting() {
-        return file_exists($this->getIncludePath('serve.php'));
-    }
-    
+
     /**
      * Get plugin admin menu items
      */
-    public function getAdminMenuItems() {
+    protected function getAdminMenuItems() {
         return $this->manifestData['adminMenu'] ?? [];
     }
     
     /**
      * Get plugin API endpoints
      */
-    public function getApiEndpoints() {
+    protected function getApiEndpoints() {
         return $this->manifestData['apiEndpoints'] ?? [];
-    }
-    
-    /**
-     * Check if plugin has migrations
-     */
-    public function hasMigrations() {
-        return file_exists($this->getIncludePath('migrations/migrations.php'));
-    }
-    
-    /**
-     * Get plugin migration file path
-     */
-    public function getMigrationsPath() {
-        return $this->getIncludePath('migrations/migrations.php');
-    }
-    
-    /**
-     * Get all plugin data models
-     */
-    public function getDataModels() {
-        $models = [];
-        $dataDir = $this->getIncludePath('data');
-        
-        if (is_dir($dataDir)) {
-            $files = glob($dataDir . '/*_class.php');
-            foreach ($files as $file) {
-                $className = str_replace('_class.php', '', basename($file));
-                $models[] = $className;
-            }
-        }
-        
-        return $models;
-    }
-    
-    /**
-     * Check if plugin provides a specific feature
-     */
-    public function providesFeature($feature) {
-        // Explicitly prevent plugins from providing theme functionality
-        if ($feature === 'theme') {
-            return false;
-        }
-        $provides = $this->manifestData['provides'] ?? [];
-        return in_array($feature, $provides);
     }
     
     /**
@@ -391,14 +261,6 @@ class PluginHelper extends ComponentBase {
     }
     
     /**
-     * Get plugin description for UI
-     */
-    public function getPluginDescription() {
-        // Use plugin description if available
-        return $this->get('description', '');
-    }
-    
-    /**
      * Check if a plugin is active (static convenience method)
      */
     public static function isPluginActive($pluginName) {
@@ -408,131 +270,6 @@ class PluginHelper extends ComponentBase {
         } catch (Exception $e) {
             return false;
         }
-    }
-    
-    /**
-     * Get a service instance from a plugin
-     * Services provide business logic without UI dependencies
-     */
-    public static function getService($plugin_name, $service_name = null) {
-        $service_name = $service_name ?: 'Service';
-        $service_file = "plugins/{$plugin_name}/services/{$service_name}.php";
-        
-        if (file_exists(PathHelper::getIncludePath($service_file))) {
-            require_once(PathHelper::getIncludePath($service_file));
-            $class_name = ucfirst($plugin_name) . $service_name;
-            if (class_exists($class_name)) {
-                return new $class_name();
-            }
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Check if a plugin provides a specific service
-     */
-    public static function hasService($plugin_name, $service_name = null) {
-        $service_name = $service_name ?: 'Service';
-        $service_file = "plugins/{$plugin_name}/services/{$service_name}.php";
-        return file_exists(PathHelper::getIncludePath($service_file));
-    }
-    
-    /**
-     * Get all plugins of a specific type
-     */
-    public static function getByType($type) {
-        $plugins = [];
-        foreach (self::getAvailablePlugins() as $name => $plugin) {
-            $metadata = $plugin->getMetadata();
-            if (isset($metadata['type']) && $metadata['type'] === $type) {
-                $plugins[$name] = $plugin;
-            }
-        }
-        return $plugins;
-    }
-    
-    /**
-     * Check if plugin provides theme functionality
-     * @return bool
-     */
-    public function providesTheme() {
-        $metadata = $this->getMetadata();
-        return isset($metadata['provides_theme']) && $metadata['provides_theme'] === true;
-    }
-    
-    /**
-     * Validate if plugin can serve as a theme provider
-     * @return array ['valid' => bool, 'errors' => array, 'warnings' => array]
-     */
-    public function validateAsThemeProvider() {
-        $plugin_dir = PathHelper::getIncludePath("plugins/{$this->name}");
-        $errors = [];
-        $warnings = [];
-        
-        // Check for mandatory plugin.json
-        if (!$this->metadataExists()) {
-            $errors[] = "Missing required file: plugin.json - Plugin metadata is mandatory for theme providers";
-        } else {
-            // Check for provides_theme flag
-            $metadata = $this->getMetadata();
-            if (!isset($metadata['provides_theme']) || $metadata['provides_theme'] !== true) {
-                $errors[] = "plugin.json must have 'provides_theme': true to serve as theme provider";
-            }
-        }
-        
-        // Check required files
-        $required_files = [
-            'includes/PublicPage.php' => 'PublicPage class is required for theme functionality',
-            'includes/FormWriter.php' => 'FormWriter class is required for form generation'
-        ];
-        
-        foreach ($required_files as $file => $error_message) {
-            $file_path = $plugin_dir . '/' . $file;
-            if (!file_exists($file_path)) {
-                $errors[] = "Missing required file: {$file} - {$error_message}";
-            }
-        }
-        
-        // Check for main route in serve.php
-        $serve_file = $plugin_dir . '/serve.php';
-        if (file_exists($serve_file)) {
-            $serve_content = file_get_contents($serve_file);
-            
-            // Check for main plugin route
-            if (!preg_match("/['\"]\/?" . preg_quote($this->name, '/') . "['\"]\\s*=>/", $serve_content)) {
-                $warnings[] = "No main route '/{$this->name}' found in serve.php";
-            }
-            
-            // Check for restricted routes
-            $restricted_routes = ['/login', '/logout', '/register'];
-            foreach ($restricted_routes as $route) {
-                if (preg_match("/['\"]" . preg_quote($route, '/') . "['\"]\\s*=>/", $serve_content)) {
-                    $errors[] = "Plugin cannot define system route: {$route}";
-                }
-            }
-        } else {
-            $warnings[] = "No serve.php file found - plugin may not define any routes";
-        }
-        
-        // Check for recommended files
-        $recommended_files = [
-            'views/index.php' => 'Homepage view recommended',
-            'assets/css/style.css' => 'Theme styles recommended'
-        ];
-        
-        foreach ($recommended_files as $file => $message) {
-            $file_path = $plugin_dir . '/' . $file;
-            if (!file_exists($file_path)) {
-                $warnings[] = "Missing recommended file: {$file} - {$message}";
-            }
-        }
-        
-        return [
-            'valid' => empty($errors),
-            'errors' => $errors,
-            'warnings' => $warnings
-        ];
     }
     
     /**
@@ -547,21 +284,4 @@ class PluginHelper extends ComponentBase {
         return $theme_template === 'plugin' && $active_plugin === $this->name;
     }
     
-    /**
-     * Get all plugins that can provide theme functionality
-     * @return array Array of PluginHelper instances that are valid theme providers
-     */
-    public static function getValidThemeProviders() {
-        $all_plugins = self::getAvailablePlugins();
-        $theme_providers = [];
-        
-        foreach ($all_plugins as $plugin_name => $plugin_helper) {
-            $validation = $plugin_helper->validateAsThemeProvider();
-            if ($validation['valid']) {
-                $theme_providers[$plugin_name] = $plugin_helper;
-            }
-        }
-        
-        return $theme_providers;
-    }
 }

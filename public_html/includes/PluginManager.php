@@ -198,7 +198,7 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $plugin_name Plugin name
      * @return array Results of migration runs
      */
-    public function runPendingMigrations($plugin_name) {
+    protected function runPendingMigrations($plugin_name) {
         require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
 
         $results = array();
@@ -371,7 +371,7 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $plugin_name Plugin name to validate
      * @return array Validation results with 'valid', 'errors', and 'warnings'
      */
-    public function validatePlugin($plugin_name) {
+    protected function validatePlugin($plugin_name) {
         $results = array(
             'valid' => true,
             'errors' => array(),
@@ -933,51 +933,12 @@ class PluginManager extends AbstractExtensionManager {
         return $this->installFromZip($zip_path);
     }
     
-    // ========== Legacy Support Methods ==========
-    // These methods exist to support any existing code that might call them
-    
-    /**
-     * Run plugin system repair
-     * @deprecated Use validateAllPlugins() instead
-     */
-    public function repair() {
-        return $this->validateAllPlugins();
-    }
-    
-    /**
-     * Validate all installed plugins
-     * @return array Validation results for all plugins
-     */
-    public function validateAllPlugins() {
-        $results = array();
-        
-        $plugins = new MultiPlugin();
-        $plugins->load();
-        
-        foreach ($plugins as $plugin) {
-            $plugin_name = $plugin->get('plg_name');
-            $results[$plugin_name] = $this->validatePlugin($plugin_name);
-        }
-        
-        return $results;
-    }
-    
-    /**
-     * Check if a plugin can be safely activated
-     * @param string $plugin_name Plugin name
-     * @return bool True if plugin can be activated
-     */
-    public function canActivate($plugin_name) {
-        $validation = $this->validatePlugin($plugin_name);
-        return $validation['valid'];
-    }
-    
     /**
      * Get all plugins that depend on a given plugin
      * @param string $plugin_name Plugin name
      * @return array Array of dependent plugin names
      */
-    public function getDependents($plugin_name) {
+    protected function getDependents($plugin_name) {
         $dependents = array();
         
         $deps = new MultiPluginDependency(array('pld_depends_on' => $plugin_name));

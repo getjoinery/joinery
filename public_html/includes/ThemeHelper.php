@@ -45,44 +45,6 @@ class ThemeHelper extends ComponentBase {
     }
     
     /**
-     * Initialize theme
-     */
-    public function initialize() {
-        // Load theme functions file if it exists
-        $functionsFile = $this->getIncludePath('functions.php');
-        if (file_exists($functionsFile)) {
-            require_once($functionsFile);
-        }
-        
-        // Register theme with system
-        $this->registerTheme();
-        
-        return true;
-    }
-    
-    /**
-     * Register theme with the system
-     */
-    private function registerTheme() {
-        // Hook into system if needed
-        // This is where theme-specific initialization would happen
-        
-        // Example: Register theme support features
-        if (method_exists('SystemHooks', 'registerThemeSupport')) {
-            SystemHooks::registerThemeSupport($this->name, $this->manifestData);
-        }
-    }
-    
-    /**
-     * Check if theme is currently active
-     */
-    public function isActive() {
-        $settings = Globalvars::get_instance();
-        $activeTheme = $settings->get_setting('theme_template', true, true);
-        return $this->name === $activeTheme;
-    }
-    
-    /**
      * Validate theme structure and requirements
      */
     public function validate() {
@@ -130,13 +92,6 @@ class ThemeHelper extends ComponentBase {
      */
     public function getFormWriterBase() {
         return $this->manifestData['formWriterBase'] ?? null;
-    }
-    
-    /**
-     * Get PublicPage base class for theme
-     */
-    public function getPublicPageBase() {
-        return $this->manifestData['publicPageBase'] ?? null;
     }
     
     // === STATIC HELPER METHODS ===
@@ -189,43 +144,6 @@ class ThemeHelper extends ComponentBase {
             return false;
         }
     }
-    
-    /**
-     * Initialize all active themes (usually just one)
-     */
-    public static function initializeActive() {
-        $results = ['success' => [], 'failed' => []];
-        
-        try {
-            $activeTheme = self::getInstance();
-            $activeTheme->initialize();
-            $results['success'][$activeTheme->getName()] = 'Theme initialized';
-        } catch (Exception $e) {
-            $results['failed']['theme'] = $e->getMessage();
-            error_log("Failed to initialize active theme: " . $e->getMessage());
-        }
-        
-        return $results;
-    }
-    
-    /**
-     * Validate all available themes
-     */
-    public static function validateAll() {
-        $results = [];
-        $themes = self::getAvailableThemes();
-        
-        foreach ($themes as $name => $theme) {
-            $validation = $theme->validate();
-            $results[$name] = [
-                'valid' => $validation === true,
-                'errors' => $validation === true ? [] : $validation
-            ];
-        }
-        
-        return $results;
-    }
-    
     
     /**
      * Get active theme name
