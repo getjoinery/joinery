@@ -592,20 +592,6 @@ class RouteHelper {
             return true;
         }
 
-        // Try default view if specified
-        if (!empty($route['default_view'])) {
-            $default_view = $route['default_view'];
-            // Ensure default_view has .php extension
-            if (substr($default_view, -4) !== '.php') {
-                $default_view .= '.php';
-            }
-            $default_path = PathHelper::getThemeFilePath(basename($default_view), dirname($default_view), 'system', null, null, false, false);
-            if ($default_path) {
-                require_once($default_path);
-                return true;
-            }
-        }
-
         return false;
     }
     
@@ -1395,14 +1381,12 @@ class RouteHelper {
                     // If shouldIgnore() returns true, do nothing (ignore completely)
                 }
                 exit();
-            } else {
-                self::show404('Dynamic route matched but handler failed', [
-                    'route' => $route,
-                    'path' => $full_path
-                ]);
             }
+            // Handler returned false — fall through to view fallback (step 6).
+            // This allows auto-discovery to handle plugin-namespaced URLs like
+            // /profile/{plugin}/... that a wildcard route matched but couldn't resolve.
         }
-        
+
         // 6. View directory fallback (automatic theme-aware view lookup)
         error_log("=== STEP 6: View directory fallback ===");
         // Try to find view file for any remaining paths
