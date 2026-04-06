@@ -790,6 +790,25 @@ All themes should include a `theme.json` file for proper system integration:
 }
 ```
 
+**Theme with plugin dependencies (requires_plugins):**
+```json
+{
+  "name": "scrolldaddy-theme",
+  "displayName": "ScrollDaddy Theme",
+  "version": "1.0.0",
+  "requires_plugins": ["scrolldaddy"],
+  "cssFramework": "html5",
+  "formWriterBase": "FormWriterV2HTML5",
+  "publicPageBase": "PublicPageBase"
+}
+```
+
+The `requires_plugins` field declares plugins that must be active for the theme to work correctly. When present:
+- **Theme activation is blocked** if any listed plugin is not active (with a clear error message directing the admin to activate the plugin first).
+- **Plugin deactivation is blocked** if the active theme lists that plugin in `requires_plugins` (with an error directing the admin to switch themes first).
+
+Use this when the theme directly uses plugin-provided classes, helpers, or pages — for example, a theme that renders a widget from a specific plugin's helper class, or whose navigation links to plugin-namespaced URLs.
+
 Themes also support the `deprecated` and `superseded_by` fields described in the [plugin.json Deprecation Fields](#deprecation-fields) section above. The behavior is identical for themes and plugins.
 
 ## ThemeHelper Enhanced Capabilities
@@ -799,11 +818,6 @@ Themes also support the `deprecated` and `superseded_by` fields described in the
 **Get Active Theme:**
 ```php
 $current_theme = ThemeHelper::getActive();
-```
-
-**Switch Themes:**
-```php
-ThemeHelper::switchTheme('new-theme');
 ```
 
 **Get Theme Configuration:**
