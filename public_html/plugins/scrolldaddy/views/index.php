@@ -50,9 +50,9 @@ Hero Area
                         </div><!--
                         <div class="client-box mb-sm-0 mb-3">
                             <div class="client-thumb-group">
-                                <div class="thumb"><img src="/plugins/scrolldaddy-html5/assets/img/shape/client-1-1.png" alt="avater"></div>
-                                <div class="thumb"><img src="/plugins/scrolldaddy-html5/assets/img/shape/client-1-2.png" alt="avater"></div>
-                                <div class="thumb"><img src="/plugins/scrolldaddy-html5/assets/img/shape/client-1-3.png" alt="avater"></div>
+                                <div class="thumb"><img src="/plugins/scrolldaddy/assets/img/shape/client-1-1.png" alt="avater"></div>
+                                <div class="thumb"><img src="/plugins/scrolldaddy/assets/img/shape/client-1-2.png" alt="avater"></div>
+                                <div class="thumb"><img src="/plugins/scrolldaddy/assets/img/shape/client-1-3.png" alt="avater"></div>
                                 <div class="thumb icon"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
                             </div>
 							
@@ -114,7 +114,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card ">
                         <!--<div class="box-icon">
-                            <img src="/plugins/scrolldaddy-html5/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/scrolldaddy/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Block Social Media</a></h3>
                         <p class="box-text">Block Facebook, Instagram, TikTok, and more.</p>
@@ -124,7 +124,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card">
                          <!--<div class="box-icon">
-                            <img src="/plugins/scrolldaddy-html5/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/scrolldaddy/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Protect yourself online</a></h3>
                         <p class="box-text">Block known malware, phishing, and virus related sites.</p>
@@ -134,7 +134,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card">
                          <!--<div class="box-icon">
-                            <img src="/plugins/scrolldaddy-html5/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/scrolldaddy/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Filter what you consume</a></h3>
                         <p class="box-text">Integrated ad blocker that works before content even gets to your computer.</p>
@@ -144,7 +144,7 @@ About Area
                 <div class="col-md-6 col-xl-3">
                     <div class="feature-card ">
                          <!--<div class="box-icon">
-                            <img src="/plugins/scrolldaddy-html5/assets/img/icon/feature_1_1.svg" alt="Icon">
+                            <img src="/plugins/scrolldaddy/assets/img/icon/feature_1_1.svg" alt="Icon">
                         </div>-->
                         <h3 class="box-title"><a href="#">Block full time or scheduled</a></h3>
                         <p class="box-text">Choose to block full time, and on a schedule separately.</p>
