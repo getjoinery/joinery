@@ -3,7 +3,6 @@
 
 $routes = [
     'dynamic' => [
-        '/blog' => ['view' => 'views/blog'],
         '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class'],
     ],
 

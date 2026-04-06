@@ -45,7 +45,7 @@ function rules_logic($get_vars, $post_vars){
 			$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$block->delete_rule($rule_id);
 			$device_id = $block->get('sdb_sdd_device_id');
-			return LogicResult::redirect('/profile/rules?device_id='.$device_id.'&block_id='.$block_id);
+			return LogicResult::redirect('/profile/scrolldaddy/rules?device_id='.$device_id.'&block_id='.$block_id);
 		}
 		else{
 			$device_id = LibraryFunctions::fetch_variable_local($post_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
@@ -53,7 +53,7 @@ function rules_logic($get_vars, $post_vars){
 			$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
 			$profile->delete_rule($rule_id);
-			return LogicResult::redirect('/profile/rules?device_id='.$device->key);
+			return LogicResult::redirect('/profile/scrolldaddy/rules?device_id='.$device->key);
 		}
 	}
 	else if(isset($_POST['sdr_hostname'])){
@@ -63,7 +63,7 @@ function rules_logic($get_vars, $post_vars){
 			$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$block->add_rule($_POST['sdr_hostname'], $_POST['sdr_action']);
 			$device_id = $block->get('sdb_sdd_device_id');
-			return LogicResult::redirect('/profile/rules?device_id='.$device_id.'&block_id='.$block_id);
+			return LogicResult::redirect('/profile/scrolldaddy/rules?device_id='.$device_id.'&block_id='.$block_id);
 		}
 		else{
 			$device_id = LibraryFunctions::fetch_variable_local($post_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
@@ -71,7 +71,7 @@ function rules_logic($get_vars, $post_vars){
 			$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
 			$profile->add_rule($_POST['sdr_hostname'], $_POST['sdr_action']);
-			return LogicResult::redirect('/profile/rules?device_id='.$device->key);
+			return LogicResult::redirect('/profile/scrolldaddy/rules?device_id='.$device->key);
 		}
 	}
 	else{

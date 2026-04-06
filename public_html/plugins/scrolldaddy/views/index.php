@@ -36,7 +36,7 @@ Hero Area
                         <h1 class="hero-title">Save your sanity online</h1>
                         <p class="hero-text">Block social media, gambling, porn, news, and more before it gets to you.</p>
                         <div class="btn-group">
-                            <a href="/pricing" class="th-btn">Get Started</a>
+                            <a href="/scrolldaddy/pricing" class="th-btn">Get Started</a>
 							<!--
                             <div class="call-btn">
                                 <a href="https://www.youtube.com/watch?v=_sI_Ps7JSEk" class="play-btn popup-video">
@@ -299,11 +299,11 @@ Price Area
 						  if (this.checked) {
 							  
 							// Redirect to the new URL when toggled on
-							window.location.href = '/pricing?page=year';
+							window.location.href = '/scrolldaddy/pricing?page=year';
 						  } else {
-							 
+
 							// Redirect to a different URL or stay on the same page when toggled off
-							window.location.href = '/pricing';
+							window.location.href = '/scrolldaddy/pricing';
 						  }
 						});
 					  </script>

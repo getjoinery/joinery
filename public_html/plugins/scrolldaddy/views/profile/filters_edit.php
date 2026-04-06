@@ -21,7 +21,7 @@ $page_vars = process_logic(filters_edit_logic($_GET, $_POST));
 		'title' => 'Always-On Filters',
 		'breadcrumbs' => array (
 			'My Profile' => '/profile',
-			'Devices' => '/profile/devices',
+			'Devices' => '/profile/scrolldaddy/devices',
 			'Always-On Filters' => ''),
 	);
 	$page->public_header($hoptions,NULL);
@@ -34,7 +34,7 @@ $page_vars = process_logic(filters_edit_logic($_GET, $_POST));
 	}
 
 	$formwriter = $page->getFormWriter('form1', [
-		'action' => '/profile/filters_edit'
+		'action' => '/profile/scrolldaddy/filters_edit'
 	]);
 
 	$formwriter->begin_form();
@@ -43,7 +43,7 @@ $page_vars = process_logic(filters_edit_logic($_GET, $_POST));
                     <div class="job-content">
                         <div class="job-post_date">
 							<h3><?php echo $name; ?></h3>
-                            <div class="icon"><a href="/profile/rules?device_id=<?php echo $device->key; ?>"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> Custom Rules</a></div>
+                            <div class="icon"><a href="/profile/scrolldaddy/rules?device_id=<?php echo $device->key; ?>"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> Custom Rules</a></div>
                         </div>
                     </div>
 	<?php

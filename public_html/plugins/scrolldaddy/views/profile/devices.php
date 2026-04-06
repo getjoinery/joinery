@@ -39,7 +39,7 @@ if(!$tier){
             <div class="error-content">
                 <h2 class="error-title">Choose your plan</h2>
                 <p class="error-text">You haven't chosen your plan yet.</p>
-                <a href="/pricing" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>Choose your plan</a>
+                <a href="/scrolldaddy/pricing" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>Choose your plan</a>
             </div>
         </div>
     </section>
@@ -52,7 +52,7 @@ else{
                         <div class="job-content">
                             <div class="job-post_date">
 								<h3><?php echo $name; ?></h3>
-                                <div class="icon"><a href="/profile/devices?showdeleted=1"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Deleted Devices</a></div>
+                                <div class="icon"><a href="/profile/scrolldaddy/devices?showdeleted=1"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="3,6 5,6 21,6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Deleted Devices</a></div>
                             </div>
                         </div>
 		<?php	
@@ -112,7 +112,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="20,6 9,17 4,12"/></svg>Active'.$seen_label.'</span>
-									<div class="scd-actions-wrap"><button class="scd-actions-btn" aria-expanded="false" aria-label="Device actions"><svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="scd-actions-menu" role="menu"><a href="/profile/activation?device_id='.$device->key.'" role="menuitem">Connection Details</a><a href="/profile/device_edit?device_id='.$device->key.'" role="menuitem">Edit Device</a><a href="/profile/test?device_id='.$device->key.'" role="menuitem">Test a Domain/Page</a>'.($device->get('sdd_log_queries') ? '<a href="/profile/querylog?device_id='.$device->key.'" role="menuitem">View Query Log</a>' : '').'</div></div>
+									<div class="scd-actions-wrap"><button class="scd-actions-btn" aria-expanded="false" aria-label="Device actions"><svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="scd-actions-menu" role="menu"><a href="/profile/scrolldaddy/activation?device_id='.$device->key.'" role="menuitem">Connection Details</a><a href="/profile/scrolldaddy/device_edit?device_id='.$device->key.'" role="menuitem">Edit Device</a><a href="/profile/scrolldaddy/test?device_id='.$device->key.'" role="menuitem">Test a Domain/Page</a>'.($device->get('sdd_log_queries') ? '<a href="/profile/scrolldaddy/querylog?device_id='.$device->key.'" role="menuitem">View Query Log</a>' : '').'</div></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
 							</div>
@@ -126,7 +126,7 @@ else{
 										<h5 class="price">'.$num_blocks_always[$device->key].' blocked</h5>
 									</div>
 								</div>
-								<a class="th-btn style5" href="/profile/filters_edit?device_id='.$device->key.'">Edit</a>
+								<a class="th-btn style5" href="/profile/scrolldaddy/filters_edit?device_id='.$device->key.'">Edit</a>
 							</div>';
 
 							// SCHEDULED BLOCKS
@@ -153,8 +153,8 @@ else{
 										</div>
 									</div>
 									<div style="display:flex; gap:6px;">
-										<a class="th-btn style5" href="/profile/scheduled_block_edit?device_id='.$device->key.'&block_id='.$sblock->key.'">Edit</a>
-										<form method="POST" action="/profile/scheduled_block_edit" style="display:inline;" onsubmit="return confirm(\'Delete this scheduled block?\')">
+										<a class="th-btn style5" href="/profile/scrolldaddy/scheduled_block_edit?device_id='.$device->key.'&block_id='.$sblock->key.'">Edit</a>
+										<form method="POST" action="/profile/scrolldaddy/scheduled_block_edit" style="display:inline;" onsubmit="return confirm(\'Delete this scheduled block?\')">
 											<input type="hidden" name="action" value="delete">
 											<input type="hidden" name="block_id" value="'.$sblock->key.'">
 											<button type="submit" class="th-btn style5" style="background:#dc3545;border-color:#dc3545;">Delete</button>
@@ -176,7 +176,7 @@ else{
 										<h5 class="price">'.($has_blocks ? '' : 'None.').'</h5>
 									</div>
 								</div>
-								<a class="th-btn style5" href="/profile/scheduled_block_edit?device_id='.$device->key.'">Add</a>
+								<a class="th-btn style5" href="/profile/scrolldaddy/scheduled_block_edit?device_id='.$device->key.'">Add</a>
 							</div>
 					</div>
 				</div>';
@@ -188,8 +188,8 @@ else{
 						<div class="job-post style2">
 							<div class="job-content">
 								<div class="job-post_date">
-									<a href="/profile/activation?device_id='.$device->key.'"><span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Needs Activation</span></a>
-									<div class="icon"><a href="/profile/device_edit?device_id='.$device->key.'">Edit Device</a></div>
+									<a href="/profile/scrolldaddy/activation?device_id='.$device->key.'"><span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Needs Activation</span></a>
+									<div class="icon"><a href="/profile/scrolldaddy/device_edit?device_id='.$device->key.'">Edit Device</a></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
 							</div>
@@ -204,7 +204,7 @@ else{
 
 									</div>
 								</div>
-								<a class="th-btn style5" href="/profile/activation?device_id='.$device->key.'">Activate</a>
+								<a class="th-btn style5" href="/profile/scrolldaddy/activation?device_id='.$device->key.'">Activate</a>
 							</div>
 							
 						</div>
@@ -222,7 +222,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<h3 class="box-title">Add a Device</h3>
-									<a class="th-btn style5" href="/profile/device_edit">Add</a>
+									<a class="th-btn style5" href="/profile/scrolldaddy/device_edit">Add</a>
 								</div>
 							</div>
 

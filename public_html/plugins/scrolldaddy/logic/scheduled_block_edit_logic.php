@@ -35,7 +35,7 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 		$device_id = $block->get('sdb_sdd_device_id');
 		$block->permanent_delete();
 
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 	else if(isset($_POST['action']) && $_POST['action'] == 'edit'){
 		// CREATE OR EDIT A SCHEDULED BLOCK
@@ -80,7 +80,7 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 		$block->update_filters($post_vars);
 		$block->update_services($post_vars);
 
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 	else{
 		// GET - LOAD FORM DATA

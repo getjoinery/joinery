@@ -23,7 +23,7 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 		'is_valid_page' => $is_valid_page,
 		'title' => 'Custom Rules',
 		'breadcrumbs' => array (
-			'Devices' => '/profile/devices',
+			'Devices' => '/profile/scrolldaddy/devices',
 			'Custom Rules' => ''),
 	);
 	$page->public_header($hoptions,NULL);
@@ -75,7 +75,7 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 				  $hidden_fields .= '<input type="hidden" name="block_id" value="'.$block_id.'" />';
 			  }
 
-			  $delform = '<form id="form'.$rule->key.'" method="POST" action="/profile/rules">
+			  $delform = '<form id="form'.$rule->key.'" method="POST" action="/profile/scrolldaddy/rules">
 		'.$hidden_fields.'
 		<button type="submit">Delete</button>
 		</form>';
@@ -86,7 +86,7 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 
 	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'scrolldaddy_custom_rules', false)){
 		if($device->are_filters_editable()){
-			$formwriter = $page->getFormWriter('rules_form', ['action' => '/profile/rules', 'method' => 'POST']);
+			$formwriter = $page->getFormWriter('rules_form', ['action' => '/profile/scrolldaddy/rules', 'method' => 'POST']);
 			echo $formwriter->begin_form();
 			$formwriter->hiddeninput('device_id', '', ['value' => $device->key]);
 			if($is_block_context){
