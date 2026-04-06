@@ -59,6 +59,7 @@ function device_edit_logic($get_vars, $post_vars){
 			$device->set('sdd_timezone', strip_tags($_POST['sdd_timezone']));
 			$device->set('sdd_device_name', $device_name);
 			$device->set('sdd_allow_device_edits', $_POST['sdd_allow_device_edits']);
+			$device->set('sdd_log_queries', isset($_POST['sdd_log_queries']) && $_POST['sdd_log_queries'] === '1');
 			$device->prepare();
 			$device->save();
 
