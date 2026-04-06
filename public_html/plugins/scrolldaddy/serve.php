@@ -32,6 +32,10 @@ $routes = [
             'view' => 'views/profile/test',
             'plugin_specify' => 'scrolldaddy'
         ],
+        '/profile/querylog' => [
+            'view' => 'views/profile/querylog',
+            'plugin_specify' => 'scrolldaddy'
+        ],
         // Public pages
         '/pricing' => [
             'view' => 'views/pricing',
