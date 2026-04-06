@@ -47,9 +47,9 @@ if (!$version) {
         "Example: php utils/create_install_sql.php 0.67\n");
 }
 
-// Validate version format (should be like X.XX)
-if (!preg_match('/^\d+\.\d+$/', $version)) {
-    die("ERROR: Invalid version format '$version'. Expected format: X.XX (e.g., 0.67)\n");
+// Validate version format (X.XX or X.XX.X)
+if (!preg_match('/^\d+\.\d+(\.\d+)?$/', $version)) {
+    die("ERROR: Invalid version format '$version'. Expected format: X.XX or X.XX.X (e.g., 0.8 or 0.8.1)\n");
 }
 
 echo "Creating install SQL file (version $version)...\n";
