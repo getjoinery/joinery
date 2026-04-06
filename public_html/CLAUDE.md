@@ -694,7 +694,6 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 - `getInstance($themeName)` - Get singleton instance for theme operations
 - `asset($path, $themeName)` - Generate theme asset URLs with cache busting
 - `config($key, $default, $themeName)` - Get theme configuration values
-- `switchTheme($themeName)` - Change active theme system-wide
 
 **PluginHelper** - Manages plugin metadata and provides plugin helper functions
 

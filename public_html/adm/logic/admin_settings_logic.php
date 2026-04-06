@@ -28,6 +28,32 @@ function admin_settings_logic($get, $post) {
 			));
 		}
 
+		// Validate: new theme's required plugins must all be active (only when theme is changing)
+		if (isset($post['theme_template']) && $post['theme_template'] !== 'plugin'
+			&& $post['theme_template'] !== $settings->get_setting('theme_template')) {
+			$new_theme_name = $post['theme_template'];
+			try {
+				$new_theme = ThemeHelper::getInstance($new_theme_name);
+				$required_plugins = $new_theme->get('requires_plugins', []);
+				if (!empty($required_plugins)) {
+					$inactive_plugins = [];
+					foreach ($required_plugins as $plugin_name) {
+						if (!PluginHelper::isPluginActive($plugin_name)) {
+							$inactive_plugins[] = $plugin_name;
+						}
+					}
+					if (!empty($inactive_plugins)) {
+						return LogicResult::render(array(
+							'run_validation' => $run_validation,
+							'error_message' => "Cannot activate theme '{$new_theme_name}': required plugin(s) not active: " . implode(', ', $inactive_plugins) . ". Activate the plugin(s) first."
+						));
+					}
+				}
+			} catch (Exception $e) {
+				// Theme not loadable — other validation will surface the error
+			}
+		}
+
 		if($settings->get_setting('preview_image') != $post['preview_image']){
 			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
 			$search_criteria = array();

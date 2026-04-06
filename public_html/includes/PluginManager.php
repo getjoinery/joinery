@@ -624,6 +624,24 @@ class PluginManager extends AbstractExtensionManager {
             // Otherwise plugin helper unavailable — proceed
         }
 
+        // Block if the active theme requires this plugin
+        try {
+            $settings_obj = Globalvars::get_instance();
+            $active_theme_name = $settings_obj->get_setting('theme_template', true, true);
+            if ($active_theme_name && $active_theme_name !== 'plugin') {
+                $theme_helper = ThemeHelper::getInstance($active_theme_name);
+                $required_plugins = $theme_helper->get('requires_plugins', []);
+                if (is_array($required_plugins) && in_array($name, $required_plugins)) {
+                    throw new Exception("Cannot deactivate plugin '{$name}': the active theme '{$active_theme_name}' requires it. Switch to a different theme first.");
+                }
+            }
+        } catch (Exception $e) {
+            if (strpos($e->getMessage(), 'requires it') !== false) {
+                throw $e;
+            }
+            // Theme helper unavailable or no theme configured — proceed
+        }
+
         // Block if other active plugins depend on this one
         $dependents = $this->getDependents($name);
         if (!empty($dependents)) {

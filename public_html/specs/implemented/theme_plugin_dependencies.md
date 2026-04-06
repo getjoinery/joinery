@@ -81,3 +81,7 @@ Activate the plugin first."
 - Plugin-to-plugin dependencies (already implemented via `depends` in plugin.json)
 - Automatic plugin activation when a theme is activated
 - UI for managing theme-plugin dependencies
+
+## Implementation notes
+
+**`ThemeHelper::switchTheme()` was removed during implementation.** The method existed in ThemeHelper but had no callers in production code. It also bypassed the `requires_plugins` validation added in Change 3 — meaning a programmatic theme switch would skip the check entirely. Since all theme switching goes through `admin_settings_logic`, the method was deleted rather than patched. If programmatic theme switching is ever needed in the future, it should go through the same validation path (call the logic function, or validate `requires_plugins` manually before updating the setting).
