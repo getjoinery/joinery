@@ -61,11 +61,11 @@ Price Area
 						  if (this.checked) {
 							  
 							// Redirect to the new URL when toggled on
-							window.location.href = '/pricing?page=year';
+							window.location.href = '/scrolldaddy/pricing?page=year';
 						  } else {
-							 
+
 							// Redirect to a different URL or stay on the same page when toggled off
-							window.location.href = '/pricing';
+							window.location.href = '/scrolldaddy/pricing';
 						  }
 						});
 					  </script>

@@ -98,7 +98,7 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 									</ol>
 								</div>
 							</div>
-							<a class="th-btn style5" href="/profile/mobileconfig?device_id='.$device->key.'">Download Profile</a>
+							<a class="th-btn style5" href="/profile/scrolldaddy/mobileconfig?device_id='.$device->key.'">Download Profile</a>
 						</div>
 					</div>
 				</div>
@@ -122,7 +122,7 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 									</ol>
 								</div>
 							</div>
-							<a class="th-btn style5" href="/profile/mobileconfig?device_id='.$device->key.'">Download Profile</a>
+							<a class="th-btn style5" href="/profile/scrolldaddy/mobileconfig?device_id='.$device->key.'">Download Profile</a>
 						</div>
 					</div>
 				</div>
@@ -243,7 +243,7 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 			</div><!-- end row -->
 
 			<div class="col-12 text-center mt-40">
-				<a href="/profile/devices" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12,19 5,12 12,5"/></svg>Back To Devices</a>
+				<a href="/profile/scrolldaddy/devices" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12,19 5,12 12,5"/></svg>Back To Devices</a>
 			</div>
 
 		</div>
@@ -257,7 +257,7 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 			<div class="error-content text-center">
 				<h2 class="error-title">Device Not Active</h2>
 				<p class="error-text">This device is not yet active. Please return to your devices list.</p>
-				<a href="/profile/devices" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12,19 5,12 12,5"/></svg>Back To Devices</a>
+				<a href="/profile/scrolldaddy/devices" class="th-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12,19 5,12 12,5"/></svg>Back To Devices</a>
 			</div>
 		</div>
 		</section>';

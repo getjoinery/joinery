@@ -35,7 +35,7 @@ function device_delete_logic($get_vars, $post_vars){
 	if(isset($_POST['confirm'])){
 		$device->permanent_delete();
 
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 
 	return LogicResult::render($page_vars);

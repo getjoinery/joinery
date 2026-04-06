@@ -61,7 +61,7 @@ Team Area
 											echo htmlspecialchars($tier->get('sbt_display_name'));
 										}
 										else{
-											echo '<a href="/pricing">Choose a plan</a>';
+											echo '<a href="/scrolldaddy/pricing">Choose a plan</a>';
 										}
 										?></h6>
                                     </div>

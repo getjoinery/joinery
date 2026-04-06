@@ -18,7 +18,7 @@ $hoptions = array(
 	'is_valid_page' => $is_valid_page,
 	'title'         => 'Query Log',
 	'breadcrumbs'   => array(
-		'Devices'   => '/profile/devices',
+		'Devices'   => '/profile/scrolldaddy/devices',
 		'Query Log' => '',
 	),
 );
@@ -33,7 +33,7 @@ if (!$device->get('sdd_is_active')) {
 			<div class="error-content">
 				<h2 class="error-title">Device Not Activated</h2>
 				<p class="error-text">This device has not been activated yet. There is no query log to view.</p>
-				<a href="/profile/activation?device_id=' . $device_id . '" class="th-btn">Activate Device</a>
+				<a href="/profile/scrolldaddy/activation?device_id=' . $device_id . '" class="th-btn">Activate Device</a>
 			</div>
 		</div>
 	</section>';
@@ -45,7 +45,7 @@ if (!$device->get('sdd_is_active')) {
 		<div class="container">
 			<div class="error-content">
 				<h2 class="error-title">Query Log &mdash; ' . $device_name . '</h2>
-				<p class="error-text">Query logging is not enabled for this device. <a href="/profile/device_edit?device_id=' . $device_id . '">Enable it on the device edit page</a>.</p>
+				<p class="error-text">Query logging is not enabled for this device. <a href="/profile/scrolldaddy/device_edit?device_id=' . $device_id . '">Enable it on the device edit page</a>.</p>
 			</div>
 		</div>
 	</section>';
@@ -64,7 +64,7 @@ if (!$device->get('sdd_is_active')) {
 	// Controls row
 	echo '
 		<div style="display:flex; align-items:center; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
-			<form method="GET" action="/profile/querylog" style="display:flex; align-items:center; gap:8px;">
+			<form method="GET" action="/profile/scrolldaddy/querylog" style="display:flex; align-items:center; gap:8px;">
 				<input type="hidden" name="device_id" value="' . $device_id . '">
 				<label for="scd-lines-select" style="margin:0; font-size:14px; white-space:nowrap;">Show:</label>
 				<select id="scd-lines-select" name="lines" onchange="this.form.submit()" style="padding:4px 8px; border:1px solid #ddd; border-radius:4px; font-size:14px;">

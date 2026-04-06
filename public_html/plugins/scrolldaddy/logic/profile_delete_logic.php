@@ -34,7 +34,7 @@ function profile_delete_logic($get_vars, $post_vars){
 	if(isset($_POST['confirm'])){
 		$profile->permanent_delete();
 
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 	else{
 		if($profile->is_primary_or_secondary() == 'primary'){

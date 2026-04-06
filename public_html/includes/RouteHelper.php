@@ -581,8 +581,11 @@ class RouteHelper {
             $view_path .= '.php';
         }
         
-        // Include view with explicit variables
-        $full_path = PathHelper::getThemeFilePath(basename($view_path), dirname($view_path), 'system', null, null, false, false);
+        // Include view with explicit variables.
+        // Extract plugin name from URL pattern so getThemeFilePath can look in the
+        // correct plugin directory — no plugin_specify field needed.
+        $plugin_name_for_view = self::extractPluginNameFromPattern($pattern);
+        $full_path = PathHelper::getThemeFilePath(basename($view_path), dirname($view_path), 'system', null, $plugin_name_for_view, false, false);
         if ($full_path) {
             extract($viewVariables);
             require_once($full_path);
@@ -819,31 +822,41 @@ class RouteHelper {
             }
         }
         
-        // 2. FASTER: Only check plugins that declare routes_prefix
-        // Scan directory for plugin.json files instead of loading all plugins
-        $plugins_dir = PathHelper::getIncludePath('plugins');
-        if (!is_dir($plugins_dir)) {
-            return null;
-        }
-        
-        $directories = scandir($plugins_dir);
-        foreach ($directories as $dir) {
-            if ($dir === '.' || $dir === '..' || !is_dir($plugins_dir . '/' . $dir)) {
-                continue;
-            }
-            
-            $plugin_json = $plugins_dir . '/' . $dir . '/plugin.json';
-            if (file_exists($plugin_json)) {
-                $metadata = json_decode(file_get_contents($plugin_json), true);
-                if (isset($metadata['routes_prefix']) && strpos($path, $metadata['routes_prefix']) === 0) {
-                    return $dir;
-                }
-            }
-        }
-        
         return null;
     }
     
+    /**
+     * Extract plugin name from a URL path or route pattern.
+     *
+     * Handles the three plugin namespace prefixes:
+     *   /{plugin}/...             → plugin name = segments[0]
+     *   /profile/{plugin}/...     → plugin name = segments[1]
+     *   /admin/{plugin}/...       → plugin name = segments[1]
+     *
+     * Wildcards ('*') are stripped before processing, so both exact paths
+     * ('/profile/scrolldaddy/devices') and wildcard patterns
+     * ('/profile/scrolldaddy/*') work correctly.
+     *
+     * Returns null for paths with fewer than one segment.
+     *
+     * @param string $pattern URL path or route pattern
+     * @return string|null Plugin directory name, or null if not determinable
+     */
+    private static function extractPluginNameFromPattern($pattern) {
+        $path     = rtrim(str_replace('*', '', $pattern), '/');
+        $segments = array_values(array_filter(explode('/', ltrim($path, '/'))));
+
+        if (empty($segments)) {
+            return null;
+        }
+
+        if (($segments[0] === 'profile' || $segments[0] === 'admin') && isset($segments[1])) {
+            return $segments[1];
+        }
+
+        return $segments[0];
+    }
+
     /**
      * Validate route configuration for common mistakes
      * ONLY runs in debug mode to avoid performance impact
@@ -1364,7 +1377,7 @@ class RouteHelper {
                     'type' => 'dynamic',
                     'pattern' => $route['pattern'] ?? $full_path,
                     'config' => $route,
-                    'source' => isset($route['plugin_specify']) ? 'plugin:' . $route['plugin_specify'] : 'main',
+                    'source' => 'main',
                     'params' => $params
                 ];
                 return;
@@ -1394,10 +1407,62 @@ class RouteHelper {
         error_log("=== STEP 6: View directory fallback ===");
         // Try to find view file for any remaining paths
         $view_file = 'views/' . trim($request_path, '/') . '.php';
-        error_log("Trying view fallback file: " . var_export($view_file, true));
 
-        // Store debug info for 404 page
-        $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
+        // Detect plugin namespace patterns for auto-discovery.
+        // URLs matching /{plugin}/*, /profile/{plugin}/*, or /admin/{plugin}/*
+        // where {plugin} is an active plugin name resolve via the plugin's views directory.
+        $view_full_path = null;
+        $segments = array_values(array_filter(explode('/', trim($request_path, '/'))));
+        $plugin_ns = null;
+
+        if (!empty($segments)) {
+            try {
+                $active_plugin_names = array_keys(PluginHelper::getActivePlugins());
+            } catch (Exception $e) {
+                $active_plugin_names = [];
+            }
+
+            if (count($segments) >= 2 && $segments[0] === 'profile' && in_array($segments[1], $active_plugin_names)) {
+                $plugin_ns = ['plugin_name' => $segments[1], 'view_subdir' => 'profile', 'remaining' => implode('/', array_slice($segments, 2))];
+            } elseif (count($segments) >= 2 && $segments[0] === 'admin' && in_array($segments[1], $active_plugin_names)) {
+                $plugin_ns = ['plugin_name' => $segments[1], 'view_subdir' => 'admin',   'remaining' => implode('/', array_slice($segments, 2))];
+            } elseif (in_array($segments[0], $active_plugin_names)) {
+                $plugin_ns = ['plugin_name' => $segments[0], 'view_subdir' => '',        'remaining' => implode('/', array_slice($segments, 1))];
+            }
+        }
+
+        if ($plugin_ns !== null) {
+            $plugin_name = $plugin_ns['plugin_name'];
+            $view_subdir = $plugin_ns['view_subdir'];
+            $remaining   = $plugin_ns['remaining'] !== '' ? $plugin_ns['remaining'] : 'index';
+            error_log("View fallback: plugin namespace match — plugin=$plugin_name subdir=$view_subdir remaining=$remaining");
+
+            // 1. Theme override at full URL path (e.g. theme/getjoinery/views/profile/scrolldaddy/devices.php)
+            $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
+
+            // 2. Plugin directory at remaining path (e.g. plugins/scrolldaddy/views/profile/devices.php)
+            if (!$view_full_path) {
+                $plugin_rel = 'plugins/' . $plugin_name . '/views/' . ($view_subdir ? $view_subdir . '/' : '') . $remaining . '.php';
+                $plugin_abs = PathHelper::getAbsolutePath($plugin_rel);
+                error_log("Trying plugin namespace fallback: " . var_export($plugin_abs, true));
+                if (file_exists($plugin_abs)) {
+                    $view_full_path = $plugin_abs;
+                }
+            }
+
+            // 3. Base fallback at full URL path (e.g. views/profile/scrolldaddy/devices.php — unlikely for plugin pages)
+            if (!$view_full_path) {
+                $base_abs = PathHelper::getAbsolutePath($view_file);
+                error_log("Trying base fallback: " . var_export($base_abs, true));
+                if (file_exists($base_abs)) {
+                    $view_full_path = $base_abs;
+                }
+            }
+        } else {
+            // No plugin namespace match — existing behavior: theme → base
+            error_log("Trying view fallback file: " . var_export($view_file, true));
+            $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
+        }
 
         if (self::$match_only_mode && $view_full_path) {
             self::$match_only_result = [
@@ -1511,12 +1576,39 @@ class RouteHelper {
                     // Clean up any output
                     ob_end_clean();
                     
-                    // Merge plugin routes
+                    // Merge plugin routes (with namespace enforcement for dynamic routes)
                     if (is_array($routes)) {
                         foreach ($routes as $type => $type_routes) {
-                            if (isset($all_plugin_routes[$type]) && is_array($type_routes)) {
-                                // MERGE #1: Combine routes from multiple plugins
-                                // Later plugins can override earlier ones (last wins)
+                            if (!isset($all_plugin_routes[$type]) || !is_array($type_routes)) {
+                                continue;
+                            }
+
+                            if ($type === 'dynamic') {
+                                // Enforce namespace: each route pattern must start with
+                                // /{pluginName}, /profile/{pluginName}, or /admin/{pluginName}
+                                $valid_prefixes = [
+                                    '/' . $pluginName,
+                                    '/profile/' . $pluginName,
+                                    '/admin/' . $pluginName,
+                                ];
+                                $filtered = [];
+                                foreach ($type_routes as $pattern => $config) {
+                                    $in_namespace = false;
+                                    foreach ($valid_prefixes as $prefix) {
+                                        if ($pattern === $prefix || strpos($pattern, $prefix . '/') === 0) {
+                                            $in_namespace = true;
+                                            break;
+                                        }
+                                    }
+                                    if ($in_namespace) {
+                                        $filtered[$pattern] = $config;
+                                    } else {
+                                        error_log("RouteHelper: Plugin '$pluginName' route '$pattern' is outside its namespace. Use one of: /" . $pluginName . "/*, /profile/" . $pluginName . "/*, /admin/" . $pluginName . "/*. Route ignored.");
+                                    }
+                                }
+                                $all_plugin_routes[$type] = array_merge($all_plugin_routes[$type], $filtered);
+                            } else {
+                                // Static and custom routes merged without namespace enforcement
                                 $all_plugin_routes[$type] = array_merge($all_plugin_routes[$type], $type_routes);
                             }
                         }

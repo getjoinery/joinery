@@ -63,7 +63,7 @@ function device_edit_logic($get_vars, $post_vars){
 			$device->prepare();
 			$device->save();
 
-			return LogicResult::redirect('/profile/devices');
+			return LogicResult::redirect('/profile/scrolldaddy/devices');
 		}
 		else{
 			// Create new device — check device limit
@@ -88,7 +88,7 @@ function device_edit_logic($get_vars, $post_vars){
 			$device = SdDevice::createDevice($empty_device, $profile1, $profile2, $_POST);
 		}
 
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 	else{
 

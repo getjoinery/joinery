@@ -37,7 +37,7 @@ function device_soft_delete_logic($get_vars, $post_vars){
 		$device->set('sdd_delete_time', 'now()');
 		$device->save();
 
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 
 	return LogicResult::render($page_vars);

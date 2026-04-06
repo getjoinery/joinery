@@ -14,7 +14,7 @@ function querylog_logic($get_vars, $post_vars) {
 
 	$device_id = isset($get_vars['device_id']) ? (int)$get_vars['device_id'] : 0;
 	if (!$device_id) {
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 
 	try {
@@ -24,7 +24,7 @@ function querylog_logic($get_vars, $post_vars) {
 			'current_user_permission' => $session->get_permission(),
 		));
 	} catch (Exception $e) {
-		return LogicResult::redirect('/profile/devices');
+		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 
 	$page_vars = array(
