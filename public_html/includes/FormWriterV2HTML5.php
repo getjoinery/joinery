@@ -5,12 +5,13 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.0.6
- * @changelog 2.0.5 - Added public textbox() method with Trumbowyg rich text editor support (htmlmode option)
- * @changelog 2.0.4 - Fixed placeholder to only show when field is empty (matches Bootstrap behavior)
- * @changelog 2.0.3 - Added inline flex layout for time and datetime inputs to display fields side-by-side
- * @changelog 2.0.2 - Changed fieldset/legend to div/label for radio and checkbox groups to match Bootstrap styling
- * @changelog 2.0.1 - Fixed outputRadioInput to iterate through options array and display all radio buttons
+ * @version 2.0.7
+ * @changelog 2.0.7 - outputCheckboxInput: support 'checked' boolean option as override (same as Bootstrap/Tailwind)
+ * @changelog 2.0.6 - Added public textbox() method with Trumbowyg rich text editor support (htmlmode option)
+ * @changelog 2.0.5 - Fixed placeholder to only show when field is empty (matches Bootstrap behavior)
+ * @changelog 2.0.4 - Added inline flex layout for time and datetime inputs to display fields side-by-side
+ * @changelog 2.0.3 - Changed fieldset/legend to div/label for radio and checkbox groups to match Bootstrap styling
+ * @changelog 2.0.2 - Fixed outputRadioInput to iterate through options array and display all radio buttons
  */
 
 require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
@@ -356,10 +357,18 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputCheckboxInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $checked_value = $options['checked_value'] ?? '1';
         $class = $options['class'] ?? '';
         $id = $options['id'] ?? $name;
+
+        // Determine checked state:
+        // 'checked' option (boolean) takes precedence; otherwise compare 'value'/stored value against checked_value
+        if (isset($options['checked'])) {
+            $is_checked = !empty($options['checked']);
+        } else {
+            $current_value = $options['value'] ?? ($this->values[$name] ?? '');
+            $is_checked = ((string)$current_value === (string)$checked_value);
+        }
 
         $has_errors = isset($this->errors[$name]);
 
@@ -371,7 +380,7 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $html .= ' class="form-check-input' . ($class ? ' ' . htmlspecialchars($class) : '') . '"';
         $html .= ' value="' . htmlspecialchars($checked_value) . '"';
 
-        if ((string)$value === (string)$checked_value) {
+        if ($is_checked) {
             $html .= ' checked';
         }
         if (!empty($options['disabled'])) {
