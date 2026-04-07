@@ -4,7 +4,8 @@
  *
  * Bootstrap-themed form field output
  *
- * @version 2.1.0
+ * @version 2.1.1
+ * @changelog 2.1.1 - outputTextInput: support 'type' option; outputCheckboxInput: unified checked logic; outputDateInput: isset for min/max; outputPasswordInput: conditional placeholder
  */
 
 require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
@@ -49,14 +50,16 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $html .= '<div class="input-group-text">' . htmlspecialchars($prepend) . '</div>';
         }
 
+        $type = $options['type'] ?? 'text';
+
         // Output input
-        $html .= '<input type="text"';
+        $html .= '<input type="' . htmlspecialchars($type) . '"';
         $html .= ' name="' . htmlspecialchars($name) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
 
-        // Only show placeholder if field is empty (Bootstrap native behavior)
+        // Only show placeholder if field is empty
         if ($placeholder && !$value) {
             $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
@@ -218,7 +221,8 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
 
-        if ($placeholder) {
+        // Only show placeholder if field is empty
+        if ($placeholder && !$value) {
             $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
@@ -474,8 +478,18 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputCheckboxInput($name, $label, $options) {
-        $value = $options['value'] ?? '1';
-        $checked = !empty($options['checked']) || (isset($this->values[$name]) && $this->values[$name]);
+        $checked_value = $options['checked_value'] ?? '1';
+        $value = $options['value'] ?? $checked_value;  // HTML submit value
+
+        // Determine checked state:
+        // 'checked' option (boolean) takes precedence; otherwise compare 'value'/stored value against checked_value
+        if (isset($options['checked'])) {
+            $checked = !empty($options['checked']);
+        } else {
+            $current_value = isset($options['value']) ? $options['value'] : ($this->values[$name] ?? '');
+            $checked = ((string)$current_value === (string)$checked_value);
+        }
+
         $id = $options['id'] ?? $name;
 
         $has_errors = isset($this->errors[$name]);
@@ -627,10 +641,10 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
 
-        if (!empty($options['min'])) {
+        if (isset($options['min'])) {
             $html .= ' min="' . htmlspecialchars($options['min']) . '"';
         }
-        if (!empty($options['max'])) {
+        if (isset($options['max'])) {
             $html .= ' max="' . htmlspecialchars($options['max']) . '"';
         }
         if (!empty($options['readonly'])) {

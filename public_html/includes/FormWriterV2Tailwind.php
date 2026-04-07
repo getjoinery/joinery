@@ -4,7 +4,11 @@
  *
  * Tailwind-themed form field output
  *
- * @version 2.0.0
+ * @version 2.0.1
+ * @changelog 2.0.1 - Behavioral parity with HTML5/Bootstrap: value fallbacks, type option, outputNumberInput,
+ *                    outputDropInput key/value order fix, outputCheckboxList key/value order fix,
+ *                    outputCheckboxInput unified checked logic, isset for date min/max,
+ *                    conditional placeholder, textarea cols/rows defaults, outputTextInput attribute parity
  */
 
 require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
@@ -19,10 +23,11 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputTextInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
         $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
         $id = $options['id'] ?? $name;
+        $type = $options['type'] ?? 'text';
 
         $has_errors = isset($this->errors[$name]);
         if ($has_errors) {
@@ -37,13 +42,14 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             $html .= '</label>';
         }
 
-        $html .= '<input type="text"';
+        $html .= '<input type="' . htmlspecialchars($type) . '"';
         $html .= ' name="' . htmlspecialchars($name) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
 
-        if ($placeholder) {
+        // Only show placeholder if field is empty
+        if ($placeholder && !$value) {
             $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
@@ -57,6 +63,27 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         }
         if (!empty($options['autocomplete'])) {
             $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
+        }
+        if (!empty($options['required'])) {
+            $html .= ' required';
+        }
+        if (!empty($options['pattern'])) {
+            $html .= ' pattern="' . htmlspecialchars($options['pattern']) . '"';
+        }
+        if (isset($options['min'])) {
+            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
+        }
+        if (isset($options['max'])) {
+            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
+        }
+        if (isset($options['minlength'])) {
+            $html .= ' minlength="' . intval($options['minlength']) . '"';
+        }
+        if (isset($options['maxlength'])) {
+            $html .= ' maxlength="' . intval($options['maxlength']) . '"';
+        }
+        if (isset($options['step'])) {
+            $html .= ' step="' . htmlspecialchars($options['step']) . '"';
         }
         if (!empty($options['onchange'])) {
             $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
@@ -92,7 +119,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputPasswordInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
         $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
         $id = $options['id'] ?? $name;
@@ -116,7 +143,8 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
 
-        if ($placeholder) {
+        // Only show placeholder if field is empty
+        if ($placeholder && !$value) {
             $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
@@ -161,6 +189,18 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
     }
 
     /**
+     * Output a number input field with Tailwind styling
+     *
+     * @param string $name Field name
+     * @param string $label Field label
+     * @param array $options Field options
+     */
+    protected function outputNumberInput($name, $label, $options) {
+        $options['type'] = 'number';
+        $this->outputTextInput($name, $label, $options);
+    }
+
+    /**
      * Output a textarea field with Tailwind styling
      *
      * @param string $name Field name
@@ -168,11 +208,12 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputTextarea($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
         $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
         $id = $options['id'] ?? $name;
-        $rows = $options['rows'] ?? 3;
+        $rows = $options['rows'] ?? 5;
+        $cols = $options['cols'] ?? 80;
 
         $has_errors = isset($this->errors[$name]);
         if ($has_errors) {
@@ -191,9 +232,11 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' name="' . htmlspecialchars($name) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' rows="' . (int)$rows . '"';
+        $html .= ' rows="' . intval($rows) . '"';
+        $html .= ' cols="' . intval($cols) . '"';
 
-        if ($placeholder) {
+        // Only show placeholder if field is empty
+        if ($placeholder && !$value) {
             $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
         }
         if (!empty($options['readonly'])) {
@@ -201,6 +244,18 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         }
         if (!empty($options['disabled'])) {
             $html .= ' disabled';
+        }
+        if (!empty($options['required'])) {
+            $html .= ' required';
+        }
+        if (isset($options['minlength'])) {
+            $html .= ' minlength="' . intval($options['minlength']) . '"';
+        }
+        if (isset($options['maxlength'])) {
+            $html .= ' maxlength="' . intval($options['maxlength']) . '"';
+        }
+        if (!empty($options['onchange'])) {
+            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
         }
 
         $html .= '>';
@@ -235,7 +290,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputDropInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
         $id = $options['id'] ?? $name;
         $select_options = $options['options'] ?? [];
@@ -272,12 +327,15 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= '>';
 
         if (!empty($options['empty_option'])) {
-            $html .= '<option value="">' . htmlspecialchars($options['empty_option']) . '</option>';
+            $empty_label = ($options['empty_option'] === true) ? 'Select...' : $options['empty_option'];
+            $html .= '<option value="">' . htmlspecialchars($empty_label) . '</option>';
         }
 
-        foreach ($select_options as $opt_label => $opt_value) {
+        // Standard convention: [value => label]. Convert boolean values to int for comparison.
+        $compare_value = is_bool($value) ? ($value ? 1 : 0) : $value;
+        foreach ($select_options as $opt_value => $opt_label) {
             $html .= '<option value="' . htmlspecialchars($opt_value) . '"';
-            if ((string)$value === (string)$opt_value) {
+            if ((string)$compare_value === (string)$opt_value) {
                 $html .= ' selected';
             }
             $html .= '>' . htmlspecialchars($opt_label) . '</option>';
@@ -426,8 +484,18 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputCheckboxInput($name, $label, $options) {
-        $value = $options['value'] ?? '1';
-        $checked = !empty($options['checked']) || (isset($this->values[$name]) && $this->values[$name]);
+        $checked_value = $options['checked_value'] ?? '1';
+        $value = $options['value'] ?? $checked_value;  // HTML submit value
+
+        // Determine checked state:
+        // 'checked' option (boolean) takes precedence; otherwise compare 'value'/stored value against checked_value
+        if (isset($options['checked'])) {
+            $checked = !empty($options['checked']);
+        } else {
+            $current_value = isset($options['value']) ? $options['value'] : ($this->values[$name] ?? '');
+            $checked = ((string)$current_value === (string)$checked_value);
+        }
+
         $id = $options['id'] ?? $name;
 
         $has_errors = isset($this->errors[$name]);
@@ -493,7 +561,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options (must include 'options' key)
      */
     protected function outputRadioInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $radio_options = $options['options'] ?? [];
 
         $has_errors = isset($this->errors[$name]);
@@ -564,7 +632,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputDateInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
         $id = $options['id'] ?? $name;
 
@@ -587,10 +655,10 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($class) . '"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
 
-        if (!empty($options['min'])) {
+        if (isset($options['min'])) {
             $html .= ' min="' . htmlspecialchars($options['min']) . '"';
         }
-        if (!empty($options['max'])) {
+        if (isset($options['max'])) {
             $html .= ' max="' . htmlspecialchars($options['max']) . '"';
         }
         if (!empty($options['readonly'])) {
@@ -687,7 +755,7 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
      * @param array $options Field options
      */
     protected function outputHiddenInput($name, $options) {
-        $value = $options['value'] ?? '';
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
         $id = $options['id'] ?? $name;
 
         $html = '<input type="hidden"';
@@ -800,24 +868,26 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
         $html .= '<div class="mt-2 space-y-2">';
 
+        // Standard convention: $optionvals is [value => label]
+        // $key is the value to submit, $value is the display label
         foreach ($optionvals as $key => $value) {
-            $uniqid = $id . '_' . htmlspecialchars($value);
-            $is_checked = in_array($value, $checked) ? 'checked="checked"' : '';
-            $is_disabled = in_array($value, $disabled) ? 'disabled="disabled"' : '';
+            $uniqid = $id . '_' . htmlspecialchars($key);
+            $is_checked = in_array($key, $checked) ? 'checked="checked"' : '';
+            $is_disabled = in_array($key, $disabled) ? 'disabled="disabled"' : '';
 
             // Readonly means it cannot be changed but is submitted
-            if (in_array($value, $readonly)) {
-                if (in_array($value, $checked)) {
-                    $html .= '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" />';
+            if (in_array($key, $readonly)) {
+                if (in_array($key, $checked)) {
+                    $html .= '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" />';
                 }
                 $html .= '<div class="relative flex items-center">';
-                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' disabled="disabled" />';
-                $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
+                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
+                $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($value) . '</label>';
                 $html .= '</div>';
             } else {
                 $html .= '<div class="relative flex items-center">';
-                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($value) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
-                $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($key) . '</label>';
+                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
+                $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($value) . '</label>';
                 $html .= '</div>';
             }
         }
