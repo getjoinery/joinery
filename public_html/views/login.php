@@ -48,6 +48,11 @@
         $formwriter->passwordinput('password', 'Password:', [
             'required' => true,
         ]);
+
+        $formwriter->checkboxinput('setcookie', 'Remember Me', [
+            'value'         => 'yes',
+            'checked_value' => 'yes',
+        ]);
         ?>
 
         <div class="d-flex justify-content-between align-items-center" style="margin-top: 1rem;">
