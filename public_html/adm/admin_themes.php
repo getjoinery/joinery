@@ -204,32 +204,80 @@ $page->begin_box(array('altlinks' => $altlinks));
 </div>
 
 <!-- Delete Confirmation Modal -->
-<div class="modal fade" id="deleteThemeModal" tabindex="-1" aria-labelledby="deleteThemeModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="deleteThemeModalLabel">Confirm Theme Deletion</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<style>
+.jy-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+.jy-modal-overlay.active { display: flex; }
+.jy-modal {
+    background: var(--white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 500px;
+    margin: 1rem;
+}
+.jy-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.jy-modal-header h5 { margin: 0; font-size: 1.1rem; }
+.jy-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 0;
+}
+.jy-modal-close:hover { color: var(--body-color); }
+.jy-modal-body { padding: 1.5rem; }
+.jy-modal-body p { margin-bottom: 0.75rem; }
+.jy-modal-body ul { list-style: disc; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+.jy-modal-body ul li { list-style: disc; margin-bottom: 0.25rem; }
+.jy-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border);
+}
+</style>
+
+<div id="deleteThemeModal" class="jy-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="deleteThemeModalLabel">
+    <div class="jy-modal">
+        <div class="jy-modal-header">
+            <h5 id="deleteThemeModalLabel">Confirm Theme Deletion</h5>
+            <button type="button" class="jy-modal-close" onclick="closeDeleteModal()" aria-label="Close">&times;</button>
+        </div>
+        <div class="jy-modal-body">
+            <p>Are you sure you want to permanently delete the theme "<strong><span id="deleteThemeName"></span></strong>"?</p>
+            <p>This will:</p>
+            <ul>
+                <li>Remove all theme files from the server</li>
+                <li>Delete the theme's database record</li>
+            </ul>
+            <div id="stockThemeWarning" class="alert alert-info" style="display:none;">
+                This is a <strong>stock theme</strong>. It can be re-downloaded later via the upgrade system.
             </div>
-            <div class="modal-body">
-                <p>Are you sure you want to permanently delete the theme "<span id="deleteThemeName"></span>"?</p>
-                <p>This will:</p>
-                <ul>
-                    <li>Remove all theme files from the server</li>
-                    <li>Delete the theme's database record</li>
-                </ul>
-                <div id="stockThemeWarning" class="alert alert-info" style="display: none;">
-                    <i class="fas fa-info-circle"></i> This is a <strong>stock theme</strong>. It can be re-downloaded later via the upgrade system.
-                </div>
-                <div id="customThemeWarning" class="alert alert-danger" style="display: none;">
-                    <i class="fas fa-exclamation-triangle"></i> <strong>WARNING:</strong> This is a <strong>custom theme</strong>. Custom themes cannot be recovered once deleted!
-                </div>
-                <p class="text-danger"><strong>This action cannot be undone.</strong></p>
+            <div id="customThemeWarning" class="alert alert-danger" style="display:none;">
+                <strong>WARNING:</strong> This is a <strong>custom theme</strong>. Custom themes cannot be recovered once deleted!
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Permanently Delete Theme</button>
-            </div>
+            <p style="color:var(--danger);"><strong>This action cannot be undone.</strong></p>
+        </div>
+        <div class="jy-modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+            <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Permanently Delete Theme</button>
         </div>
     </div>
 </div>
@@ -241,7 +289,6 @@ function showDeleteModal(themeName, displayName, isStock) {
     themeToDelete = themeName;
     document.getElementById('deleteThemeName').textContent = displayName;
 
-    // Show appropriate warning based on stock status
     if (isStock) {
         document.getElementById('stockThemeWarning').style.display = 'block';
         document.getElementById('customThemeWarning').style.display = 'none';
@@ -250,9 +297,18 @@ function showDeleteModal(themeName, displayName, isStock) {
         document.getElementById('customThemeWarning').style.display = 'block';
     }
 
-    var modal = new bootstrap.Modal(document.getElementById('deleteThemeModal'));
-    modal.show();
+    document.getElementById('deleteThemeModal').classList.add('active');
+    document.body.style.overflow = 'hidden';
 }
+
+function closeDeleteModal() {
+    document.getElementById('deleteThemeModal').classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+document.getElementById('deleteThemeModal').addEventListener('click', function(e) {
+    if (e.target === this) closeDeleteModal();
+});
 
 document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
     if (themeToDelete) {
