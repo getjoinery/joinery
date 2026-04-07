@@ -2,9 +2,13 @@
 /**
  * FormWriter v2 Tailwind CSS Implementation
  *
- * Tailwind-themed form field output
+ * Tailwind-themed form field rendering. Implements render*() methods only —
+ * all behavioral logic (value resolution, state determination) lives in
+ * FormWriterV2Base::prepare*Data() methods.
  *
- * @version 2.0.1
+ * @version 2.2.0
+ * @changelog 2.2.0 - Phase 2: shared AJAX script, visibility moved to base, buildCommonAttributes in renderTextInput, renderTextbox returns string
+ * @changelog 2.1.0 - Refactored to prepare/render pattern: output*() → render*()
  * @changelog 2.0.1 - Behavioral parity with HTML5/Bootstrap: value fallbacks, type option, outputNumberInput,
  *                    outputDropInput key/value order fix, outputCheckboxList key/value order fix,
  *                    outputCheckboxInput unified checked logic, isset for date min/max,
@@ -16,150 +20,105 @@ require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
 class FormWriterV2Tailwind extends FormWriterV2Base {
 
     /**
-     * Output a text input field with Tailwind styling
+     * Render a text input field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareTextData()
+     * @return string HTML output
      */
-    protected function outputTextInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $placeholder = $options['placeholder'] ?? '';
-        $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
-        $id = $options['id'] ?? $name;
-        $type = $options['type'] ?? 'text';
+    protected function renderTextInput($data) {
+        $class = $data['class'] ?: 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
+        $id = $data['id'];
 
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $class .= ' border-red-500';
         }
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
-        $html .= '<input type="' . htmlspecialchars($type) . '"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= '<input type="' . htmlspecialchars($data['type']) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
 
-        // Only show placeholder if field is empty
-        if ($placeholder && !$value) {
-            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        if ($data['placeholder']) {
+            $html .= ' placeholder="' . htmlspecialchars($data['placeholder']) . '"';
         }
-        if (!empty($options['readonly'])) {
-            $html .= ' readonly';
+        if ($data['pattern']) {
+            $html .= ' pattern="' . htmlspecialchars($data['pattern']) . '"';
         }
-        if (!empty($options['disabled'])) {
-            $html .= ' disabled';
-        }
-        if (!empty($options['autofocus'])) {
-            $html .= ' autofocus';
-        }
-        if (!empty($options['autocomplete'])) {
-            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
-        }
-        if (!empty($options['required'])) {
-            $html .= ' required';
-        }
-        if (!empty($options['pattern'])) {
-            $html .= ' pattern="' . htmlspecialchars($options['pattern']) . '"';
-        }
-        if (isset($options['min'])) {
-            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
-        }
-        if (isset($options['max'])) {
-            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
-        }
-        if (isset($options['minlength'])) {
-            $html .= ' minlength="' . intval($options['minlength']) . '"';
-        }
-        if (isset($options['maxlength'])) {
-            $html .= ' maxlength="' . intval($options['maxlength']) . '"';
-        }
-        if (isset($options['step'])) {
-            $html .= ' step="' . htmlspecialchars($options['step']) . '"';
-        }
-        if (!empty($options['onchange'])) {
-            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
-        }
+        $html .= $this->buildCommonAttributes($data, [
+            'min' => 'min', 'max' => 'max', 'step' => 'step',
+            'minlength' => 'minlength', 'maxlength' => 'maxlength',
+        ]);
 
         $html .= '>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a password input field with Tailwind styling
+     * Render a password input field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from preparePasswordData()
+     * @return string HTML output
      */
-    protected function outputPasswordInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $placeholder = $options['placeholder'] ?? '';
-        $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
-        $id = $options['id'] ?? $name;
+    protected function renderPasswordInput($data) {
+        $class = $data['class'] ?: 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
+        $id = $data['id'];
 
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $class .= ' border-red-500';
         }
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<input type="password"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
 
-        // Only show placeholder if field is empty
-        if ($placeholder && !$value) {
-            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        if ($data['placeholder']) {
+            $html .= ' placeholder="' . htmlspecialchars($data['placeholder']) . '"';
         }
-        if (!empty($options['readonly'])) {
+        if ($data['readonly']) {
             $html .= ' readonly';
         }
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
-        if (!empty($options['autocomplete'])) {
-            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
+        if ($data['autocomplete']) {
+            $html .= ' autocomplete="' . htmlspecialchars($data['autocomplete']) . '"';
         }
 
         $html .= '>';
 
-        if (!empty($options['strength_meter'])) {
+        if ($data['strength_meter']) {
             $html .= '<div class="password-strength-meter mt-2">';
             $html .= '<div class="w-full bg-gray-200 rounded-full h-1.5">';
             $html .= '<div class="bg-blue-600 h-1.5 rounded-full" style="width: 0%"></div>';
@@ -168,174 +127,147 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
             $html .= '</div>';
         }
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a number input field with Tailwind styling
+     * Render a number input field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareNumberData()
+     * @return string HTML output
      */
-    protected function outputNumberInput($name, $label, $options) {
-        $options['type'] = 'number';
-        $this->outputTextInput($name, $label, $options);
+    protected function renderNumberInput($data) {
+        return $this->renderTextInput($data);
     }
 
     /**
-     * Output a textarea field with Tailwind styling
+     * Render a textarea field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareTextareaData()
+     * @return string HTML output
      */
-    protected function outputTextarea($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $placeholder = $options['placeholder'] ?? '';
-        $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
-        $id = $options['id'] ?? $name;
-        $rows = $options['rows'] ?? 5;
-        $cols = $options['cols'] ?? 80;
+    protected function renderTextarea($data) {
+        $class = $data['class'] ?: 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
+        $id = $data['id'];
 
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $class .= ' border-red-500';
         }
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<textarea';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' rows="' . intval($rows) . '"';
-        $html .= ' cols="' . intval($cols) . '"';
+        $html .= ' rows="' . intval($data['rows']) . '"';
+        $html .= ' cols="' . intval($data['cols']) . '"';
 
-        // Only show placeholder if field is empty
-        if ($placeholder && !$value) {
-            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        if ($data['placeholder']) {
+            $html .= ' placeholder="' . htmlspecialchars($data['placeholder']) . '"';
         }
-        if (!empty($options['readonly'])) {
+        if ($data['readonly']) {
             $html .= ' readonly';
         }
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
-        if (!empty($options['required'])) {
+        if ($data['required']) {
             $html .= ' required';
         }
-        if (isset($options['minlength'])) {
-            $html .= ' minlength="' . intval($options['minlength']) . '"';
+        if (isset($data['minlength'])) {
+            $html .= ' minlength="' . intval($data['minlength']) . '"';
         }
-        if (isset($options['maxlength'])) {
-            $html .= ' maxlength="' . intval($options['maxlength']) . '"';
+        if (isset($data['maxlength'])) {
+            $html .= ' maxlength="' . intval($data['maxlength']) . '"';
         }
-        if (!empty($options['onchange'])) {
-            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
+        if ($data['onchange']) {
+            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
         }
 
         $html .= '>';
-        $html .= htmlspecialchars($value);
+        $html .= htmlspecialchars($data['value']);
         $html .= '</textarea>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a select dropdown field with Tailwind styling
+     * Render a select dropdown field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareDropData()
+     * @return string HTML output
      */
-    protected function outputDropInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
-        $id = $options['id'] ?? $name;
-        $select_options = $options['options'] ?? [];
-        $ajaxendpoint = $options['ajaxendpoint'] ?? '';
+    protected function renderDropInput($data) {
+        $class = $data['class'] ?: 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
+        $id = $data['id'];
 
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $class .= ' border-red-500';
         }
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<select';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
 
-        if (!empty($options['multiple'])) {
+        if ($data['multiple']) {
             $html .= ' multiple';
         }
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
-        if (!empty($options['onchange'])) {
-            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
+        if ($data['onchange']) {
+            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
         }
 
         $html .= '>';
 
-        if (!empty($options['empty_option'])) {
-            $empty_label = ($options['empty_option'] === true) ? 'Select...' : $options['empty_option'];
-            $html .= '<option value="">' . htmlspecialchars($empty_label) . '</option>';
+        if ($data['empty_option'] !== null) {
+            $html .= '<option value="">' . htmlspecialchars($data['empty_option']) . '</option>';
         }
 
-        // Standard convention: [value => label]. Convert boolean values to int for comparison.
-        $compare_value = is_bool($value) ? ($value ? 1 : 0) : $value;
-        foreach ($select_options as $opt_value => $opt_label) {
+        foreach ($data['options_list'] as $opt_value => $opt_label) {
             $html .= '<option value="' . htmlspecialchars($opt_value) . '"';
-            if ((string)$compare_value === (string)$opt_value) {
+            if ((string)$data['value'] === (string)$opt_value) {
                 $html .= ' selected';
             }
             $html .= '>' . htmlspecialchars($opt_label) . '</option>';
@@ -343,253 +275,109 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
 
         $html .= '</select>';
 
-        // AJAX dropdown support - output inline script
-        if (!empty($ajaxendpoint)) {
-            $html .= '<script>
-(function() {
-  class AjaxSearchSelect {
-    constructor(selectEl, ajaxUrl) {
-      this.select = selectEl;
-      this.ajaxUrl = ajaxUrl;
-      this.cache = {};
-      this.debounceTimer = null;
-
-      const input = document.createElement(\'input\');
-      input.type = \'text\';
-      input.className = selectEl.className;
-      // Don\'t transfer name - keep it on the select element so it submits the ID
-      input.placeholder = \'Type to search...\';
-
-      const list = document.createElement(\'datalist\');
-      list.id = selectEl.id + \'_list\';
-      input.setAttribute(\'list\', list.id);
-
-      selectEl.style.display = \'none\';
-      // Keep name on select so it submits the ID, not the input value
-      selectEl.parentNode.insertBefore(input, selectEl);
-      selectEl.parentNode.insertBefore(list, selectEl);
-
-      this.input = input;
-      this.list = list;
-      this.data = [];
-
-      if (selectEl.value) {
-        input.value = selectEl.options[selectEl.selectedIndex].text;
-      }
-
-      input.addEventListener(\'input\', (e) => this.search(e.target.value));
-      input.addEventListener(\'change\', (e) => {
-        const inputVal = e.target.value.trim();
-        if (!inputVal) {
-          selectEl.value = \'\';
-        } else {
-          // When user selects from datalist, find the matching item and update hidden select
-          const matching = this.data.find(item => item.text === inputVal);
-          if (matching) {
-            // Add the option to the select if it doesn\'t exist
-            let option = selectEl.querySelector(\'option[value="\' + matching.id + \'"]\');
-            if (!option) {
-              option = document.createElement(\'option\');
-              option.value = matching.id;
-              option.textContent = matching.text;
-              selectEl.innerHTML = \'\';  // Clear previous options
-              selectEl.appendChild(option);
-            }
-            selectEl.value = matching.id;
-          }
-        }
-        selectEl.dispatchEvent(new Event(\'change\', { bubbles: true }));
-      });
-    }
-
-    search(query) {
-      clearTimeout(this.debounceTimer);
-      if (query.length < 3) {
-        this.list.innerHTML = \'\';
-        this.data = [];
-        return;
-      }
-
-      if (this.cache[query]) {
-        this.updateList(this.cache[query]);
-        return;
-      }
-
-      this.debounceTimer = setTimeout(() => {
-        // Build URL - use & if URL already has ?, otherwise use ?
-        const separator = this.ajaxUrl.includes(\'?\') ? \'&\' : \'?\';
-        fetch(this.ajaxUrl + separator + \'q=\' + encodeURIComponent(query))
-          .then(r => r.json())
-          .then(data => {
-            this.cache[query] = data;
-            this.updateList(data);
-          });
-      }, 250);
-    }
-
-    updateList(data) {
-      this.data = data;
-      this.list.innerHTML = \'\';
-      data.forEach(item => {
-        const opt = document.createElement(\'option\');
-        opt.value = item.text;  // Display the full text (name - email)
-        opt.dataset.id = item.id;  // Store the ID for later retrieval
-        this.list.appendChild(opt);
-      });
-    }
-  }
-
-  document.addEventListener(\'DOMContentLoaded\', () => {
-    const select = document.getElementById(\'' . htmlspecialchars($id) . '\');
-    if (select) {
-      new AjaxSearchSelect(select, \'' . htmlspecialchars($ajaxendpoint) . '\');
-    }
-  });
-})();
-</script>';
+        // AJAX dropdown support
+        if ($data['ajaxendpoint']) {
+            $html .= $this->buildAjaxSelectScript($id, $data['ajaxendpoint']);
         }
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
-        }
-
-        // Check for visibility rules or custom scripts in options
-        if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
-            $html .= $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
-        } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
-            $html .= $this->generateFieldScript($id, $options['custom_script']);
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a checkbox input field with Tailwind styling
+     * Render a checkbox input field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareCheckboxData()
+     * @return string HTML output
      */
-    protected function outputCheckboxInput($name, $label, $options) {
-        $checked_value = $options['checked_value'] ?? '1';
-        $value = $options['value'] ?? $checked_value;  // HTML submit value
-
-        // Determine checked state:
-        // 'checked' option (boolean) takes precedence; otherwise compare 'value'/stored value against checked_value
-        if (isset($options['checked'])) {
-            $checked = !empty($options['checked']);
-        } else {
-            $current_value = isset($options['value']) ? $options['value'] : ($this->values[$name] ?? '');
-            $checked = ((string)$current_value === (string)$checked_value);
-        }
-
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
+    protected function renderCheckboxInput($data) {
+        $id = $data['id'];
 
         $html = '<div class="mb-4">';
         $html .= '<div class="flex items-center">';
 
         $html .= '<input type="checkbox"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' . ($has_errors ? ' border-red-500' : '') . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' . ($data['has_errors'] ? ' border-red-500' : '') . '"';
+        $html .= ' value="' . htmlspecialchars($data['checked_value']) . '"';
 
-        if ($checked) {
+        if ($data['is_checked']) {
             $html .= ' checked';
         }
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
 
         $html .= '>';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="ml-2 block text-sm text-gray-900">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '</div>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Check for visibility rules or custom scripts in options
-        if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
-            $html .= $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
-        } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
-            $html .= $this->generateFieldScript($id, $options['custom_script']);
-        }
-
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output radio input fields with Tailwind styling
+     * Render radio input fields with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label (group label)
-     * @param array $options Field options (must include 'options' key)
+     * @param array $data Prepared field data from prepareRadioData()
+     * @return string HTML output
      */
-    protected function outputRadioInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $radio_options = $options['options'] ?? [];
-
-        $has_errors = isset($this->errors[$name]);
+    protected function renderRadioInput($data) {
+        $has_errors = $data['has_errors'];
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label class="block text-sm font-medium text-gray-700 mb-2">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<div class="errorplacement space-y-2">';
 
-        foreach ($radio_options as $opt_value => $opt_label) {
-            $id = $name . '_' . $opt_value;
+        foreach ($data['options_list'] as $opt_value => $opt_label) {
+            $id = $data['name'] . '_' . $opt_value;
 
             $html .= '<div class="flex items-center">';
             $html .= '<input type="radio"';
-            $html .= ' name="' . htmlspecialchars($name) . '"';
+            $html .= ' name="' . htmlspecialchars($data['name']) . '"';
             $html .= ' id="' . htmlspecialchars($id) . '"';
             $html .= ' class="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500' . ($has_errors ? ' border-red-500' : '') . '"';
             $html .= ' value="' . htmlspecialchars($opt_value) . '"';
 
-            if ((string)$value === (string)$opt_value) {
+            if ((string)$data['value'] === (string)$opt_value) {
                 $html .= ' checked';
             }
-            if (!empty($options['disabled'])) {
+            if ($data['disabled']) {
                 $html .= ' disabled';
             }
 
@@ -605,288 +393,208 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= '</div>';
 
         if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a date input field with Tailwind styling
+     * Render a date input field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareDateData()
+     * @return string HTML output
      */
-    protected function outputDateInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
-        $id = $options['id'] ?? $name;
+    protected function renderDateInput($data) {
+        $class = $data['class'] ?: 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
+        $id = $data['id'];
 
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $class .= ' border-red-500';
         }
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<input type="date"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
 
-        if (isset($options['min'])) {
-            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
+        if (isset($data['min'])) {
+            $html .= ' min="' . htmlspecialchars($data['min']) . '"';
         }
-        if (isset($options['max'])) {
-            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
+        if (isset($data['max'])) {
+            $html .= ' max="' . htmlspecialchars($data['max']) . '"';
         }
-        if (!empty($options['readonly'])) {
+        if ($data['readonly']) {
             $html .= ' readonly';
         }
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
 
         $html .= '>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a file input field with Tailwind styling
+     * Render a file input field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareFileData()
+     * @return string HTML output
      */
-    protected function outputFileInput($name, $label, $options) {
-        $class = $options['class'] ?? 'mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100';
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
+    protected function renderFileInput($data) {
+        $class = $data['class'] ?: 'mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100';
+        $id = $data['id'];
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<input type="file"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
 
-        if (!empty($options['accept'])) {
-            $html .= ' accept="' . htmlspecialchars($options['accept']) . '"';
+        if ($data['accept']) {
+            $html .= ' accept="' . htmlspecialchars($data['accept']) . '"';
         }
-        if (!empty($options['multiple'])) {
+        if ($data['multiple']) {
             $html .= ' multiple';
         }
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
 
         $html .= '>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a hidden input field
+     * Render a hidden input field
      *
-     * @param string $name Field name
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareHiddenData()
+     * @return string HTML output
      */
-    protected function outputHiddenInput($name, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $id = $options['id'] ?? $name;
-
+    protected function renderHiddenInput($data) {
         $html = '<input type="hidden"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
         $html .= '>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a submit button with Tailwind styling
+     * Render a submit button with Tailwind styling
      *
-     * @param string $name Button name
-     * @param string $label Button label
-     * @param array $options Button options
+     * @param array $data Prepared field data from prepareSubmitData()
+     * @return string HTML output
      */
-    protected function outputSubmitButton($name, $label, $options) {
-        $class = $options['class'] ?? 'inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2';
-        $id = $options['id'] ?? $name;
+    protected function renderSubmitButton($data) {
+        $class = $data['class'] ?: 'inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2';
 
         $html = '<button type="submit"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
 
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
-        if (!empty($options['onclick'])) {
-            $html .= ' onclick="' . htmlspecialchars($options['onclick']) . '"';
+        if ($data['onclick']) {
+            $html .= ' onclick="' . htmlspecialchars($data['onclick']) . '"';
         }
 
         $html .= '>';
-        $html .= htmlspecialchars($label);
+        $html .= htmlspecialchars($data['label']);
         $html .= '</button>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Create a checkbox list (or radio group) field
+     * Render a checkbox list (or radio group) field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options (options, checked, disabled, readonly, type)
+     * @param array $data Prepared field data from prepareCheckboxListData()
+     * @return string HTML output
      */
-    public function checkboxlist($name, $label = '', $options = []) {
-        $this->registerField($name, 'checkboxlist', $label, $options);
-        $this->outputCheckboxList($name, $label, $options);
-    }
+    protected function renderCheckboxList($data) {
+        $id = $data['id'];
 
-    /**
-     * Output a checkbox list (or radio group) field with Tailwind styling
-     *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputCheckboxList($name, $label, $options) {
-        $optionvals = $options['options'] ?? [];
-        $checked = $options['checked'] ?? [];
-        $disabled = $options['disabled'] ?? [];
-        $readonly = $options['readonly'] ?? [];
-        $type = $options['type'] ?? 'checkbox';
-        $id = $options['id'] ?? $name;
-
-        // Ensure checked is an array
-        if (!is_array($checked)) {
-            $checked = [];
-        }
-
-        // Validate input
-        if (empty($optionvals)) {
-            $html = '<div class="rounded-md bg-yellow-50 p-4"><div class="text-sm text-yellow-800">No options available for ' . htmlspecialchars($name) . '</div></div>';
-            if ($this->use_deferred_output) {
-                $this->deferred_output[$name] = $html;
-            } else {
-                echo $html;
-            }
-            return;
-        }
-
-        if ($type === 'radio') {
-            if (is_array($checked) && count($checked) > 1) {
-                throw new DisplayableUserException('A radio field cannot have more than one checked value.');
-            }
-            if ($readonly) {
-                throw new DisplayableUserException('A radio field cannot have read only values.');
-            }
-        } elseif ($type !== 'checkbox') {
-            throw new DisplayableUserException('Invalid checkbox list type.');
+        if (empty($data['options_list'])) {
+            return '<div class="rounded-md bg-yellow-50 p-4"><div class="text-sm text-yellow-800">No options available for ' . htmlspecialchars($data['name']) . '</div></div>';
         }
 
         $html = '<div id="' . htmlspecialchars($id) . '_container" class="mb-4">';
-        if ($label) {
-            $html .= '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<div class="mt-2 space-y-2">';
 
-        // Standard convention: $optionvals is [value => label]
-        // $key is the value to submit, $value is the display label
-        foreach ($optionvals as $key => $value) {
+        foreach ($data['options_list'] as $key => $value) {
             $uniqid = $id . '_' . htmlspecialchars($key);
-            $is_checked = in_array($key, $checked) ? 'checked="checked"' : '';
-            $is_disabled = in_array($key, $disabled) ? 'disabled="disabled"' : '';
+            $is_checked = in_array($key, $data['checked']) ? 'checked="checked"' : '';
+            $is_disabled = in_array($key, $data['disabled']) ? 'disabled="disabled"' : '';
 
-            // Readonly means it cannot be changed but is submitted
-            if (in_array($key, $readonly)) {
-                if (in_array($key, $checked)) {
-                    $html .= '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" />';
+            if (in_array($key, $data['readonly'])) {
+                if (in_array($key, $data['checked'])) {
+                    $html .= '<input type="hidden" name="' . htmlspecialchars($data['name']) . '[]" value="' . htmlspecialchars($key) . '" />';
                 }
                 $html .= '<div class="relative flex items-center">';
-                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
+                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($data['type']) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($data['name']) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
                 $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($value) . '</label>';
                 $html .= '</div>';
             } else {
                 $html .= '<div class="relative flex items-center">';
-                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
+                $html .= '<input class="h-4 w-4 rounded border-gray-300 text-indigo-600" type="' . htmlspecialchars($data['type']) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($data['name']) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
                 $html .= '<label for="' . htmlspecialchars($uniqid) . '" class="ml-3 block text-sm text-gray-700">' . htmlspecialchars($value) . '</label>';
                 $html .= '</div>';
             }
@@ -895,45 +603,31 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= '</div>';
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a time input field (hour:minute AM/PM) with Tailwind styling
+     * Render a time input field (hour:minute AM/PM) with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareTimeData()
+     * @return string HTML output
      */
-    protected function outputTimeInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
-        $class = $options['class'] ?? 'mt-1 block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
-        $id = $options['id'] ?? $name;
+    protected function renderTimeInput($data) {
+        $class = $data['class'] ?: 'mt-1 block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
+        $id = $data['id'];
         $hour_id = $id . '_hour';
         $minute_id = $id . '_minute';
         $ampm_id = $id . '_ampm';
 
-        $has_errors = isset($this->errors[$name]);
         $input_class = $class;
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $input_class .= ' border-red-500';
         }
 
-        // Use centralized time parsing helper
-        $parsed = $this->parseTimeValue($value);
-        $hour = $parsed['hour'];
-        $minute = $parsed['minute'];
-        $ampm = $parsed['ampm'];
-
         $html = '<div class="mb-4">';
 
-        if ($label) {
-            $html .= '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<div class="flex gap-2 mt-1">';
@@ -946,9 +640,9 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($input_class) . '" style="width: 80px;"';
         $html .= ' min="1" max="12"';
         $html .= ' placeholder="HH"';
-        $html .= ' value="' . htmlspecialchars($hour) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
-        if (!empty($options['disabled'])) $html .= ' disabled';
+        $html .= ' value="' . htmlspecialchars($data['hour']) . '"';
+        if ($data['readonly']) $html .= ' readonly';
+        if ($data['disabled']) $html .= ' disabled';
         $html .= '>';
         $html .= '</div>';
 
@@ -965,9 +659,9 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($input_class) . '" style="width: 80px;"';
         $html .= ' min="0" max="59"';
         $html .= ' placeholder="MM"';
-        $html .= ' value="' . htmlspecialchars($minute) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
-        if (!empty($options['disabled'])) $html .= ' disabled';
+        $html .= ' value="' . htmlspecialchars($data['minute']) . '"';
+        if ($data['readonly']) $html .= ' readonly';
+        if ($data['disabled']) $html .= ' disabled';
         $html .= '>';
         $html .= '</div>';
 
@@ -977,84 +671,76 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' id="' . htmlspecialchars($ampm_id) . '"';
         $html .= ' name="' . htmlspecialchars($id . '_ampm') . '"';
         $html .= ' class="' . htmlspecialchars($input_class) . '"';
-        if (!empty($options['readonly'])) $html .= ' disabled';
-        if (!empty($options['disabled'])) $html .= ' disabled';
+        if ($data['readonly']) $html .= ' disabled';
+        if ($data['disabled']) $html .= ' disabled';
         $html .= '>';
-        $html .= '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
-        $html .= '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
+        $html .= '<option value="AM"' . ($data['ampm'] === 'AM' ? ' selected' : '') . '>AM</option>';
+        $html .= '<option value="PM"' . ($data['ampm'] === 'PM' ? ' selected' : '') . '>PM</option>';
         $html .= '</select>';
         $html .= '</div>';
 
         // Hidden field to store the actual time value
         $html .= '<input type="hidden"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
         $html .= '>';
 
         $html .= '</div>';
 
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $html .= '<div class="mt-1 text-sm text-red-600">';
-            foreach ($this->errors[$name] as $error) {
+            foreach ($data['errors'] as $error) {
                 $html .= htmlspecialchars($error) . '<br>';
             }
             $html .= '</div>';
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</small>';
+        if ($data['helptext']) {
+            $html .= '<small class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
-
-        // Output shared JavaScript from base class
+        // Capture and append the shared time input JS
+        ob_start();
         $this->outputTimeInputJavaScript();
+        $html .= ob_get_clean();
 
-        // Add data attributes to trigger the sync
-        $sync_html = '<div data-time-hour="' . htmlspecialchars($hour_id) . '"';
-        $sync_html .= ' data-time-minute="' . htmlspecialchars($minute_id) . '"';
-        $sync_html .= ' data-time-ampm="' . htmlspecialchars($ampm_id) . '"';
-        $sync_html .= ' data-time-hidden="' . htmlspecialchars($id) . '"';
-        $sync_html .= ' style="display:none;"></div>';
-        echo $sync_html;
+        // Sync div for JS
+        $html .= '<div data-time-hour="' . htmlspecialchars($hour_id) . '"';
+        $html .= ' data-time-minute="' . htmlspecialchars($minute_id) . '"';
+        $html .= ' data-time-ampm="' . htmlspecialchars($ampm_id) . '"';
+        $html .= ' data-time-hidden="' . htmlspecialchars($id) . '"';
+        $html .= ' style="display:none;"></div>';
+
+        return $html;
     }
 
     /**
-     * Output separate date and time input fields with Tailwind styling
+     * Render separate date and time input fields with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareDateTimeData()
+     * @return string HTML output
      */
-    protected function outputDateTimeInput($name, $label, $options) {
-        // Derive date and time field names from the main name
-        $date_name = $name . '_dateinput';
-        $time_name = $name . '_timeinput';
-        $date_value = $options['value'] ?? $options['date_value'] ?? '';
-        $time_value = $options['time_value'] ?? '';
-        $class = $options['class'] ?? 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
-        $date_id = $options['date_id'] ?? $date_name;
-        $time_id = $options['time_id'] ?? $time_name;
-
-        // Extract date from datetime value if provided
-        if ($date_value && strpos($date_value, ' ') !== false) {
-            list($date_value, $time_value) = explode(' ', $date_value, 2);
-        }
+    protected function renderDateTimeInput($data) {
+        $class = $data['class'] ?: 'mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500';
+        $date_name = $data['date_name'];
+        $time_name = $data['time_name'];
+        $date_id = $date_name;
+        $time_id = $time_name;
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
-            $html .= '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label class="block text-sm font-medium text-gray-700">' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<div class="grid grid-cols-2 gap-4 mt-1">';
 
         // Date input
         $date_class = $class;
-        if (isset($this->errors[$date_name])) {
+        if (!empty($data['date_errors'])) {
             $date_class .= ' border-red-500';
         }
 
@@ -1063,30 +749,23 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' name="' . htmlspecialchars($date_name) . '"';
         $html .= ' id="' . htmlspecialchars($date_id) . '"';
         $html .= ' class="' . htmlspecialchars($date_class) . '"';
-        $html .= ' value="' . htmlspecialchars($date_value) . '"';
-        if (!empty($options['readonly'])) {
+        $html .= ' value="' . htmlspecialchars($data['date_value']) . '"';
+        if ($data['readonly']) {
             $html .= ' readonly';
         }
         $html .= '>';
 
-        if (isset($this->errors[$date_name])) {
-            foreach ($this->errors[$date_name] as $error) {
-                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
-            }
+        foreach ($data['date_errors'] as $error) {
+            $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
         }
         $html .= '</div>';
 
-        // Time input - use centralized parseTimeValue helper
+        // Time input
         $html .= '<div>';
         $time_class = $class;
-        if (isset($this->errors[$time_name])) {
+        if (!empty($data['time_errors'])) {
             $time_class .= ' border-red-500';
         }
-
-        $parsed = $this->parseTimeValue($time_value);
-        $hour = $parsed['hour'];
-        $minute = $parsed['minute'];
-        $ampm = $parsed['ampm'];
 
         $time_hour_id = $time_id . '_hour';
         $time_minute_id = $time_id . '_minute';
@@ -1098,8 +777,8 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' name="' . htmlspecialchars($time_name . '_hour') . '"';
         $html .= ' class="' . htmlspecialchars($time_class) . '" style="width: 80px;"';
         $html .= ' min="1" max="12" placeholder="HH"';
-        $html .= ' value="' . htmlspecialchars($hour) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
+        $html .= ' value="' . htmlspecialchars($data['hour']) . '"';
+        if ($data['readonly']) $html .= ' readonly';
         $html .= '>';
 
         $html .= '<span class="flex items-center font-bold">:</span>';
@@ -1109,81 +788,75 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= ' name="' . htmlspecialchars($time_name . '_minute') . '"';
         $html .= ' class="' . htmlspecialchars($time_class) . '" style="width: 80px;"';
         $html .= ' min="0" max="59" placeholder="MM"';
-        $html .= ' value="' . htmlspecialchars($minute) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
+        $html .= ' value="' . htmlspecialchars($data['minute']) . '"';
+        if ($data['readonly']) $html .= ' readonly';
         $html .= '>';
 
         $html .= '<select';
         $html .= ' id="' . htmlspecialchars($time_ampm_id) . '"';
         $html .= ' name="' . htmlspecialchars($time_name . '_ampm') . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        if (!empty($options['readonly'])) $html .= ' disabled';
+        if ($data['readonly']) $html .= ' disabled';
         $html .= '>';
-        $html .= '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
-        $html .= '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
+        $html .= '<option value="AM"' . ($data['ampm'] === 'AM' ? ' selected' : '') . '>AM</option>';
+        $html .= '<option value="PM"' . ($data['ampm'] === 'PM' ? ' selected' : '') . '>PM</option>';
         $html .= '</select>';
         $html .= '</div>';
 
         $html .= '<input type="hidden"';
         $html .= ' id="' . htmlspecialchars($time_id) . '"';
-        $html .= ' value="' . htmlspecialchars($time_value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['time_value']) . '"';
         $html .= '>';
 
-        if (isset($this->errors[$time_name])) {
-            foreach ($this->errors[$time_name] as $error) {
-                $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
-            }
+        foreach ($data['time_errors'] as $error) {
+            $html .= '<p class="mt-1 text-sm text-red-600">' . htmlspecialchars($error) . '</p>';
         }
         $html .= '</div>';
 
         $html .= '</div>';
 
-        if (!empty($options['helptext'])) {
-            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</p>';
+        if ($data['helptext']) {
+            $html .= '<p class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</p>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
+        return $html;
     }
 
-
     /**
-     * Output a rich text editor (Trumbowyg) field with Tailwind styling
+     * Render a rich text editor (Trumbowyg) field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareTextboxData()
      */
-    protected function outputTextbox($name, $label, $options) {
-        $value = $options['value'] ?? '';
-        $id = $options['id'] ?? $name;
-        $class = $options['class'] ?? 'trumbowyg-editor';
+    protected function renderTextbox($data) {
+        $id = $data['id'];
+        $class = $data['class'] ?: 'trumbowyg-editor';
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<textarea';
         $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        if (!empty($options['readonly'])) {
+        if ($data['readonly']) {
             $html .= ' readonly';
         }
-        if (!empty($options['disabled'])) {
+        if ($data['disabled']) {
             $html .= ' disabled';
         }
         $html .= '>';
-        $html .= htmlspecialchars($value);
+        $html .= htmlspecialchars($data['value']);
         $html .= '</textarea>';
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</small>';
+        if ($data['helptext']) {
+            $html .= '<small class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
@@ -1200,31 +873,29 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= '});';
         $html .= '</script>';
 
-        $this->handleOutput($name, $html);
+        return $html;
     }
 
     /**
-     * Output an image input field with Tailwind styling
+     * Render an image input field with Tailwind styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareImageData()
+     * @return string HTML output
      */
-    protected function outputImageInput($name, $label, $options) {
-        $value = $options['value'] ?? '';
-        $id = $options['id'] ?? $name;
-        $class = $options['class'] ?? 'mt-1 block w-full rounded-md border border-gray-300 shadow-sm';
+    protected function renderImageInput($data) {
+        $id = $data['id'];
+        $value = $data['value'];
 
         $html = '<div class="mb-4">';
 
-        if ($label) {
+        if ($data['label']) {
             $html .= '<label for="' . htmlspecialchars($id) . '" class="block text-sm font-medium text-gray-700">';
-            $html .= htmlspecialchars($label);
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '<input type="hidden"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="image-input-hidden"';
         $html .= ' value="' . htmlspecialchars($value) . '"';
@@ -1242,12 +913,12 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         $html .= '</button>';
         $html .= '</div>';
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="mt-1 text-sm text-gray-500">' . htmlspecialchars($options['helptext']) . '</small>';
+        if ($data['helptext']) {
+            $html .= '<small class="mt-1 text-sm text-gray-500">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
+        return $html;
     }
 }

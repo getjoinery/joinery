@@ -1405,3 +1405,83 @@ FormWriter provides:
 - [Validation System](validation.md) - Complete validation documentation
 - [Admin Pages](admin_pages.md) - Using FormWriter in admin interfaces
 - Example forms: `/utils/forms_example_bootstrapv2.php`
+
+---
+
+## 10. Architecture: Base Class vs. Renderers
+
+The FormWriter v2 system uses a **prepare/render split** to ensure behavioral consistency across all themes.
+
+### How It Works
+
+All behavioral logic (value resolution, state determination, option normalization) lives in `FormWriterV2Base`. Subclasses are responsible **only** for generating themed HTML.
+
+```
+FormWriterV2Base (concrete output methods)
+  └── outputCheckboxInput($name, $label, $options)
+        ├── prepareCheckboxData(...)  →  $data array  [ALL logic here]
+        ├── renderCheckboxInput($data)  ←  abstract, subclass implements
+        └── handleOutput(...)
+
+FormWriterV2HTML5::renderCheckboxInput($data)     ── HTML only
+FormWriterV2Bootstrap::renderCheckboxInput($data) ── HTML only
+FormWriterV2Tailwind::renderCheckboxInput($data)  ── HTML only
+```
+
+### Creating a New Theme
+
+Implement only `render*()` methods. Never implement `output*()` methods. The base class handles all data preparation.
+
+```php
+class FormWriterV2MyTheme extends FormWriterV2Base {
+    protected function renderTextInput($data) {
+        $class = $data['class'] ?: 'my-input-class';
+        $html = '<div class="my-wrapper">';
+        $html .= '<label>' . htmlspecialchars($data['label']) . '</label>';
+        $html .= '<input type="' . htmlspecialchars($data['type']) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
+        if ($data['required']) $html .= ' required';
+        if ($data['disabled']) $html .= ' disabled';
+        $html .= '>';
+        $html .= '</div>';
+        return $html;
+    }
+    // ... implement all other render*() methods
+}
+```
+
+### $data Array Keys per Field Type
+
+| Method | Key fields in `$data` |
+|--------|----------------------|
+| `renderTextInput` | `name, label, id, value, type, placeholder, class, readonly, disabled, autofocus, required, autocomplete, onchange, pattern, min, max, step, minlength, maxlength, prepend, has_errors, errors, helptext` |
+| `renderPasswordInput` | Same as textInput + `strength_meter` |
+| `renderNumberInput` | Same as textInput (type='number') |
+| `renderDropInput` | `name, label, id, value, options_list ([value=>label]), empty_option, class, multiple, disabled, required, onchange, ajaxendpoint, has_errors, errors, helptext, visibility_rules, custom_script` |
+| `renderCheckboxInput` | `name, label, id, checked_value, is_checked, class, disabled, required, onchange, has_errors, errors, helptext, visibility_rules, custom_script` |
+| `renderRadioInput` | `name, label, value, options_list, class, disabled, required, onchange, has_errors, errors, helptext` |
+| `renderDateInput` | `name, label, id, value (YYYY-MM-DD), class, min, max, readonly, disabled, required, onchange, has_errors, errors, helptext` |
+| `renderTimeInput` | `name, label, id, value, hour, minute, ampm, class, readonly, disabled, has_errors, errors, helptext` |
+| `renderDateTimeInput` | `name, label, date_name, time_name, date_value, time_value, hour, minute, ampm, class, readonly, disabled, date_errors, time_errors, helptext` |
+| `renderFileInput` | `name, label, id, class, accept, multiple, disabled, required, onchange, has_errors, errors, helptext` |
+| `renderHiddenInput` | `name, id, value` |
+| `renderSubmitButton` | `name, label, id, class, disabled, onclick` |
+| `renderTextarea` | `name, label, id, value, placeholder, class, rows, cols, readonly, disabled, required, minlength, maxlength, onchange, has_errors, errors, helptext` |
+| `renderCheckboxList` | `name, label, id, options_list, checked (array), disabled (array), readonly (array), type, has_errors, errors, helptext` |
+| `renderTextbox` | `name, label, id, value, class, rows, htmlmode, readonly, disabled, has_errors, errors, helptext` |
+| `renderImageInput` | `name, label, id, value, images, preview_size, class, disabled, has_errors, errors, helptext` |
+
+### Adding a New Option
+
+To add a new option (e.g., `'autocapitalize'`), change only one place — the `prepare*Data()` method in `FormWriterV2Base`. All three themes automatically receive it in `$data` and can use it in their renderer.
+
+```php
+// In FormWriterV2Base::prepareTextData():
+'autocapitalize' => $options['autocapitalize'] ?? '',
+
+// In any renderer:
+if ($data['autocapitalize']) {
+    $html .= ' autocapitalize="' . htmlspecialchars($data['autocapitalize']) . '"';
+}
+```
