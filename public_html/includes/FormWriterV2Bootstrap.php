@@ -4,7 +4,9 @@
  *
  * Bootstrap-themed form field output
  *
- * @version 2.1.1
+ * @version 2.3.0
+ * @changelog 2.3.0 - Phase 2: shared AJAX script, visibility moved to base, buildCommonAttributes in renderTextInput
+ * @changelog 2.2.0 - Refactored to prepare/render split: output*() in base, render*() here
  * @changelog 2.1.1 - outputTextInput: support 'type' option; outputCheckboxInput: unified checked logic; outputDateInput: isset for min/max; outputPasswordInput: conditional placeholder
  */
 
@@ -17,228 +19,167 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
      */
     private static $trumbowyg_script_output = false;
 
-    /**
-     * Output a text input field with Bootstrap styling
-     *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputTextInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $placeholder = $options['placeholder'] ?? '';
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-        $prepend = $options['prepend'] ?? '';  // Bootstrap input-group prepend text
+    // ── Render methods (pure HTML generation) ────────────────────────────────
 
-        // Determine if field has errors
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+    /**
+     * Render a text input field with Bootstrap styling
+     *
+     * @param array $data Prepared field data from prepareTextData()
+     * @return string HTML output
+     */
+    protected function renderTextInput($data) {
+        $class = $data['class'] ?: 'form-control';
+        if ($data['has_errors']) {
             $class .= ' is-invalid';
         }
 
-        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group mb-3">';
+        $html = '<div id="' . htmlspecialchars($data['name']) . '_container" class="form-group mb-3">';
 
-        // Output label
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
         }
 
-        // Open input-group if prepend text is provided
-        if ($prepend) {
+        if ($data['prepend']) {
             $html .= '<div class="input-group">';
-            $html .= '<div class="input-group-text">' . htmlspecialchars($prepend) . '</div>';
+            $html .= '<div class="input-group-text">' . htmlspecialchars($data['prepend']) . '</div>';
         }
 
-        $type = $options['type'] ?? 'text';
-
-        // Output input
-        $html .= '<input type="' . htmlspecialchars($type) . '"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= '<input type="' . htmlspecialchars($data['type']) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
 
-        // Only show placeholder if field is empty
-        if ($placeholder && !$value) {
-            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        if ($data['placeholder']) {
+            $html .= ' placeholder="' . htmlspecialchars($data['placeholder']) . '"';
         }
-        if (!empty($options['readonly'])) {
-            $html .= ' readonly';
-        }
-        if (!empty($options['disabled'])) {
-            $html .= ' disabled';
-        }
-        if (!empty($options['autofocus'])) {
-            $html .= ' autofocus';
-        }
-        if (!empty($options['autocomplete'])) {
-            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
-        }
-        if (!empty($options['onchange'])) {
-            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
-        }
-        if (!empty($options['required'])) {
-            $html .= ' required';
-        }
+        $html .= $this->buildCommonAttributes($data);
 
         $html .= '>';
 
-        // Close input-group if prepend text was provided
-        if ($prepend) {
+        if ($data['prepend']) {
             $html .= '</div>';  // Close input-group
         }
 
-        // Display any errors for this field
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        // Display help text if provided
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a number input field with Bootstrap styling
+     * Render a number input field with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options (supports min, max, step, placeholder, required, helptext)
+     * @param array $data Prepared field data from prepareNumberData()
+     * @return string HTML output
      */
-    protected function outputNumberInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $placeholder = $options['placeholder'] ?? '';
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-
-        // Determine if field has errors
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+    protected function renderNumberInput($data) {
+        $class = $data['class'] ?: 'form-control';
+        if ($data['has_errors']) {
             $class .= ' is-invalid';
         }
 
-        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group mb-3">';
+        $html = '<div id="' . htmlspecialchars($data['name']) . '_container" class="form-group mb-3">';
 
-        // Output label
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
         }
 
-        // Output input
         $html .= '<input type="number"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
         $html .= ' inputmode="numeric"';
 
-        if ($placeholder && !$value) {
-            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        if ($data['placeholder']) {
+            $html .= ' placeholder="' . htmlspecialchars($data['placeholder']) . '"';
         }
-        if (isset($options['min'])) {
-            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
+        if (isset($data['min'])) {
+            $html .= ' min="' . htmlspecialchars($data['min']) . '"';
         }
-        if (isset($options['max'])) {
-            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
+        if (isset($data['max'])) {
+            $html .= ' max="' . htmlspecialchars($data['max']) . '"';
         }
-        if (isset($options['step'])) {
-            $html .= ' step="' . htmlspecialchars($options['step']) . '"';
+        if (isset($data['step'])) {
+            $html .= ' step="' . htmlspecialchars($data['step']) . '"';
         }
-        if (!empty($options['readonly'])) {
+        if (!empty($data['readonly'])) {
             $html .= ' readonly';
         }
-        if (!empty($options['disabled'])) {
+        if (!empty($data['disabled'])) {
             $html .= ' disabled';
         }
-        if (!empty($options['required'])) {
+        if (!empty($data['required'])) {
             $html .= ' required';
         }
 
         $html .= '>';
 
-        // Display any errors for this field
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        // Display help text if provided
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a password input field with Bootstrap styling
+     * Render a password input field with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from preparePasswordData()
+     * @return string HTML output
      */
-    protected function outputPasswordInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $placeholder = $options['placeholder'] ?? '';
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+    protected function renderPasswordInput($data) {
+        $class = $data['class'] ?: 'form-control';
+        if ($data['has_errors']) {
             $class .= ' is-invalid';
         }
 
         $html = '<div class="form-group mb-3">';
 
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<input type="password"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
 
-        // Only show placeholder if field is empty
-        if ($placeholder && !$value) {
-            $html .= ' placeholder="' . htmlspecialchars($placeholder) . '"';
+        if ($data['placeholder']) {
+            $html .= ' placeholder="' . htmlspecialchars($data['placeholder']) . '"';
         }
-        if (!empty($options['readonly'])) {
+        if (!empty($data['readonly'])) {
             $html .= ' readonly';
         }
-        if (!empty($options['disabled'])) {
+        if (!empty($data['disabled'])) {
             $html .= ' disabled';
         }
-        if (!empty($options['autocomplete'])) {
-            $html .= ' autocomplete="' . htmlspecialchars($options['autocomplete']) . '"';
+        if (!empty($data['autocomplete'])) {
+            $html .= ' autocomplete="' . htmlspecialchars($data['autocomplete']) . '"';
         }
 
         $html .= '>';
 
-        // Password strength meter if requested
-        if (!empty($options['strength_meter'])) {
+        if (!empty($data['strength_meter'])) {
             $html .= '<div class="password-strength-meter mt-2">';
             $html .= '<div class="progress" style="height: 5px;">';
             $html .= '<div class="progress-bar" role="progressbar" style="width: 0%"></div>';
@@ -247,87 +188,62 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $html .= '</div>';
         }
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a textarea field with Bootstrap styling
+     * Render a select dropdown field with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareDropData()
+     * @return string HTML output
      */
-    /**
-     * Output a select dropdown field with Bootstrap styling
-     *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputDropInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-        $select_options = $options['options'] ?? [];
-        $ajaxendpoint = $options['ajaxendpoint'] ?? '';
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+    protected function renderDropInput($data) {
+        $class = $data['class'] ?: 'form-control';
+        if ($data['has_errors']) {
             $class .= ' is-invalid';
         }
 
-        $html = '<div id="' . htmlspecialchars($name) . '_container" class="form-group mb-3">';
+        $html = '<div id="' . htmlspecialchars($data['name']) . '_container" class="form-group mb-3">';
 
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<select';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
 
-        if (!empty($options['multiple'])) {
+        if (!empty($data['multiple'])) {
             $html .= ' multiple';
         }
-        if (!empty($options['disabled'])) {
+        if (!empty($data['disabled'])) {
             $html .= ' disabled';
         }
-        if (!empty($options['onchange'])) {
-            $html .= ' onchange="' . htmlspecialchars($options['onchange']) . '"';
+        if (!empty($data['onchange'])) {
+            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
         }
 
         $html .= '>';
 
-        // Default empty option
-        if (!empty($options['empty_option'])) {
-            // If empty_option is boolean true, show "Select..." as default text
-            // If it's a string, use that string as the label
-            $empty_label = ($options['empty_option'] === true) ? 'Select...' : $options['empty_option'];
-            $html .= '<option value="">' . htmlspecialchars($empty_label) . '</option>';
+        if ($data['empty_option'] !== null) {
+            $html .= '<option value="">' . htmlspecialchars($data['empty_option']) . '</option>';
         }
 
-        // Output options - Standard convention: [id => label]
-        // Convert boolean values to int for comparison (PostgreSQL returns boolean as true/false)
-        $compare_value = is_bool($value) ? ($value ? 1 : 0) : $value;
-        foreach ($select_options as $opt_value => $opt_label) {
+        $compare_value = $data['value'];
+        foreach ($data['options_list'] as $opt_value => $opt_label) {
             $html .= '<option value="' . htmlspecialchars($opt_value) . '"';
             if ((string)$compare_value === (string)$opt_value) {
                 $html .= ' selected';
@@ -337,251 +253,105 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
         $html .= '</select>';
 
-        // AJAX dropdown support - output inline script
-        if (!empty($ajaxendpoint)) {
-            $html .= '<script>
-(function() {
-  class AjaxSearchSelect {
-    constructor(selectEl, ajaxUrl) {
-      this.select = selectEl;
-      this.ajaxUrl = ajaxUrl;
-      this.cache = {};
-      this.debounceTimer = null;
-
-      const input = document.createElement(\'input\');
-      input.type = \'text\';
-      input.className = selectEl.className;
-      // Don\'t transfer name - keep it on the select element so it submits the ID
-      input.placeholder = \'Type to search...\';
-
-      const list = document.createElement(\'datalist\');
-      list.id = selectEl.id + \'_list\';
-      input.setAttribute(\'list\', list.id);
-
-      selectEl.style.display = \'none\';
-      // Keep name on select so it submits the ID, not the input value
-      selectEl.parentNode.insertBefore(input, selectEl);
-      selectEl.parentNode.insertBefore(list, selectEl);
-
-      this.input = input;
-      this.list = list;
-      this.data = [];
-
-      if (selectEl.value) {
-        input.value = selectEl.options[selectEl.selectedIndex].text;
-      }
-
-      input.addEventListener(\'input\', (e) => this.search(e.target.value));
-      input.addEventListener(\'change\', (e) => {
-        const inputVal = e.target.value.trim();
-        if (!inputVal) {
-          selectEl.value = \'\';
-        } else {
-          // When user selects from datalist, find the matching item and update hidden select
-          const matching = this.data.find(item => item.text === inputVal);
-          if (matching) {
-            // Add the option to the select if it doesn\'t exist
-            let option = selectEl.querySelector(\'option[value="\' + matching.id + \'"]\');
-            if (!option) {
-              option = document.createElement(\'option\');
-              option.value = matching.id;
-              option.textContent = matching.text;
-              selectEl.innerHTML = \'\';  // Clear previous options
-              selectEl.appendChild(option);
-            }
-            selectEl.value = matching.id;
-          }
-        }
-        selectEl.dispatchEvent(new Event(\'change\', { bubbles: true }));
-      });
-    }
-
-    search(query) {
-      clearTimeout(this.debounceTimer);
-      if (query.length < 3) {
-        this.list.innerHTML = \'\';
-        this.data = [];
-        return;
-      }
-
-      if (this.cache[query]) {
-        this.updateList(this.cache[query]);
-        return;
-      }
-
-      this.debounceTimer = setTimeout(() => {
-        // Build URL - use & if URL already has ?, otherwise use ?
-        const separator = this.ajaxUrl.includes(\'?\') ? \'&\' : \'?\';
-        fetch(this.ajaxUrl + separator + \'q=\' + encodeURIComponent(query))
-          .then(r => r.json())
-          .then(data => {
-            this.cache[query] = data;
-            this.updateList(data);
-          });
-      }, 250);
-    }
-
-    updateList(data) {
-      this.data = data;
-      this.list.innerHTML = \'\';
-      data.forEach(item => {
-        const opt = document.createElement(\'option\');
-        opt.value = item.text;  // Display the full text (name - email)
-        opt.dataset.id = item.id;  // Store the ID for later retrieval
-        this.list.appendChild(opt);
-      });
-    }
-  }
-
-  document.addEventListener(\'DOMContentLoaded\', () => {
-    const select = document.getElementById(\'' . htmlspecialchars($id) . '\');
-    if (select) {
-      new AjaxSearchSelect(select, \'' . htmlspecialchars($ajaxendpoint) . '\');
-    }
-  });
-})();
-</script>';
+        // AJAX dropdown support
+        if (!empty($data['ajaxendpoint'])) {
+            $html .= $this->buildAjaxSelectScript($data['id'], $data['ajaxendpoint']);
         }
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
-        }
-
-        // Check for visibility rules or custom scripts in options
-        if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
-            $html .= $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
-        } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
-            $html .= $this->generateFieldScript($id, $options['custom_script']);
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a checkbox input field with Bootstrap styling
+     * Render a checkbox input field with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareCheckboxData()
+     * @return string HTML output
      */
-    protected function outputCheckboxInput($name, $label, $options) {
-        $checked_value = $options['checked_value'] ?? '1';
-        $value = $options['value'] ?? $checked_value;  // HTML submit value
-
-        // Determine checked state:
-        // 'checked' option (boolean) takes precedence; otherwise compare 'value'/stored value against checked_value
-        if (isset($options['checked'])) {
-            $checked = !empty($options['checked']);
-        } else {
-            $current_value = isset($options['value']) ? $options['value'] : ($this->values[$name] ?? '');
-            $checked = ((string)$current_value === (string)$checked_value);
-        }
-
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
-
+    protected function renderCheckboxInput($data) {
         $html = '';
         $html .= '<div class="form-group mb-3">';
         $html .= '<div class="form-check">';
 
         $html .= '<input type="checkbox"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' class="form-check-input' . ($has_errors ? ' is-invalid' : '') . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
+        $html .= ' class="form-check-input' . ($data['has_errors'] ? ' is-invalid' : '') . '"';
+        $html .= ' value="' . htmlspecialchars($data['checked_value']) . '"';
 
-        if ($checked) {
+        if ($data['is_checked']) {
             $html .= ' checked';
         }
-        if (!empty($options['disabled'])) {
+        if (!empty($data['disabled'])) {
             $html .= ' disabled';
         }
 
         $html .= '>';
 
-        if ($label) {
-            $html .= '<label class="form-check-label" for="' . htmlspecialchars($id) . '">';
-            $html .= htmlspecialchars($label);
+        if ($data['label']) {
+            $html .= '<label class="form-check-label" for="' . htmlspecialchars($data['id']) . '">';
+            $html .= htmlspecialchars($data['label']);
             $html .= '</label>';
         }
 
         $html .= '</div>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
-
-        // Check for visibility rules or custom scripts in options
-        if (isset($options['visibility_rules']) && !empty($options['visibility_rules'])) {
-            echo $this->generateVisibilityScript($name, $id, $options['visibility_rules']);
-        } elseif (isset($options['custom_script']) && !empty($options['custom_script'])) {
-            echo $this->generateFieldScript($id, $options['custom_script']);
-        }
+        return $html;
     }
 
     /**
-     * Output radio input fields with Bootstrap styling
+     * Render radio input fields with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label (group label)
-     * @param array $options Field options (must include 'options' key)
+     * @param array $data Prepared field data from prepareRadioData()
+     * @return string HTML output
      */
-    protected function outputRadioInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $radio_options = $options['options'] ?? [];
-
-        $has_errors = isset($this->errors[$name]);
-
+    protected function renderRadioInput($data) {
         $html = '';
         $html .= '<div class="form-group mb-3">';
 
-        // Group label
-        if ($label) {
-            $html .= '<label>' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label>' . htmlspecialchars($data['label']) . '</label>';
         }
 
-        // Wrap radio buttons in errorplacement div for proper error positioning
         $html .= '<div class="errorplacement">';
 
-        // Output each radio option
-        foreach ($radio_options as $opt_value => $opt_label) {
-            $id = $name . '_' . $opt_value;
+        foreach ($data['options_list'] as $opt_value => $opt_label) {
+            $id = $data['name'] . '_' . $opt_value;
 
             $html .= '<div class="form-check">';
             $html .= '<input type="radio"';
-            $html .= ' name="' . htmlspecialchars($name) . '"';
+            $html .= ' name="' . htmlspecialchars($data['name']) . '"';
             $html .= ' id="' . htmlspecialchars($id) . '"';
-            $html .= ' class="form-check-input' . ($has_errors ? ' is-invalid' : '') . '"';
+            $html .= ' class="form-check-input' . ($data['has_errors'] ? ' is-invalid' : '') . '"';
             $html .= ' value="' . htmlspecialchars($opt_value) . '"';
 
-            if ((string)$value === (string)$opt_value) {
+            if ((string)$data['value'] === (string)$opt_value) {
                 $html .= ' checked';
             }
-            if (!empty($options['disabled'])) {
+            if (!empty($data['disabled'])) {
                 $html .= ' disabled';
             }
 
@@ -596,113 +366,100 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
         $html .= '</div>'; // End errorplacement
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
+        return $html;
     }
 
     /**
-     * Output a date input field with Bootstrap styling
+     * Render a date input field with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareDateData()
+     * @return string HTML output
      */
-    protected function outputDateInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+    protected function renderDateInput($data) {
+        $class = $data['class'] ?: 'form-control';
+        if ($data['has_errors']) {
             $class .= ' is-invalid';
         }
 
         $html = '';
         $html .= '<div class="form-group mb-3">';
 
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<input type="date"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
 
-        if (isset($options['min'])) {
-            $html .= ' min="' . htmlspecialchars($options['min']) . '"';
+        if (isset($data['min'])) {
+            $html .= ' min="' . htmlspecialchars($data['min']) . '"';
         }
-        if (isset($options['max'])) {
-            $html .= ' max="' . htmlspecialchars($options['max']) . '"';
+        if (isset($data['max'])) {
+            $html .= ' max="' . htmlspecialchars($data['max']) . '"';
         }
-        if (!empty($options['readonly'])) {
+        if (!empty($data['readonly'])) {
             $html .= ' readonly';
         }
-        if (!empty($options['disabled'])) {
+        if (!empty($data['disabled'])) {
             $html .= ' disabled';
         }
 
         $html .= '>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
+        return $html;
     }
 
     /**
-     * Output a time input field with Bootstrap styling
+     * Render a time input field with Bootstrap styling
+     * (stub — outputTimeInput is overridden and handles everything directly)
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareTimeData()
+     * @return string HTML output
      */
-    protected function outputTimeInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
+    protected function renderTimeInput($data) {
+        $class = $data['class'] ?: 'form-control';
+        $id = $data['id'];
         $hour_id = $id . '_hour';
         $minute_id = $id . '_minute';
         $ampm_id = $id . '_ampm';
 
-        $has_errors = isset($this->errors[$name]);
         $input_class = $class;
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $input_class .= ' is-invalid';
         }
-
-        // Use centralized time parsing helper
-        $time_components = $this->parseTimeValue($value);
-        $hour = $time_components['hour'];
-        $minute = $time_components['minute'];
-        $ampm = $time_components['ampm'];
 
         $html = '';
         $html .= '<div class="form-group mb-3">';
 
-        if ($label) {
-            $html .= '<label>' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label>' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<div class="row g-2">';
@@ -715,9 +472,9 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
         $html .= ' min="1" max="12"';
         $html .= ' placeholder="HH"';
-        $html .= ' value="' . htmlspecialchars($hour) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
-        if (!empty($options['disabled'])) $html .= ' disabled';
+        $html .= ' value="' . htmlspecialchars($data['hour']) . '"';
+        if ($data['readonly']) $html .= ' readonly';
+        if ($data['disabled']) $html .= ' disabled';
         $html .= '>';
         $html .= '</div>';
 
@@ -734,9 +491,9 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($input_class) . '" style="width: 120px;"';
         $html .= ' min="0" max="59"';
         $html .= ' placeholder="MM"';
-        $html .= ' value="' . htmlspecialchars($minute) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
-        if (!empty($options['disabled'])) $html .= ' disabled';
+        $html .= ' value="' . htmlspecialchars($data['minute']) . '"';
+        if ($data['readonly']) $html .= ' readonly';
+        if ($data['disabled']) $html .= ' disabled';
         $html .= '>';
         $html .= '</div>';
 
@@ -746,83 +503,74 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' id="' . htmlspecialchars($ampm_id) . '"';
         $html .= ' name="' . htmlspecialchars($id . '_ampm') . '"';
         $html .= ' class="form-select"';
-        if (!empty($options['readonly'])) $html .= ' disabled';
-        if (!empty($options['disabled'])) $html .= ' disabled';
+        if ($data['readonly']) $html .= ' disabled';
+        if ($data['disabled']) $html .= ' disabled';
         $html .= '>';
-        $html .= '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
-        $html .= '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
+        $html .= '<option value="AM"' . ($data['ampm'] === 'AM' ? ' selected' : '') . '>AM</option>';
+        $html .= '<option value="PM"' . ($data['ampm'] === 'PM' ? ' selected' : '') . '>PM</option>';
         $html .= '</select>';
         $html .= '</div>';
 
         // Hidden field to store the actual time value
         $html .= '<input type="hidden"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
         $html .= '>';
 
         $html .= '</div>';
 
-        if ($has_errors) {
+        if ($data['has_errors']) {
             $html .= '<div class="invalid-feedback d-block">';
-            foreach ($this->errors[$name] as $error) {
+            foreach ($data['errors'] as $error) {
                 $html .= htmlspecialchars($error) . '<br>';
             }
             $html .= '</div>';
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if ($data['helptext']) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
-
-        // Output shared JavaScript for time inputs
+        // Capture and append the shared time input JS
+        ob_start();
         $this->outputTimeInputJavaScript();
+        $html .= ob_get_clean();
 
-        // Add data attributes to trigger the sync
-        echo '<div data-time-hour="' . htmlspecialchars($hour_id) . '"';
-        echo ' data-time-minute="' . htmlspecialchars($minute_id) . '"';
-        echo ' data-time-ampm="' . htmlspecialchars($ampm_id) . '"';
-        echo ' data-time-hidden="' . htmlspecialchars($id) . '"';
-        echo ' style="display:none;"></div>';
+        // Sync div for JS
+        $html .= '<div data-time-hour="' . htmlspecialchars($hour_id) . '"';
+        $html .= ' data-time-minute="' . htmlspecialchars($minute_id) . '"';
+        $html .= ' data-time-ampm="' . htmlspecialchars($ampm_id) . '"';
+        $html .= ' data-time-hidden="' . htmlspecialchars($id) . '"';
+        $html .= ' style="display:none;"></div>';
+
+        return $html;
     }
 
     /**
-     * Output separate date and time input fields with Bootstrap styling
+     * Render separate date and time input fields with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareDateTimeData()
+     * @return string HTML output
      */
-    protected function outputDateTimeInput($name, $label, $options) {
-        // Derive date and time field names from the main name
-        $date_name = $name . '_dateinput';
-        $time_name = $name . '_timeinput';
-        $date_value = $options['value'] ?? $options['date_value'] ?? ($this->values[$name] ?? '');
-        $time_value = $options['time_value'] ?? ($this->values[$time_name] ?? '');
-        $class = $options['class'] ?? 'form-control';
-        $date_id = $options['date_id'] ?? $date_name;
-        $time_id = $options['time_id'] ?? $time_name;
+    protected function renderDateTimeInput($data) {
+        $class = $data['class'] ?: 'form-control';
 
-        // Extract date from datetime value if provided
-        if ($date_value && strpos($date_value, ' ') !== false) {
-            list($date_value, $time_value) = explode(' ', $date_value, 2);
-        }
-
-        // Use helper to parse time value
-        $time_components = $this->parseTimeValue($time_value);
-        $hour = $time_components['hour'];
-        $minute = $time_components['minute'];
-        $ampm = $time_components['ampm'];
+        $date_name = $data['date_name'];
+        $time_name = $data['time_name'];
+        $date_value = $data['date_value'];
+        $time_value = $data['time_value'];
+        $hour = $data['hour'];
+        $minute = $data['minute'];
+        $ampm = $data['ampm'];
 
         $html = '';
         $html .= '<div class="form-group mb-3">';
 
-        if ($label) {
-            $html .= '<label>' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label>' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<div class="row">';
@@ -830,22 +578,22 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
 
         // Date input
         $date_class = $class;
-        if (isset($this->errors[$date_name])) {
+        if (!empty($data['date_errors'])) {
             $date_class .= ' is-invalid';
         }
 
         $html .= '<input type="date"';
         $html .= ' name="' . htmlspecialchars($date_name) . '"';
-        $html .= ' id="' . htmlspecialchars($date_id) . '"';
+        $html .= ' id="' . htmlspecialchars($data['date_name']) . '"';
         $html .= ' class="' . htmlspecialchars($date_class) . '"';
         $html .= ' value="' . htmlspecialchars($date_value) . '"';
-        if (!empty($options['readonly'])) {
+        if (!empty($data['readonly'])) {
             $html .= ' readonly';
         }
         $html .= '>';
 
-        if (isset($this->errors[$date_name])) {
-            foreach ($this->errors[$date_name] as $error) {
+        if (!empty($data['date_errors'])) {
+            foreach ($data['date_errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
@@ -853,15 +601,15 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= '</div>';
         $html .= '<div class="col-md-6">';
 
-        // Time input - use same AM/PM format as outputTimeInput
+        // Time input - AM/PM format
         $time_class = $class;
-        if (isset($this->errors[$time_name])) {
+        if (!empty($data['time_errors'])) {
             $time_class .= ' is-invalid';
         }
 
-        $time_hour_id = $time_id . '_hour';
-        $time_minute_id = $time_id . '_minute';
-        $time_ampm_id = $time_id . '_ampm';
+        $time_hour_id = $time_name . '_hour';
+        $time_minute_id = $time_name . '_minute';
+        $time_ampm_id = $time_name . '_ampm';
 
         $html .= '<div class="row g-2">';
         $html .= '<div class="col-auto">';
@@ -871,7 +619,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
         $html .= ' min="1" max="12" placeholder="HH"';
         $html .= ' value="' . htmlspecialchars($hour) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
+        if (!empty($data['readonly'])) $html .= ' readonly';
         $html .= '>';
         $html .= '</div>';
         $html .= '<div class="col-auto" style="display: flex; align-items: center;"><strong>:</strong></div>';
@@ -882,7 +630,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' class="' . htmlspecialchars($time_class) . '" style="width: 120px;"';
         $html .= ' min="0" max="59" placeholder="MM"';
         $html .= ' value="' . htmlspecialchars($minute) . '"';
-        if (!empty($options['readonly'])) $html .= ' readonly';
+        if (!empty($data['readonly'])) $html .= ' readonly';
         $html .= '>';
         $html .= '</div>';
         $html .= '<div class="col-auto">';
@@ -890,7 +638,7 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= ' id="' . htmlspecialchars($time_ampm_id) . '"';
         $html .= ' name="' . htmlspecialchars($time_name . '_ampm') . '"';
         $html .= ' class="form-select"';
-        if (!empty($options['readonly'])) $html .= ' disabled';
+        if (!empty($data['readonly'])) $html .= ' disabled';
         $html .= '>';
         $html .= '<option value="AM"' . ($ampm === 'AM' ? ' selected' : '') . '>AM</option>';
         $html .= '<option value="PM"' . ($ampm === 'PM' ? ' selected' : '') . '>PM</option>';
@@ -899,13 +647,13 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= '</div>';
 
         $html .= '<input type="hidden"';
-        $html .= ' id="' . htmlspecialchars($time_id) . '"';
+        $html .= ' id="' . htmlspecialchars($time_name) . '"';
         $html .= ' value="' . htmlspecialchars($time_value) . '"';
         $html .= '>';
 
-        if (isset($this->errors[$time_name])) {
+        if (!empty($data['time_errors'])) {
             $html .= '<div class="invalid-feedback d-block">';
-            foreach ($this->errors[$time_name] as $error) {
+            foreach ($data['time_errors'] as $error) {
                 $html .= htmlspecialchars($error) . '<br>';
             }
             $html .= '</div>';
@@ -914,128 +662,279 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         $html .= '</div>';
         $html .= '</div>';
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
+        return $html;
     }
 
     /**
-     * Output a file input field with Bootstrap styling
+     * Render a file input field with Bootstrap styling
      *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareFileData()
+     * @return string HTML output
      */
-    protected function outputFileInput($name, $label, $options) {
-        $class = $options['class'] ?? 'form-control-file';
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
+    protected function renderFileInput($data) {
+        $class = $data['class'] ?: 'form-control-file';
+        if ($data['has_errors']) {
             $class .= ' is-invalid';
         }
 
         $html = '';
         $html .= '<div class="form-group mb-3">';
 
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
         }
 
         $html .= '<input type="file"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
 
-        if (!empty($options['accept'])) {
-            $html .= ' accept="' . htmlspecialchars($options['accept']) . '"';
+        if (!empty($data['accept'])) {
+            $html .= ' accept="' . htmlspecialchars($data['accept']) . '"';
         }
-        if (!empty($options['multiple'])) {
+        if (!empty($data['multiple'])) {
             $html .= ' multiple';
         }
-        if (!empty($options['disabled'])) {
+        if (!empty($data['disabled'])) {
             $html .= ' disabled';
         }
 
         $html .= '>';
 
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
                 $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
             }
         }
 
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
         }
 
         $html .= '</div>';
 
-        $this->handleOutput($name, $html);
+        return $html;
     }
 
     /**
-     * Output a hidden input field
+     * Render a hidden input field
+     * Note: Bootstrap override uses $options['value'] ?? '' (no values[] fallback)
      *
-     * @param string $name Field name
-     * @param array $options Field options
+     * @param array $data Prepared field data from prepareHiddenData()
+     * @return string HTML output
      */
-    protected function outputHiddenInput($name, $options) {
-        $value = $options['value'] ?? '';
-        $id = $options['id'] ?? $name;
-
+    protected function renderHiddenInput($data) {
         $html = '<input type="hidden"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
         $html .= '>';
-
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
 
     /**
-     * Output a submit button with Bootstrap styling
+     * Render a submit button with Bootstrap styling
      *
-     * @param string $name Button name
-     * @param string $label Button label
-     * @param array $options Button options
+     * @param array $data Prepared field data from prepareSubmitData()
+     * @return string HTML output
      */
-    protected function outputSubmitButton($name, $label, $options) {
-        $class = $options['class'] ?? 'btn btn-primary';
-        $id = $options['id'] ?? $name;
+    protected function renderSubmitButton($data) {
+        $class = $data['class'] ?: 'btn btn-primary';
 
         $html = '<button type="submit"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
 
-        if (!empty($options['disabled'])) {
+        if (!empty($data['disabled'])) {
             $html .= ' disabled';
         }
-        if (!empty($options['onclick'])) {
-            $html .= ' onclick="' . htmlspecialchars($options['onclick']) . '"';
+        if (!empty($data['onclick'])) {
+            $html .= ' onclick="' . htmlspecialchars($data['onclick']) . '"';
         }
 
         $html .= '>';
-        $html .= htmlspecialchars($label);
+        $html .= htmlspecialchars($data['label']);
         $html .= '</button>';
 
-        // Either echo immediately or store for deferred output
-        if ($this->use_deferred_output) {
-            $this->deferred_output[$name] = $html;
-        } else {
-            echo $html;
-        }
+        return $html;
     }
+
+    /**
+     * Render a textarea field with Bootstrap styling
+     *
+     * @param array $data Prepared field data from prepareTextareaData()
+     * @return string HTML output
+     */
+    protected function renderTextarea($data) {
+        $class = $data['class'] ?: 'form-control';
+        if ($data['has_errors']) {
+            $class .= ' is-invalid';
+        }
+
+        $html = '';
+        $html .= '<div class="form-group mb-3">';
+
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
+        }
+
+        $html .= '<textarea';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
+        $html .= ' class="' . htmlspecialchars($class) . '"';
+        $html .= ' rows="' . intval($data['rows']) . '"';
+        $html .= ' cols="' . intval($data['cols']) . '"';
+
+        if (!empty($data['readonly'])) {
+            $html .= ' readonly';
+        }
+        if (!empty($data['disabled'])) {
+            $html .= ' disabled';
+        }
+
+        $html .= '>';
+        $html .= htmlspecialchars($data['value']);
+        $html .= '</textarea>';
+
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
+        }
+
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    /**
+     * Render a textbox (rich text editor) field
+     * Delegates to the public textbox() method (which handles Trumbowyg loading)
+     *
+     * @param array $data Prepared field data from prepareTextboxData()
+     */
+    protected function renderTextbox($data) {
+        // Delegate to the public textbox() method, capturing its echoed output
+        $options = [
+            'rows' => $data['rows'],
+            'value' => $data['value'],
+            'htmlmode' => $data['htmlmode'] ? 'yes' : 'no',
+        ];
+        ob_start();
+        $this->textbox($data['name'], $data['label'], $options);
+        return ob_get_clean();
+    }
+
+    /**
+     * Render an image input field (placeholder implementation)
+     *
+     * @param array $data Prepared field data from prepareImageData()
+     * @return string HTML output
+     */
+    protected function renderImageInput($data) {
+        $class = $data['class'] ?: 'form-control';
+        if ($data['has_errors']) {
+            $class .= ' is-invalid';
+        }
+
+        $html = '';
+        $html .= '<div class="form-group mb-3">';
+
+        if ($data['label']) {
+            $html .= '<label for="' . htmlspecialchars($data['id']) . '">' . htmlspecialchars($data['label']) . '</label>';
+        }
+
+        $html .= '<input type="hidden"';
+        $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        $html .= ' id="' . htmlspecialchars($data['id']) . '"';
+        $html .= ' class="image-input-hidden"';
+        $html .= ' value="' . htmlspecialchars($data['value']) . '"';
+        $html .= '>';
+
+        if ($data['value']) {
+            $html .= '<div class="mt-2">';
+            $html .= '<img src="' . htmlspecialchars($data['value']) . '" alt="Preview" style="max-width: 200px; max-height: 200px;" class="img-thumbnail">';
+            $html .= '</div>';
+        }
+
+        $html .= '<div class="mt-2">';
+        $html .= '<button type="button" class="btn btn-secondary btn-sm" onclick="alert(\'Image selection not implemented\')">';
+        $html .= 'Select Image';
+        $html .= '</button>';
+        $html .= '</div>';
+
+        if ($data['has_errors']) {
+            foreach ($data['errors'] as $error) {
+                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
+            }
+        }
+
+        if (!empty($data['helptext'])) {
+            $html .= '<small class="form-text text-muted">' . htmlspecialchars($data['helptext']) . '</small>';
+        }
+
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    /**
+     * Render a checkbox list (stub — outputCheckboxList is overridden)
+     *
+     * @param array $data Prepared field data from prepareCheckboxListData()
+     * @return string HTML output
+     */
+    protected function renderCheckboxList($data) {
+        $id = $data['id'];
+
+        if (empty($data['options_list'])) {
+            return '<div class="alert alert-warning">No options available for ' . htmlspecialchars($data['name']) . '</div>';
+        }
+
+        $html = '';
+        $html .= '<div id="' . htmlspecialchars($id) . '_container" class="mb-3 errorplacement">';
+        if ($data['label']) {
+            $html .= '<label class="form-label">' . htmlspecialchars($data['label']) . '</label>';
+        }
+
+        foreach ($data['options_list'] as $key => $value) {
+            $uniqid = $id . '_' . htmlspecialchars($key);
+            $is_checked = in_array($key, $data['checked']) ? 'checked="checked"' : '';
+            $is_disabled = in_array($key, $data['disabled']) ? 'disabled="disabled"' : '';
+
+            if (in_array($key, $data['readonly'])) {
+                if (in_array($key, $data['checked'])) {
+                    $html .= '<input type="hidden" name="' . htmlspecialchars($data['name']) . '[]" value="' . htmlspecialchars($key) . '" />';
+                }
+                $html .= '<div class="form-check">';
+                $html .= '<input class="form-check-input" type="' . htmlspecialchars($data['type']) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($data['name']) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
+                $html .= '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
+                $html .= '</div>';
+            } else {
+                $html .= '<div class="form-check">';
+                $html .= '<input class="form-check-input" type="' . htmlspecialchars($data['type']) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($data['name']) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
+                $html .= '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
+                $html .= '</div>';
+            }
+        }
+
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    // ── Public overrides (unchanged from original) ───────────────────────────
 
     /**
      * Output a textarea field with optional rich text editor (Trumbowyg)
@@ -1267,219 +1166,4 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         echo $output;
     }
 
-    /**
-     * Create a checkbox list (or radio group) field
-     *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options (options, checked, disabled, readonly, type)
-     */
-    public function checkboxlist($name, $label = '', $options = []) {
-        $this->registerField($name, 'checkboxlist', $label, $options);
-        $this->outputCheckboxList($name, $label, $options);
-    }
-
-    /**
-     * Output a checkbox list (or radio group) field with Bootstrap styling
-     *
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputCheckboxList($name, $label, $options) {
-        $optionvals = $options['options'] ?? [];
-        $checked = $options['checked'] ?? [];
-        $disabled = $options['disabled'] ?? [];
-        $readonly = $options['readonly'] ?? [];
-        $type = $options['type'] ?? 'checkbox';
-        $id = $options['id'] ?? $name;
-
-        // Ensure checked is an array
-        if (!is_array($checked)) {
-            $checked = [];
-        }
-
-        // Validate input
-        if (empty($optionvals)) {
-            echo '<div class="alert alert-warning">No options available for ' . htmlspecialchars($name) . '</div>';
-            return;
-        }
-
-        if ($type === 'radio') {
-            if (is_array($checked) && count($checked) > 1) {
-                throw new DisplayableUserException('A radio field cannot have more than one checked value.');
-            }
-            if ($readonly) {
-                throw new DisplayableUserException('A radio field cannot have read only values.');
-            }
-        } elseif ($type !== 'checkbox') {
-            throw new DisplayableUserException('Invalid checkbox list type.');
-        }
-
-        $html = '';
-        $html .= '<div id="' . htmlspecialchars($id) . '_container" class="mb-3 errorplacement">';
-        if ($label) {
-            $html .= '<label class="form-label">' . htmlspecialchars($label) . '</label>';
-        }
-
-        // Standard convention: $optionvals is [id => label]
-        // $key is the ID (value to submit), $value is the display label
-        foreach ($optionvals as $key => $value) {
-            $uniqid = $id . '_' . htmlspecialchars($key);
-            $is_checked = in_array($key, $checked) ? 'checked="checked"' : '';
-            $is_disabled = in_array($key, $disabled) ? 'disabled="disabled"' : '';
-
-            // Readonly means it cannot be changed but is submitted
-            if (in_array($key, $readonly)) {
-                if (in_array($key, $checked)) {
-                    $html .= '<input type="hidden" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" />';
-                }
-                $html .= '<div class="form-check">';
-                $html .= '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' disabled="disabled" />';
-                $html .= '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
-                $html .= '</div>';
-            } else {
-                $html .= '<div class="form-check">';
-                $html .= '<input class="form-check-input" type="' . htmlspecialchars($type) . '" id="' . htmlspecialchars($uniqid) . '" name="' . htmlspecialchars($name) . '[]" value="' . htmlspecialchars($key) . '" ' . $is_checked . ' ' . $is_disabled . ' />';
-                $html .= '<label class="form-check-label" for="' . htmlspecialchars($uniqid) . '">' . htmlspecialchars($value) . '</label>';
-                $html .= '</div>';
-            }
-        }
-
-        $html .= '</div>';
-
-        $this->handleOutput($name, $html);
-    }
-
-    /**
-     * Output a textarea field
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputTextarea($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-        $rows = $options['rows'] ?? 5;
-        $cols = $options['cols'] ?? 80;
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
-            $class .= ' is-invalid';
-        }
-
-        $html = '';
-        $html .= '<div class="form-group mb-3">';
-
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
-        }
-
-        $html .= '<textarea';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' class="' . htmlspecialchars($class) . '"';
-        $html .= ' rows="' . intval($rows) . '"';
-        $html .= ' cols="' . intval($cols) . '"';
-
-        if (!empty($options['readonly'])) {
-            $html .= ' readonly';
-        }
-        if (!empty($options['disabled'])) {
-            $html .= ' disabled';
-        }
-
-        $html .= '>';
-        $html .= htmlspecialchars($value);
-        $html .= '</textarea>';
-
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
-                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
-            }
-        }
-
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
-        }
-
-        $html .= '</div>';
-
-        $this->handleOutput($name, $html);
-    }
-
-    /**
-     * Output a textbox (rich text editor) field
-     * Implementation for abstract method
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputTextbox($name, $label, $options) {
-        // The public textbox() method handles rich text editor logic
-        // This protected method is called from the public wrapper
-        // Delegate to the actual implementation
-        $this->textbox($name, $label, $options);
-    }
-
-    /**
-     * Output an image input (selection) field
-     * @param string $name Field name
-     * @param string $label Field label
-     * @param array $options Field options
-     */
-    protected function outputImageInput($name, $label, $options) {
-        $value = $options['value'] ?? ($this->values[$name] ?? '');
-        $class = $options['class'] ?? 'form-control';
-        $id = $options['id'] ?? $name;
-
-        $has_errors = isset($this->errors[$name]);
-        if ($has_errors) {
-            $class .= ' is-invalid';
-        }
-
-        $html = '';
-        $html .= '<div class="form-group mb-3">';
-
-        if ($label) {
-            $html .= '<label for="' . htmlspecialchars($id) . '">' . htmlspecialchars($label) . '</label>';
-        }
-
-        // Image input as hidden field with preview
-        $html .= '<input type="hidden"';
-        $html .= ' name="' . htmlspecialchars($name) . '"';
-        $html .= ' id="' . htmlspecialchars($id) . '"';
-        $html .= ' class="image-input-hidden"';
-        $html .= ' value="' . htmlspecialchars($value) . '"';
-        $html .= '>';
-
-        // Display preview if value exists
-        if ($value) {
-            $html .= '<div class="mt-2">';
-            $html .= '<img src="' . htmlspecialchars($value) . '" alt="Preview" style="max-width: 200px; max-height: 200px;" class="img-thumbnail">';
-            $html .= '</div>';
-        }
-
-        // Image selection button (placeholder)
-        $html .= '<div class="mt-2">';
-        $html .= '<button type="button" class="btn btn-secondary btn-sm" onclick="alert(\'Image selection not implemented\')">';
-        $html .= 'Select Image';
-        $html .= '</button>';
-        $html .= '</div>';
-
-        if ($has_errors) {
-            foreach ($this->errors[$name] as $error) {
-                $html .= '<div class="invalid-feedback d-block">' . htmlspecialchars($error) . '</div>';
-            }
-        }
-
-        if (!empty($options['helptext'])) {
-            $html .= '<small class="form-text text-muted">' . htmlspecialchars($options['helptext']) . '</small>';
-        }
-
-        $html .= '</div>';
-
-        $this->handleOutput($name, $html);
-    }
 }

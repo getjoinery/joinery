@@ -7,7 +7,9 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.4.0
+ * @version 2.6.0
+ * @changelog 2.6.0 - Phase 2 cleanup: buildAjaxSelectScript shared method, visibility/custom_script in base output methods, outputTextbox uses handleOutput
+ * @changelog 2.5.0 - Prepare/render split: base class concrete output*() methods call prepare*Data() + abstract render*()
  * @changelog 2.4.0 - Added numberinput(), repeater min/max/item_label, sub-field schema passthrough
  * @changelog 2.3.0 - Added colorpicker() method with theme color extraction and custom picker
  * @changelog 2.2.0 - Added imageselector() method for visual image picker with modal
@@ -2713,94 +2715,6 @@ document.addEventListener("DOMContentLoaded", function() {
         }
     }
 
-    /**
-     * Output shared JavaScript for AJAX search select functionality
-     * Contains AjaxSearchSelect class definition used by both theme implementations
-     */
-    protected function outputAjaxSearchSelectJavaScript() {
-        static $ajax_search_select_js_loaded = false;
-        if (!$ajax_search_select_js_loaded) {
-            echo '<script type="text/javascript">
-class AjaxSearchSelect {
-    constructor(selectId, searchEndpoint, minChars = 2) {
-        this.selectId = selectId;
-        this.searchEndpoint = searchEndpoint;
-        this.minChars = minChars;
-        this.selectElement = document.getElementById(selectId);
-        this.init();
-    }
-
-    init() {
-        if (!this.selectElement) return;
-
-        const self = this;
-        const input = this.selectElement.querySelector(".search-input");
-        const resultsDiv = this.selectElement.querySelector(".search-results");
-        const selectedDiv = this.selectElement.querySelector(".selected-items");
-        const hiddenInput = this.selectElement.querySelector(".search-hidden-value");
-
-        if (!input) return;
-
-        input.addEventListener("input", (e) => {
-            const query = e.target.value.trim();
-
-            if (query.length < this.minChars) {
-                resultsDiv.innerHTML = "";
-                return;
-            }
-
-            fetch(this.searchEndpoint + "?q=" + encodeURIComponent(query))
-                .then(response => response.json())
-                .then(data => {
-                    resultsDiv.innerHTML = "";
-
-                    if (!data.results || data.results.length === 0) {
-                        resultsDiv.innerHTML = "<div class=\"no-results\">No results found</div>";
-                        return;
-                    }
-
-                    data.results.forEach(item => {
-                        const div = document.createElement("div");
-                        div.className = "result-item";
-                        div.textContent = item.label;
-                        div.addEventListener("click", () => {
-                            self.selectItem(item.value, item.label, input, selectedDiv, hiddenInput);
-                        });
-                        resultsDiv.appendChild(div);
-                    });
-                })
-                .catch(error => console.error("Search error:", error));
-        });
-    }
-
-    selectItem(value, label, input, selectedDiv, hiddenInput) {
-        input.value = label;
-        hiddenInput.value = value;
-
-        const tag = document.createElement("span");
-        tag.className = "selected-tag";
-        tag.textContent = label + " ";
-
-        const removeBtn = document.createElement("button");
-        removeBtn.type = "button";
-        removeBtn.className = "remove-tag";
-        removeBtn.textContent = "×";
-        removeBtn.addEventListener("click", (e) => {
-            e.preventDefault();
-            tag.remove();
-            input.value = "";
-            hiddenInput.value = "";
-        });
-
-        tag.appendChild(removeBtn);
-        selectedDiv.appendChild(tag);
-    }
-}
-</script>';
-            $ajax_search_select_js_loaded = true;
-        }
-    }
-
     // ===== TIME HANDLING HELPER METHODS =====
     // These methods centralize time parsing and conversion logic previously duplicated in concrete classes
 
@@ -2919,24 +2833,576 @@ class AjaxSearchSelect {
         }
     }
 
-    // Abstract methods for theme-specific HTML generation
-    // Each theme implementation must provide these methods
+    // ===== PREPARE/RENDER SPLIT ARCHITECTURE =====
+    // Concrete output*() methods call prepare*Data() + abstract render*()
+    // Each subclass implements render*() — pure HTML generation only
 
-    abstract protected function outputTextInput($name, $label, $options);
-    abstract protected function outputPasswordInput($name, $label, $options);
-    abstract protected function outputDropInput($name, $label, $options);
-    abstract protected function outputCheckboxInput($name, $label, $options);
-    abstract protected function outputRadioInput($name, $label, $options);
-    abstract protected function outputCheckboxList($name, $label, $options);
-    abstract protected function outputDateInput($name, $label, $options);
-    abstract protected function outputTimeInput($name, $label, $options);
-    abstract protected function outputDateTimeInput($name, $label, $options);
-    abstract protected function outputFileInput($name, $label, $options);
-    abstract protected function outputHiddenInput($name, $options);
-    abstract protected function outputSubmitButton($name, $label, $options);
-    abstract protected function outputTextbox($name, $label, $options);
-    abstract protected function outputImageInput($name, $label, $options);
-    abstract protected function outputTextarea($name, $label, $options);
+    // ── Shared HTML attribute helpers ────────────────────────────────────────
+
+    /**
+     * Build common boolean/value attributes shared by many inputs
+     * @param array $data Prepared data array
+     * @param array $extra_keys Map of data key => html attribute name for value attributes
+     * @return string HTML attribute string
+     */
+    protected function buildCommonAttributes($data, $extra_keys = []) {
+        $attrs = '';
+        if (!empty($data['disabled'])) $attrs .= ' disabled';
+        if (!empty($data['required'])) $attrs .= ' required';
+        if (!empty($data['readonly'])) $attrs .= ' readonly';
+        if (!empty($data['autofocus'])) $attrs .= ' autofocus';
+        if (!empty($data['onchange'])) $attrs .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
+        if (!empty($data['autocomplete'])) $attrs .= ' autocomplete="' . htmlspecialchars($data['autocomplete']) . '"';
+        foreach ($extra_keys as $key => $attr_name) {
+            if (isset($data[$key])) $attrs .= ' ' . $attr_name . '="' . htmlspecialchars($data[$key]) . '"';
+        }
+        return $attrs;
+    }
+
+    /**
+     * Build ARIA error attributes for accessible validation
+     * @param array $data Prepared data array
+     * @return string ARIA HTML attribute string
+     */
+    protected function buildErrorAttributes($data) {
+        if (empty($data['has_errors'])) return '';
+        return ' aria-invalid="true" aria-describedby="' . htmlspecialchars($data['name']) . '_error"';
+    }
+
+    /**
+     * Build the inline AJAX search-select script for dropdown fields.
+     * Shared by all theme renderers to avoid duplicating ~100 lines of JS.
+     *
+     * @param string $id The select element's HTML id
+     * @param string $endpoint The AJAX search endpoint URL
+     * @return string Script HTML block
+     */
+    protected function buildAjaxSelectScript($id, $endpoint) {
+        return '<script>
+(function() {
+  class AjaxSearchSelect {
+    constructor(selectEl, ajaxUrl) {
+      this.select = selectEl;
+      this.ajaxUrl = ajaxUrl;
+      this.cache = {};
+      this.debounceTimer = null;
+
+      const input = document.createElement(\'input\');
+      input.type = \'text\';
+      input.className = selectEl.className;
+      input.placeholder = \'Type to search...\';
+
+      const list = document.createElement(\'datalist\');
+      list.id = selectEl.id + \'_list\';
+      input.setAttribute(\'list\', list.id);
+
+      selectEl.style.display = \'none\';
+      selectEl.parentNode.insertBefore(input, selectEl);
+      selectEl.parentNode.insertBefore(list, selectEl);
+
+      this.input = input;
+      this.list = list;
+      this.data = [];
+
+      if (selectEl.value) {
+        input.value = selectEl.options[selectEl.selectedIndex].text;
+      }
+
+      input.addEventListener(\'input\', (e) => this.search(e.target.value));
+      input.addEventListener(\'change\', (e) => {
+        const inputVal = e.target.value.trim();
+        if (!inputVal) {
+          selectEl.value = \'\';
+        } else {
+          const matching = this.data.find(item => item.text === inputVal);
+          if (matching) {
+            let option = selectEl.querySelector(\'option[value="\' + matching.id + \'"]\');
+            if (!option) {
+              option = document.createElement(\'option\');
+              option.value = matching.id;
+              option.textContent = matching.text;
+              selectEl.innerHTML = \'\';
+              selectEl.appendChild(option);
+            }
+            selectEl.value = matching.id;
+          }
+        }
+        selectEl.dispatchEvent(new Event(\'change\', { bubbles: true }));
+      });
+    }
+
+    search(query) {
+      clearTimeout(this.debounceTimer);
+      if (query.length < 3) {
+        this.list.innerHTML = \'\';
+        this.data = [];
+        return;
+      }
+
+      if (this.cache[query]) {
+        this.updateList(this.cache[query]);
+        return;
+      }
+
+      this.debounceTimer = setTimeout(() => {
+        const separator = this.ajaxUrl.includes(\'?\') ? \'&\' : \'?\';
+        fetch(this.ajaxUrl + separator + \'q=\' + encodeURIComponent(query))
+          .then(r => r.json())
+          .then(data => {
+            this.cache[query] = data;
+            this.updateList(data);
+          });
+      }, 250);
+    }
+
+    updateList(data) {
+      this.data = data;
+      this.list.innerHTML = \'\';
+      data.forEach(item => {
+        const opt = document.createElement(\'option\');
+        opt.value = item.text;
+        opt.dataset.id = item.id;
+        this.list.appendChild(opt);
+      });
+    }
+  }
+
+  document.addEventListener(\'DOMContentLoaded\', () => {
+    const select = document.getElementById(\'' . htmlspecialchars($id) . '\');
+    if (select) {
+      new AjaxSearchSelect(select, \'' . htmlspecialchars($endpoint) . '\');
+    }
+  });
+})();
+</script>';
+    }
+
+    // ── Prepare methods (behavioral logic) ───────────────────────────────────
+
+    protected function prepareTextData($name, $label, $options) {
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $raw_placeholder = $options['placeholder'] ?? '';
+        $placeholder = ($raw_placeholder && !$value) ? $raw_placeholder : '';
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'value' => $value,
+            'type' => $options['type'] ?? 'text',
+            'placeholder' => $placeholder,
+            'class' => $options['class'] ?? '',
+            'prepend' => $options['prepend'] ?? '',
+            'readonly' => !empty($options['readonly']),
+            'disabled' => !empty($options['disabled']),
+            'autofocus' => !empty($options['autofocus']),
+            'required' => !empty($options['required']),
+            'autocomplete' => $options['autocomplete'] ?? '',
+            'onchange' => $options['onchange'] ?? '',
+            'pattern' => $options['pattern'] ?? '',
+            'min' => $options['min'] ?? null,
+            'max' => $options['max'] ?? null,
+            'step' => $options['step'] ?? null,
+            'minlength' => $options['minlength'] ?? null,
+            'maxlength' => $options['maxlength'] ?? null,
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function preparePasswordData($name, $label, $options) {
+        $data = $this->prepareTextData($name, $label, $options);
+        $data['type'] = 'password';
+        $data['strength_meter'] = !empty($options['strength_meter']);
+        return $data;
+    }
+
+    protected function prepareNumberData($name, $label, $options) {
+        $data = $this->prepareTextData($name, $label, $options);
+        $data['type'] = 'number';
+        return $data;
+    }
+
+    protected function prepareDropData($name, $label, $options) {
+        $raw_value = $options['value'] ?? ($this->values[$name] ?? '');
+        $value = is_bool($raw_value) ? ($raw_value ? 1 : 0) : $raw_value;
+        $raw_empty = $options['empty_option'] ?? false;
+        if ($raw_empty === true) $empty_option = 'Select...';
+        elseif ($raw_empty) $empty_option = $raw_empty;
+        else $empty_option = null;
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'value' => $value,
+            'options_list' => $options['options'] ?? [],
+            'empty_option' => $empty_option,
+            'class' => $options['class'] ?? '',
+            'multiple' => !empty($options['multiple']),
+            'disabled' => !empty($options['disabled']),
+            'required' => !empty($options['required']),
+            'onchange' => $options['onchange'] ?? '',
+            'ajaxendpoint' => $options['ajaxendpoint'] ?? '',
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+            'visibility_rules' => $options['visibility_rules'] ?? null,
+            'custom_script' => $options['custom_script'] ?? null,
+        ];
+    }
+
+    protected function prepareCheckboxData($name, $label, $options) {
+        $checked_value = $options['checked_value'] ?? '1';
+        if (isset($options['checked'])) {
+            $is_checked = !empty($options['checked']);
+        } else {
+            $current_value = $options['value'] ?? ($this->values[$name] ?? '');
+            $is_checked = ((string)$current_value === (string)$checked_value);
+        }
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'checked_value' => $checked_value,
+            'is_checked' => $is_checked,
+            'class' => $options['class'] ?? '',
+            'disabled' => !empty($options['disabled']),
+            'required' => !empty($options['required']),
+            'onchange' => $options['onchange'] ?? '',
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+            'visibility_rules' => $options['visibility_rules'] ?? null,
+            'custom_script' => $options['custom_script'] ?? null,
+        ];
+    }
+
+    protected function prepareRadioData($name, $label, $options) {
+        return [
+            'name' => $name, 'label' => $label,
+            'value' => $options['value'] ?? ($this->values[$name] ?? ''),
+            'options_list' => $options['options'] ?? [],
+            'class' => $options['class'] ?? '',
+            'disabled' => !empty($options['disabled']),
+            'required' => !empty($options['required']),
+            'onchange' => $options['onchange'] ?? '',
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareDateData($name, $label, $options) {
+        $raw_value = $options['value'] ?? ($this->values[$name] ?? '');
+        if ($raw_value && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw_value)) {
+            try { $raw_value = (new DateTime($raw_value))->format('Y-m-d'); } catch (Exception $e) {}
+        }
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'value' => $raw_value,
+            'class' => $options['class'] ?? '',
+            'min' => $options['min'] ?? null,
+            'max' => $options['max'] ?? null,
+            'readonly' => !empty($options['readonly']),
+            'disabled' => !empty($options['disabled']),
+            'required' => !empty($options['required']),
+            'onchange' => $options['onchange'] ?? '',
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareTimeData($name, $label, $options) {
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $parsed = $this->parseTimeValue($value);
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'value' => $value,
+            'hour' => $parsed['hour'],
+            'minute' => $parsed['minute'],
+            'ampm' => $parsed['ampm'],
+            'class' => $options['class'] ?? '',
+            'readonly' => !empty($options['readonly']),
+            'disabled' => !empty($options['disabled']),
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareDateTimeData($name, $label, $options) {
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $date_value = $options['date_value'] ?? '';
+        $time_value = $options['time_value'] ?? '';
+        if (!$date_value && !$time_value && $value) {
+            if (strpos($value, ' ') !== false) {
+                list($date_value, $time_value) = explode(' ', $value, 2);
+            } else {
+                $date_value = $value;
+            }
+        }
+        $parsed = $this->parseTimeValue($time_value);
+        return [
+            'name' => $name, 'label' => $label,
+            'date_name' => $name . '_dateinput',
+            'time_name' => $name . '_timeinput',
+            'date_value' => $date_value,
+            'time_value' => $time_value,
+            'hour' => $parsed['hour'],
+            'minute' => $parsed['minute'],
+            'ampm' => $parsed['ampm'],
+            'class' => $options['class'] ?? '',
+            'readonly' => !empty($options['readonly']),
+            'disabled' => !empty($options['disabled']),
+            'date_errors' => $this->errors[$name . '_dateinput'] ?? [],
+            'time_errors' => $this->errors[$name . '_timeinput'] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareFileData($name, $label, $options) {
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'class' => $options['class'] ?? '',
+            'accept' => $options['accept'] ?? '',
+            'multiple' => !empty($options['multiple']),
+            'disabled' => !empty($options['disabled']),
+            'required' => !empty($options['required']),
+            'onchange' => $options['onchange'] ?? '',
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareHiddenData($name, $label, $options) {
+        return [
+            'name' => $name,
+            'id' => $options['id'] ?? $name,
+            'value' => $options['value'] ?? ($this->values[$name] ?? ''),
+        ];
+    }
+
+    protected function prepareSubmitData($name, $label, $options) {
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'class' => $options['class'] ?? '',
+            'disabled' => !empty($options['disabled']),
+            'onclick' => $options['onclick'] ?? '',
+        ];
+    }
+
+    protected function prepareTextareaData($name, $label, $options) {
+        $value = $options['value'] ?? ($this->values[$name] ?? '');
+        $raw_placeholder = $options['placeholder'] ?? '';
+        $placeholder = ($raw_placeholder && !$value) ? $raw_placeholder : '';
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'value' => $value,
+            'placeholder' => $placeholder,
+            'class' => $options['class'] ?? '',
+            'rows' => $options['rows'] ?? 5,
+            'cols' => $options['cols'] ?? 80,
+            'readonly' => !empty($options['readonly']),
+            'disabled' => !empty($options['disabled']),
+            'required' => !empty($options['required']),
+            'minlength' => $options['minlength'] ?? null,
+            'maxlength' => $options['maxlength'] ?? null,
+            'onchange' => $options['onchange'] ?? '',
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareCheckboxListData($name, $label, $options) {
+        $options_list = $options['options'] ?? [];
+        $checked_raw = isset($options['checked']) ? $options['checked'] : ($options['value'] ?? ($this->values[$name] ?? []));
+        $checked = is_array($checked_raw) ? $checked_raw : (array)$checked_raw;
+        $type = $options['type'] ?? 'checkbox';
+        if ($type !== 'checkbox' && $type !== 'radio') {
+            throw new DisplayableUserException('checkboxList type must be "checkbox" or "radio"');
+        }
+        if ($type === 'radio' && count($checked) > 1) {
+            throw new DisplayableUserException('Radio checkboxList cannot have more than one checked value');
+        }
+        if ($type === 'radio' && !empty($options['readonly'])) {
+            throw new DisplayableUserException('Radio checkboxList does not support readonly');
+        }
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'options_list' => $options_list,
+            'checked' => $checked,
+            'disabled' => $options['disabled'] ?? [],
+            'readonly' => $options['readonly'] ?? [],
+            'type' => $type,
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareTextboxData($name, $label, $options) {
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'value' => $options['value'] ?? ($this->values[$name] ?? ''),
+            'class' => $options['class'] ?? '',
+            'rows' => $options['rows'] ?? 10,
+            'htmlmode' => !empty($options['htmlmode']),
+            'readonly' => !empty($options['readonly']),
+            'disabled' => !empty($options['disabled']),
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    protected function prepareImageData($name, $label, $options) {
+        return [
+            'name' => $name, 'label' => $label,
+            'id' => $options['id'] ?? $name,
+            'value' => $options['value'] ?? ($this->values[$name] ?? ''),
+            'images' => $options['images'] ?? [],
+            'preview_size' => $options['preview_size'] ?? '100px',
+            'class' => $options['class'] ?? '',
+            'disabled' => !empty($options['disabled']),
+            'has_errors' => isset($this->errors[$name]),
+            'errors' => $this->errors[$name] ?? [],
+            'helptext' => $options['helptext'] ?? '',
+        ];
+    }
+
+    // ── Concrete output*() methods (call prepare*Data + render*) ─────────────
+
+    protected function outputTextInput($name, $label, $options) {
+        $data = $this->prepareTextData($name, $label, $options);
+        $html = $this->renderTextInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputPasswordInput($name, $label, $options) {
+        $data = $this->preparePasswordData($name, $label, $options);
+        $html = $this->renderPasswordInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputNumberInput($name, $label, $options) {
+        $data = $this->prepareNumberData($name, $label, $options);
+        $html = $this->renderNumberInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputDropInput($name, $label, $options) {
+        $data = $this->prepareDropData($name, $label, $options);
+        $html = $this->renderDropInput($data);
+        if (!empty($data['visibility_rules'])) {
+            $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules']);
+        } elseif (!empty($data['custom_script'])) {
+            $html .= $this->generateFieldScript($data['id'], $data['custom_script']);
+        }
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputCheckboxInput($name, $label, $options) {
+        $data = $this->prepareCheckboxData($name, $label, $options);
+        $html = $this->renderCheckboxInput($data);
+        if (!empty($data['visibility_rules'])) {
+            $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules']);
+        } elseif (!empty($data['custom_script'])) {
+            $html .= $this->generateFieldScript($data['id'], $data['custom_script']);
+        }
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputRadioInput($name, $label, $options) {
+        $data = $this->prepareRadioData($name, $label, $options);
+        $html = $this->renderRadioInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputCheckboxList($name, $label, $options) {
+        $data = $this->prepareCheckboxListData($name, $label, $options);
+        $html = $this->renderCheckboxList($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputDateInput($name, $label, $options) {
+        $data = $this->prepareDateData($name, $label, $options);
+        $html = $this->renderDateInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputTimeInput($name, $label, $options) {
+        $data = $this->prepareTimeData($name, $label, $options);
+        $html = $this->renderTimeInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputDateTimeInput($name, $label, $options) {
+        $data = $this->prepareDateTimeData($name, $label, $options);
+        $html = $this->renderDateTimeInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputFileInput($name, $label, $options) {
+        $data = $this->prepareFileData($name, $label, $options);
+        $html = $this->renderFileInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputHiddenInput($name, $options) {
+        $data = $this->prepareHiddenData($name, '', $options);
+        $html = $this->renderHiddenInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputSubmitButton($name, $label, $options) {
+        $data = $this->prepareSubmitData($name, $label, $options);
+        $html = $this->renderSubmitButton($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputTextbox($name, $label, $options) {
+        $data = $this->prepareTextboxData($name, $label, $options);
+        $html = $this->renderTextbox($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputTextarea($name, $label, $options) {
+        $data = $this->prepareTextareaData($name, $label, $options);
+        $html = $this->renderTextarea($data);
+        $this->handleOutput($name, $html);
+    }
+
+    protected function outputImageInput($name, $label, $options) {
+        $data = $this->prepareImageData($name, $label, $options);
+        $html = $this->renderImageInput($data);
+        $this->handleOutput($name, $html);
+    }
+
+    // ── Abstract render*() methods (theme-specific HTML generation) ───────────
+
+    abstract protected function renderTextInput($data);
+    abstract protected function renderPasswordInput($data);
+    abstract protected function renderNumberInput($data);
+    abstract protected function renderDropInput($data);
+    abstract protected function renderCheckboxInput($data);
+    abstract protected function renderRadioInput($data);
+    abstract protected function renderCheckboxList($data);
+    abstract protected function renderDateInput($data);
+    abstract protected function renderTimeInput($data);
+    abstract protected function renderDateTimeInput($data);
+    abstract protected function renderFileInput($data);
+    abstract protected function renderHiddenInput($data);
+    abstract protected function renderSubmitButton($data);
+    abstract protected function renderTextbox($data);
+    abstract protected function renderTextarea($data);
+    abstract protected function renderImageInput($data);
 
     // ===== NEW FIELD VISIBILITY & CUSTOM SCRIPT METHODS =====
 
