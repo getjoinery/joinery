@@ -765,6 +765,13 @@ class SessionControl{
 		$client_ip = $this->_get_client_ip();
 		if (isset($_SESSION['ip_address']) && $client_ip) {
 			if ($this->_is_major_ip_change($_SESSION['ip_address'], $client_ip)) {
+				error_log(sprintf(
+					'IP_VIOLATION get_permission: user_id=%s stored_ip=%s current_ip=%s page=%s',
+					$_SESSION['usr_user_id'] ?? 'unknown',
+					$_SESSION['ip_address'],
+					$client_ip,
+					$_SERVER['REQUEST_URI'] ?? ''
+				));
 				return 0;
 			}
 		}
@@ -817,6 +824,16 @@ class SessionControl{
 		}
 
 		if(!isset($_SESSION['loggedin']) || ($ipchange && ($_SESSION['permission'] ?? 0) >= 5)){
+			if ($ipchange && isset($_SESSION['loggedin'])) {
+				error_log(sprintf(
+					'IP_VIOLATION logout: user_id=%s permission=%s stored_ip=%s current_ip=%s page=%s',
+					$_SESSION['usr_user_id'] ?? 'unknown',
+					$_SESSION['permission'] ?? 'unknown',
+					$_SESSION['ip_address'] ?? 'unknown',
+					$client_ip,
+					$_SERVER['REQUEST_URI'] ?? ''
+				));
+			}
 			if (count($_POST)) {
 				$query_string = http_build_query($_POST);
 			} else {
