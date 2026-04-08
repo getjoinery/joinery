@@ -166,74 +166,6 @@ array(
 			</div>
 		</div>
 
-		<!-- Subscription Tier Card -->
-		<div class="card mt-3">
-			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-star me-2"></span>Subscription Tier</h6>
-			</div>
-			<div class="card-body">
-				<table class="table table-borderless fw-medium mb-0">
-					<tbody>
-						<tr>
-							<td class="p-1" style="width: 35%;">Current Tier:</td>
-							<td class="p-1">
-								<?php if($user_tier): ?>
-									<strong><?php echo htmlspecialchars($user_tier->get('sbt_display_name')); ?></strong>
-									(Level <?php echo $user_tier->get('sbt_tier_level'); ?>)
-								<?php else: ?>
-									<strong>Free</strong> (No active tier)
-								<?php endif; ?>
-								<a href="/admin/admin_tier_edit?user_id=<?php echo $user->key; ?>" class="fs-11 ms-2">[change]</a>
-							</td>
-						</tr>
-					</tbody>
-				</table>
-
-				<?php if($tier_changes->count_all() > 0): ?>
-					<?php $tier_changes->load(); ?>
-					<div class="border-top mt-3 pt-3">
-						<h6 class="fs-10 mb-2">Tier Change History:</h6>
-						<div class="fs-10 text-600">
-							<?php
-							require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-							foreach($tier_changes as $change): ?>
-								<?php
-									$change_time = LibraryFunctions::convert_time($change->get('cht_change_time'), 'UTC', $session->get_timezone());
-									$old_value = $change->get('cht_old_value') ? 'Level ' . $change->get('cht_old_value') : 'Free';
-									$new_value = $change->get('cht_new_value') ? 'Level ' . $change->get('cht_new_value') : 'Free';
-									$reason = $change->get('cht_change_reason');
-
-									if ($change->get('cht_entity_id')) {
-										try {
-											$tier = new SubscriptionTier($change->get('cht_entity_id'), TRUE);
-											$new_value = htmlspecialchars($tier->get('sbt_display_name')) . ' (' . $new_value . ')';
-										} catch (Exception $e) { /* Tier may have been deleted */ }
-									}
-								?>
-								<div class="mb-1">
-									• <?php echo $change_time; ?>: <?php echo $old_value; ?> → <?php echo $new_value; ?>
-									<?php if($reason): ?>
-										(<?php echo htmlspecialchars($reason); ?>
-										<?php if($reason === 'purchase' && $change->get('cht_reference_id')): ?>
-											- <a href="/admin/admin_order?ord_order_id=<?php echo $change->get('cht_reference_id'); ?>">Order #<?php echo $change->get('cht_reference_id'); ?></a>
-										<?php elseif($reason === 'manual' && $change->get('cht_changed_by_usr_user_id')): ?>
-											<?php
-												try {
-													require_once(PathHelper::getIncludePath('data/users_class.php'));
-													$changed_by = new User($change->get('cht_changed_by_usr_user_id'), TRUE);
-													echo ' by ' . htmlspecialchars($changed_by->display_name());
-												} catch (Exception $e) { /* User may have been deleted */ }
-											?>
-										<?php endif; ?>)
-									<?php endif; ?>
-								</div>
-							<?php endforeach; ?>
-						</div>
-					</div>
-				<?php endif; ?>
-			</div>
-		</div>
-
 		<!-- Mailing Lists Card -->
 		<?php if(!empty($user_subscribed_list)): ?>
 		<div class="card mt-3">
@@ -318,8 +250,76 @@ array(
 
 	<!-- RIGHT COLUMN: Subscription Status -->
 	<div class="col-xxl-6">
-		<!-- Active Subscriptions -->
+		<!-- Subscription Tier Card -->
 		<div class="card">
+			<div class="card-header bg-body-tertiary">
+				<h6 class="mb-0"><span class="fas fa-star me-2"></span>Subscription Tier</h6>
+			</div>
+			<div class="card-body">
+				<table class="table table-borderless fw-medium mb-0">
+					<tbody>
+						<tr>
+							<td class="p-1" style="width: 35%;">Current Tier:</td>
+							<td class="p-1">
+								<?php if($user_tier): ?>
+									<strong><?php echo htmlspecialchars($user_tier->get('sbt_display_name')); ?></strong>
+									(Level <?php echo $user_tier->get('sbt_tier_level'); ?>)
+								<?php else: ?>
+									<strong>Free</strong> (No active tier)
+								<?php endif; ?>
+								<a href="/admin/admin_tier_edit?user_id=<?php echo $user->key; ?>" class="fs-11 ms-2">[change]</a>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+
+				<?php if($tier_changes->count_all() > 0): ?>
+					<?php $tier_changes->load(); ?>
+					<div class="border-top mt-3 pt-3">
+						<h6 class="fs-10 mb-2">Tier Change History:</h6>
+						<div class="fs-10 text-600">
+							<?php
+							require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+							foreach($tier_changes as $change): ?>
+								<?php
+									$change_time = LibraryFunctions::convert_time($change->get('cht_change_time'), 'UTC', $session->get_timezone());
+									$old_value = $change->get('cht_old_value') ? 'Level ' . $change->get('cht_old_value') : 'Free';
+									$new_value = $change->get('cht_new_value') ? 'Level ' . $change->get('cht_new_value') : 'Free';
+									$reason = $change->get('cht_change_reason');
+
+									if ($change->get('cht_entity_id')) {
+										try {
+											$tier = new SubscriptionTier($change->get('cht_entity_id'), TRUE);
+											$new_value = htmlspecialchars($tier->get('sbt_display_name')) . ' (' . $new_value . ')';
+										} catch (Exception $e) { /* Tier may have been deleted */ }
+									}
+								?>
+								<div class="mb-1">
+									• <?php echo $change_time; ?>: <?php echo $old_value; ?> → <?php echo $new_value; ?>
+									<?php if($reason): ?>
+										(<?php echo htmlspecialchars($reason); ?>
+										<?php if($reason === 'purchase' && $change->get('cht_reference_id')): ?>
+											- <a href="/admin/admin_order?ord_order_id=<?php echo $change->get('cht_reference_id'); ?>">Order #<?php echo $change->get('cht_reference_id'); ?></a>
+										<?php elseif($reason === 'manual' && $change->get('cht_changed_by_usr_user_id')): ?>
+											<?php
+												try {
+													require_once(PathHelper::getIncludePath('data/users_class.php'));
+													$changed_by = new User($change->get('cht_changed_by_usr_user_id'), TRUE);
+													echo ' by ' . htmlspecialchars($changed_by->display_name());
+												} catch (Exception $e) { /* User may have been deleted */ }
+											?>
+										<?php endif; ?>)
+									<?php endif; ?>
+								</div>
+							<?php endforeach; ?>
+						</div>
+					</div>
+				<?php endif; ?>
+			</div>
+		</div>
+
+		<!-- Active Subscriptions -->
+		<div class="card mt-3">
 			<div class="card-header bg-body-tertiary">
 				<h6 class="mb-0"><span class="fas fa-credit-card me-2"></span>Active Subscriptions</h6>
 			</div>
