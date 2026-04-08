@@ -487,7 +487,7 @@ php utils/upgrade.php --refresh-archives --verbose
 
 **Plugin views auto-discover under namespaced URLs.** Creating `plugins/myplugin/views/profile/settings.php` makes `/profile/myplugin/settings` work immediately — no serve.php entry needed. Plugin internal links must use namespaced URLs (e.g. `/profile/myplugin/settings`, not `/profile/settings`). Use serve.php only for routes needing model binding, permission gates, or feature flags. Plugin names must be distinctive and not conflict with system paths — see [Plugin Developer Guide](docs/plugin_developer_guide.md).
 
-**Schema changes to plugin data classes take effect on next activate** — modify `$field_specifications`, then deactivate → activate the plugin. Do NOT run update_database for plugin tables; it deliberately excludes them.
+**Schema changes to plugin data classes** — modify `$field_specifications`, then run "Sync with Filesystem" from the admin Plugins page, or run `update_database` from admin utilities (its final step syncs plugins). Deploys also sync automatically via `upgrade.php`. The core `update_database` pipeline excludes plugins, but `PluginManager::sync()` handles plugin tables as a post-core step.
 
 **Helper Class Integration:** Use RouteHelper for custom routing, ThemeHelper for asset management, and PathHelper for file operations instead of manual path handling.
 

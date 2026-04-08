@@ -54,7 +54,7 @@ function theme_plugin_registry_sync() {
 
     echo "Syncing plugins with stock/custom status...\n";
     $plugin_manager = new PluginManager();
-    $synced_plugins = $plugin_manager->syncWithFilesystem();
+    $synced_plugins = $plugin_manager->sync();
     echo "Synced " . count($synced_plugins) . " new plugins.\n";
 
     // Update existing plugins with stock/custom status
