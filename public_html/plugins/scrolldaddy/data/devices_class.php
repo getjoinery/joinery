@@ -102,7 +102,7 @@ class SdDevice extends SystemBase {
 		if (!$value) return [];
 		$decoded = json_decode($value, true);
 		if (is_array($decoded)) return $decoded;
-		// Fallback: handle legacy PHP-serialized data from controld plugin
+		// Fallback: handle legacy PHP-serialized data
 		$unserialized = @unserialize($value);
 		if (is_array($unserialized)) return $unserialized;
 		return [];

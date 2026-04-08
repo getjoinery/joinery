@@ -102,7 +102,7 @@ $formwriter->dropinput('myplugin_feature_enabled', 'Enable Feature', [
 
 - Pattern: `{plugin_name}_{setting_name}`
 - Examples:
-  - `controld_key`
+  - `scrolldaddy_dns_host`
   - `bookings_default_duration`
   - `events_timezone`
   - `myplugin_api_key`

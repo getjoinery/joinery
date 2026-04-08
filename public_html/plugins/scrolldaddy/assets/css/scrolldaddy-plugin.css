@@ -50,3 +50,9 @@
     position: static !important;
     animation: none !important;
 }
+
+/* Checkbox fix: replace FontAwesome Pro checkmark with Unicode character (Pro font not loaded) */
+input[type="checkbox"]:checked ~ label:before {
+    content: "✓" !important;
+    font-family: inherit !important;
+}
