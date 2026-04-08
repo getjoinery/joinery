@@ -29,25 +29,27 @@ $formwriter = $page->getFormWriter('form1', [
 	'edit_primary_key_value' => $product_version->key
 ]);
 
-?>
-
 $formwriter->begin_form();
+
+$formwriter->hiddeninput('product_id', '', ['value' => $product->key]);
 
 $formwriter->textinput('version_name', 'Label', [
 	'validation' => ['required' => true, 'maxlength' => 255],
 	'value' => $product_version->get('prv_version_name')
 ]);
 
-if(!$product_version->key){
-	// New version - show price fields
+if(!$product_version->key || !$has_orders){
+	// New version, or existing with no orders - show editable price fields
 	$formwriter->textinput('version_price', 'Price ('.$currency_symbol.')', [
-		'validation' => ['required' => true]
+		'validation' => ['required' => true],
+		'value' => $product_version->get('prv_version_price')
 	]);
 
-	$optionvals = array('single'=>"One price", 'user' => 'User Chooses', 'day'=>'Daily Subscription', 'week'=>'Weekly Subscription', 'month'=>'Monthly Subscription', 'year'=>'Yearly Subscription');
+	$optionvals = array('single'=>"One-time charge", 'user' => 'User Chooses', 'day'=>'Daily Subscription', 'week'=>'Weekly Subscription', 'month'=>'Monthly Subscription', 'year'=>'Yearly Subscription');
 	$formwriter->dropinput('prv_price_type', 'Pricing', [
 		'options' => $optionvals,
 		'validation' => ['required' => true],
+		'value' => $product_version->get('prv_price_type'),
 		'visibility_rules' => [
 			'single' => ['show' => [], 'hide' => ['prv_trial_period_days']],
 			'user' => ['show' => [], 'hide' => ['prv_trial_period_days']],
@@ -59,23 +61,23 @@ if(!$product_version->key){
 	]);
 
 	$formwriter->textinput('prv_trial_period_days', 'Subscription trial period (days):', [
-		'value' => 0
+		'value' => $product_version->get('prv_trial_period_days') ?: 0
 	]);
 }
 else{
-	// Existing version - show price as read-only
+	// Existing version with orders - show price as read-only
 	$formwriter->hiddeninput('version_price', '', ['value' => '']);
 	$formwriter->hiddeninput('prv_price_type', '', ['value' => '']);
 	$formwriter->hiddeninput('prv_trial_period_days', '', ['value' => '']);
 
 	echo '<div class="ctrlHolder"><p class="label">Current Price</p>';
 	echo '<div class="textInput"><strong>'.$currency_symbol . $product_version->get('prv_version_price') . ' / ' . $product_version->get('prv_price_type') . '</strong>';
-	echo '<br><em style="color: #666;">Price cannot be edited. To change pricing, create a new version and make this one inactive.</em></div></div>';
+	echo '<br><em style="color: #666;">Price cannot be edited because orders reference this version. To change pricing, create a new version and make this one inactive.</em></div></div>';
 }
 
 // Display priority - for pricing page
 if($settings->get_setting('pricing_page')){
-	$formwriter->textinput('prv_display_priority', 'Display Priority (0=private, >0=public, higher=preferred):', [
+	$formwriter->textinput('prv_display_priority', 'Display Order (0 for private)', [
 		'value' => $product_version->get('prv_display_priority'),
 		'help_text' => 'Set to 0 to hide from public /pricing page. Higher values show first when multiple versions exist.'
 	]);

@@ -599,7 +599,7 @@ $page->endtable($orders_pager);
 		<!-- Session Visits -->
 		<div class="card">
 			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-eye me-2"></span>Session Visits</h6>
+				<h6 class="mb-0"><span class="fas fa-eye me-2"></span>Event Session Visits</h6>
 			</div>
 			<div class="card-body p-0">
 				<div class="table-responsive">
