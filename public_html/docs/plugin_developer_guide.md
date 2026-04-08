@@ -399,6 +399,8 @@ class MyData extends SystemBase {
 }
 ```
 
+**Choosing a prefix:** Your plugin's table prefix (e.g. `abc` in `abc_items`) must be unique across all plugins installed on a site. Use a short abbreviation of your plugin name — at least 3 characters. The system will block installation if your class names or table names collide with an installed plugin, and will warn if your prefix matches even when table names don't.
+
 ### Migration System
 
 **Current status:** The migration runner only processes `.sql` files in `plugins/{name}/migrations/`. The PHP `return []` format with `up`/`down` closures shown below is the intended future format but is **not yet executed automatically** during plugin installation.
