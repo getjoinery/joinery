@@ -275,7 +275,7 @@ Career Area
     <!-- Theme Custom CSS -->
     <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/style.css">
     <!-- ScrollDaddy Plugin CSS -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=2">
+    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=4">
 
     <!-- Facebook Open Graph Meta Tags -->
     <meta property="og:title" content="Scrolldaddy - Take Control of Your Browsing">

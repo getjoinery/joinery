@@ -47,7 +47,7 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 	$hostname_field = $is_block_context ? 'sbr_hostname' : 'sdr_hostname';
 	$action_field = $is_block_context ? 'sbr_action' : 'sdr_action';
 
-	echo '		  <table class="table"><thead>
+	echo '		  <table class="sd-table"><thead>
 			<tr>
 			  <th scope="col">Site</th>
 			  <th scope="col">Rule</th>
@@ -77,7 +77,7 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 
 			  $delform = '<form id="form'.$rule->key.'" method="POST" action="/profile/scrolldaddy/rules">
 		'.$hidden_fields.'
-		<button type="submit">Delete</button>
+		<button type="submit" class="btn-delete">Delete</button>
 		</form>';
 		echo '<td>'.$delform.'</td>';
 			echo '</tr>';
@@ -92,7 +92,7 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 			if($is_block_context){
 				$formwriter->hiddeninput('block_id', '', ['value' => $block_id]);
 			}
-			echo '<tr><td>';
+			echo '<tr class="sd-add-row"><td>';
 			echo $formwriter->textinput('sdr_hostname', 'Add Site', ['maxlength' => 255]);
 
 			$optionvals = [
@@ -103,7 +103,6 @@ $page_vars = process_logic(rules_logic($_GET, $_POST));
 
 			echo $formwriter->dropinput('sdr_action', '', ['options' => $optionvals]);
 			echo '</td><td>';
-			echo '<br>';
 			echo $formwriter->submitbutton('btn_submit', 'New Rule', ['class' => 'btn btn-primary']);
 
 			echo '</td></tr>';
