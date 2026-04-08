@@ -152,8 +152,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		LoginClass::StoreUserLogin($user->key, LoginClass::LOGIN_FORM);
 
 		// Potentially save a cookie if they set "Remember Me"
-		if ((isset($post_vars['setcookie']) && $post_vars['setcookie']=="yes") ||
-			(isset($post_vars['lbx_setcookie']) && $post_vars['lbx_setcookie'] == "yes")) {
+		if (!empty($post_vars['setcookie']) || !empty($post_vars['lbx_setcookie'])) {
 			$session->save_user_to_cookie();
 		}
 
