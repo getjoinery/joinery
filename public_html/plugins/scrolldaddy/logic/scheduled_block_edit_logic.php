@@ -51,7 +51,13 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 			$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		}
 		else{
-			// Create new
+			// Create new — check scheduled block limit
+			$max_blocks = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_max_scheduled_blocks', 1);
+			$existing_blocks = new MultiSdScheduledBlock(['device_id' => $device->key]);
+			if($existing_blocks->count_all() >= $max_blocks){
+				return LogicResult::error("Your plan allows {$max_blocks} scheduled block per device. Upgrade to add more.");
+			}
+
 			$block = new SdScheduledBlock(NULL);
 			$block->set('sdb_sdd_device_id', $device->key);
 			$block->set('sdb_is_active', true);
@@ -75,6 +81,14 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 		}
 
 		$block->save();
+
+		// Strip restricted filters for users without advanced_filters
+		if(!SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_advanced_filters', false)){
+			require_once(PathHelper::getIncludePath('plugins/scrolldaddy/includes/ScrollDaddyHelper.php'));
+			foreach(ScrollDaddyHelper::getRestrictedFilters() as $restricted_key){
+				unset($post_vars['block_'.$restricted_key]);
+			}
+		}
 
 		// Update filter and service rules
 		$block->update_filters($post_vars);

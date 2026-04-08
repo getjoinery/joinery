@@ -18,5 +18,19 @@
     "type": "boolean",
     "default": false,
     "description": "Enable custom DNS filtering rules"
+  },
+  "scrolldaddy_query_logging": {
+    "label": "Query Logging",
+    "type": "boolean",
+    "default": false,
+    "description": "Enable DNS query logging on the ScrollDaddy server"
+  },
+  "scrolldaddy_max_scheduled_blocks": {
+    "label": "Max Scheduled Blocks per Device",
+    "type": "integer",
+    "default": 1,
+    "min": 1,
+    "max": 100,
+    "description": "Maximum number of scheduled filter blocks per device"
   }
 }
