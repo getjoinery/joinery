@@ -31,6 +31,10 @@ class ScrollDaddyHelper {
 		'dnsvpn' => 'VPN and DNS providers',
 	);
 
+	public static function getRestrictedFilters() {
+		return array('malware', 'ip_malware', 'ai_malware', 'typo', 'fakenews');
+	}
+
 	public static $service_categories = array(
 		'audio' => 'Audio streaming',
 		'career' => 'Career and education',

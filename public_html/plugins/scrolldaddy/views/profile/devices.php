@@ -167,6 +167,12 @@ else{
 								}
 							}
 
+							$max_blocks = $tier ? $tier->getFeature('scrolldaddy_max_scheduled_blocks', 1) : 1;
+							$block_count = $device_blocks ? count($device_blocks) : 0;
+							$add_block_btn = ($block_count >= $max_blocks)
+								? '<span style="font-size:13px; color:#6c757d;">Upgrade to add more</span>'
+								: '<a class="th-btn style5" href="/profile/scrolldaddy/scheduled_block_edit?device_id='.$device->key.'">Add</a>';
+
 							echo '
 							<br>
 							<div class="job-post_author">
@@ -179,7 +185,7 @@ else{
 										<h5 class="price">'.($has_blocks ? '' : 'None.').'</h5>
 									</div>
 								</div>
-								<a class="th-btn style5" href="/profile/scrolldaddy/scheduled_block_edit?device_id='.$device->key.'">Add</a>
+								'.$add_block_btn.'
 							</div>
 					</div>
 				</div>';

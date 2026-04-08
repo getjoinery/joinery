@@ -52,6 +52,12 @@ function filters_edit_logic($get_vars, $post_vars){
 			}
 		}
 
+		if(!SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_advanced_filters', false)){
+			foreach(ScrollDaddyHelper::getRestrictedFilters() as $restricted_key){
+				unset($_POST['block_'.$restricted_key]);
+			}
+		}
+
 		$profile->update_remote_filters($_POST);
 		$profile->update_remote_services($_POST);
 
