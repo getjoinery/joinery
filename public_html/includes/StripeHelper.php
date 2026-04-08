@@ -1246,17 +1246,34 @@ class StripeHelper {
 		
 		$price_items_wrap = array($price_items);
 
+		// Check for trial period on the product version
+		require_once(PathHelper::getIncludePath('data/product_versions_class.php'));
+		$trial_period_days = 0;
+		$product_version_id = $order_item->get('odi_prv_product_version_id');
+		if ($product_version_id) {
+			$product_version = new ProductVersion($product_version_id, TRUE);
+			if ($product_version->key) {
+				$trial_period_days = intval($product_version->get('prv_trial_period_days'));
+			}
+		}
+
 		try{
 
-			$params = array([
+			$subscription_params = [
 			  'customer' => $stripe_customer_id,
 			  'items' => $price_items_wrap,
 			  'metadata' => [
-				 "ord_order_id" => $order->key, 
+				 "ord_order_id" => $order->key,
 				 "odi_order_item_id" => $order_item->key,
 				 "customer_name" => $billing_name,
 				 "customer_email" => $billing_user->get('usr_email')],
-			]);
+			];
+
+			if ($trial_period_days > 0) {
+				$subscription_params['trial_period_days'] = $trial_period_days;
+			}
+
+			$params = array($subscription_params);
 			
 			
 			$subscription_result = $this->create_subscription($params);
@@ -1426,7 +1443,7 @@ class StripeHelper {
 		
 		// Get validated endpoint secret and process webhook
 		$endpoint_secret = $this->get_webhook_endpoint_secret();
-		return $this->stripe->webhooks->constructEvent($payload, $sig_header, $endpoint_secret);
+		return \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
 	}
 
 }
