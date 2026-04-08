@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.6.0
+ * @version 2.6.1
+ * @changelog 2.6.1 - prepareCheckboxData: use array_key_exists instead of isset so null 'checked' value is treated as unchecked (not missing)
  * @changelog 2.6.0 - Phase 2 cleanup: buildAjaxSelectScript shared method, visibility/custom_script in base output methods, outputTextbox uses handleOutput
  * @changelog 2.5.0 - Prepare/render split: base class concrete output*() methods call prepare*Data() + abstract render*()
  * @changelog 2.4.0 - Added numberinput(), repeater min/max/item_label, sub-field schema passthrough
@@ -3051,7 +3052,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
     protected function prepareCheckboxData($name, $label, $options) {
         $checked_value = $options['checked_value'] ?? '1';
-        if (isset($options['checked'])) {
+        if (array_key_exists('checked', $options)) {
             $is_checked = !empty($options['checked']);
         } else {
             $current_value = $options['value'] ?? ($this->values[$name] ?? '');
