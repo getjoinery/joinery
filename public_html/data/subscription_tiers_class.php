@@ -92,8 +92,8 @@ class SubscriptionTier extends SystemBase {
         // Remove user from all subscription tier groups
         foreach ($tier_groups as $group) {
             $existing_members = new MultiGroupMember([
-                'grm_grp_group_id' => $group->key,
-                'grm_foreign_key_id' => $user_id
+                'group_id' => $group->key,
+                'foreign_key_id' => $user_id
             ]);
             $existing_members->load();
 
@@ -134,7 +134,7 @@ class SubscriptionTier extends SystemBase {
      */
     public static function GetUserTier($user_id) {
         // Get all subscription tier groups the user belongs to
-        $user_groups = new MultiGroupMember(['grm_foreign_key_id' => $user_id]);
+        $user_groups = new MultiGroupMember(['foreign_key_id' => $user_id]);
         $user_groups->load();
 
         $current_tier = null;
@@ -445,8 +445,8 @@ class SubscriptionTier extends SystemBase {
         // Remove user from all subscription tier groups
         foreach ($tier_groups as $group) {
             $existing_members = new MultiGroupMember([
-                'grm_grp_group_id' => $group->key,
-                'grm_foreign_key_id' => $user_id
+                'group_id' => $group->key,
+                'foreign_key_id' => $user_id
             ]);
             $existing_members->load();
 

@@ -112,6 +112,13 @@ function change_tier_logic($get, $post) {
 
         // Check if user has an active subscription
         if (!$current_subscription) {
+            // For upgrade action with no active subscription, redirect to product page (new purchase / reactivation)
+            if ($post['action'] === 'upgrade' && !empty($post['product_id'])) {
+                $reactivate_product = new Product(intval($post['product_id']), TRUE);
+                if ($reactivate_product->key) {
+                    return LogicResult::redirect($reactivate_product->get_url());
+                }
+            }
             $page_vars['error_message'] = 'No active subscription found. Please purchase a subscription first.';
             return LogicResult::render($page_vars);
         }
