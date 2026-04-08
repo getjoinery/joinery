@@ -58,6 +58,31 @@ function rules_logic($get_vars, $post_vars){
 	}
 	else if(isset($_POST['sdr_hostname'])){
 
+		$is_ajax = isset($_POST['ajax']) && $_POST['ajax'] === '1';
+
+		if ($is_ajax) {
+			header('Content-Type: application/json');
+			if (!$tier || !$tier->getFeature('scrolldaddy_custom_rules', false)) {
+				echo json_encode(['success' => false, 'message' => 'Your plan does not include custom rules.']);
+				exit;
+			}
+			try {
+				$device_id = LibraryFunctions::fetch_variable_local($post_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
+				$device = new SdDevice($device_id, TRUE);
+				$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+				$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
+				$result = $profile->add_rule($_POST['sdr_hostname'], $_POST['sdr_action']);
+				if ($result === false) {
+					echo json_encode(['success' => false, 'message' => 'Invalid hostname.']);
+				} else {
+					echo json_encode(['success' => true]);
+				}
+			} catch (Exception $e) {
+				echo json_encode(['success' => false, 'message' => 'Device not found or access denied.']);
+			}
+			exit;
+		}
+
 		if($block_id){
 			$block = new SdScheduledBlock($block_id, TRUE);
 			$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));

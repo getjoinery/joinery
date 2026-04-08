@@ -4,11 +4,12 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('test_logic.php', 'logic', 'system', null, 'scrolldaddy'));
 
-$page_vars   = process_logic(test_logic($_GET, $_POST));
-$device      = $page_vars['device'];
-$device_id   = (int)$device->key;
-$device_name = htmlspecialchars($device->get_readable_name());
-$is_active   = $device->get('sdd_is_active');
+$page_vars     = process_logic(test_logic($_GET, $_POST));
+$device        = $page_vars['device'];
+$device_id     = (int)$device->key;
+$device_name   = htmlspecialchars($device->get_readable_name());
+$is_active     = $device->get('sdd_is_active');
+$can_add_rules = $page_vars['can_add_rules'];
 
 $page    = new PublicPage();
 $hoptions = array(
@@ -65,7 +66,8 @@ echo PublicPage::EndPage();
 ?>
 <script>
 (function () {
-	var deviceId = <?php echo $device_id; ?>;
+	var deviceId     = <?php echo $device_id; ?>;
+	var scdCanAddRules = <?php echo $can_add_rules ? 'true' : 'false'; ?>;
 
 	var _svgAttrs = 'xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em;margin-right:4px;"';
 	var _icons = {
@@ -166,20 +168,54 @@ echo PublicPage::EndPage();
 		html += '<div style="font-weight:600; font-size:15px; color:' + color + ';">' + _icons[iconKey] + escHtml(data.domain) + ' &mdash; ' + label + '</div>';
 		if (data.detail)   html += '<div style="font-size:13px; color:#6c757d; margin-top:4px; padding-left:20px;">' + escHtml(data.detail) + '</div>';
 		if (data.profile)  html += '<div style="font-size:13px; color:#6c757d; padding-left:20px;">Active profile: ' + escHtml(data.profile) + '</div>';
+
+		if (scdCanAddRules
+				&& data.reason !== 'custom_block_rule' && data.reason !== 'custom_allow_rule'
+				&& data.reason !== 'safesearch_rewrite' && data.reason !== 'safeyoutube_rewrite') {
+			var ruleAction, ruleLabel;
+			if (data.result === 'BLOCKED' || data.result === 'REFUSED') {
+				ruleAction = 1; ruleLabel = 'Allow this domain';
+			} else if (data.result === 'FORWARDED') {
+				ruleAction = 0; ruleLabel = 'Block this domain';
+			}
+			if (ruleAction !== undefined) {
+				html += '<div style="margin-top:10px; padding-left:20px;">';
+				html += '<button type="button" class="scd-add-rule-btn th-btn"'
+					  + ' data-domain="' + escHtml(data.domain) + '"'
+					  + ' data-device="' + deviceId + '"'
+					  + ' data-action="' + ruleAction + '">'
+					  + escHtml(ruleLabel) + '</button>';
+				html += '<span class="scd-rule-feedback" style="display:none; font-size:13px; margin-left:8px;"></span>';
+				html += '</div>';
+			}
+		}
+
 		html += '</div>';
 		return html;
 	}
 
-	function renderGroup(label, items, color, collapsed) {
+	function renderGroup(label, items, color, collapsed, ruleAction) {
 		var html = '<details' + (collapsed ? '' : ' open') + ' style="margin-bottom:8px;">';
 		html += '<summary style="cursor:pointer; font-weight:600; color:' + color + '; padding:5px 0; user-select:none;">';
 		html += escHtml(label) + ' <span style="font-size:13px; font-weight:400; color:#888;">(' + items.length + ')</span>';
 		html += '</summary>';
 		html += '<div style="padding-left:10px; margin-top:4px;">';
 		items.forEach(function (r) {
-			html += '<div style="padding:5px 0; border-bottom:1px solid #f0f0f0;">';
+			html += '<div style="padding:5px 0; border-bottom:1px solid #f0f0f0; display:flex; align-items:baseline; gap:8px;">';
+			html += '<div style="flex:1;">';
 			html += '<div style="font-size:14px;">' + escHtml(r.domain) + '</div>';
 			if (r.detail) html += '<div style="font-size:12px; color:#888;">' + escHtml(r.detail) + '</div>';
+			html += '</div>';
+			if (scdCanAddRules && ruleAction !== null && r.result !== 'ERROR'
+					&& r.reason !== 'custom_block_rule' && r.reason !== 'custom_allow_rule') {
+				var btnLabel = ruleAction === 1 ? 'Allow' : 'Block';
+				html += '<button type="button" class="scd-add-rule-btn th-btn"'
+					  + ' data-domain="' + escHtml(r.domain) + '"'
+					  + ' data-device="' + deviceId + '"'
+					  + ' data-action="' + ruleAction + '">'
+					  + escHtml(btnLabel) + '</button>';
+				html += '<span class="scd-rule-feedback" style="display:none; font-size:12px;"></span>';
+			}
 			html += '</div>';
 		});
 		html += '</div></details>';
@@ -218,10 +254,10 @@ echo PublicPage::EndPage();
 		html += blockedCount + ' blocked &bull; ' + grouped.REWRITTEN.length + ' rewritten &bull; ' + grouped.ALLOWED.length + ' allowed';
 		html += '</div>';
 
-		if (grouped.BLOCKED.length > 0)   html += renderGroup('Blocked',   grouped.BLOCKED,   '#dc3545', false);
-		if (grouped.REFUSED.length > 0)   html += renderGroup('Refused',   grouped.REFUSED,   '#e67e22', false);
-		if (grouped.REWRITTEN.length > 0) html += renderGroup('Rewritten', grouped.REWRITTEN, '#0d6efd', false);
-		if (grouped.ALLOWED.length > 0)   html += renderGroup('Allowed',   grouped.ALLOWED,   '#198754', true);
+		if (grouped.BLOCKED.length > 0)   html += renderGroup('Blocked',   grouped.BLOCKED,   '#dc3545', false, 1);
+		if (grouped.REFUSED.length > 0)   html += renderGroup('Refused',   grouped.REFUSED,   '#e67e22', false, 1);
+		if (grouped.REWRITTEN.length > 0) html += renderGroup('Rewritten', grouped.REWRITTEN, '#0d6efd', false, null);
+		if (grouped.ALLOWED.length > 0)   html += renderGroup('Allowed',   grouped.ALLOWED,   '#198754', true,  0);
 
 		html += '</div>';
 		return html;
@@ -231,6 +267,43 @@ echo PublicPage::EndPage();
 	var inputEl  = document.getElementById('scd-test-input');
 	if (btn)     btn.addEventListener('click', runTest);
 	if (inputEl) inputEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); runTest(); } });
+
+	document.addEventListener('click', function (e) {
+		var btn = e.target.closest('.scd-add-rule-btn');
+		if (!btn) return;
+		btn.disabled = true;
+		var feedback = btn.parentNode.querySelector('.scd-rule-feedback');
+		var xhr = new XMLHttpRequest();
+		xhr.open('POST', '/profile/scrolldaddy/rules');
+		xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+		xhr.onload = function () {
+			var data;
+			try { data = JSON.parse(xhr.responseText); } catch (e) {}
+			if (data && data.success) {
+				btn.style.display = 'none';
+				feedback.style.display = 'inline';
+				feedback.style.color = '#198754';
+				feedback.innerHTML = 'Rule added. <a href="/profile/scrolldaddy/rules?device_id=' + encodeURIComponent(btn.dataset.device) + '">Manage rules \u2192</a>';
+			} else {
+				btn.disabled = false;
+				feedback.style.display = 'inline';
+				feedback.style.color = '#dc3545';
+				feedback.textContent = (data && data.message) ? data.message : 'Failed to add rule.';
+			}
+		};
+		xhr.onerror = function () {
+			btn.disabled = false;
+			feedback.style.display = 'inline';
+			feedback.style.color = '#dc3545';
+			feedback.textContent = 'Network error. Please try again.';
+		};
+		xhr.send(
+			'ajax=1' +
+			'&device_id='    + encodeURIComponent(btn.dataset.device) +
+			'&sdr_hostname=' + encodeURIComponent(btn.dataset.domain) +
+			'&sdr_action='   + encodeURIComponent(btn.dataset.action)
+		);
+	});
 })();
 </script>
 <?php

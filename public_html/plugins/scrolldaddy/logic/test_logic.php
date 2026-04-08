@@ -3,6 +3,7 @@
 function test_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
 
 	$page_vars = array();
@@ -35,6 +36,12 @@ function test_logic($get_vars, $post_vars) {
 	}
 
 	$page_vars['device'] = $device;
+
+	$tier = SubscriptionTier::GetUserTier($session->get_user_id());
+	$page_vars['tier'] = $tier;
+	$page_vars['can_add_rules'] = $tier
+		&& $tier->getFeature('scrolldaddy_custom_rules', false)
+		&& $device->are_filters_editable();
 
 	return LogicResult::render($page_vars);
 }
