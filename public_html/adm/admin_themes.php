@@ -20,6 +20,7 @@ $page = new AdminPage();
 
 // Build Options dropdown links
 $altlinks = array();
+$altlinks['Sync with Filesystem'] = '/admin/admin_themes?action=sync_filesystem';
 $altlinks['Add New'] = '/admin/admin_themes?show_upload=1';
 $altlinks['Check for Updates'] = '/admin/admin_themes?action=check_updates';
 

@@ -1,9 +1,14 @@
 /**
- * ControlD Plugin Styles
- * Additional styles specific to ControlD plugin functionality
+ * ScrollDaddy Plugin Styles
+ * Additional styles specific to ScrollDaddy plugin functionality
  * These styles work with any theme's CSS framework
- * v6
+ * v8
  */
+
+/* Fix blue bar under logo: inline <img> leaves a baseline gap that the mask-icon fills with theme color */
+.icon-masking img {
+    display: block;
+}
 
 /* Override Font Awesome Pro icon glyphs (not licensed) with plain Unicode equivalents */
 
@@ -109,43 +114,43 @@ input[type="radio"] ~ label::before {
     content: "✗";
 }
 
-/* ControlD Dashboard Styles */
-.controld-dashboard {
+/* ScrollDaddy Dashboard Styles */
+.sd-dashboard {
     /* Dashboard-specific styles */
 }
 
-.controld-status-active {
+.sd-status-active {
     color: #28a745;
 }
 
-.controld-status-inactive {
+.sd-status-inactive {
     color: #dc3545;
 }
 
 /* Device Management Styles */
-.controld-device-card {
+.sd-device-card {
     /* Device card styles */
 }
 
-.controld-device-online {
+.sd-device-online {
     border-left: 4px solid #28a745;
 }
 
-.controld-device-offline {
+.sd-device-offline {
     border-left: 4px solid #dc3545;
 }
 
 /* Profile Management Styles */
-.controld-profile-selector {
+.sd-profile-selector {
     /* Profile selector styles */
 }
 
 /* Filtering Rules Styles */
-.controld-rule-active {
+.sd-rule-active {
     background-color: rgba(40, 167, 69, 0.1);
 }
 
-.controld-rule-disabled {
+.sd-rule-disabled {
     background-color: rgba(108, 117, 125, 0.1);
     opacity: 0.7;
 }

@@ -63,6 +63,41 @@ function admin_plugins_logic($get, $post) {
 			// Check for updates action
 			$message = 'Check for updates functionality will be implemented in a future update.';
 			$message_type = 'info';
+		} elseif ($action === 'sync_filesystem') {
+			try {
+				$plugin_manager = new PluginManager();
+				$result = $plugin_manager->sync();
+
+				$parts = [];
+				if (!empty($result['added'])) {
+					$parts[] = count($result['added']) . ' new plugin(s) discovered';
+				}
+				if (!empty($result['updated'])) {
+					$parts[] = count($result['updated']) . ' plugin(s) updated';
+				}
+				if (!empty($result['table_messages'])) {
+					$parts[] = count($result['table_messages']) . ' table change(s)';
+				}
+				if (!empty($result['migration_messages'])) {
+					$parts[] = count($result['migration_messages']) . ' migration(s) applied';
+				}
+
+				if (empty($parts)) {
+					$message = 'Sync complete. Everything is up to date.';
+				} else {
+					$message = 'Sync complete: ' . implode(', ', $parts) . '.';
+				}
+				if (!empty($result['table_messages'])) {
+					$message .= '<br><small>' . htmlspecialchars(implode('; ', $result['table_messages'])) . '</small>';
+				}
+				if (!empty($result['migration_messages'])) {
+					$message .= '<br><small>Migrations: ' . htmlspecialchars(implode('; ', $result['migration_messages'])) . '</small>';
+				}
+				$message_type = 'success';
+			} catch (Exception $e) {
+				$message = 'Sync failed: ' . htmlspecialchars($e->getMessage());
+				$message_type = 'danger';
+			}
 		} elseif (!$plugin_name || !Plugin::is_valid_plugin_name($plugin_name)) {
 			// Other actions require valid plugin name
 			$message = 'Invalid plugin name.';
