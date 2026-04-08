@@ -455,6 +455,59 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
         
+        // Scan all existing data classes (core + installed plugins, excluding self)
+        $existing_classes = $existing_tables = $existing_prefixes = [];
+        $scan_dirs = [PathHelper::getAbsolutePath('data')];
+        $plugins_dir = PathHelper::getAbsolutePath('plugins');
+        foreach (glob($plugins_dir . '/*/data') ?: [] as $dir) {
+            if (strpos($dir, "plugins/{$plugin_name}/") === false) {
+                $scan_dirs[] = $dir;
+            }
+        }
+        foreach ($scan_dirs as $dir) {
+            foreach (glob($dir . '/*.php') ?: [] as $file) {
+                $content = file_get_contents($file);
+                preg_match_all('/^\s*class\s+([A-Za-z_]\w*)/m', $content, $cm);
+                preg_match_all('/\$tablename\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $content, $tm);
+                preg_match_all('/\$prefix\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $content, $pm);
+                $existing_classes = array_merge($existing_classes, $cm[1]);
+                foreach ($tm[1] as $t) $existing_tables[$t] = basename(dirname($dir));
+                foreach ($pm[1] as $p) $existing_prefixes[$p] = basename(dirname($dir));
+            }
+        }
+
+        // Scan the incoming plugin
+        $incoming_classes = $incoming_tables = $incoming_prefixes = [];
+        $data_dir = PathHelper::getAbsolutePath("plugins/{$plugin_name}/data");
+        foreach (glob($data_dir . '/*.php') ?: [] as $file) {
+            $content = file_get_contents($file);
+            preg_match_all('/^\s*class\s+([A-Za-z_]\w*)/m', $content, $cm);
+            preg_match_all('/\$tablename\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $content, $tm);
+            preg_match_all('/\$prefix\s*=\s*[\'"]([a-z0-9_]+)[\'"]/', $content, $pm);
+            $incoming_classes = array_merge($incoming_classes, $cm[1]);
+            $incoming_tables = array_merge($incoming_tables, $tm[1]);
+            $incoming_prefixes = array_merge($incoming_prefixes, $pm[1]);
+        }
+
+        // Check collisions
+        foreach ($incoming_classes as $cls) {
+            if (in_array($cls, $existing_classes)) {
+                $results['valid'] = false;
+                $results['errors'][] = "Class name collision: '{$cls}' is already defined";
+            }
+        }
+        foreach ($incoming_tables as $tbl) {
+            if (isset($existing_tables[$tbl])) {
+                $results['valid'] = false;
+                $results['errors'][] = "Table name collision: '{$tbl}' is already used by {$existing_tables[$tbl]}";
+            }
+        }
+        foreach ($incoming_prefixes as $pfx) {
+            if (isset($existing_prefixes[$pfx]) && empty(array_intersect($incoming_tables, array_keys($existing_tables)))) {
+                $results['warnings'][] = "Table prefix '{$pfx}' is also used by {$existing_prefixes[$pfx]} — consider a more distinctive prefix";
+            }
+        }
+
         // Store dependencies in database if valid
         if ($results['valid']) {
             $this->storeDependencies($plugin_name, $manifest);
