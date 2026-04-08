@@ -2,7 +2,112 @@
  * ControlD Plugin Styles
  * Additional styles specific to ControlD plugin functionality
  * These styles work with any theme's CSS framework
+ * v6
  */
+
+/* Override Font Awesome Pro icon glyphs (not licensed) with plain Unicode equivalents */
+
+/* Main menu: dropdown arrow on parent items */
+.main-menu ul li.menu-item-has-children > a:after {
+    font-family: inherit;
+    content: " ▾";
+}
+
+/* Main menu: sub-menu item bullet and nested dropdown arrow */
+.main-menu ul.sub-menu li a:before {
+    font-family: inherit;
+    content: "•";
+}
+.main-menu ul.sub-menu li.menu-item-has-children > a:after {
+    font-family: inherit;
+    content: " ›";
+}
+
+/* Mobile menu: bullet, expand (+/-) */
+.th-mobile-menu ul li a:before {
+    font-family: inherit;
+    content: "›";
+}
+.th-mobile-menu ul .th-item-has-children > a .th-mean-expand:before {
+    font-family: inherit;
+    content: "+";
+}
+.th-mobile-menu ul .th-item-has-children.th-active > a .th-mean-expand:before {
+    font-family: inherit;
+    content: "−";
+}
+
+/* Scroll-to-top button arrow */
+.scroll-top:after {
+    font-family: inherit;
+    content: "↑";
+}
+
+/* Sidebar widget nav arrows */
+.widget_nav_menu a::before,
+.widget_meta a::before,
+.widget_pages a::before,
+.widget_archive a::before,
+.widget_categories a::before {
+    font-family: inherit;
+    content: "›";
+}
+
+/* Breadcrumb separator */
+.breadcumb-menu li:after {
+    font-family: inherit;
+    content: "›";
+}
+
+/* Checkbox checkmark */
+input[type="checkbox"]:checked ~ label:before {
+    font-family: inherit;
+    content: "✓";
+}
+
+/* Radio button indicator */
+input[type="radio"] ~ label::before {
+    font-family: inherit;
+    content: "○";
+}
+
+/* Accordions (all styles) */
+.accordion-card .accordion-button:not(.collapsed):after,
+.accordion-card.style5 .accordion-button:not(.collapsed):after,
+.accordion-card.style11 .accordion-button:not(.collapsed):after,
+.accordion-card.style12 .accordion-button:not(.collapsed):after {
+    font-family: inherit;
+    content: "▴";
+}
+.accordion-card.style5 .accordion-button:after,
+.accordion-card.style11 .accordion-button:after,
+.accordion-card.style12 .accordion-button:after {
+    font-family: inherit;
+    content: "▾";
+}
+
+/* Blog post format decorations (quote/link) */
+.blog-single.format-quote:before,
+.blog-single.format-link:before,
+.blog-single.tag-sticky-2:before,
+.blog-single.sticky:before {
+    font-family: inherit;
+    content: "❝";
+}
+.blog-single.format-quote:before {
+    content: "❝";
+}
+
+/* Available/unavailable feature lists */
+.available-list li:after,
+.price-grid .available-list ul li:before {
+    font-family: inherit;
+    content: "✓";
+}
+.available-list li.unavailable:after {
+    font-family: inherit;
+    content: "✗";
+}
 
 /* ControlD Dashboard Styles */
 .controld-dashboard {

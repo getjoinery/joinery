@@ -275,7 +275,7 @@ Career Area
     <!-- Theme Custom CSS -->
     <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/style.css">
     <!-- ScrollDaddy Plugin CSS -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=4">
+    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=6">
 
     <!-- Facebook Open Graph Meta Tags -->
     <meta property="og:title" content="Scrolldaddy - Take Control of Your Browsing">
@@ -408,8 +408,8 @@ Career Area
 										foreach ($menus as $menu){
 											if($menu['parent'] == true){
 												$submenus = $menu['submenu'];
-												
-												if(empty($submenus)){	
+
+												if(empty($submenus)){
 													echo '          <li><a href="'.$menu['link'].'" class="text-base font-medium text-gray-500 hover:text-gray-900">'.$menu['name'].'</a></li>';
 												}
 												else{
@@ -417,16 +417,19 @@ Career Area
 													<li class="menu-item-has-children">
 														<a href="'.$menu["link"].'">'.$menu["name"].'</a>
 														<ul class="sub-menu">';
-														foreach ($submenus as $submenu){ 
+														foreach ($submenus as $submenu){
 															echo '<li><a href="'.$submenu["link"].'">'.$submenu["name"].'</a></li>';
 														 }
 														echo '</ul>
 													</li>';
-													
-													
+
+
 												}
 											}
-										}		
+										}
+										if($session->get_user_id()){
+											echo '<li><a href="/profile/scrolldaddy/devices">My Devices</a></li>';
+										}
 										?>
                                    
                                 </ul>
@@ -440,7 +443,6 @@ Career Area
                             <div class="header-button">
 								<?php
 								if($session->get_user_id()){
-									echo '<a href="/profile/scrolldaddy/devices" class="icon-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></a>';
 									echo '<a href="/profile" class="icon-btn"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>';
 									echo '<a href="/logout" class="th-btn">Log out</a>';
 								}

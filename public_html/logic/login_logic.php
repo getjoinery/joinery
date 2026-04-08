@@ -166,7 +166,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if ($returnurl) {
 			return LogicResult::redirect($returnurl);
 		} else {
-			return LogicResult::redirect('/profile');
+			$alternate_homepage = $settings->get_setting('alternate_loggedin_homepage');
+			return LogicResult::redirect($alternate_homepage ?: '/profile');
 		}
 	}
 
