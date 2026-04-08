@@ -1237,10 +1237,26 @@
 				if (!empty($plugin_result['updated'])) {
 					$plugin_parts[] = count($plugin_result['updated']) . " updated";
 				}
+				if (!empty($plugin_result['table_messages'])) {
+					$plugin_parts[] = count($plugin_result['table_messages']) . " table change(s)";
+				}
+				if (!empty($plugin_result['migration_messages'])) {
+					$plugin_parts[] = count($plugin_result['migration_messages']) . " migration(s)";
+				}
 				if (empty($plugin_parts)) {
 					upgrade_echo("✓ Plugins synced (no changes)<br>");
 				} else {
 					upgrade_echo("✓ Plugins synced: " . implode(", ", $plugin_parts) . "<br>");
+				}
+				if (!empty($plugin_result['table_messages'])) {
+					foreach ($plugin_result['table_messages'] as $tm) {
+						upgrade_echo("  Table: " . htmlspecialchars($tm) . "<br>");
+					}
+				}
+				if (!empty($plugin_result['migration_messages'])) {
+					foreach ($plugin_result['migration_messages'] as $mm) {
+						upgrade_echo("  Migration: " . htmlspecialchars($mm) . "<br>");
+					}
 				}
 			} catch (Exception $e) {
 				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';

@@ -893,31 +893,51 @@ class PluginManager extends AbstractExtensionManager {
     // ========== Public API Methods (Backward Compatibility) ==========
 
     /**
-     * Sync filesystem plugins with database
-     * @return array Array of newly synced plugin names
+     * Comprehensive plugin sync: filesystem scan, table updates, migrations, deletion rules.
+     *
+     * Overrides the base sync() so that every caller (upgrade.php, postInstall,
+     * marketplace, admin UI) automatically gets the full behaviour.
+     *
+     * @return array Sync result with keys: added, updated, total, table_messages, migration_messages
      */
-    public function syncWithFilesystem() {
+    public function sync() {
         $result = parent::sync();
 
-        // Update database tables for all active plugins
-        // This ensures new data classes in existing plugins get their tables created
+        // Update database tables and run migrations for all active plugins
         require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
         require_once(PathHelper::getIncludePath('data/plugins_class.php'));
         $database_updater = new DatabaseUpdater();
         $active_plugins = new MultiPlugin(['plg_active' => 1]);
         $active_plugins->load();
         $table_messages = [];
+        $migration_messages = [];
         foreach ($active_plugins as $plugin) {
             $plugin_name = $plugin->get('plg_name');
+
+            // Update tables (adds missing columns, creates new tables)
             $table_result = $database_updater->runPluginTablesOnly($plugin_name);
             if (!empty($table_result['messages'])) {
                 $table_messages = array_merge($table_messages, $table_result['messages']);
             }
+
+            // Run pending migrations
+            try {
+                $migration_results = $this->runPendingMigrations($plugin_name);
+                foreach ($migration_results as $m) {
+                    if (!empty($m['error'])) {
+                        $migration_messages[] = "$plugin_name: " . $m['error'];
+                    } elseif (!empty($m['id'])) {
+                        $migration_messages[] = "$plugin_name: applied " . $m['id'];
+                    }
+                }
+            } catch (Exception $e) {
+                $migration_messages[] = "$plugin_name: migration error - " . $e->getMessage();
+            }
         }
         $result['table_messages'] = $table_messages;
+        $result['migration_messages'] = $migration_messages;
 
         // Register deletion rules for ALL active plugins
-        // This ensures deletion rules are up-to-date even if plugin code changed
         require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
         PluginHelper::registerAllActiveDeletionRules();
 

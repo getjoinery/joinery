@@ -578,6 +578,63 @@
 		$migration_log->prepare();
 		$migration_log->save();
 		
+		// Step: Sync plugins and themes
+		// Runs after core DB is fully up to date so plugin tables are created against current schema
+		echo "<br>\n<strong>Plugin &amp; Theme Sync</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+
+			$theme_manager = ThemeManager::getInstance();
+			$theme_sync_result = $theme_manager->sync();
+			$theme_parts = [];
+			if (!empty($theme_sync_result['added'])) {
+				$theme_parts[] = count($theme_sync_result['added']) . " added";
+			}
+			if (!empty($theme_sync_result['updated'])) {
+				$theme_parts[] = count($theme_sync_result['updated']) . " updated";
+			}
+			if (empty($theme_parts)) {
+				echo "✓ Themes synced (no changes)<br>\n";
+			} else {
+				echo "✓ Themes synced: " . implode(", ", $theme_parts) . "<br>\n";
+			}
+
+			$plugin_manager = PluginManager::getInstance();
+			$plugin_sync_result = $plugin_manager->sync();
+			$plugin_parts = [];
+			if (!empty($plugin_sync_result['added'])) {
+				$plugin_parts[] = count($plugin_sync_result['added']) . " added";
+			}
+			if (!empty($plugin_sync_result['updated'])) {
+				$plugin_parts[] = count($plugin_sync_result['updated']) . " updated";
+			}
+			if (!empty($plugin_sync_result['table_messages'])) {
+				$plugin_parts[] = count($plugin_sync_result['table_messages']) . " table change(s)";
+			}
+			if (!empty($plugin_sync_result['migration_messages'])) {
+				$plugin_parts[] = count($plugin_sync_result['migration_messages']) . " migration(s)";
+			}
+			if (empty($plugin_parts)) {
+				echo "✓ Plugins synced (no changes)<br>\n";
+			} else {
+				echo "✓ Plugins synced: " . implode(", ", $plugin_parts) . "<br>\n";
+			}
+			if (!empty($plugin_sync_result['table_messages'])) {
+				foreach ($plugin_sync_result['table_messages'] as $tm) {
+					echo "  Table: " . htmlspecialchars($tm) . "<br>\n";
+				}
+			}
+			if (!empty($plugin_sync_result['migration_messages'])) {
+				foreach ($plugin_sync_result['migration_messages'] as $mm) {
+					echo "  Migration: " . htmlspecialchars($mm) . "<br>\n";
+				}
+			}
+		} catch (Exception $e) {
+			echo "⚠️  Plugin/Theme sync failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+			// Non-fatal — core DB update already succeeded
+		}
+
 		// Show final result
 		if ($overall_success) {
 			echo "✅ DATABASE UPDATE SUCCESSFUL";

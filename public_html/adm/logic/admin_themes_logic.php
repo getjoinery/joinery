@@ -85,6 +85,34 @@ function admin_themes_logic($get, $post) {
 						$theme_manager->deleteTheme($theme_name);
 						$message = "Theme '$theme_name' has been completely removed (files and database record).";
 						break;
+
+					case 'sync_filesystem':
+						$result = $theme_manager->sync();
+
+						$parts = [];
+						if (!empty($result['added'])) {
+							$parts[] = count($result['added']) . ' new theme(s) discovered';
+						}
+						if (!empty($result['updated'])) {
+							$parts[] = count($result['updated']) . ' theme(s) updated';
+						}
+						if (!empty($result['components'])) {
+							$c = $result['components'];
+							$component_parts = [];
+							if (!empty($c['created']) && $c['created'] > 0) $component_parts[] = $c['created'] . ' created';
+							if (!empty($c['updated']) && $c['updated'] > 0) $component_parts[] = $c['updated'] . ' updated';
+							if (!empty($c['deactivated']) && $c['deactivated'] > 0) $component_parts[] = $c['deactivated'] . ' deactivated';
+							if (!empty($component_parts)) {
+								$parts[] = 'components: ' . implode(', ', $component_parts);
+							}
+						}
+
+						if (empty($parts)) {
+							$message = 'Sync complete. Everything is up to date.';
+						} else {
+							$message = 'Sync complete: ' . implode(', ', $parts) . '.';
+						}
+						break;
 				}
 			}
 		} catch (Exception $e) {

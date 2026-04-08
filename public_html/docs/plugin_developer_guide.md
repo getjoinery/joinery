@@ -351,7 +351,15 @@ Discovery → Install → Activate ↔ Deactivate → Uninstall → Permanent De
 5. Resumes any suspended scheduled tasks for this plugin
 6. Sets `plg_active = 1`
 
-**Developer workflow for schema changes** — If you add columns to `$field_specifications` on an already-installed plugin: modify the class, then deactivate → activate. Activation re-runs `runPluginTablesOnly()` which picks up the new columns.
+**Developer workflow for schema changes** — If you add columns to `$field_specifications` on an already-installed plugin: modify the class, then run **Sync with Filesystem** from the admin Plugins page (`/admin/admin_plugins?action=sync_filesystem`). Sync calls `runPluginTablesOnly()` for all active plugins, which picks up new columns and creates new tables. Schema changes are also applied automatically during deploys (`upgrade.php`) and when running `update_database` from admin utilities.
+
+**Sync** (`PluginManager::sync()`)
+1. Scans filesystem — discovers new plugins, updates metadata from manifests, detects missing directories
+2. Updates database tables for **all active plugins** via `DatabaseUpdater::runPluginTablesOnly()`
+3. Runs pending migrations for all active plugins
+4. Re-registers deletion rules for all active plugins via `PluginHelper::registerAllActiveDeletionRules()`
+
+Sync is the recommended way to apply schema changes after code deploys. It is also available as an admin UI action on the Plugins page and the Themes page.
 
 **Deactivate** (`PluginManager::deactivate($name)`)
 1. Runs `deactivate.php` hook
@@ -369,7 +377,7 @@ Discovery → Install → Activate ↔ Deactivate → Uninstall → Permanent De
 
 **Permanent Delete** — Drops plugin database tables, removes migration records, deletes plugin files and DB record. Cannot be undone.
 
-**Important:** The core `update_database.php` script explicitly **excludes plugins** (`include_plugins => false`). This is intentional — core can't know about plugins at compile time. Schema updates happen through the activate workflow above.
+**Important:** The core `update_database.php` script excludes plugins from its main pipeline (`include_plugins => false`) because plugin tables have independent lifecycles. However, `update_database` runs a plugin/theme sync as its final step, so plugin schema changes are still applied when you run it.
 
 ### Table Creation (Automatic)
 
