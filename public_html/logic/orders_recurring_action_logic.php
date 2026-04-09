@@ -24,7 +24,7 @@ function orders_recurring_action_logic($get_vars, $post_vars) {
 	$order_item_id = intval($order_item_id);
 
 	$order_item = new OrderItem($order_item_id, TRUE);
-	$success = $order_item->cancel_subscription_order_item(true);
+	$success = $order_item->cancel_subscription_order_item(true, 'period_end');
 
 	// Redirect back
 	$returnurl = $session->get_return();

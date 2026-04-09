@@ -5,7 +5,7 @@ require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 $session = SessionControl::get_instance();
 // Check for admin permission (level 9)
 try {
-    $session->check_permission(9);
+    $session->check_permission(8);
 } catch (Exception $e) {
     die("Admin access required");
 }

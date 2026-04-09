@@ -21,7 +21,7 @@ require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 $session = SessionControl::get_instance();
-// No permission check for testing
+$session->check_permission(5);
 
 $page = new PublicPage();
 $hoptions = array(
