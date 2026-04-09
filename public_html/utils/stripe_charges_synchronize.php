@@ -13,8 +13,11 @@
 
 	require_once( __DIR__ . '/../data/event_logs_class.php');
 	
+	$session = SessionControl::get_instance();
+	$session->check_permission(5);
+
 	$stripe_helper = new StripeHelper();
-	
+
 	$event_log = new EventLog(NULL);
 	$event_log->set('evl_event', 'stripe_charges_synchronize');
 	$event_log->set('evl_usr_user_id', User::USER_SYSTEM);

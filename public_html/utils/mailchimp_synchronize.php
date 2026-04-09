@@ -7,7 +7,10 @@
 	require_once( __DIR__ . '/../data/contact_types_class.php');
 	
 	$settings = Globalvars::get_instance();
-	
+
+	$session = SessionControl::get_instance();
+	$session->check_permission(5);
+
 	$test = LibraryFunctions::fetch_variable('test', 0,0,'');
 
 	require_once(PathHelper::getComposerAutoloadPath());

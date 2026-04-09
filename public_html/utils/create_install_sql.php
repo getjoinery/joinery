@@ -19,6 +19,11 @@
  * @version 1.0
  */
 
+if (php_sapi_name() !== 'cli') {
+	http_response_code(403);
+	die('This script can only be run from the command line.');
+}
+
 // ============================================================================
 // SETUP AND ARGUMENT PARSING
 // ============================================================================

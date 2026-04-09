@@ -130,7 +130,7 @@ $routes = [
         '/ajax/*' => ['view' => 'ajax/{file}'],
         '/utils/publish_theme' => ['view' => 'utils/publish_theme'],  // Public API: own auth via upgrade_server_active
         '/utils/upgrade' => ['view' => 'utils/upgrade'],              // Public API: own auth via upgrade_server_active / CLI
-        '/utils/*' => ['view' => 'utils/{file}', 'min_permission' => 5],
+        '/utils/*' => ['view' => 'utils/{file}'],
         '/tests/*' => ['view' => 'tests/{path}', 'min_permission' => 10],
         
         // Optional: Explicit route for views directory access (if needed)
