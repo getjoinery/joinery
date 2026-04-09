@@ -12,6 +12,11 @@
 
 	$settings = Globalvars::get_instance();
 
+	if (php_sapi_name() !== 'cli') {
+		$session = SessionControl::get_instance();
+		$session->check_permission(10);
+	}
+
 	$stripe_helper = new StripeHelper();
 
 	$orders = new MultiOrder(array('user_id' => $user->key));

@@ -12,6 +12,11 @@
 
 	require_once( __DIR__ . '/../data/event_logs_class.php');
 
+	if (php_sapi_name() !== 'cli') {
+		$session = SessionControl::get_instance();
+		$session->check_permission(10);
+	}
+
 	$stripe_helper = new StripeHelper();
 
 	$event_log = new EventLog(NULL);
