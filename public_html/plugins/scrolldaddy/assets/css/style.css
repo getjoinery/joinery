@@ -3529,6 +3529,12 @@ hr.title-line {
   mix-blend-mode: hue;
   background: var(--theme-color);
   top: 0;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
 }
 
 .icon-masking2 {
@@ -6849,10 +6855,15 @@ li.activemenu a{
 @media (max-width: 575px) {
   .header-logo {
     max-width: 150px;
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
   .header-logo .icon-masking .mask-icon {
     -webkit-mask-size: cover;
             mask-size: cover;
+  }
+  .default-header .menu-area {
+    padding: 6px 0;
   }
 }
 
@@ -8703,6 +8714,12 @@ blockquote.has-very-dark-gray-color {
     -webkit-justify-content: center;
         -ms-flex-pack: center;
             justify-content: center;
+  }
+}
+
+@media (max-width: 767px) {
+  .hero-style1 {
+    padding: 60px 0 50px 0;
   }
 }
 

@@ -327,7 +327,7 @@ Price Area
                         <div class="price-box th-ani ">
                             <div class="price-title-wrap">
                                 <h3 class="box-title"><?php echo $product->get('pro_name'); ?></h3>
-                                <p class="subtitle"><?php echo $tier->get('sbt_display_name'); ?></p>
+                                <!--<p class="subtitle"><?php echo $tier->get('sbt_display_name'); ?></p>-->
                             </div>
                             <!--<p class="box-text">Perfect plan to get started</p>-->
 							<?php echo $product->get('pro_short_description'); ?>

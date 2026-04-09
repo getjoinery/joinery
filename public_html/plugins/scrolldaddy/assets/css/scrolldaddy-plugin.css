@@ -246,3 +246,20 @@ input[type="checkbox"]:checked ~ label:before {
 .sd-table .sd-add-row .form-group {
     margin-bottom: 0;
 }
+
+/* Mobile header and hero spacing */
+@media (max-width: 575px) {
+    .default-header .menu-area {
+        padding: 6px 0;
+    }
+    .header-logo {
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+}
+
+@media (max-width: 767px) {
+    .hero-style1 {
+        padding: 60px 0 50px 0;
+    }
+}
