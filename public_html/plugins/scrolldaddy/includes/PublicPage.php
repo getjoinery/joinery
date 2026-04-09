@@ -275,7 +275,7 @@ Career Area
     <!-- Theme Custom CSS -->
     <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/style.css">
     <!-- ScrollDaddy Plugin CSS -->
-    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=7">
+    <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=8">
 
     <!-- Facebook Open Graph Meta Tags -->
     <meta property="og:title" content="Scrolldaddy - Take Control of Your Browsing">
@@ -615,7 +615,7 @@ Career Area
 	<!-- Joinery Validation (Pure JS, no jQuery dependency) -->
 	<script src="/assets/js/joinery-validate.js"></script>
     <!-- Main Js File -->
-    <script src="/plugins/scrolldaddy/assets/js/main.js?v=2"></script>
+    <script src="/plugins/scrolldaddy/assets/js/main.js?v=3"></script>
     <!-- ScrollDaddy Plugin JS -->
     <script src="/plugins/scrolldaddy/assets/js/scrolldaddy-plugin.js?v=2"></script>
 

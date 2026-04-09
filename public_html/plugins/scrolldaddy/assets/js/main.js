@@ -16,8 +16,7 @@
 
     /* 2. Mobile Menu */
     var menuWrapper = document.querySelector('.th-menu-wrapper');
-    var menuToggle = document.querySelector('.th-menu-toggle');
-    if (menuWrapper && menuToggle) {
+    if (menuWrapper) {
         // Add submenu classes and expand togglers
         menuWrapper.querySelectorAll('li').forEach(function (li) {
             var submenu = li.querySelector('ul');
@@ -43,9 +42,11 @@
             });
         }
 
-        menuToggle.addEventListener('click', function (e) {
-            e.stopPropagation();
-            menuWrapper.classList.toggle('th-body-visible');
+        document.querySelectorAll('.th-menu-toggle').forEach(function (toggle) {
+            toggle.addEventListener('click', function (e) {
+                e.stopPropagation();
+                menuWrapper.classList.toggle('th-body-visible');
+            });
         });
 
         // Click on overlay (outside the inner div) closes menu
