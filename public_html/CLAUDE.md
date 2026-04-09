@@ -553,12 +553,13 @@ Production Docker server hosting multiple client sites. Each site runs in its ow
 - `scrolldaddy` - ScrollDaddy web app (port 8087); DB exposed on port 9087
 
 ### ScrollDaddy DNS Server
+**Source code:** `/home/user1/scrolldaddy-dns/` (Go project — this is the authoritative repo, NOT `/tmp/scrolldaddy-dns/` on the DNS server)
 **IP:** `45.56.103.84` | **SSH Key:** `~/.ssh/id_ed25519_claude` | **Service:** `scrolldaddy-dns`
 **Logs:** `/var/log/scrolldaddy/dns.log` | **API (localhost:8053):** `/reload`, `/stats`, `/test` (require `X-API-Key`)
 
 **Deploy (build installer locally, copy to server, run):**
 ```bash
-cd scrolldaddy-dns
+cd /home/user1/scrolldaddy-dns
 make release VERSION=1.x.x
 scp scrolldaddy-dns-installer.sh root@45.56.103.84:/tmp/
 ssh root@45.56.103.84 bash /tmp/scrolldaddy-dns-installer.sh --verbose
