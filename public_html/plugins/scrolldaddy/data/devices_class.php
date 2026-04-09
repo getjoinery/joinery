@@ -228,8 +228,10 @@ class SdDevice extends SystemBase {
 			return 'primary';
 		}
 
-		$current_time = date("H:i");
-		$current_day = strtolower(date("D"));
+		$tz = new DateTimeZone($profile->get('sdp_schedule_timezone'));
+		$now = new DateTime('now', $tz);
+		$current_time = $now->format('H:i');
+		$current_day = strtolower($now->format('D'));
 
 		$schedule_days = self::decodeDays($profile->get('sdp_schedule_days'));
 
@@ -237,15 +239,14 @@ class SdDevice extends SystemBase {
 			return false;
 		}
 
-		$start_timestamp = $profile->get('sdp_schedule_start');
-		$end_timestamp = $profile->get('sdp_schedule_end');
-		$current_timestamp = strtotime($current_time);
+		$start = $profile->get('sdp_schedule_start');
+		$end = $profile->get('sdp_schedule_end');
 
-		if ($end_timestamp < $start_timestamp) {
-			return ($current_timestamp >= $start_timestamp || $current_timestamp < $end_timestamp);
+		if ($end < $start) {
+			$is_in_schedule = ($current_time >= $start || $current_time < $end);
+		} else {
+			$is_in_schedule = ($current_time >= $start && $current_time < $end);
 		}
-
-		$is_in_schedule = ($current_timestamp >= $start_timestamp && $current_timestamp < $end_timestamp);
 
 		if($is_in_schedule){
 			if($readable == 'readable'){

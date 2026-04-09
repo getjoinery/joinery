@@ -340,6 +340,41 @@ document.addEventListener("DOMContentLoaded", function() {
 			if (this.checked) endDateInput.style.display = "";
 		});
 	}
+
+	// Append day-of-week name to "Which week" dropdown options
+	var dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+	var baseLabels = {};
+	var womSelect = document.getElementById("evt_recurrence_week_of_month");
+	var dateInput = document.getElementById("evt_start_time_dateinput");
+
+	if (womSelect && dateInput) {
+		for (var i = 0; i < womSelect.options.length; i++) {
+			baseLabels[i] = womSelect.options[i].text;
+		}
+
+		function updateWomLabels() {
+			var val = dateInput.value;
+			if (!val) {
+				for (var i = 0; i < womSelect.options.length; i++) {
+					womSelect.options[i].text = baseLabels[i];
+				}
+				return;
+			}
+			var parts = val.split("-");
+			var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+			var dow = dayNames[d.getDay()];
+			for (var i = 0; i < womSelect.options.length; i++) {
+				if (womSelect.options[i].value === "") {
+					womSelect.options[i].text = baseLabels[i];
+				} else {
+					womSelect.options[i].text = baseLabels[i] + " " + dow;
+				}
+			}
+		}
+
+		dateInput.addEventListener("change", updateWomLabels);
+		updateWomLabels();
+	}
 });
 </script>';
 }
