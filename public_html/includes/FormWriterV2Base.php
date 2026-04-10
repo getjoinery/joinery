@@ -3268,7 +3268,7 @@ document.addEventListener("DOMContentLoaded", function() {
             'name' => $name, 'label' => $label,
             'id' => $options['id'] ?? $name,
             'value' => $options['value'] ?? ($this->values[$name] ?? ''),
-            'images' => $options['images'] ?? [],
+            'images' => $options['options'] ?? $options['images'] ?? [],
             'preview_size' => $options['preview_size'] ?? '100px',
             'class' => $options['class'] ?? '',
             'disabled' => !empty($options['disabled']),
