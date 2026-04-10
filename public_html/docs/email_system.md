@@ -474,3 +474,42 @@ The email system provides:
 - **✅ Template compatibility** - all existing templates work unchanged
 
 Use EmailMessage + EmailSender for all email development. Direct EmailTemplate usage is only for specialized template processing needs.
+
+## Email Service Provider Interface
+
+The email system uses a provider abstraction so that new email services can be added without modifying core code.
+
+### Architecture
+
+- **`EmailServiceProvider`** — interface in `includes/EmailServiceProvider.php` that all providers implement
+- **Provider classes** — live in `includes/email_providers/` (e.g., `MailgunProvider.php`, `SmtpProvider.php`)
+- **Auto-discovery** — `EmailSender` scans `includes/email_providers/` for classes implementing the interface; no manual registration needed
+
+### Adding a New Provider
+
+Create a single file in `includes/email_providers/` implementing `EmailServiceProvider`:
+
+```php
+class SendGridProvider implements EmailServiceProvider {
+    public static function getKey(): string { return 'sendgrid'; }
+    public static function getLabel(): string { return 'SendGrid'; }
+    public static function getSettingsFields(): array { /* ... */ }
+    public static function validateConfiguration(): array { /* ... */ }
+    public function send(EmailMessage $message): bool { /* ... */ }
+    public function sendBatch(EmailMessage $message, array $recipients): bool { /* ... */ }
+}
+```
+
+The provider automatically appears in the admin email settings dropdown and its configuration fields render dynamically. No other files need modification.
+
+### Interface Methods
+
+| Method | Purpose |
+|---|---|
+| `getKey()` | Unique key stored in settings (e.g., `'mailgun'`) |
+| `getLabel()` | Human-readable name for admin UI |
+| `getSettingsFields()` | Array of setting field definitions for admin rendering |
+| `validateConfiguration()` | Check required settings are present; returns `['valid' => bool, 'errors' => []]` |
+| `send(EmailMessage)` | Send a single message; return success/failure |
+| `sendBatch(EmailMessage, array)` | Send to multiple recipients; providers can optimize (e.g., Mailgun batch API) |
+| `validateApiConnection()` | (Optional) Live API check for admin validation panel |
