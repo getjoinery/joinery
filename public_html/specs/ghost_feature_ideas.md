@@ -35,10 +35,9 @@ For reference, these Ghost features already exist in Joinery:
 
 ## Gaps — High Priority (Core Publishing)
 
-### 1. Gated / Paywalled Content
+### 1. ~~Gated / Paywalled Content~~ — IMPLEMENTED
 **Ghost:** Each post can be set to public, free-members-only, or specific paid tier(s). Non-members see a paywall prompt when they hit restricted content.
-**Joinery:** No per-post content access gating exists.
-**Notes:** This is Ghost's flagship monetization feature. Would require a new field on `pst_posts` (e.g. `pst_min_access_tier`) and view-layer enforcement, plus a "subscribe to read" prompt template.
+**Joinery:** Implemented via `tier_min_level` fields on posts, pages, events, files, videos, products, mailing lists, page contents, and event sessions. The `authenticate_tier()` method on SystemBase enforces access, and the tier gate prompt component renders upgrade/login CTAs. Includes preview length setting, early access timers, lock indicators in listings, and admin UI on all entity edit pages. See `specs/implemented/tier_gating.md`.
 
 ---
 

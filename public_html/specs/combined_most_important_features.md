@@ -9,26 +9,21 @@ These are the features that surfaced as high-priority gaps across all three plat
 
 ---
 
-## 1. Per-Post / Per-Content Tier Gating
+## 1. Per-Post / Per-Content Tier Gating — IMPLEMENTED
 
 **Appears in:** Ghost (gap #1), Patreon (gap #1)
 
-**What it is:** Each piece of content (post, page, event, file) can be restricted to members at or above a specific subscription tier. Non-members or lower-tier members see a prompt to subscribe or upgrade rather than the content itself.
+**Status:** Implemented. See `specs/implemented/tier_gating.md` and `docs/subscription_tiers.md` (Tier Gating section).
 
-**Why it matters across platforms:**
-- It is Ghost's flagship monetization feature and Patreon's core value proposition. Without it, having subscription tiers is largely decorative — the platform collects payments but doesn't enforce access.
-- It is the single highest-impact gap relative to both Ghost and Patreon.
-
-**What Joinery needs:**
-- A new access field on `pst_posts` (e.g. `pst_access_group_id` pointing to a group/tier, or `pst_min_tier_level` as an integer). The same pattern should extend to pages, events, and files.
-- View-layer enforcement: check the current user's tier against the content's required tier. If insufficient, render a "subscribe to read" prompt with a call-to-action linking to the relevant tier.
-- An optional preview length for posts (show N characters or a teaser before the lock, mirroring Patreon's "draggable paywall").
-- An `pst_public_at` timestamp for time-delayed public release (content is patron-only initially, then becomes public automatically — Patreon's "early access" pattern).
-- Admin UI on the post/page edit screen to set access level.
-
-**Implementation notes:**
-- The tier/group system already exists. This is primarily a new field + view enforcement, not a new data model.
-- The same mechanism should be reused for events (event-only content for registered attendees) and files (tier-gated downloads).
+**What was built:**
+- `{prefix}_tier_min_level` field on posts, pages, events, files, videos, products, mailing lists, page contents, and event sessions.
+- `authenticate_tier()` method on SystemBase with admin bypass, early access timer support, and structured return data for the view layer.
+- `{prefix}_tier_public_after_hours` field on posts, pages, and events for time-delayed public release (Patreon's "early access" pattern).
+- Tier gate prompt component (`includes/tier_gate_prompt.php`) showing upgrade CTAs or login/signup for non-authenticated users.
+- Configurable preview length (`tier_gate_preview_length` setting) for showing N characters before the paywall.
+- Lock indicators in blog listings, RSS feed exclusion of gated content, and `tier_gate_hide_from_listings` setting.
+- Admin UI on all entity edit pages with tier dropdown and early access presets.
+- Gated content counts on the subscription tiers admin page.
 
 ---
 
@@ -97,7 +92,7 @@ These are the features that surfaced as high-priority gaps across all three plat
 - Add merge tag support in templates: `{{first_name}}`, `{{event_name}}`, `{{event_time}}`, `{{tier_name}}`, `{{cancel_link}}`, `{{reschedule_link}}`.
 
 **Execution:**
-- A scheduled task (already used elsewhere in Joinery) runs on a short interval (e.g. every 5 minutes), queries `email_workflow_steps` where the calculated fire time (`trigger_time + offset_minutes`) is in the past and not yet sent, and dispatches via the existing `SystemMailer`.
+- A scheduled task (already used elsewhere in Joinery) runs on a short interval (e.g. every 5 minutes), queries `email_workflow_steps` where the calculated fire time (`trigger_time + offset_minutes`) is in the past and not yet sent, and dispatches via `SystemMailer` (which now uses the pluggable `EmailProviderInterface` supporting Mailgun, PHPMailer, and SMTP providers — see `specs/implemented/email_provider_abstraction.md`).
 
 **Admin UI:**
 - A workflow builder: choose trigger, add one or more steps (time offset + template), set optional filter conditions, preview, activate/deactivate.

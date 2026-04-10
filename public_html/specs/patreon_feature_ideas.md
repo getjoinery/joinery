@@ -34,17 +34,15 @@ For reference, these Patreon features already exist in Joinery:
 
 ## Gaps — High Priority (Core Creator Monetization)
 
-### 1. Per-Post Tier Gating (Inline Paywall)
+### 1. ~~Per-Post Tier Gating (Inline Paywall)~~ — IMPLEMENTED
 **Patreon:** Each post can be set to public, patron-only, or specific tier(s). Non-members see a paywall prompt mid-content ("draggable paywall") showing a preview before the lock.
-**Joinery:** Tier system exists but no per-post access control is enforced at the view layer. All published posts are visible to all visitors.
-**Notes:** Requires a new field on `pst_posts` (e.g. `pst_min_tier_level` or `pst_access_group_id`) and view-layer enforcement rendering a subscribe prompt for users below the required tier. Tier gating is arguably Joinery's single biggest gap relative to Patreon.
+**Joinery:** Implemented via `tier_min_level` fields on all content entities (posts, pages, events, files, videos, products, mailing lists, page contents, event sessions). The `authenticate_tier()` method enforces access, with a configurable preview length before the paywall and a tier gate prompt component showing upgrade CTAs. See `specs/implemented/tier_gating.md`.
 
 ---
 
-### 2. Early Access Content
+### 2. ~~Early Access Content~~ — IMPLEMENTED
 **Patreon:** Posts can be set as patron-only initially, then flipped to public after a specified date (e.g. patrons get content 7 days early).
-**Joinery:** Scheduling (`pst_published_time`) exists but no concept of "becomes public after N days" or tier-switching on a schedule.
-**Notes:** Requires two fields: the initial access tier and a `pst_public_at` timestamp. A scheduled task would flip access to public at that time.
+**Joinery:** Implemented via `{prefix}_tier_public_after_hours` field on posts, pages, and events. The `authenticate_tier()` method computes `publish_time + delay_hours` and automatically lifts the gate when the delay elapses — no scheduled task needed. Admin UI provides presets from 1 hour to 90 days. See `specs/implemented/tier_gating.md`.
 
 ---
 
