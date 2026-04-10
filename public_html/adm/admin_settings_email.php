@@ -71,10 +71,13 @@
 			const smtpAuth = document.getElementById('smtp_auth');
 			const value = smtpAuth ? smtpAuth.value : '';
 
-			const smtpAuthFields = document.getElementById('smtp_auth_fields');
-			if (smtpAuthFields) {
-				smtpAuthFields.style.display = (value == 0 || value == '') ? 'none' : 'block';
-			}
+			const wrapperIds = ['smtp_username_wrapper', 'smtp_password_wrapper'];
+			wrapperIds.forEach(function(id) {
+				const el = document.getElementById(id);
+				if (el) {
+					el.style.display = (value == 0 || value == '') ? 'none' : 'block';
+				}
+			});
 		}
 
 		function set_email_test_choices(){
@@ -256,8 +259,9 @@
 		echo '<div class="col-md-6">';
 		echo '<h3>Email Settings</h3>';
 		
-		// Email service selection settings
-		$service_optionvals = array('mailgun' => 'Mailgun', 'smtp' => 'SMTP');
+		// Email service selection settings (auto-discovered from provider classes)
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		$service_optionvals = EmailSender::getAvailableServices();
 
 		$formwriter->dropinput('email_service', 'Primary Email Service', [
 			'options' => $service_optionvals,
@@ -387,247 +391,101 @@
 			echo '</div>';
 		}
 
-		// Mailgun section with two-column layout and API validation
-		echo '<div class="row">';
-		echo '<div class="col-md-6">';
-		echo '<h5>Mailgun Settings</h5>';
-		$formwriter->textinput('mailgun_api_key', 'Mailgun API Key (Example: key-6eac34eed3afb3df055f81aa20d878e4)', [
-			'value' => $settings->get_setting('mailgun_api_key')
-		]);
-		$formwriter->textinput('mailgun_domain', 'Mailgun Domain (Example: mg.domain.net)', [
-			'value' => $settings->get_setting('mailgun_domain')
-		]);
-		$formwriter->textinput('mailgun_eu_api_link', 'Mailgun EU API Link (Example: https://api.eu.mailgun.net)', [
-			'value' => $settings->get_setting('mailgun_eu_api_link')
-		]);
-		echo '</div>';
-		echo '<div class="col-md-6">';
-		echo '<h5>API Status</h5>';
-		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
-		
-		if ($run_validation) {
-			$mailgun_api_key = $settings->get_setting('mailgun_api_key');
-			$mailgun_domain = $settings->get_setting('mailgun_domain');
-			$mailgun_eu_api_link = $settings->get_setting('mailgun_eu_api_link');
+		// Dynamic provider settings sections — auto-discovered from provider classes
+		$discovered_providers = EmailSender::getDiscoveredProviders();
+		foreach ($discovered_providers as $provider_key => $provider_class) {
+			$provider_label = $provider_class::getLabel();
+			$provider_fields = $provider_class::getSettingsFields();
+			$has_api_validation = method_exists($provider_class, 'validateApiConnection');
 
-			if (!empty($mailgun_api_key) && !empty($mailgun_domain)) {
-				// Test Mailgun API connection
-				$autoload_path = PathHelper::getComposerAutoloadPath();
-				if (file_exists($autoload_path)) {
-					try {
-						require_once($autoload_path);
+			echo '<div class="row">';
+			echo '<div class="col-md-6">';
+			echo '<h5>' . htmlspecialchars($provider_label) . ' Settings</h5>';
 
-						// Create Mailgun client (v3.x SDK)
-						if ($mailgun_eu_api_link) {
-							$mg = Mailgun\Mailgun::create($mailgun_api_key, $mailgun_eu_api_link);
-						} else {
-							$mg = Mailgun\Mailgun::create($mailgun_api_key);
+			foreach ($provider_fields as $field) {
+				$field_key = $field['key'];
+				$field_label = $field['label'];
+				$field_type = $field['type'] ?? 'text';
+
+				// Handle show_when conditional visibility
+				$wrapper_style = '';
+				$wrapper_id = '';
+				if (isset($field['show_when'])) {
+					foreach ($field['show_when'] as $dep_key => $dep_val) {
+						$current_dep = $settings->get_setting($dep_key);
+						if ($current_dep != $dep_val) {
+							$wrapper_style = 'display:none;';
 						}
+						$wrapper_id = $field_key . '_wrapper';
+					}
+				}
 
-						// Try to get domain info
-						try {
-							$domain_info = $mg->domains()->show($mailgun_domain);
-							echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
-							echo '<strong>Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
+				if ($wrapper_id) {
+					echo '<div id="' . htmlspecialchars($wrapper_id) . '" style="' . $wrapper_style . '">';
+				}
 
-							// Try to get domain data from the response
-							if ($domain_info && method_exists($domain_info, 'getDomain')) {
-								$domain = $domain_info->getDomain();
-								if ($domain) {
-									if (method_exists($domain, 'getName')) {
-										echo '<strong>Name:</strong> ' . htmlspecialchars($domain->getName()) . '<br>';
-									}
-									if (method_exists($domain, 'getState')) {
-										echo '<strong>Status:</strong> ' . htmlspecialchars($domain->getState()) . '<br>';
-									}
-								}
-							}
+				if ($field_type === 'password') {
+					$formwriter->passwordinput($field_key, $field_label, [
+						'value' => $settings->get_setting($field_key),
+					]);
+				} elseif ($field_type === 'dropdown') {
+					$formwriter->dropinput($field_key, $field_label, [
+						'options' => $field['options'] ?? [],
+						'value' => $settings->get_setting($field_key),
+						'empty_option' => false,
+					]);
+				} else {
+					$formwriter->textinput($field_key, $field_label, [
+						'value' => $settings->get_setting($field_key),
+					]);
+				}
 
-							echo '<div style="color: #28a745; font-size: 11px; margin-top: 10px;">✓ Domain accessible via API</div>';
+				if ($wrapper_id) {
+					echo '</div>';
+				}
+			}
 
-						} catch (Exception $domain_ex) {
-							// Domain check failed - provide helpful error message
-							$error_msg = $domain_ex->getMessage();
-							echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Mailgun Validation Failed</strong></div>';
-							echo '<strong>Configured Domain:</strong> ' . htmlspecialchars($mailgun_domain) . '<br>';
+			echo '</div>';
 
-							// Try to find similar domains to help troubleshoot
-							$suggested_domain = null;
-							try {
-								$all_domains = $mg->domains()->index();
-								$entered_lower = strtolower($mailgun_domain);
-								foreach ($all_domains->getDomains() as $acct_domain) {
-									$acct_name = strtolower($acct_domain->getName());
-									// Check if entered domain contains this domain or vice versa
-									if (stripos($entered_lower, $acct_name) !== false || stripos($acct_name, $entered_lower) !== false) {
-										$suggested_domain = $acct_domain->getName();
-										break;
-									}
-								}
-							} catch (Exception $list_ex) {
-								// Couldn't list domains, skip suggestion
-							}
+			// API validation column
+			echo '<div class="col-md-6">';
+			if ($has_api_validation) {
+				echo '<h5>' . htmlspecialchars($provider_label) . ' Connection Status</h5>';
+				echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 
-							if ($suggested_domain) {
-								echo '<div style="color: #ffc107; font-size: 12px; margin-top: 10px; padding: 8px; background: #fff3cd; border-radius: 4px;">';
-								echo '<strong>💡 Did you mean:</strong> <code>' . htmlspecialchars($suggested_domain) . '</code>';
-								echo '</div>';
-							} else {
-								// Check for common issues
-								if (stripos($error_msg, 'endpoint') !== false || stripos($error_msg, 'does not exist') !== false) {
-									echo '<div style="color: #dc3545; font-size: 11px; margin-top: 10px;">';
-									echo '<strong>Possible causes:</strong><br>';
-									echo '• Domain not found in your Mailgun account<br>';
-									echo '• EU region account without EU API Link configured<br>';
-									echo '• API key may be invalid or expired';
-									echo '</div>';
-								} else {
-									echo '<div style="color: #dc3545; font-size: 11px; margin-top: 10px;">Error: ' . htmlspecialchars($error_msg) . '</div>';
-								}
-							}
+				if ($run_validation) {
+					$api_result = $provider_class::validateApiConnection();
+
+					if ($api_result['success']) {
+						echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>&#10003; ' . htmlspecialchars($api_result['label']) . '</strong></div>';
+					} else {
+						echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>&#10007; ' . htmlspecialchars($api_result['label']) . '</strong></div>';
+					}
+
+					// Show detail key-value pairs
+					if (!empty($api_result['details'])) {
+						foreach ($api_result['details'] as $detail_label => $detail_value) {
+							echo '<strong>' . htmlspecialchars($detail_label) . ':</strong> ' . htmlspecialchars($detail_value) . '<br>';
 						}
+					}
 
-					} catch (Exception $e) {
-						echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ API Connection Failed</strong></div>';
-						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+					// Show error message
+					if (!empty($api_result['error']) && !$api_result['success']) {
+						echo '<div style="color: #dc3545; font-size: 11px; margin-top: 10px;">Error: ' . htmlspecialchars($api_result['error']) . '</div>';
 					}
 				} else {
-					echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ Composer Not Configured</strong></div>';
-					echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
+					echo '<div style="text-align: center; padding: 40px;">';
+					echo '<p style="color: #666; margin-bottom: 15px;">Validation not run yet</p>';
+					echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
+					echo '</div>';
 				}
-			} else {
-				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter API key and domain to validate connection</div>';
+
+				echo '</div>';
 			}
-		} else {
-			// Show placeholder with "Run Validation" button
-			echo '<div style="text-align: center; padding: 40px;">';
-			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
-			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
 			echo '</div>';
-		}
-		
-		echo '</div>';
-		echo '</div>';
-		echo '</div>';
-		echo '<div style="margin: 50px 0;"></div>';
-
-		// SMTP Configuration Section
-		echo '<h4>SMTP Configuration</h4>';
-
-		// SMTP settings with two-column layout and connection validation
-		echo '<div class="row">';
-		echo '<div class="col-md-6">';
-		echo '<h5>SMTP Server Settings</h5>';
-		$formwriter->textinput('smtp_host', 'SMTP Host', [
-			'value' => $settings->get_setting('smtp_host')
-		]);
-		$formwriter->textinput('smtp_port', 'SMTP Port (25, 465, 587, 2525)', [
-			'value' => $settings->get_setting('smtp_port')
-		]);
-		$formwriter->textinput('smtp_helo', 'SMTP HELO/EHLO Hostname', [
-			'value' => $settings->get_setting('smtp_helo')
-		]);
-		$formwriter->textinput('smtp_hostname', 'SMTP Hostname (for headers)', [
-			'value' => $settings->get_setting('smtp_hostname')
-		]);
-		$formwriter->textinput('smtp_sender', 'SMTP Bounce Address', [
-			'value' => $settings->get_setting('smtp_sender')
-		]);
-
-		$auth_optionvals = array(0 => 'No', 1 => 'Yes');
-		$formwriter->dropinput('smtp_auth', 'SMTP Authentication Required', [
-			'options' => $auth_optionvals,
-			'value' => $settings->get_setting('smtp_auth'),
-			'empty_option' => false
-		]);
-
-		echo '<div id="smtp_auth_fields" style="' . ($settings->get_setting('smtp_auth') ? '' : 'display:none;') . '">';
-		$formwriter->textinput('smtp_username', 'SMTP Username', [
-			'value' => $settings->get_setting('smtp_username')
-		]);
-		$formwriter->passwordinput('smtp_password', 'SMTP Password', [
-			'value' => $settings->get_setting('smtp_password')
-		]);
-		echo '</div>';
-
-		echo '</div>';
-		echo '<div class="col-md-6">';
-		echo '<h5>SMTP Connection Status</h5>';
-		echo '<div style="min-height: 250px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
-
-		if ($run_validation) {
-			$smtp_host = $settings->get_setting('smtp_host');
-			$smtp_port = $settings->get_setting('smtp_port');
-			
-			if (!empty($smtp_host)) {
-				// Test SMTP connection
-				try {
-					require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
-					
-					// Create test instance
-					$mailer = new SmtpMailer();
-					
-					echo '<p><strong>Configuration:</strong></p>';
-					echo '<ul style="list-style: none; padding-left: 0;">';
-					echo '<li><strong>Host:</strong> ' . htmlspecialchars($smtp_host ?: 'Not set') . '</li>';
-					echo '<li><strong>Port:</strong> ' . htmlspecialchars($smtp_port ?: '25') . '</li>';
-					
-					// Determine encryption based on port
-					$encryption = 'None';
-					switch(intval($smtp_port)) {
-						case 465:
-							$encryption = 'SSL/TLS';
-							break;
-						case 587:
-						case 2525:
-							$encryption = 'STARTTLS';
-							break;
-					}
-					echo '<li><strong>Encryption:</strong> ' . $encryption . ' (auto-detected)</li>';
-					echo '<li><strong>Authentication:</strong> ' . ($settings->get_setting('smtp_auth') ? 'Yes' : 'No') . '</li>';
-					echo '</ul>';
-					
-					// Try to connect
-					try {
-						// Test connection without sending
-						// Note: smtpConnect() returns false on failure, doesn't always throw
-						$connect_result = $mailer->smtpConnect();
-						if ($connect_result) {
-							echo '<p style="color: green;"><strong>✓ Connection Test:</strong> Successfully connected to SMTP server</p>';
-							if ($settings->get_setting('smtp_auth')) {
-								echo '<p style="color: green; font-size: 12px;">✓ Authentication successful</p>';
-							}
-							$mailer->smtpClose();
-						} else {
-							// Get error info from PHPMailer
-							$error_info = $mailer->ErrorInfo ?: 'Connection or authentication failed';
-							echo '<p style="color: red;"><strong>✗ Connection Failed:</strong> ' . htmlspecialchars($error_info) . '</p>';
-							if ($settings->get_setting('smtp_auth')) {
-								echo '<p style="color: #dc3545; font-size: 12px;">Check username and password if authentication is failing.</p>';
-							}
-						}
-					} catch (Exception $e) {
-						echo '<p style="color: red;"><strong>✗ Connection Failed:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
-					}
-					
-				} catch (Exception $e) {
-					echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Configuration Error</strong></div>';
-					echo '<div style="color: #666; font-size: 12px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
-				}
-			} else {
-				echo '<div style="color: #666; text-align: center; padding: 20px;">Enter SMTP host to validate connection</div>';
-			}
-		} else {
-			// Show placeholder with "Run Validation" button
-			echo '<div style="text-align: center; padding: 40px;">';
-			echo '<p style="color: #666; margin-bottom: 15px;">SMTP validation not run yet</p>';
-			echo '<a href="?run_validation=1#email-settings" class="btn btn-primary btn-sm">Run All Validations</a>';
 			echo '</div>';
+			echo '<div style="margin: 50px 0;"></div>';
 		}
-
-		echo '</div>';
-		echo '</div>';
-		echo '</div>';
 
 		echo '<div style="margin: 30px 0;"></div>';
 
