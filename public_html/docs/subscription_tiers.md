@@ -288,6 +288,105 @@ The system automatically:
 
 ---
 
+## Tier Gating (Content Access Control)
+
+Tier gating restricts access to any entity based on the viewer's subscription tier. When a user lacks the required tier, they see a prompt to subscribe or upgrade.
+
+### How It Works
+
+Each gatable entity has a `{prefix}_tier_min_level` field. When set to a tier level value (e.g., 10, 20, 30), only users at that tier or higher can see the full content. Admins (permission 5+) always bypass the gate.
+
+### Making an Entity Tier-Gatable
+
+1. Add the field to `$field_specifications`:
+```php
+'{prefix}_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+```
+
+2. For early access support (optional), also add:
+```php
+'{prefix}_tier_public_after_hours' => array('type'=>'int4', 'is_nullable'=>true),
+```
+
+3. Call `authenticate_tier()` in the view:
+```php
+$session = SessionControl::get_instance();
+$access = $entity->authenticate_tier($session);
+
+if ($access['allowed']) {
+    // Render full content
+} else {
+    require_once(PathHelper::getIncludePath('includes/tier_gate_prompt.php'));
+    render_tier_gate_prompt($access);
+}
+```
+
+4. For entities with `authenticate_read()` (files, videos), add inside that method:
+```php
+if ($this->get('{prefix}_tier_min_level')) {
+    $tier_access = $this->authenticate_tier($session);
+    if (!$tier_access['allowed']) return false;
+}
+```
+
+5. Add a tier dropdown to the admin edit page:
+```php
+require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+$tier_options = ['' => 'No tier required'];
+$all_tiers = MultiSubscriptionTier::GetAllActive();
+foreach ($all_tiers as $tier) {
+    $tier_options[$tier->get('sbt_tier_level')] = $tier->get('sbt_display_name') . ' (Level ' . $tier->get('sbt_tier_level') . ')';
+}
+$formwriter->dropinput('{prefix}_tier_min_level', 'Minimum Tier Required', [
+    'options' => $tier_options
+]);
+```
+
+### Gate Prompt Component
+
+`includes/tier_gate_prompt.php` provides two functions:
+
+- `render_tier_gate_prompt($access, $options)` — Renders the paywall prompt. Pass `['preview_html' => $html]` in options to show a preview before the gate.
+- `get_tier_gate_preview_html($body_text)` — Returns truncated preview HTML based on the `tier_gate_preview_length` setting.
+
+### authenticate_tier() Return Value
+
+Returns an array with:
+- `allowed` (bool) — Whether access is granted
+- `reason` (string|null) — `'not_logged_in'` or `'tier_too_low'`
+- `required_level` (int|null) — The tier level needed
+- `user_level` (int|null) — The user's current tier level
+- `required_tier` (SubscriptionTier|null) — The required tier object
+- `upgrade_options` (array) — Available upgrade products
+
+### Multi-Class Filtering
+
+Use `max_visible_tier_level` in Multi class queries to filter by user's tier:
+```php
+$user_tier_level = 0;
+$tier = SubscriptionTier::GetUserTier($session->get_user_id());
+if ($tier) $user_tier_level = $tier->get('sbt_tier_level');
+
+$posts = new MultiPost(['published' => true, 'deleted' => false, 'max_visible_tier_level' => $user_tier_level]);
+```
+
+Supported on: `MultiPost`, `MultiEvent`, `MultiProduct`.
+
+### Interaction with Other Access Controls
+
+Tier gating is additive. The precedence is: soft delete > published state > visibility > permission level > group membership > tier requirement. Tier is always the last check.
+
+### Site Settings
+
+- `tier_gate_preview_length` — Characters of body text to show before the paywall (0 = no preview)
+- `tier_gate_hide_from_listings` — Hide gated content from listings for users who lack the tier (RSS feeds always hide gated items)
+
+### Plugin Developer Usage
+
+Plugin developers can use tier gating in plugin views by calling `authenticate_tier()` on any entity that has the `{prefix}_tier_min_level` field. The gate prompt component renders correctly in any theme context.
+
+---
+
 ## Related Documentation
 
 - `/specs/subscription_tiers.md` - Full specification and implementation details

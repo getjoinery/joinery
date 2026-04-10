@@ -53,6 +53,8 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 	    'pst_short_description' => array('type'=>'varchar(255)'),
 	    'pst_fil_file_id' => array('type'=>'int4'),
 	    'pst_delete_time' => array('type'=>'timestamp(6)'),
+	    'pst_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	    'pst_tier_public_after_hours' => array('type'=>'int4', 'is_nullable'=>true),
 	);
 
 function prepare() {	
@@ -276,6 +278,11 @@ class MultiPost extends SystemMultiBase {
 
 		if (isset($this->options['before_date'])) {
 			$filters['pst_published_time'] = "< '" . $this->options['before_date'] . "'";
+		}
+
+		if (isset($this->options['max_visible_tier_level'])) {
+			$level = intval($this->options['max_visible_tier_level']);
+			$filters['(pst_tier_min_level'] = "<= {$level} OR pst_tier_min_level IS NULL)";
 		}
 
 		return $this->_get_resultsv2('pst_posts', $filters, $this->order_by, $only_count, $debug);

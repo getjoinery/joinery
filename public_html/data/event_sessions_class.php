@@ -85,7 +85,8 @@ class EventSession extends SystemBase {
 	    'evs_vid_video_id' => array('type'=>'int4'),
 	    'evs_session_number' => array('type'=>'int2'),
 	    'evs_delete_time' => array('type'=>'timestamp(6)'),
-	); 
+	    'evs_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	);
 
 public static function GetBySessionNumber($event_id, $session_number){
 		$results = new MultiEventSessions(array('event_id' => $event_id, 'session_number' => $session_number));

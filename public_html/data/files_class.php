@@ -48,6 +48,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_min_permission' => array('type'=>'int2'),
 	    'fil_grp_group_id' => array('type'=>'int4'),
 	    'fil_evt_event_id' => array('type'=>'int4'),
+	    'fil_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	);
 
 public static function get_by_name($name) {
@@ -552,9 +553,17 @@ public static function get_by_name($name) {
 			}
 		}
 
+		// Tier gating check
+		if ($this->get('fil_tier_min_level')) {
+			$tier_access = $this->authenticate_tier($session);
+			if (!$tier_access['allowed']) {
+				return false;
+			}
+		}
+
 		return true;
 	}
-		
+
 }
 
 class MultiFile extends SystemMultiBase {

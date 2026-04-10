@@ -141,6 +141,16 @@ $formwriter->dropinput('pro_sbt_subscription_tier_id', 'Activates Subscription',
 	'empty_option' => '-- Select --'
 ]);
 
+// Tier Gating - restrict who can VIEW/purchase this product
+$view_tier_options = ['' => 'Anyone can view'];
+foreach ($subscription_tiers as $tier) {
+	$view_tier_options[$tier->get('sbt_tier_level')] = htmlspecialchars($tier->get('sbt_display_name')) . ' (Level ' . $tier->get('sbt_tier_level') . ')';
+}
+$formwriter->dropinput('pro_tier_min_level', 'Minimum Tier to View', [
+	'options' => $view_tier_options,
+	'helptext' => 'Restrict viewing/purchasing this product to users with this subscription tier or higher'
+]);
+
 $formwriter->textinput('pro_max_purchase_count', 'Total Number available for purchase (0 for unlimited)', [
 	'validation' => ['required' => true]
 ]);

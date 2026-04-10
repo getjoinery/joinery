@@ -1412,6 +1412,111 @@ abstract class SystemBase {
 
 	function authenticate_write($data) {}
 
+	/**
+	 * Check whether the current user has sufficient tier access to view this entity.
+	 *
+	 * @param SessionControl $session  The current session
+	 * @return array  [
+	 *     'allowed'          => bool,
+	 *     'reason'           => string|null ('no_tier'|'tier_too_low'|'not_logged_in'),
+	 *     'required_level'   => int|null,
+	 *     'user_level'       => int|null,
+	 *     'required_tier'    => SubscriptionTier|null,
+	 *     'upgrade_options'  => array,
+	 * ]
+	 */
+	public function authenticate_tier($session) {
+		$prefix = static::$prefix;
+		$min_level_field = $prefix . '_tier_min_level';
+
+		// Check if this entity even has the tier field
+		if (!array_key_exists($min_level_field, static::$field_specifications)) {
+			return ['allowed' => true];
+		}
+
+		$min_level = $this->get($min_level_field);
+
+		// No tier requirement — access granted
+		if ($min_level === null || $min_level <= 0) {
+			return ['allowed' => true];
+		}
+
+		// Admins always see gated content
+		if ($session->get_permission() >= 5) {
+			return ['allowed' => true];
+		}
+
+		// Check early access expiry — if the delay has elapsed, content is now public
+		$delay_field = $prefix . '_tier_public_after_hours';
+		if (array_key_exists($delay_field, static::$field_specifications)) {
+			$delay_hours = $this->get($delay_field);
+			if ($delay_hours > 0) {
+				$publish_time = $this->_get_publish_time();
+				if ($publish_time) {
+					$public_at = LibraryFunctions::time_shift($publish_time, $delay_hours . ' hours');
+					if ($public_at <= gmdate('Y-m-d H:i:s')) {
+						return ['allowed' => true];
+					}
+				}
+			}
+		}
+
+		require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+
+		$user_id = $session->get_user_id();
+
+		// Not logged in
+		if (!$user_id) {
+			return [
+				'allowed' => false,
+				'reason' => 'not_logged_in',
+				'required_level' => $min_level,
+				'user_level' => null,
+				'required_tier' => SubscriptionTier::GetByColumn('sbt_tier_level', $min_level),
+				'upgrade_options' => [],
+			];
+		}
+
+		// Check tier
+		if (SubscriptionTier::UserHasMinimumTier($user_id, $min_level)) {
+			return ['allowed' => true];
+		}
+
+		// Access denied — insufficient tier
+		$user_tier = SubscriptionTier::GetUserTier($user_id);
+		return [
+			'allowed' => false,
+			'reason' => 'tier_too_low',
+			'required_level' => $min_level,
+			'user_level' => $user_tier ? $user_tier->get('sbt_tier_level') : 0,
+			'required_tier' => SubscriptionTier::GetByColumn('sbt_tier_level', $min_level),
+			'upgrade_options' => SubscriptionTier::getUpgradeOptions($user_id),
+		];
+	}
+
+	/**
+	 * Get the publish time for this entity, used by early access calculation.
+	 * Entities override this if their publish time field doesn't follow the
+	 * standard {prefix}_published_time naming convention.
+	 */
+	protected function _get_publish_time() {
+		$prefix = static::$prefix;
+
+		// Try {prefix}_published_time (posts, pages)
+		$published_field = $prefix . '_published_time';
+		if (array_key_exists($published_field, static::$field_specifications)) {
+			return $this->get($published_field);
+		}
+
+		// Fall back to {prefix}_create_time (page content, events, etc.)
+		$create_field = $prefix . '_create_time';
+		if (array_key_exists($create_field, static::$field_specifications)) {
+			return $this->get($create_field);
+		}
+
+		return null;
+	}
+
 	function is_owner($session) { return FALSE; }
 
 	function get_json() { 

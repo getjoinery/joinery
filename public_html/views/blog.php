@@ -73,7 +73,12 @@ $page->public_header([
                                     ?>
                                 </p>
 
-                                <a href="<?php echo $post->get_url(); ?>" style="color: var(--color-primary); font-weight: 600; text-decoration: none;">Read More &#8250;</a>
+                                <?php
+                $post_tier_min = $post->get('pst_tier_min_level');
+                if ($post_tier_min > 0): ?>
+                <span style="display: inline-block; padding: 0.125rem 0.5rem; background: #f0f0f0; border-radius: 4px; font-size: 0.75rem; color: #888; margin-bottom: 0.5rem;">&#128274; Members Only</span><br>
+                <?php endif; ?>
+                <a href="<?php echo $post->get_url(); ?>" style="color: var(--color-primary); font-weight: 600; text-decoration: none;">Read More &#8250;</a>
                             </div>
                         </div>
                         <?php endforeach; ?>

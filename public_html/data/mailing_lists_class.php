@@ -66,7 +66,8 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	    'mlt_emt_email_template_id' => array('type'=>'int4'),
 	    'mlt_fil_file_id' => array('type'=>'int4'),
 	    'mlt_ctt_contact_type_id' => array('type'=>'int4'),
-	); 
+	    'mlt_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	);
 
 function get_subscribed_users($return='object'){
 		$searches = array();

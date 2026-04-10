@@ -84,6 +84,7 @@ class Product extends SystemBase {
 	    'pro_stripe_product_id' => array('type'=>'varchar(64)'),
 	    'pro_stripe_product_id_test' => array('type'=>'varchar(64)'),
 	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),
+	    'pro_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	);
 
 public function get_requirement_info($output='text') {
@@ -779,6 +780,11 @@ class MultiProduct extends SystemMultiBase {
 
 		if (isset($this->options['deleted'])) {
 			$filters['pro_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		if (isset($this->options['max_visible_tier_level'])) {
+			$level = intval($this->options['max_visible_tier_level']);
+			$filters['(pro_tier_min_level'] = "<= {$level} OR pro_tier_min_level IS NULL)";
 		}
 
 		return $this->_get_resultsv2('pro_products', $filters, $this->order_by, $only_count, $debug);

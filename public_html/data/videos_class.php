@@ -49,6 +49,7 @@ class Video extends SystemBase {	public static $prefix = 'vid';
 	    'vid_min_permission' => array('type'=>'int2'),
 	    'vid_grp_group_id' => array('type'=>'int4'),
 	    'vid_evt_event_id' => array('type'=>'int4'),
+	    'vid_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	);
 
 function get_embed($vidwidth = 560, $vidheight = 315) {
@@ -274,6 +275,14 @@ function get_embed($vidwidth = 560, $vidheight = 315) {
 			$numeventsregistrations = $event_registrations->count_all();	
 
 			if(!$numeventsregistrations){
+				return false;
+			}
+		}
+
+		// Tier gating check
+		if ($this->get('vid_tier_min_level')) {
+			$tier_access = $this->authenticate_tier($session);
+			if (!$tier_access['allowed']) {
 				return false;
 			}
 		}

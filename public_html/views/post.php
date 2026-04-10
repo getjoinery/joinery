@@ -37,12 +37,22 @@
                 </div>
 
                 <div class="entry-content">
+                    <?php
+                    $tier_access = $post->authenticate_tier($page_vars['session']);
+                    if ($tier_access['allowed']):
+                    ?>
                     <?php echo $post->get('pst_body'); ?>
                     <?php if ($page_vars['settings']->get_setting('blog_footer_text')): ?>
                     <div class="border-top pt-4 mt-5">
                         <?php echo $page_vars['settings']->get_setting('blog_footer_text'); ?>
                     </div>
                     <?php endif; ?>
+                    <?php else:
+                        require_once(PathHelper::getIncludePath('includes/tier_gate_prompt.php'));
+                        $preview_html = get_tier_gate_preview_html($post->get('pst_body'));
+                        render_tier_gate_prompt($tier_access, ['preview_html' => $preview_html]);
+                    endif;
+                    ?>
                 </div>
             </article>
         </main>

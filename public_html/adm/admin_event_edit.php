@@ -187,6 +187,24 @@ if (!$event->is_instance()) {
 
 } // end recurrence section
 
+// Tier Gating
+require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+$tier_options = ['' => 'Public (no tier required)'];
+$all_tiers_list = MultiSubscriptionTier::GetAllActive();
+foreach ($all_tiers_list as $tier) {
+	$tier_options[$tier->get('sbt_tier_level')] = htmlspecialchars($tier->get('sbt_display_name')) . ' (Level ' . $tier->get('sbt_tier_level') . ')';
+}
+$formwriter->dropinput('evt_tier_min_level', 'Minimum Tier Required', [
+	'options' => $tier_options,
+	'helptext' => 'Restrict this event to users with this subscription tier or higher'
+]);
+
+$early_access_options = ['' => 'Never (permanent)', '1' => '1 hour', '3' => '3 hours', '12' => '12 hours', '24' => '1 day', '72' => '3 days', '168' => '7 days', '336' => '14 days', '720' => '30 days', '2160' => '90 days'];
+$formwriter->dropinput('evt_tier_public_after_hours', 'Make public after', [
+	'options' => $early_access_options,
+	'helptext' => 'Automatically remove the tier gate after this delay from creation time'
+]);
+
 $formwriter->textbox('evt_description', 'Event Description', [
 	'rows' => 10,
 	'cols' => 80,
