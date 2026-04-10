@@ -43,6 +43,8 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	    'pag_script_filename' => array('type'=>'varchar(255)'),
 	    'pag_fil_file_id' => array('type'=>'int4'),
 	    'pag_delete_time' => array('type'=>'timestamp(6)'),
+	    'pag_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	    'pag_tier_public_after_hours' => array('type'=>'int4', 'is_nullable'=>true),
 	);
 
 	protected static $foreign_key_actions = [

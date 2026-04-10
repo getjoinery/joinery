@@ -258,6 +258,18 @@
 		'empty_option' => '-- Select --'
 	]);
 
+	// Tier Gating
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+	$tier_options = ['' => 'No tier required'];
+	$all_tiers = MultiSubscriptionTier::GetAllActive();
+	foreach ($all_tiers as $tier) {
+		$tier_options[$tier->get('sbt_tier_level')] = htmlspecialchars($tier->get('sbt_display_name')) . ' (Level ' . $tier->get('sbt_tier_level') . ')';
+	}
+	$formwriter->dropinput('evs_tier_min_level', 'Minimum Tier Required', [
+		'options' => $tier_options,
+		'helptext' => 'Restrict this session to users with this subscription tier or higher'
+	]);
+
 	$formwriter->submitbutton('btn_submit', 'Submit');
 	$formwriter->end_form();
 	$page->end_box();

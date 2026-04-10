@@ -56,7 +56,17 @@
 							]);
 							?>
 							<div class="entry-content">
-								<?php echo $page->get_filled_content(); ?>
+								<?php
+								$session = SessionControl::get_instance();
+								$page_tier_access = $page->authenticate_tier($session);
+								if ($page_tier_access['allowed']) {
+									echo $page->get_filled_content();
+								} else {
+									require_once(PathHelper::getIncludePath('includes/tier_gate_prompt.php'));
+									$preview_html = get_tier_gate_preview_html($page->get('pag_body'));
+									render_tier_gate_prompt($page_tier_access, ['preview_html' => $preview_html]);
+								}
+								?>
 							</div>
 						</div>
 					</div>

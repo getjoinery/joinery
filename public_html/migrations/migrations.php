@@ -1367,3 +1367,23 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// =============================================================================
+	// TIER GATING SETTINGS
+	// =============================================================================
+
+	// ========== Tier gate preview length setting (v99) ==========
+	$migration = array();
+	$migration['database_version'] = '99';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'tier_gate_preview_length'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('tier_gate_preview_length', '0');";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Tier gate hide from listings setting (v100) ==========
+	$migration = array();
+	$migration['database_version'] = '100';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'tier_gate_hide_from_listings'";
+	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('tier_gate_hide_from_listings', '0');";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

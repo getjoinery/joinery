@@ -40,13 +40,25 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		else{
 			$search_criteria = array('published'=>TRUE, 'deleted'=>FALSE, 'listed'=>TRUE);
+
+			// If tier_gate_hide_from_listings is enabled, filter out posts the user can't see
+			if ($settings->get_setting('tier_gate_hide_from_listings')) {
+				require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+				$user_tier_level = 0;
+				if ($session->get_user_id()) {
+					$user_tier = SubscriptionTier::GetUserTier($session->get_user_id());
+					if ($user_tier) $user_tier_level = $user_tier->get('sbt_tier_level');
+				}
+				$search_criteria['max_visible_tier_level'] = $user_tier_level;
+			}
+
 			$posts = new MultiPost(
 				$search_criteria,
 				array($page_sort=>$page_direction),
 				$numperpage,
-				$page_offset);	
-			$numrecords = $posts->count_all();	
-			$posts->load();	
+				$page_offset);
+			$numrecords = $posts->count_all();
+			$posts->load();
 			$page_vars['posts'] = $posts;
 			$page_vars['title'] = 'Blog';
 		}

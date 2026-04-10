@@ -1148,7 +1148,22 @@
 		'value' => $settings->get_setting('subscription_reactivation_enabled'),
 		'helptext' => 'Allow users to reactivate cancelled subscriptions before they expire'
 	]);
-	
+
+	// Tier Gating Settings
+	echo '<h4>Tier Gating (Content Access Control)</h4>';
+	echo '<p class="text-muted">Control how tier-restricted content is displayed to users</p>';
+
+	$formwriter->textinput('tier_gate_preview_length', 'Preview length (characters)', [
+		'value' => $settings->get_setting('tier_gate_preview_length') ?: '0',
+		'helptext' => 'Characters of body text to show before the paywall (0 for no preview)'
+	]);
+
+	$formwriter->dropinput('tier_gate_hide_from_listings', 'Hide gated content from listings', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('tier_gate_hide_from_listings'),
+		'helptext' => 'Hide gated content from blog/event listings for users who lack the required tier. RSS feeds always hide gated items regardless of this setting.'
+	]);
+
 	echo '<hr>';
 
 	echo '<h3>File Hosting Settings</h3>';

@@ -124,10 +124,22 @@ $page->public_header($page_options);
                         ?>
 
                         <!-- Event Description -->
+                        <?php
+                        $event_tier_access = !$is_virtual_event ? $event->authenticate_tier($page_vars['session']) : ['allowed' => true];
+                        ?>
                         <div class="bg-white rounded-4 shadow-sm p-4 mb-4">
                             <h3 class="mb-3">Description</h3>
                             <div class="entry-content">
+                                <?php if ($event_tier_access['allowed']): ?>
                                 <?php echo $evt_get('evt_description'); ?>
+                                <?php else:
+                                    require_once(PathHelper::getIncludePath('includes/tier_gate_prompt.php'));
+                                    // Show short description as preview, gate the full description
+                                    if ($evt_get('evt_short_description')) {
+                                        echo '<p>' . htmlspecialchars($evt_get('evt_short_description')) . '</p>';
+                                    }
+                                    render_tier_gate_prompt($event_tier_access);
+                                endif; ?>
                             </div>
                         </div>
 
@@ -142,6 +154,7 @@ $page->public_header($page_options);
                     <div class="widget bg-white rounded-4 shadow-sm p-4 mb-4">
                         <h4 class="mb-3">Registration</h4>
 
+                        <?php if ($event_tier_access['allowed']): ?>
                         <?php if ($page_vars['registration_message']): ?>
                         <p class="mb-3"><?php echo $page_vars['registration_message']; ?></p>
                         <?php endif; ?>
@@ -154,6 +167,9 @@ $page->public_header($page_options);
 
                         <?php if ($page_vars['if_registered_message']): ?>
                         <p style="color: var(--color-muted); font-size: 0.875rem; margin-top: 1rem; margin-bottom: 0;"><?php echo $page_vars['if_registered_message']; ?></p>
+                        <?php endif; ?>
+                        <?php else: ?>
+                        <p style="color: var(--color-muted);">Upgrade your subscription to register for this event.</p>
                         <?php endif; ?>
                     </div>
                     <?php else: ?>

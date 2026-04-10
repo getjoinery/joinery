@@ -69,6 +69,55 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
     $page->endtable(null);
     ?>
 
+    <!-- Gated Content Summary -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3>Gated Content by Tier</h3>
+        </div>
+        <div class="card-body">
+            <?php
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+
+            $has_gated_content = false;
+            foreach ($tiers as $tier) {
+                $level = $tier->get('sbt_tier_level');
+                $counts = [];
+
+                $tables = [
+                    'Posts' => ['pst_posts', 'pst_tier_min_level', 'pst_delete_time'],
+                    'Pages' => ['pag_pages', 'pag_tier_min_level', 'pag_delete_time'],
+                    'Events' => ['evt_events', 'evt_tier_min_level', 'evt_delete_time'],
+                    'Files' => ['fil_files', 'fil_tier_min_level', 'fil_delete_time'],
+                    'Videos' => ['vid_videos', 'vid_tier_min_level', 'vid_delete_time'],
+                    'Products' => ['pro_products', 'pro_tier_min_level', 'pro_delete_time'],
+                ];
+
+                foreach ($tables as $label => $info) {
+                    $sql = "SELECT count(1) as cnt FROM {$info[0]} WHERE {$info[1]} = ? AND {$info[2]} IS NULL";
+                    $q = $dblink->prepare($sql);
+                    $q->execute([$level]);
+                    $row = $q->fetch(PDO::FETCH_ASSOC);
+                    if ($row['cnt'] > 0) {
+                        $counts[] = $row['cnt'] . ' ' . strtolower($label);
+                    }
+                }
+
+                if (!empty($counts)) {
+                    $has_gated_content = true;
+                    echo '<p><strong>' . htmlspecialchars($tier->get('sbt_display_name')) . ' (Level ' . $level . '):</strong> ';
+                    echo implode(', ', $counts);
+                    echo ' require this tier</p>';
+                }
+            }
+
+            if (!$has_gated_content) {
+                echo '<p class="text-muted">No content is currently tier-gated.</p>';
+            }
+            ?>
+        </div>
+    </div>
+
     <!-- Products Using Tiers -->
     <div class="card mt-4">
         <div class="card-header">

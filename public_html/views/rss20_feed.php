@@ -21,10 +21,16 @@
 	<link>'.LibraryFunctions::get_absolute_url('').'</link>
 	<description/>';
 
-	foreach ($posts as $post){  
+	foreach ($posts as $post){
+
+		// Skip tier-gated posts in RSS feeds
+		$tier_min = $post->get('pst_tier_min_level');
+		if ($tier_min > 0) {
+			continue;
+		}
 
 		//ESCAPE SPECIAL CHARACTERS
-		$title = htmlentities( $post->get('pst_title'), ENT_QUOTES ); 
+		$title = htmlentities( $post->get('pst_title'), ENT_QUOTES );
 
 		echo '<item><title>'.$title.'</title>
 		<description><![CDATA['.$post->get('pst_short_description').']]></description>
