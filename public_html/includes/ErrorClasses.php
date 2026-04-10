@@ -417,97 +417,92 @@ class WebErrorHandler implements ErrorHandlerInterface {
     
     protected function getErrorStyles(): string {
         return '<style>
-            body { 
+            .error-container {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                margin: 0; 
-                padding: 20px; 
-                background: #f5f5f5; 
                 color: #333;
                 line-height: 1.6;
-            }
-            .error-container { 
-                max-width: 600px; 
-                margin: 50px auto; 
-                background: white; 
-                padding: 40px; 
-                border-radius: 8px; 
+                max-width: 600px;
+                margin: 50px auto;
+                background: white;
+                padding: 40px;
+                border-radius: 8px;
                 box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             }
-            h1 { 
-                color: #d32f2f; 
-                margin-bottom: 20px; 
+            .error-container h1 {
+                color: #d32f2f;
+                margin-bottom: 20px;
                 font-size: 28px;
                 font-weight: 600;
             }
-            .error-message { 
-                font-size: 16px; 
-                margin-bottom: 30px; 
+            .error-container .error-message {
+                font-size: 16px;
+                margin-bottom: 30px;
                 color: #666;
             }
-            .debug-info { 
-                background: #f8f9fa; 
-                padding: 20px; 
-                border-radius: 4px; 
+            .error-container .debug-info {
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 4px;
                 margin: 20px 0;
                 border-left: 4px solid #007bff;
             }
-            .debug-info h3 { 
-                margin-top: 0; 
+            .error-container .debug-info h3 {
+                margin-top: 0;
                 color: #007bff;
             }
-            .debug-info pre { 
-                background: #e9ecef; 
-                padding: 10px; 
-                border-radius: 4px; 
+            .error-container .debug-info pre {
+                background: #e9ecef;
+                padding: 10px;
+                border-radius: 4px;
                 overflow-x: auto;
                 font-size: 12px;
             }
-            .error-actions { 
-                margin-top: 30px; 
+            .error-container .error-actions {
+                margin-top: 30px;
                 text-align: center;
             }
-            .btn { 
+            .error-container .btn {
                 display: inline-block;
-                padding: 10px 20px; 
-                margin: 0 10px 10px 0; 
-                border: none; 
-                border-radius: 4px; 
-                text-decoration: none; 
+                padding: 10px 20px;
+                margin: 0 10px 10px 0;
+                border: none;
+                border-radius: 4px;
+                text-decoration: none;
                 font-size: 14px;
                 font-weight: 500;
                 cursor: pointer;
                 transition: background-color 0.2s;
             }
-            .btn-primary { 
-                background: #007bff; 
-                color: white; 
+            .error-container .btn-primary {
+                background: #007bff;
+                color: white;
             }
-            .btn-primary:hover { 
-                background: #0056b3; 
+            .error-container .btn-primary:hover {
+                background: #0056b3;
             }
-            .btn-secondary { 
-                background: #6c757d; 
-                color: white; 
+            .error-container .btn-secondary {
+                background: #6c757d;
+                color: white;
             }
-            .btn-secondary:hover { 
-                background: #545b62; 
+            .error-container .btn-secondary:hover {
+                background: #545b62;
             }
-            .contact-info { 
-                margin-top: 20px; 
+            .error-container .contact-info {
+                margin-top: 20px;
                 font-size: 14px; 
                 color: #666;
             }
-            details { 
-                margin: 10px 0; 
+            .error-container details {
+                margin: 10px 0;
             }
-            summary { 
-                cursor: pointer; 
+            .error-container summary {
+                cursor: pointer;
                 font-weight: 500;
                 color: #007bff;
             }
         </style>';
     }
-    
+
     protected function isProduction(): bool {
         try {
             $settings = Globalvars::get_instance();
@@ -526,110 +521,106 @@ class AdminErrorHandler extends WebErrorHandler {
     
     protected function getErrorStyles(): string {
         // Use Bootstrap classes for admin interface consistency
+        // Styles scoped to .error-container to avoid overriding page styles on mid-render errors
         return '<style>
-            body { 
+            .error-container {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                margin: 0; 
-                padding: 20px; 
-                background: #f8f9fa; 
                 color: #333;
                 line-height: 1.6;
-            }
-            .error-container { 
-                max-width: 800px; 
-                margin: 20px auto; 
-                background: white; 
-                padding: 30px; 
-                border-radius: 0.375rem; 
+                max-width: 800px;
+                margin: 20px auto;
+                background: white;
+                padding: 30px;
+                border-radius: 0.375rem;
                 box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
                 border: 1px solid #dee2e6;
             }
-            h1 { 
-                color: #dc3545; 
-                margin-bottom: 1rem; 
+            .error-container h1 {
+                color: #dc3545;
+                margin-bottom: 1rem;
                 font-size: 2rem;
                 font-weight: 500;
             }
-            .error-message { 
-                font-size: 1.1rem; 
-                margin-bottom: 1.5rem; 
+            .error-container .error-message {
+                font-size: 1.1rem;
+                margin-bottom: 1.5rem;
                 color: #6c757d;
             }
-            .debug-info { 
-                background: #f8f9fa; 
-                padding: 1rem; 
-                border-radius: 0.375rem; 
+            .error-container .debug-info {
+                background: #f8f9fa;
+                padding: 1rem;
+                border-radius: 0.375rem;
                 margin: 1rem 0;
                 border: 1px solid #e9ecef;
             }
-            .debug-info h3 { 
-                margin-top: 0; 
+            .error-container .debug-info h3 {
+                margin-top: 0;
                 color: #495057;
                 font-size: 1.25rem;
             }
-            .debug-info pre { 
-                background: #e9ecef; 
-                padding: 0.75rem; 
-                border-radius: 0.375rem; 
+            .error-container .debug-info pre {
+                background: #e9ecef;
+                padding: 0.75rem;
+                border-radius: 0.375rem;
                 overflow-x: auto;
                 font-size: 0.875rem;
                 margin: 0.5rem 0;
             }
-            .error-actions { 
-                margin-top: 2rem; 
+            .error-container .error-actions {
+                margin-top: 2rem;
                 text-align: left;
             }
-            .btn { 
+            .error-container .btn {
                 display: inline-block;
-                padding: 0.5rem 1rem; 
-                margin: 0 0.5rem 0.5rem 0; 
-                border: 1px solid transparent; 
-                border-radius: 0.375rem; 
-                text-decoration: none; 
+                padding: 0.5rem 1rem;
+                margin: 0 0.5rem 0.5rem 0;
+                border: 1px solid transparent;
+                border-radius: 0.375rem;
+                text-decoration: none;
                 font-size: 0.875rem;
                 font-weight: 400;
                 cursor: pointer;
                 transition: all 0.15s ease-in-out;
             }
-            .btn-primary { 
-                background: #0d6efd; 
-                color: white; 
+            .error-container .btn-primary {
+                background: #0d6efd;
+                color: white;
                 border-color: #0d6efd;
             }
-            .btn-primary:hover { 
-                background: #0b5ed7; 
+            .error-container .btn-primary:hover {
+                background: #0b5ed7;
                 border-color: #0a58ca;
             }
-            .btn-secondary { 
-                background: #6c757d; 
-                color: white; 
+            .error-container .btn-secondary {
+                background: #6c757d;
+                color: white;
                 border-color: #6c757d;
             }
-            .btn-secondary:hover { 
-                background: #5c636a; 
+            .error-container .btn-secondary:hover {
+                background: #5c636a;
                 border-color: #565e64;
             }
-            .contact-info { 
-                margin-top: 1rem; 
-                font-size: 0.875rem; 
+            .error-container .contact-info {
+                margin-top: 1rem;
+                font-size: 0.875rem;
                 color: #6c757d;
             }
-            details { 
-                margin: 0.5rem 0; 
+            .error-container details {
+                margin: 0.5rem 0;
             }
-            summary { 
-                cursor: pointer; 
+            .error-container summary {
+                cursor: pointer;
                 font-weight: 500;
                 color: #0d6efd;
                 padding: 0.25rem 0;
             }
-            .alert { 
+            .error-container .alert {
                 padding: 0.75rem 1.25rem;
                 margin-bottom: 1rem;
                 border: 1px solid transparent;
                 border-radius: 0.375rem;
             }
-            .alert-danger {
+            .error-container .alert-danger {
                 color: #721c24;
                 background-color: #f8d7da;
                 border-color: #f5c6cb;
