@@ -69,6 +69,8 @@ $page->begin_box(array('altlinks' => $altlinks));
                             </button>
                         </div>
                     </form>
+                    <hr>
+                    <p class="mb-0">Or browse available themes in the <a href="/admin/admin_marketplace">Marketplace</a>.</p>
                 </div>
             </div>
             <?php endif; ?>

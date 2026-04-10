@@ -84,7 +84,7 @@ class PublicPage extends PublicPageBase {
     <?php echo $_head_inject; ?>
     <?php $this->global_includes_top($options); ?>
 
-    <link rel="stylesheet" href="/theme/jeremytunnell-html5/assets/css/style.css">
+    <link rel="stylesheet" href="/theme/jeremytunnell-html5/assets/css/style.css?v=1.0.3">
 
     <?php
     if($settings->get_setting('custom_css')){
