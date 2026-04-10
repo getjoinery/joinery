@@ -145,7 +145,7 @@ Brief descriptions of ideal users with subtle illustrations or icons:
 1. **Member Management**
    - User profiles with custom fields
    - Permission-based access control (member, moderator, admin)
-   - Subscription tiers with feature-gating
+   - Subscription tiers with content access control (per-post, per-page, per-event tier gating)
    - Groups and group management
    - Member directory
    - Activity tracking and analytics
@@ -172,7 +172,7 @@ Brief descriptions of ideal users with subtle illustrations or icons:
    - Automated email sequences
    - Direct messaging between members
    - Notification system
-   - Self-hosted email option (no third-party dependency required)
+   - Pluggable email providers (Mailgun, PHPMailer/SMTP) via EmailProviderInterface — self-hosted option with no third-party dependency
 
 5. **Content & Community**
    - Posts with categories and scheduling

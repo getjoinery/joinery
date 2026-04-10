@@ -143,7 +143,7 @@ Joinery already has an incomplete Calendly integration (in `/ajax/calendly_webho
 ### 13. Automated Pre-Event Reminders
 **Calendly:** Email (and SMS on paid plans) reminders are sent automatically before the meeting — e.g., 24 hours before and 1 hour before — with customizable content.
 **Joinery:** No automatic reminder system. Admins can manually export registrant emails, but nothing fires automatically.
-**Notes:** Requires a scheduled task that queries upcoming events/bookings within a configured window and sends reminder emails via the existing `SystemMailer`. Fields needed: `bkt_reminder_hours` (array or multiple fields for timing). A more general "event workflow" system (see gap #18) would be the right long-term approach; a simple reminder-only implementation is achievable sooner.
+**Notes:** Requires a scheduled task that queries upcoming events/bookings within a configured window and sends reminder emails via `SystemMailer` (which now uses the pluggable `EmailProviderInterface` — see `specs/implemented/email_provider_abstraction.md`). Fields needed: `bkt_reminder_hours` (array or multiple fields for timing). A more general "event workflow" system (see gap #18) would be the right long-term approach; a simple reminder-only implementation is achievable sooner.
 
 ---
 

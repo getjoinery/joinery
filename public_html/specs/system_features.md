@@ -202,6 +202,7 @@ This inventory is the master checklist for system testing coverage. Each feature
 - [ ] Feature toggle: `blog_active`
 - [ ] Option to use blog as homepage (`use_blog_as_homepage`)
 - [ ] Blog subdirectory configuration
+- [ ] Tier gating: per-post access control via `pst_tier_min_level` with gate prompt, preview, and early access timer (`pst_tier_public_after_hours`)
 
 ### 3.4 Comments
 - [ ] Comment submission on posts/content
@@ -387,8 +388,8 @@ This inventory is the master checklist for system testing coverage. Each feature
 - [ ] Send individual emails
 - [ ] Send bulk emails to groups/lists
 - [ ] Email queue for batch processing (`equ_queued_emails`)
-- [ ] Email service: Mailgun (primary)
-- [ ] Email fallback service: SMTP
+- [ ] Pluggable email provider system via `EmailProviderInterface` (see `specs/implemented/email_provider_abstraction.md`)
+- [ ] Email providers: Mailgun, PHPMailer (SMTP), with provider auto-detection from site settings
 - [ ] Email dry run mode (`email_dry_run`)
 - [ ] Email test mode with test recipient (`email_test_mode`, `email_test_recipient`)
 - [ ] Email debug mode logging (`email_debug_mode`)
@@ -686,15 +687,15 @@ This inventory is the master checklist for system testing coverage. Each feature
 - [ ] Order creation
 
 ### 15.3 Mailgun
-- [ ] Email sending (primary service)
+- [ ] Email sending via `MailgunEmailProvider` (implements `EmailProviderInterface`)
 - [ ] Inbound email webhook
 - [ ] Webhook signature validation
 - [ ] EU API endpoint support
 
-### 15.4 SMTP
-- [ ] SMTP email sending (fallback service)
+### 15.4 SMTP / PHPMailer
+- [ ] Email sending via `PHPMailerEmailProvider` (implements `EmailProviderInterface`)
 - [ ] Configurable host, port, authentication
-- [ ] PHPMailer-based implementation
+- [ ] Provider auto-selected based on site settings (`mailgun_api_key` present = Mailgun, otherwise PHPMailer)
 
 ### 15.5 Calendly
 - [ ] Webhook for new invitees (`calendly_webhook.php`)
