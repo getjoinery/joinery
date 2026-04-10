@@ -68,9 +68,10 @@ $result = EmailSender::sendTemplate(
     ['name' => 'John', 'recipient' => $user->export_as_array()]
 );
 
-// Batch send
+// Batch send (uses provider's native batch API when available)
 $recipients = ['user1@example.com', 'user2@example.com'];
-$results = $sender->sendBatch($message, $recipients);
+$result = $sender->sendBatch($message, $recipients);
+// Returns: ['success' => bool, 'failed_recipients' => string[]]
 ```
 
 **Service Selection:**
@@ -392,7 +393,11 @@ foreach ($users as $user) {
 }
 
 $sender = new EmailSender();
-$results = $sender->sendBatch($message, $recipients);
+$result = $sender->sendBatch($message, $recipients);
+// $result['success'] — true if all recipients succeeded
+// $result['failed_recipients'] — array of email addresses that failed
+// Failed recipients are automatically retried via the fallback provider,
+// then queued for later retry if both providers fail.
 ```
 
 ## Error Handling
@@ -496,7 +501,7 @@ class SendGridProvider implements EmailServiceProvider {
     public static function getSettingsFields(): array { /* ... */ }
     public static function validateConfiguration(): array { /* ... */ }
     public function send(EmailMessage $message): bool { /* ... */ }
-    public function sendBatch(EmailMessage $message, array $recipients): bool { /* ... */ }
+    public function sendBatch(EmailMessage $message, array $recipients): array { /* ... */ }
 }
 ```
 
@@ -511,5 +516,5 @@ The provider automatically appears in the admin email settings dropdown and its 
 | `getSettingsFields()` | Array of setting field definitions for admin rendering |
 | `validateConfiguration()` | Check required settings are present; returns `['valid' => bool, 'errors' => []]` |
 | `send(EmailMessage)` | Send a single message; return success/failure |
-| `sendBatch(EmailMessage, array)` | Send to multiple recipients; providers can optimize (e.g., Mailgun batch API) |
+| `sendBatch(EmailMessage, array)` | Send to multiple recipients; returns `['success' => bool, 'failed_recipients' => []]`. Providers can optimize (e.g., Mailgun batch API) |
 | `validateApiConnection()` | (Optional) Live API check for admin validation panel |

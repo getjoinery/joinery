@@ -1,17 +1,17 @@
 <?php
 // tests/email/suites/ServiceTests.php
 
-require_once(__DIR__ . '/../../../includes/SmtpMailer.php');
+require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
 
 class ServiceTests {
     private array $config;
     private $runner;
-    
+
     public function __construct(array $config, $runner = null) {
         $this->config = $config;
         $this->runner = $runner;
     }
-    
+
     public function run(): array {
         $results = [];
 
@@ -23,6 +23,7 @@ class ServiceTests {
         $results['service_detection'] = $this->testServiceDetection();
 
         // Provider abstraction tests
+        $results['provider_discovery'] = $this->testProviderDiscovery();
         $results['service_validation'] = $this->testServiceValidation();
         $results['service_fallback'] = $this->testServiceFallback();
         $results['batch_sending'] = $this->testBatchSending();
@@ -31,14 +32,14 @@ class ServiceTests {
 
         return $results;
     }
-    
+
     private function testSMTPConfiguration(): array {
         $settings = Globalvars::get_instance();
-        
+
         // Test if SMTP settings are configured
         $host = $settings->get_setting('smtp_host');
         $port = $settings->get_setting('smtp_port');
-        
+
         return [
             'passed' => !empty($host) && !empty($port),
             'message' => empty($host) ? 'SMTP host not configured' : 'SMTP configuration found',
@@ -49,58 +50,58 @@ class ServiceTests {
             ]
         ];
     }
-    
+
     private function testSMTPConnection(): array {
         $settings = Globalvars::get_instance();
         $host = $settings->get_setting('smtp_host');
         $port = intval($settings->get_setting('smtp_port') ?: 25);
-        
+
         if (empty($host)) {
             return ['passed' => false, 'message' => 'No SMTP host configured'];
         }
-        
+
         // Test connection using socket
         $connection = @fsockopen($host, $port, $errno, $errstr, 5);
-        
+
         if (!$connection) {
             return [
                 'passed' => false,
                 'message' => "SMTP connection failed: $errstr ($errno)",
             ];
         }
-        
+
         fclose($connection);
         return [
             'passed' => true,
             'message' => "Successfully connected to $host:$port",
         ];
     }
-    
+
     private function testSMTPSending(): array {
         $settings = Globalvars::get_instance();
         $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
-        
+
         if (!$testRecipient) {
             return [
                 'passed' => false,
                 'message' => 'No test recipient configured',
             ];
         }
-        
+
         try {
             // Create a test email using new EmailMessage + EmailSender system
             $message = EmailMessage::fromTemplate('activation_content', [
                 'act_code' => 'SMTP-TEST-' . date('His'),
                 'resend' => false,
             ]);
-            
+
             $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
                    ->to($testRecipient, 'SMTP Test Recipient')
                    ->subject('SMTP Test Email - ' . date('Y-m-d H:i:s'));
-            
+
             $sender = new EmailSender();
             $sendResult = $sender->send($message);
-            
+
             return [
                 'passed' => $sendResult,
                 'message' => $sendResult ? "Successfully sent via SMTP to $testRecipient" : 'SMTP sending failed',
@@ -124,12 +125,12 @@ class ServiceTests {
             ];
         }
     }
-    
+
     private function testMailgunConfiguration(): array {
         $settings = Globalvars::get_instance();
         $apiKey = $settings->get_setting('mailgun_api_key');
         $domain = $settings->get_setting('mailgun_domain');
-        
+
         return [
             'passed' => !empty($apiKey) && !empty($domain),
             'message' => (!empty($apiKey) && !empty($domain)) ? 'Mailgun configured' : 'Mailgun not configured',
@@ -140,22 +141,22 @@ class ServiceTests {
             ]
         ];
     }
-    
+
     private function testMailgunSending(): array {
         $settings = Globalvars::get_instance();
         $testRecipient = $settings->get_setting('email_test_recipient');
-        
+
         if (empty($testRecipient)) {
             return [
                 'passed' => false,
                 'message' => 'No test recipient configured',
             ];
         }
-        
+
         // Check if Mailgun is configured
         $apiKey = $settings->get_setting('mailgun_api_key');
         $domain = $settings->get_setting('mailgun_domain');
-        
+
         if (empty($apiKey) || empty($domain)) {
             return [
                 'passed' => false,
@@ -166,21 +167,21 @@ class ServiceTests {
                 ]
             ];
         }
-        
+
         try {
-            // Create a test email using new EmailMessage + EmailSender system  
+            // Create a test email using new EmailMessage + EmailSender system
             $message = EmailMessage::fromTemplate('activation_content', [
                 'act_code' => 'MAILGUN-TEST-' . date('His'),
                 'resend' => false,
             ]);
-            
+
             $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
                    ->to($testRecipient, 'Mailgun Test Recipient')
                    ->subject('Mailgun Test Email - ' . date('Y-m-d H:i:s'));
-            
+
             $sender = new EmailSender();
             $sendResult = $sender->send($message);
-            
+
             return [
                 'passed' => $sendResult,
                 'message' => $sendResult ? "Successfully sent via Mailgun to $testRecipient" : 'Mailgun sending failed',
@@ -202,7 +203,7 @@ class ServiceTests {
             ];
         }
     }
-    
+
     // ── Helpers for temporarily overriding settings ──────────────────────
 
     /**
@@ -257,6 +258,59 @@ class ServiceTests {
 
     // ── Provider abstraction tests ────────────────────────────────────
 
+    private function testProviderDiscovery(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+
+        $checks = [];
+        $all_passed = true;
+
+        // Reset cache to force fresh discovery
+        EmailSender::resetProviderCache();
+
+        // getAvailableServices should include mailgun and smtp
+        $services = EmailSender::getAvailableServices();
+        $has_mailgun = isset($services['mailgun']);
+        $has_smtp = isset($services['smtp']);
+        $checks['has_mailgun'] = $has_mailgun;
+        $checks['has_smtp'] = $has_smtp;
+        if (!$has_mailgun || !$has_smtp) $all_passed = false;
+
+        // Labels should be non-empty strings
+        $mg_label_ok = $has_mailgun && is_string($services['mailgun']) && strlen($services['mailgun']) > 0;
+        $smtp_label_ok = $has_smtp && is_string($services['smtp']) && strlen($services['smtp']) > 0;
+        $checks['mailgun_label_ok'] = $mg_label_ok;
+        $checks['smtp_label_ok'] = $smtp_label_ok;
+        if (!$mg_label_ok || !$smtp_label_ok) $all_passed = false;
+
+        // getProviderSettings should return non-empty arrays for known providers
+        $mg_settings = EmailSender::getProviderSettings('mailgun');
+        $smtp_settings = EmailSender::getProviderSettings('smtp');
+        $mg_settings_ok = is_array($mg_settings) && count($mg_settings) > 0;
+        $smtp_settings_ok = is_array($smtp_settings) && count($smtp_settings) > 0;
+        $checks['mailgun_settings_ok'] = $mg_settings_ok;
+        $checks['smtp_settings_ok'] = $smtp_settings_ok;
+        if (!$mg_settings_ok || !$smtp_settings_ok) $all_passed = false;
+
+        // getProviderSettings for nonexistent should return empty array
+        $bad_settings = EmailSender::getProviderSettings('nonexistent');
+        $bad_empty = is_array($bad_settings) && count($bad_settings) === 0;
+        $checks['nonexistent_returns_empty'] = $bad_empty;
+        if (!$bad_empty) $all_passed = false;
+
+        return [
+            'passed' => $all_passed,
+            'message' => $all_passed
+                ? 'Provider discovery finds mailgun and smtp with valid settings fields'
+                : 'Provider discovery issues',
+            'details' => [
+                'checks' => $checks,
+                'discovered_services' => array_keys($services),
+                'mailgun_field_count' => count($mg_settings),
+                'smtp_field_count' => count($smtp_settings),
+            ]
+        ];
+    }
+
     private function testServiceValidation(): array {
         require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
@@ -309,6 +363,9 @@ class ServiceTests {
         $keys = ['email_service', 'email_fallback_service', 'mailgun_api_key'];
         $snapshot = $this->snapshotSettings($keys);
 
+        // Reset provider cache so fresh providers are loaded with new settings
+        EmailSender::resetProviderCache();
+
         try {
             // Force mailgun as primary with a bogus API key, SMTP as fallback
             $this->writeSetting('email_service', 'mailgun');
@@ -325,6 +382,7 @@ class ServiceTests {
             $result = $sender->send($message);
 
             $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
 
             return [
                 'passed' => $result === true,
@@ -340,6 +398,7 @@ class ServiceTests {
             ];
         } catch (Exception $e) {
             $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
             return [
                 'passed' => false,
                 'message' => 'Fallback test threw exception: ' . $e->getMessage(),
@@ -367,12 +426,14 @@ class ServiceTests {
             $sender = new EmailSender();
             $results = $sender->sendBatch($message, [$testRecipient]);
 
-            // Current API returns [$email => bool]
+            // New API returns ['success' => bool, 'failed_recipients' => []]
             $is_array = is_array($results);
-            $has_recipient = $is_array && array_key_exists($testRecipient, $results);
-            $recipient_ok = $has_recipient && $results[$testRecipient] === true;
+            $has_success = $is_array && array_key_exists('success', $results);
+            $has_failed = $is_array && array_key_exists('failed_recipients', $results);
+            $success_ok = $has_success && $results['success'] === true;
+            $failed_empty = $has_failed && empty($results['failed_recipients']);
 
-            $passed = $is_array && $recipient_ok;
+            $passed = $is_array && $success_ok && $failed_empty;
 
             return [
                 'passed' => $passed,
@@ -381,9 +442,10 @@ class ServiceTests {
                     : "Batch send failed",
                 'details' => [
                     'is_array' => $is_array,
-                    'has_recipient_key' => $has_recipient,
-                    'recipient_result' => $results[$testRecipient] ?? null,
-                    'result_keys' => $is_array ? array_keys($results) : 'not array',
+                    'has_success_key' => $has_success,
+                    'has_failed_key' => $has_failed,
+                    'success_value' => $results['success'] ?? null,
+                    'failed_recipients' => $results['failed_recipients'] ?? 'missing',
                 ]
             ];
         } catch (Exception $e) {
@@ -408,6 +470,8 @@ class ServiceTests {
         $keys = ['email_service', 'email_fallback_service', 'mailgun_api_key'];
         $snapshot = $this->snapshotSettings($keys);
 
+        EmailSender::resetProviderCache();
+
         try {
             // Force mailgun as primary with bogus key, SMTP as fallback
             $this->writeSetting('email_service', 'mailgun');
@@ -424,25 +488,28 @@ class ServiceTests {
             $results = $sender->sendBatch($message, [$testRecipient]);
 
             $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
 
-            // Current sendBatch loops calling send() which has fallback built in.
-            // So the recipient should still succeed via SMTP.
+            // New API: sendBatch returns ['success' => bool, 'failed_recipients' => []]
+            // Batch with fallback should succeed via SMTP
             $is_array = is_array($results);
-            $recipient_ok = $is_array && isset($results[$testRecipient]) && $results[$testRecipient] === true;
+            $success = $is_array && isset($results['success']) && $results['success'] === true;
 
             return [
-                'passed' => $recipient_ok,
-                'message' => $recipient_ok
+                'passed' => $success,
+                'message' => $success
                     ? "Batch fallback succeeded — sent via SMTP after Mailgun failure"
                     : "Batch fallback failed",
                 'details' => [
                     'primary' => 'mailgun (bogus key)',
                     'fallback' => 'smtp',
-                    'recipient_result' => $results[$testRecipient] ?? null,
+                    'success' => $results['success'] ?? null,
+                    'failed_recipients' => $results['failed_recipients'] ?? 'missing',
                 ]
             ];
         } catch (Exception $e) {
             $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
             return [
                 'passed' => false,
                 'message' => 'Batch fallback test threw exception: ' . $e->getMessage(),
@@ -465,6 +532,8 @@ class ServiceTests {
         // Snapshot all settings we will break
         $keys = ['email_service', 'email_fallback_service', 'mailgun_api_key', 'smtp_host', 'smtp_username', 'smtp_password'];
         $snapshot = $this->snapshotSettings($keys);
+
+        EmailSender::resetProviderCache();
 
         try {
             // Break both providers
@@ -505,6 +574,7 @@ class ServiceTests {
             $q3->execute([':max_id' => $max_id, ':subj' => $test_subject]);
 
             $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
 
             $passed = ($result === false) && ($queued_count > 0);
 
@@ -521,6 +591,7 @@ class ServiceTests {
             ];
         } catch (Exception $e) {
             $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
             return [
                 'passed' => false,
                 'message' => 'Queue test threw exception: ' . $e->getMessage(),
@@ -531,18 +602,19 @@ class ServiceTests {
 
     private function testServiceDetection(): array {
         $settings = Globalvars::get_instance();
-        
-        // Test the new service selection system
+
+        // Test the service selection system
         $currentService = $settings->get_setting('email_service') ?: 'mailgun';
         $fallbackService = $settings->get_setting('email_fallback_service') ?: 'smtp';
-        
-        // Test service validation using EmailSender (moved from EmailTemplate)
+
+        // Test service validation using EmailSender
         $primaryValidation = EmailSender::validateService($currentService);
         $fallbackValidation = EmailSender::validateService($fallbackService);
-        
-        $passed = in_array($currentService, ['smtp', 'mailgun']) && 
-                  in_array($fallbackService, ['smtp', 'mailgun']);
-        
+
+        // Use provider discovery instead of hardcoded list
+        $available = EmailSender::getAvailableServices();
+        $passed = isset($available[$currentService]) && isset($available[$fallbackService]);
+
         return [
             'passed' => $passed,
             'message' => "Primary: $currentService, Fallback: $fallbackService",
@@ -553,6 +625,7 @@ class ServiceTests {
                 'fallback_valid' => $fallbackValidation['valid'],
                 'primary_errors' => $primaryValidation['errors'],
                 'fallback_errors' => $fallbackValidation['errors'],
+                'available_services' => array_keys($available),
             ]
         ];
     }
