@@ -1387,3 +1387,15 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// =============================================================================
+	// ADMIN MENU CLEANUP
+	// =============================================================================
+
+	// ========== Disable Marketplace sidebar menu item (v101) ==========
+	$migration = array();
+	$migration['database_version'] = '101';
+	$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system-marketplace' AND amu_disable = 1";
+	$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_disable = 1 WHERE amu_slug = 'system-marketplace'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
