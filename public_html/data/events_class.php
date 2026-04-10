@@ -129,7 +129,9 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 	    // Instance relationship fields (set on materialized instances)
 	    'evt_parent_event_id' => array('type'=>'integer', 'is_nullable'=>true),
 	    'evt_materialized_instance_date' => array('type'=>'date', 'is_nullable'=>true),
-	); 
+	    'evt_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	    'evt_tier_public_after_hours' => array('type'=>'int4', 'is_nullable'=>true),
+	);
 
 function get_leader() {
 		if($this->get('evt_usr_user_id_leader')){
@@ -1317,6 +1319,11 @@ class MultiEvent extends SystemMultiBase {
 
         if (isset($this->options['recurring_or_future']) && $this->options['recurring_or_future']) {
             $filters['((evt_recurrence_type'] = "IS NOT NULL AND evt_recurrence_type != '') OR evt_end_time > now() OR (evt_end_time IS NULL AND evt_start_time > now()) OR (evt_end_time IS NULL AND evt_start_time IS NULL))";
+        }
+
+        if (isset($this->options['max_visible_tier_level'])) {
+            $level = intval($this->options['max_visible_tier_level']);
+            $filters['(evt_tier_min_level'] = "<= {$level} OR evt_tier_min_level IS NULL)";
         }
 
         return $this->_get_resultsv2('evt_events', $filters, $this->order_by, $only_count, $debug);

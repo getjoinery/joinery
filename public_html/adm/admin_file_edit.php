@@ -120,6 +120,18 @@
 		'options' => $optionvals
 	]);
 
+	// Tier Gating
+	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+	$tier_options = ['' => 'No tier required'];
+	$all_tiers = MultiSubscriptionTier::GetAllActive();
+	foreach ($all_tiers as $tier) {
+		$tier_options[$tier->get('sbt_tier_level')] = htmlspecialchars($tier->get('sbt_display_name')) . ' (Level ' . $tier->get('sbt_tier_level') . ')';
+	}
+	$formwriter->dropinput('fil_tier_min_level', 'Minimum Tier Required', [
+		'options' => $tier_options,
+		'helptext' => 'Restrict this file to users with this subscription tier or higher'
+	]);
+
 	if($file->is_image()){
 	/*
 		echo $formwriter->checkboxinput("Include this image in the gallery", "fil_gal_gallery_id", "checkbox", "left", $file->get('fil_gal_gallery_id'), 1, "");
