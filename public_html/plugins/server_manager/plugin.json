@@ -1,0 +1,7 @@
+{
+    "name": "Server Manager",
+    "version": "1.0.0",
+    "description": "Remote server management for Joinery instances",
+    "author": "Joinery",
+    "is_stock": true
+}
