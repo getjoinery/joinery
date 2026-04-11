@@ -74,11 +74,17 @@ $page->admin_header([
 	'menu-id' => 'server-manager',
 	'page_title' => 'Job #' . $job->key,
 	'readable_title' => 'Job Detail',
-	'breadcrumbs' => [
-		'Server Manager' => '/admin/server_manager',
-		'Jobs' => '/admin/server_manager/jobs',
-		'Job #' . $job->key => '',
-	],
+	'breadcrumbs' => $node_id
+		? [
+			'Server Manager' => '/admin/server_manager',
+			$node_name => '/admin/server_manager/node_detail?mgn_id=' . $node_id,
+			'Job #' . $job->key => '',
+		]
+		: [
+			'Server Manager' => '/admin/server_manager',
+			'Jobs' => '/admin/server_manager/jobs',
+			'Job #' . $job->key => '',
+		],
 	'session' => $session,
 ]);
 
