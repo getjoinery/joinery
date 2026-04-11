@@ -62,7 +62,8 @@
 	$stage_directory_contents = $stage_directory.'/*';
 
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
-	if(isset($_GET['serve-upgrade']) && $_GET['serve-upgrade'] && $settings->get_setting('upgrade_server_active')){
+	$is_upgrade_server = $settings->get_setting('upgrade_server_active') || PluginHelper::isPluginActive('server_manager');
+	if(isset($_GET['serve-upgrade']) && $_GET['serve-upgrade'] && $is_upgrade_server){
 		require_once(PathHelper::getIncludePath('/data/upgrades_class.php'));
 		$response = array();
 		$response['system_version'] = $settings->get_setting('system_version');
@@ -79,7 +80,7 @@
 		$response['core_location'] = LibraryFunctions::get_absolute_url('/static_files/' . $upgrade->get('upg_name'));
 
 		// Theme/plugin download endpoint
-		$response['theme_endpoint'] = LibraryFunctions::get_absolute_url('/utils/publish_theme');
+		$response['theme_endpoint'] = LibraryFunctions::get_absolute_url('/admin/server_manager/publish_theme');
 
 		// Required system themes/plugins — these must be downloaded even if
 		// the target site doesn't have them installed yet
@@ -1762,7 +1763,7 @@
 			return ['success' => false, 'error' => 'Upgrade source not configured'];
 		}
 
-		$url = rtrim($upgrade_source, '/') . '/utils/publish_upgrade?refresh-archives=1';
+		$url = rtrim($upgrade_source, '/') . '/admin/server_manager/publish?refresh-archives=1';
 
 		$ch = curl_init($url);
 		curl_setopt_array($ch, [

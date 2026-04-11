@@ -36,9 +36,6 @@
 	$pageoptions['altlinks'] += array('API Keys'=>'/admin/admin_api_keys'); 
 	$pageoptions['altlinks'] += array('Upgrade'=>'/utils/upgrade');
 	$pageoptions['altlinks'] += array('Refresh Themes'=>'/utils/upgrade?theme-only=1');
-	if($settings->get_setting('upgrade_server_active')){
-		$pageoptions['altlinks'] += array('Publish Upgrade'=>'/utils/publish_upgrade');
-	}
 
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
@@ -1239,30 +1236,12 @@
 	]);
 
 	echo '<h3>Upgrade Settings</h3>';
-	$formwriter->dropinput('upgrade_server_active', 'Act as upgrade server', [
-		'options' => $yes_no_options,
-		'value' => $settings->get_setting('upgrade_server_active')
-	]);
 	if(!$upgrade_source = $settings->get_setting('upgrade_source')){
 		$upgrade_source = 'https://getjoinery.com';
 	}
 	$formwriter->textinput('upgrade_source', 'Upgrade source', [
 		'value' => $upgrade_source
 	]);
-
-	// Remote archive refresh settings (only shown if acting as upgrade server)
-	if($settings->get_setting('upgrade_server_active')){
-		$allow_refresh = $settings->get_setting('allow_remote_archive_refresh');
-		$formwriter->dropinput('allow_remote_archive_refresh', 'Allow remote archive refresh', [
-			'options' => $yes_no_options,
-			'value' => ($allow_refresh === '1' || $allow_refresh === 'true') ? '1' : '0',
-			'helptext' => 'Allow authorized client sites to trigger archive regeneration remotely'
-		]);
-		$formwriter->textinput('archive_refresh_allowed_ips', 'Allowed IPs for refresh', [
-			'value' => $settings->get_setting('archive_refresh_allowed_ips') ?: '[]',
-			'helptext' => 'JSON array of IPs. Example: ["203.0.113.50", "10.0.0.0/24"]'
-		]);
-	}
 
 	echo '<hr>';
 

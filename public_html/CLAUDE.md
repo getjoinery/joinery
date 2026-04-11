@@ -466,9 +466,11 @@ $session->check_permission(5); // Requires permission level 5 (admin minimum)
 Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 
 ### Deploying to Production
-Both steps run from the CLI. Publish: `php utils/publish_upgrade.php "release notes"` (auto-detects next version). Apply on the remote site: `php utils/upgrade.php --verbose`.
+**Preferred method:** Use the Server Manager dashboard at `/admin/server_manager`. The "Publish Upgrade" form on the dashboard creates a job that builds archives. Then use the node detail Updates tab to apply upgrades to remote nodes.
 
-**Small fixes (no version bump):** On the remote server, `--refresh-archives` tells `upgrade.php` to first ask the source server to rebuild its archives from the current files, then apply them — skipping `publish_upgrade.php` entirely:
+**CLI fallback:** Publish: `php plugins/server_manager/includes/publish_upgrade.php "release notes"` (auto-detects next version). Apply on the remote site: `php utils/upgrade.php --verbose`.
+
+**Small fixes (no version bump):** On the remote server, `--refresh-archives` tells `upgrade.php` to first ask the source server to rebuild its archives from the current files, then apply them:
 ```bash
 php utils/upgrade.php --refresh-archives --verbose
 ```

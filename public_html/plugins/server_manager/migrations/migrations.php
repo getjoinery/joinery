@@ -89,4 +89,21 @@ return [
 			$q->execute(['Destinations', '/admin/server_manager/destinations', $parent_id, 3, 'server-manager-destinations']);
 		},
 	],
+	[
+		'id' => 'sm_005_move_marketplace_menu',
+		'version' => '1.0.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+
+			// Get server-manager parent menu ID
+			$q = $dblink->prepare("SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = ?");
+			$q->execute(['server-manager']);
+			$parent_id = $q->fetchColumn();
+			if (!$parent_id) return;
+
+			// Move marketplace menu entry to server manager, update URL
+			$q = $dblink->prepare("UPDATE amu_admin_menus SET amu_parent_menu_id = ?, amu_defaultpage = ?, amu_order = 4 WHERE amu_slug = ?");
+			$q->execute([$parent_id, '/admin/server_manager/marketplace', 'system-marketplace']);
+		},
+	],
 ];
