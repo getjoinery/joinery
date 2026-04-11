@@ -1,6 +1,7 @@
 # Server Manager Spec
 
-**Last Updated:** 2026-04-10
+**Last Updated:** 2026-04-11
+**Status:** Implemented
 
 ## Overview
 
@@ -318,15 +319,13 @@ joinery-agent/
     └── joinery-agent.env.example    # Example config
 ```
 
-Agent config (`/etc/joinery-agent/joinery-agent.env`):
+Agent config: The agent reads database credentials directly from Joinery's `Globalvars_site.php` — no manual DB configuration needed. The default config path is `/var/www/html/joinerytest/config/Globalvars_site.php` (override with `JOINERY_CONFIG` env var).
+
+Optional settings in `/etc/joinery-agent/joinery-agent.env`:
 ```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=joinerytest
-DB_USER=postgres
-DB_PASSWORD=...
+# JOINERY_CONFIG=/var/www/html/mysite/config/Globalvars_site.php
 POLL_INTERVAL=5s
-AGENT_NAME=joinerytest-agent
+AGENT_NAME=joinery-agent
 ```
 
 Agent behavior:
@@ -546,6 +545,8 @@ public static function build_publish_upgrade($params) {
 | `includes/JobCommandBuilder.php` | Command generation — all job-type logic lives here |
 | `includes/JobResultProcessor.php` | Output parsing and structured results |
 | `ajax/job_status.php` | Live job output polling (AJAX endpoint) |
+| `ajax/discover_nodes.php` | Creates and polls node discovery jobs |
+| `migrations/migrations.php` | Unique indexes and admin menu entries |
 | `views/admin/index.php` | Dashboard — agent status, node cards, recent jobs (`/admin/server_manager`) |
 | `views/admin/nodes.php` | Node list with status indicators (`/admin/server_manager/nodes`) |
 | `views/admin/nodes_edit.php` | Node add/edit form with test connection (`/admin/server_manager/nodes_edit`) |
@@ -560,7 +561,7 @@ public static function build_publish_upgrade($params) {
 | File | Purpose |
 |------|---------|
 | `main.go` | Entry point, config loading, poll loop |
-| `config.go` | Configuration struct and env loading |
+| `config.go` | Configuration — auto-reads from Globalvars_site.php |
 | `db.go` | PostgreSQL connection, job claiming, output writing, heartbeat |
 | `runner.go` | Step executor — dispatches to ssh/scp/local |
 | `ssh.go` | SSH connection pooling and command execution |
@@ -568,7 +569,8 @@ public static function build_publish_upgrade($params) {
 | `server.go` | Node lookup (reads mgn_managed_nodes for connection details) |
 | `Makefile` | Build, test, release |
 | `go.mod` | Go module definition |
-| `install/joinery-agent-installer.sh` | systemd service installer |
+| `build_installer.sh` | Generates self-extracting installer |
+| `install/joinery-agent.service` | systemd unit file |
 | `config/joinery-agent.env.example` | Example config |
 
 ## Job Types Summary
@@ -585,6 +587,7 @@ public static function build_publish_upgrade($params) {
 | `apply_update` | Run upgrade.php on target | **Yes** | **Yes** |
 | `refresh_archives` | Rebuild + apply upgrade archives | **Yes** | **Yes** |
 | `publish_upgrade` | Build upgrade archives from source | No | No |
+| `discover_nodes` | Scan remote host for Joinery instances | No | No |
 
 ## Safety Constraints
 
@@ -685,8 +688,10 @@ private static function get_config_path($node) {
 
 private static function get_db_credentials_script($node) {
     $config = self::get_config_path($node);
-    return "DB_NAME=\$(grep -oP \"dbname\\s*=\\s*'\\K[^']+\" {$config}) && "
-         . "DB_USER=\$(grep -oP \"dbuser\\s*=\\s*'\\K[^']+\" {$config})";
+    // Uses cut/sed to extract values — survives SSH + docker exec escaping layers
+    $extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
+    return "DB_NAME=\$(grep dbname {$config} | {$extract}) && "
+         . "DB_USER=\$(grep dbusername {$config} | {$extract})";
 }
 ```
 
@@ -705,6 +710,40 @@ This ensures credentials are always current (read at execution time, not stored)
 - **Agent permissions**: Runs as `user1` (has SSH keys), not as root. Sudo only if explicitly needed for specific operations
 - **SSH keys**: Stored as file paths in the database, not key contents. Keys remain on disk with proper permissions
 - **Destructive operations**: Require explicit `confirm_overwrite`/confirmation flag in job parameters. Plugin UI shows confirmation dialogs before creating these jobs
+
+## Implementation Notes
+
+Implemented 2026-04-11. Key additions and changes from the original spec:
+
+### Auto-detect nodes
+Added `discover_nodes` job type and `/ajax/discover_nodes` endpoint. Users enter an SSH host and key path, click **Detect**, and the agent scans the remote host for Joinery instances (Docker containers and bare metal). Detected instances appear as cards with one-click **Add This Node** buttons that save directly without manual form filling. Discovery uses `local` type steps (agent runs SSH from the control plane) so no node record is needed beforehand.
+
+### Zero-config agent
+The Go agent reads database credentials directly from `Globalvars_site.php` instead of requiring a separate env file. The install process is two commands: `sudo bash joinery-agent-installer.sh` then `sudo systemctl start joinery-agent`. No editing config files.
+
+### Schema validation on startup
+The agent checks that `mgn_managed_nodes`, `mjb_management_jobs`, and `ahb_agent_heartbeats` tables exist before entering the poll loop. If missing, it exits with a message telling the user to install and activate the plugin.
+
+### Self-documenting errors
+All error states produce actionable guidance:
+- **Go agent**: SSH failures include the exact manual SSH command to try. Missing keys say where to configure them. DB auth failures point to Globalvars_site.php. Schema errors give step-by-step plugin install instructions.
+- **PHP plugin**: Dashboard shows install commands when agent is offline. Pages that require nodes show "add a node" links instead of empty/broken forms. Stuck jobs (pending > 2 min, running > 1 hour) show warnings with diagnostic commands.
+
+### Admin menu
+Migration `sm_002_admin_menus` creates a "Server Manager" entry in the admin sidebar with sub-items for Dashboard, Nodes, Backups, Database, Updates, and Jobs.
+
+### DB credential extraction fix
+The original spec used `grep -oP` with Perl regex to extract credentials from remote `Globalvars_site.php`. This failed through the SSH + docker exec escaping layers. Replaced with a `cut`/`sed` pipeline that survives all escaping contexts.
+
+### Version check fix
+The original spec assumed a `version.php` file. Joinery stores its version in the `stg_settings` database table. Updated `check_status` to query the database for `system_version` instead.
+
+### Form submission fix
+The joinery-validate library calls `form.submit()` after async validation, which doesn't include the submit button's name/value pair. Changed the PHP form handler to check for `$_POST['mgn_name']` instead of `$_POST['btn_submit']`.
+
+### Documentation
+- `/docs/server_manager.md` — full developer documentation with quick start, job types, architecture, adding new job types, data models, troubleshooting
+- `/home/user1/joinery-agent/README.md` — agent install, configure, upgrade, safety features
 - **Command generation is server-side only**: The agent executes commands from `mjb_commands`, but those commands are generated entirely by the plugin's PHP code on the server. Users never supply raw commands — they click buttons in the admin UI, and the plugin's `JobCommandBuilder` translates that into safe, parameterized step sequences
 - **Job authentication**: All jobs record `mjb_created_by` (the user who triggered them). Agent verifies the job was created by a permission-10 user before executing
 - **Database communication**: Agent connects to local PostgreSQL only — no network-exposed API on the agent
