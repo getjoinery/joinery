@@ -50,4 +50,43 @@ return [
 			}
 		},
 	],
+	[
+		'id' => 'sm_003_consolidate_admin_menus',
+		'version' => '1.0.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+
+			// Remove sidebar entries for pages now consolidated into node_detail tabs
+			$remove_slugs = [
+				'server-manager-nodes',
+				'server-manager-backups',
+				'server-manager-database',
+				'server-manager-updates',
+			];
+			$placeholders = implode(',', array_fill(0, count($remove_slugs), '?'));
+			$q = $dblink->prepare("DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})");
+			$q->execute($remove_slugs);
+		},
+	],
+	[
+		'id' => 'sm_004_destinations_menu',
+		'version' => '1.0.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+
+			// Check if already exists
+			$q = $dblink->prepare("SELECT COUNT(*) FROM amu_admin_menus WHERE amu_slug = ?");
+			$q->execute(['server-manager-destinations']);
+			if ($q->fetchColumn() > 0) return;
+
+			// Get parent menu ID
+			$q = $dblink->prepare("SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = ?");
+			$q->execute(['server-manager']);
+			$parent_id = $q->fetchColumn();
+			if (!$parent_id) return;
+
+			$q = $dblink->prepare("INSERT INTO amu_admin_menus (amu_menudisplay, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_slug) VALUES (?, ?, ?, ?, 10, ?)");
+			$q->execute(['Destinations', '/admin/server_manager/destinations', $parent_id, 3, 'server-manager-destinations']);
+		},
+	],
 ];

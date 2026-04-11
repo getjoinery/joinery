@@ -16,7 +16,7 @@ The plugin is already in the `plugins/` directory. From the admin panel:
 2. Click **Actions** on "Server Manager" and choose **Install**
 3. Click **Actions** again and choose **Activate**
 
-The plugin creates three database tables automatically: `mgn_managed_nodes`, `mjb_management_jobs`, `ahb_agent_heartbeats`.
+The plugin creates its database tables automatically: `mgn_managed_nodes`, `mjb_management_jobs`, `ahb_agent_heartbeats`, `bkd_backup_destinations`.
 
 ### 2. Install and start the Go agent
 
@@ -90,11 +90,11 @@ The installer auto-detects upgrades: stops the service, swaps the binary, restar
 
 ### 3. Add managed nodes
 
-Go to `/admin/server_manager/nodes_edit`. There are two ways to add nodes:
+Go to `/admin/server_manager/node_add` (or click **Add Node** on the dashboard). There are two ways to add nodes:
 
 #### Auto-detect (recommended)
 
-The **Auto-Detect Joinery Servers** panel at the top of the page scans a remote host for Joinery instances automatically. Enter:
+The **Auto-Detect Joinery Servers** panel scans a remote host for Joinery instances automatically. Enter:
 
 1. **SSH Host** -- the server IP (e.g., `23.239.11.53`)
 2. **SSH Key Path** -- path to the private key on the control plane (defaults to `/home/user1/.ssh/id_ed25519_claude`)
@@ -123,22 +123,49 @@ Fill in the form fields directly:
 | Web Root | /var/www/html/empoweredhealthtn/public_html | /var/www/html/scrolldaddy/public_html |
 | Site URL | https://empoweredhealthtn.com | https://scrolldaddy.app |
 
-Click **Add Node**, then use **Test Connection** to verify SSH access.
+Click **Add Node**, then use **Test Connection** from the node's Overview tab to verify SSH access.
 
 ## Admin Pages
 
 All pages are at `/admin/server_manager/...` and require permission level 10 (superadmin).
 
+The UI is organized around a **dashboard + node detail** pattern. The dashboard shows the fleet overview; clicking a node opens a tabbed detail page with all operations for that node.
+
 | URL | Purpose |
 |-----|---------|
-| `/admin/server_manager` | Dashboard -- agent status, node cards with health data, recent jobs |
-| `/admin/server_manager/nodes` | List all managed nodes with status indicators |
-| `/admin/server_manager/nodes_edit` | Add or edit a node, test connection, trigger status check |
-| `/admin/server_manager/backups` | Run database or project backups, fetch backup files |
-| `/admin/server_manager/database` | Copy database between nodes, restore from backup |
-| `/admin/server_manager/updates` | Version comparison across nodes, publish/apply updates |
-| `/admin/server_manager/jobs` | Job history with filters by node, status, and type |
-| `/admin/server_manager/job_detail?job_id=N` | Single job output with live polling |
+| `/admin/server_manager` | **Dashboard** -- agent status, node cards with health dots, publish upgrade, recent jobs |
+| `/admin/server_manager/node_detail?mgn_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
+| `/admin/server_manager/node_add` | **Add Node** -- auto-detect panel + manual add form |
+| `/admin/server_manager/destinations` | **Backup Destinations** -- CRUD for cloud storage targets (B2, S3, Linode) |
+| `/admin/server_manager/jobs` | **Jobs** -- global job history with filters by node, status, and type |
+| `/admin/server_manager/job_detail?job_id=N` | **Job Detail** -- single job output with live polling |
+
+### Node Detail Tabs
+
+The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has five tabs:
+
+| Tab | Purpose |
+|-----|---------|
+| **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node |
+| **Backups** | Destination indicator, run database/project backup, fetch backup file, backup file browser with scan and delete |
+| **Database** | Copy database from another node to this one, restore from backup file |
+| **Updates** | Version comparison (node vs control plane), apply update / dry run / refresh & apply |
+| **Jobs** | Job history filtered to this node, with status and type filters |
+
+### Dashboard Features
+
+The dashboard shows:
+
+- **Agent Status** -- online/offline indicator with version and last heartbeat time
+- **Managed Nodes** -- cards with health-based status dots (green=healthy, yellow=warning, red=problem, gray=no data), key metrics, and action buttons
+- **Publish Upgrade** -- build upgrade archives from control plane source code (node-independent)
+- **Recent Jobs** -- latest 20 jobs across all nodes
+
+Health dot colors reflect actual server health, not check recency:
+- **Red**: Last check failed, disk > 90%, or PostgreSQL not accepting connections
+- **Yellow**: Disk > 80% or load average > 5
+- **Green**: All metrics healthy
+- **Gray**: Never checked or no data
 
 ## Job Types
 
@@ -146,9 +173,11 @@ All pages are at `/admin/server_manager/...` and require permission level 10 (su
 |----------|-------------|-------------|
 | `test_connection` | Verify SSH connectivity to a node | No |
 | `check_status` | Gather disk, memory, uptime, PostgreSQL, version info | No |
-| `backup_database` | Run `backup_database.sh` on the remote server | No |
-| `backup_project` | Run `backup_project.sh` (DB + files + Apache config) | No |
+| `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
+| `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |
 | `fetch_backup` | SCP a backup file from remote to control plane | No |
+| `list_backups` | List backup files on local server and cloud destination | No |
+| `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
 | `apply_update` | Run `upgrade.php` on target (supports `--dry-run`) | **Yes** |
@@ -157,6 +186,77 @@ All pages are at `/admin/server_manager/...` and require permission level 10 (su
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
+
+## Backup Destinations
+
+Backup destinations define where backup files are uploaded after creation. Each node can optionally have a backup destination assigned. If no destination is set, backups remain local only on the remote server.
+
+### Supported Providers
+
+| Provider | CLI Tool | Credentials |
+|----------|----------|-------------|
+| **Local** | _(none)_ | No upload, files stay on remote server |
+| **Backblaze B2** | `b2` | Application Key ID + Application Key |
+| **Amazon S3** | `aws` | Access Key + Secret Key + Region |
+| **Linode Object Storage** | `aws` | Access Key + Secret Key + Region + Endpoint URL |
+
+S3-compatible providers (Linode, DigitalOcean Spaces, MinIO, etc.) all use the `aws` CLI with a custom `--endpoint-url`.
+
+### Configuration
+
+1. Go to `/admin/server_manager/destinations` and click **Add Destination**
+2. Select a provider, enter bucket name, path prefix, and credentials
+3. Go to a node's Overview tab, expand **Edit Connection Settings**, and select the destination from the **Backup Destination** dropdown
+4. Save — backups for this node will now auto-upload after creation
+
+### Upload Path Structure
+
+All providers use: `{prefix}/{node_slug}/{filename}`
+
+Example: `joinery-backups/empoweredhealthtn/empoweredhealthtn-04_11_2026.sql.gz.enc`
+
+### Credential Storage
+
+Credentials are stored in the `bkd_credentials` JSON column on the `bkd_backup_destinations` table. They are injected into SSH commands as inline environment variables — never written to files on remote hosts.
+
+### Backup Browser
+
+The **Backups** tab on each node includes a file browser that lists backup files from both local storage and the cloud destination. Features:
+
+- **Scan for Backups** — creates a `list_backups` job to scan local `/backups/` directory and cloud bucket, caches the result on the node record
+- **Unified file table** — shows filename, size, date, and location (Local / Cloud / Both)
+- **Delete** — per-file delete with options: delete local copy, delete cloud copy, or delete everywhere
+
+The file listing is cached on the node record (`mgn_last_backup_list`) and rendered immediately. Click **Scan for Backups** to refresh.
+
+## Backup Encryption
+
+### Default Behavior
+
+Encryption is **enabled by default** on both Database Backup and Full Project Backup forms. The existing `backup_database.sh` script handles encryption using AES-256-CBC with a key from `~/.joinery_backup_key` on the remote server.
+
+### B2 Enforcement
+
+When a node's backup destination is Backblaze B2, encryption is **mandatory**. The UI replaces the checkbox with a message, and the server-side enforces it regardless of form input.
+
+### Auto-Generated Keys
+
+If an encryption key doesn't exist on the remote server, the backup job auto-generates one:
+
+1. The first step checks for `~/.joinery_backup_key`
+2. If missing, generates a random 32-byte base64 key with `openssl rand -base64 32`
+3. Saves it with 600 permissions
+4. Logs `ENCRYPTION_KEY_GENERATED` in the job output (the key value itself is never in the output)
+
+### Key Security
+
+The encryption key **never touches the control plane**. It exists only on the remote server. This ensures that compromising the B2 bucket or the control plane database does not expose the decryption key.
+
+To retrieve the key (for decrypting backups on another machine), SSH to the remote server:
+
+```bash
+cat ~/.joinery_backup_key
+```
 
 ## How It Works: Smart Plugin, Dumb Agent
 
@@ -247,6 +347,9 @@ Represents a remote Joinery instance. Key fields:
 - `mgn_web_root` -- Path to `public_html` inside the server/container
 - `mgn_last_status_data` -- JSON from last status check (disk, memory, load, etc.)
 - `mgn_joinery_version` -- Last known version string
+- `mgn_bkd_backup_destination_id` -- FK to backup destination (null = local only)
+- `mgn_last_backup_list` -- Cached JSON file listing from last backup scan
+- `mgn_last_backup_list_time` -- When the backup list was last refreshed
 
 ### ManagementJob (`mjb_management_jobs`)
 
@@ -272,6 +375,18 @@ $job = ManagementJob::createJob(
 );
 ```
 
+### BackupDestination (`bkd_backup_destinations`)
+
+Configured storage target for backups. Key fields:
+
+- `bkd_name` -- Display name (e.g., "Production B2")
+- `bkd_provider` -- `local`, `b2`, `s3`, or `linode`
+- `bkd_bucket` -- Bucket name (required for cloud providers)
+- `bkd_path_prefix` -- Path prefix within the bucket (default: `joinery-backups`)
+- `bkd_credentials` -- JSON with provider-specific credentials (key_id/app_key for B2, access_key/secret_key/region for S3/Linode)
+- `bkd_delete_local` -- Whether to delete local backup after successful upload
+- `bkd_enabled` -- Whether this destination is active
+
 ### AgentHeartbeat (`ahb_agent_heartbeats`)
 
 Single-row table tracking agent liveness. Updated every 30 seconds by the Go agent. The dashboard checks `ahb_last_heartbeat` to show online/offline status.
@@ -290,9 +405,11 @@ Single-row table tracking agent liveness. Updated every 30 seconds by the Go age
 
 6. **Remote credentials at runtime** -- Database credentials for backup/copy/restore are extracted from each node's `Globalvars_site.php` at execution time, never stored on the control plane.
 
-## AJAX Endpoint
+## AJAX Endpoints
 
-`/plugins/server_manager/ajax/job_status` -- polled by the job detail page for live output.
+### `/ajax/job_status`
+
+Polled by the job detail page for live output.
 
 Parameters:
 - `job_id` (int) -- job to query
@@ -312,6 +429,20 @@ Response:
 ```
 
 The UI polls every 2 seconds while a job is running and stops when status is `completed` or `failed`.
+
+### `/ajax/backup_actions`
+
+Used by the backup browser on the Backups tab.
+
+| Action | Method | Parameters | Returns |
+|--------|--------|------------|---------|
+| `refresh_list` | GET | `node_id` | `{success, job_id}` -- creates a `list_backups` job |
+| `delete_file` | GET | `node_id`, `target` (local/cloud/both), `local_path`, `cloud_path` | `{success, job_id}` -- creates a `delete_backup` job |
+| `list_status` | GET | `node_id`, `job_id` (optional) | `{success, status, backup_list, last_scan}` -- returns cached file listing |
+
+### `/ajax/discover_nodes`
+
+Used by the auto-detect panel on the Add Node page. Creates and polls `discover_nodes` jobs.
 
 ## Troubleshooting
 
@@ -344,12 +475,24 @@ The UI polls every 2 seconds while a job is running and stops when status is `co
 | `data/managed_node_class.php` | ManagedNode + MultiManagedNode |
 | `data/management_job_class.php` | ManagementJob + MultiManagementJob |
 | `data/agent_heartbeat_class.php` | AgentHeartbeat + MultiAgentHeartbeat |
+| `data/backup_destination_class.php` | BackupDestination + MultiBackupDestination |
 | `includes/JobCommandBuilder.php` | Command generation for all job types |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `ajax/job_status.php` | Live job output polling |
 | `ajax/discover_nodes.php` | Creates and polls node discovery jobs |
-| `migrations/migrations.php` | Unique indexes and admin menu entries |
-| `views/admin/*.php` | 8 admin view pages |
+| `ajax/backup_actions.php` | Backup browser actions (scan, delete) |
+| `migrations/migrations.php` | Indexes, admin menu entries, menu consolidation |
+| `views/admin/index.php` | Dashboard -- fleet overview, publish upgrade |
+| `views/admin/node_detail.php` | Node detail -- tabbed page (overview/backups/database/updates/jobs) |
+| `views/admin/node_add.php` | Add node -- auto-detect + manual form |
+| `views/admin/destinations.php` | Backup destination CRUD |
+| `views/admin/jobs.php` | Global job history |
+| `views/admin/job_detail.php` | Single job output with live polling |
+| `views/admin/nodes_edit.php` | Redirect stub (-> node_detail or node_add) |
+| `views/admin/nodes.php` | Redirect stub (-> dashboard) |
+| `views/admin/backups.php` | Redirect stub (-> dashboard or node_detail) |
+| `views/admin/database.php` | Redirect stub (-> dashboard or node_detail) |
+| `views/admin/updates.php` | Redirect stub (-> dashboard or node_detail) |
 
 ### Go Agent (`/home/user1/joinery-agent/`)
 
