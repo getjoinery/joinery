@@ -3,7 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -11,10 +11,23 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nod
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 $session->set_return();
+
+// Handle publish_upgrade action (node-independent, lives on dashboard)
+if ($_POST && isset($_POST['action']) && $_POST['action'] === 'publish_upgrade') {
+	$release_notes = trim($_POST['release_notes'] ?? '');
+	if ($release_notes) {
+		$params = ['release_notes' => $release_notes];
+		$steps = JobCommandBuilder::build_publish_upgrade($params);
+		$job = ManagementJob::createJob(null, 'publish_upgrade', $steps, $params, $session->get_user_id());
+		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
+		exit;
+	}
+}
 
 // Process any completed check_status jobs that haven't been processed yet.
 // This catches cases where the user navigated away from job_detail before the
@@ -93,6 +106,13 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 </div>
 
 <!-- Node Cards -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+	<h5 class="mb-0">Managed Nodes</h5>
+	<div>
+		<a href="/admin/server_manager/destinations" class="btn btn-sm btn-outline-secondary">Backup Destinations</a>
+		<a href="/admin/server_manager/node_add" class="btn btn-sm btn-primary">Add Node</a>
+	</div>
+</div>
 <div class="row mb-4">
 	<?php foreach ($nodes as $node): ?>
 		<?php
@@ -137,7 +157,7 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 		<div class="col-md-6 col-lg-4 mb-3">
 			<div class="card">
 				<div class="card-header d-flex justify-content-between align-items-center">
-					<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
+					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" class="text-decoration-none text-reset"><strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong></a>
 					<span class="badge bg-<?php echo $status_color; ?>">&bull;</span>
 				</div>
 				<div class="card-body">
@@ -163,11 +183,11 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 					<?php endif; ?>
 				</div>
 				<div class="card-footer">
-					<form method="post" action="/admin/server_manager/nodes_edit?mgn_id=<?php echo $node->key; ?>&action=check_status" style="display:inline">
+					<form method="post" action="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" style="display:inline">
+						<input type="hidden" name="action" value="check_status">
 						<button type="submit" class="btn btn-sm btn-outline-primary">Check Status</button>
 					</form>
-					<a href="/admin/server_manager/jobs?node_id=<?php echo $node->key; ?>" class="btn btn-sm btn-outline-secondary">Jobs</a>
-					<a href="/admin/server_manager/nodes_edit?mgn_id=<?php echo $node->key; ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
+					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" class="btn btn-sm btn-outline-secondary">Manage</a>
 				</div>
 			</div>
 		</div>
@@ -178,10 +198,31 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 	<div class="alert alert-info">
 		<strong>No managed nodes configured yet.</strong>
 		Nodes represent the remote Joinery servers you want to manage (backups, updates, status checks).
-		<a href="/admin/server_manager/nodes_edit" class="alert-link">Add your first node</a> to get started.
+		<a href="/admin/server_manager/node_add" class="alert-link">Add your first node</a> to get started.
 		You will need: the server's SSH host/IP, an SSH key path, and (for Docker setups) the container name.
 	</div>
 <?php endif; ?>
+
+<!-- Publish Upgrade -->
+<?php
+$pageoptions = ['title' => 'Publish New Upgrade'];
+$page->begin_box($pageoptions);
+?>
+<p class="text-muted">Build upgrade archives from the current control plane source code.</p>
+<form method="post">
+	<input type="hidden" name="action" value="publish_upgrade">
+	<div class="row">
+		<div class="col-md-8">
+			<textarea name="release_notes" class="form-control form-control-sm" rows="2" placeholder="Describe what changed in this release..." required></textarea>
+		</div>
+		<div class="col-md-4 d-flex align-items-end">
+			<button type="submit" class="btn btn-sm btn-primary">Publish Upgrade</button>
+		</div>
+	</div>
+</form>
+<?php
+$page->end_box();
+?>
 
 <!-- Recent Jobs -->
 <?php

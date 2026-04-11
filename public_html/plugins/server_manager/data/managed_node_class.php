@@ -14,7 +14,7 @@ class ManagedNode extends SystemBase {
 	public static $tablename = 'mgn_managed_nodes';
 	public static $pkey_column = 'mgn_id';
 
-	public static $json_vars = array('mgn_last_status_data');
+	public static $json_vars = array('mgn_last_status_data', 'mgn_last_backup_list');
 
 	public static $field_specifications = array(
 		'mgn_id'                  => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -31,6 +31,9 @@ class ManagedNode extends SystemBase {
 		'mgn_joinery_version'     => array('type'=>'varchar(20)'),
 		'mgn_last_status_check'   => array('type'=>'timestamp(6)'),
 		'mgn_last_status_data'    => array('type'=>'jsonb'),
+		'mgn_bkd_backup_destination_id' => array('type'=>'int8'),
+		'mgn_last_backup_list'    => array('type'=>'jsonb'),
+		'mgn_last_backup_list_time' => array('type'=>'timestamp(6)'),
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
 		'mgn_notes'               => array('type'=>'text'),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),

@@ -80,54 +80,91 @@ class JobCommandBuilder {
 
 	/**
 	 * Backup a node's database using backup_database.sh.
+	 * If the node has a cloud backup destination, appends upload and optional cleanup steps.
 	 */
 	public static function build_backup_database($node, $params = []) {
 		$scripts = self::get_scripts_path($node);
 		$creds = self::get_db_credentials_script($node);
 
-		$flags = '';
+		// Force encryption for B2 destinations
+		$dest = self::get_destination($node);
+		if ($dest && $dest->get('bkd_provider') === 'b2') {
+			$params['encryption'] = true;
+		}
+
+		// Script encrypts by default; pass --plaintext to disable
+		$flags = '--non-interactive';
+		if (empty($params['encryption'])) {
+			$flags .= ' --plaintext';
+		}
+
+		$steps = [];
+
+		// Ensure encryption key exists, auto-generate if missing
 		if (!empty($params['encryption'])) {
-			$flags .= ' --encrypt';
-		}
-		if (isset($params['compression']) && $params['compression'] === false) {
-			$flags .= ' --no-compress';
+			$steps[] = ['type' => 'ssh', 'label' => 'Ensure encryption key',
+				'cmd' => 'if [ -f ~/.joinery_backup_key ]; then echo "ENCRYPTION_KEY_OK"; else openssl rand -base64 32 > ~/.joinery_backup_key && chmod 600 ~/.joinery_backup_key && echo "ENCRYPTION_KEY_GENERATED — retrieve it via SSH: cat ~/.joinery_backup_key"; fi'];
 		}
 
-		$label = !empty($params['backup_label']) ? $params['backup_label'] : 'manual';
+		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
+			'cmd' => 'mkdir -p /backups'];
 
-		$steps = [
-			['type' => 'ssh', 'label' => 'Run database backup',
-			 'cmd' => "{$creds} && bash {$scripts}/sysadmin_tools/backup_database.sh -d \"\$DB_NAME\" -u \"\$DB_USER\"{$flags}",
-			 'timeout' => 3600],
-			['type' => 'ssh', 'label' => 'List backup files',
-			 'cmd' => "ls -lht /backups/*.sql.gz 2>/dev/null | head -5",
-			 'continue_on_error' => true],
-		];
+		$steps[] = ['type' => 'ssh', 'label' => 'Run database backup',
+			'cmd' => "{$creds} && cd /backups && bash {$scripts}/sysadmin_tools/backup_database.sh {$flags} \"\$DB_NAME\"",
+			'timeout' => 3600];
+
+		// Append upload step if node has a cloud destination
+		self::append_upload_steps($steps, $node);
+
+		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
+			'cmd' => "ls -lht /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -5",
+			'continue_on_error' => true];
 
 		return $steps;
 	}
 
 	/**
 	 * Full project backup (DB + files + Apache config).
+	 * If the node has a cloud backup destination, appends upload and optional cleanup steps.
 	 */
 	public static function build_backup_project($node, $params = []) {
 		$scripts = self::get_scripts_path($node);
 		$web_root = rtrim($node->get('mgn_web_root'), '/');
 		$project_root = dirname($web_root);
+		// Extract project name from path: /var/www/html/empoweredhealthtn/public_html -> empoweredhealthtn
+		$project_name = basename($project_root);
 
-		$flags = '';
-		if (!empty($params['encryption'])) {
-			$flags .= ' --encrypt';
+		// Force encryption for B2 destinations
+		$dest = self::get_destination($node);
+		if ($dest && $dest->get('bkd_provider') === 'b2') {
+			$params['encryption'] = true;
 		}
 
-		$steps = [
-			['type' => 'ssh', 'label' => 'Run full project backup',
-			 'cmd' => "bash {$scripts}/sysadmin_tools/backup_project.sh -p {$project_root}{$flags}",
-			 'timeout' => 3600],
-			['type' => 'ssh', 'label' => 'List backup files',
-			 'cmd' => "ls -lht /backups/ 2>/dev/null | head -5",
-			 'continue_on_error' => true],
-		];
+		// Script encrypts by default; pass --plaintext to disable
+		$flags = '--non-interactive --output-dir /backups';
+		if (empty($params['encryption'])) {
+			$flags .= ' --plaintext';
+		}
+
+		$steps = [];
+
+		if (!empty($params['encryption'])) {
+			$steps[] = ['type' => 'ssh', 'label' => 'Ensure encryption key',
+				'cmd' => 'if [ -f ~/.joinery_backup_key ]; then echo "ENCRYPTION_KEY_OK"; else openssl rand -base64 32 > ~/.joinery_backup_key && chmod 600 ~/.joinery_backup_key && echo "ENCRYPTION_KEY_GENERATED — retrieve it via SSH: cat ~/.joinery_backup_key"; fi'];
+		}
+
+		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
+			'cmd' => 'mkdir -p /backups'];
+
+		$steps[] = ['type' => 'ssh', 'label' => 'Run full project backup',
+			'cmd' => "bash {$scripts}/sysadmin_tools/backup_project.sh {$project_name} {$flags}",
+			'timeout' => 3600];
+
+		self::append_upload_steps($steps, $node);
+
+		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
+			'cmd' => "ls -lht /backups/ 2>/dev/null | head -5",
+			'continue_on_error' => true];
 
 		return $steps;
 	}
@@ -313,6 +350,214 @@ class JobCommandBuilder {
 			'continue_on_error' => true];
 
 		return $steps;
+	}
+
+	// ── Backup destination helpers ──
+
+	/**
+	 * Load the backup destination for a node, if configured.
+	 * Returns BackupDestination or null.
+	 */
+	private static function get_destination($node) {
+		$dest_id = $node->get('mgn_bkd_backup_destination_id');
+		if (!$dest_id) return null;
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
+		try {
+			$dest = new BackupDestination($dest_id, TRUE);
+			if ($dest->get('bkd_enabled') && $dest->is_cloud()) {
+				return $dest;
+			}
+		} catch (Exception $e) {}
+		return null;
+	}
+
+	/**
+	 * Append upload (and optional local cleanup) steps to a steps array
+	 * if the node has a cloud backup destination configured.
+	 *
+	 * The upload command uses NEWEST_BACKUP shell variable which should be set
+	 * by finding the most recently modified backup file.
+	 */
+	private static function append_upload_steps(&$steps, $node) {
+		$dest = self::get_destination($node);
+		if (!$dest) return;
+
+		$slug = $node->get('mgn_slug');
+		$prefix = $dest->get('bkd_path_prefix') ?: 'joinery-backups';
+		$creds = $dest->get_credentials();
+		$bucket = $dest->get('bkd_bucket');
+		$provider = $dest->get('bkd_provider');
+
+		// Find the newest backup file
+		$find_newest = 'NEWEST_BACKUP=$(ls -t /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -1)';
+		$check = 'test -n "$NEWEST_BACKUP"';
+
+		$upload_cmd = self::build_provider_upload_cmd($provider, $creds, $bucket, $prefix, $slug);
+
+		$steps[] = [
+			'type' => 'ssh',
+			'label' => 'Upload backup to ' . $dest->get('bkd_name'),
+			'cmd' => "{$find_newest} && {$check} && {$upload_cmd}",
+			'timeout' => 3600,
+			'continue_on_error' => true,
+		];
+
+		if ($dest->get('bkd_delete_local')) {
+			$steps[] = [
+				'type' => 'ssh',
+				'label' => 'Clean up local backup',
+				'cmd' => "{$find_newest} && {$check} && rm -f \"\$NEWEST_BACKUP\"",
+				'continue_on_error' => true,
+			];
+		}
+	}
+
+	/**
+	 * Build the provider-specific upload command.
+	 * Assumes $NEWEST_BACKUP is set in the shell environment.
+	 */
+	private static function build_provider_upload_cmd($provider, $creds, $bucket, $prefix, $slug) {
+		$remote_path = "{$prefix}/{$slug}/\$(basename \"\$NEWEST_BACKUP\")";
+
+		if ($provider === 'b2') {
+			$key_id = escapeshellarg($creds['key_id'] ?? '');
+			$app_key = escapeshellarg($creds['app_key'] ?? '');
+			return "b2 authorize-account {$key_id} {$app_key} && b2 upload-file " . escapeshellarg($bucket) . " \"\$NEWEST_BACKUP\" \"{$remote_path}\"";
+		}
+
+		// S3-compatible (AWS S3, Linode Object Storage, etc.)
+		$access = $creds['access_key'] ?? '';
+		$secret = $creds['secret_key'] ?? '';
+		$region = $creds['region'] ?? 'us-east-1';
+		$endpoint = $creds['endpoint'] ?? '';
+
+		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
+		$cmd = "{$env} aws s3 cp \"\$NEWEST_BACKUP\" \"s3://{$bucket}/{$remote_path}\" --region " . escapeshellarg($region);
+		if ($endpoint) {
+			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
+		}
+		return $cmd;
+	}
+
+	/**
+	 * List backup files on a node (local + cloud if destination configured).
+	 * Output is parsed by JobResultProcessor::process_list_backups.
+	 */
+	public static function build_list_backups($node) {
+		$steps = [
+			['type' => 'ssh', 'label' => 'List local backups',
+			 'cmd' => "for f in /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz; do "
+			        . "[ -f \"\$f\" ] && stat --format='LOCAL|%s|%Y|%n' \"\$f\"; "
+			        . "done 2>/dev/null; echo 'LOCAL_LIST_DONE'",
+			 'continue_on_error' => true],
+		];
+
+		$dest = self::get_destination($node);
+		if ($dest) {
+			$slug = $node->get('mgn_slug');
+			$prefix = $dest->get('bkd_path_prefix') ?: 'joinery-backups';
+			$creds = $dest->get_credentials();
+			$bucket = $dest->get('bkd_bucket');
+			$provider = $dest->get('bkd_provider');
+
+			$list_cmd = self::build_provider_list_cmd($provider, $creds, $bucket, $prefix, $slug);
+			$steps[] = [
+				'type' => 'ssh', 'label' => 'List cloud backups',
+				'cmd' => $list_cmd,
+				'continue_on_error' => true,
+			];
+		}
+
+		return $steps;
+	}
+
+	/**
+	 * Build provider-specific list command.
+	 */
+	private static function build_provider_list_cmd($provider, $creds, $bucket, $prefix, $slug) {
+		$cloud_path = "{$prefix}/{$slug}/";
+
+		if ($provider === 'b2') {
+			$key_id = escapeshellarg($creds['key_id'] ?? '');
+			$app_key = escapeshellarg($creds['app_key'] ?? '');
+			return "b2 authorize-account {$key_id} {$app_key} && b2 ls --long " . escapeshellarg($bucket) . " " . escapeshellarg($cloud_path) . "; echo 'CLOUD_LIST_DONE'";
+		}
+
+		$access = $creds['access_key'] ?? '';
+		$secret = $creds['secret_key'] ?? '';
+		$region = $creds['region'] ?? 'us-east-1';
+		$endpoint = $creds['endpoint'] ?? '';
+
+		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
+		$cmd = "{$env} aws s3 ls \"s3://{$bucket}/{$cloud_path}\" --region " . escapeshellarg($region);
+		if ($endpoint) {
+			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
+		}
+		return $cmd . "; echo 'CLOUD_LIST_DONE'";
+	}
+
+	/**
+	 * Delete a backup file from local, cloud, or both.
+	 * $params: target ('local', 'cloud', 'both'), local_path, cloud_path, filename
+	 */
+	public static function build_delete_backup($node, $params) {
+		$target = $params['target'] ?? 'local';
+		$local_path = $params['local_path'] ?? '';
+		$cloud_path = $params['cloud_path'] ?? '';
+		$steps = [];
+
+		if (($target === 'local' || $target === 'both') && $local_path) {
+			$steps[] = [
+				'type' => 'ssh', 'label' => 'Delete local backup',
+				'cmd' => "rm -f " . escapeshellarg($local_path) . " && echo 'LOCAL_DELETE_OK'",
+				'continue_on_error' => true,
+			];
+		}
+
+		if (($target === 'cloud' || $target === 'both') && $cloud_path) {
+			$dest = self::get_destination($node);
+			if ($dest) {
+				$creds = $dest->get_credentials();
+				$bucket = $dest->get('bkd_bucket');
+				$provider = $dest->get('bkd_provider');
+
+				$delete_cmd = self::build_provider_delete_cmd($provider, $creds, $bucket, $cloud_path);
+				$steps[] = [
+					'type' => 'ssh', 'label' => 'Delete cloud backup',
+					'cmd' => $delete_cmd,
+					'continue_on_error' => true,
+				];
+			}
+		}
+
+		if (empty($steps)) {
+			$steps[] = ['type' => 'ssh', 'label' => 'No files to delete', 'cmd' => 'echo "Nothing to delete"'];
+		}
+
+		return $steps;
+	}
+
+	/**
+	 * Build provider-specific delete command.
+	 */
+	private static function build_provider_delete_cmd($provider, $creds, $bucket, $cloud_path) {
+		if ($provider === 'b2') {
+			$key_id = escapeshellarg($creds['key_id'] ?? '');
+			$app_key = escapeshellarg($creds['app_key'] ?? '');
+			return "b2 authorize-account {$key_id} {$app_key} && b2 delete-file-version " . escapeshellarg($bucket) . " " . escapeshellarg($cloud_path) . " && echo 'CLOUD_DELETE_OK'";
+		}
+
+		$access = $creds['access_key'] ?? '';
+		$secret = $creds['secret_key'] ?? '';
+		$region = $creds['region'] ?? 'us-east-1';
+		$endpoint = $creds['endpoint'] ?? '';
+
+		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
+		$cmd = "{$env} aws s3 rm \"s3://{$bucket}/{$cloud_path}\" --region " . escapeshellarg($region);
+		if ($endpoint) {
+			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
+		}
+		return $cmd . " && echo 'CLOUD_DELETE_OK'";
 	}
 
 	/**
