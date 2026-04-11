@@ -8,6 +8,7 @@ $device = $page_vars['device'];
 $doh_url = $page_vars['doh_url'];
 $dns_host = $page_vars['dns_host'];
 $resolver_uid = $page_vars['resolver_uid'];
+$server_ips = isset($page_vars['server_ips']) ? $page_vars['server_ips'] : array();
 
 // Derive deterministic UUIDs from resolver_uid (32 hex chars -> UUID format)
 $inner_uuid = substr($resolver_uid, 0, 8) . '-'
@@ -42,7 +43,21 @@ echo '<?xml version="1.0" encoding="UTF-8"?>
 				<key>ServerURL</key>
 				<string>' . htmlspecialchars($doh_url) . '</string>
 				<key>ServerName</key>
-				<string>' . htmlspecialchars($dns_host) . '</string>
+				<string>' . htmlspecialchars($dns_host) . '</string>';
+
+if(!empty($server_ips)){
+	echo '
+				<key>ServerAddresses</key>
+				<array>';
+	foreach($server_ips as $ip){
+		echo '
+					<string>' . htmlspecialchars($ip) . '</string>';
+	}
+	echo '
+				</array>';
+}
+
+echo '
 			</dict>
 			<key>PayloadDescription</key>
 			<string>Configures DNS filtering for ' . $device_name . '</string>

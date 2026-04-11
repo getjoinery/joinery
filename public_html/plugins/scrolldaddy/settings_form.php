@@ -20,4 +20,23 @@ $formwriter->passwordinput('scrolldaddy_dns_api_key', 'ScrollDaddy DNS API Key',
     'value' => $settings->get_setting('scrolldaddy_dns_api_key'),
     'placeholder' => 'API key for DNS server management endpoints',
 ]);
+$formwriter->textinput('scrolldaddy_dns_server_ip', 'Server Public IP', [
+    'value' => $settings->get_setting('scrolldaddy_dns_server_ip'),
+    'placeholder' => 'e.g. 45.56.103.84 (shown in Windows/router setup instructions)',
+]);
+
+echo '<h4>Secondary DNS Server (Optional)</h4>';
+echo '<p>Configure a secondary DNS server for redundancy. Leave blank for single-server mode.</p>';
+$formwriter->textinput('scrolldaddy_dns_secondary_internal_url', 'Secondary Internal URL', [
+    'value' => $settings->get_setting('scrolldaddy_dns_secondary_internal_url'),
+    'placeholder' => 'e.g. http://10.0.0.2:8053'
+]);
+$formwriter->passwordinput('scrolldaddy_dns_secondary_api_key', 'Secondary DNS API Key', [
+    'value' => $settings->get_setting('scrolldaddy_dns_secondary_api_key'),
+    'placeholder' => 'Leave blank to use primary API key',
+]);
+$formwriter->textinput('scrolldaddy_dns_secondary_server_ip', 'Secondary Server Public IP', [
+    'value' => $settings->get_setting('scrolldaddy_dns_secondary_server_ip'),
+    'placeholder' => 'e.g. 172.16.0.2 (shown in setup instructions when configured)',
+]);
 ?>

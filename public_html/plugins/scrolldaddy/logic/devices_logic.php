@@ -64,27 +64,26 @@ function devices_logic($get_vars, $post_vars){
 		$device->check_activate();
 	}
 
-	// FETCH LAST-SEEN FROM DNS SERVER
-	$dns_internal_url = $settings->get_setting('scrolldaddy_dns_internal_url');
-	$dns_api_key = $settings->get_setting('scrolldaddy_dns_api_key');
+	// FETCH LAST-SEEN FROM DNS SERVER(S)
+	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/includes/ScrollDaddyApiClient.php'));
 	$last_seen = array();
-	if($dns_internal_url && $dns_api_key){
-		foreach($devices as $device){
-			$uid = $device->get('sdd_resolver_uid');
-			if(!$uid) continue;
-			$url = rtrim($dns_internal_url, '/') . '/device/' . $uid . '/seen';
-			$ch = curl_init($url);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($ch, CURLOPT_TIMEOUT, 2);
-			curl_setopt($ch, CURLOPT_HTTPHEADER, ['X-API-Key: ' . $dns_api_key]);
-			$response = curl_exec($ch);
-			curl_close($ch);
-			if($response){
-				$data = json_decode($response, true);
-				if($data && isset($data['seen'])){
-					$last_seen[$device->key] = $data;
-				}
+	foreach($devices as $device){
+		$uid = $device->get('sdd_resolver_uid');
+		if(!$uid) continue;
+
+		$path = '/device/' . $uid . '/seen';
+		$data = ScrollDaddyApiClient::callPrimary($path, 'GET', 2);
+
+		// If primary hasn't seen it, check secondary (important during install)
+		if((!$data || empty($data['seen'])) && $settings->get_setting('scrolldaddy_dns_secondary_internal_url')){
+			$secondary_data = ScrollDaddyApiClient::callSecondary($path, 'GET', 2);
+			if($secondary_data && !empty($secondary_data['seen'])){
+				$data = $secondary_data;
 			}
+		}
+
+		if($data && isset($data['seen'])){
+			$last_seen[$device->key] = $data;
 		}
 	}
 	$page_vars['last_seen'] = $last_seen;

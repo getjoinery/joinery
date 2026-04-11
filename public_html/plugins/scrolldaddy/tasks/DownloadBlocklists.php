@@ -304,28 +304,13 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 	}
 
 	/**
-	 * POST to the DNS server's /reload endpoint.
-	 * Silently ignores errors — the DNS server reloads on its own every 3600s.
+	 * POST to the DNS server(s) /reload endpoint.
+	 * Triggers reload on both primary and secondary (if configured).
+	 * Silently ignores errors — the DNS servers reload on their own every 3600s.
 	 */
 	private function trigger_reload() {
-		$settings = Globalvars::get_instance();
-		$internal_url = $settings->get_setting('scrolldaddy_dns_internal_url');
-		if (!$internal_url) {
-			return;
-		}
-		$api_key = $settings->get_setting('scrolldaddy_dns_api_key');
-		$ch = curl_init(rtrim($internal_url, '/') . '/reload');
-		$headers = array('Content-Length: 0');
-		if ($api_key) {
-			$headers[] = 'X-API-Key: ' . $api_key;
-		}
-		curl_setopt_array($ch, array(
-			CURLOPT_POST           => true,
-			CURLOPT_HTTPHEADER     => $headers,
-			CURLOPT_TIMEOUT        => 5,
-			CURLOPT_RETURNTRANSFER => true,
-		));
-		curl_exec($ch);
-		curl_close($ch);
+		require_once(PathHelper::getIncludePath('plugins/scrolldaddy/includes/ScrollDaddyApiClient.php'));
+		ScrollDaddyApiClient::callPrimary('/reload', 'POST', 5);
+		ScrollDaddyApiClient::callSecondary('/reload', 'POST', 5);
 	}
 }
