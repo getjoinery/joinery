@@ -3,17 +3,28 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/agent_heartbeat_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 $session->set_return();
+
+// Process any completed check_status jobs that haven't been processed yet.
+// This catches cases where the user navigated away from job_detail before the
+// AJAX poll could trigger the result processor.
+$db = DbConnector::get_instance()->get_db_link();
+$q = $db->query("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_status = 'completed' AND mjb_job_type = 'check_status' AND mjb_result IS NULL AND mjb_delete_time IS NULL");
+foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+	$unprocessed_job = new ManagementJob($row['mjb_id'], TRUE);
+	JobResultProcessor::process($unprocessed_job);
+}
 
 // Load nodes
 $nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
@@ -90,17 +101,37 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 			$status_data = json_decode($status_data, true);
 		}
 		$last_check = $node->get('mgn_last_status_check');
-		$now = time();
-		$check_age = $last_check ? ($now - strtotime($last_check)) : PHP_INT_MAX;
 
-		if (!$last_check) {
+		// Check if the most recent check_status job for this node failed
+		$last_job_failed = false;
+		$last_job_q = $db->prepare("SELECT mjb_status FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'check_status' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+		$last_job_q->execute([$node->key]);
+		$last_job_row = $last_job_q->fetch(PDO::FETCH_ASSOC);
+		if ($last_job_row && $last_job_row['mjb_status'] === 'failed') {
+			$last_job_failed = true;
+		}
+
+		// Dot color reflects actual health, not recency
+		// Red: real problem (failed check, disk > 90%, postgres down)
+		// Yellow: warning threshold (disk > 80%, high load)
+		// Green: healthy
+		// Gray: no data yet
+		if (!$last_check || !$status_data) {
 			$status_color = 'secondary';
-		} elseif ($check_age < 300) {
-			$status_color = 'success';
-		} elseif ($check_age < 1800) {
+		} elseif ($last_job_failed) {
+			$status_color = 'danger';
+		} elseif (
+			(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
+			(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')
+		) {
+			$status_color = 'danger';
+		} elseif (
+			(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
+			(isset($status_data['load_1m']) && $status_data['load_1m'] > 5)
+		) {
 			$status_color = 'warning';
 		} else {
-			$status_color = 'danger';
+			$status_color = 'success';
 		}
 		?>
 		<div class="col-md-6 col-lg-4 mb-3">
