@@ -153,12 +153,14 @@ The Joinery plugin will call `/reload` on both servers independently when needed
 
 ### 1. New Settings
 
-Add two new settings to the plugin's settings form and migrations:
+Add new settings to the plugin's settings form and migrations:
 
 | Setting | Purpose |
 |---------|---------|
+| `scrolldaddy_dns_server_ip` | Primary server's public IP (for Windows/router instructions and mobileconfig `ServerAddresses`) |
 | `scrolldaddy_dns_secondary_internal_url` | Internal API URL for the secondary server (e.g., `http://23.x.x.x:8053`) |
 | `scrolldaddy_dns_secondary_api_key` | API key for the secondary server (may differ from primary) |
+| `scrolldaddy_dns_secondary_server_ip` | Secondary server's public IP (for setup instructions and mobileconfig) |
 
 The external-facing hostname (`scrolldaddy_dns_host`) remains singular — both servers respond to the same domain. NS records handle failover at the DNS level, and DoH/DoT URLs don't change from the user's perspective.
 
@@ -284,22 +286,111 @@ Both servers must accept DoH (443 via Caddy) and DoT (853) traffic:
 
 ---
 
+## Client Failover Behavior
+
+ScrollDaddy uses DoH (HTTPS) and DoT (TLS) — not plain DNS on port 53. The traditional "primary/secondary DNS server" model doesn't directly apply. Instead, failover relies on two mechanisms depending on platform:
+
+1. **Multiple A records**: Both server IPs published as A records for `dns.scrolldaddy.app`. HTTPS/TLS clients that implement Happy Eyeballs (RFC 8305) race connections to both IPs and use whichever responds first.
+2. **Multiple DNS server entries**: Platforms that configure DNS by IP address (Windows, routers) can list both servers explicitly.
+
+### Per-Platform Failover Summary
+
+| Platform | Protocol | Failover mechanism | Speed | Notes |
+|----------|----------|-------------------|-------|-------|
+| **iOS/iPadOS** | DoH | Happy Eyeballs via multiple A records | ~250ms | Also supports `ServerAddresses` array in mobileconfig for hardcoded IPs (bypasses bootstrap DNS) |
+| **macOS** | DoH | Happy Eyeballs via multiple A records | ~250ms | Same `ServerAddresses` support as iOS |
+| **Android** | DoT | Sequential retry on multiple A records | 3-5 sec | Slower failover; tries IPs one at a time |
+| **Chrome/Edge/Brave** | DoH | Happy Eyeballs via multiple A records | ~250ms | Standard HTTPS connection behavior |
+| **Firefox** | DoH | Happy Eyeballs via multiple A records | ~250ms | `network.trr.bootstrapAddr` only accepts one IP |
+| **Windows 11** | DoH | Multiple DNS server entries (IP-based config) | 2-5 sec | Users configure both IPs, each with DoH template |
+| **Linux** | DoT/DoH | Multiple A records or multiple server entries | Varies | systemd-resolved supports multiple DoT servers |
+| **Routers** | DoH | Multiple server entries | 3-5 sec | Most support configuring multiple upstream DoH servers |
+
+### Key Findings
+
+- **DoH gets near-instant failover** on Apple, Chrome, and Firefox because DoH is standard HTTPS and modern HTTPS stacks implement Happy Eyeballs — parallel connection attempts with 250ms stagger.
+- **Android DoT is the weakest link** — sequential attempts mean 3-5 seconds of noticeable delay if the first IP is down.
+- **Windows is IP-based** — users configure explicit DNS server IPs, not hostnames. The setup instructions must show both IPs with DoH templates mapped to each.
+- **Apple mobileconfig profiles** support a `ServerAddresses` array (iOS 14+) that hardcodes server IPs directly in the profile. This bypasses the bootstrap DNS resolution problem entirely and is the most reliable approach for Apple devices.
+
+### Bootstrap Resolution
+
+Every platform must resolve the DoH/DoT hostname (e.g., `dns.scrolldaddy.app`) using plaintext DNS before it can use encrypted DNS. If that bootstrap resolution only returns one IP, failover depends on re-resolution with short TTLs. Mitigation:
+
+- Publish both A records with short TTL (60-300 seconds)
+- Use `ServerAddresses` in Apple mobileconfig profiles to bypass bootstrap entirely
+- For Windows, the IP-based config inherently avoids this problem
+
+---
+
+## Setup Instructions Changes (Activation Page + Mobileconfig)
+
+The activation page and mobileconfig profile must be updated to support two-server redundancy.
+
+### New Settings
+
+Add two settings for the public-facing server IPs (distinct from the internal API URLs):
+
+| Setting | Purpose |
+|---------|---------|
+| `scrolldaddy_dns_server_ip` | Primary server's public IP (shown in Windows/router setup instructions) |
+| `scrolldaddy_dns_secondary_server_ip` | Secondary server's public IP (shown when configured) |
+
+These go in the same migration as the other secondary settings and in the settings form.
+
+### Mobileconfig Changes
+
+**File: `plugins/scrolldaddy/views/profile/mobileconfig.php`**
+
+Add `ServerAddresses` array to the DNSSettings dict when server IPs are configured:
+
+```xml
+<key>ServerAddresses</key>
+<array>
+    <string>{primary_ip}</string>
+    <string>{secondary_ip}</string>
+</array>
+```
+
+This tells iOS/macOS exactly which IPs to connect to, bypassing bootstrap DNS resolution and enabling immediate Happy Eyeballs failover between both servers.
+
+**File: `plugins/scrolldaddy/logic/mobileconfig_logic.php`** — Pass `server_ips` array to the view.
+
+### Activation View Changes
+
+**File: `plugins/scrolldaddy/views/profile/activation.php`**
+
+**Windows card** — Currently hardcodes a single IP (`45.56.103.84`). Update to:
+- Show both IPs when secondary is configured
+- Instruct users to add both as DNS servers with DoH encryption enabled
+- Each IP gets the same DoH URL template
+
+**Router card** — Add note that users can configure both server IPs for redundancy when their router supports multiple upstream DNS servers.
+
+**File: `plugins/scrolldaddy/logic/activation_logic.php`** — Pass `server_ips` array to the view.
+
+---
+
 ## Testing Plan
 
+### DNS Server
 1. **Single-server backward compatibility**: Verify that with `SCD_PEER_URL` blank and no secondary plugin settings, everything works exactly as before
-2. **Peer log merging**: 
-   - Generate queries on both servers for the same device
-   - Call `/device/{uid}/log` on either server
-   - Verify merged output is chronologically sorted and contains entries from both
+2. **Peer log merging**: Generate queries on both servers for the same device; call `/device/{uid}/log` on either server; verify merged output is chronologically sorted and contains entries from both
 3. **Peer log recursion prevention**: Verify `?peer=0` flag prevents infinite loops
 4. **Peer unreachable**: Verify that if the peer is down, `/device/{uid}/log` returns local-only results without errors or delays beyond the 3-second timeout
-5. **Install flow last seen**: 
-   - Configure device to use secondary server's IP
-   - Send a DNS query through secondary
-   - Verify plugin's device list shows the device as "seen"
-6. **Dual reload**: After blocklist update, verify both servers reload by checking `/stats` on each
-7. **Log purge**: Verify purge clears logs on both servers
-8. **NS failover**: Stop primary server, verify DNS queries still resolve through secondary
+5. **Log purge**: Verify purge clears logs on both servers
+
+### Joinery Plugin
+6. **Install flow last seen**: Configure device to use secondary server's IP; send a DNS query through secondary; verify plugin's device list shows the device as "seen"
+7. **Dual reload**: After blocklist update, verify both servers reload by checking `/stats` on each
+8. **Settings form**: Verify new secondary settings and IP fields save and load correctly
+
+### Setup Instructions & Failover
+9. **Mobileconfig with ServerAddresses**: Download a mobileconfig with both IPs configured; verify the XML contains `ServerAddresses` array with both IPs; install on iOS/macOS and verify DNS works
+10. **Windows instructions**: With both IPs configured, verify the activation page shows both IPs with instructions to add each as a DNS server
+11. **Single-server activation**: With no secondary configured, verify activation page shows only the primary IP and mobileconfig has no `ServerAddresses` (or just the primary)
+12. **Multi-A-record failover**: Publish both A records for `dns.scrolldaddy.app`; stop primary server; verify DNS queries still resolve on iOS, Android, Chrome, and Firefox
+13. **Windows failover**: Configure both IPs as DNS servers on Windows 11 with DoH; stop primary; verify DNS still resolves through secondary
 
 ---
 
@@ -316,10 +407,14 @@ Both servers must accept DoH (443 via Caddy) and DoT (853) traffic:
 ### Joinery Plugin (`plugins/scrolldaddy/`)
 | File | Change |
 |------|--------|
-| `settings_form.php` | Add secondary URL and API key fields |
-| `migrations/` | New migration for secondary settings |
+| `settings_form.php` | Add secondary URL, API key, and server IP fields |
+| `migrations/` | New migration for secondary settings and server IPs |
 | `includes/ScrollDaddyApiClient.php` | New helper for single/dual server API calls |
 | `logic/devices_logic.php` | Query both servers for last seen during install flow |
+| `logic/activation_logic.php` | Pass server IPs array to view |
+| `logic/mobileconfig_logic.php` | Pass server IPs array to view |
+| `views/profile/activation.php` | Windows: show both IPs; Router: note about two servers |
+| `views/profile/mobileconfig.php` | Add `ServerAddresses` array with both IPs |
 | `tasks/DownloadBlocklists.php` | Call `/reload` on both servers |
 
 ### Infrastructure

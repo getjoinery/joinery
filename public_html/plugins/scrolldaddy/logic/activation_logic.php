@@ -46,6 +46,18 @@ function activation_logic($get_vars, $post_vars){
 	$page_vars['dot_hostname'] = $dot_hostname;
 	$page_vars['resolver_uid'] = $resolver_uid;
 
+	// Server IPs for platform-specific setup instructions
+	$server_ips = array();
+	$primary_ip = $settings->get_setting('scrolldaddy_dns_server_ip');
+	if($primary_ip){
+		$server_ips[] = $primary_ip;
+	}
+	$secondary_ip = $settings->get_setting('scrolldaddy_dns_secondary_server_ip');
+	if($secondary_ip){
+		$server_ips[] = $secondary_ip;
+	}
+	$page_vars['server_ips'] = $server_ips;
+
 	return LogicResult::render($page_vars);
 }
 
