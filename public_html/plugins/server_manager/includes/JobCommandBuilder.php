@@ -21,16 +21,18 @@ class JobCommandBuilder {
 
 	/**
 	 * Build shell script snippet to extract DB credentials from remote config.
-	 * Sets $DB_NAME and $DB_USER variables in the shell context.
+	 * Sets $DB_NAME, $DB_USER, and $PGPASSWORD variables in the shell context.
+	 * PGPASSWORD is exported so psql picks it up automatically.
 	 */
 	private static function get_db_credentials_script($node) {
 		$config = self::get_config_path($node);
-		// Extract dbname and dbusername from Globalvars_site.php
+		// Extract dbname, dbusername, and dbpassword from Globalvars_site.php
 		// Pattern: grep the line, take text before semicolon, take value after =,
 		// strip whitespace, strip surrounding single quotes via sed
 		$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
 		return "DB_NAME=\$(grep dbname {$config} | {$extract}) && "
-			 . "DB_USER=\$(grep dbusername {$config} | {$extract})";
+			 . "DB_USER=\$(grep dbusername {$config} | {$extract}) && "
+			 . "export PGPASSWORD=\$(grep dbpassword {$config} | {$extract})";
 	}
 
 	/**
@@ -160,9 +162,7 @@ class JobCommandBuilder {
 
 		// Safety: auto-backup target database first
 		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			'cmd' => "DB_NAME=\$(grep -oP \"dbname\\s*=\\s*'\\K[^']+\" {$target_config}) && "
-				   . "DB_USER=\$(grep -oP \"dbuser\\s*=\\s*'\\K[^']+\" {$target_config}) && "
-				   . "pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			'cmd' => "{$target_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
 			'node_id' => $target_node->key];
 
 		// Dump source
@@ -333,9 +333,11 @@ if [ -n "$containers" ]; then
       web_root=$(echo "$config" | sed 's|/config/Globalvars_site.php||')/public_html
       web_dir=$(docker exec "$c" grep "webDir" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
       db_name=$(docker exec "$c" grep "dbname" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
+      db_user=$(docker exec "$c" grep "dbusername" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
+      db_pass=$(docker exec "$c" grep "dbpassword" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
       version=""
       if [ -n "$db_name" ]; then
-        version=$(docker exec "$c" psql -U postgres -d "$db_name" -tAc "SELECT stg_value FROM stg_settings WHERE stg_name = 'system_version'" 2>/dev/null)
+        version=$(docker exec "$c" bash -c "PGPASSWORD='$db_pass' psql -U '${db_user:-postgres}' -d '$db_name' -tAc \"SELECT stg_value FROM stg_settings WHERE stg_name = 'system_version'\"" 2>/dev/null)
       fi
       echo "JOINERY_INSTANCE|docker|$c|$web_root|$web_dir|$db_name|$version"
       found=$((found+1))
@@ -350,10 +352,12 @@ if [ "$found" = "0" ]; then
     web_root="$site_dir/public_html"
     web_dir=$(grep "webDir" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
     db_name=$(grep "dbname" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
+    db_user=$(grep "dbusername" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
+    db_pass=$(grep "dbpassword" "$config" 2>/dev/null | head -1 | grep -oP "'[^']+'" | tail -1 | tr -d "'")
     dir_name=$(basename "$site_dir")
     version=""
     if [ -n "$db_name" ]; then
-      version=$(psql -U postgres -d "$db_name" -tAc "SELECT stg_value FROM stg_settings WHERE stg_name = 'system_version'" 2>/dev/null)
+      version=$(PGPASSWORD="$db_pass" psql -U "${db_user:-postgres}" -d "$db_name" -tAc "SELECT stg_value FROM stg_settings WHERE stg_name = 'system_version'" 2>/dev/null)
     fi
     echo "JOINERY_INSTANCE|bare|$dir_name|$web_root|$web_dir|$db_name|$version"
     found=$((found+1))
