@@ -294,7 +294,7 @@ class JobCommandBuilder {
 		$notes = escapeshellarg($params['release_notes']);
 		return [
 			['type' => 'local', 'label' => 'Publish upgrade',
-			 'cmd' => "cd /var/www/html/joinerytest/public_html && php utils/publish_upgrade.php {$notes}"],
+			 'cmd' => "cd /var/www/html/joinerytest/public_html && php plugins/server_manager/includes/publish_upgrade.php {$notes}"],
 		];
 	}
 

@@ -23,7 +23,7 @@ $site_template = $settings->get_setting('site_template');
 $full_site_dir = $baseDir . $site_template;
 
 // Check if upgrade server functionality is enabled
-if (!$settings->get_setting('upgrade_server_active')) {
+if (!$settings->get_setting('upgrade_server_active') && !PluginHelper::isPluginActive('server_manager')) {
     http_response_code(403);
     echo json_encode(['error' => 'Upgrade server is not active']);
     exit;
