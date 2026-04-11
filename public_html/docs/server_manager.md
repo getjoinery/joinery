@@ -182,7 +182,7 @@ Health dot colors reflect actual server health, not check recency:
 | `restore_database` | Restore a backup file on a node | **Yes** |
 | `apply_update` | Run `upgrade.php` on target (supports `--dry-run`) | **Yes** |
 | `refresh_archives` | Run `upgrade.php --refresh-archives` on target | **Yes** |
-| `publish_upgrade` | Run `publish_upgrade.php` locally on control plane | No |
+| `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.

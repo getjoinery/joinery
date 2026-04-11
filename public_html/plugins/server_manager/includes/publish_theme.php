@@ -12,22 +12,18 @@
  * Version: 1.1.0
  */
 
-// Standalone script - load minimal requirements
-require_once(__DIR__ . '/../includes/PathHelper.php');
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+// When loaded via route, core classes are pre-loaded.
+// When loaded standalone (unlikely), bootstrap manually.
+if (!class_exists('PathHelper')) {
+    require_once(__DIR__ . '/../../../includes/PathHelper.php');
+    require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+}
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 $settings = Globalvars::get_instance();
 $baseDir = $settings->get_setting('baseDir');
 $site_template = $settings->get_setting('site_template');
 $full_site_dir = $baseDir . $site_template;
-
-// Check if upgrade server functionality is enabled
-if (!$settings->get_setting('upgrade_server_active') && !PluginHelper::isPluginActive('server_manager')) {
-    http_response_code(403);
-    echo json_encode(['error' => 'Upgrade server is not active']);
-    exit;
-}
 
 // Handle ?list=themes
 if (isset($_GET['list']) && $_GET['list'] === 'themes') {
