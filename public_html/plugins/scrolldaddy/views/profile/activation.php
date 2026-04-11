@@ -12,6 +12,7 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 	$doh_url = $page_vars['doh_url'];
 	$dot_hostname = $page_vars['dot_hostname'];
 	$resolver_uid = $page_vars['resolver_uid'];
+	$server_ips = isset($page_vars['server_ips']) ? $page_vars['server_ips'] : array();
 
 	$page = new PublicPage();
 	$hoptions = array(
@@ -30,6 +31,18 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 		$device_name = strip_tags($device->get_readable_name());
 		$doh_url_safe = htmlspecialchars($doh_url);
 		$dot_hostname_safe = htmlspecialchars($dot_hostname);
+
+		// Determine which setup cards to show based on device type
+		$device_type = $device->get('sdd_device_type');
+		$show_cards = array();
+		switch($device_type){
+			case 'mobile-ios':    $show_cards = array('ios'); break;
+			case 'desktop-mac':   $show_cards = array('mac'); break;
+			case 'mobile-android':$show_cards = array('android'); break;
+			case 'desktop-windows':$show_cards = array('windows', 'browser'); break;
+			case 'desktop-linux': $show_cards = array('linux'); break;
+			default:              $show_cards = array('ios', 'mac', 'android', 'windows', 'linux', 'router', 'browser'); break;
+		}
 
 		echo '
 		<section class="space">
@@ -79,7 +92,8 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 			<!-- Platform setup cards -->
 			<div class="row justify-content-center gy-4">
 
-				<!-- iOS / iPadOS -->
+				<!-- iOS / iPadOS -->'.
+				(in_array('ios', $show_cards) ? '
 				<div class="col-md-6 col-lg-4">
 					<div class="job-post style2">
 						<div class="job-content">
@@ -101,9 +115,10 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 							<a class="th-btn style5" href="/profile/scrolldaddy/mobileconfig?device_id='.$device->key.'">Download Profile</a>
 						</div>
 					</div>
-				</div>
+				</div>' : '').'
 
-				<!-- macOS -->
+				<!-- macOS -->'.
+				(in_array('mac', $show_cards) ? '
 				<div class="col-md-6 col-lg-4">
 					<div class="job-post style2">
 						<div class="job-content">
@@ -125,9 +140,13 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 							<a class="th-btn style5" href="/profile/scrolldaddy/mobileconfig?device_id='.$device->key.'">Download Profile</a>
 						</div>
 					</div>
-				</div>
+				</div>' : '').'
 
-				<!-- Android -->
+				<!-- Android -->';
+
+		if(in_array('android', $show_cards)){
+
+		echo '
 				<div class="col-md-6 col-lg-4">
 					<div class="job-post style2">
 						<div class="job-content">
@@ -165,8 +184,13 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 		echo '
 						</div>
 					</div>
-				</div>
+				</div>';
 
+		} // end android card
+
+		if(in_array('windows', $show_cards)){
+
+		echo '
 				<!-- Windows -->
 				<div class="col-md-6 col-lg-4">
 					<div class="job-post style2">
@@ -181,18 +205,74 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 									<ol style="padding-left:16px;font-size:13px;line-height:2;">
 										<li>Open <strong>Settings</strong> → <strong>Network &amp; Internet</strong></li>
 										<li>Click your connection (Wi-Fi or Ethernet) → <strong>Hardware properties</strong></li>
-										<li>Click <strong>Edit</strong> next to DNS server assignment → set to <strong>Manual</strong></li>
-										<li>Enter DNS IP: <strong>45.56.103.84</strong></li>
+										<li>Click <strong>Edit</strong> next to DNS server assignment → set to <strong>Manual</strong></li>';
+
+		if(!empty($server_ips)){
+			echo '<li>Enter DNS IP: <strong>'.htmlspecialchars($server_ips[0]).'</strong></li>';
+		} else {
+			echo '<li>Enter your DNS server IP address</li>';
+		}
+
+		echo '
 										<li>Set <em>Preferred DNS encryption</em> to <strong>Encrypted only (HTTPS)</strong></li>
-										<li>Enter your DoH URL as the HTTPS template</li>
+										<li>Enter your DoH URL as the HTTPS template</li>';
+
+		if(count($server_ips) > 1){
+			echo '<li>Click <strong>Add</strong> to add a backup server → enter <strong>'.htmlspecialchars($server_ips[1]).'</strong></li>
+										<li>Set the backup to <strong>Encrypted only (HTTPS)</strong> with the same DoH URL</li>';
+		}
+
+		echo '
 									</ol>
 								</div>
 							</div>
 							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($doh_url).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoH URL\',2000);">Copy DoH URL</button>
 						</div>
 					</div>
-				</div>
+				</div>';
 
+		} // end windows card
+
+		if(in_array('linux', $show_cards)){
+
+		echo '
+				<!-- Linux -->
+				<div class="col-md-6 col-lg-4">
+					<div class="job-post style2">
+						<div class="job-content">
+							<h3 class="box-title"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-0.125em;margin-right:0.5rem"><path d="M12.5 2c-1.7 0-3 1.3-3 3v1.5c-1.2.5-2 1.7-2 3v2c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-4c0-1.1-.9-2-2-2v-2c0-1.3-.8-2.5-2-3V5c0-1.7-1.3-3-3-3zm-1 4h2v1h-2V6zm-2 3h6v2h-6V9zm-1 4h8v4h-8v-4z"/></svg>Linux</h3>
+							<p>Configure system-wide encrypted DNS using systemd-resolved (Ubuntu, Fedora, and most modern distros).</p>
+						</div>
+						<div class="job-post_author">
+							<div class="job-wrapp">
+								<div class="job-author"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+								<div class="author-info">
+									<ol style="padding-left:16px;font-size:13px;line-height:2;">
+										<li>Edit <strong>/etc/systemd/resolved.conf</strong> as root</li>
+										<li>Set <strong>DNS='.(!empty($server_ips) ? htmlspecialchars(implode(' ', $server_ips)) : 'YOUR_SERVER_IP').'</strong></li>
+										<li>Set <strong>DNSOverTLS=yes</strong></li>
+										<li>Run <strong>sudo systemctl restart systemd-resolved</strong></li>
+										<li>Verify with <strong>resolvectl status</strong></li>
+									</ol>
+									<p style="font-size:12px;color:#999;margin-top:4px;">Alternatively, configure DoH in your browser (Chrome, Firefox) using the DoH URL above.</p>
+								</div>
+							</div>';
+
+		if($dot_hostname){
+			echo '
+							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($dot_hostname).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoT Hostname\',2000);">Copy DoT Hostname</button>';
+		}
+
+		echo '
+						</div>
+					</div>
+				</div>';
+
+		} // end linux card
+
+		if(in_array('router', $show_cards)){
+
+		echo '
 				<!-- Router -->
 				<div class="col-md-6 col-lg-4">
 					<div class="job-post style2">
@@ -210,14 +290,25 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 										<li>Look for <strong>DNS over HTTPS</strong> or <strong>Secure DNS</strong></li>
 										<li>Paste your DoH URL and save</li>
 									</ol>
-									<p style="font-size:12px;color:#999;margin-top:4px;">Supported on Asus, pfSense, OPNsense, Firewalla, and others. Steps vary by model.</p>
+									<p style="font-size:12px;color:#999;margin-top:4px;">Supported on Asus, pfSense, OPNsense, Firewalla, and others. Steps vary by model.</p>';
+
+		if(count($server_ips) > 1){
+			echo '<p style="font-size:12px;color:#999;margin-top:4px;">For redundancy, add both DNS server IPs: <strong>'.htmlspecialchars($server_ips[0]).'</strong> and <strong>'.htmlspecialchars($server_ips[1]).'</strong></p>';
+		}
+
+		echo '
 								</div>
 							</div>
 							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($doh_url).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoH URL\',2000);">Copy DoH URL</button>
 						</div>
 					</div>
-				</div>
+				</div>';
 
+		} // end router card
+
+		if(in_array('browser', $show_cards)){
+
+		echo '
 				<!-- Browser -->
 				<div class="col-md-6 col-lg-4">
 					<div class="job-post style2">
@@ -238,8 +329,11 @@ $page_vars = process_logic(activation_logic($_GET, $_POST));
 							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($doh_url).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoH URL\',2000);">Copy DoH URL</button>
 						</div>
 					</div>
-				</div>
+				</div>';
 
+		} // end browser card
+
+		echo '
 			</div><!-- end row -->
 
 			<div class="col-12 text-center mt-40">

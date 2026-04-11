@@ -69,6 +69,7 @@ $page_vars = process_logic(device_edit_logic($_GET, $_POST));
 			'Linux Computer' => 'desktop-linux',
 			"Apple phone or Ipad" => 'mobile-ios',
 			"Android phone or tablet" => 'mobile-android',
+			"Router or other device" => 'other',
 		];
 		$formwriter->dropinput('device_type', 'Device type', [
 			'options' => $optionvals

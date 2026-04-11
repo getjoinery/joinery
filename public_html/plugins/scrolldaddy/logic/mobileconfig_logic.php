@@ -36,6 +36,18 @@ function mobileconfig_logic($get_vars, $post_vars){
 	$page_vars['dns_host'] = $dns_host;
 	$page_vars['resolver_uid'] = $resolver_uid;
 
+	// Server IPs for ServerAddresses in mobileconfig
+	$server_ips = array();
+	$primary_ip = $settings->get_setting('scrolldaddy_dns_server_ip');
+	if($primary_ip){
+		$server_ips[] = $primary_ip;
+	}
+	$secondary_ip = $settings->get_setting('scrolldaddy_dns_secondary_server_ip');
+	if($secondary_ip){
+		$server_ips[] = $secondary_ip;
+	}
+	$page_vars['server_ips'] = $server_ips;
+
 	return LogicResult::render($page_vars);
 }
 
