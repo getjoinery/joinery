@@ -5,12 +5,12 @@
 Five complementary tools provide deployment and upgrade capabilities:
 
 1. **upgrade.php** - Web-based upgrade system for client installations (recommended)
-2. **publish_upgrade.php** - Package creation tool for distributing updates (core + themes + plugins)
-3. **publish_theme.php** - Individual theme/plugin publishing
+2. **publish_upgrade.php** - Package creation tool for distributing updates (core + themes + plugins) — lives in the Server Manager plugin
+3. **publish_theme.php** - Individual theme/plugin publishing — lives in the Server Manager plugin
 4. **install.sh** - Universal installer for Docker and bare-metal deployments
 5. **deploy.sh** - Git-based deployment for development environments (not recommended for production)
 
-The first four use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation.
+Tools 1, 4, and 5 use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation. Tools 2 and 3 require the **Server Manager** plugin to be active.
 
 For Docker and bare-metal deployments, see **[Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)**.
 
@@ -96,6 +96,9 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
 
 # Dry run
 php /var/www/html/joinerytest/public_html/utils/upgrade.php --dry-run
+
+# Refresh archives from source, then apply (no version bump needed)
+php /var/www/html/joinerytest/public_html/utils/upgrade.php --refresh-archives --verbose
 ```
 
 **Features:**
@@ -105,29 +108,37 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --dry-run
 - Preserves custom themes/plugins (is_stock: false)
 - Enhanced rollback (preserves failed deployments with timestamps)
 - Database migrations and composer integration
+- **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
+
+**`--refresh-archives` flag:**
+
+For small fixes that don't warrant a version bump, `--refresh-archives` tells `upgrade.php` to first call back to the upgrade server and ask it to rebuild its archives from the current source files, then download and apply them. This avoids the need to run `publish_upgrade` manually.
 
 **Download Flow:**
 1. Fetches available upgrade info from upgrade server
 2. Downloads core archive (`joinery-core-X.XX.upg.zip`)
 3. Downloads each stock theme archive (`theme-THEMENAME-X.XX.upg.zip`)
 4. Downloads each stock plugin archive (`plugin-PLUGINNAME-X.XX.upg.zip`)
-5. Extracts and validates all archives
-6. Performs deployment with rollback protection
+5. If any theme/plugin archive is unavailable (404), logs a warning and continues
+6. Extracts and validates all archives
+7. Performs deployment with rollback protection
 
 ---
 
 ### publish_upgrade.php
 
-**Location:** `/utils/publish_upgrade.php`
-**Access:** Superadmin only (permission level 8)
+**Location:** `plugins/server_manager/includes/publish_upgrade.php`
+**Access:** Requires the Server Manager plugin to be active. Superadmin only (permission level 10).
 
-```
-# Create upgrade package
-https://yoursite.com/utils/publish_upgrade?version_major=3&version_minor=26
+**Preferred usage:** Use the **Publish Upgrade** form on the Server Manager dashboard (`/admin/server_manager`). Enter release notes and submit — the plugin creates a job that builds all archives.
 
-# With verbose output
-https://yoursite.com/utils/publish_upgrade?version_major=3&version_minor=26&verbose=1
+**CLI usage:**
+```bash
+php plugins/server_manager/includes/publish_upgrade.php "release notes here"
+# Auto-detects the next version number
 ```
+
+> **Note:** The legacy location `utils/publish_upgrade.php` still exists for backward compatibility during the Phase 1 transition. It will be removed in a future release once all remote nodes have been upgraded.
 
 **Features:**
 - Creates separate archives for core, themes, and plugins
@@ -142,7 +153,7 @@ https://yoursite.com/utils/publish_upgrade?version_major=3&version_minor=26&verb
 static_files/
 ├── joinery-core-3.26.upg.zip        # Core application
 ├── theme-falcon-3.26.upg.zip        # Falcon theme
-├── theme-phillyzouk-3.26.upg.zip    # Phillyzouk theme
+├── theme-default-3.26.upg.zip       # Default theme
 ├── plugin-bookings-3.26.upg.zip     # Bookings plugin
 ├── plugin-controld-3.26.upg.zip     # ControlD plugin
 └── ...
@@ -152,25 +163,28 @@ static_files/
 
 ### publish_theme.php
 
-**Location:** `/utils/publish_theme.php`
-**Access:** Superadmin only (permission level 8)
+**Location:** `plugins/server_manager/includes/publish_theme.php`
+**Access:** Requires the Server Manager plugin to be active. Superadmin only (permission level 10).
 
 ```
 # Publish a single theme
-https://yoursite.com/utils/publish_theme?type=theme&name=falcon&version=1.0.0
+https://yoursite.com/admin/server_manager/publish_theme?type=theme&name=falcon&version=1.0.0
 
 # Publish a single plugin
-https://yoursite.com/utils/publish_theme?type=plugin&name=bookings&version=2.1.0
+https://yoursite.com/admin/server_manager/publish_theme?type=plugin&name=bookings&version=2.1.0
 
-# With verbose output
-https://yoursite.com/utils/publish_theme?type=theme&name=mytheme&version=1.0.0&verbose=1
+# List available themes (used by marketplace and upgrade.php)
+https://yoursite.com/admin/server_manager/publish_theme?list=themes
 ```
+
+> **Note:** The legacy location `utils/publish_theme.php` still exists for backward compatibility during the Phase 1 transition.
 
 **Features:**
 - Publishes individual themes or plugins independently of core
 - Allows different versioning for themes/plugins vs core
 - Useful for third-party theme/plugin distribution
 - Validates theme.json/plugin.json exists before packaging
+- Serves catalog listings for the marketplace and `upgrade.php`
 
 ---
 
@@ -309,11 +323,10 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 | `baseDir` | Base directory (e.g., `/var/www/html/`) |
 | `site_template` | Site directory name (e.g., `joinerytest`) |
 | `system_version` | Current version (e.g., `3.25`) |
-| `upgrade_server_active` | Enable upgrade server mode (set to `1` on server that publishes upgrades) |
 | `upgrade_source` | URL of upgrade server to download from (e.g., `https://joinerytest.site`) |
 | `composerAutoLoad` | Composer vendor path |
 
-**Note:** `upgrade_server_active` enables a site to *serve* upgrades to other sites. `upgrade_source` specifies where a site *downloads* upgrades from.
+**Note:** A site acts as an upgrade server when the **Server Manager** plugin is active. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
 
 ---
 
@@ -321,8 +334,10 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 
 The marketplace admin page lets superadmins browse themes and plugins available on the upgrade server and install them with one click.
 
-**Admin Page:** System > Marketplace (permission level 8)
-**Files:** `adm/admin_marketplace.php`, `adm/logic/admin_marketplace_logic.php`
+**Admin Page:** Server Manager > Marketplace (permission level 8)
+**Files:** `plugins/server_manager/views/admin/marketplace.php`, `plugins/server_manager/logic/admin_marketplace_logic.php`
+
+> **Note:** The old URL `/admin/admin_marketplace` redirects to `/admin/server_manager/marketplace`.
 
 ### How It Works
 
@@ -335,7 +350,7 @@ The marketplace admin page lets superadmins browse themes and plugins available 
 ### Prerequisites
 
 - `upgrade_source` setting must be configured (URL of the upgrade server)
-- The upgrade server must have `upgrade_server_active` enabled
+- The upgrade server must have the **Server Manager** plugin active
 
 ### Overwrite Protection
 
@@ -355,11 +370,14 @@ The `publish_theme.php` catalog endpoints (`?list=themes`, `?list=plugins`) incl
 
 - **[CLAUDE.md](/CLAUDE.md)** - System architecture and development guidelines
 - **[Plugin Developer Guide](/docs/plugin_developer_guide.md)** - Plugin development
+- **[Server Manager](/docs/server_manager.md)** - Server management, publishing, and backup destinations
 - **Specifications:**
   - `/specs/implemented/upgrade_system.md` - Feature parity analysis
   - `/specs/implemented/fix_publish_upgrade_system.md` - Publish upgrade fixes
   - `/specs/implemented/theme_plugin_distribution_refactor.md` - Separate archive distribution
+  - `/specs/implemented/server_manager_publish_upgrade.md` - Moving publish/upgrade into server_manager plugin
+  - `/specs/implemented/upgrade_graceful_theme_download.md` - Graceful handling of missing archives
 
 ---
 
-*Last Updated: 2026-04-04*
+*Last Updated: 2026-04-12*
