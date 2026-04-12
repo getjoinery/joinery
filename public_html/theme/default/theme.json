@@ -2,12 +2,11 @@
   "name": "default",
   "displayName": "Default Theme",
   "version": "1.1.0",
-  "description": "Default canvas HTML5 theme — uses base views and styles with no overrides",
+  "description": "Default canvas HTML5 theme \u2014 uses base views and styles with no overrides",
   "author": "Joinery Team",
   "is_stock": true,
   "is_system": true,
   "requires": {
-    "php": ">=7.4",
-    "joinery": ">=1.0.0"
+    "php": ">=7.4"
   }
 }

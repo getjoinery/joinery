@@ -409,6 +409,9 @@ class MultiPlugin extends SystemMultiBase {
             if ($metadata) {
                 $plugin_data['deprecated'] = !empty($metadata['deprecated']);
                 $plugin_data['superseded_by'] = $metadata['superseded_by'] ?? null;
+                $plugin_data['requires_joinery'] = $metadata['requires']['joinery'] ?? null;
+            } else {
+                $plugin_data['requires_joinery'] = null;
             }
 
             // Get plugin record if it exists

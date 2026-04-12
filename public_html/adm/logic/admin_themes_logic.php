@@ -24,6 +24,28 @@ function admin_themes_logic($get, $post) {
 				switch ($action) {
 					case 'activate':
 						$theme_name = $post['theme_name'];
+
+						// Gate activation on theme's requires.joinery (if any). Fail closed with
+						// a clear error that matches the badge format on the themes list page.
+						$req_path = PathHelper::getAbsolutePath("theme/{$theme_name}/theme.json");
+						if (file_exists($req_path)) {
+							$req_manifest = json_decode(file_get_contents($req_path), true);
+							if (!empty($req_manifest['requires']['joinery'])) {
+								require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+								$jv = LibraryFunctions::get_joinery_version();
+								$required = $req_manifest['requires']['joinery'];
+								$op = '>=';
+								$ver = $required;
+								if (preg_match('/^([><=]+)(.+)$/', $required, $m)) { $op = $m[1]; $ver = $m[2]; }
+								if ($jv === '') {
+									throw new Exception("Cannot activate theme '$theme_name': requires Joinery $required, but installed Joinery version could not be determined.");
+								}
+								if (!version_compare($jv, $ver, $op)) {
+									throw new Exception("Cannot activate theme '$theme_name': requires Joinery $required, this site is $jv.");
+								}
+							}
+						}
+
 						$theme_manager->activate($theme_name);
 						$message = "Theme '$theme_name' activated successfully.";
 

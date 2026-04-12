@@ -401,6 +401,21 @@ class PluginManager extends AbstractExtensionManager {
                 $results['errors'][] = "PHP version " . PHP_VERSION . " does not meet requirement: " . $required_php;
             }
         }
+
+        // Check Joinery version requirement — read from the canonical VERSION file.
+        // Fail-closed: if we can't determine Joinery's version, reject.
+        if (isset($manifest['requires']['joinery'])) {
+            require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+            $required_joinery = $manifest['requires']['joinery'];
+            $joinery_version = LibraryFunctions::get_joinery_version();
+            if ($joinery_version === '') {
+                $results['valid'] = false;
+                $results['errors'][] = "Joinery $required_joinery required, but installed Joinery version could not be determined";
+            } elseif (!$this->checkVersionConstraint($joinery_version, $required_joinery)) {
+                $results['valid'] = false;
+                $results['errors'][] = "Joinery version $joinery_version does not meet requirement: $required_joinery";
+            }
+        }
         
         // Check required PHP extensions
         if (isset($manifest['requires']['extensions']) && is_array($manifest['requires']['extensions'])) {

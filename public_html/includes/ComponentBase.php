@@ -83,21 +83,24 @@ abstract class ComponentBase {
             }
         }
         
-        // Check Joinery version
+        // Check Joinery version against the canonical VERSION file.
+        // Fail-closed: empty version means the check fails (rather than silently passing
+        // against a hardcoded default, which is what the previous implementation did).
         if (isset($requirements['joinery'])) {
-            // Get current Joinery version from database or config
-            $settings = Globalvars::get_instance();
-            $joineryVersion = $settings->get_setting('joinery_version', true, true) ?? '1.0.0';
-            
+            require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+            $joineryVersion = LibraryFunctions::get_joinery_version();
+
             $operator = '>=';
             $version = $requirements['joinery'];
-            
+
             if (preg_match('/^([><=]+)(.+)$/', $requirements['joinery'], $matches)) {
                 $operator = $matches[1];
                 $version = $matches[2];
             }
-            
-            if (!version_compare($joineryVersion, $version, $operator)) {
+
+            if ($joineryVersion === '') {
+                $errors[] = "Joinery {$requirements['joinery']} required, but installed Joinery version could not be determined (VERSION file missing and system_version unset)";
+            } elseif (!version_compare($joineryVersion, $version, $operator)) {
                 $errors[] = "Joinery {$requirements['joinery']} required, currently {$joineryVersion}";
             }
         }
