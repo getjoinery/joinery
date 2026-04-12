@@ -184,8 +184,20 @@ Health dot colors reflect actual server health, not check recency:
 | `refresh_archives` | Run `upgrade.php --refresh-archives` on target | **Yes** |
 | `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
+| `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
+
+### One-Click Node Install
+
+**Dashboard → Install New Node** opens a form that provisions a fresh Joinery site on an SSH-accessible server in a single click. Two modes:
+
+- **Fresh**: empty Joinery site with default schema. Admin picks the domain. Default admin login is `admin@example.com` / `changeme123`, with `usr_force_password_change=true` so the first login forces a new password.
+- **From Backup**: fresh install + restore of a source node's DB and project files. Target inherits the source's domain — admin cuts over DNS after install. Use source admin credentials to log in.
+
+The job composes existing primitives: the installer artifacts from `maintenance_scripts/install_tools/` are packaged locally, SCP'd, extracted on the target, and `install.sh -y -q site SITENAME - DOMAIN` runs non-interactively. For From-Backup, source backups are captured (or an existing cached backup is used), fetched to the control plane, and pushed to the target after install.
+
+The `mgn_install_state` column tracks the lifecycle: `installing` → `NULL` (success) or `install_failed` (failure). On failure, the node detail page surfaces a **Retry Install** button; the target must be cleaned manually (e.g. `rm -rf /var/www/html/SITENAME`) before retry because `install.sh` refuses to overwrite an existing site. Postgres passwords are auto-generated and stored in the target's `Globalvars_site.php` — Server Manager does not capture or display them.
 
 ## Backup Destinations
 

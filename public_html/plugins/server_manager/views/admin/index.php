@@ -33,7 +33,7 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'publish_upgrade')
 // This catches cases where the user navigated away from job_detail before the
 // AJAX poll could trigger the result processor.
 $db = DbConnector::get_instance()->get_db_link();
-$q = $db->query("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_status = 'completed' AND mjb_job_type = 'check_status' AND mjb_result IS NULL AND mjb_delete_time IS NULL");
+$q = $db->query("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_status IN ('completed','failed') AND mjb_job_type IN ('check_status','install_node') AND mjb_result IS NULL AND mjb_delete_time IS NULL");
 foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 	$unprocessed_job = new ManagementJob($row['mjb_id'], TRUE);
 	JobResultProcessor::process($unprocessed_job);
@@ -85,17 +85,11 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 					<div class="mt-2">
 						<small class="text-muted">
 							<?php if (!$agent): ?>
-								The joinery-agent service needs to be installed and started on this server.
-								<ol class="mt-1 mb-0">
-									<li><code>cd /home/user1/joinery-agent && make release VERSION=1.0.0</code></li>
-									<li><code>sudo bash joinery-agent-installer.sh --verbose</code></li>
-									<li>Edit <code>/etc/joinery-agent/joinery-agent.env</code> with your database credentials</li>
-									<li><code>sudo systemctl start joinery-agent</code></li>
-								</ol>
+								The joinery-agent service runs on the control plane and services all managed nodes.
+								Install it here: <code>cd /home/user1/joinery-agent && make release VERSION=1.0.0 &amp;&amp; sudo bash joinery-agent-installer.sh --verbose</code>
 							<?php else: ?>
 								The agent was last seen at <?php echo LibraryFunctions::convert_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
-								Check if the service is running: <code>sudo systemctl status joinery-agent</code>
-								&mdash; View logs: <code>journalctl -u joinery-agent -f</code>
+								Check: <code>sudo systemctl status joinery-agent</code> &mdash; <code>journalctl -u joinery-agent -f</code>
 							<?php endif; ?>
 						</small>
 					</div>
@@ -110,7 +104,8 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 	<h5 class="mb-0">Managed Nodes</h5>
 	<div>
 		<a href="/admin/server_manager/destinations" class="btn btn-sm btn-outline-secondary">Backup Destinations</a>
-		<a href="/admin/server_manager/node_add" class="btn btn-sm btn-primary">Add Node</a>
+		<a href="/admin/server_manager/node_add" class="btn btn-sm btn-outline-primary">Add Existing Node</a>
+		<a href="/admin/server_manager/install_node_form" class="btn btn-sm btn-primary">Install New Node</a>
 	</div>
 </div>
 <div class="row mb-4">
@@ -132,11 +127,12 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 		}
 
 		// Dot color reflects actual health, not recency
-		// Red: real problem (failed check, disk > 90%, postgres down)
-		// Yellow: warning threshold (disk > 80%, high load)
-		// Green: healthy
-		// Gray: no data yet
-		if (!$last_check || !$status_data) {
+		$install_state = $node->get('mgn_install_state');
+		if ($install_state === 'installing') {
+			$status_color = 'info';
+		} elseif ($install_state === 'install_failed') {
+			$status_color = 'danger';
+		} elseif (!$last_check || !$status_data) {
 			$status_color = 'secondary';
 		} elseif ($last_job_failed) {
 			$status_color = 'danger';
@@ -161,6 +157,11 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 					<span class="badge bg-<?php echo $status_color; ?>">&bull;</span>
 				</div>
 				<div class="card-body">
+					<?php if ($install_state === 'installing'): ?>
+						<p class="mb-1"><span class="badge bg-info">Installing…</span></p>
+					<?php elseif ($install_state === 'install_failed'): ?>
+						<p class="mb-1"><span class="badge bg-danger">Install failed</span></p>
+					<?php endif; ?>
 					<?php if ($node->get('mgn_site_url')): ?>
 						<p class="mb-1"><small><a href="<?php echo htmlspecialchars($node->get('mgn_site_url')); ?>" target="_blank"><?php echo htmlspecialchars($node->get('mgn_site_url')); ?></a></small></p>
 					<?php endif; ?>

@@ -561,6 +561,295 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Build a local shell command that updates a ManagedNode field in the control plane DB.
+	 * Reads DB credentials from the control plane's Globalvars_site.php. Used during the
+	 * install_node flow to switch mgn_ssh_user to 'user1' after install.sh server disables
+	 * root SSH login.
+	 */
+	private static function _update_node_ssh_user_cmd($node, $new_user) {
+		$node_id = intval($node->key);
+		$new_user_esc = escapeshellarg($new_user);
+		$cfg = escapeshellarg(PathHelper::getSiteRoot() . '/config/Globalvars_site.php');
+		$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
+		return "CFG={$cfg} && "
+		     . "DB_NAME=\$(grep dbname \$CFG | {$extract}) && "
+		     . "DB_USER=\$(grep dbusername \$CFG | {$extract}) && "
+		     . "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extract}) && "
+		     . "psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -c \"UPDATE mgn_managed_nodes SET mgn_ssh_user = {$new_user_esc} WHERE mgn_id = {$node_id}\" && "
+		     . "echo SSH_USER_UPDATED_TO_{$new_user}";
+	}
+
+	/**
+	 * Build steps for one-click node install (fresh or from-backup).
+	 *
+	 * Target is assumed to be a bare Ubuntu 24.04 host with SSH root access.
+	 * The flow bootstraps whichever prereqs (Docker or Apache/PHP/Postgres)
+	 * are needed based on the admin's choice, then creates the site.
+	 *
+	 * $params:
+	 *   mode           - 'fresh' or 'from_backup'
+	 *   sitename       - site directory name (e.g. 'mysite' → /var/www/html/mysite)
+	 *   domain         - primary domain (fresh) or source domain (from-backup)
+	 *   docker_mode    - 'docker' or 'bare-metal' (required; no auto-detect)
+	 *   port           - (docker only) host port, default 8080
+	 *   source_node_id - (from-backup only) source node ID
+	 *   backup_source  - (from-backup only) 'new' or 'existing'
+	 *   db_backup_path / project_backup_path - (existing backup) remote paths on source
+	 */
+	public static function build_install_node($node, $params) {
+		$mode      = $params['mode'] ?? 'fresh';
+		$sitename  = $params['sitename'] ?? $node->get('mgn_slug');
+		$domain    = $params['domain'] ?? '';
+		$docker    = $params['docker_mode'] ?? '';
+		$port      = intval($params['port'] ?? 8080) ?: 8080;
+
+		if ($docker !== 'docker' && $docker !== 'bare-metal') {
+			throw new Exception("install_node requires docker_mode = 'docker' or 'bare-metal' (got: " . var_export($docker, true) . ")");
+		}
+
+		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
+		$remote_install_dir = '/tmp/joinery_install';
+		$remote_tools_dir = "{$remote_install_dir}/maintenance_scripts/install_tools";
+
+		// Control plane URL — where the target fetches the Joinery release tarball from.
+		// Uses the webDir config setting (our site's own hostname).
+		$settings = Globalvars::get_instance();
+		$webdir = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'] ?? 'joinerytest.site';
+		$release_url = "https://{$webdir}/utils/latest_release";
+		$release_url_esc = escapeshellarg($release_url);
+
+		$sitename_esc = escapeshellarg($sitename);
+		$domain_esc = escapeshellarg($domain);
+		$mode_flag = ($docker === 'docker') ? ' --docker' : ' --bare-metal';
+		$port_arg = ($docker === 'docker') ? ' ' . intval($port) : '';
+
+		$steps = [];
+
+		// 1. Pre-flight: verify the control plane is serving a release archive
+		$steps[] = ['type' => 'local', 'label' => 'Pre-flight: check release archive is available',
+			'cmd' => "CODE=\$(curl -sILo /dev/null -w '%{http_code}' {$release_url_esc}) && "
+			       . "test \"\$CODE\" = '200' -o \"\$CODE\" = '302' || { echo \"Release URL {$release_url} returned HTTP \$CODE\"; exit 1; } && "
+			       . "echo PREFLIGHT_OK"];
+
+		// From-Backup: grab source backups BEFORE installing
+		if ($mode === 'from_backup') {
+			$source_node_id = intval($params['source_node_id'] ?? 0);
+			if (!$source_node_id) {
+				throw new Exception('From-Backup mode requires source_node_id.');
+			}
+			require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+			$source_node = new ManagedNode($source_node_id, TRUE);
+			$source_scripts = self::get_scripts_path($source_node);
+			$source_creds = self::get_db_credentials_script($source_node);
+			$source_web_root = rtrim($source_node->get('mgn_web_root'), '/');
+			$source_project = basename(dirname($source_web_root));
+
+			$db_backup_remote = $params['db_backup_path'] ?? '';
+			$project_backup_remote = $params['project_backup_path'] ?? '';
+
+			if (($params['backup_source'] ?? 'new') === 'new') {
+				$db_backup_remote = "/backups/install_{$transfer_id}.sql.gz";
+				$project_backup_remote = "/backups/install_{$transfer_id}_project.tar.gz";
+
+				$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory on source',
+					'node_id' => $source_node_id, 'cmd' => 'mkdir -p /backups'];
+				$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
+					'node_id' => $source_node_id,
+					'cmd' => "{$source_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$db_backup_remote}",
+					'timeout' => 3600];
+				$steps[] = ['type' => 'ssh', 'label' => 'Archive source project files',
+					'node_id' => $source_node_id,
+					'cmd' => "bash {$source_scripts}/sysadmin_tools/backup_project.sh {$source_project} --non-interactive --plaintext --output-dir /backups "
+					       . "&& NEW_BK=\$(ls -t /backups/{$source_project}_*.tar.gz 2>/dev/null | head -1) "
+					       . "&& test -n \"\$NEW_BK\" && mv \"\$NEW_BK\" {$project_backup_remote}",
+					'timeout' => 3600];
+			} else {
+				if (!$db_backup_remote || !$project_backup_remote) {
+					throw new Exception('From-Backup with existing backup requires db_backup_path and project_backup_path.');
+				}
+			}
+
+			$local_db_backup = "/tmp/install_{$transfer_id}.sql.gz";
+			$local_project_backup = "/tmp/install_{$transfer_id}_project.tar.gz";
+			$steps[] = ['type' => 'scp', 'label' => 'Fetch DB backup to control plane',
+				'node_id' => $source_node_id, 'direction' => 'download',
+				'remote_path' => $db_backup_remote, 'local_path' => $local_db_backup];
+			$steps[] = ['type' => 'scp', 'label' => 'Fetch project backup to control plane',
+				'node_id' => $source_node_id, 'direction' => 'download',
+				'remote_path' => $project_backup_remote, 'local_path' => $local_project_backup];
+		}
+
+		// 2. Fetch the Joinery release tarball on the target and extract it.
+		// Target needs curl (usually present on Ubuntu; install if missing).
+		// All commands sudo-wrapped so they work whether the agent connects as root or user1.
+		$steps[] = ['type' => 'ssh', 'label' => 'Ensure curl is installed',
+			'on_host' => true,
+			'cmd' => "command -v curl >/dev/null || sudo bash -c 'apt-get update -qq && apt-get install -y -qq curl'"];
+
+		$steps[] = ['type' => 'ssh', 'label' => 'Download and extract Joinery release',
+			'on_host' => true,
+			'cmd' => "sudo rm -rf {$remote_install_dir} && sudo mkdir -p {$remote_install_dir} && "
+			       . "curl -sL {$release_url_esc} | sudo tar xz -C {$remote_install_dir} && "
+			       . "sudo test -f {$remote_tools_dir}/install.sh && sudo chmod +x {$remote_tools_dir}/*.sh && "
+			       . "echo RELEASE_EXTRACTED",
+			'timeout' => 600];
+
+		// 3. Install prereqs (Docker or bare-metal server setup)
+		if ($docker === 'docker') {
+			// install.sh docker is idempotent — short-circuits if Docker is already installed.
+			// Docker subcommand does NOT harden SSH, so root access stays intact.
+			$steps[] = ['type' => 'ssh', 'label' => 'Install Docker (if missing)',
+				'on_host' => true,
+				'cmd' => "cd {$remote_tools_dir} && ./install.sh -y -q docker",
+				'timeout' => 1800];
+		} else {
+			// Bare-metal: install.sh server runs `PermitRootLogin no` + restarts sshd, locking
+			// out our root-keyed agent. Before it runs, pre-stage user1 with root's authorized
+			// keys and NOPASSWD sudo so the agent can keep talking to the target. After, we
+			// switch the ManagedNode's ssh_user to user1 so subsequent steps (and future jobs)
+			// connect as user1.
+			// All commands prefixed with sudo — works as root (no-op) or as user1 (NOPASSWD sudo
+			// already present from a prior successful run). On retry where we're already user1,
+			// this step is effectively a no-op re-sync.
+			$steps[] = ['type' => 'ssh', 'label' => 'Pre-stage user1 for managed access',
+				'on_host' => true,
+				'cmd' => "set -e; "
+				       . "sudo test -s /root/.ssh/authorized_keys || { echo 'FATAL: /root/.ssh/authorized_keys is empty or missing — cannot pre-stage user1 safely. Aborting before install.sh server locks out root SSH.'; exit 1; }; "
+				       . "id user1 >/dev/null 2>&1 || sudo useradd -m -s /bin/bash user1; "
+				       . "sudo install -d -m 700 -o user1 -g user1 /home/user1/.ssh; "
+				       . "sudo touch /home/user1/.ssh/authorized_keys; "
+				       . "sudo bash -c 'cat /root/.ssh/authorized_keys >> /home/user1/.ssh/authorized_keys && sort -u /home/user1/.ssh/authorized_keys -o /home/user1/.ssh/authorized_keys'; "
+				       . "sudo chmod 600 /home/user1/.ssh/authorized_keys; "
+				       . "sudo chown user1:user1 /home/user1/.ssh/authorized_keys; "
+				       . "echo 'user1 ALL=(ALL:ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/user1 >/dev/null; "
+				       . "sudo chmod 440 /etc/sudoers.d/user1; "
+				       . "echo USER1_READY"];
+
+			// Switch the agent to user1 BEFORE running install.sh server (which disables
+			// root login). The SSH pool re-creates its connection using the updated user
+			// on the next step since install.sh server also restarts sshd.
+			$steps[] = ['type' => 'local', 'label' => 'Switch SSH user to user1',
+				'cmd' => self::_update_node_ssh_user_cmd($node, 'user1')];
+
+			// Now as user1 (via sudo, NOPASSWD). Only run server setup if prereqs missing —
+			// install.sh server resets the postgres role password and would break other sites.
+			//
+			// The password file at /root/.joinery_postgres_password is required by the site
+			// creation step below (it uses --password-file to ensure the site's DB password
+			// matches the postgres role password — _site_init.sh uses the site password as
+			// PGPASSWORD for createdb -U postgres). If prereqs are already installed but the
+			// file doesn't exist (host was set up manually), harvest the password from an
+			// existing site's Globalvars_site.php.
+			$steps[] = ['type' => 'ssh', 'label' => 'Install Apache/PHP/Postgres (if missing)',
+				'on_host' => true,
+				'cmd' => "cd {$remote_tools_dir} && "
+				       . "if command -v apache2 >/dev/null && command -v psql >/dev/null && command -v php >/dev/null; then "
+				       .   "echo 'PREREQS_ALREADY_INSTALLED — skipping install.sh server'; "
+				       .   "if ! sudo test -s /root/.joinery_postgres_password; then "
+				       .     "echo 'Harvesting postgres password from an existing site config...'; "
+				       .     "EXISTING_CFG=\$(sudo find /var/www/html -maxdepth 3 -name Globalvars_site.php -path '*/config/*' 2>/dev/null | head -1); "
+				       .     "if [ -z \"\$EXISTING_CFG\" ]; then "
+				       .       "echo 'FATAL: prereqs installed but no postgres password available — cannot determine DB password. Manually create /root/.joinery_postgres_password containing the postgres role password.'; exit 1; "
+				       .     "fi; "
+				       .     "PW=\$(sudo grep dbpassword \"\$EXISTING_CFG\" | head -1 | cut -d\\; -f1 | cut -d= -f2 | tr -d ' ' | sed \"s/^.//;s/.$//\"); "
+				       .     "test -n \"\$PW\" || { echo 'FATAL: could not extract dbpassword from existing config'; exit 1; }; "
+				       .     "echo \"\$PW\" | sudo tee /root/.joinery_postgres_password >/dev/null && sudo chmod 600 /root/.joinery_postgres_password; "
+				       .     "echo 'Password harvested from existing site config'; "
+				       .   "fi; "
+				       . "else "
+				       .   "export POSTGRES_PASSWORD=\$(openssl rand -base64 18 | tr -d '/+=' | head -c 24) && "
+				       .   "echo 'Auto-generated postgres password (recorded in /root/.joinery_postgres_password on target):' && "
+				       .   "echo \"\$POSTGRES_PASSWORD\" | sudo tee /root/.joinery_postgres_password >/dev/null && sudo chmod 600 /root/.joinery_postgres_password && "
+				       .   "sudo -E ./install.sh -y -q server; "
+				       . "fi",
+				'timeout' => 3600];
+		}
+
+		// 4. Create the site.
+		// --no-ssl is always passed (DNS typically not yet pointing here).
+		// Prefix with sudo so it works whether connecting as root or user1.
+		//
+		// Bare-metal: _site_init.sh uses $PASSWORD as PGPASSWORD for the `postgres` role when
+		// running createdb, so the site's DB password MUST match the postgres role password
+		// set by install.sh server (stored in /root/.joinery_postgres_password). Without this,
+		// createdb auth-fails and the schema load skips silently. Passing `-` (auto-generate)
+		// produces a mismatch — use --password-file instead.
+		//
+		// Docker mode runs Postgres inside the container with a fresh password, so `-` is fine.
+		if ($docker === 'docker') {
+			$pass_arg = ' -';
+		} else {
+			$pass_arg = ' --password-file=/root/.joinery_postgres_password';
+		}
+		$install_cmd = "cd {$remote_tools_dir} && sudo ./install.sh -y -q site{$mode_flag} {$sitename_esc}{$pass_arg} {$domain_esc}{$port_arg} --no-ssl";
+		$steps[] = ['type' => 'ssh', 'label' => 'Create the site',
+			'on_host' => true, 'cmd' => $install_cmd, 'timeout' => 3600];
+
+		// From-Backup: restore DB + files onto freshly-installed site
+		if ($mode === 'from_backup') {
+			$target_config = "/var/www/html/{$sitename}/config/Globalvars_site.php";
+			$remote_db_dump = "/tmp/joinery_restore_{$transfer_id}.sql.gz";
+			$remote_project_tar = "/tmp/joinery_restore_{$transfer_id}_project.tar.gz";
+			$local_db_backup = "/tmp/install_{$transfer_id}.sql.gz";
+			$local_project_backup = "/tmp/install_{$transfer_id}_project.tar.gz";
+
+			$steps[] = ['type' => 'scp', 'label' => 'Upload DB backup to target',
+				'direction' => 'upload', 'local_path' => $local_db_backup, 'remote_path' => $remote_db_dump];
+			$steps[] = ['type' => 'scp', 'label' => 'Upload project backup to target',
+				'direction' => 'upload', 'local_path' => $local_project_backup, 'remote_path' => $remote_project_tar];
+
+			$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
+			$creds = "DB_NAME=\$(grep dbname {$target_config} | {$extract}) && "
+			       . "DB_USER=\$(grep dbusername {$target_config} | {$extract}) && "
+			       . "export PGPASSWORD=\$(grep dbpassword {$target_config} | {$extract})";
+
+			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup fresh DB before restore',
+				'on_host' => true,
+				'cmd' => "mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_install_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+				'timeout' => 3600];
+
+			$steps[] = ['type' => 'ssh', 'label' => 'Restore source database',
+				'on_host' => true,
+				'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$remote_db_dump} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
+				'timeout' => 3600];
+
+			$steps[] = ['type' => 'ssh', 'label' => 'Extract project files',
+				'on_host' => true,
+				'cmd' => "tar xzf {$remote_project_tar} -C /var/www/html/{$sitename} --strip-components=1 --exclude='config/Globalvars_site.php'",
+				'timeout' => 3600,
+				'continue_on_error' => true];
+
+			$steps[] = ['type' => 'ssh', 'label' => 'Fix permissions',
+				'on_host' => true,
+				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh /var/www/html/{$sitename}",
+				'continue_on_error' => true];
+
+			$steps[] = ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
+				'on_host' => true,
+				'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
+				'continue_on_error' => true];
+
+			$steps[] = ['type' => 'local', 'label' => 'Clean up backup files on control plane',
+				'cmd' => "rm -f {$local_db_backup} {$local_project_backup}",
+				'continue_on_error' => true];
+		}
+
+		// Cleanup installer on target (release tarball was piped through tar; no local file)
+		$steps[] = ['type' => 'ssh', 'label' => 'Clean up installer on target',
+			'on_host' => true,
+			'cmd' => "sudo rm -rf {$remote_install_dir}",
+			'continue_on_error' => true];
+
+		// Post-install verification. Globalvars_site.php is chmod 640 root:www-data so
+		// user1 needs sudo to test-read it.
+		$steps[] = ['type' => 'ssh', 'label' => 'Verify install',
+			'on_host' => true,
+			'cmd' => "echo INSTALL_SUCCESS && hostname && sudo test -f /var/www/html/{$sitename}/config/Globalvars_site.php && echo CONFIG_OK"];
+
+		return $steps;
+	}
+
+	/**
 	 * The bash script that runs on the remote host to discover Joinery instances.
 	 * Outputs structured lines: JOINERY_INSTANCE|type|name|web_root|domain|db_name|version
 	 */
