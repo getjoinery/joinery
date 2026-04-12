@@ -8,8 +8,7 @@
   "deprecated": true,
   "superseded_by": "zoukroom-html5",
   "requires": {
-    "php": ">=7.4",
-    "joinery": ">=1.0.0"
+    "php": ">=7.4"
   },
   "cssFramework": "uikit",
   "formWriterBase": "FormWriterHTML5",

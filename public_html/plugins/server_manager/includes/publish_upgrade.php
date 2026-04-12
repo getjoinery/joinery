@@ -49,19 +49,29 @@
 			$cli_notes = $cli_args[0] ?? 'CLI publish';
 		}
 
-		// Auto-detect next version if not specified
+		// Auto-detect next version if not specified. Prefer the VERSION file as source of
+		// truth (it's authoritative for "what's currently published"); fall back to the
+		// last upg_upgrades row if VERSION doesn't exist yet.
 		if ($cli_major === null || $cli_minor === null || $cli_patch === null) {
-			$latest = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1);
-			$latest->load();
-			if ($latest->count() > 0) {
-				$last = $latest->get(0);
-				$cli_major = $cli_major ?? $last->get('upg_major_version');
-				$cli_minor = $cli_minor ?? $last->get('upg_minor_version');
-				$cli_patch = $cli_patch ?? ($last->get('upg_patch_version') + 1);
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+			$current = LibraryFunctions::get_joinery_version();
+			if ($current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $m)) {
+				$cli_major = $cli_major ?? $m[1];
+				$cli_minor = $cli_minor ?? $m[2];
+				$cli_patch = $cli_patch ?? ($m[3] + 1);
 			} else {
-				$cli_major = $cli_major ?? 0;
-				$cli_minor = $cli_minor ?? 8;
-				$cli_patch = $cli_patch ?? 1;
+				$latest = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1);
+				$latest->load();
+				if ($latest->count() > 0) {
+					$last = $latest->get(0);
+					$cli_major = $cli_major ?? $last->get('upg_major_version');
+					$cli_minor = $cli_minor ?? $last->get('upg_minor_version');
+					$cli_patch = $cli_patch ?? ($last->get('upg_patch_version') + 1);
+				} else {
+					$cli_major = $cli_major ?? 0;
+					$cli_minor = $cli_minor ?? 8;
+					$cli_patch = $cli_patch ?? 1;
+				}
 			}
 		}
 
@@ -213,9 +223,28 @@
 			exit;
 		}
 
-		// Generate fresh install SQL file before creating archive
 		// Use form-provided version consistently for both archive and SQL filenames
 		$version = $version_major . '.' . $version_minor . '.' . $version_patch;
+
+		// Downgrade guard: refuse if the new version is less than what's in VERSION. Cheap
+		// safeguard against accidentally re-publishing a lower number than the file already
+		// has (e.g. someone bumped it manually out-of-band).
+		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+		$current_version = LibraryFunctions::get_joinery_version();
+		if ($current_version !== '' && version_compare($version, $current_version, '<')) {
+			publish_output("Refusing to publish {$version} — VERSION file is already at {$current_version}. Publish a higher version or update the VERSION file first.");
+			exit;
+		}
+
+		// Write the new version to public_html/VERSION so it ships in the tarball and
+		// becomes the authoritative version for sites upgrading to it.
+		$version_file = PathHelper::getIncludePath('VERSION');
+		if (file_put_contents($version_file, $version . "\n") === false) {
+			publish_output("ERROR: Could not write version to $version_file (permissions?).");
+			exit;
+		}
+		publish_output("Wrote version $version to $version_file");
+
 		publish_output("Generating install SQL file (version $version)...");
 
 		$create_sql_cmd = sprintf(
@@ -357,6 +386,22 @@
 		$upgrade->set('upg_release_notes', $_REQUEST['release_notes']);
 		$upgrade->prepare();
 		$upgrade->save();
+
+		// Write system_version on the publish server so its own version is current immediately
+		// (rather than waiting for the next update_database self-heal). Both writers always
+		// write get_joinery_version() → can't disagree.
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$q = $db->prepare("UPDATE stg_settings SET stg_value = ? WHERE stg_name = 'system_version'");
+			$q->execute([$version]);
+			if ($q->rowCount() === 0) {
+				$q = $db->prepare("INSERT INTO stg_settings (stg_name, stg_value, stg_group_name, stg_create_time) VALUES ('system_version', ?, 'general', now())");
+				$q->execute([$version]);
+			}
+			publish_output("Updated stg_settings.system_version to $version");
+		} catch (Exception $e) {
+			publish_output("Warning: could not update system_version: " . $e->getMessage());
+		}
 
 		// =====================================================
 		// Create individual THEME archives

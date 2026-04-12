@@ -635,6 +635,30 @@
 			// Non-fatal — core DB update already succeeded
 		}
 
+		// Self-heal system_version from the canonical VERSION file. Keeps stg_settings
+		// in sync even on publish servers that don't run upgrade.php against themselves.
+		try {
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+			$canonical_version = LibraryFunctions::get_joinery_version();
+			if ($canonical_version !== '') {
+				$settings = Globalvars::get_instance();
+				$current = $settings->get_setting('system_version', true, true);
+				if ($current !== $canonical_version) {
+					$db = DbConnector::get_instance()->get_db_link();
+					// Update if row exists, insert if it doesn't.
+					$q = $db->prepare("UPDATE stg_settings SET stg_value = ? WHERE stg_name = 'system_version'");
+					$q->execute([$canonical_version]);
+					if ($q->rowCount() === 0) {
+						$q = $db->prepare("INSERT INTO stg_settings (stg_name, stg_value, stg_group_name, stg_create_time) VALUES ('system_version', ?, 'general', now())");
+						$q->execute([$canonical_version]);
+					}
+					echo "✓ system_version synced to " . htmlspecialchars($canonical_version) . " (was " . htmlspecialchars($current ?? 'unset') . ")<br>\n";
+				}
+			}
+		} catch (Exception $e) {
+			echo "⚠️  system_version self-heal failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Show final result
 		if ($overall_success) {
 			echo "✅ DATABASE UPDATE SUCCESSFUL";

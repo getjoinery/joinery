@@ -165,8 +165,23 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 					<?php if ($node->get('mgn_site_url')): ?>
 						<p class="mb-1"><small><a href="<?php echo htmlspecialchars($node->get('mgn_site_url')); ?>" target="_blank"><?php echo htmlspecialchars($node->get('mgn_site_url')); ?></a></small></p>
 					<?php endif; ?>
-					<?php if ($node->get('mgn_joinery_version')): ?>
-						<p class="mb-1"><small>Version: <?php echo htmlspecialchars($node->get('mgn_joinery_version')); ?></small></p>
+					<?php
+					// Version compare: show a warning when the node's version diverges from
+					// the control plane's VERSION file in either direction.
+					$node_version = $node->get('mgn_joinery_version');
+					if ($node_version):
+						$cp_version = LibraryFunctions::get_joinery_version();
+						$version_cmp = ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version))
+							? version_compare($node_version, $cp_version)
+							: null;
+					?>
+						<p class="mb-1"><small>Version: <?php echo htmlspecialchars($node_version); ?>
+						<?php if ($version_cmp === -1): ?>
+							<span class="badge bg-warning" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?> — upgrade this node">upgrade available</span>
+						<?php elseif ($version_cmp === 1): ?>
+							<span class="badge bg-danger" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?> — node ahead, may have been upgraded out-of-band">ahead of control plane</span>
+						<?php endif; ?>
+						</small></p>
 					<?php endif; ?>
 					<?php if ($status_data): ?>
 						<?php if (isset($status_data['disk_usage_percent'])): ?>

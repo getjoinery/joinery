@@ -6,8 +6,7 @@
   "author": "Joinery",
   "is_stock": true,
   "requires": {
-    "php": ">=7.4",
-    "joinery": ">=1.0.0"
+    "php": ">=7.4"
   },
   "cssFramework": "tailwind",
   "formWriterBase": "FormWriterHTML5",
