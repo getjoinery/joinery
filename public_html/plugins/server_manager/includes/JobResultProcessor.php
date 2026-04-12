@@ -137,6 +137,34 @@ class JobResultProcessor {
 	}
 
 	/**
+	 * Post-process install_node: mark the node online on success or install_failed on failure.
+	 * Runs for both 'completed' and 'failed' terminal states.
+	 */
+	private static function process_install_node($job) {
+		$node_id = $job->get('mjb_mgn_node_id');
+		if (!$node_id) return;
+
+		try {
+			$node = new ManagedNode($node_id, TRUE);
+		} catch (Exception $e) { return; }
+
+		$status = $job->get('mjb_status');
+		$output = $job->get('mjb_output') ?: '';
+
+		if ($status === 'completed' && strpos($output, 'INSTALL_SUCCESS') !== false) {
+			$node->set('mgn_install_state', null);
+		} else {
+			$node->set('mgn_install_state', 'install_failed');
+		}
+		$node->save();
+
+		$job->set('mjb_result', json_encode([
+			'install_state' => $node->get('mgn_install_state'),
+		]));
+		$job->save();
+	}
+
+	/**
 	 * Parse discover_nodes output into structured instance data.
 	 */
 	private static function process_discover_nodes($job) {

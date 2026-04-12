@@ -19,7 +19,12 @@ Today, bringing up a new managed node is multi-step and manual: SCP `install.sh`
 
 ## What Already Exists (Reuse, Don't Rebuild)
 
-- **`install.sh -y -q site`** (`maintenance_scripts/install_tools/install.sh`) — non-interactive provisioning of Apache/PHP/Postgres, site directories, database, Apache vhost, cron entries. Supports Docker and bare-metal auto-detection. Used for fresh install in both modes.
+- **`install.sh`** (`maintenance_scripts/install_tools/install.sh`) has four subcommands. A bare-server install chains two of them:
+  - `install.sh -y -q docker` — installs Docker CE. **Idempotent**: if Docker is already installed, it verifies the daemon is running and exits 0.
+  - `install.sh -y -q server` — installs Apache + PHP 8.3 + PostgreSQL + Composer + Certbot + fail2ban + UFW + SSH hardening. Requires a `POSTGRES_PASSWORD` env var for the postgres role. **Not idempotent**: runs `apt upgrade -y`, overwrites `pg_hba.conf`, and **resets the `postgres` user password**. Running it on a host that already has another Joinery site will break that site. So this step must be skipped when prereqs are already detected.
+  - `install.sh -y -q site [--docker|--bare-metal] SITENAME [PASSWORD|-] [DOMAIN] [PORT] [--no-ssl]` — creates a site (DB, site directory, Apache vhost, cron). Requires prereqs already installed. Uses `-` as password to auto-generate. PORT (Docker only) defaults to 8080 if absent. **Without `--no-ssl`, install.sh performs early DNS validation and fails hard if the domain doesn't resolve to the target's IP.** For the one-click flow — where the admin cuts over DNS after install — we always pass `--no-ssl` and leave `certbot --apache -d DOMAIN` as a post-install manual step.
+  - `install.sh -y -q list` — not used.
+- **Backup/restore job primitives** — `backup_database`, `backup_project`, `fetch_backup`, and `restore_database` already exist in `JobCommandBuilder.php`. From-Backup mode composes these around `install.sh`.
 - **Backup/restore job primitives** — `backup_database`, `backup_project`, `fetch_backup`, and `restore_database` already exist in `JobCommandBuilder.php`. From-Backup mode composes these around `install.sh`.
 - **Control-plane joinery-agent** — already polls the local DB and SSHes out to managed nodes; will automatically service the new node once its `ManagedNode` row exists.
 - **`JobCommandBuilder.php`** — step-based SSH/SCP/local job framework with 13+ existing job types including `test_connection`.
@@ -59,11 +64,23 @@ Added to `JobCommandBuilder.php`. Both modes share the fresh-install spine; From
 
 ### Fresh mode steps
 
-1. **Pre-flight** (local): verify installer artifacts exist — `install.sh`, `_site_init.sh`, `default_Globalvars_site.php`, `default_virtualhost.conf`, `joinery-install.sql.gz`. Fail fast if any are missing.
-2. **SCP install_tools** to `/tmp/joinery_install/` on target.
-3. **SSH: run install.sh**: `install.sh -y -q site $SITENAME --domain=$DOMAIN`
-4. **Cleanup**: remove `/tmp/joinery_install/`.
-5. **Post-install verification**: auto-queue a `test_connection` job against the new node. On success, mark node `online`. On failure, mark `install_failed`.
+Target is assumed to be a bare Ubuntu 24.04 host with SSH root access and nothing else installed. The admin explicitly picks Docker or bare-metal on the form (no auto-detect — the choice drives which prereqs to install).
+
+The target fetches the Joinery release archive from the control plane over HTTPS (matching the documented one-liner install), so there is no SCP of installer files and no local tarball packaging on the control plane.
+
+1. **Pre-flight** (local): HEAD-check `https://<control_plane>/utils/latest_release` returns 200 or 302. Fail fast if the control plane is not serving a release.
+2. **Ensure curl** (SSH): `command -v curl || apt-get install -y curl` (on Ubuntu 24.04 it's usually already present).
+3. **Download and extract release** (SSH, `on_host:true`): `curl -sL https://<control_plane>/utils/latest_release | tar xz -C /tmp/joinery_install` and `chmod +x /tmp/joinery_install/maintenance_scripts/install_tools/*.sh`. The tarball contains `public_html/`, `config/`, and `maintenance_scripts/` at the top level, which is what `install.sh site` expects.
+4. **Install prereqs** (SSH) — conditional on what the admin picked and what's already present:
+   - Docker mode: always run `./install.sh -y -q docker` (idempotent — no-op if Docker is already installed). No SSH hardening happens, so root access continues.
+   - Bare-metal mode: this requires careful handling because `install.sh server` sets `PermitRootLogin no` in `sshd_config` and restarts SSH, which would lock the agent out mid-job. Before running the server setup we pre-stage `user1`:
+     1. Create user1 if missing, copy `/root/.ssh/authorized_keys` into `/home/user1/.ssh/authorized_keys` (the agent's key goes in), and add `user1 ALL=(ALL:ALL) NOPASSWD: ALL` to `/etc/sudoers.d/user1`.
+     2. Run a local SQL update that changes the `ManagedNode`'s `mgn_ssh_user` to `user1` — subsequent SSH pool reconnects (forced by sshd restart) come in as user1 automatically.
+     3. Check `command -v apache2 && command -v psql && command -v php` — if all three are present, **skip the server step** (it would reset the postgres role password and break any existing site on the same host). Otherwise generate a postgres password with `openssl rand`, write it to `/root/.joinery_postgres_password` on the target, and run `sudo -E ./install.sh -y -q server`.
+     4. All subsequent SSH steps prefix with `sudo` (harmless when root, required for user1).
+5. **Create the site** (SSH): `./install.sh -y -q site [--docker|--bare-metal] SITENAME - DOMAIN [PORT] --no-ssl`. Password `-` auto-generates the site's Postgres password into `Globalvars_site.php`. `--no-ssl` is always passed because DNS usually doesn't yet resolve to the new server; admin runs `sudo certbot --apache -d DOMAIN` post-install once DNS is pointed.
+6. **Cleanup** (SSH): `rm -rf /tmp/joinery_install` (continue-on-error — safe to leave artifacts on failure).
+7. **Post-install verification** (SSH): emits `INSTALL_SUCCESS`, `hostname`, and checks `/var/www/html/SITENAME/config/Globalvars_site.php` exists. `JobResultProcessor::process_install_node` clears `mgn_install_state` on success or sets it to `install_failed` on failure.
 
 ### From-Backup mode steps
 
@@ -83,7 +100,7 @@ Failures at any step mark the node `install_failed` and leave artifacts on the t
 
 The target is provisioned with the **source's** domain. `install.sh` is invoked with `--domain=$SOURCE_DOMAIN`, which sets up the Apache vhost for the source domain. The restored DB already contains the source domain in its settings, so everything stays internally consistent. No rewriting is needed or performed.
 
-**Implication for the admin:** the new node initially serves at the source's domain but DNS still points at the original server. Admin performs DNS cutover when ready. `install.sh` skips certbot if DNS doesn't yet resolve to the new server; after cutover, admin runs `sudo certbot --apache -d $SOURCE_DOMAIN` on the target.
+**Implication for the admin:** the new node initially serves at the source's domain but DNS still points at the original server. Admin performs DNS cutover when ready. Because DNS doesn't yet resolve to the new server, `install.sh` is invoked with `--no-ssl` (without that flag it would fail early-validation). After cutover, admin runs `sudo certbot --apache -d $SOURCE_DOMAIN` on the target.
 
 **Out of scope for v1:** cloning a site to a **different** domain (e.g., `prod.example.com` → `staging.example.com`). This would require both Apache vhost reconfiguration and DB-wide URL rewriting, neither of which are trivial to automate safely. Admins needing a same-backup-different-domain workflow should do a Fresh install and restore content manually.
 
@@ -105,13 +122,9 @@ Joinery stores API keys, OAuth tokens, webhook secrets, and SMTP passwords as pl
 
 ## Artifact Staging
 
-The job reads installer artifacts from the control plane at the sibling-of-public_html path:
+The target fetches the Joinery release archive from the control plane's `/utils/latest_release` endpoint (the same URL used by the documented one-liner install). This endpoint redirects to the most recent `joinery-core-X.Y.Z.tar.gz` in `/static_files/` — produced by `publish_upgrade.php`. The control plane's URL is derived from the `webDir` setting in `Globalvars_site.php`.
 
-```
-dirname($public_html_root) . '/maintenance_scripts/install_tools/'
-```
-
-This layout is guaranteed by `install.sh` and `deploy.sh` on every Joinery deployment, so no configuration is needed. The control plane knows its own `public_html` path from `PathHelper`. If this ever needs to be overridable (e.g., shared `install_tools/` across multiple sites on one host), add an `install_tools_path` setting as a fallback — v1 does not need it.
+Nothing is staged or packaged on the control plane at install time. If no release has ever been published (empty `upg_upgrades` table), the pre-flight step will fail with the HTTP status returned by `/utils/latest_release` — the admin needs to publish a release first via the Server Manager dashboard.
 
 ## UI Changes
 

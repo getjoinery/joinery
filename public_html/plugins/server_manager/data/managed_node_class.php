@@ -35,6 +35,7 @@ class ManagedNode extends SystemBase {
 		'mgn_last_backup_list'    => array('type'=>'jsonb'),
 		'mgn_last_backup_list_time' => array('type'=>'timestamp(6)'),
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
+		'mgn_install_state'       => array('type'=>'varchar(20)'),
 		'mgn_notes'               => array('type'=>'text'),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mgn_update_time'         => array('type'=>'timestamp(6)'),

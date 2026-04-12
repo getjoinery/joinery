@@ -165,6 +165,40 @@ if ($_POST && isset($_POST['action'])) {
 		exit;
 	}
 
+	if ($action === 'retry_install') {
+		// Reuse params from the most recent install_node job for this node
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+		$q->execute([$node->key]);
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			$session->save_message(new DisplayMessage(
+				'No prior install job found for this node.', 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url);
+			exit;
+		}
+		$prev = new ManagementJob($row['mjb_id'], TRUE);
+		$params = $prev->get('mjb_parameters');
+		if (is_string($params)) $params = json_decode($params, true);
+		try {
+			$steps = JobCommandBuilder::build_install_node($node, $params ?: []);
+			$node->set('mgn_install_state', 'installing');
+			$node->save();
+			$job = ManagementJob::createJob($node->key, 'install_node', $steps, $params, $session->get_user_id());
+			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
+			exit;
+		} catch (Exception $e) {
+			$session->save_message(new DisplayMessage(
+				'Failed to queue retry: ' . $e->getMessage(), 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url);
+			exit;
+		}
+	}
+
 	// Save node settings (overview tab form)
 	if ($action === 'save_node') {
 		$editable_fields = [
@@ -274,6 +308,33 @@ if (!empty($display_messages)) {
 // OVERVIEW TAB
 // ============================================================
 if ($tab === 'overview') {
+
+	// Install state banner (takes precedence over regular status)
+	$install_state = $node->get('mgn_install_state');
+	if ($install_state === 'installing') {
+		echo '<div class="alert alert-info"><strong>Install in progress.</strong> The install job is running against this node. ';
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+		$q->execute([$node->key]);
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		if ($row) {
+			echo '<a href="/admin/server_manager/job_detail?job_id=' . $row['mjb_id'] . '">View job #' . $row['mjb_id'] . '</a>';
+		}
+		echo '</div>';
+	} elseif ($install_state === 'install_failed') {
+		echo '<div class="alert alert-danger"><strong>Install failed.</strong> The last install attempt did not complete.';
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'install_node' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+		$q->execute([$node->key]);
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		if ($row) {
+			echo ' <a href="/admin/server_manager/job_detail?job_id=' . $row['mjb_id'] . '" class="alert-link">View job #' . $row['mjb_id'] . ' output</a>.';
+		}
+		echo '<div class="mt-2"><form method="post" style="display:inline" onsubmit="return confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\');">';
+		echo '<input type="hidden" name="action" value="retry_install">';
+		echo '<button type="submit" class="btn btn-sm btn-warning">Retry Install</button></form></div>';
+		echo '</div>';
+	}
 
 	// Status summary card
 	$status_data = $node->get('mgn_last_status_data');
