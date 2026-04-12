@@ -3,16 +3,17 @@
  * Email Forwarding Plugin Migrations
  *
  * Tables are created automatically from data class field specifications.
- * Migrations are only for settings, initial data, and admin menu entries.
+ * Admin menus are now managed declaratively via plugin.json adminMenu.
+ * Migrations are only for settings and initial data.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 return [
 	[
 		'id' => '001_email_forwarding_initial_setup',
 		'version' => '1.0.0',
-		'description' => 'Add email forwarding settings and admin menu entry',
+		'description' => 'Add email forwarding settings',
 		'up' => function($dbconnector) {
 			$dblink = $dbconnector->get_db_link();
 
@@ -46,19 +47,6 @@ return [
 				}
 			}
 
-			// Add admin menu entry under Emails (parent ID 11)
-			$check_sql = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'incoming' AND amu_setting_activate = 'email_forwarding_enabled'";
-			$check_q = $dblink->prepare($check_sql);
-			$check_q->execute();
-			$result = $check_q->fetch(PDO::FETCH_ASSOC);
-
-			if ($result['count'] == 0) {
-				$sql = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_slug, amu_setting_activate)
-						VALUES ('Incoming', '/plugins/email_forwarding/admin/admin_email_forwarding', 11, 10, 5, 'incoming', 'email_forwarding_enabled')";
-				$q = $dblink->prepare($sql);
-				$q->execute();
-			}
-
 			return true;
 		},
 		'down' => function($dbconnector) {
@@ -68,12 +56,7 @@ return [
 			$q = $dblink->prepare($sql);
 			$q->execute();
 
-			$sql = "DELETE FROM amu_admin_menus WHERE amu_slug = 'incoming' AND amu_setting_activate = 'email_forwarding_enabled'";
-			$q = $dblink->prepare($sql);
-			$q->execute();
-
 			return true;
 		}
 	]
 ];
-?>

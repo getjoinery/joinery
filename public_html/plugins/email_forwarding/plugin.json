@@ -1,11 +1,22 @@
 {
     "name": "Email Forwarding",
     "description": "Self-hosted email forwarding with virtual mailboxes, SRS, and DKIM verification",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "author": "Joinery",
     "is_stock": true,
     "requires": {
         "php": ">=8.0"
     },
-    "tags": ["email", "forwarding", "smtp"]
+    "tags": ["email", "forwarding", "smtp"],
+    "adminMenu": [
+        {
+            "slug": "incoming",
+            "title": "Incoming",
+            "url": "/plugins/email_forwarding/admin/admin_email_forwarding",
+            "parent": "emails",
+            "permission": 5,
+            "order": 10,
+            "settingActivate": "email_forwarding_enabled"
+        }
+    ]
 }

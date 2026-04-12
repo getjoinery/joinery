@@ -2,10 +2,11 @@
 /**
  * Server Manager Plugin - Uninstall
  *
- * Removes plugin settings and admin menu entries.
+ * Removes plugin settings.
+ * Admin menus are removed automatically by the declarative menu system.
  * Tables are dropped by the plugin system automatically.
  *
- * @version 1.0
+ * @version 1.1
  */
 function server_manager_uninstall() {
 	try {
@@ -14,11 +15,6 @@ function server_manager_uninstall() {
 
 		// Remove plugin-specific settings
 		$sql = "DELETE FROM stg_settings WHERE stg_name LIKE 'server_manager_%'";
-		$q = $dblink->prepare($sql);
-		$q->execute();
-
-		// Clean up admin menu entries
-		$sql = "DELETE FROM amu_admin_menus WHERE amu_defaultpage LIKE '/plugins/server_manager/%' OR amu_defaultpage LIKE '/admin/server_manager%'";
 		$q = $dblink->prepare($sql);
 		$q->execute();
 

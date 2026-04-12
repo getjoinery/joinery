@@ -2,7 +2,9 @@
 /**
  * Email Forwarding Plugin - Uninstall Script
  *
- * @version 1.0
+ * Admin menus are removed automatically by the declarative menu system.
+ *
+ * @version 1.1
  */
 
 function email_forwarding_uninstall() {
@@ -21,9 +23,6 @@ function email_forwarding_uninstall() {
 
 		// Remove settings
 		$db->exec("DELETE FROM stg_settings WHERE stg_name LIKE 'email_forwarding_%'");
-
-		// Remove admin menu entry
-		$db->exec("DELETE FROM amu_admin_menus WHERE amu_slug = 'incoming' AND amu_setting_activate = 'email_forwarding_enabled'");
 
 		// Remove migration records
 		$db->exec("DELETE FROM plm_plugin_migrations WHERE plm_plugin_name = 'email_forwarding'");
