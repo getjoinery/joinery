@@ -5,6 +5,7 @@
   "description": "Bootstrap 5 based responsive theme with modern UI components",
   "author": "Joinery Team",
   "is_stock": true,
+  "deprecated": true,
   "system": false,
   "requires": {
     "php": ">=7.4",
