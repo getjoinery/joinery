@@ -51,7 +51,7 @@ $response = [
 
 // If job just completed, run result processor and include result
 if ($job->get('mjb_status') === 'completed' || $job->get('mjb_status') === 'failed') {
-	if ($job->get('mjb_status') === 'completed' && !$job->get('mjb_result')) {
+	if (!$job->get('mjb_result')) {
 		JobResultProcessor::process($job);
 		$job->load();
 	}

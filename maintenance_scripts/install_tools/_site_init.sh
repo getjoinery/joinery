@@ -447,6 +447,12 @@ fi
 # =============================================================================
 
 if [ "$DOCKER_MODE" = false ]; then
+    # Create test site directories FIRST — the virtualhost template references them, so
+    # Apache reload will fail if they don't exist yet when the vhost is enabled.
+    log "Creating test site directories..."
+    mkdir -p "/var/www/html/${SITENAME}_test/public_html"
+    mkdir -p "/var/www/html/${SITENAME}_test/logs"
+
     log "Configuring Apache virtualhost..."
 
     if [ -f "$VIRTUALHOST_TEMPLATE" ]; then
@@ -476,11 +482,6 @@ if [ "$DOCKER_MODE" = false ]; then
     else
         log_error "Virtualhost template not found: $VIRTUALHOST_TEMPLATE"
     fi
-
-    # Create test site directories (bare-metal only)
-    log "Creating test site directories..."
-    mkdir -p "/var/www/html/${SITENAME}_test/public_html"
-    mkdir -p "/var/www/html/${SITENAME}_test/logs"
 fi
 
 # =============================================================================
