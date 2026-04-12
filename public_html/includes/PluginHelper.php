@@ -111,9 +111,71 @@ class PluginHelper extends ComponentBase {
         
         // Validate admin menu items if present
         $menuItems = $this->getAdminMenuItems();
+        $seen_slugs = [];
         foreach ($menuItems as $index => $item) {
-            if (empty($item['title']) || empty($item['url'])) {
-                $errors[] = "Admin menu item {$index} missing required fields (title, url)";
+            $prefix = "adminMenu[{$index}]";
+
+            if (empty($item['slug']) || !is_string($item['slug'])) {
+                $errors[] = "{$prefix}: missing required field 'slug'";
+            } elseif (!preg_match('/^[a-z0-9][a-z0-9-]*$/', $item['slug'])) {
+                $errors[] = "{$prefix}: slug must contain only lowercase letters, numbers, and hyphens";
+            } elseif (strlen($item['slug']) > 32) {
+                $errors[] = "{$prefix}: slug exceeds 32 characters";
+            } elseif (in_array($item['slug'], $seen_slugs)) {
+                $errors[] = "{$prefix}: duplicate slug '{$item['slug']}'";
+            } else {
+                $seen_slugs[] = $item['slug'];
+            }
+
+            if (empty($item['title']) || !is_string($item['title'])) {
+                $errors[] = "{$prefix}: missing required field 'title'";
+            } elseif (strlen($item['title']) > 32) {
+                $errors[] = "{$prefix}: title exceeds 32 characters";
+            }
+
+            if (!isset($item['order']) || !is_int($item['order'])) {
+                $errors[] = "{$prefix}: missing or non-integer 'order'";
+            }
+
+            if (isset($item['url']) && is_string($item['url']) && preg_match('/\.php/', $item['url'])) {
+                $errors[] = "{$prefix}: url must not contain .php extension";
+            }
+
+            if (isset($item['permission']) && (!is_int($item['permission']) || $item['permission'] < 1 || $item['permission'] > 10)) {
+                $errors[] = "{$prefix}: permission must be an integer 1-10";
+            }
+
+            if (isset($item['parent']) && isset($item['items'])) {
+                $errors[] = "{$prefix}: cannot have both 'parent' and 'items'";
+            }
+
+            // Validate nested items
+            if (isset($item['items']) && is_array($item['items'])) {
+                foreach ($item['items'] as $childIndex => $child) {
+                    $childPrefix = "{$prefix}.items[{$childIndex}]";
+
+                    if (empty($child['slug']) || !is_string($child['slug'])) {
+                        $errors[] = "{$childPrefix}: missing required field 'slug'";
+                    } elseif (!preg_match('/^[a-z0-9][a-z0-9-]*$/', $child['slug'])) {
+                        $errors[] = "{$childPrefix}: slug must contain only lowercase letters, numbers, and hyphens";
+                    } elseif (in_array($child['slug'], $seen_slugs)) {
+                        $errors[] = "{$childPrefix}: duplicate slug '{$child['slug']}'";
+                    } else {
+                        $seen_slugs[] = $child['slug'];
+                    }
+
+                    if (empty($child['title']) || !is_string($child['title'])) {
+                        $errors[] = "{$childPrefix}: missing required field 'title'";
+                    }
+
+                    if (!isset($child['order']) || !is_int($child['order'])) {
+                        $errors[] = "{$childPrefix}: missing or non-integer 'order'";
+                    }
+
+                    if (isset($child['url']) && is_string($child['url']) && preg_match('/\.php/', $child['url'])) {
+                        $errors[] = "{$childPrefix}: url must not contain .php extension";
+                    }
+                }
             }
         }
         
@@ -199,9 +261,10 @@ class PluginHelper extends ComponentBase {
     // Plugin-specific getters
 
     /**
-     * Get plugin admin menu items
+     * Get plugin admin menu items declared in plugin.json
+     * @return array The adminMenu array from the manifest
      */
-    protected function getAdminMenuItems() {
+    public function getAdminMenuItems() {
         return $this->manifestData['adminMenu'] ?? [];
     }
     

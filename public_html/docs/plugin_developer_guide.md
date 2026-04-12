@@ -329,6 +329,83 @@ $page->admin_footer();
 ?>
 ```
 
+### Admin Menus (Declarative)
+
+Plugin admin menus are declared in `plugin.json` using the `adminMenu` key. The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. No migrations needed.
+
+> **Deprecation:** The migration-based approach (INSERT into `amu_admin_menus`) still works for existing plugins but is deprecated for new development. Use `adminMenu` in `plugin.json` instead.
+
+**Three placement patterns:**
+
+**1. Parent group with children** -- creates a top-level menu section:
+
+```json
+{
+  "adminMenu": [
+    {
+      "slug": "my-plugin",
+      "title": "My Plugin",
+      "icon": "plug",
+      "permission": 8,
+      "order": 15,
+      "items": [
+        { "slug": "my-plugin-dashboard", "title": "Dashboard", "url": "/admin/my_plugin", "order": 1 },
+        { "slug": "my-plugin-settings", "title": "Settings", "url": "/admin/my_plugin/settings", "order": 2 }
+      ]
+    }
+  ]
+}
+```
+
+Children inherit the parent's `permission` unless they override it.
+
+**2. Child attachment** -- attaches to any existing menu by slug:
+
+```json
+{
+  "adminMenu": [
+    {
+      "slug": "incoming",
+      "title": "Incoming",
+      "url": "/plugins/email_forwarding/admin/admin_email_forwarding",
+      "parent": "emails",
+      "permission": 5,
+      "order": 10,
+      "settingActivate": "email_forwarding_enabled"
+    }
+  ]
+}
+```
+
+The `parent` value is the `amu_slug` of any menu in the system -- core menus, other plugin menus, or groups from the same plugin.
+
+**3. Standalone top-level** -- a single entry with no children or parent:
+
+```json
+{
+  "adminMenu": [
+    { "slug": "my-tool", "title": "My Tool", "url": "/admin/my_tool", "icon": "wrench", "permission": 10, "order": 16 }
+  ]
+}
+```
+
+**Available fields:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `slug` | Yes | -- | Unique identifier (`[a-z0-9-]`, max 32 chars) |
+| `title` | Yes | -- | Display text (max 32 chars) |
+| `order` | Yes | -- | Sort position within parent level |
+| `url` | No | `""` | Target page. URLs starting with `/` are stored as-is |
+| `icon` | No | null | Icon identifier |
+| `permission` | No | 10 | Min permission level (1-10) |
+| `settingActivate` | No | null | Setting that must be truthy for menu to display |
+| `disabled` | No | false | Whether disabled by default |
+| `parent` | No | null | Slug of parent menu to attach under |
+| `items` | No | null | Array of child menu items |
+
+**Important:** Menus declared in `plugin.json` are the source of truth. Manual edits via the admin menu UI will be overwritten on the next sync.
+
 ### Plugin Lifecycle
 
 **PluginManager is the single entry point for all lifecycle operations.** Plugin models (`Plugin`, `PluginHelper`) are pure CRUD — never call lifecycle methods directly on them.
