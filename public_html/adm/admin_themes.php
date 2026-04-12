@@ -129,6 +129,19 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     }
                                 }
 
+                                // Joinery version requirement check — error badge if unmet.
+                                $req_joinery = $theme_data['requires_joinery'] ?? null;
+                                if (!empty($req_joinery)) {
+                                    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                                    $jv = LibraryFunctions::get_joinery_version();
+                                    $op = '>='; $ver = $req_joinery;
+                                    if (preg_match('/^([><=]+)(.+)$/', $req_joinery, $rm)) { $op = $rm[1]; $ver = $rm[2]; }
+                                    $req_ok = ($jv !== '' && version_compare($jv, $ver, $op));
+                                    if (!$req_ok) {
+                                        $type_badge .= '<br><span class="badge bg-danger">Requires Joinery ' . htmlspecialchars($req_joinery) . ' — this site is ' . htmlspecialchars($jv ?: 'unknown') . '</span>';
+                                    }
+                                }
+
                                 echo '<tr>';
                                 echo '<td>';
                                 echo '<strong>' . htmlspecialchars($display_name) . '</strong>';

@@ -6,6 +6,40 @@ require_once('PluginHelper.php');
 
 class LibraryFunctions {
 
+	/**
+	 * Returns the installed Joinery release version in major.minor.patch form.
+	 *
+	 * Authoritative source is `public_html/VERSION` (baked into the release tarball by
+	 * publish_upgrade). Falls back to `stg_settings.system_version` during the transition
+	 * period before sites have a VERSION file. Cached per-request.
+	 *
+	 * Returns empty string if neither source is available — callers enforcing requirements
+	 * should treat that as fail-closed.
+	 */
+	public static function get_joinery_version() {
+		static $cached = null;
+		if ($cached !== null) return $cached;
+
+		$version_file = PathHelper::getIncludePath('VERSION');
+		if (is_file($version_file)) {
+			$v = trim(file_get_contents($version_file));
+			if ($v !== '') {
+				$cached = $v;
+				return $cached;
+			}
+		}
+
+		// Transition fallback: read the DB setting. Remove once all sites ship VERSION.
+		try {
+			$settings = Globalvars::get_instance();
+			$v = trim($settings->get_setting('system_version', true, true) ?? '');
+			$cached = $v;
+		} catch (Throwable $e) {
+			$cached = '';
+		}
+		return $cached;
+	}
+
 	// Function translate_data_types() has been moved to DatabaseUpdater class.
 	// It was database-specific and only used by DatabaseUpdater.
 	

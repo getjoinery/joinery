@@ -180,6 +180,20 @@ $page->begin_box(array('altlinks' => $altlinks));
                     }
                 }
 
+                // Joinery version requirement check — show error badge if this plugin's
+                // requires.joinery is not satisfied by the current Joinery version.
+                if (!empty($plugin['requires_joinery'])) {
+                    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+                    $jv = LibraryFunctions::get_joinery_version();
+                    $req = $plugin['requires_joinery'];
+                    $op = '>='; $ver = $req;
+                    if (preg_match('/^([><=]+)(.+)$/', $req, $rm)) { $op = $rm[1]; $ver = $rm[2]; }
+                    $req_ok = ($jv !== '' && version_compare($jv, $ver, $op));
+                    if (!$req_ok) {
+                        $status_cell .= '<br><span class="badge bg-danger">Requires Joinery ' . htmlspecialchars($req) . ' — this site is ' . htmlspecialchars($jv ?: 'unknown') . '</span>';
+                    }
+                }
+
                 if (!$plugin['directory_exists']) {
                     $status_cell .= '<br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Directory missing</small>';
                 }

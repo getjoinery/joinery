@@ -578,6 +578,20 @@
 			}
 		}
 
+		// Prefer the VERSION file baked into the tarball over the server's JSON response.
+		// If it exists, it's authoritative. The JSON response stays as back-compat for
+		// tarballs published before VERSION was introduced.
+		$staged_version_file = $stage_directory . '/VERSION';
+		if (file_exists($staged_version_file)) {
+			$staged_version = trim(file_get_contents($staged_version_file));
+			if ($staged_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $staged_version)) {
+				if (!empty($decode_response['system_version']) && $decode_response['system_version'] !== $staged_version) {
+					if ($verbose) upgrade_echo("Version mismatch: server said " . htmlspecialchars($decode_response['system_version']) . ", tarball VERSION says " . htmlspecialchars($staged_version) . ". Trusting tarball.<br>");
+				}
+				$decode_response['system_version'] = $staged_version;
+			}
+		}
+
 		// =====================================================
 		// SELF-UPDATE CHECK
 		// =====================================================

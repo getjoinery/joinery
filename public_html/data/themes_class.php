@@ -129,6 +129,9 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
             if ($metadata) {
                 $theme_data['deprecated'] = !empty($metadata['deprecated']);
                 $theme_data['superseded_by'] = $metadata['superseded_by'] ?? null;
+                $theme_data['requires_joinery'] = $metadata['requires']['joinery'] ?? null;
+            } else {
+                $theme_data['requires_joinery'] = null;
             }
 
             if (isset($themes_lookup[$theme_name])) {
