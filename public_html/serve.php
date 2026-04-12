@@ -128,8 +128,7 @@ $routes = [
         '/api/v1/*' => ['view' => 'api/apiv1'],
         '/admin/*' => ['view' => 'adm/{path}', 'min_permission' => 5],
         '/ajax/*' => ['view' => 'ajax/{file}'],
-        '/utils/publish_theme' => ['view' => 'utils/publish_theme'],  // Public API: own auth via upgrade_server_active
-        '/utils/upgrade' => ['view' => 'utils/upgrade'],              // Public API: own auth via upgrade_server_active / CLI
+        '/utils/upgrade' => ['view' => 'utils/upgrade'],              // Public API: own auth via plugin activation / CLI
         '/utils/*' => ['view' => 'utils/{file}'],
         '/tests/*' => ['view' => 'tests/{path}', 'min_permission' => 10],
         
