@@ -1,7 +1,30 @@
 {
     "name": "Server Manager",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
-    "is_stock": true
+    "is_stock": true,
+    "adminMenu": [
+        {
+            "slug": "server-manager",
+            "title": "Server Manager",
+            "icon": "server",
+            "permission": 10,
+            "order": 14,
+            "items": [
+                { "slug": "server-manager-dashboard", "title": "Dashboard", "url": "/admin/server_manager", "order": 1 },
+                { "slug": "server-manager-destinations", "title": "Destinations", "url": "/admin/server_manager/destinations", "order": 3 },
+                { "slug": "server-manager-jobs", "title": "Jobs", "url": "/admin/server_manager/jobs", "order": 6 }
+            ]
+        },
+        {
+            "slug": "system-marketplace",
+            "title": "Marketplace",
+            "url": "/admin/server_manager/marketplace",
+            "permission": 8,
+            "icon": "store",
+            "parent": "server-manager",
+            "order": 4
+        }
+    ]
 }

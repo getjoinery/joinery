@@ -649,6 +649,9 @@ class PluginManager extends AbstractExtensionManager {
             $task->set('sct_is_active', true);
             $task->save();
         }
+
+        // Sync declarative admin menus from plugin.json
+        $this->syncAdminMenus($name);
     }
 
     /**
@@ -718,6 +721,9 @@ class PluginManager extends AbstractExtensionManager {
         } catch (Exception $e) {
             error_log("Failed to remove deletion rules for plugin '$name': " . $e->getMessage());
         }
+
+        // Remove declarative admin menus
+        $this->syncAdminMenus($name, []);
 
         // Set inactive flag and timestamps
         $model->set('plg_active', 0);
@@ -846,6 +852,9 @@ class PluginManager extends AbstractExtensionManager {
         if (!empty($dependents)) {
             throw new Exception("Cannot uninstall plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
         }
+
+        // Remove declarative admin menus before uninstall hook
+        $this->syncAdminMenus($name, []);
 
         // Run uninstall hook
         $uninstall_file = PathHelper::getAbsolutePath("plugins/{$name}/uninstall.php");
@@ -994,6 +1003,11 @@ class PluginManager extends AbstractExtensionManager {
         require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
         PluginHelper::registerAllActiveDeletionRules();
 
+        // Sync declarative admin menus for all active plugins
+        foreach ($active_plugins as $plugin) {
+            $this->syncAdminMenus($plugin->get('plg_name'));
+        }
+
         return $result;
     }
     
@@ -1022,6 +1036,228 @@ class PluginManager extends AbstractExtensionManager {
         }
         
         return array_unique($dependents);
+    }
+
+    // ========== Declarative Admin Menus ==========
+
+    /**
+     * Sync a plugin's admin menus from its plugin.json adminMenu declaration.
+     *
+     * Handles creation, update, and removal. On deactivate/uninstall, pass an
+     * empty array for $declared_menus to remove all the plugin's menus.
+     *
+     * @param string $plugin_name Plugin directory name
+     * @param array|null $declared_menus Menu items from plugin.json, or null to read from file.
+     *                                   Pass empty array [] to remove all menus (deactivate/uninstall).
+     */
+    public function syncAdminMenus($plugin_name, $declared_menus = null) {
+        require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
+
+        // Read declared menus from plugin.json if not explicitly provided
+        if ($declared_menus === null) {
+            try {
+                $helper = PluginHelper::getInstance($plugin_name);
+                $declared_menus = $helper->getAdminMenuItems();
+            } catch (Exception $e) {
+                error_log("syncAdminMenus: could not read plugin.json for '$plugin_name': " . $e->getMessage());
+                $declared_menus = [];
+            }
+        }
+
+        $dblink = DbConnector::get_instance()->get_db_link();
+
+        // Flatten the tree into an ordered list: parents first, then children
+        $parents = [];
+        $children = [];
+        foreach ($declared_menus as $item) {
+            $entry = [
+                'slug' => $item['slug'],
+                'title' => $item['title'],
+                'url' => $item['url'] ?? '',
+                'order' => $item['order'],
+                'permission' => $item['permission'] ?? 10,
+                'icon' => $item['icon'] ?? null,
+                'settingActivate' => $item['settingActivate'] ?? null,
+                'disabled' => $item['disabled'] ?? false,
+                'parent_slug' => $item['parent'] ?? null,
+            ];
+
+            if (!empty($item['items']) && is_array($item['items'])) {
+                $parents[] = $entry;
+                $parent_permission = $item['permission'] ?? 10;
+                foreach ($item['items'] as $child) {
+                    $children[] = [
+                        'slug' => $child['slug'],
+                        'title' => $child['title'],
+                        'url' => $child['url'] ?? '',
+                        'order' => $child['order'],
+                        'permission' => $child['permission'] ?? $parent_permission,
+                        'icon' => $child['icon'] ?? null,
+                        'settingActivate' => $child['settingActivate'] ?? null,
+                        'disabled' => $child['disabled'] ?? false,
+                        'parent_slug' => $item['slug'],
+                    ];
+                }
+            } elseif (!empty($item['parent'])) {
+                $children[] = $entry;
+            } else {
+                $parents[] = $entry;
+            }
+        }
+        $flat_entries = array_merge($parents, $children);
+        $declared_slugs = array_column($flat_entries, 'slug');
+
+        // Get previously synced slugs from plg_metadata
+        $previous_slugs = $this->getMenuSlugsFromMetadata($plugin_name);
+
+        // Upsert: process parents first (they have no parent_slug), then children
+        foreach ($flat_entries as $entry) {
+            $parent_menu_id = null;
+
+            // Resolve parent slug to ID
+            if (!empty($entry['parent_slug'])) {
+                $q = $dblink->prepare("SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = ?");
+                $q->execute([$entry['parent_slug']]);
+                $parent_menu_id = $q->fetchColumn();
+
+                if ($parent_menu_id === false) {
+                    error_log("syncAdminMenus: plugin '$plugin_name' references parent slug '{$entry['parent_slug']}' which does not exist. Skipping menu '{$entry['slug']}'.");
+                    continue;
+                }
+            }
+
+            // Check if row already exists
+            $q = $dblink->prepare("SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = ?");
+            $q->execute([$entry['slug']]);
+            $existing_id = $q->fetchColumn();
+
+            $url = $entry['url'] ?? '';
+            $permission = $entry['permission'] ?? 10;
+            $icon = $entry['icon'] ?? null;
+            $setting_activate = $entry['settingActivate'] ?? null;
+            $disabled = (!empty($entry['disabled'])) ? 1 : 0;
+
+            if ($existing_id !== false) {
+                // Update existing row
+                $q = $dblink->prepare(
+                    "UPDATE amu_admin_menus SET
+                        amu_menudisplay = ?,
+                        amu_defaultpage = ?,
+                        amu_parent_menu_id = ?,
+                        amu_order = ?,
+                        amu_min_permission = ?,
+                        amu_icon = ?,
+                        amu_setting_activate = ?,
+                        amu_disable = ?
+                    WHERE amu_admin_menu_id = ?"
+                );
+                $q->execute([
+                    $entry['title'],
+                    $url,
+                    $parent_menu_id,
+                    $entry['order'],
+                    $permission,
+                    $icon,
+                    $setting_activate,
+                    $disabled,
+                    $existing_id
+                ]);
+            } else {
+                // Insert new row
+                $q = $dblink->prepare(
+                    "INSERT INTO amu_admin_menus
+                        (amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_setting_activate, amu_disable)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                );
+                $q->execute([
+                    $entry['title'],
+                    $entry['slug'],
+                    $url,
+                    $parent_menu_id,
+                    $entry['order'],
+                    $permission,
+                    $icon,
+                    $setting_activate,
+                    $disabled
+                ]);
+            }
+        }
+
+        // Prune: delete slugs that were previously synced but are no longer declared
+        $slugs_to_remove = array_diff($previous_slugs, $declared_slugs);
+        if (!empty($slugs_to_remove)) {
+            // Delete children first (rows that have a parent), then parents
+            $placeholders = implode(',', array_fill(0, count($slugs_to_remove), '?'));
+            $q = $dblink->prepare(
+                "DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})
+                 AND amu_parent_menu_id IS NOT NULL"
+            );
+            $q->execute(array_values($slugs_to_remove));
+
+            $q = $dblink->prepare(
+                "DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})"
+            );
+            $q->execute(array_values($slugs_to_remove));
+        }
+
+        // Cache current declared slugs in plg_metadata for next sync
+        $this->saveMenuSlugsToMetadata($plugin_name, $declared_slugs);
+    }
+
+    /**
+     * Get the previously synced menu slugs from the plugin's plg_metadata.
+     *
+     * @param string $plugin_name Plugin name
+     * @return array List of slug strings
+     */
+    private function getMenuSlugsFromMetadata($plugin_name) {
+        $plugin = Plugin::get_by_plugin_name($plugin_name);
+        if (!$plugin) {
+            return [];
+        }
+
+        $metadata_raw = $plugin->get('plg_metadata');
+        if (empty($metadata_raw)) {
+            return [];
+        }
+
+        $metadata = json_decode($metadata_raw, true);
+        if (!is_array($metadata)) {
+            return [];
+        }
+
+        return $metadata['_menu_slugs'] ?? [];
+    }
+
+    /**
+     * Save the current declared menu slugs into the plugin's plg_metadata.
+     *
+     * @param string $plugin_name Plugin name
+     * @param array $slugs List of slug strings
+     */
+    private function saveMenuSlugsToMetadata($plugin_name, $slugs) {
+        $plugin = Plugin::get_by_plugin_name($plugin_name);
+        if (!$plugin) {
+            return;
+        }
+
+        $metadata_raw = $plugin->get('plg_metadata');
+        $metadata = [];
+        if (!empty($metadata_raw)) {
+            $decoded = json_decode($metadata_raw, true);
+            if (is_array($decoded)) {
+                $metadata = $decoded;
+            }
+        }
+
+        if (empty($slugs)) {
+            unset($metadata['_menu_slugs']);
+        } else {
+            $metadata['_menu_slugs'] = array_values($slugs);
+        }
+
+        $plugin->set('plg_metadata', json_encode($metadata));
+        $plugin->save();
     }
 }
 ?>
