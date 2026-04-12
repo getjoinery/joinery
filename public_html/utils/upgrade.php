@@ -739,6 +739,9 @@
 		if (!empty($themes_to_download) || !empty($plugins_to_download)) {
 			upgrade_echo('<br><h3>Downloading Individual Themes and Plugins</h3>');
 
+			$skipped_items = [];
+			$downloaded_count = 0;
+
 			// Download themes
 			foreach ($themes_to_download as $theme_name) {
 				$theme_url = $theme_endpoint . '?download=' . urlencode($theme_name);
@@ -748,14 +751,10 @@
 				$result = download_and_extract($theme_url, $stage_directory . '/theme/');
 				if ($result['success']) {
 					upgrade_echo(" ✓<br>");
+					$downloaded_count++;
 				} else {
-					upgrade_echo(" ❌ " . htmlspecialchars($result['error']) . "<br>");
-					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
-					echo '<strong>❌ Theme Download Failed:</strong> ' . htmlspecialchars($theme_name) . '<br>';
-					echo 'Error: ' . htmlspecialchars($result['error']) . '<br>';
-					echo '</div>';
-					exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-					exit(1);
+					upgrade_echo(" ⚠ skipped (" . htmlspecialchars($result['error']) . ")<br>");
+					$skipped_items[] = "Theme: {$theme_name} — " . $result['error'];
 				}
 			}
 
@@ -768,19 +767,26 @@
 				$result = download_and_extract($plugin_url, $stage_directory . '/plugins/');
 				if ($result['success']) {
 					upgrade_echo(" ✓<br>");
+					$downloaded_count++;
 				} else {
-					upgrade_echo(" ❌ " . htmlspecialchars($result['error']) . "<br>");
-					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
-					echo '<strong>❌ Plugin Download Failed:</strong> ' . htmlspecialchars($plugin_name) . '<br>';
-					echo 'Error: ' . htmlspecialchars($result['error']) . '<br>';
-					echo '</div>';
-					exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-					exit(1);
+					upgrade_echo(" ⚠ skipped (" . htmlspecialchars($result['error']) . ")<br>");
+					$skipped_items[] = "Plugin: {$plugin_name} — " . $result['error'];
 				}
 			}
 
-			$total_items = count($themes_to_download) + count($plugins_to_download);
-			upgrade_echo("✓ Downloaded {$total_items} theme/plugin archives<br>");
+			upgrade_echo("✓ Downloaded {$downloaded_count} theme/plugin archives<br>");
+
+			if (!empty($skipped_items)) {
+				echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
+				echo '<strong>⚠️ ' . count($skipped_items) . ' item(s) skipped</strong> (not available from upgrade server):<br>';
+				echo '<ul style="margin-bottom: 0;">';
+				foreach ($skipped_items as $item) {
+					echo '<li>' . htmlspecialchars($item) . '</li>';
+				}
+				echo '</ul>';
+				echo '<br><small>These items were not updated. If they are deprecated, consider removing them.</small>';
+				echo '</div>';
+			}
 		}
 
 		// ============================================
