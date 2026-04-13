@@ -139,6 +139,12 @@ if (isset($_GET['download'])) {
             mkdir($archive_dir, 0755, true);
         }
 
+        // Unlink existing archive so tar can always create a fresh one even if the
+        // old file is owned by another user (archive dir is world-writable).
+        if (file_exists($archive_path)) {
+            @unlink($archive_path);
+        }
+
         // Create tar.gz with just the item directory
         $parent_dir = dirname($source_dir);
         $tar_cmd = sprintf(
@@ -157,6 +163,10 @@ if (isset($_GET['download'])) {
             echo json_encode(['error' => 'Failed to create archive', 'details' => implode("\n", $output)]);
             exit;
         }
+
+        // Make the new archive world-writable so subsequent regenerations by other
+        // users (e.g. CLI publish runs) can overwrite it.
+        @chmod($archive_path, 0666);
     }
 
     // Serve the archive
