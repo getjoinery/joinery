@@ -330,6 +330,11 @@ EOF
     # Enable the proxy site
     a2ensite "${sitename}-proxy.conf" >/dev/null 2>&1 || true
 
+    # Disable the Ubuntu default vhost so bare-IP hits (no Host header match) fall
+    # through to our site's proxy instead of the Apache welcome page. Idempotent:
+    # a2dissite silently succeeds if already disabled.
+    a2dissite 000-default.conf >/dev/null 2>&1 || true
+
     # Test and reload Apache
     if ! apachectl configtest 2>/dev/null; then
         print_error "Apache configuration error"

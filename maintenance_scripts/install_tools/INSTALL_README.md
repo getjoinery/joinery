@@ -721,7 +721,7 @@ sudo ./manage_domain.sh set mysite example.com --no-ssl
 
 **What happens:**
 - Creates backup of current configuration
-- For Docker sites: Creates Apache reverse proxy on host
+- For Docker sites: Creates Apache reverse proxy on host and disables Apache's `000-default.conf` so bare-IP requests fall through to the site instead of the Ubuntu welcome page
 - For bare-metal: Updates Apache VirtualHost
 - Attempts SSL via certbot (unless `--no-ssl` or Cloudflare detected)
 
