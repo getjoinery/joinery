@@ -785,6 +785,22 @@ class JobCommandBuilder {
 		$steps[] = ['type' => 'ssh', 'label' => 'Create the site',
 			'on_host' => true, 'cmd' => $install_cmd, 'timeout' => 3600];
 
+		// Docker mode: set up an HTTP reverse proxy on the host so port 80 serves the site.
+		// In docker mode, maintenance_scripts/ is baked into the container image — not on
+		// the host — so we use the still-extracted copy under /tmp/joinery_install. This runs
+		// before the cleanup step. manage_domain.sh auto-installs Apache + mod_proxy if
+		// missing, writes {sitename}-proxy.conf, and reloads. Idempotent. SSL stays a
+		// separate admin action after DNS cutover.
+		// Skip for localhost / bare IP — a ServerName-based proxy needs a routable domain.
+		$is_ip = (bool)preg_match('/^\d+\.\d+\.\d+\.\d+$/', $domain);
+		if ($docker === 'docker' && $domain !== '' && $domain !== 'localhost' && !$is_ip) {
+			$manage_domain = "{$remote_install_dir}/maintenance_scripts/sysadmin_tools/manage_domain.sh";
+			$steps[] = ['type' => 'ssh', 'label' => 'Set up HTTP reverse proxy',
+				'on_host' => true,
+				'cmd' => "sudo bash {$manage_domain} set {$sitename_esc} {$domain_esc} --no-ssl",
+				'timeout' => 300];
+		}
+
 		// From-Backup: restore DB + files onto freshly-installed site
 		if ($mode === 'from_backup') {
 			$target_config = "/var/www/html/{$sitename}/config/Globalvars_site.php";
@@ -842,9 +858,17 @@ class JobCommandBuilder {
 
 		// Post-install verification. Globalvars_site.php is chmod 640 root:www-data so
 		// user1 needs sudo to test-read it.
+		// Docker mode: config lives inside the container — exec test through docker.
+		if ($docker === 'docker') {
+			$verify_cmd = "echo INSTALL_SUCCESS && hostname && "
+			            . "sudo docker exec {$sitename} test -f /var/www/html/{$sitename}/config/Globalvars_site.php && echo CONFIG_OK";
+		} else {
+			$verify_cmd = "echo INSTALL_SUCCESS && hostname && "
+			            . "sudo test -f /var/www/html/{$sitename}/config/Globalvars_site.php && echo CONFIG_OK";
+		}
 		$steps[] = ['type' => 'ssh', 'label' => 'Verify install',
 			'on_host' => true,
-			'cmd' => "echo INSTALL_SUCCESS && hostname && sudo test -f /var/www/html/{$sitename}/config/Globalvars_site.php && echo CONFIG_OK"];
+			'cmd' => $verify_cmd];
 
 		return $steps;
 	}

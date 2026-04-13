@@ -217,7 +217,7 @@ if ($error) {
 	<div id="panel_fresh" class="mb-3">
 		<label class="form-label">Primary Domain *</label>
 		<input type="text" name="domain" class="form-control" placeholder="e.g., mysite.example.com">
-		<small class="text-muted">Apache vhost is configured for this domain. The site is installed with <code>--no-ssl</code> (install.sh hard-fails if DNS isn't already pointing here). After DNS cutover, run <code>sudo certbot --apache -d DOMAIN</code> on the target.</small>
+		<small class="text-muted">Docker mode: an HTTP reverse proxy on port 80 is configured automatically so the site is reachable at <code>http://DOMAIN/</code> once DNS points here. Bare-metal: Apache vhost binds directly. SSL is not set up at install time — after DNS cutover, run <code>sudo certbot --apache -d DOMAIN</code> on the target to add it.</small>
 	</div>
 
 	<div id="panel_backup" class="mb-3" style="display:none">
