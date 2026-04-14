@@ -370,7 +370,7 @@ The `publish_theme.php` catalog endpoints (`?list=themes`, `?list=plugins`) incl
 
 - **[CLAUDE.md](/CLAUDE.md)** - System architecture and development guidelines
 - **[Plugin Developer Guide](/docs/plugin_developer_guide.md)** - Plugin development
-- **[Server Manager](/docs/server_manager.md)** - Server management, publishing, and backup destinations
+- **[Server Manager](/docs/server_manager.md)** - Server management, publishing, and backup targets
 - **Specifications:**
   - `/specs/implemented/upgrade_system.md` - Feature parity analysis
   - `/specs/implemented/fix_publish_upgrade_system.md` - Publish upgrade fixes

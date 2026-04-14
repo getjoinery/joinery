@@ -1,74 +1,74 @@
 <?php
 /**
- * Server Manager - Backup Destinations
- * URL: /admin/server_manager/destinations
+ * Server Manager - Backup Targets
+ * URL: /admin/server_manager/targets
  *
- * CRUD page for managing backup storage destinations (B2, S3, Linode, local).
+ * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
- * @version 1.1
+ * @version 2.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/DestinationTester.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetTester.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 $session->set_return();
 
-// Load or create destination
-$dest = null;
+// Load or create target
+$target = null;
 $is_edit = false;
-if (isset($_GET['bkd_id']) && $_GET['bkd_id']) {
-	$dest = new BackupDestination(intval($_GET['bkd_id']), TRUE);
+if (isset($_GET['bkt_id']) && $_GET['bkt_id']) {
+	$target = new BackupTarget(intval($_GET['bkt_id']), TRUE);
 	$is_edit = true;
 } elseif (isset($_GET['action']) && $_GET['action'] === 'add') {
-	$dest = new BackupDestination(NULL);
+	$target = new BackupTarget(NULL);
 }
 
 // Handle test (from list row)
 if (isset($_GET['action']) && $_GET['action'] === 'test' && $is_edit) {
-	$result = DestinationTester::test($dest);
+	$result = TargetTester::test($target);
 	$page_regex = '/\/admin\/server_manager/';
 	$session->save_message(new DisplayMessage(
-		'Test "' . $dest->get('bkd_name') . '": ' . $result['message'],
+		'Test "' . $target->get('bkt_name') . '": ' . $result['message'],
 		$result['success'] ? 'Success' : 'Error',
 		$page_regex,
 		$result['success'] ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR,
 		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 	));
-	header('Location: /admin/server_manager/destinations');
+	header('Location: /admin/server_manager/targets');
 	exit;
 }
 
 // Handle delete
 if (isset($_GET['action']) && $_GET['action'] === 'delete' && $is_edit) {
-	$dest->soft_delete();
+	$target->soft_delete();
 	$page_regex = '/\/admin\/server_manager/';
 	$session->save_message(new DisplayMessage(
-		'Destination deleted.', 'Success', $page_regex,
+		'Target deleted.', 'Success', $page_regex,
 		DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 	));
-	header('Location: /admin/server_manager/destinations');
+	header('Location: /admin/server_manager/targets');
 	exit;
 }
 
 // Handle form save
 $error = null;
-if ($_POST && isset($_POST['bkd_name'])) {
-	if (!$dest) {
-		$dest = new BackupDestination(NULL);
+if ($_POST && isset($_POST['bkt_name'])) {
+	if (!$target) {
+		$target = new BackupTarget(NULL);
 	}
 
-	$dest->set('bkd_name', trim($_POST['bkd_name'] ?? ''));
-	$dest->set('bkd_provider', trim($_POST['bkd_provider'] ?? 'b2'));
-	$dest->set('bkd_bucket', trim($_POST['bkd_bucket'] ?? ''));
-	$dest->set('bkd_path_prefix', trim($_POST['bkd_path_prefix'] ?? 'joinery-backups'));
-	$dest->set('bkd_delete_local', !empty($_POST['bkd_delete_local']));
-	$dest->set('bkd_enabled', isset($_POST['bkd_enabled']) ? true : false);
+	$target->set('bkt_name', trim($_POST['bkt_name'] ?? ''));
+	$target->set('bkt_provider', trim($_POST['bkt_provider'] ?? 'b2'));
+	$target->set('bkt_bucket', trim($_POST['bkt_bucket'] ?? ''));
+	$target->set('bkt_path_prefix', trim($_POST['bkt_path_prefix'] ?? 'joinery-backups'));
+	$target->set('bkt_delete_local', !empty($_POST['bkt_delete_local']));
+	$target->set('bkt_enabled', isset($_POST['bkt_enabled']) ? true : false);
 
 	// Build credentials JSON from provider-specific fields
-	$provider = $dest->get('bkd_provider');
+	$provider = $target->get('bkt_provider');
 	$creds = [];
 	if ($provider === 'b2') {
 		$creds = [
@@ -85,52 +85,52 @@ if ($_POST && isset($_POST['bkd_name'])) {
 			$creds['endpoint'] = trim($_POST['cred_endpoint'] ?? '');
 		}
 	}
-	$dest->set('bkd_credentials', json_encode($creds));
+	$target->set('bkt_credentials', json_encode($creds));
 
-	if (!isset($_POST['bkd_enabled'])) {
-		$dest->set('bkd_enabled', false);
+	if (!isset($_POST['bkt_enabled'])) {
+		$target->set('bkt_enabled', false);
 	}
 
 	try {
-		$dest->prepare();
-		$dest->save();
-		$dest->load();
+		$target->prepare();
+		$target->save();
+		$target->load();
 
-		$test_result = DestinationTester::test($dest);
+		$test_result = TargetTester::test($target);
 		$page_regex = '/\/admin\/server_manager/';
 		if ($test_result['success']) {
 			$session->save_message(new DisplayMessage(
-				'Destination saved. ' . $test_result['message'],
+				'Target saved. ' . $test_result['message'],
 				'Success', $page_regex,
 				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
 		} else {
 			$session->save_message(new DisplayMessage(
-				'Destination saved, but connection test failed: ' . $test_result['message'],
+				'Target saved, but connection test failed: ' . $test_result['message'],
 				'Warning', $page_regex,
 				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
 		}
-		header('Location: /admin/server_manager/destinations?bkd_id=' . $dest->key);
+		header('Location: /admin/server_manager/targets?bkt_id=' . $target->key);
 		exit;
 	} catch (Exception $e) {
 		$error = $e->getMessage();
-		$is_edit = $dest->key ? true : false;
+		$is_edit = $target->key ? true : false;
 	}
 }
 
-// Load all destinations for listing
-$all_destinations = new MultiBackupDestination(['deleted' => false], ['bkd_name' => 'ASC']);
-$all_destinations->load();
+// Load all targets for listing
+$all_targets = new MultiBackupTarget(['deleted' => false], ['bkt_name' => 'ASC']);
+$all_targets->load();
 
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager',
-	'page_title' => 'Backup Destinations',
-	'readable_title' => 'Backup Destinations',
+	'page_title' => 'Backup Targets',
+	'readable_title' => 'Backup Targets',
 	'breadcrumbs' => [
 		'Server Manager' => '/admin/server_manager',
-		'Destinations' => '',
+		'Targets' => '',
 	],
 	'session' => $session,
 ]);
@@ -151,63 +151,63 @@ if ($error) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
 }
 
-// ── Destination List ──
+// ── Target List ──
 $provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
 
-$pageoptions = ['title' => 'Backup Destinations', 'altlinks' => ['Add Destination' => '/admin/server_manager/destinations?action=add']];
+$pageoptions = ['title' => 'Backup Targets', 'altlinks' => ['Add Target' => '/admin/server_manager/targets?action=add']];
 $page->begin_box($pageoptions);
 
 echo '<table class="table table-striped table-sm">';
 echo '<thead><tr><th>Name</th><th>Provider</th><th>Bucket</th><th>Path Prefix</th><th>Delete Local</th><th>Status</th><th>Actions</th></tr></thead>';
 echo '<tbody>';
 
-$dest_count = 0;
-foreach ($all_destinations as $d) {
-	$dest_count++;
-	$prov = $d->get('bkd_provider');
+$target_count = 0;
+foreach ($all_targets as $t) {
+	$target_count++;
+	$prov = $t->get('bkt_provider');
 	$prov_label = $provider_labels[$prov] ?? $prov;
-	$enabled = $d->get('bkd_enabled');
+	$enabled = $t->get('bkt_enabled');
 	echo '<tr>';
-	echo '<td><a href="/admin/server_manager/destinations?bkd_id=' . $d->key . '">' . htmlspecialchars($d->get('bkd_name')) . '</a></td>';
+	echo '<td><a href="/admin/server_manager/target_info?bkt_id=' . $t->key . '">' . htmlspecialchars($t->get('bkt_name')) . '</a></td>';
 	echo '<td>' . htmlspecialchars($prov_label) . '</td>';
-	echo '<td>' . htmlspecialchars($d->get('bkd_bucket') ?: '-') . '</td>';
-	echo '<td>' . htmlspecialchars($d->get('bkd_path_prefix') ?: '-') . '</td>';
-	echo '<td>' . ($d->get('bkd_delete_local') ? 'Yes' : 'No') . '</td>';
+	echo '<td>' . htmlspecialchars($t->get('bkt_bucket') ?: '-') . '</td>';
+	echo '<td>' . htmlspecialchars($t->get('bkt_path_prefix') ?: '-') . '</td>';
+	echo '<td>' . ($t->get('bkt_delete_local') ? 'Yes' : 'No') . '</td>';
 	echo '<td><span class="badge bg-' . ($enabled ? 'success' : 'secondary') . '">' . ($enabled ? 'Enabled' : 'Disabled') . '</span></td>';
-	echo '<td><a href="/admin/server_manager/destinations?bkd_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
-	echo '<a href="/admin/server_manager/destinations?bkd_id=' . $d->key . '&action=test" class="btn btn-sm btn-outline-secondary">Test</a></td>';
+	echo '<td><a href="/admin/server_manager/targets?bkt_id=' . $t->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
+	echo '<a href="/admin/server_manager/targets?bkt_id=' . $t->key . '&action=test" class="btn btn-sm btn-outline-secondary">Test</a></td>';
 	echo '</tr>';
 }
 
-if ($dest_count === 0) {
-	echo '<tr><td colspan="7" class="text-muted text-center">No backup destinations configured. Backups are stored locally on each node.</td></tr>';
+if ($target_count === 0) {
+	echo '<tr><td colspan="7" class="text-muted text-center">No backup targets configured. Backups are stored locally on each node.</td></tr>';
 }
 
 echo '</tbody></table>';
 $page->end_box();
 
 // ── Add/Edit Form ──
-if ($dest !== null) {
-	$creds = $dest->key ? $dest->get_credentials() : [];
-	$current_provider = $dest->get('bkd_provider') ?: 'b2';
+if ($target !== null) {
+	$creds = $target->key ? $target->get_credentials() : [];
+	$current_provider = $target->get('bkt_provider') ?: 'b2';
 
-	$form_title = $is_edit ? 'Edit Destination: ' . htmlspecialchars($dest->get('bkd_name')) : 'Add Destination';
+	$form_title = $is_edit ? 'Edit Target: ' . htmlspecialchars($target->get('bkt_name')) : 'Add Target';
 	$pageoptions = ['title' => $form_title];
 	$page->begin_box($pageoptions);
 ?>
 	<form method="post">
 		<?php if ($is_edit): ?>
-			<input type="hidden" name="edit_primary_key_value" value="<?php echo $dest->key; ?>">
+			<input type="hidden" name="edit_primary_key_value" value="<?php echo $target->key; ?>">
 		<?php endif; ?>
 
 		<div class="row mb-3">
 			<div class="col-md-6">
 				<label class="form-label">Name *</label>
-				<input type="text" name="bkd_name" class="form-control" value="<?php echo htmlspecialchars($dest->get('bkd_name') ?: ''); ?>" required placeholder="e.g., Production B2">
+				<input type="text" name="bkt_name" class="form-control" value="<?php echo htmlspecialchars($target->get('bkt_name') ?: ''); ?>" required placeholder="e.g., Production B2">
 			</div>
 			<div class="col-md-6">
 				<label class="form-label">Provider *</label>
-				<select name="bkd_provider" id="providerSelect" class="form-select" onchange="toggleProviderFields()">
+				<select name="bkt_provider" id="providerSelect" class="form-select" onchange="toggleProviderFields()">
 					<?php foreach ($provider_labels as $key => $label): ?>
 						<option value="<?php echo $key; ?>" <?php echo $current_provider === $key ? 'selected' : ''; ?>><?php echo $label; ?></option>
 					<?php endforeach; ?>
@@ -219,11 +219,11 @@ if ($dest !== null) {
 			<div class="row mb-3">
 				<div class="col-md-6">
 					<label class="form-label">Bucket Name *</label>
-					<input type="text" name="bkd_bucket" class="form-control" value="<?php echo htmlspecialchars($dest->get('bkd_bucket') ?: ''); ?>" placeholder="my-backup-bucket">
+					<input type="text" name="bkt_bucket" class="form-control" value="<?php echo htmlspecialchars($target->get('bkt_bucket') ?: ''); ?>" placeholder="my-backup-bucket">
 				</div>
 				<div class="col-md-6">
 					<label class="form-label">Path Prefix</label>
-					<input type="text" name="bkd_path_prefix" class="form-control" value="<?php echo htmlspecialchars($dest->get('bkd_path_prefix') ?: 'joinery-backups'); ?>" placeholder="joinery-backups">
+					<input type="text" name="bkt_path_prefix" class="form-control" value="<?php echo htmlspecialchars($target->get('bkt_path_prefix') ?: 'joinery-backups'); ?>" placeholder="joinery-backups">
 					<small class="text-muted">Files stored at: bucket/prefix/node-slug/filename</small>
 				</div>
 			</div>
@@ -287,20 +287,20 @@ if ($dest !== null) {
 		</div>
 
 		<div class="mb-3 form-check">
-			<input type="checkbox" name="bkd_delete_local" class="form-check-input" id="deleteLocal" value="1" <?php echo $dest->get('bkd_delete_local') ? 'checked' : ''; ?>>
+			<input type="checkbox" name="bkt_delete_local" class="form-check-input" id="deleteLocal" value="1" <?php echo $target->get('bkt_delete_local') ? 'checked' : ''; ?>>
 			<label class="form-check-label" for="deleteLocal">Delete local backup file after successful upload</label>
 		</div>
 
 		<div class="mb-3 form-check">
-			<input type="checkbox" name="bkd_enabled" class="form-check-input" id="destEnabled" value="1" <?php echo ($dest->key ? $dest->get('bkd_enabled') : true) ? 'checked' : ''; ?>>
-			<label class="form-check-label" for="destEnabled">Enabled</label>
+			<input type="checkbox" name="bkt_enabled" class="form-check-input" id="targetEnabled" value="1" <?php echo ($target->key ? $target->get('bkt_enabled') : true) ? 'checked' : ''; ?>>
+			<label class="form-check-label" for="targetEnabled">Enabled</label>
 		</div>
 
-		<button type="submit" class="btn btn-primary"><?php echo $is_edit ? 'Save Changes' : 'Add Destination'; ?></button>
-		<a href="/admin/server_manager/destinations" class="btn btn-outline-secondary ms-2">Cancel</a>
+		<button type="submit" class="btn btn-primary"><?php echo $is_edit ? 'Save Changes' : 'Add Target'; ?></button>
+		<a href="/admin/server_manager/targets" class="btn btn-outline-secondary ms-2">Cancel</a>
 
 		<?php if ($is_edit): ?>
-			<a href="/admin/server_manager/destinations?bkd_id=<?php echo $dest->key; ?>&action=delete" class="btn btn-outline-danger ms-2" onclick="return confirm('Delete this destination?')">Delete</a>
+			<a href="/admin/server_manager/targets?bkt_id=<?php echo $target->key; ?>&action=delete" class="btn btn-outline-danger ms-2" onclick="return confirm('Delete this target?')">Delete</a>
 		<?php endif; ?>
 	</form>
 
