@@ -223,26 +223,23 @@ class JobResultProcessor {
 	}
 
 	/**
-	 * Parse list_backups output into structured file list.
-	 * Stores result on both the job and the node record for caching.
+	 * Parse list_backups output into a local-file list. Cloud listings are
+	 * fetched web-server-side at display time via TargetLister, merged by
+	 * BackupListHelper.
 	 *
 	 * Local output format: LOCAL|size_bytes|mtime_epoch|filepath
-	 * Cloud output: provider-specific (B2 --long or aws s3 ls)
 	 */
 	private static function process_list_backups($job) {
 		$output = $job->get('mjb_output') ?: '';
 		$files = [];
-		$local_files = [];
-		$cloud_files = [];
 
-		// Parse local file lines: LOCAL|size|mtime|path
 		if (preg_match_all('/^LOCAL\|(\d+)\|(\d+)\|(.+)$/m', $output, $matches, PREG_SET_ORDER)) {
 			foreach ($matches as $m) {
 				$path = trim($m[3]);
 				$filename = basename($path);
 				$size_bytes = intval($m[1]);
 				$mtime = intval($m[2]);
-				$local_files[$filename] = [
+				$files[] = [
 					'filename' => $filename,
 					'size' => self::format_size($size_bytes),
 					'size_bytes' => $size_bytes,
@@ -255,84 +252,10 @@ class JobResultProcessor {
 			}
 		}
 
-		// Parse cloud file lines
-		// AWS S3 ls format: "2026-04-11 16:30:00    2684354560 prefix/slug/filename.sql.gz"
-		if (preg_match_all('/^(\d{4}-\d{2}-\d{2})\s+\S+\s+(\d+)\s+(.+)$/m', $output, $matches, PREG_SET_ORDER)) {
-			foreach ($matches as $m) {
-				$cloud_path = trim($m[3]);
-				$filename = basename($cloud_path);
-				$cloud_files[$filename] = [
-					'size' => self::format_size(intval($m[2])),
-					'size_bytes' => intval($m[2]),
-					'date' => $m[1],
-					'cloud_path' => $cloud_path,
-				];
-			}
-		}
+		usort($files, function($a, $b) { return ($b['mtime'] ?? 0) - ($a['mtime'] ?? 0); });
 
-		// B2 ls --long format: "4_zBucketId_... upload 2026-04-11 ... 2684354560 prefix/slug/filename.sql.gz"
-		// Simplified: look for lines with a path that contains our backup extensions
-		if (preg_match_all('/(\d{4}-\d{2}-\d{2})\s+\S+\s+(\d+)\s+\S+\s+(\S+\.(?:sql\.gz(?:\.enc)?|tar\.gz))$/m', $output, $matches, PREG_SET_ORDER)) {
-			foreach ($matches as $m) {
-				$cloud_path = trim($m[3]);
-				$filename = basename($cloud_path);
-				if (!isset($cloud_files[$filename])) {
-					$cloud_files[$filename] = [
-						'size' => self::format_size(intval($m[2])),
-						'size_bytes' => intval($m[2]),
-						'date' => $m[1],
-						'cloud_path' => $cloud_path,
-					];
-				}
-			}
-		}
-
-		// Merge local and cloud into unified list
-		$all_filenames = array_unique(array_merge(array_keys($local_files), array_keys($cloud_files)));
-		foreach ($all_filenames as $fn) {
-			$has_local = isset($local_files[$fn]);
-			$has_cloud = isset($cloud_files[$fn]);
-
-			if ($has_local && $has_cloud) {
-				$entry = $local_files[$fn];
-				$entry['cloud_path'] = $cloud_files[$fn]['cloud_path'];
-				$entry['location'] = 'both';
-			} elseif ($has_local) {
-				$entry = $local_files[$fn];
-			} else {
-				$entry = [
-					'filename' => $fn,
-					'size' => $cloud_files[$fn]['size'],
-					'size_bytes' => $cloud_files[$fn]['size_bytes'],
-					'date' => $cloud_files[$fn]['date'],
-					'mtime' => 0,
-					'local_path' => null,
-					'cloud_path' => $cloud_files[$fn]['cloud_path'],
-					'location' => 'cloud',
-				];
-			}
-			$files[] = $entry;
-		}
-
-		// Sort by date descending
-		usort($files, function($a, $b) {
-			return ($b['mtime'] ?? 0) - ($a['mtime'] ?? 0) ?: strcmp($b['date'] ?? '', $a['date'] ?? '');
-		});
-
-		$result = ['files' => $files];
-
-		// Store on job
-		$job->set('mjb_result', json_encode($result));
+		$job->set('mjb_result', json_encode(['files' => $files]));
 		$job->save();
-
-		// Cache on node record
-		$node_id = $job->get('mjb_mgn_node_id');
-		if ($node_id) {
-			$node = new ManagedNode($node_id, TRUE);
-			$node->set('mgn_last_backup_list', json_encode($result));
-			$node->set('mgn_last_backup_list_time', gmdate('Y-m-d H:i:s'));
-			$node->save();
-		}
 	}
 
 	/**

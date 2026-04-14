@@ -791,12 +791,14 @@ if ($tab === 'overview') {
 	$page->end_box();
 
 	// ── Backup File Browser ──
-	$backup_list = $node->get('mgn_last_backup_list');
-	if (is_string($backup_list)) {
-		$backup_list = json_decode($backup_list, true);
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
+	$backup_list = BackupListHelper::get_for_node($node);
+	$last_scan = $backup_list['last_scan'];
+	$files = $backup_list['files'];
+	$cloud_error = $backup_list['cloud_error'];
+	if ($cloud_error) {
+		echo '<div class="alert alert-warning">Cloud listing failed: ' . htmlspecialchars($cloud_error) . '</div>';
 	}
-	$last_scan = $node->get('mgn_last_backup_list_time');
-	$files = ($backup_list && isset($backup_list['files'])) ? $backup_list['files'] : [];
 
 	$pageoptions = ['title' => 'Backup Files'];
 	$page->begin_box($pageoptions);
@@ -956,9 +958,10 @@ document.addEventListener('click', function(e) {
 	$status_data = $node->get('mgn_last_status_data');
 	if (is_string($status_data)) $status_data = json_decode($status_data, true);
 
-	$backup_list_raw = $node->get('mgn_last_backup_list');
-	if (is_string($backup_list_raw)) $backup_list_raw = json_decode($backup_list_raw, true);
-	$backup_list_time = $node->get('mgn_last_backup_list_time');
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
+	$_bl = BackupListHelper::get_for_node($node);
+	$backup_list_raw = ['files' => $_bl['files']];
+	$backup_list_time = $_bl['last_scan'];
 
 	// Load other nodes for the cross-node copy source dropdown
 	$other_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);

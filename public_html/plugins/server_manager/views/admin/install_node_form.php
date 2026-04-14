@@ -114,12 +114,11 @@ $existing_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], 
 $existing_nodes->load();
 
 // Build backup list data for JS, keyed by node id
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
 $backup_lists = [];
 foreach ($existing_nodes as $en) {
-	$list = $en->get('mgn_last_backup_list');
-	if (is_string($list)) $list = json_decode($list, true);
-	$files = ($list && isset($list['files'])) ? $list['files'] : [];
-	$backup_lists[$en->key] = $files;
+	$bl = BackupListHelper::get_for_node($en);
+	$backup_lists[$en->key] = $bl['files'];
 }
 
 $page = new AdminPage();

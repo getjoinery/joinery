@@ -2,10 +2,13 @@
 /**
  * BackupTarget - A configured storage target for backups (B2, S3, Linode).
  *
- * Credentials are stored as JSON in bkt_credentials. Structure varies by provider:
- *   b2:    {"key_id": "...", "app_key": "..."}
- *   s3:    {"access_key": "...", "secret_key": "...", "region": "us-east-1"}
- *   linode: {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
+ * Credentials are stored as JSON in bkt_credentials with a unified shape for
+ * every provider:
+ *   {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
+ *
+ * All providers authenticate via SigV4 against their S3-compatible endpoint.
+ * For B2, the endpoint is auto-detected at save time via b2_authorize_account
+ * (its S3-compat URL format is https://s3.<region>.backblazeb2.com).
  *
  * @version 2.0
  */
