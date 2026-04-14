@@ -289,9 +289,14 @@ class JobCommandBuilder {
 			if ($target) {
 				$cred_vals = $target->get_credentials();
 				$bucket    = $target->get('bkt_bucket');
-				$provider  = $target->get('bkt_provider');
 				$dl_path   = '/backups/' . basename($filename);
-				$dl_cmd    = self::build_provider_download_cmd($provider, $cred_vals, $bucket, $cloud_path, $dl_path);
+
+				$uploader_script = self::build_node_uploader_script($cred_vals, $bucket);
+				$eof = '__JOINERY_UPLOADER_EOF__';
+				$cp_arg = escapeshellarg($cloud_path);
+				$dl_arg = escapeshellarg($dl_path);
+				$dl_cmd = "php -- download {$cp_arg} {$dl_arg} <<'{$eof}'\n{$uploader_script}\n{$eof}";
+
 				$steps[] = ['type' => 'ssh', 'label' => 'Download backup from cloud',
 					'cmd' => $dl_cmd, 'timeout' => 3600];
 				$local_path = $dl_path;
@@ -310,33 +315,6 @@ class JobCommandBuilder {
 			'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c \"SELECT count(*) AS table_count FROM information_schema.tables WHERE table_schema = 'public'\""];
 
 		return $steps;
-	}
-
-	/**
-	 * Build provider-specific download command.
-	 * Downloads a cloud file to a local path on the remote server.
-	 */
-	private static function build_provider_download_cmd($provider, $creds, $bucket, $cloud_path, $local_path) {
-		$local_escaped = escapeshellarg($local_path);
-
-		if ($provider === 'b2') {
-			$key_id  = escapeshellarg($creds['key_id'] ?? '');
-			$app_key = escapeshellarg($creds['app_key'] ?? '');
-			$cp      = escapeshellarg($cloud_path);
-			return "b2 authorize-account {$key_id} {$app_key} && b2 download-file-by-name " . escapeshellarg($bucket) . " {$cp} {$local_escaped}";
-		}
-
-		// S3-compatible
-		$access   = $creds['access_key'] ?? '';
-		$secret   = $creds['secret_key'] ?? '';
-		$region   = $creds['region'] ?? 'us-east-1';
-		$endpoint = $creds['endpoint'] ?? '';
-		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
-		$cmd = "{$env} aws s3 cp \"s3://{$bucket}/{$cloud_path}\" {$local_escaped} --region " . escapeshellarg($region);
-		if ($endpoint) {
-			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
-		}
-		return $cmd;
 	}
 
 	/**
@@ -472,13 +450,15 @@ class JobCommandBuilder {
 		$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
 		$creds = $target->get_credentials();
 		$bucket = $target->get('bkt_bucket');
-		$provider = $target->get('bkt_provider');
 
 		// Find the newest backup file
 		$find_newest = 'NEWEST_BACKUP=$(ls -t /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -1)';
 		$check = 'test -n "$NEWEST_BACKUP"';
+		$remote_key = "REMOTE_KEY=\"{$prefix}/{$slug}/\$(basename \"\$NEWEST_BACKUP\")\"";
 
-		$upload_cmd = self::build_provider_upload_cmd($provider, $creds, $bucket, $prefix, $slug);
+		$uploader_script = self::build_node_uploader_script($creds, $bucket);
+		$eof = '__JOINERY_UPLOADER_EOF__';
+		$upload_cmd = "php -- upload \"\$NEWEST_BACKUP\" \"\$REMOTE_KEY\" <<'{$eof}'\n{$uploader_script}\n{$eof}";
 
 		// No continue_on_error: if upload fails, halt so (a) the local cleanup step below
 		// does not delete the only surviving copy, and (b) the job is marked failed so the
@@ -486,7 +466,7 @@ class JobCommandBuilder {
 		$steps[] = [
 			'type' => 'ssh',
 			'label' => 'Upload backup to ' . $target->get('bkt_name'),
-			'cmd' => "{$find_newest} && {$check} && {$upload_cmd}",
+			'cmd' => "{$find_newest} && {$check} && {$remote_key} && {$upload_cmd}",
 			'timeout' => 3600,
 		];
 
@@ -501,87 +481,45 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Build the provider-specific upload command.
-	 * Assumes $NEWEST_BACKUP is set in the shell environment.
+	 * Assemble the standalone PHP uploader script that will be heredoc'd onto
+	 * the node. Concatenates S3Signer.php + node_uploader.php + a credentials
+	 * block. The result runs under `php -` on the node with no file deps.
 	 */
-	private static function build_provider_upload_cmd($provider, $creds, $bucket, $prefix, $slug) {
-		$remote_path = "{$prefix}/{$slug}/\$(basename \"\$NEWEST_BACKUP\")";
+	private static function build_node_uploader_script($creds, $bucket) {
+		$signer_path = PathHelper::getIncludePath('plugins/server_manager/includes/S3Signer.php');
+		$dispatcher_path = PathHelper::getIncludePath('plugins/server_manager/includes/node_uploader.php');
 
-		if ($provider === 'b2') {
-			$key_id = escapeshellarg($creds['key_id'] ?? '');
-			$app_key = escapeshellarg($creds['app_key'] ?? '');
-			return "b2 authorize-account {$key_id} {$app_key} && b2 upload-file " . escapeshellarg($bucket) . " \"\$NEWEST_BACKUP\" \"{$remote_path}\"";
-		}
+		$signer = self::strip_php_tags(file_get_contents($signer_path));
+		$dispatcher = self::strip_php_tags(file_get_contents($dispatcher_path));
 
-		// S3-compatible (AWS S3, Linode Object Storage, etc.)
-		$access = $creds['access_key'] ?? '';
-		$secret = $creds['secret_key'] ?? '';
-		$region = $creds['region'] ?? 'us-east-1';
-		$endpoint = $creds['endpoint'] ?? '';
+		$creds_block = '$creds = ' . var_export($creds, true) . ";\n"
+		             . '$bucket = ' . var_export($bucket, true) . ";\n";
 
-		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
-		$cmd = "{$env} aws s3 cp \"\$NEWEST_BACKUP\" \"s3://{$bucket}/{$remote_path}\" --region " . escapeshellarg($region);
-		if ($endpoint) {
-			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
-		}
-		return $cmd;
+		return "<?php\n" . $signer . "\n" . $creds_block . "\n" . $dispatcher;
 	}
 
 	/**
-	 * List backup files on a node (local + cloud if target configured).
-	 * Output is parsed by JobResultProcessor::process_list_backups.
+	 * Strip opening and closing PHP tags so a file body can be concatenated
+	 * inside another `<?php ... ?>` block.
+	 */
+	private static function strip_php_tags($code) {
+		$code = preg_replace('/^\s*<\?php\s*/', '', $code);
+		$code = preg_replace('/\?>\s*$/', '', $code);
+		return $code;
+	}
+
+	/**
+	 * List backup files on a node. Local only — cloud listings are done
+	 * web-server-side via TargetLister when the Backups tab renders.
 	 */
 	public static function build_list_backups($node) {
-		$steps = [
+		return [
 			['type' => 'ssh', 'label' => 'List local backups',
 			 'cmd' => "for f in /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz; do "
 			        . "[ -f \"\$f\" ] && stat --format='LOCAL|%s|%Y|%n' \"\$f\"; "
 			        . "done 2>/dev/null; echo 'LOCAL_LIST_DONE'",
 			 'continue_on_error' => true],
 		];
-
-		$target = self::get_target($node);
-		if ($target) {
-			$slug = $node->get('mgn_slug');
-			$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
-			$creds = $target->get_credentials();
-			$bucket = $target->get('bkt_bucket');
-			$provider = $target->get('bkt_provider');
-
-			$list_cmd = self::build_provider_list_cmd($provider, $creds, $bucket, $prefix, $slug);
-			$steps[] = [
-				'type' => 'ssh', 'label' => 'List cloud backups',
-				'cmd' => $list_cmd,
-				'continue_on_error' => true,
-			];
-		}
-
-		return $steps;
-	}
-
-	/**
-	 * Build provider-specific list command.
-	 */
-	private static function build_provider_list_cmd($provider, $creds, $bucket, $prefix, $slug) {
-		$cloud_path = "{$prefix}/{$slug}/";
-
-		if ($provider === 'b2') {
-			$key_id = escapeshellarg($creds['key_id'] ?? '');
-			$app_key = escapeshellarg($creds['app_key'] ?? '');
-			return "b2 authorize-account {$key_id} {$app_key} && b2 ls --long " . escapeshellarg($bucket) . " " . escapeshellarg($cloud_path) . "; echo 'CLOUD_LIST_DONE'";
-		}
-
-		$access = $creds['access_key'] ?? '';
-		$secret = $creds['secret_key'] ?? '';
-		$region = $creds['region'] ?? 'us-east-1';
-		$endpoint = $creds['endpoint'] ?? '';
-
-		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
-		$cmd = "{$env} aws s3 ls \"s3://{$bucket}/{$cloud_path}\" --region " . escapeshellarg($region);
-		if ($endpoint) {
-			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
-		}
-		return $cmd . "; echo 'CLOUD_LIST_DONE'";
 	}
 
 	/**
@@ -589,12 +527,12 @@ class JobCommandBuilder {
 	 * $params: target ('local', 'cloud', 'both'), local_path, cloud_path, filename
 	 */
 	public static function build_delete_backup($node, $params) {
-		$target = $params['target'] ?? 'local';
+		$which = $params['target'] ?? 'local';
 		$local_path = $params['local_path'] ?? '';
 		$cloud_path = $params['cloud_path'] ?? '';
 		$steps = [];
 
-		if (($target === 'local' || $target === 'both') && $local_path) {
+		if (($which === 'local' || $which === 'both') && $local_path) {
 			$steps[] = [
 				'type' => 'ssh', 'label' => 'Delete local backup',
 				'cmd' => "rm -f " . escapeshellarg($local_path) . " && echo 'LOCAL_DELETE_OK'",
@@ -602,17 +540,20 @@ class JobCommandBuilder {
 			];
 		}
 
-		if (($target === 'cloud' || $target === 'both') && $cloud_path) {
+		if (($which === 'cloud' || $which === 'both') && $cloud_path) {
 			$target = self::get_target($node);
 			if ($target) {
 				$creds = $target->get_credentials();
 				$bucket = $target->get('bkt_bucket');
-				$provider = $target->get('bkt_provider');
 
-				$delete_cmd = self::build_provider_delete_cmd($provider, $creds, $bucket, $cloud_path);
+				$uploader_script = self::build_node_uploader_script($creds, $bucket);
+				$eof = '__JOINERY_UPLOADER_EOF__';
+				$remote_key = escapeshellarg($cloud_path);
+				$cmd = "php -- delete {$remote_key} <<'{$eof}'\n{$uploader_script}\n{$eof}";
+
 				$steps[] = [
 					'type' => 'ssh', 'label' => 'Delete cloud backup',
-					'cmd' => $delete_cmd,
+					'cmd' => $cmd,
 					'continue_on_error' => true,
 				];
 			}
@@ -623,29 +564,6 @@ class JobCommandBuilder {
 		}
 
 		return $steps;
-	}
-
-	/**
-	 * Build provider-specific delete command.
-	 */
-	private static function build_provider_delete_cmd($provider, $creds, $bucket, $cloud_path) {
-		if ($provider === 'b2') {
-			$key_id = escapeshellarg($creds['key_id'] ?? '');
-			$app_key = escapeshellarg($creds['app_key'] ?? '');
-			return "b2 authorize-account {$key_id} {$app_key} && b2 delete-file-version " . escapeshellarg($bucket) . " " . escapeshellarg($cloud_path) . " && echo 'CLOUD_DELETE_OK'";
-		}
-
-		$access = $creds['access_key'] ?? '';
-		$secret = $creds['secret_key'] ?? '';
-		$region = $creds['region'] ?? 'us-east-1';
-		$endpoint = $creds['endpoint'] ?? '';
-
-		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
-		$cmd = "{$env} aws s3 rm \"s3://{$bucket}/{$cloud_path}\" --region " . escapeshellarg($region);
-		if ($endpoint) {
-			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
-		}
-		return $cmd . " && echo 'CLOUD_DELETE_OK'";
 	}
 
 	/**

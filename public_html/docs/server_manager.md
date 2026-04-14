@@ -238,7 +238,7 @@ The **Backups** tab on each node includes a file browser that lists backup files
 - **Unified file table** — shows filename, size, date, and location (Local / Cloud / Both)
 - **Delete** — per-file delete with options: delete local copy, delete cloud copy, or delete everywhere
 
-The file listing is cached on the node record (`mgn_last_backup_list`) and rendered immediately. Click **Scan for Backups** to refresh.
+The local file listing comes from the most recent completed `list_backups` job (a single SSH `ls /backups/`). Cloud listings are fetched live via `TargetLister` on each page render. Click **Scan for Backups** to refresh the local list.
 
 ## Backup Encryption
 
@@ -359,8 +359,6 @@ Represents a remote Joinery instance. Key fields:
 - `mgn_last_status_data` -- JSON from last status check (disk, memory, load, etc.)
 - `mgn_joinery_version` -- Last known version string
 - `mgn_bkt_backup_target_id` -- FK to backup target (null = local only)
-- `mgn_last_backup_list` -- Cached JSON file listing from last backup scan
-- `mgn_last_backup_list_time` -- When the backup list was last refreshed
 
 ### ManagementJob (`mjb_management_jobs`)
 
