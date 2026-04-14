@@ -3,7 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.2
+ * @version 1.3
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -16,18 +16,6 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobComm
 $session = SessionControl::get_instance();
 $session->check_permission(10);
 $session->set_return();
-
-// Handle publish_upgrade action (node-independent, lives on dashboard)
-if ($_POST && isset($_POST['action']) && $_POST['action'] === 'publish_upgrade') {
-	$release_notes = trim($_POST['release_notes'] ?? '');
-	if ($release_notes) {
-		$params = ['release_notes' => $release_notes];
-		$steps = JobCommandBuilder::build_publish_upgrade($params);
-		$job = ManagementJob::createJob(null, 'publish_upgrade', $steps, $params, $session->get_user_id());
-		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
-		exit;
-	}
-}
 
 // Process any completed check_status jobs that haven't been processed yet.
 // This catches cases where the user navigated away from job_detail before the
@@ -59,253 +47,218 @@ $page->admin_header([
 	'session' => $session,
 ]);
 
-// Agent Status
 $agent_online = $agent && $agent->is_online();
-$agent_class = $agent_online ? 'success' : 'danger';
-$agent_label = $agent_online ? 'Online' : 'Offline';
+$agent_class  = $agent_online ? 'success' : 'danger';
+$agent_label  = $agent_online ? 'Online'  : 'Offline';
 ?>
 
-<div class="row mb-4">
-	<div class="col-md-12">
-		<div class="card">
-			<div class="card-body">
-				<h5 class="card-title">Agent Status</h5>
-				<span class="badge bg-<?php echo $agent_class; ?>"><?php echo $agent_label; ?></span>
-				<?php if ($agent): ?>
-					<?php if ($agent->get('ahb_agent_version')): ?>
-						<span class="text-muted ms-2">v<?php echo htmlspecialchars($agent->get('ahb_agent_version')); ?></span>
-					<?php endif; ?>
-					<span class="text-muted ms-2">
-						Last heartbeat: <?php echo LibraryFunctions::convert_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>
-					</span>
+<style>
+	.node-row { cursor: pointer; transition: background-color 0.12s ease; }
+	.node-row:hover { background-color: #f8f9fa; }
+</style>
+
+<!-- Agent Status Bar -->
+<div class="card mb-4">
+	<div class="card-body d-flex justify-content-between align-items-center">
+		<div>
+			<strong>Agent Status:</strong>
+			<span class="badge bg-<?php echo $agent_class; ?> ms-1"><?php echo $agent_label; ?></span>
+			<?php if ($agent): ?>
+				<?php if ($agent->get('ahb_agent_version')): ?>
+					<span class="text-muted ms-2">v<?php echo htmlspecialchars($agent->get('ahb_agent_version')); ?></span>
+				<?php endif; ?>
+				<span class="text-muted ms-2">
+					Last heartbeat: <?php echo LibraryFunctions::convert_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>
+				</span>
+			<?php else: ?>
+				<span class="text-muted ms-2">No agent has connected yet</span>
+			<?php endif; ?>
+		</div>
+		<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
+	</div>
+	<?php if (!$agent_online): ?>
+		<div class="card-footer">
+			<small class="text-muted">
+				<?php if (!$agent): ?>
+					The joinery-agent service runs on the control plane and services all connected sites.
+					Install it here: <code>cd /home/user1/joinery-agent &amp;&amp; make release VERSION=1.0.0 &amp;&amp; sudo bash joinery-agent-installer.sh --verbose</code>
 				<?php else: ?>
-					<span class="text-muted ms-2">No agent has connected yet</span>
+					The agent was last seen at <?php echo LibraryFunctions::convert_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
+					Check: <code>sudo systemctl status joinery-agent</code> &mdash; <code>journalctl -u joinery-agent -f</code>
 				<?php endif; ?>
-				<?php if (!$agent_online): ?>
-					<div class="mt-2">
-						<small class="text-muted">
-							<?php if (!$agent): ?>
-								The joinery-agent service runs on the control plane and services all managed nodes.
-								Install it here: <code>cd /home/user1/joinery-agent && make release VERSION=1.0.0 &amp;&amp; sudo bash joinery-agent-installer.sh --verbose</code>
-							<?php else: ?>
-								The agent was last seen at <?php echo LibraryFunctions::convert_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
-								Check: <code>sudo systemctl status joinery-agent</code> &mdash; <code>journalctl -u joinery-agent -f</code>
-							<?php endif; ?>
-						</small>
-					</div>
-				<?php endif; ?>
-			</div>
+			</small>
 		</div>
-	</div>
+	<?php endif; ?>
 </div>
 
-<!-- Node Cards -->
-<div class="d-flex justify-content-between align-items-center mb-3">
-	<h5 class="mb-0">Managed Nodes</h5>
-	<div>
-		<a href="/admin/server_manager/destinations" class="btn btn-sm btn-outline-secondary">Backup Destinations</a>
-		<a href="/admin/server_manager/node_add" class="btn btn-sm btn-outline-primary">Add Existing Node</a>
-		<a href="/admin/server_manager/install_node_form" class="btn btn-sm btn-primary">Install New Node</a>
-	</div>
-</div>
-<div class="row mb-4">
-	<?php foreach ($nodes as $node): ?>
+<!-- Two-column layout: Nodes (left) | Recent Jobs (right) -->
+<div class="row">
+	<!-- LEFT: Sites -->
+	<div class="col-md-6 mb-4">
 		<?php
-		$status_data = $node->get('mgn_last_status_data');
-		if (is_string($status_data)) {
-			$status_data = json_decode($status_data, true);
-		}
-		$last_check = $node->get('mgn_last_status_check');
-
-		// Check if the most recent check_status job for this node failed
-		$last_job_failed = false;
-		$last_job_q = $db->prepare("SELECT mjb_status FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'check_status' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
-		$last_job_q->execute([$node->key]);
-		$last_job_row = $last_job_q->fetch(PDO::FETCH_ASSOC);
-		if ($last_job_row && $last_job_row['mjb_status'] === 'failed') {
-			$last_job_failed = true;
-		}
-
-		// Dot color reflects actual health, not recency.
-		// A failed most-recent check_status always wins, even if the node has never
-		// had a successful check (no $last_check / $status_data yet).
-		$install_state = $node->get('mgn_install_state');
-		if ($install_state === 'installing') {
-			$status_color = 'info';
-		} elseif ($install_state === 'install_failed') {
-			$status_color = 'danger';
-		} elseif ($last_job_failed) {
-			$status_color = 'danger';
-		} elseif (!$last_check || !$status_data) {
-			$status_color = 'secondary';
-		} elseif (
-			(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
-			(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')
-		) {
-			$status_color = 'danger';
-		} elseif (
-			(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
-			(isset($status_data['load_1m']) && $status_data['load_1m'] > 5)
-		) {
-			$status_color = 'warning';
-		} else {
-			$status_color = 'success';
-		}
+		$pageoptions = [
+			'title' => 'Sites',
+			'altlinks' => [
+				'Connect Site'   => '/admin/server_manager/node_add',
+				'Remote Install' => '/admin/server_manager/install_node_form',
+			],
+		];
+		$page->begin_box($pageoptions);
 		?>
-		<div class="col-md-6 col-lg-4 mb-3">
-			<div class="card">
-				<div class="card-header d-flex justify-content-between align-items-center">
-					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" class="text-decoration-none text-reset"><strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong></a>
-					<span class="badge bg-<?php echo $status_color; ?>">&bull;</span>
-				</div>
-				<div class="card-body">
-					<?php if ($install_state === 'installing'): ?>
-						<p class="mb-1"><span class="badge bg-info">Installing…</span></p>
-					<?php elseif ($install_state === 'install_failed'): ?>
-						<p class="mb-1"><span class="badge bg-danger">Install failed</span></p>
-					<?php endif; ?>
-					<?php if ($node->get('mgn_site_url')): ?>
-						<p class="mb-1"><small><a href="<?php echo htmlspecialchars($node->get('mgn_site_url')); ?>" target="_blank"><?php echo htmlspecialchars($node->get('mgn_site_url')); ?></a></small></p>
-					<?php endif; ?>
-					<?php
-					// Version compare: show a warning when the node's version diverges from
-					// the control plane's VERSION file in either direction.
-					$node_version = $node->get('mgn_joinery_version');
-					if ($node_version):
-						$cp_version = LibraryFunctions::get_joinery_version();
-						$version_cmp = ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version))
-							? version_compare($node_version, $cp_version)
-							: null;
-					?>
-						<p class="mb-1"><small>Version: <?php echo htmlspecialchars($node_version); ?>
-						<?php if ($version_cmp === -1): ?>
-							<span class="badge bg-warning" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?> — upgrade this node">upgrade available</span>
-						<?php elseif ($version_cmp === 1): ?>
-							<span class="badge bg-danger" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?> — node ahead, may have been upgraded out-of-band">ahead of control plane</span>
-						<?php endif; ?>
-						</small></p>
-					<?php endif; ?>
-					<?php if ($status_data): ?>
-						<?php if (isset($status_data['disk_usage_percent'])): ?>
-							<p class="mb-1"><small>Disk: <?php echo $status_data['disk_usage_percent']; ?>% used</small></p>
-						<?php endif; ?>
-						<?php if (isset($status_data['memory_used_mb']) && isset($status_data['memory_total_mb'])): ?>
-							<p class="mb-1"><small>Memory: <?php echo $status_data['memory_used_mb']; ?> / <?php echo $status_data['memory_total_mb']; ?> MB</small></p>
-						<?php endif; ?>
-						<?php if (isset($status_data['load_1m'])): ?>
-							<p class="mb-1"><small>Load: <?php echo $status_data['load_1m']; ?></small></p>
-						<?php endif; ?>
-					<?php endif; ?>
-					<?php if ($last_check): ?>
-						<p class="mb-0 text-muted"><small>Checked: <?php echo LibraryFunctions::convert_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?></small></p>
-					<?php endif; ?>
-				</div>
-				<div class="card-footer">
-					<form method="post" action="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" style="display:inline">
-						<input type="hidden" name="action" value="check_status">
-						<button type="submit" class="btn btn-sm btn-outline-primary">Check Status</button>
-					</form>
-					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" class="btn btn-sm btn-outline-secondary">Manage</a>
-				</div>
+
+		<?php if (count($nodes) == 0): ?>
+			<div class="alert alert-info mb-0">
+				<strong>No sites configured yet.</strong>
+				<a href="/admin/server_manager/node_add" class="alert-link">Connect your first site</a> to get started.
 			</div>
-		</div>
-	<?php endforeach; ?>
+		<?php else: ?>
+			<div class="list-group list-group-flush">
+				<?php foreach ($nodes as $node): ?>
+					<?php
+					$status_data = $node->get('mgn_last_status_data');
+					if (is_string($status_data)) $status_data = json_decode($status_data, true);
+					$last_check = $node->get('mgn_last_status_check');
+
+					// Most recent check_status job failed?
+					$last_job_failed = false;
+					$last_job_q = $db->prepare("SELECT mjb_status FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'check_status' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+					$last_job_q->execute([$node->key]);
+					$last_job_row = $last_job_q->fetch(PDO::FETCH_ASSOC);
+					if ($last_job_row && $last_job_row['mjb_status'] === 'failed') {
+						$last_job_failed = true;
+					}
+
+					$install_state = $node->get('mgn_install_state');
+					if ($install_state === 'installing') {
+						$status_color = 'info';
+					} elseif ($install_state === 'install_failed') {
+						$status_color = 'danger';
+					} elseif ($last_job_failed) {
+						$status_color = 'danger';
+					} elseif (!$last_check || !$status_data) {
+						$status_color = 'secondary';
+					} elseif (
+						(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
+						(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')
+					) {
+						$status_color = 'danger';
+					} elseif (
+						(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
+						(isset($status_data['load_1m']) && $status_data['load_1m'] > 5)
+					) {
+						$status_color = 'warning';
+					} else {
+						$status_color = 'success';
+					}
+
+					// Version comparison
+					$node_version = $node->get('mgn_joinery_version');
+					$version_cmp = null;
+					if ($node_version) {
+						$cp_version = LibraryFunctions::get_joinery_version();
+						if ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version)) {
+							$version_cmp = version_compare($node_version, $cp_version);
+						}
+					}
+					?>
+					<div class="list-group-item node-row d-flex justify-content-between align-items-center"
+						data-href="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>"
+						onclick="if(!event.target.closest('form,button,input,a')) window.location=this.dataset.href">
+						<div class="d-flex align-items-center" style="min-width:0;flex:1">
+							<span class="badge bg-<?php echo $status_color; ?> me-2">&bull;</span>
+							<div style="min-width:0">
+								<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
+								<?php if ($install_state === 'installing'): ?>
+									<span class="badge bg-info ms-1">Installing…</span>
+								<?php elseif ($install_state === 'install_failed'): ?>
+									<span class="badge bg-danger ms-1">Install failed</span>
+								<?php endif; ?>
+								<?php if ($version_cmp === -1): ?>
+									<span class="badge bg-warning ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?>">upgrade available</span>
+								<?php elseif ($version_cmp === 1): ?>
+									<span class="badge bg-danger ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?>">ahead of control plane</span>
+								<?php endif; ?>
+								<?php if ($node->get('mgn_site_url')): ?>
+									<div><small class="text-muted"><?php echo htmlspecialchars($node->get('mgn_site_url')); ?></small></div>
+								<?php endif; ?>
+							</div>
+						</div>
+						<form method="post" action="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" style="flex-shrink:0">
+							<input type="hidden" name="action" value="check_status">
+							<button type="submit" class="btn btn-sm btn-outline-primary">Check Status</button>
+						</form>
+					</div>
+				<?php endforeach; ?>
+			</div>
+		<?php endif; ?>
+		<?php $page->end_box(); ?>
+	</div>
+
+	<!-- RIGHT: Recent Jobs -->
+	<div class="col-md-6 mb-4">
+		<?php
+		$pageoptions = ['title' => 'Recent Jobs', 'altlinks' => ['All Jobs' => '/admin/server_manager/jobs']];
+		$page->begin_box($pageoptions);
+		?>
+		<table class="table table-striped table-sm mb-0">
+			<thead>
+				<tr>
+					<th>ID</th>
+					<th>Site</th>
+					<th>Type</th>
+					<th>Status</th>
+					<th>Started</th>
+					<th>Dur.</th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ($recent_jobs as $job): ?>
+					<?php
+					$status_class = match($job->get('mjb_status')) {
+						'completed' => 'success',
+						'failed' => 'danger',
+						'running' => 'primary',
+						'cancelled' => 'secondary',
+						default => 'warning',
+					};
+					$duration = '';
+					if ($job->get('mjb_started_time') && $job->get('mjb_completed_time')) {
+						$diff = strtotime($job->get('mjb_completed_time')) - strtotime($job->get('mjb_started_time'));
+						$duration = $diff < 60 ? "{$diff}s" : round($diff / 60, 1) . 'm';
+					} elseif ($job->get('mjb_started_time')) {
+						$diff = time() - strtotime($job->get('mjb_started_time'));
+						$duration = ($diff < 60 ? "{$diff}s" : round($diff / 60, 1) . 'm') . '...';
+					}
+
+					$node_name = '-';
+					$node_id = $job->get('mjb_mgn_node_id');
+					if ($node_id) {
+						try {
+							$job_node = new ManagedNode($node_id, TRUE);
+							$node_name = $job_node->get('mgn_name');
+						} catch (Exception $e) {
+							$node_name = "Node #{$node_id}";
+						}
+					}
+					?>
+					<tr>
+						<td><a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>">#<?php echo $job->key; ?></a></td>
+						<td><?php echo htmlspecialchars($node_name); ?></td>
+						<td><?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?></td>
+						<td><span class="badge bg-<?php echo $status_class; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span></td>
+						<td><?php echo $job->get('mjb_started_time') ? LibraryFunctions::convert_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') : '-'; ?></td>
+						<td><?php echo $duration; ?></td>
+					</tr>
+				<?php endforeach; ?>
+				<?php if (count($recent_jobs) == 0): ?>
+					<tr><td colspan="6" class="text-muted text-center">No jobs yet</td></tr>
+				<?php endif; ?>
+			</tbody>
+		</table>
+		<?php $page->end_box(); ?>
+	</div>
 </div>
 
-<?php if (count($nodes) == 0): ?>
-	<div class="alert alert-info">
-		<strong>No managed nodes configured yet.</strong>
-		Nodes represent the remote Joinery servers you want to manage (backups, updates, status checks).
-		<a href="/admin/server_manager/node_add" class="alert-link">Add your first node</a> to get started.
-		You will need: the server's SSH host/IP, an SSH key path, and (for Docker setups) the container name.
-	</div>
-<?php endif; ?>
-
-<!-- Publish Upgrade -->
 <?php
-$pageoptions = ['title' => 'Publish New Upgrade'];
-$page->begin_box($pageoptions);
-?>
-<p class="text-muted">Build upgrade archives from the current control plane source code.</p>
-<form method="post">
-	<input type="hidden" name="action" value="publish_upgrade">
-	<div class="row">
-		<div class="col-md-8">
-			<textarea name="release_notes" class="form-control form-control-sm" rows="2" placeholder="Describe what changed in this release..." required></textarea>
-		</div>
-		<div class="col-md-4 d-flex align-items-end">
-			<button type="submit" class="btn btn-sm btn-primary">Publish Upgrade</button>
-		</div>
-	</div>
-</form>
-<?php
-$page->end_box();
-?>
-
-<!-- Recent Jobs -->
-<?php
-$pageoptions = ['title' => 'Recent Jobs', 'altlinks' => ['All Jobs' => '/admin/server_manager/jobs']];
-$page->begin_box($pageoptions);
-?>
-
-<table class="table table-striped table-sm">
-	<thead>
-		<tr>
-			<th>ID</th>
-			<th>Node</th>
-			<th>Type</th>
-			<th>Status</th>
-			<th>Started</th>
-			<th>Duration</th>
-		</tr>
-	</thead>
-	<tbody>
-		<?php foreach ($recent_jobs as $job): ?>
-			<?php
-			$status_class = match($job->get('mjb_status')) {
-				'completed' => 'success',
-				'failed' => 'danger',
-				'running' => 'primary',
-				'cancelled' => 'secondary',
-				default => 'warning',
-			};
-			$duration = '';
-			if ($job->get('mjb_started_time') && $job->get('mjb_completed_time')) {
-				$diff = strtotime($job->get('mjb_completed_time')) - strtotime($job->get('mjb_started_time'));
-				$duration = $diff < 60 ? "{$diff}s" : round($diff / 60, 1) . 'm';
-			} elseif ($job->get('mjb_started_time')) {
-				$diff = time() - strtotime($job->get('mjb_started_time'));
-				$duration = ($diff < 60 ? "{$diff}s" : round($diff / 60, 1) . 'm') . '...';
-			}
-
-			// Look up node name
-			$node_name = '-';
-			$node_id = $job->get('mjb_mgn_node_id');
-			if ($node_id) {
-				try {
-					$job_node = new ManagedNode($node_id, TRUE);
-					$node_name = $job_node->get('mgn_name');
-				} catch (Exception $e) {
-					$node_name = "Node #{$node_id}";
-				}
-			}
-			?>
-			<tr>
-				<td><a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>">#<?php echo $job->key; ?></a></td>
-				<td><?php echo htmlspecialchars($node_name); ?></td>
-				<td><?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?></td>
-				<td><span class="badge bg-<?php echo $status_class; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span></td>
-				<td><?php echo $job->get('mjb_started_time') ? LibraryFunctions::convert_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') : '-'; ?></td>
-				<td><?php echo $duration; ?></td>
-			</tr>
-		<?php endforeach; ?>
-		<?php if (count($recent_jobs) == 0): ?>
-			<tr><td colspan="6" class="text-muted text-center">No jobs yet</td></tr>
-		<?php endif; ?>
-	</tbody>
-</table>
-
-<?php
-$page->end_box();
 $page->admin_footer();
 ?>
