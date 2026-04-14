@@ -171,8 +171,7 @@ Health dot colors reflect actual server health, not check recency:
 
 | Job Type | Description | Destructive |
 |----------|-------------|-------------|
-| `test_connection` | Verify SSH connectivity to a node | No |
-| `check_status` | Gather disk, memory, uptime, PostgreSQL, version info | No |
+| `check_status` | SSH-probe disk, memory, uptime, PostgreSQL, version; subsumes the old `test_connection` since its first step is the SSH handshake | No |
 | `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
 | `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |
 | `fetch_backup` | SCP a backup file from remote to control plane | No |

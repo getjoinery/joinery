@@ -59,13 +59,6 @@ if ($_POST && isset($_POST['action'])) {
 		exit;
 	}
 
-	if ($action === 'test_connection') {
-		$steps = JobCommandBuilder::build_test_connection($node);
-		$job = ManagementJob::createJob($node->key, 'test_connection', $steps, null, $session->get_user_id());
-		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
-		exit;
-	}
-
 	// Backup actions
 	if ($action === 'backup_database') {
 		$params = ['encryption' => !empty($_POST['encryption'])];
@@ -96,9 +89,8 @@ if ($_POST && isset($_POST['action'])) {
 	// Database actions
 	if ($action === 'copy_database') {
 		$source_id = intval($_POST['source_node_id'] ?? 0);
-		$confirm = !empty($_POST['confirm_overwrite']);
 
-		if ($source_id && $confirm) {
+		if ($source_id) {
 			if ($source_id === $node->key) {
 				$session->save_message(new DisplayMessage(
 					'Source and target nodes must be different.',
@@ -107,7 +99,7 @@ if ($_POST && isset($_POST['action'])) {
 			} else {
 				try {
 					$source_node = new ManagedNode($source_id, TRUE);
-					$params = ['source_node_id' => $source_id, 'target_node_id' => $node->key, 'confirm_overwrite' => true];
+					$params = ['source_node_id' => $source_id, 'target_node_id' => $node->key];
 					$steps = JobCommandBuilder::build_copy_database($source_node, $node, $params);
 					$job = ManagementJob::createJob($node->key, 'copy_database', $steps, $params, $session->get_user_id());
 					header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
@@ -119,31 +111,39 @@ if ($_POST && isset($_POST['action'])) {
 					));
 				}
 			}
-		} elseif (!$confirm) {
-			$session->save_message(new DisplayMessage(
-				'You must confirm the database overwrite.',
-				'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-			));
+		}
+		header('Location: ' . $base_url . '&tab=database');
+		exit;
+	}
+
+	if ($action === 'copy_database_local') {
+		$source_db_name = trim($_POST['source_db_name'] ?? '');
+		if ($source_db_name) {
+			$params = ['source_db_name' => $source_db_name];
+			$steps = JobCommandBuilder::build_copy_database_by_name($node, $params);
+			$job = ManagementJob::createJob($node->key, 'copy_database_local', $steps, $params, $session->get_user_id());
+			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
+			exit;
 		}
 		header('Location: ' . $base_url . '&tab=database');
 		exit;
 	}
 
 	if ($action === 'restore_database') {
-		$backup_path = trim($_POST['backup_path'] ?? '');
-		$confirm = !empty($_POST['confirm_overwrite']);
+		$filename     = trim($_POST['backup_filename'] ?? '');
+		$local_path   = trim($_POST['backup_local_path'] ?? '');
+		$cloud_path   = trim($_POST['backup_cloud_path'] ?? '');
 
-		if ($backup_path && $confirm) {
-			$params = ['backup_path' => $backup_path, 'confirm_overwrite' => true];
+		if ($filename && ($local_path || $cloud_path)) {
+			$params = [
+				'filename'   => $filename,
+				'local_path' => $local_path ?: null,
+				'cloud_path' => $cloud_path ?: null,
+			];
 			$steps = JobCommandBuilder::build_restore_database($node, $params);
 			$job = ManagementJob::createJob($node->key, 'restore_database', $steps, $params, $session->get_user_id());
 			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 			exit;
-		} elseif (!$confirm) {
-			$session->save_message(new DisplayMessage(
-				'You must confirm the database overwrite.',
-				'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-			));
 		}
 		header('Location: ' . $base_url . '&tab=database');
 		exit;
@@ -303,6 +303,10 @@ if (!empty($display_messages)) {
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'jobs' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=jobs">Jobs</a></li>
 </ul>
 
+<form id="nodeActionCheckStatus" method="post" action="<?php echo $base_url; ?>" style="display:none">
+	<input type="hidden" name="action" value="check_status">
+</form>
+
 <?php
 // ============================================================
 // OVERVIEW TAB
@@ -352,10 +356,10 @@ if ($tab === 'overview') {
 		$last_job_failed = true;
 	}
 
-	if (!$last_check || !$status_data) {
-		$status_color = 'secondary';
-	} elseif ($last_job_failed) {
+	if ($last_job_failed) {
 		$status_color = 'danger';
+	} elseif (!$last_check || !$status_data) {
+		$status_color = 'secondary';
 	} elseif (
 		(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
 		(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')
@@ -370,13 +374,28 @@ if ($tab === 'overview') {
 		$status_color = 'success';
 	}
 
-	echo '<div class="card mb-3"><div class="card-body">';
-	echo '<div class="d-flex align-items-center mb-2">';
+	echo '<div class="mb-3">';
+	echo '<div class="d-flex justify-content-between align-items-center py-2 px-3 mb-2">';
+	echo '<div class="d-flex align-items-center">';
 	echo '<span class="badge bg-' . $status_color . ' me-2">&bull;</span>';
 	echo '<strong>' . $node_name . '</strong>';
 	if ($node->get('mgn_site_url')) {
 		echo '<a href="' . htmlspecialchars($node->get('mgn_site_url')) . '" target="_blank" class="ms-2 small">' . htmlspecialchars($node->get('mgn_site_url')) . '</a>';
 	}
+	echo '</div>';
+	?>
+	<div class="btn-group" style="position:relative">
+		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
+		<ul class="dropdown-menu dropdown-menu-end" style="display:none;position:absolute;right:0;top:100%">
+			<li><a class="dropdown-item" href="javascript:void(0)" onclick="document.getElementById('nodeActionCheckStatus').submit()">Check Status</a></li>
+			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
+			<?php if (!$node->get('mgn_delete_time')): ?>
+				<li><hr class="dropdown-divider"></li>
+				<li><a class="dropdown-item text-danger" href="<?php echo $base_url; ?>&action=delete" onclick="return confirm('Delete this node?')">Delete Node</a></li>
+			<?php endif; ?>
+		</ul>
+	</div>
+	<?php
 	echo '</div>';
 
 	if ($status_data) {
@@ -404,11 +423,6 @@ if ($tab === 'overview') {
 		echo '<small class="text-muted">No status check has been run yet.</small>';
 	}
 
-	echo '</div></div>';
-
-	echo '<div class="mb-3">';
-	echo '<form method="post" style="display:inline"><input type="hidden" name="action" value="check_status"><button type="submit" class="btn btn-sm btn-outline-primary">Check Status</button></form> ';
-	echo '<form method="post" style="display:inline"><input type="hidden" name="action" value="test_connection"><button type="submit" class="btn btn-sm btn-outline-secondary">Test Connection</button></form>';
 	echo '</div>';
 
 	// Recent jobs for this node
@@ -451,15 +465,9 @@ if ($tab === 'overview') {
 
 	$page->end_box();
 
-	// Connection settings — collapsed by default
-	echo '<div class="mb-3">';
-	echo '<a class="btn btn-sm btn-outline-secondary" href="javascript:void(0)" onclick="var el=document.getElementById(\'connectionSettings\');el.style.display=el.style.display===\'none\'?\'block\':\'none\';this.textContent=el.style.display===\'none\'?\'Edit Connection Settings\':\'Hide Connection Settings\'">Edit Connection Settings</a>';
-	if (!$node->get('mgn_delete_time')) {
-		echo ' <a href="' . $base_url . '&action=delete" class="btn btn-sm btn-outline-danger" onclick="return confirm(\'Delete this node?\')">Delete Node</a>';
-	}
-	echo '</div>';
-
-	echo '<div id="connectionSettings" style="display:none">';
+	// Connection settings — open when arriving from the Actions menu (?edit=1), otherwise collapsed
+	$edit_open = !empty($_GET['edit']);
+	echo '<div id="connectionSettings" style="display:' . ($edit_open ? 'block' : 'none') . '">';
 
 	$default_ssh_key = '/home/user1/.ssh/id_ed25519_claude';
 
@@ -804,16 +812,21 @@ document.addEventListener('click', function(e) {
 // ============================================================
 } elseif ($tab === 'database') {
 
-	// Load other nodes for the copy source dropdown
+	// Load cached status data (for Internal Copy db_list) and backup list (for Restore dropdown)
+	$status_data = $node->get('mgn_last_status_data');
+	if (is_string($status_data)) $status_data = json_decode($status_data, true);
+
+	$backup_list_raw = $node->get('mgn_last_backup_list');
+	if (is_string($backup_list_raw)) $backup_list_raw = json_decode($backup_list_raw, true);
+	$backup_list_time = $node->get('mgn_last_backup_list_time');
+
+	// Load other nodes for the cross-node copy source dropdown
 	$other_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
 	$other_nodes->load();
 
 	$pageoptions = ['title' => 'Copy Database to ' . $node_name];
 	$page->begin_box($pageoptions);
 ?>
-	<div class="alert alert-warning">
-		<strong>Destructive Operation:</strong> Copying a database will overwrite this node's database. An automatic backup is taken before overwrite.
-	</div>
 	<form method="post">
 		<input type="hidden" name="action" value="copy_database">
 		<div class="row mb-3">
@@ -823,7 +836,7 @@ document.addEventListener('click', function(e) {
 					<option value="">Select source...</option>
 					<?php foreach ($other_nodes as $n): ?>
 						<?php if ($n->key != $node->key): ?>
-							<option value="<?php echo $n->key; ?>"><?php echo htmlspecialchars($n->get('mgn_name')); ?></option>
+							<option value="<?php echo $n->key; ?>"><?php echo htmlspecialchars($n->get('mgn_name')); ?> (<?php echo htmlspecialchars($n->get('mgn_slug')); ?>)</option>
 						<?php endif; ?>
 					<?php endforeach; ?>
 				</select>
@@ -833,36 +846,111 @@ document.addEventListener('click', function(e) {
 			</div>
 			<div class="col-md-5">
 				<label class="form-label"><strong>Target</strong> (this node)</label>
-				<input type="text" class="form-control" value="<?php echo $node_name; ?>" disabled>
+				<input type="text" class="form-control" value="<?php echo $node_name; ?> (<?php echo htmlspecialchars($node->get('mgn_slug')); ?>)" disabled>
 			</div>
-		</div>
-		<div class="mb-3 form-check">
-			<input type="checkbox" name="confirm_overwrite" class="form-check-input" id="copy_confirm" value="1">
-			<label class="form-check-label" for="copy_confirm"><strong>I confirm I want to overwrite this node's database</strong></label>
 		</div>
 		<button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will overwrite the database on <?php echo $node_name; ?>.')">Copy Database</button>
 	</form>
 <?php
 	$page->end_box();
 
+	$pageoptions = ['title' => 'Internal Copy'];
+	$page->begin_box($pageoptions);
+	$db_list = $status_data['db_list'] ?? [];
+	$current_db = $status_data['current_db'] ?? null;
+	$skip_dbs = [$current_db, 'postgres'];
+	$other_dbs = array_values(array_filter($db_list, fn($d) => !in_array($d, $skip_dbs, true)));
+?>
+	<?php if (empty($db_list)): ?>
+		<p class="text-muted">Run <strong>Check Status</strong> from the Overview tab to discover databases on this server.</p>
+	<?php elseif (empty($other_dbs)): ?>
+		<p class="text-muted">No other databases found on this server<?php echo $current_db ? " (current: <strong>" . htmlspecialchars($current_db) . "</strong>)" : ''; ?>.</p>
+	<?php else: ?>
+		<form method="post">
+			<input type="hidden" name="action" value="copy_database_local">
+			<div class="row mb-3">
+				<div class="col-md-5">
+					<label class="form-label"><strong>Source Database</strong></label>
+					<select name="source_db_name" class="form-select" required>
+						<option value="">Select source...</option>
+						<?php foreach ($other_dbs as $db): ?>
+							<option value="<?php echo htmlspecialchars($db); ?>"><?php echo htmlspecialchars($db); ?></option>
+						<?php endforeach; ?>
+					</select>
+				</div>
+				<div class="col-md-2 text-center align-self-end">
+					<p class="mb-2"><strong>&rarr;</strong></p>
+				</div>
+				<div class="col-md-5">
+					<label class="form-label"><strong>Target</strong> (this node)</label>
+					<input type="text" class="form-control" value="<?php echo $current_db ? htmlspecialchars($current_db) : $node_name; ?>" disabled>
+				</div>
+			</div>
+			<button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will overwrite the database on <?php echo $node_name; ?>.')">Copy Database</button>
+		</form>
+	<?php endif; ?>
+<?php
+	$page->end_box();
+
+	// Filter backup list to database backups only (.sql.gz / .sql.gz.enc)
+	$restore_files = [];
+	if (!empty($backup_list_raw['files'])) {
+		foreach ($backup_list_raw['files'] as $f) {
+			$fn = $f['filename'] ?? '';
+			if (preg_match('/\.sql\.gz(\.enc)?$/', $fn)) {
+				$restore_files[] = $f;
+			}
+		}
+	}
+
 	$pageoptions = ['title' => 'Restore Database from Backup'];
 	$page->begin_box($pageoptions);
 ?>
-	<div class="alert alert-warning">
-		<strong>Destructive Operation:</strong> Restoring will overwrite the current database. An automatic backup is taken before restore.
-	</div>
-	<form method="post">
-		<input type="hidden" name="action" value="restore_database">
-		<div class="mb-3">
-			<label class="form-label">Backup file path (on the server)</label>
-			<input type="text" name="backup_path" class="form-control" placeholder="/backups/backup_20260410.sql.gz" required>
-		</div>
-		<div class="mb-3 form-check">
-			<input type="checkbox" name="confirm_overwrite" class="form-check-input" id="restore_confirm" value="1">
-			<label class="form-check-label" for="restore_confirm"><strong>I confirm I want to overwrite the database</strong></label>
-		</div>
-		<button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will overwrite the database.')">Restore Database</button>
-	</form>
+	<?php if (empty($restore_files)): ?>
+		<p class="text-muted">
+			No database backups found.
+			<?php if ($backup_list_time): ?>
+				Last refreshed <?php echo LibraryFunctions::convert_time($backup_list_time, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?>.
+			<?php endif; ?>
+			Go to the <a href="<?php echo $base_url; ?>&tab=backups">Backups tab</a> to refresh the list.
+		</p>
+	<?php else: ?>
+		<form method="post">
+			<input type="hidden" name="action" value="restore_database">
+			<div class="mb-3">
+				<label class="form-label">Backup file</label>
+				<select name="backup_filename" id="restore_backup_select" class="form-select" required
+					onchange="
+						var opts = this.options[this.selectedIndex].dataset;
+						document.getElementById('restore_local_path').value = opts.localPath || '';
+						document.getElementById('restore_cloud_path').value = opts.cloudPath || '';
+					">
+					<option value="">Select backup...</option>
+					<?php foreach ($restore_files as $f): ?>
+						<?php
+						$loc_badge = match($f['location'] ?? '') {
+							'both'  => ' [local + cloud]',
+							'cloud' => ' [cloud only]',
+							default => ' [local]',
+						};
+						$label = $f['filename'] . ' — ' . ($f['size'] ?? '') . ' — ' . ($f['date'] ?? '') . $loc_badge;
+						?>
+						<option value="<?php echo htmlspecialchars($f['filename']); ?>"
+							data-local-path="<?php echo htmlspecialchars($f['local_path'] ?? ''); ?>"
+							data-cloud-path="<?php echo htmlspecialchars($f['cloud_path'] ?? ''); ?>">
+							<?php echo htmlspecialchars($label); ?>
+						</option>
+					<?php endforeach; ?>
+				</select>
+				<?php if ($backup_list_time): ?>
+					<small class="text-muted">List refreshed <?php echo LibraryFunctions::convert_time($backup_list_time, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?>. <a href="<?php echo $base_url; ?>&tab=backups">Refresh</a></small>
+				<?php endif; ?>
+			</div>
+			<input type="hidden" name="backup_local_path" id="restore_local_path" value="">
+			<input type="hidden" name="backup_cloud_path" id="restore_cloud_path" value="">
+			<button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will overwrite the database.')">Restore Database</button>
+		</form>
+	<?php endif; ?>
 <?php
 	$page->end_box();
 
@@ -879,7 +967,7 @@ document.addEventListener('click', function(e) {
 			<?php
 			$count = 0;
 			foreach ($db_jobs as $job):
-				if (!in_array($job->get('mjb_job_type'), ['copy_database', 'restore_database'])) continue;
+				if (!in_array($job->get('mjb_job_type'), ['copy_database', 'copy_database_local', 'restore_database'])) continue;
 				$count++;
 				if ($count > 10) break;
 				$sc = match($job->get('mjb_status')) {
@@ -995,7 +1083,7 @@ document.addEventListener('click', function(e) {
 					<label class="form-label">Type</label>
 					<select name="job_type" class="form-select form-select-sm">
 						<option value="">All</option>
-						<?php foreach (['test_connection', 'check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'restore_database', 'apply_update', 'refresh_archives'] as $t): ?>
+						<?php foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'apply_update', 'refresh_archives'] as $t): ?>
 							<option value="<?php echo $t; ?>" <?php echo (isset($_GET['job_type']) && $_GET['job_type'] === $t) ? 'selected' : ''; ?>><?php echo str_replace('_', ' ', $t); ?></option>
 						<?php endforeach; ?>
 					</select>
