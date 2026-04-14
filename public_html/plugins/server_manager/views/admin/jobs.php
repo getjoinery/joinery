@@ -84,7 +84,7 @@ $page->admin_header([
 				<label class="form-label">Type</label>
 				<select name="job_type" class="form-select form-select-sm">
 					<option value="">All</option>
-					<?php foreach (['test_connection', 'check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'restore_database', 'apply_update', 'refresh_archives', 'publish_upgrade'] as $t): ?>
+					<?php foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'apply_update', 'refresh_archives', 'publish_upgrade'] as $t): ?>
 						<option value="<?php echo $t; ?>" <?php echo (isset($_GET['job_type']) && $_GET['job_type'] === $t) ? 'selected' : ''; ?>><?php echo str_replace('_', ' ', $t); ?></option>
 					<?php endforeach; ?>
 				</select>

@@ -44,15 +44,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Test SSH connectivity to a node.
-	 */
-	public static function build_test_connection($node) {
-		return [
-			['type' => 'ssh', 'label' => 'Test SSH connection', 'cmd' => 'echo "Connection successful" && hostname && whoami'],
-		];
-	}
-
-	/**
 	 * Check system health metrics on a node.
 	 */
 	public static function build_check_status($node) {
@@ -74,6 +65,14 @@ class JobCommandBuilder {
 			$steps[] = ['type' => 'ssh', 'label' => 'Container stats',
 						'cmd' => "docker stats --no-stream {$container}", 'on_host' => true];
 		}
+
+		// List databases in this node's PostgreSQL instance for the Internal Copy dropdown.
+		// For Docker this runs inside the container; for bare-metal on the host. Either way,
+		// it returns the databases accessible to the node's DB user.
+		$creds = self::get_db_credentials_script($node);
+		$steps[] = ['type' => 'ssh', 'label' => 'List databases',
+			'cmd' => "{$creds} && echo \"CURRENT_DB=\$DB_NAME\" && psql -U \"\$DB_USER\" -tAc \"SELECT 'DB:' || datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres') ORDER BY datname\"",
+			'continue_on_error' => true];
 
 		return $steps;
 	}
@@ -234,23 +233,76 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Restore a database from a backup file already on the target server.
+	 * Copy a database by name within the same PostgreSQL instance (bare-metal nodes).
+	 * Source and target share the same DB user/credentials; no web-root lookup needed.
+	 *
+	 * Params:
+	 *   source_db_name - name of the source database in the same PG instance
+	 */
+	public static function build_copy_database_by_name($node, $params = []) {
+		$creds = self::get_db_credentials_script($node);
+		$source_db = $params['source_db_name'];
+		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
+		$dump_file = "/tmp/local_copy_{$transfer_id}.sql.gz";
+
+		return [
+			['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
+			 'cmd' => "{$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			 'timeout' => 3600],
+			['type' => 'ssh', 'label' => "Dump source database ({$source_db})",
+			 'cmd' => "{$creds} && pg_dump -U \"\$DB_USER\" " . escapeshellarg($source_db) . " | gzip > {$dump_file}",
+			 'timeout' => 3600],
+			['type' => 'ssh', 'label' => 'Restore to target',
+			 'cmd' => "{$creds} && gunzip -c {$dump_file} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
+			 'timeout' => 3600],
+			['type' => 'ssh', 'label' => 'Clean up temp dump',
+			 'cmd' => "rm -f {$dump_file}", 'continue_on_error' => true],
+		];
+	}
+
+	/**
+	 * Restore a database from a backup file (local or cloud).
 	 * Auto-prepends a backup before overwrite.
+	 * If the file is cloud-only, downloads it to /backups/ first.
+	 *
+	 * Params:
+	 *   filename   - original filename (used for cloud download target)
+	 *   local_path - path on server if file exists locally (may be null)
+	 *   cloud_path - provider path if file exists in cloud (may be null)
 	 */
 	public static function build_restore_database($node, $params) {
-		$creds = self::get_db_credentials_script($node);
-		$backup_path = $params['backup_path'];
+		$creds      = self::get_db_credentials_script($node);
+		$local_path = $params['local_path'] ?? $params['backup_path'] ?? null;
+		$cloud_path = $params['cloud_path'] ?? null;
+		$filename   = $params['filename'] ?? basename((string)($local_path ?: $cloud_path));
 
 		$steps = [];
 
-		// Safety: auto-backup current database first
+		// Auto-backup target before overwrite
 		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
 			'cmd' => "{$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
 			'timeout' => 3600];
 
+		// If cloud-only: download to /backups/ on the remote server first
+		if (!$local_path && $cloud_path) {
+			$dest = self::get_destination($node);
+			if ($dest) {
+				$cred_vals = $dest->get_credentials();
+				$bucket    = $dest->get('bkd_bucket');
+				$provider  = $dest->get('bkd_provider');
+				$dl_path   = '/backups/' . basename($filename);
+				$dl_cmd    = self::build_provider_download_cmd($provider, $cred_vals, $bucket, $cloud_path, $dl_path);
+				$steps[] = ['type' => 'ssh', 'label' => 'Download backup from cloud',
+					'cmd' => $dl_cmd, 'timeout' => 3600];
+				$local_path = $dl_path;
+			}
+		}
+
+		$restore_path = escapeshellarg($local_path);
+
 		// Restore
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database from backup',
-			'cmd' => "{$creds} && gunzip -c {$backup_path} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
+			'cmd' => "{$creds} && gunzip -c {$restore_path} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
 			'timeout' => 3600];
 
 		// Verify
@@ -258,6 +310,33 @@ class JobCommandBuilder {
 			'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c \"SELECT count(*) AS table_count FROM information_schema.tables WHERE table_schema = 'public'\""];
 
 		return $steps;
+	}
+
+	/**
+	 * Build provider-specific download command.
+	 * Downloads a cloud file to a local path on the remote server.
+	 */
+	private static function build_provider_download_cmd($provider, $creds, $bucket, $cloud_path, $local_path) {
+		$local_escaped = escapeshellarg($local_path);
+
+		if ($provider === 'b2') {
+			$key_id  = escapeshellarg($creds['key_id'] ?? '');
+			$app_key = escapeshellarg($creds['app_key'] ?? '');
+			$cp      = escapeshellarg($cloud_path);
+			return "b2 authorize-account {$key_id} {$app_key} && b2 download-file-by-name " . escapeshellarg($bucket) . " {$cp} {$local_escaped}";
+		}
+
+		// S3-compatible
+		$access   = $creds['access_key'] ?? '';
+		$secret   = $creds['secret_key'] ?? '';
+		$region   = $creds['region'] ?? 'us-east-1';
+		$endpoint = $creds['endpoint'] ?? '';
+		$env = "AWS_ACCESS_KEY_ID=" . escapeshellarg($access) . " AWS_SECRET_ACCESS_KEY=" . escapeshellarg($secret);
+		$cmd = "{$env} aws s3 cp \"s3://{$bucket}/{$cloud_path}\" {$local_escaped} --region " . escapeshellarg($region);
+		if ($endpoint) {
+			$cmd .= " --endpoint-url " . escapeshellarg($endpoint);
+		}
+		return $cmd;
 	}
 
 	/**

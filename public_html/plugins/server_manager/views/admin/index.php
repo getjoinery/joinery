@@ -126,16 +126,18 @@ $agent_label = $agent_online ? 'Online' : 'Offline';
 			$last_job_failed = true;
 		}
 
-		// Dot color reflects actual health, not recency
+		// Dot color reflects actual health, not recency.
+		// A failed most-recent check_status always wins, even if the node has never
+		// had a successful check (no $last_check / $status_data yet).
 		$install_state = $node->get('mgn_install_state');
 		if ($install_state === 'installing') {
 			$status_color = 'info';
 		} elseif ($install_state === 'install_failed') {
 			$status_color = 'danger';
-		} elseif (!$last_check || !$status_data) {
-			$status_color = 'secondary';
 		} elseif ($last_job_failed) {
 			$status_color = 'danger';
+		} elseif (!$last_check || !$status_data) {
+			$status_color = 'secondary';
 		} elseif (
 			(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
 			(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')
