@@ -6,7 +6,6 @@
  *   b2:    {"key_id": "...", "app_key": "..."}
  *   s3:    {"access_key": "...", "secret_key": "...", "region": "us-east-1"}
  *   linode: {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
- *   local: {}
  *
  * @version 1.0
  */
@@ -36,7 +35,7 @@ class BackupDestination extends SystemBase {
 		'bkd_delete_time'     => array('type'=>'timestamp(6)'),
 	);
 
-	private static $valid_providers = ['local', 'b2', 's3', 'linode'];
+	private static $valid_providers = ['b2', 's3', 'linode'];
 
 	function prepare() {
 		if (empty($this->get('bkd_name'))) {
@@ -48,8 +47,8 @@ class BackupDestination extends SystemBase {
 			throw new BackupDestinationException('Invalid provider. Must be one of: ' . implode(', ', self::$valid_providers));
 		}
 
-		if ($provider !== 'local' && empty($this->get('bkd_bucket'))) {
-			throw new BackupDestinationException('Bucket name is required for cloud providers.');
+		if (empty($this->get('bkd_bucket'))) {
+			throw new BackupDestinationException('Bucket name is required.');
 		}
 
 		$this->set('bkd_update_time', gmdate('Y-m-d H:i:s'));
@@ -66,12 +65,6 @@ class BackupDestination extends SystemBase {
 		return is_array($creds) ? $creds : [];
 	}
 
-	/**
-	 * Check if this is a cloud destination (not local-only).
-	 */
-	function is_cloud() {
-		return $this->get('bkd_provider') !== 'local';
-	}
 }
 
 class MultiBackupDestination extends SystemMultiBase {
