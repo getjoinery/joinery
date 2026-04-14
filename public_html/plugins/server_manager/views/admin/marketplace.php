@@ -78,7 +78,7 @@ $page->begin_box(array('altlinks' => $altlinks));
 								<p class="card-text small"><?= htmlspecialchars($item['description']) ?></p>
 							<?php endif; ?>
 							<?php if (!empty($item['is_system'])): ?>
-								<span class="badge bg-primary mb-2"><i class="fas fa-lock me-1"></i>System</span>
+								<span class="badge bg-primary mb-2 align-self-start"><i class="fas fa-lock me-1"></i>System</span>
 							<?php endif; ?>
 							<div class="mt-auto">
 								<?php if ($item['install_status'] === 'installed'): ?>

@@ -68,11 +68,11 @@ $default_ssh_key = '/home/user1/.ssh/id_ed25519_claude';
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager',
-	'page_title' => 'Add Node',
-	'readable_title' => 'Add Node',
+	'page_title' => 'Connect Site',
+	'readable_title' => 'Connect Site',
 	'breadcrumbs' => [
 		'Server Manager' => '/admin/server_manager',
-		'Add Node' => '',
+		'Connect Site' => '',
 	],
 	'session' => $session,
 ]);
@@ -330,7 +330,7 @@ $formwriter->checkboxinput('mgn_enabled', 'Enabled', [
 
 $formwriter->textbox('mgn_notes', 'Notes', ['rows' => 3]);
 
-$formwriter->submitbutton('btn_submit', 'Add Node');
+$formwriter->submitbutton('btn_submit', 'Connect Site');
 echo $formwriter->end_form();
 
 $page->end_box();

@@ -368,12 +368,19 @@ class JobCommandBuilder {
 
 	/**
 	 * Publish a new upgrade from the control plane (runs locally).
+	 * If major/minor/patch are in $params, passes them as an explicit version arg;
+	 * otherwise the CLI auto-detects the next version.
 	 */
 	public static function build_publish_upgrade($params) {
 		$notes = escapeshellarg($params['release_notes']);
+		$version_arg = '';
+		if (isset($params['major'], $params['minor'], $params['patch'])) {
+			$version = intval($params['major']) . '.' . intval($params['minor']) . '.' . intval($params['patch']);
+			$version_arg = escapeshellarg($version) . ' ';
+		}
 		return [
 			['type' => 'local', 'label' => 'Publish upgrade',
-			 'cmd' => "cd /var/www/html/joinerytest/public_html && php plugins/server_manager/includes/publish_upgrade.php {$notes}"],
+			 'cmd' => "cd /var/www/html/joinerytest/public_html && php plugins/server_manager/includes/publish_upgrade.php {$version_arg}{$notes}"],
 		];
 	}
 
