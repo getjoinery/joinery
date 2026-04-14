@@ -1,23 +1,23 @@
 <?php
 /**
- * DestinationTester — probe a BackupDestination's credentials and bucket.
+ * TargetTester — probe a BackupTarget's credentials and bucket.
  *
  * Uses curl against provider REST APIs (no CLI tools required on the web server).
  *
- * @version 1.0
+ * @version 2.0
  */
 
-class DestinationTester {
+class TargetTester {
 
 	const TIMEOUT_SECONDS = 15;
 
 	/**
-	 * Test a BackupDestination. Returns ['success' => bool, 'message' => string].
+	 * Test a BackupTarget. Returns ['success' => bool, 'message' => string].
 	 */
-	public static function test($dest) {
-		$provider = $dest->get('bkd_provider');
-		$bucket = $dest->get('bkd_bucket');
-		$creds = $dest->get_credentials();
+	public static function test($target) {
+		$provider = $target->get('bkt_provider');
+		$bucket = $target->get('bkt_bucket');
+		$creds = $target->get_credentials();
 
 		if (empty($bucket)) {
 			return ['success' => false, 'message' => 'No bucket configured.'];

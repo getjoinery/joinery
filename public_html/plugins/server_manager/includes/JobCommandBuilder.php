@@ -79,15 +79,15 @@ class JobCommandBuilder {
 
 	/**
 	 * Backup a node's database using backup_database.sh.
-	 * If the node has a cloud backup destination, appends upload and optional cleanup steps.
+	 * If the node has a cloud backup target, appends upload and optional cleanup steps.
 	 */
 	public static function build_backup_database($node, $params = []) {
 		$scripts = self::get_scripts_path($node);
 		$creds = self::get_db_credentials_script($node);
 
-		// Force encryption whenever backups will be uploaded to a cloud destination
-		$dest = self::get_destination($node);
-		if ($dest) {
+		// Force encryption whenever backups will be uploaded to a cloud target
+		$target = self::get_target($node);
+		if ($target) {
 			$params['encryption'] = true;
 		}
 
@@ -112,7 +112,7 @@ class JobCommandBuilder {
 			'cmd' => "{$creds} && cd /backups && bash {$scripts}/sysadmin_tools/backup_database.sh {$flags} \"\$DB_NAME\"",
 			'timeout' => 3600];
 
-		// Append upload step if node has a cloud destination
+		// Append upload step if node has a cloud target
 		self::append_upload_steps($steps, $node);
 
 		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
@@ -124,7 +124,7 @@ class JobCommandBuilder {
 
 	/**
 	 * Full project backup (DB + files + Apache config).
-	 * If the node has a cloud backup destination, appends upload and optional cleanup steps.
+	 * If the node has a cloud backup target, appends upload and optional cleanup steps.
 	 */
 	public static function build_backup_project($node, $params = []) {
 		$scripts = self::get_scripts_path($node);
@@ -133,9 +133,9 @@ class JobCommandBuilder {
 		// Extract project name from path: /var/www/html/empoweredhealthtn/public_html -> empoweredhealthtn
 		$project_name = basename($project_root);
 
-		// Force encryption whenever backups will be uploaded to a cloud destination
-		$dest = self::get_destination($node);
-		if ($dest) {
+		// Force encryption whenever backups will be uploaded to a cloud target
+		$target = self::get_target($node);
+		if ($target) {
 			$params['encryption'] = true;
 		}
 
@@ -285,11 +285,11 @@ class JobCommandBuilder {
 
 		// If cloud-only: download to /backups/ on the remote server first
 		if (!$local_path && $cloud_path) {
-			$dest = self::get_destination($node);
-			if ($dest) {
-				$cred_vals = $dest->get_credentials();
-				$bucket    = $dest->get('bkd_bucket');
-				$provider  = $dest->get('bkd_provider');
+			$target = self::get_target($node);
+			if ($target) {
+				$cred_vals = $target->get_credentials();
+				$bucket    = $target->get('bkt_bucket');
+				$provider  = $target->get('bkt_provider');
 				$dl_path   = '/backups/' . basename($filename);
 				$dl_cmd    = self::build_provider_download_cmd($provider, $cred_vals, $bucket, $cloud_path, $dl_path);
 				$steps[] = ['type' => 'ssh', 'label' => 'Download backup from cloud',
@@ -438,20 +438,20 @@ class JobCommandBuilder {
 		return $steps;
 	}
 
-	// ── Backup destination helpers ──
+	// ── Backup target helpers ──
 
 	/**
-	 * Load the backup destination for a node, if configured.
-	 * Returns BackupDestination or null.
+	 * Load the backup target for a node, if configured.
+	 * Returns BackupTarget or null.
 	 */
-	private static function get_destination($node) {
-		$dest_id = $node->get('mgn_bkd_backup_destination_id');
-		if (!$dest_id) return null;
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
+	private static function get_target($node) {
+		$target_id = $node->get('mgn_bkt_backup_target_id');
+		if (!$target_id) return null;
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
 		try {
-			$dest = new BackupDestination($dest_id, TRUE);
-			if ($dest->get('bkd_enabled')) {
-				return $dest;
+			$target = new BackupTarget($target_id, TRUE);
+			if ($target->get('bkt_enabled')) {
+				return $target;
 			}
 		} catch (Exception $e) {}
 		return null;
@@ -459,20 +459,20 @@ class JobCommandBuilder {
 
 	/**
 	 * Append upload (and optional local cleanup) steps to a steps array
-	 * if the node has a cloud backup destination configured.
+	 * if the node has a cloud backup target configured.
 	 *
 	 * The upload command uses NEWEST_BACKUP shell variable which should be set
 	 * by finding the most recently modified backup file.
 	 */
 	private static function append_upload_steps(&$steps, $node) {
-		$dest = self::get_destination($node);
-		if (!$dest) return;
+		$target = self::get_target($node);
+		if (!$target) return;
 
 		$slug = $node->get('mgn_slug');
-		$prefix = $dest->get('bkd_path_prefix') ?: 'joinery-backups';
-		$creds = $dest->get_credentials();
-		$bucket = $dest->get('bkd_bucket');
-		$provider = $dest->get('bkd_provider');
+		$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
+		$creds = $target->get_credentials();
+		$bucket = $target->get('bkt_bucket');
+		$provider = $target->get('bkt_provider');
 
 		// Find the newest backup file
 		$find_newest = 'NEWEST_BACKUP=$(ls -t /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -1)';
@@ -480,15 +480,17 @@ class JobCommandBuilder {
 
 		$upload_cmd = self::build_provider_upload_cmd($provider, $creds, $bucket, $prefix, $slug);
 
+		// No continue_on_error: if upload fails, halt so (a) the local cleanup step below
+		// does not delete the only surviving copy, and (b) the job is marked failed so the
+		// failure is visible in the UI instead of silently being labeled "completed".
 		$steps[] = [
 			'type' => 'ssh',
-			'label' => 'Upload backup to ' . $dest->get('bkd_name'),
+			'label' => 'Upload backup to ' . $target->get('bkt_name'),
 			'cmd' => "{$find_newest} && {$check} && {$upload_cmd}",
 			'timeout' => 3600,
-			'continue_on_error' => true,
 		];
 
-		if ($dest->get('bkd_delete_local')) {
+		if ($target->get('bkt_delete_local')) {
 			$steps[] = [
 				'type' => 'ssh',
 				'label' => 'Clean up local backup',
@@ -526,7 +528,7 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * List backup files on a node (local + cloud if destination configured).
+	 * List backup files on a node (local + cloud if target configured).
 	 * Output is parsed by JobResultProcessor::process_list_backups.
 	 */
 	public static function build_list_backups($node) {
@@ -538,13 +540,13 @@ class JobCommandBuilder {
 			 'continue_on_error' => true],
 		];
 
-		$dest = self::get_destination($node);
-		if ($dest) {
+		$target = self::get_target($node);
+		if ($target) {
 			$slug = $node->get('mgn_slug');
-			$prefix = $dest->get('bkd_path_prefix') ?: 'joinery-backups';
-			$creds = $dest->get_credentials();
-			$bucket = $dest->get('bkd_bucket');
-			$provider = $dest->get('bkd_provider');
+			$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
+			$creds = $target->get_credentials();
+			$bucket = $target->get('bkt_bucket');
+			$provider = $target->get('bkt_provider');
 
 			$list_cmd = self::build_provider_list_cmd($provider, $creds, $bucket, $prefix, $slug);
 			$steps[] = [
@@ -601,11 +603,11 @@ class JobCommandBuilder {
 		}
 
 		if (($target === 'cloud' || $target === 'both') && $cloud_path) {
-			$dest = self::get_destination($node);
-			if ($dest) {
-				$creds = $dest->get_credentials();
-				$bucket = $dest->get('bkd_bucket');
-				$provider = $dest->get('bkd_provider');
+			$target = self::get_target($node);
+			if ($target) {
+				$creds = $target->get_credentials();
+				$bucket = $target->get('bkt_bucket');
+				$provider = $target->get('bkt_provider');
 
 				$delete_cmd = self::build_provider_delete_cmd($provider, $creds, $bucket, $cloud_path);
 				$steps[] = [

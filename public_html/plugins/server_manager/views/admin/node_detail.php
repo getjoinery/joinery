@@ -204,7 +204,7 @@ if ($_POST && isset($_POST['action'])) {
 		$editable_fields = [
 			'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 			'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
-			'mgn_site_url', 'mgn_bkd_backup_destination_id', 'mgn_notes', 'mgn_enabled',
+			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
 		];
 		foreach ($editable_fields as $field) {
 			if (isset($_POST[$field])) {
@@ -215,7 +215,7 @@ if ($_POST && isset($_POST['action'])) {
 				if ($field === 'mgn_ssh_port' && $value === '') {
 					$value = 22;
 				}
-				if ($field === 'mgn_bkd_backup_destination_id' && $value === '') {
+				if ($field === 'mgn_bkt_backup_target_id' && $value === '') {
 					$value = null;
 				}
 				$node->set($field, $value);
@@ -416,116 +416,153 @@ if ($tab === 'overview') {
 		$version_cmp = ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version ?? ''))
 			? version_compare($node_version, $cp_version) : null;
 
+		// Stat tile grid — each tile: label on top, large value, optional subline/progress bar.
 		echo '<div class="row g-3">';
 
 		// Disk
 		if (isset($status_data['disk_usage_percent'])) {
 			$pct = intval($status_data['disk_usage_percent']);
 			$bar = $pct > 90 ? 'bg-danger' : ($pct > 80 ? 'bg-warning' : 'bg-success');
-			echo '<div class="col-md-6">';
-			echo '<div class="d-flex justify-content-between"><small class="text-muted">Disk</small>';
-			$total = $status_data['disk_total'] ?? '';
-			$used  = $status_data['disk_used'] ?? '';
-			$avail = $status_data['disk_available'] ?? '';
-			echo '<small>' . $pct . '%' . ($total ? " &middot; {$used} / {$total} used &middot; {$avail} free" : '') . '</small></div>';
-			echo '<div class="progress" style="height:6px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
-			echo '</div>';
+			$sub = '';
+			if (!empty($status_data['disk_total'])) {
+				$sub = htmlspecialchars($status_data['disk_used'] . ' / ' . $status_data['disk_total'] . ' used · ' . ($status_data['disk_available'] ?? '?') . ' free');
+			}
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Disk</div>';
+			echo '<div class="fs-3 fw-semibold mt-1">' . $pct . '<span class="fs-5 text-muted">%</span></div>';
+			echo '<div class="progress mt-2" style="height:4px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
+			if ($sub) echo '<div class="text-muted small mt-2">' . $sub . '</div>';
+			echo '</div></div>';
 		}
 
 		// Memory
 		if (isset($status_data['memory_used_mb'], $status_data['memory_total_mb']) && $status_data['memory_total_mb'] > 0) {
 			$used = (int)$status_data['memory_used_mb'];
 			$total = (int)$status_data['memory_total_mb'];
-			$pct = (int) round($used * 100 / $total);
+			$pct = (int)round($used * 100 / $total);
 			$bar = $pct > 90 ? 'bg-danger' : ($pct > 80 ? 'bg-warning' : 'bg-success');
-			echo '<div class="col-md-6">';
-			echo '<div class="d-flex justify-content-between"><small class="text-muted">Memory</small>';
-			echo '<small>' . $pct . '% &middot; ' . $used . ' / ' . $total . ' MB</small></div>';
-			echo '<div class="progress" style="height:6px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
-			echo '</div>';
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Memory</div>';
+			echo '<div class="fs-3 fw-semibold mt-1">' . $pct . '<span class="fs-5 text-muted">%</span></div>';
+			echo '<div class="progress mt-2" style="height:4px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
+			echo '<div class="text-muted small mt-2">' . $used . ' / ' . $total . ' MB</div>';
+			echo '</div></div>';
 		}
 
-		echo '</div>'; // end row
-
-		// Metric key-value grid
-		echo '<dl class="row g-0 mt-3 mb-0 small">';
-
+		// Load average
 		if (isset($status_data['load_1m'])) {
-			echo '<dt class="col-sm-4 text-muted fw-normal">Load average</dt>';
-			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars(($status_data['load_1m'] ?? '-') . ', ' . ($status_data['load_5m'] ?? '-') . ', ' . ($status_data['load_15m'] ?? '-')) . ' <span class="text-muted">(1m, 5m, 15m)</span></dd>';
+			$l1 = $status_data['load_1m'] ?? '-';
+			$l5 = $status_data['load_5m'] ?? '-';
+			$l15 = $status_data['load_15m'] ?? '-';
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Load Average</div>';
+			echo '<div class="fs-3 fw-semibold mt-1">' . htmlspecialchars((string)$l1) . '</div>';
+			echo '<div class="text-muted small mt-2">' . htmlspecialchars("{$l5} (5m) · {$l15} (15m)") . '</div>';
+			echo '</div></div>';
 		}
+
+		// Uptime
 		if (!empty($status_data['uptime'])) {
-			echo '<dt class="col-sm-4 text-muted fw-normal">Uptime</dt>';
-			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars($status_data['uptime']) . '</dd>';
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Uptime</div>';
+			echo '<div class="fs-5 fw-semibold mt-1">' . htmlspecialchars($status_data['uptime']) . '</div>';
+			echo '</div></div>';
 		}
+
+		// PostgreSQL
 		if (!empty($status_data['postgres_status'])) {
 			$pg_class = $status_data['postgres_status'] === 'accepting connections' ? 'success' : 'danger';
-			echo '<dt class="col-sm-4 text-muted fw-normal">PostgreSQL</dt>';
-			echo '<dd class="col-sm-8 mb-1"><span class="badge bg-' . $pg_class . '">' . htmlspecialchars($status_data['postgres_status']) . '</span></dd>';
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">PostgreSQL</div>';
+			echo '<div class="mt-1"><span class="badge bg-' . $pg_class . '">' . htmlspecialchars($status_data['postgres_status']) . '</span></div>';
+			if (!empty($status_data['current_db'])) {
+				echo '<div class="text-muted small mt-2">Current DB: <code>' . htmlspecialchars($status_data['current_db']) . '</code></div>';
+			}
+			echo '</div></div>';
 		}
-		if (!empty($status_data['current_db'])) {
-			echo '<dt class="col-sm-4 text-muted fw-normal">Current database</dt>';
-			echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($status_data['current_db']) . '</code></dd>';
-		}
-		if (!empty($status_data['db_list'])) {
-			echo '<dt class="col-sm-4 text-muted fw-normal">Databases</dt>';
-			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars(implode(', ', $status_data['db_list'])) . '</dd>';
-		}
+
+		// Joinery version
 		if ($node_version) {
 			$badge = '';
+			$subline = '';
 			if ($version_cmp === -1) {
-				$badge = ' <span class="badge bg-warning ms-1">upgrade available</span> <small class="text-muted">(control plane: ' . htmlspecialchars($cp_version) . ')</small>';
+				$badge = ' <span class="badge bg-warning ms-1">upgrade available</span>';
+				$subline = 'Control plane: ' . htmlspecialchars($cp_version);
 			} elseif ($version_cmp === 1) {
-				$badge = ' <span class="badge bg-danger ms-1">ahead of control plane</span> <small class="text-muted">(control plane: ' . htmlspecialchars($cp_version) . ')</small>';
+				$badge = ' <span class="badge bg-danger ms-1">ahead of control plane</span>';
+				$subline = 'Control plane: ' . htmlspecialchars($cp_version);
 			} elseif ($version_cmp === 0) {
 				$badge = ' <span class="badge bg-success ms-1">up to date</span>';
 			}
-			echo '<dt class="col-sm-4 text-muted fw-normal">Joinery version</dt>';
-			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars($node_version) . $badge . '</dd>';
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Joinery Version</div>';
+			echo '<div class="fs-5 fw-semibold mt-1">' . htmlspecialchars($node_version) . $badge . '</div>';
+			if ($subline) echo '<div class="text-muted small mt-2">' . $subline . '</div>';
+			echo '</div></div>';
 		}
 
-		echo '</dl>';
+		echo '</div>'; // end .row
+
+		// Secondary info that doesn't warrant its own tile.
+		if (!empty($status_data['db_list']) && count($status_data['db_list']) > 1) {
+			echo '<div class="text-muted small mt-3"><strong>All databases:</strong> ' . htmlspecialchars(implode(', ', $status_data['db_list'])) . '</div>';
+		}
+
 		$page->end_box();
 	}
 
 	// ── Connection Info panel (read-only summary) ──
 	$pageoptions = ['title' => 'Connection Info'];
 	$page->begin_box($pageoptions);
-	echo '<dl class="row g-0 mb-0 small">';
-	echo '<dt class="col-sm-4 text-muted fw-normal">Host</dt>';
-	echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_host')) . '</code></dd>';
-	echo '<dt class="col-sm-4 text-muted fw-normal">SSH</dt>';
-	echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_ssh_user')) . '@' . htmlspecialchars($node->get('mgn_host')) . ':' . intval($node->get('mgn_ssh_port') ?: 22) . '</code></dd>';
+	echo '<table class="table table-sm mb-0 align-middle">';
+	echo '<tbody>';
+
+	$conn_row = function($label, $value) {
+		echo '<tr>';
+		echo '<th class="text-muted fw-normal" style="width:200px">' . $label . '</th>';
+		echo '<td>' . $value . '</td>';
+		echo '</tr>';
+	};
+
+	$conn_row('Host', '<code>' . htmlspecialchars($node->get('mgn_host')) . '</code>');
+	$conn_row('SSH', '<code>' . htmlspecialchars($node->get('mgn_ssh_user')) . '@' . htmlspecialchars($node->get('mgn_host')) . ':' . intval($node->get('mgn_ssh_port') ?: 22) . '</code>');
+
 	if ($node->get('mgn_container_name')) {
-		echo '<dt class="col-sm-4 text-muted fw-normal">Docker container</dt>';
-		echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_container_name')) . '</code>';
+		$container_value = '<code>' . htmlspecialchars($node->get('mgn_container_name')) . '</code>';
 		if ($node->get('mgn_container_user')) {
-			echo ' <span class="text-muted">as ' . htmlspecialchars($node->get('mgn_container_user')) . '</span>';
+			$container_value .= ' <span class="text-muted">as ' . htmlspecialchars($node->get('mgn_container_user')) . '</span>';
 		}
-		echo '</dd>';
+		$conn_row('Docker container', $container_value);
 	}
 	if ($node->get('mgn_web_root')) {
-		echo '<dt class="col-sm-4 text-muted fw-normal">Web root</dt>';
-		echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code></dd>';
+		$conn_row('Web root', '<code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code>');
 	}
 	if ($node->get('mgn_site_url')) {
-		echo '<dt class="col-sm-4 text-muted fw-normal">Site URL</dt>';
-		echo '<dd class="col-sm-8 mb-1"><a href="' . htmlspecialchars($node->get('mgn_site_url')) . '" target="_blank">' . htmlspecialchars($node->get('mgn_site_url')) . '</a></dd>';
+		$site_url = htmlspecialchars($node->get('mgn_site_url'));
+		$conn_row('Site URL', '<a href="' . $site_url . '" target="_blank" rel="noopener">' . $site_url . ' ↗</a>');
 	}
-	$dest_id = $node->get('mgn_bkd_backup_destination_id');
-	if ($dest_id) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
+
+	$target_id = $node->get('mgn_bkt_backup_target_id');
+	if ($target_id) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
 		try {
-			$bkd = new BackupDestination($dest_id, TRUE);
-			echo '<dt class="col-sm-4 text-muted fw-normal">Backup destination</dt>';
-			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars($bkd->get('bkd_name')) . ' <span class="text-muted">(' . htmlspecialchars($bkd->get('bkd_provider')) . ')</span></dd>';
+			$target = new BackupTarget($target_id, TRUE);
+			$conn_row('Backup target',
+				'<a href="/admin/server_manager/target_info?bkt_id=' . $target->key . '">' . htmlspecialchars($target->get('bkt_name')) . '</a> <span class="text-muted">(' . htmlspecialchars($target->get('bkt_provider')) . ')</span>'
+			);
 		} catch (Exception $e) {}
 	}
 	if ($node->get('mgn_notes')) {
-		echo '<dt class="col-sm-4 text-muted fw-normal">Notes</dt>';
-		echo '<dd class="col-sm-8 mb-1">' . nl2br(htmlspecialchars($node->get('mgn_notes'))) . '</dd>';
+		$conn_row('Notes', nl2br(htmlspecialchars($node->get('mgn_notes'))));
 	}
-	echo '</dl>';
+
+	echo '</tbody></table>';
 	$page->end_box();
 
 	// Recent jobs for this node
@@ -642,22 +679,22 @@ if ($tab === 'overview') {
 
 	echo '<h6 class="text-muted mt-4 mb-3">Backup Settings</h6>';
 
-	// Destination dropdown (manual since FormWriter doesn't have a model-aware FK dropdown)
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
-	$all_dests = new MultiBackupDestination(['deleted' => false, 'enabled' => true], ['bkd_name' => 'ASC']);
-	$all_dests->load();
-	$current_dest_id = $node->get('mgn_bkd_backup_destination_id');
+	// Target dropdown (manual since FormWriter doesn't have a model-aware FK dropdown)
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+	$all_targets = new MultiBackupTarget(['deleted' => false, 'enabled' => true], ['bkt_name' => 'ASC']);
+	$all_targets->load();
+	$current_target_id = $node->get('mgn_bkt_backup_target_id');
 
 	echo '<div class="mb-3">';
-	echo '<label class="form-label">Backup Destination</label>';
-	echo '<select name="mgn_bkd_backup_destination_id" class="form-select">';
+	echo '<label class="form-label">Backup Target</label>';
+	echo '<select name="mgn_bkt_backup_target_id" class="form-select">';
 	echo '<option value="">Local only (no cloud upload)</option>';
-	foreach ($all_dests as $d) {
-		$sel = ($d->key == $current_dest_id) ? ' selected' : '';
-		echo '<option value="' . $d->key . '"' . $sel . '>' . htmlspecialchars($d->get('bkd_name')) . ' (' . $d->get('bkd_provider') . ')</option>';
+	foreach ($all_targets as $d) {
+		$sel = ($d->key == $current_target_id) ? ' selected' : '';
+		echo '<option value="' . $d->key . '"' . $sel . '>' . htmlspecialchars($d->get('bkt_name')) . ' (' . $d->get('bkt_provider') . ')</option>';
 	}
 	echo '</select>';
-	echo '<small class="text-muted">Where to upload backups after creation. <a href="/admin/server_manager/destinations">Manage destinations</a></small>';
+	echo '<small class="text-muted">Where to upload backups after creation. <a href="/admin/server_manager/targets">Manage targets</a></small>';
 	echo '</div>';
 
 	$formwriter->checkboxinput('mgn_enabled', 'Enabled', [
@@ -677,30 +714,30 @@ if ($tab === 'overview') {
 // ============================================================
 } elseif ($tab === 'backups') {
 
-	// Load destination info
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
-	$dest_id = $node->get('mgn_bkd_backup_destination_id');
-	$dest_name = 'Local only';
-	$dest_provider = 'local';
-	if ($dest_id) {
+	// Load target info
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+	$target_id = $node->get('mgn_bkt_backup_target_id');
+	$target_name = 'Local only';
+	$target_provider = 'local';
+	if ($target_id) {
 		try {
-			$bkd = new BackupDestination($dest_id, TRUE);
+			$target = new BackupTarget($target_id, TRUE);
 			$provider_labels = ['local' => 'Local', 'b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
-			$dest_provider = $bkd->get('bkd_provider');
-			$dest_name = htmlspecialchars($bkd->get('bkd_name')) . ' (' . ($provider_labels[$dest_provider] ?? $dest_provider) . ')';
+			$target_provider = $target->get('bkt_provider');
+			$target_name = htmlspecialchars($target->get('bkt_name')) . ' (' . ($provider_labels[$target_provider] ?? $target_provider) . ')';
 		} catch (Exception $e) {
-			$dest_name = 'Local only (configured destination not found)';
+			$target_name = 'Local only (configured target not found)';
 		}
 	}
 
 	echo '<div class="alert alert-light border mb-3">';
-	echo '<strong>Backup destination:</strong> ' . $dest_name;
-	echo ' <a href="' . $base_url . '&tab=overview" class="ms-2 small">Change</a>';
+	echo '<strong>Backup target:</strong> ' . $target_name;
+	echo ' <a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="ms-2 small">Change</a>';
 	echo '</div>';
 
 	$pageoptions = ['title' => 'Run Backup'];
 	$page->begin_box($pageoptions);
-	$require_encryption = ($dest_provider === 'b2');
+	$require_encryption = ($target_provider === 'b2');
 ?>
 	<div class="row">
 		<div class="col-md-6">
@@ -709,7 +746,7 @@ if ($tab === 'overview') {
 				<input type="hidden" name="action" value="backup_database">
 				<?php if ($require_encryption): ?>
 					<input type="hidden" name="encryption" value="1">
-					<div class="mb-2"><small class="text-muted">Encryption required for Backblaze B2 destinations</small></div>
+					<div class="mb-2"><small class="text-muted">Encryption required for Backblaze B2 targets</small></div>
 				<?php else: ?>
 					<div class="mb-2 form-check">
 						<input type="checkbox" name="encryption" class="form-check-input" id="db_encrypt" checked>
@@ -725,7 +762,7 @@ if ($tab === 'overview') {
 				<input type="hidden" name="action" value="backup_project">
 				<?php if ($require_encryption): ?>
 					<input type="hidden" name="encryption" value="1">
-					<div class="mb-2"><small class="text-muted">Encryption required for Backblaze B2 destinations</small></div>
+					<div class="mb-2"><small class="text-muted">Encryption required for Backblaze B2 targets</small></div>
 				<?php else: ?>
 					<div class="mb-2 form-check">
 						<input type="checkbox" name="encryption" class="form-check-input" id="proj_encrypt" checked>

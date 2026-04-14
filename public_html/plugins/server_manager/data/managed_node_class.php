@@ -31,7 +31,7 @@ class ManagedNode extends SystemBase {
 		'mgn_joinery_version'     => array('type'=>'varchar(20)'),
 		'mgn_last_status_check'   => array('type'=>'timestamp(6)'),
 		'mgn_last_status_data'    => array('type'=>'jsonb'),
-		'mgn_bkd_backup_destination_id' => array('type'=>'int8'),
+		'mgn_bkt_backup_target_id' => array('type'=>'int8'),
 		'mgn_last_backup_list'    => array('type'=>'jsonb'),
 		'mgn_last_backup_list_time' => array('type'=>'timestamp(6)'),
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),

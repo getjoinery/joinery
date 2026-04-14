@@ -16,7 +16,7 @@ The plugin is already in the `plugins/` directory. From the admin panel:
 2. Click **Actions** on "Server Manager" and choose **Install**
 3. Click **Actions** again and choose **Activate**
 
-The plugin creates its database tables automatically: `mgn_managed_nodes`, `mjb_management_jobs`, `ahb_agent_heartbeats`, `bkd_backup_destinations`.
+The plugin creates its database tables automatically: `mgn_managed_nodes`, `mjb_management_jobs`, `ahb_agent_heartbeats`, `bkt_backup_targets`.
 
 ### 2. Install and start the Go agent
 
@@ -136,7 +136,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 | `/admin/server_manager` | **Dashboard** -- agent status, node cards with health dots, publish upgrade, recent jobs |
 | `/admin/server_manager/node_detail?mgn_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
 | `/admin/server_manager/node_add` | **Add Node** -- auto-detect panel + manual add form |
-| `/admin/server_manager/destinations` | **Backup Destinations** -- CRUD for cloud storage targets (B2, S3, Linode) |
+| `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (B2, S3, Linode) |
 | `/admin/server_manager/jobs` | **Jobs** -- global job history with filters by node, status, and type |
 | `/admin/server_manager/job_detail?job_id=N` | **Job Detail** -- single job output with live polling |
 
@@ -147,7 +147,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | Tab | Purpose |
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node |
-| **Backups** | Destination indicator, run database/project backup, fetch backup file, backup file browser with scan and delete |
+| **Backups** | Target indicator, run database/project backup, fetch backup file, backup file browser with scan and delete |
 | **Database** | Copy database from another node to this one, restore from backup file |
 | **Updates** | Version comparison (node vs control plane), apply update / dry run / refresh & apply |
 | **Jobs** | Job history filtered to this node, with status and type filters |
@@ -175,7 +175,7 @@ Health dot colors reflect actual server health, not check recency:
 | `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
 | `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |
 | `fetch_backup` | SCP a backup file from remote to control plane | No |
-| `list_backups` | List backup files on local server and cloud destination | No |
+| `list_backups` | List backup files on local server and cloud target | No |
 | `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
@@ -198,9 +198,9 @@ The job composes existing primitives: the installer artifacts from `maintenance_
 
 The `mgn_install_state` column tracks the lifecycle: `installing` → `NULL` (success) or `install_failed` (failure). On failure, the node detail page surfaces a **Retry Install** button; the target must be cleaned manually (e.g. `rm -rf /var/www/html/SITENAME`) before retry because `install.sh` refuses to overwrite an existing site. Postgres passwords are auto-generated and stored in the target's `Globalvars_site.php` — Server Manager does not capture or display them.
 
-## Backup Destinations
+## Backup Targets
 
-Backup destinations define where backup files are uploaded after creation. Each node can optionally have a backup destination assigned. If no destination is set, backups remain local only on the remote server.
+Backup targets define where backup files are uploaded after creation. Each node can optionally have a backup target assigned. If no target is set, backups remain local only on the remote server.
 
 ### Supported Providers
 
@@ -215,9 +215,9 @@ S3-compatible providers (Linode, DigitalOcean Spaces, MinIO, etc.) all use the `
 
 ### Configuration
 
-1. Go to `/admin/server_manager/destinations` and click **Add Destination**
+1. Go to `/admin/server_manager/targets` and click **Add Target**
 2. Select a provider, enter bucket name, path prefix, and credentials
-3. Go to a node's Overview tab, expand **Edit Connection Settings**, and select the destination from the **Backup Destination** dropdown
+3. Go to a node's Overview tab, expand **Edit Connection Settings**, and select the target from the **Backup Target** dropdown
 4. Save — backups for this node will now auto-upload after creation
 
 ### Upload Path Structure
@@ -228,11 +228,11 @@ Example: `joinery-backups/empoweredhealthtn/empoweredhealthtn-04_11_2026.sql.gz.
 
 ### Credential Storage
 
-Credentials are stored in the `bkd_credentials` JSON column on the `bkd_backup_destinations` table. They are injected into SSH commands as inline environment variables — never written to files on remote hosts.
+Credentials are stored in the `bkt_credentials` JSON column on the `bkt_backup_targets` table. They are injected into SSH commands as inline environment variables — never written to files on remote hosts.
 
 ### Backup Browser
 
-The **Backups** tab on each node includes a file browser that lists backup files from both local storage and the cloud destination. Features:
+The **Backups** tab on each node includes a file browser that lists backup files from both local storage and the cloud target. Features:
 
 - **Scan for Backups** — creates a `list_backups` job to scan local `/backups/` directory and cloud bucket, caches the result on the node record
 - **Unified file table** — shows filename, size, date, and location (Local / Cloud / Both)
@@ -248,7 +248,7 @@ Encryption is **enabled by default** on both Database Backup and Full Project Ba
 
 ### B2 Enforcement
 
-When a node's backup destination is Backblaze B2, encryption is **mandatory**. The UI replaces the checkbox with a message, and the server-side enforces it regardless of form input.
+When a node's backup target is Backblaze B2, encryption is **mandatory**. The UI replaces the checkbox with a message, and the server-side enforces it regardless of form input.
 
 ### Auto-Generated Keys
 
@@ -358,7 +358,7 @@ Represents a remote Joinery instance. Key fields:
 - `mgn_web_root` -- Path to `public_html` inside the server/container
 - `mgn_last_status_data` -- JSON from last status check (disk, memory, load, etc.)
 - `mgn_joinery_version` -- Last known version string
-- `mgn_bkd_backup_destination_id` -- FK to backup destination (null = local only)
+- `mgn_bkt_backup_target_id` -- FK to backup target (null = local only)
 - `mgn_last_backup_list` -- Cached JSON file listing from last backup scan
 - `mgn_last_backup_list_time` -- When the backup list was last refreshed
 
@@ -386,17 +386,17 @@ $job = ManagementJob::createJob(
 );
 ```
 
-### BackupDestination (`bkd_backup_destinations`)
+### BackupTarget (`bkt_backup_targets`)
 
 Configured storage target for backups. Key fields:
 
-- `bkd_name` -- Display name (e.g., "Production B2")
-- `bkd_provider` -- `local`, `b2`, `s3`, or `linode`
-- `bkd_bucket` -- Bucket name (required for cloud providers)
-- `bkd_path_prefix` -- Path prefix within the bucket (default: `joinery-backups`)
-- `bkd_credentials` -- JSON with provider-specific credentials (key_id/app_key for B2, access_key/secret_key/region for S3/Linode)
-- `bkd_delete_local` -- Whether to delete local backup after successful upload
-- `bkd_enabled` -- Whether this destination is active
+- `bkt_name` -- Display name (e.g., "Production B2")
+- `bkt_provider` -- `local`, `b2`, `s3`, or `linode`
+- `bkt_bucket` -- Bucket name (required for cloud providers)
+- `bkt_path_prefix` -- Path prefix within the bucket (default: `joinery-backups`)
+- `bkt_credentials` -- JSON with provider-specific credentials (key_id/app_key for B2, access_key/secret_key/region for S3/Linode)
+- `bkt_delete_local` -- Whether to delete local backup after successful upload
+- `bkt_enabled` -- Whether this target is active
 
 ### AgentHeartbeat (`ahb_agent_heartbeats`)
 
@@ -486,7 +486,7 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `data/managed_node_class.php` | ManagedNode + MultiManagedNode |
 | `data/management_job_class.php` | ManagementJob + MultiManagementJob |
 | `data/agent_heartbeat_class.php` | AgentHeartbeat + MultiAgentHeartbeat |
-| `data/backup_destination_class.php` | BackupDestination + MultiBackupDestination |
+| `data/backup_target_class.php` | BackupTarget + MultiBackupTarget |
 | `includes/JobCommandBuilder.php` | Command generation for all job types |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `ajax/job_status.php` | Live job output polling |
@@ -496,7 +496,7 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `views/admin/index.php` | Dashboard -- fleet overview, publish upgrade |
 | `views/admin/node_detail.php` | Node detail -- tabbed page (overview/backups/database/updates/jobs) |
 | `views/admin/node_add.php` | Add node -- auto-detect + manual form |
-| `views/admin/destinations.php` | Backup destination CRUD |
+| `views/admin/targets.php` | Backup target CRUD |
 | `views/admin/jobs.php` | Global job history |
 | `views/admin/job_detail.php` | Single job output with live polling |
 | `views/admin/nodes_edit.php` | Redirect stub (-> node_detail or node_add) |
