@@ -85,9 +85,9 @@ class JobCommandBuilder {
 		$scripts = self::get_scripts_path($node);
 		$creds = self::get_db_credentials_script($node);
 
-		// Force encryption for B2 destinations
+		// Force encryption whenever backups will be uploaded to a cloud destination
 		$dest = self::get_destination($node);
-		if ($dest && $dest->get('bkd_provider') === 'b2') {
+		if ($dest) {
 			$params['encryption'] = true;
 		}
 
@@ -133,9 +133,9 @@ class JobCommandBuilder {
 		// Extract project name from path: /var/www/html/empoweredhealthtn/public_html -> empoweredhealthtn
 		$project_name = basename($project_root);
 
-		// Force encryption for B2 destinations
+		// Force encryption whenever backups will be uploaded to a cloud destination
 		$dest = self::get_destination($node);
-		if ($dest && $dest->get('bkd_provider') === 'b2') {
+		if ($dest) {
 			$params['encryption'] = true;
 		}
 
@@ -450,7 +450,7 @@ class JobCommandBuilder {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
 		try {
 			$dest = new BackupDestination($dest_id, TRUE);
-			if ($dest->get('bkd_enabled') && $dest->is_cloud()) {
+			if ($dest->get('bkd_enabled')) {
 				return $dest;
 			}
 		} catch (Exception $e) {}
