@@ -65,8 +65,10 @@ Today the B2 target stores `{key_id, app_key}`. Under a unified SigV4 path, a B2
 The translation is mechanical:
 - `access_key` ← old `key_id` value
 - `secret_key` ← old `app_key` value
-- `region` ← **new field** — user picks from B2's regions (`us-west-001`, `us-west-002`, `us-west-004`, `us-east-005`, `eu-central-003`)
-- `endpoint` ← auto-derived from region: `https://s3.{region}.backblazeb2.com`
+- `region` ← **derived automatically** (see below)
+- `endpoint` ← `https://s3.{region}.backblazeb2.com`
+
+**Region auto-detection.** A B2 account is tied to one region, which `b2_authorize_account`'s response exposes via `apiInfo.storageApi.s3Api` (the S3-compat endpoint URL). We can derive region directly from that response — no user prompt needed during migration or target creation. The B2 form in `targets.php` doesn't need a Region dropdown; region is populated automatically when credentials validate. If detection ever fails, fall back to exposing the field.
 
 The provider dropdown label stays "Backblaze B2" (user-friendly), but internally B2 is just a preset for the S3-compatible signer.
 
@@ -86,13 +88,27 @@ Concretely:
 
 Upside: the backup browser works the same whether or not any cloud CLI is installed anywhere. Downside: the cloud listing now hits the provider API every time the Backups tab is opened (rather than being cached in the node's last-status job). Acceptable — `TargetLister` already paginates at 500 and has a 15s timeout; we can add caching later if it becomes an issue.
 
+#### Audit the consumer chain before rewriting
+
+`build_list_backups()`'s output flows through `JobResultProcessor::process_list_backups` into the `mgn_last_backup_list` JSONB column on the node, and *from there* into the Backups tab view. Moving the cloud half to real-time means touching three layers: the command builder, the result processor's parsing, and the view's consumption. Read the call chain end-to-end before estimating — the refactor reaches further than "swap a command."
+
+#### `mgn_last_backup_list` column — likely dead weight after this
+
+Today that column caches the merged local+cloud listing. If listing goes real-time via `TargetLister`, the cache is redundant for the cloud half. Two options:
+- **Delete the column entirely** — simplest if the Backups tab is the only reader. Local listings can be recomputed on the fly too (single SSH step to `ls /backups/` when the tab opens, same pattern as the cloud call).
+- **Keep it as a short-TTL (e.g. 60s) cache** — hedge against repeated tab opens hitting the provider API, at the cost of potential staleness right after an upload/delete.
+
+Decide which before implementation, because it affects both the schema migration and the UI code path.
+
 ### Invocation from the node
 
 The uploader needs to run on the node where the backup file lives (`/backups/*.sql.gz.enc`), not on the web server — the file is too large to stream across SSH. We'll invoke PHP on the node:
 
-1. The web server generates a small uploader script on the fly (reads from a template + substitutes target credentials/bucket/key).
-2. The SSH step on the node executes it via `php - <<'EOF' ... EOF` (heredoc piped in) — the script never lands on disk.
-3. The script reads the newest backup file, signs the request, streams the body via curl, returns exit 0 on 2xx.
+1. The web server reads the uploader PHP source from a real file in the repo (`plugins/server_manager/includes/node_uploader.php`), then appends a short credential block (`$access_key = '...'; $secret_key = '...'; $endpoint = '...';`) to it.
+2. The SSH step on the node executes the assembled source via `php - <<'EOF' ... EOF` (heredoc piped in) — the script never lands on disk.
+3. The script reads the newest backup file via `fopen()` (path passed as `argv[1]`), signs the request, streams the body via curl, returns exit 0 on 2xx.
+
+**Why a real file, not a fully generated script:** keeps the uploader lintable, runnable-in-isolation during development, and debuggable — `batcat plugins/server_manager/includes/node_uploader.php` shows exactly what ran, minus credentials. Only the credential tail is dynamic. Avoids the "where did this stack trace come from" problem of fully generated source.
 
 PHP is already present on every Joinery node (it's how the node runs Joinery itself). We're using it, not adding it.
 
@@ -100,7 +116,7 @@ PHP is already present on every Joinery node (it's how the node runs Joinery its
 
 **New code:**
 - `plugins/server_manager/includes/TargetUploader.php` — two methods: `upload()` and `delete()`. Both return `['success' => bool, 'error' => ?string]` (plus `bytes` / `remote_url` on upload). Mirrors `TargetTester` / `TargetLister` shape.
-- `plugins/server_manager/includes/UploaderScript.php` (or a constant/string in `TargetUploader`) — the PHP script that's heredoc'd onto the node. Self-contained (no `require` of the rest of the codebase); reads credentials from stdin to avoid env-var leak.
+- `plugins/server_manager/includes/node_uploader.php` — the standalone PHP script heredoc'd onto the node. Self-contained (no `require` of the rest of the codebase). Credentials are appended to its source by the command builder before invocation (not in the file itself — file stays committable with no secrets). Keeping it as a real file means it's lintable, testable standalone, and readable in a `batcat`.
 - Shared SigV4 signing helper — extract the signer used in `TargetTester` / `TargetLister` into a single reusable function/class so all four callers (Tester, Lister, Uploader's create, Uploader's delete) use the exact same signing code. No duplication.
 
 **Modifications:**
@@ -147,6 +163,10 @@ Current backups are small (tens of MB — e.g. the 63KB file in job #39) but pro
 ### Streaming vs. buffering
 
 Stream the file through curl (`CURLOPT_READFUNCTION` / `CURLOPT_INFILE`) rather than buffering it in memory. PHP's memory limit on a node is typically 128–256 MB — a 3 GB tarball would OOM a naive buffered upload.
+
+### SigV4 signing with streamed bodies
+
+SigV4 normally signs `SHA256(payload)` in the canonical request, which would require reading the whole file before sending. For streamed single-PUT uploads, set the header `x-amz-content-sha256: UNSIGNED-PAYLOAD` (and sign that literal string in the canonical request) — every S3-compatible provider we care about (AWS, B2 via S3-compat, Linode, DigitalOcean, Wasabi, R2, etc.) accepts this. Lets us stream the file in one pass without pre-hashing. For the later multipart v2, each *part* gets properly SHA256-signed since each part fits in memory-sized chunks.
 
 ### Retry
 
