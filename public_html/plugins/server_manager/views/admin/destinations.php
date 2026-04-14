@@ -5,11 +5,12 @@
  *
  * CRUD page for managing backup storage destinations (B2, S3, Linode, local).
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/DestinationTester.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -23,6 +24,21 @@ if (isset($_GET['bkd_id']) && $_GET['bkd_id']) {
 	$is_edit = true;
 } elseif (isset($_GET['action']) && $_GET['action'] === 'add') {
 	$dest = new BackupDestination(NULL);
+}
+
+// Handle test (from list row)
+if (isset($_GET['action']) && $_GET['action'] === 'test' && $is_edit) {
+	$result = DestinationTester::test($dest);
+	$page_regex = '/\/admin\/server_manager/';
+	$session->save_message(new DisplayMessage(
+		'Test "' . $dest->get('bkd_name') . '": ' . $result['message'],
+		$result['success'] ? 'Success' : 'Error',
+		$page_regex,
+		$result['success'] ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR,
+		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+	));
+	header('Location: /admin/server_manager/destinations');
+	exit;
 }
 
 // Handle delete
@@ -45,7 +61,7 @@ if ($_POST && isset($_POST['bkd_name'])) {
 	}
 
 	$dest->set('bkd_name', trim($_POST['bkd_name'] ?? ''));
-	$dest->set('bkd_provider', trim($_POST['bkd_provider'] ?? 'local'));
+	$dest->set('bkd_provider', trim($_POST['bkd_provider'] ?? 'b2'));
 	$dest->set('bkd_bucket', trim($_POST['bkd_bucket'] ?? ''));
 	$dest->set('bkd_path_prefix', trim($_POST['bkd_path_prefix'] ?? 'joinery-backups'));
 	$dest->set('bkd_delete_local', !empty($_POST['bkd_delete_local']));
@@ -80,11 +96,21 @@ if ($_POST && isset($_POST['bkd_name'])) {
 		$dest->save();
 		$dest->load();
 
+		$test_result = DestinationTester::test($dest);
 		$page_regex = '/\/admin\/server_manager/';
-		$session->save_message(new DisplayMessage(
-			'Destination saved.', 'Success', $page_regex,
-			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-		));
+		if ($test_result['success']) {
+			$session->save_message(new DisplayMessage(
+				'Destination saved. ' . $test_result['message'],
+				'Success', $page_regex,
+				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+		} else {
+			$session->save_message(new DisplayMessage(
+				'Destination saved, but connection test failed: ' . $test_result['message'],
+				'Warning', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+		}
 		header('Location: /admin/server_manager/destinations?bkd_id=' . $dest->key);
 		exit;
 	} catch (Exception $e) {
@@ -126,7 +152,7 @@ if ($error) {
 }
 
 // ── Destination List ──
-$provider_labels = ['local' => 'Local Only', 'b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
+$provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
 
 $pageoptions = ['title' => 'Backup Destinations', 'altlinks' => ['Add Destination' => '/admin/server_manager/destinations?action=add']];
 $page->begin_box($pageoptions);
@@ -148,7 +174,8 @@ foreach ($all_destinations as $d) {
 	echo '<td>' . htmlspecialchars($d->get('bkd_path_prefix') ?: '-') . '</td>';
 	echo '<td>' . ($d->get('bkd_delete_local') ? 'Yes' : 'No') . '</td>';
 	echo '<td><span class="badge bg-' . ($enabled ? 'success' : 'secondary') . '">' . ($enabled ? 'Enabled' : 'Disabled') . '</span></td>';
-	echo '<td><a href="/admin/server_manager/destinations?bkd_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a></td>';
+	echo '<td><a href="/admin/server_manager/destinations?bkd_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
+	echo '<a href="/admin/server_manager/destinations?bkd_id=' . $d->key . '&action=test" class="btn btn-sm btn-outline-secondary">Test</a></td>';
 	echo '</tr>';
 }
 
@@ -162,7 +189,7 @@ $page->end_box();
 // ── Add/Edit Form ──
 if ($dest !== null) {
 	$creds = $dest->key ? $dest->get_credentials() : [];
-	$current_provider = $dest->get('bkd_provider') ?: 'local';
+	$current_provider = $dest->get('bkd_provider') ?: 'b2';
 
 	$form_title = $is_edit ? 'Edit Destination: ' . htmlspecialchars($dest->get('bkd_name')) : 'Add Destination';
 	$pageoptions = ['title' => $form_title];
@@ -188,7 +215,7 @@ if ($dest !== null) {
 			</div>
 		</div>
 
-		<div id="cloudFields" style="<?php echo $current_provider === 'local' ? 'display:none' : ''; ?>">
+		<div id="cloudFields">
 			<div class="row mb-3">
 				<div class="col-md-6">
 					<label class="form-label">Bucket Name *</label>
@@ -280,15 +307,9 @@ if ($dest !== null) {
 	<script>
 	function toggleProviderFields() {
 		var provider = document.getElementById('providerSelect').value;
-		var cloudFields = document.getElementById('cloudFields');
-		var b2 = document.getElementById('b2Fields');
-		var s3 = document.getElementById('s3Fields');
-		var linode = document.getElementById('linodeFields');
-
-		cloudFields.style.display = provider === 'local' ? 'none' : '';
-		b2.style.display = provider === 'b2' ? '' : 'none';
-		s3.style.display = provider === 's3' ? '' : 'none';
-		linode.style.display = provider === 'linode' ? '' : 'none';
+		document.getElementById('b2Fields').style.display = provider === 'b2' ? '' : 'none';
+		document.getElementById('s3Fields').style.display = provider === 's3' ? '' : 'none';
+		document.getElementById('linodeFields').style.display = provider === 'linode' ? '' : 'none';
 	}
 	</script>
 
