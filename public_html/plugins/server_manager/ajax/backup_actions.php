@@ -86,16 +86,14 @@ if ($action === 'list_status') {
 				$node->load(); // refresh cached data
 			}
 			if ($status !== 'pending' && $status !== 'running') {
-				// Job is done, return the cached list from node
-				$backup_list = $node->get('mgn_last_backup_list');
-				if (is_string($backup_list)) {
-					$backup_list = json_decode($backup_list, true);
-				}
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
+				$bl = BackupListHelper::get_for_node($node);
 				echo json_encode([
 					'success' => true,
 					'status' => 'complete',
-					'backup_list' => $backup_list,
-					'last_scan' => $node->get('mgn_last_backup_list_time'),
+					'backup_list' => ['files' => $bl['files']],
+					'last_scan' => $bl['last_scan'],
+					'cloud_error' => $bl['cloud_error'],
 				]);
 				exit;
 			}
@@ -108,16 +106,14 @@ if ($action === 'list_status') {
 		}
 	}
 
-	// No job_id — just return cached data
-	$backup_list = $node->get('mgn_last_backup_list');
-	if (is_string($backup_list)) {
-		$backup_list = json_decode($backup_list, true);
-	}
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
+	$bl = BackupListHelper::get_for_node($node);
 	echo json_encode([
 		'success' => true,
 		'status' => 'cached',
-		'backup_list' => $backup_list,
-		'last_scan' => $node->get('mgn_last_backup_list_time'),
+		'backup_list' => ['files' => $bl['files']],
+		'last_scan' => $bl['last_scan'],
+		'cloud_error' => $bl['cloud_error'],
 	]);
 	exit;
 }
