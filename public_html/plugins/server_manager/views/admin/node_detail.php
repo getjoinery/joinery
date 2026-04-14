@@ -838,18 +838,21 @@ if ($tab === 'overview') {
 			$has_cloud = !empty($cloud_path);
 
 			if ($has_local && $has_cloud) {
-				echo '<div class="btn-group btn-group-sm">';
-				echo '<button type="button" class="btn btn-outline-danger btn-sm dropdown-toggle" data-bs-toggle="dropdown" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'block\'?\'none\':\'block\'">Delete</button>';
-				echo '<ul class="dropdown-menu" style="display:none">';
-				echo '<li><a class="dropdown-item" href="javascript:void(0)" onclick="deleteBackup(\'local\', ' . htmlspecialchars(json_encode($local_path)) . ', \'\')">Delete local copy</a></li>';
-				echo '<li><a class="dropdown-item" href="javascript:void(0)" onclick="deleteBackup(\'cloud\', \'\', ' . htmlspecialchars(json_encode($cloud_path)) . ')">Delete cloud copy</a></li>';
-				echo '<li><hr class="dropdown-divider"></li>';
-				echo '<li><a class="dropdown-item text-danger" href="javascript:void(0)" onclick="deleteBackup(\'both\', ' . htmlspecialchars(json_encode($local_path)) . ', ' . htmlspecialchars(json_encode($cloud_path)) . ')">Delete everywhere</a></li>';
-				echo '</ul></div>';
+				$target = 'both';
 			} elseif ($has_local) {
-				echo '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteBackup(\'local\', ' . htmlspecialchars(json_encode($local_path)) . ', \'\')">Delete</button>';
+				$target = 'local';
 			} elseif ($has_cloud) {
-				echo '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteBackup(\'cloud\', \'\', ' . htmlspecialchars(json_encode($cloud_path)) . ')">Delete</button>';
+				$target = 'cloud';
+			} else {
+				$target = '';
+			}
+
+			if ($target) {
+				$args = htmlspecialchars(json_encode($target)) . ', '
+				      . htmlspecialchars(json_encode($fn)) . ', '
+				      . htmlspecialchars(json_encode($local_path)) . ', '
+				      . htmlspecialchars(json_encode($cloud_path));
+				echo '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteBackup(' . $args . ')">Delete</button>';
 			}
 
 			echo '</td>';
@@ -866,6 +869,8 @@ if ($tab === 'overview') {
 
 <script>
 var backupNodeId = <?php echo $node->key; ?>;
+var backupLastScanAge = <?php echo $last_scan ? (time() - strtotime($last_scan)) : 99999; ?>;
+var BACKUP_STALE_SECONDS = 60;
 
 function refreshBackupList() {
 	var btn = document.getElementById('refreshBackupsBtn');
@@ -893,6 +898,11 @@ function refreshBackupList() {
 		});
 }
 
+// Auto-refresh local listing on page load if stale. Cloud listing is already live.
+if (backupLastScanAge > BACKUP_STALE_SECONDS) {
+	window.addEventListener('DOMContentLoaded', refreshBackupList);
+}
+
 function pollBackupList(jobId) {
 	var btn = document.getElementById('refreshBackupsBtn');
 	var status = document.getElementById('backupScanStatus');
@@ -916,8 +926,13 @@ function pollBackupList(jobId) {
 		});
 }
 
-function deleteBackup(target, localPath, cloudPath) {
-	if (!confirm('Delete this backup file? This cannot be undone.')) return;
+function deleteBackup(target, filename, localPath, cloudPath) {
+	var locations;
+	if (target === 'both')       locations = 'BOTH the local copy and the cloud copy';
+	else if (target === 'local') locations = 'the local copy';
+	else                         locations = 'the cloud copy';
+
+	if (!confirm('Delete ' + filename + '?\n\nThis will remove ' + locations + '. This cannot be undone.')) return;
 
 	var url = '/ajax/backup_actions?action=delete_file&node_id=' + backupNodeId
 		+ '&target=' + encodeURIComponent(target)
@@ -938,13 +953,6 @@ function deleteBackup(target, localPath, cloudPath) {
 			alert('Delete request failed');
 		});
 }
-
-// Close dropdown menus when clicking outside
-document.addEventListener('click', function(e) {
-	if (!e.target.closest('.btn-group')) {
-		document.querySelectorAll('.dropdown-menu').forEach(function(m) { m.style.display = 'none'; });
-	}
-});
 </script>
 
 <?php
@@ -1050,12 +1058,11 @@ document.addEventListener('click', function(e) {
 	$page->begin_box($pageoptions);
 ?>
 	<?php if (empty($restore_files)): ?>
-		<p class="text-muted">
+		<p class="text-muted" id="dbTabRefreshEmpty">
 			No database backups found.
 			<?php if ($backup_list_time): ?>
 				Last refreshed <?php echo LibraryFunctions::convert_time($backup_list_time, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?>.
 			<?php endif; ?>
-			Go to the <a href="<?php echo $base_url; ?>&tab=backups">Backups tab</a> to refresh the list.
 		</p>
 	<?php else: ?>
 		<form method="post">
@@ -1085,9 +1092,11 @@ document.addEventListener('click', function(e) {
 						</option>
 					<?php endforeach; ?>
 				</select>
-				<?php if ($backup_list_time): ?>
-					<small class="text-muted">List refreshed <?php echo LibraryFunctions::convert_time($backup_list_time, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?>. <a href="<?php echo $base_url; ?>&tab=backups">Refresh</a></small>
-				<?php endif; ?>
+				<small class="text-muted" id="dbTabRefreshStatus">
+					<?php if ($backup_list_time): ?>
+						List refreshed <?php echo LibraryFunctions::convert_time($backup_list_time, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?>.
+					<?php endif; ?>
+				</small>
 			</div>
 			<input type="hidden" name="backup_local_path" id="restore_local_path" value="">
 			<input type="hidden" name="backup_cloud_path" id="restore_cloud_path" value="">
@@ -1137,7 +1146,51 @@ document.addEventListener('click', function(e) {
 	</table>
 <?php
 	$page->end_box();
+?>
 
+<script>
+// Auto-refresh local backup listing on page load if stale. Matches the Backups tab behavior.
+(function() {
+	var nodeId = <?php echo $node->key; ?>;
+	var lastScanAge = <?php echo $backup_list_time ? (time() - strtotime($backup_list_time)) : 99999; ?>;
+	var STALE_SECONDS = 60;
+
+	if (lastScanAge <= STALE_SECONDS) return;
+
+	function showRefreshing() {
+		var spinner = '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing backup list...';
+		var el1 = document.getElementById('dbTabRefreshStatus');
+		if (el1) el1.innerHTML = spinner;
+		var el2 = document.getElementById('dbTabRefreshEmpty');
+		if (el2) el2.innerHTML = spinner;
+	}
+
+	function poll(jobId) {
+		fetch('/ajax/backup_actions?action=list_status&node_id=' + nodeId + '&job_id=' + jobId)
+			.then(function(r) { return r.json(); })
+			.then(function(data) {
+				if (data.status === 'pending' || data.status === 'running') {
+					setTimeout(function() { poll(jobId); }, 2000);
+					return;
+				}
+				window.location.reload();
+			})
+			.catch(function() { setTimeout(function() { poll(jobId); }, 3000); });
+	}
+
+	window.addEventListener('DOMContentLoaded', function() {
+		showRefreshing();
+		fetch('/ajax/backup_actions?action=refresh_list&node_id=' + nodeId)
+			.then(function(r) { return r.json(); })
+			.then(function(data) {
+				if (data.success && data.job_id) poll(data.job_id);
+			})
+			.catch(function() {});
+	});
+})();
+</script>
+
+<?php
 // ============================================================
 // UPDATES TAB
 // ============================================================

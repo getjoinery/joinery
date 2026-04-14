@@ -115,7 +115,21 @@ $status_class = match($job->get('mjb_status')) {
 				<p><strong>Type:</strong> <?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?></p>
 				<p><strong>Node:</strong> <?php echo htmlspecialchars($node_name); ?></p>
 				<p><strong>Status:</strong> <span id="job-status" class="badge bg-<?php echo $status_class; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span></p>
-				<p><strong>Progress:</strong> <span id="job-progress"><?php echo $job->get('mjb_current_step'); ?></span> / <?php echo $job->get('mjb_total_steps'); ?> steps</p>
+				<?php
+				// mjb_current_step is the 0-based index of the step being executed;
+				// translate to a user-facing "N of total" completed count.
+				$total_steps = intval($job->get('mjb_total_steps'));
+				$raw_current = intval($job->get('mjb_current_step'));
+				$job_status = $job->get('mjb_status');
+				if ($job_status === 'completed') {
+					$done_steps = $total_steps;
+				} elseif (in_array($job_status, ['failed', 'cancelled'])) {
+					$done_steps = $raw_current; // steps before the failing one completed
+				} else {
+					$done_steps = $raw_current; // running: steps completed so far
+				}
+				?>
+				<p><strong>Progress:</strong> <span id="job-progress"><?php echo $done_steps; ?></span> / <?php echo $total_steps; ?> steps</p>
 			</div>
 			<div class="col-md-6">
 				<p><strong>Created:</strong> <?php echo LibraryFunctions::convert_time($job->get('mjb_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A'); ?></p>
@@ -205,21 +219,29 @@ if ($result) {
 $commands = $job->get('mjb_commands');
 $commands_data = is_string($commands) ? json_decode($commands, true) : $commands;
 if ($commands_data && isset($commands_data['steps'])) {
-	echo '<div class="card mb-3"><div class="card-header"><strong>Steps</strong></div>';
+	echo '<div class="card mb-3"><div class="card-header"><strong>Steps</strong> <small class="text-muted">— progress indicator for job execution</small></div>';
 	echo '<ul class="list-group list-group-flush">';
-	$current = intval($job->get('mjb_current_step'));
+	// mjb_current_step is the 0-based index of the running (or last-run) step.
+	$raw_current = intval($job->get('mjb_current_step'));
+	$status = $job->get('mjb_status');
+	$icon_style = 'display:inline-block;width:1.25em;text-align:center;';
 	foreach ($commands_data['steps'] as $i => $step) {
-		$icon = '';
-		if ($job->get('mjb_status') === 'completed') {
-			$icon = '<span class="text-success me-2">&#10003;</span>';
-		} elseif ($job->get('mjb_status') === 'failed' && $i == $current) {
-			$icon = '<span class="text-danger me-2">&#10007;</span>';
-		} elseif ($job->get('mjb_status') === 'running' && $i == $current) {
-			$icon = '<span class="text-primary me-2">&#9654;</span>';
-		} elseif ($i < $current) {
-			$icon = '<span class="text-success me-2">&#10003;</span>';
+		if ($status === 'completed') {
+			$icon = '<span class="text-success me-2" style="' . $icon_style . '">&#10003;</span>';
+		} elseif ($i < $raw_current) {
+			$icon = '<span class="text-success me-2" style="' . $icon_style . '">&#10003;</span>';
+		} elseif ($i === $raw_current) {
+			if ($status === 'failed') {
+				$icon = '<span class="text-danger me-2" style="' . $icon_style . '">&#10007;</span>';
+			} elseif ($status === 'running') {
+				$icon = '<span class="text-primary me-2" style="' . $icon_style . '">&#9654;</span>';
+			} elseif ($status === 'cancelled') {
+				$icon = '<span class="text-secondary me-2" style="' . $icon_style . '">&#9633;</span>';
+			} else {
+				$icon = '<span class="text-muted me-2" style="' . $icon_style . '">&#9675;</span>';
+			}
 		} else {
-			$icon = '<span class="text-muted me-2">&#9675;</span>';
+			$icon = '<span class="text-muted me-2" style="' . $icon_style . '">&#9675;</span>';
 		}
 		echo '<li class="list-group-item">' . $icon . htmlspecialchars($step['label']) . ' <small class="text-muted">(' . $step['type'] . ')</small></li>';
 	}
@@ -252,7 +274,15 @@ if ($commands_data && isset($commands_data['steps'])) {
 					outputEl.scrollTop = outputEl.scrollHeight;
 				}
 
-				progressEl.textContent = data.current_step;
+				var totalSteps = <?php echo $total_steps; ?>;
+				// Translate 0-based raw index to user-facing completed count.
+				var doneSteps;
+				if (data.status === 'completed') {
+					doneSteps = totalSteps;
+				} else {
+					doneSteps = data.current_step;
+				}
+				progressEl.textContent = doneSteps;
 
 				if (data.status !== 'pending' && data.status !== 'running') {
 					polling = false;
