@@ -63,9 +63,9 @@ $page->admin_header([
 	<div class="card-body">
 		<form method="get" class="row g-2 align-items-end">
 			<div class="col-auto">
-				<label class="form-label">Node</label>
+				<label class="form-label">Site</label>
 				<select name="node_id" class="form-select form-select-sm">
-					<option value="">All Nodes</option>
+					<option value="">All Sites</option>
 					<?php foreach ($all_nodes as $n): ?>
 						<option value="<?php echo $n->key; ?>" <?php echo (isset($_GET['node_id']) && $_GET['node_id'] == $n->key) ? 'selected' : ''; ?>><?php echo htmlspecialchars($n->get('mgn_name')); ?></option>
 					<?php endforeach; ?>
@@ -98,7 +98,7 @@ $page->admin_header([
 </div>
 <?php
 
-$headers = ['ID', 'Node', 'Type', 'Status', 'Progress', 'Created', 'Duration'];
+$headers = ['ID', 'Site', 'Type', 'Status', 'Progress', 'Created', 'Duration'];
 $pager = new Pager(['numrecords' => $numrecords, 'numperpage' => $numperpage]);
 $table_options = [
 	'title' => 'Jobs',

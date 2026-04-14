@@ -13,7 +13,8 @@
             "order": 14,
             "items": [
                 { "slug": "server-manager-dashboard", "title": "Dashboard", "url": "/admin/server_manager", "order": 1 },
-                { "slug": "server-manager-destinations", "title": "Destinations", "url": "/admin/server_manager/destinations", "order": 3 },
+                { "slug": "server-manager-upgrades", "title": "Upgrades", "url": "/admin/server_manager/publish_upgrade", "order": 2 },
+                { "slug": "server-manager-destinations", "title": "Remote Backup", "url": "/admin/server_manager/destinations", "order": 3 },
                 { "slug": "server-manager-jobs", "title": "Jobs", "url": "/admin/server_manager/jobs", "order": 6 }
             ]
         },

@@ -93,7 +93,7 @@ if ($_POST && isset($_POST['action'])) {
 		if ($source_id) {
 			if ($source_id === $node->key) {
 				$session->save_message(new DisplayMessage(
-					'Source and target nodes must be different.',
+					'Source and target sites must be different.',
 					'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 			} else {
@@ -106,7 +106,7 @@ if ($_POST && isset($_POST['action'])) {
 					exit;
 				} catch (Exception $e) {
 					$session->save_message(new DisplayMessage(
-						'Source node not found.', 'Error', $page_regex,
+						'Source site not found.', 'Error', $page_regex,
 						DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 					));
 				}
@@ -230,7 +230,7 @@ if ($_POST && isset($_POST['action'])) {
 			$node->save();
 			$node->load();
 			$session->save_message(new DisplayMessage(
-				'Node saved successfully.', 'Success', $page_regex,
+				'Site saved successfully.', 'Success', $page_regex,
 				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
 			header('Location: ' . $base_url . '&tab=overview');
@@ -250,7 +250,7 @@ if ($_POST && isset($_POST['action'])) {
 if (isset($_GET['action']) && $_GET['action'] === 'delete' && $node->key) {
 	$node->soft_delete();
 	$session->save_message(new DisplayMessage(
-		'Node deleted.', 'Success', $page_regex,
+		'Site deleted.', 'Success', $page_regex,
 		DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 	));
 	header('Location: /admin/server_manager');
@@ -391,39 +391,142 @@ if ($tab === 'overview') {
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
 			<?php if (!$node->get('mgn_delete_time')): ?>
 				<li><hr class="dropdown-divider"></li>
-				<li><a class="dropdown-item text-danger" href="<?php echo $base_url; ?>&action=delete" onclick="return confirm('Delete this node?')">Delete Node</a></li>
+				<li><a class="dropdown-item text-danger" href="<?php echo $base_url; ?>&action=delete" onclick="return confirm('Delete this site?')">Delete Site</a></li>
 			<?php endif; ?>
 		</ul>
 	</div>
 	<?php
 	echo '</div>';
 
-	if ($status_data) {
-		echo '<div class="row">';
-		if (isset($status_data['disk_usage_percent'])) {
-			echo '<div class="col-auto"><small class="text-muted">Disk: ' . $status_data['disk_usage_percent'] . '%</small></div>';
-		}
-		if (isset($status_data['memory_used_mb']) && isset($status_data['memory_total_mb'])) {
-			echo '<div class="col-auto"><small class="text-muted">Memory: ' . $status_data['memory_used_mb'] . '/' . $status_data['memory_total_mb'] . ' MB</small></div>';
-		}
-		if (isset($status_data['load_1m'])) {
-			echo '<div class="col-auto"><small class="text-muted">Load: ' . $status_data['load_1m'] . '</small></div>';
-		}
-		if (isset($status_data['postgres_status'])) {
-			echo '<div class="col-auto"><small class="text-muted">PostgreSQL: ' . htmlspecialchars($status_data['postgres_status']) . '</small></div>';
-		}
-		if ($node->get('mgn_joinery_version')) {
-			echo '<div class="col-auto"><small class="text-muted">Version: ' . htmlspecialchars($node->get('mgn_joinery_version')) . '</small></div>';
-		}
-		echo '</div>';
-		if ($last_check) {
-			echo '<small class="text-muted">Last checked: ' . LibraryFunctions::convert_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A') . '</small>';
-		}
-	} elseif (!$last_check) {
+	if ($last_check) {
+		echo '<small class="text-muted">Last checked: ' . LibraryFunctions::convert_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A') . '</small>';
+	} elseif (!$status_data) {
 		echo '<small class="text-muted">No status check has been run yet.</small>';
 	}
 
 	echo '</div>';
+
+	// ── System Health panel ──
+	if ($status_data) {
+		$pageoptions = ['title' => 'System Health'];
+		$page->begin_box($pageoptions);
+
+		$cp_version = LibraryFunctions::get_joinery_version();
+		$node_version = $node->get('mgn_joinery_version');
+		$version_cmp = ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version ?? ''))
+			? version_compare($node_version, $cp_version) : null;
+
+		echo '<div class="row g-3">';
+
+		// Disk
+		if (isset($status_data['disk_usage_percent'])) {
+			$pct = intval($status_data['disk_usage_percent']);
+			$bar = $pct > 90 ? 'bg-danger' : ($pct > 80 ? 'bg-warning' : 'bg-success');
+			echo '<div class="col-md-6">';
+			echo '<div class="d-flex justify-content-between"><small class="text-muted">Disk</small>';
+			$total = $status_data['disk_total'] ?? '';
+			$used  = $status_data['disk_used'] ?? '';
+			$avail = $status_data['disk_available'] ?? '';
+			echo '<small>' . $pct . '%' . ($total ? " &middot; {$used} / {$total} used &middot; {$avail} free" : '') . '</small></div>';
+			echo '<div class="progress" style="height:6px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
+			echo '</div>';
+		}
+
+		// Memory
+		if (isset($status_data['memory_used_mb'], $status_data['memory_total_mb']) && $status_data['memory_total_mb'] > 0) {
+			$used = (int)$status_data['memory_used_mb'];
+			$total = (int)$status_data['memory_total_mb'];
+			$pct = (int) round($used * 100 / $total);
+			$bar = $pct > 90 ? 'bg-danger' : ($pct > 80 ? 'bg-warning' : 'bg-success');
+			echo '<div class="col-md-6">';
+			echo '<div class="d-flex justify-content-between"><small class="text-muted">Memory</small>';
+			echo '<small>' . $pct . '% &middot; ' . $used . ' / ' . $total . ' MB</small></div>';
+			echo '<div class="progress" style="height:6px"><div class="progress-bar ' . $bar . '" style="width:' . $pct . '%"></div></div>';
+			echo '</div>';
+		}
+
+		echo '</div>'; // end row
+
+		// Metric key-value grid
+		echo '<dl class="row g-0 mt-3 mb-0 small">';
+
+		if (isset($status_data['load_1m'])) {
+			echo '<dt class="col-sm-4 text-muted fw-normal">Load average</dt>';
+			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars(($status_data['load_1m'] ?? '-') . ', ' . ($status_data['load_5m'] ?? '-') . ', ' . ($status_data['load_15m'] ?? '-')) . ' <span class="text-muted">(1m, 5m, 15m)</span></dd>';
+		}
+		if (!empty($status_data['uptime'])) {
+			echo '<dt class="col-sm-4 text-muted fw-normal">Uptime</dt>';
+			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars($status_data['uptime']) . '</dd>';
+		}
+		if (!empty($status_data['postgres_status'])) {
+			$pg_class = $status_data['postgres_status'] === 'accepting connections' ? 'success' : 'danger';
+			echo '<dt class="col-sm-4 text-muted fw-normal">PostgreSQL</dt>';
+			echo '<dd class="col-sm-8 mb-1"><span class="badge bg-' . $pg_class . '">' . htmlspecialchars($status_data['postgres_status']) . '</span></dd>';
+		}
+		if (!empty($status_data['current_db'])) {
+			echo '<dt class="col-sm-4 text-muted fw-normal">Current database</dt>';
+			echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($status_data['current_db']) . '</code></dd>';
+		}
+		if (!empty($status_data['db_list'])) {
+			echo '<dt class="col-sm-4 text-muted fw-normal">Databases</dt>';
+			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars(implode(', ', $status_data['db_list'])) . '</dd>';
+		}
+		if ($node_version) {
+			$badge = '';
+			if ($version_cmp === -1) {
+				$badge = ' <span class="badge bg-warning ms-1">upgrade available</span> <small class="text-muted">(control plane: ' . htmlspecialchars($cp_version) . ')</small>';
+			} elseif ($version_cmp === 1) {
+				$badge = ' <span class="badge bg-danger ms-1">ahead of control plane</span> <small class="text-muted">(control plane: ' . htmlspecialchars($cp_version) . ')</small>';
+			} elseif ($version_cmp === 0) {
+				$badge = ' <span class="badge bg-success ms-1">up to date</span>';
+			}
+			echo '<dt class="col-sm-4 text-muted fw-normal">Joinery version</dt>';
+			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars($node_version) . $badge . '</dd>';
+		}
+
+		echo '</dl>';
+		$page->end_box();
+	}
+
+	// ── Connection Info panel (read-only summary) ──
+	$pageoptions = ['title' => 'Connection Info'];
+	$page->begin_box($pageoptions);
+	echo '<dl class="row g-0 mb-0 small">';
+	echo '<dt class="col-sm-4 text-muted fw-normal">Host</dt>';
+	echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_host')) . '</code></dd>';
+	echo '<dt class="col-sm-4 text-muted fw-normal">SSH</dt>';
+	echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_ssh_user')) . '@' . htmlspecialchars($node->get('mgn_host')) . ':' . intval($node->get('mgn_ssh_port') ?: 22) . '</code></dd>';
+	if ($node->get('mgn_container_name')) {
+		echo '<dt class="col-sm-4 text-muted fw-normal">Docker container</dt>';
+		echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_container_name')) . '</code>';
+		if ($node->get('mgn_container_user')) {
+			echo ' <span class="text-muted">as ' . htmlspecialchars($node->get('mgn_container_user')) . '</span>';
+		}
+		echo '</dd>';
+	}
+	if ($node->get('mgn_web_root')) {
+		echo '<dt class="col-sm-4 text-muted fw-normal">Web root</dt>';
+		echo '<dd class="col-sm-8 mb-1"><code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code></dd>';
+	}
+	if ($node->get('mgn_site_url')) {
+		echo '<dt class="col-sm-4 text-muted fw-normal">Site URL</dt>';
+		echo '<dd class="col-sm-8 mb-1"><a href="' . htmlspecialchars($node->get('mgn_site_url')) . '" target="_blank">' . htmlspecialchars($node->get('mgn_site_url')) . '</a></dd>';
+	}
+	$dest_id = $node->get('mgn_bkd_backup_destination_id');
+	if ($dest_id) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_destination_class.php'));
+		try {
+			$bkd = new BackupDestination($dest_id, TRUE);
+			echo '<dt class="col-sm-4 text-muted fw-normal">Backup destination</dt>';
+			echo '<dd class="col-sm-8 mb-1">' . htmlspecialchars($bkd->get('bkd_name')) . ' <span class="text-muted">(' . htmlspecialchars($bkd->get('bkd_provider')) . ')</span></dd>';
+		} catch (Exception $e) {}
+	}
+	if ($node->get('mgn_notes')) {
+		echo '<dt class="col-sm-4 text-muted fw-normal">Notes</dt>';
+		echo '<dd class="col-sm-8 mb-1">' . nl2br(htmlspecialchars($node->get('mgn_notes'))) . '</dd>';
+	}
+	echo '</dl>';
+	$page->end_box();
 
 	// Recent jobs for this node
 	$overview_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_id' => 'DESC'], 10);
@@ -831,7 +934,7 @@ document.addEventListener('click', function(e) {
 		<input type="hidden" name="action" value="copy_database">
 		<div class="row mb-3">
 			<div class="col-md-5">
-				<label class="form-label"><strong>Source Node</strong></label>
+				<label class="form-label"><strong>Source Site</strong></label>
 				<select name="source_node_id" class="form-select" required>
 					<option value="">Select source...</option>
 					<?php foreach ($other_nodes as $n): ?>

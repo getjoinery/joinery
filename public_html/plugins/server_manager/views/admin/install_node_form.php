@@ -125,11 +125,11 @@ foreach ($existing_nodes as $en) {
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager',
-	'page_title' => 'Install New Node',
-	'readable_title' => 'Install New Node',
+	'page_title' => 'Remote Install',
+	'readable_title' => 'Remote Install',
 	'breadcrumbs' => [
 		'Server Manager' => '/admin/server_manager',
-		'Install New Node' => '',
+		'Remote Install' => '',
 	],
 	'session' => $session,
 ]);
