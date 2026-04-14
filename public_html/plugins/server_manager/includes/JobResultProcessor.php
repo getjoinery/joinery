@@ -74,6 +74,14 @@ class JobResultProcessor {
 			$result['joinery_version'] = $version;
 		}
 
+		// Parse database list (bare-metal nodes only — Docker nodes skip this step)
+		if (preg_match('/^CURRENT_DB=(\S+)$/m', $output, $m)) {
+			$result['current_db'] = trim($m[1]);
+		}
+		if (preg_match_all('/^DB:(\S+)$/m', $output, $m)) {
+			$result['db_list'] = $m[1];
+		}
+
 		// Update the node record
 		$node_id = $job->get('mjb_mgn_node_id');
 		if ($node_id) {
@@ -119,21 +127,6 @@ class JobResultProcessor {
 	 */
 	private static function process_backup_project($job) {
 		self::process_backup_database($job);
-	}
-
-	/**
-	 * Parse test_connection output.
-	 */
-	private static function process_test_connection($job) {
-		$output = $job->get('mjb_output') ?: '';
-		$result = ['connected' => strpos($output, 'Connection successful') !== false];
-
-		if (preg_match('/hostname:\s*(.+)/i', $output, $m)) {
-			$result['hostname'] = trim($m[1]);
-		}
-
-		$job->set('mjb_result', json_encode($result));
-		$job->save();
 	}
 
 	/**
