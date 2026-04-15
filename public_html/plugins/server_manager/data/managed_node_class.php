@@ -32,6 +32,7 @@ class ManagedNode extends SystemBase {
 		'mgn_last_status_check'   => array('type'=>'timestamp(6)'),
 		'mgn_last_status_data'    => array('type'=>'jsonb'),
 		'mgn_bkt_backup_target_id' => array('type'=>'int8'),
+		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
 		'mgn_install_state'       => array('type'=>'varchar(20)'),
 		'mgn_notes'               => array('type'=>'text'),
