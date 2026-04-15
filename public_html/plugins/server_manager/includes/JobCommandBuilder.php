@@ -318,6 +318,98 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Restore a full project backup (.tar.gz) onto an existing node.
+	 *
+	 * $params:
+	 *   filename      - display name of the archive (for logging)
+	 *   local_path    - /backups/*.tar.gz on the node, or null
+	 *   cloud_path    - remote object key in the bucket, or null
+	 *   skip_database - bool
+	 *   skip_files    - bool
+	 *   skip_apache   - bool
+	 */
+	public static function build_restore_project($node, $params) {
+		$local_path = $params['local_path'] ?? null;
+		$cloud_path = $params['cloud_path'] ?? null;
+		$filename   = $params['filename'] ?? basename((string)($local_path ?: $cloud_path));
+
+		$skip_db     = !empty($params['skip_database']);
+		$skip_files  = !empty($params['skip_files']);
+		$skip_apache = !empty($params['skip_apache']);
+
+		if ($skip_db && $skip_files && $skip_apache) {
+			throw new Exception('At least one of project files, database, or Apache config must be restored.');
+		}
+
+		$web_root    = rtrim($node->get('mgn_web_root'), '/');
+		$project_dir = dirname($web_root);
+		$project_name = basename($project_dir);
+
+		$scripts = self::get_scripts_path($node);
+		$creds   = self::get_db_credentials_script($node);
+		$steps   = [];
+
+		// 1. Download from cloud if the backup only exists remotely
+		if (!$local_path && $cloud_path) {
+			$target = self::get_target($node);
+			if (!$target) {
+				throw new Exception('Cannot restore cloud-only backup: node has no backup target configured.');
+			}
+			$cred_vals = $target->get_credentials();
+			$bucket    = $target->get('bkt_bucket');
+			$dl_path   = '/backups/' . basename($filename);
+
+			$uploader_script = self::build_node_uploader_script($cred_vals, $bucket);
+			$eof    = '__JOINERY_UPLOADER_EOF__';
+			$cp_arg = escapeshellarg($cloud_path);
+			$dl_arg = escapeshellarg($dl_path);
+			$dl_cmd = "php -- download {$cp_arg} {$dl_arg} <<'{$eof}'\n{$uploader_script}\n{$eof}";
+
+			$steps[] = ['type' => 'ssh', 'label' => 'Download backup from cloud',
+				'cmd' => $dl_cmd, 'timeout' => 3600];
+			$local_path = $dl_path;
+		}
+
+		// 2. Auto-backup current DB before overwrite (plaintext — fast recovery, no key needed)
+		if (!$skip_db) {
+			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
+				'cmd' => "mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+				'timeout' => 3600];
+		}
+
+		// 3. Auto-backup current project tree (no DB, no Apache — just the files)
+		if (!$skip_files) {
+			$pd_arg = escapeshellarg($project_dir);
+			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup project files before restore',
+				'cmd' => "mkdir -p /backups && tar czf /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).tar.gz -C " . escapeshellarg(dirname($project_dir)) . " " . escapeshellarg(basename($project_dir)),
+				'timeout' => 3600];
+		}
+
+		// 4. Run restore_project.sh — --force activates non-interactive mode and
+		// cascades --non-interactive into the inner restore_database.sh call.
+		$skip_flags = '';
+		if ($skip_db)     $skip_flags .= ' --skip-database';
+		if ($skip_files)  $skip_flags .= ' --skip-files';
+		if ($skip_apache) $skip_flags .= ' --skip-apache';
+
+		$restore_cmd = "cd /backups && bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_project.sh")
+			. ' ' . escapeshellarg($project_name)
+			. ' ' . escapeshellarg($local_path)
+			. ' --force' . $skip_flags;
+
+		$steps[] = ['type' => 'ssh', 'label' => 'Run project restore', 'cmd' => $restore_cmd, 'timeout' => 3600];
+
+		// 5. Verify
+		$verify_cmd = "ls -la " . escapeshellarg($web_root) . " | head -8";
+		if (!$skip_db) {
+			$verify_cmd .= " && {$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c \"SELECT count(*) AS table_count FROM information_schema.tables WHERE table_schema = 'public'\"";
+		}
+		$steps[] = ['type' => 'ssh', 'label' => 'Verify restore', 'cmd' => $verify_cmd];
+
+		return $steps;
+	}
+
+	/**
 	 * Apply a Joinery update on target via upgrade.php.
 	 */
 	public static function build_apply_update($node, $params = []) {

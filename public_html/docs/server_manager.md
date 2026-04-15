@@ -147,7 +147,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | Tab | Purpose |
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node |
-| **Backups** | Target indicator, run database/project backup, fetch backup file, backup file browser with scan and delete |
+| **Backups** | Target indicator, run database/project backup, fetch backup file, backup file browser with scan and delete, restore full project from a `.tar.gz` archive |
 | **Database** | Copy database from another node to this one, restore from backup file |
 | **Updates** | Version comparison (node vs control plane), apply update / dry run / refresh & apply |
 | **Jobs** | Job history filtered to this node, with status and type filters |
@@ -179,6 +179,7 @@ Health dot colors reflect actual server health, not check recency:
 | `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
+| `restore_project` | Restore a full project `.tar.gz` (files + DB + Apache config) in place on an existing node. Runs `restore_project.sh --force`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*` | **Yes** |
 | `apply_update` | Run `upgrade.php` on target (supports `--dry-run`) | **Yes** |
 | `refresh_archives` | Run `upgrade.php --refresh-archives` on target | **Yes** |
 | `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
@@ -204,14 +205,15 @@ Backup targets define where backup files are uploaded after creation. Each node 
 
 ### Supported Providers
 
-| Provider | CLI Tool | Credentials |
-|----------|----------|-------------|
-| **Local** | _(none)_ | No upload, files stay on remote server |
-| **Backblaze B2** | `b2` | Application Key ID + Application Key |
-| **Amazon S3** | `aws` | Access Key + Secret Key + Region |
-| **Linode Object Storage** | `aws` | Access Key + Secret Key + Region + Endpoint URL |
+| Provider | Credentials (UI fields) |
+|----------|-------------------------|
+| **Backblaze B2** | Application Key ID + Application Key (region/endpoint auto-detected via `b2_authorize_account` at save time) |
+| **Amazon S3** | Access Key + Secret Key + Region |
+| **Linode Object Storage** | Access Key + Secret Key + Region + Endpoint URL |
 
-S3-compatible providers (Linode, DigitalOcean Spaces, MinIO, etc.) all use the `aws` CLI with a custom `--endpoint-url`.
+All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls from either the control plane (web tier) or the node (via a heredoc'd `node_uploader.php` script). New S3-compatible providers can be added by configuration alone, no script changes.
+
+Nodes with no backup target leave backups local-only on the remote server.
 
 ### Configuration
 
@@ -228,17 +230,24 @@ Example: `joinery-backups/empoweredhealthtn/empoweredhealthtn-04_11_2026.sql.gz.
 
 ### Credential Storage
 
-Credentials are stored in the `bkt_credentials` JSON column on the `bkt_backup_targets` table. They are injected into SSH commands as inline environment variables — never written to files on remote hosts.
+Credentials are stored in the `bkt_credentials` JSON column on the `bkt_backup_targets` table using a unified shape for every provider:
+
+```json
+{"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
+```
+
+For node-side operations (upload, delete, download), the credentials are embedded into a self-contained PHP script that is piped to the node via a heredoc'd `php --` invocation — never written to a file on the node and never visible in process listings as positional arguments. The `S3Signer.php` and `node_uploader.php` source is composed at job-build time by `JobCommandBuilder::build_node_uploader_script()`.
 
 ### Backup Browser
 
 The **Backups** tab on each node includes a file browser that lists backup files from both local storage and the cloud target. Features:
 
-- **Scan for Backups** — creates a `list_backups` job to scan local `/backups/` directory and cloud bucket, caches the result on the node record
+- **Scan for Backups** — creates a `list_backups` job to scan local `/backups/` on the node
 - **Unified file table** — shows filename, size, date, and location (Local / Cloud / Both)
-- **Delete** — per-file delete with options: delete local copy, delete cloud copy, or delete everywhere
+- **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
+- **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
 
-The local file listing comes from the most recent completed `list_backups` job (a single SSH `ls /backups/`). Cloud listings are fetched live via `TargetLister` on each page render. Click **Scan for Backups** to refresh the local list.
+Cloud listings are fetched live via `TargetLister` on every page render (one SigV4 HTTP GET, ~200–500ms). The local listing comes from the most recent completed `list_backups` job; both the Backups and Database tabs auto-trigger a refresh on page load when that scan is more than 60 seconds stale, so the listing is effectively always current. Both the merge logic and the staleness window are owned by `BackupListHelper::get_for_node()`.
 
 ## Backup Encryption
 
@@ -389,10 +398,10 @@ $job = ManagementJob::createJob(
 Configured storage target for backups. Key fields:
 
 - `bkt_name` -- Display name (e.g., "Production B2")
-- `bkt_provider` -- `local`, `b2`, `s3`, or `linode`
-- `bkt_bucket` -- Bucket name (required for cloud providers)
+- `bkt_provider` -- `b2`, `s3`, or `linode`
+- `bkt_bucket` -- Bucket name (required)
 - `bkt_path_prefix` -- Path prefix within the bucket (default: `joinery-backups`)
-- `bkt_credentials` -- JSON with provider-specific credentials (key_id/app_key for B2, access_key/secret_key/region for S3/Linode)
+- `bkt_credentials` -- JSON with the unified shape `{access_key, secret_key, region, endpoint}` for every provider; B2's region/endpoint are auto-detected at save time
 - `bkt_delete_local` -- Whether to delete local backup after successful upload
 - `bkt_enabled` -- Whether this target is active
 
@@ -402,7 +411,7 @@ Single-row table tracking agent liveness. Updated every 30 seconds by the Go age
 
 ## Safety Constraints
 
-1. **Auto-backup before destructive operations** -- `copy_database` and `restore_database` automatically prepend a backup step. If the backup fails, the destructive steps never run.
+1. **Auto-backup before destructive operations** -- `copy_database`, `restore_database`, and `restore_project` automatically prepend backup steps. `restore_project` snapshots both the current database (`auto_pre_project_restore_*.sql.gz`) and the current project tree (`auto_pre_project_restore_*.tar.gz`) to `/backups/` before overwriting; either can be skipped if the corresponding component is unchecked in the form. If any pre-backup step fails, the destructive steps never run.
 
 2. **Per-node concurrency lock** -- The agent skips jobs if another job is already running on the same node, preventing conflicts.
 
@@ -487,6 +496,12 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `data/backup_target_class.php` | BackupTarget + MultiBackupTarget |
 | `includes/JobCommandBuilder.php` | Command generation for all job types |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
+| `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage (get/put/delete) |
+| `includes/TargetUploader.php` | Web-tier upload + delete helpers using S3Signer |
+| `includes/TargetLister.php` | Web-tier paginated bucket listing using S3Signer |
+| `includes/TargetTester.php` | Connection test on Save for Backup Targets |
+| `includes/node_uploader.php` | Self-contained upload/delete/download dispatcher run on the node via heredoc; composed at job-build time with S3Signer + injected credentials |
+| `includes/BackupListHelper.php` | Merges latest local list_backups job output with live cloud listing into a unified file table |
 | `ajax/job_status.php` | Live job output polling |
 | `ajax/discover_nodes.php` | Creates and polls node discovery jobs |
 | `ajax/backup_actions.php` | Backup browser actions (scan, delete) |

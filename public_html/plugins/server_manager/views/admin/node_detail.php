@@ -149,6 +149,39 @@ if ($_POST && isset($_POST['action'])) {
 		exit;
 	}
 
+	if ($action === 'restore_project') {
+		$filename   = trim($_POST['backup_filename'] ?? '');
+		$local_path = trim($_POST['backup_local_path'] ?? '');
+		$cloud_path = trim($_POST['backup_cloud_path'] ?? '');
+
+		if (!$filename || (!$local_path && !$cloud_path)) {
+			header('Location: ' . $base_url . '&tab=backups');
+			exit;
+		}
+
+		$params = [
+			'filename'      => $filename,
+			'local_path'    => $local_path ?: null,
+			'cloud_path'    => $cloud_path ?: null,
+			'skip_database' => empty($_POST['restore_database']),
+			'skip_files'    => empty($_POST['restore_files']),
+			'skip_apache'   => empty($_POST['restore_apache']),
+		];
+		try {
+			$steps = JobCommandBuilder::build_restore_project($node, $params);
+			$job = ManagementJob::createJob($node->key, 'restore_project', $steps, $params, $session->get_user_id());
+			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
+			exit;
+		} catch (Exception $e) {
+			$session->save_message(new DisplayMessage(
+				$e->getMessage(), 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url . '&tab=backups');
+			exit;
+		}
+	}
+
 	// Update actions
 	if ($action === 'apply_update') {
 		$params = ['dry_run' => !empty($_POST['dry_run'])];
@@ -865,6 +898,98 @@ if ($tab === 'overview') {
 	echo '</tbody></table>';
 
 	$page->end_box();
+
+	// ── Restore Full Project ──
+	$project_backups = [];
+	foreach ($files as $f) {
+		if (preg_match('/\.tar\.gz$/', $f['filename'] ?? '')) {
+			$project_backups[] = $f;
+		}
+	}
+
+	$pageoptions = ['title' => 'Restore Full Project from Backup'];
+	$page->begin_box($pageoptions);
+?>
+	<p class="text-muted small">Replaces project files, database, and Apache config with the contents of a full project backup. The current database and project files are automatically backed up first to <code>/backups/auto_pre_project_restore_*</code>.</p>
+	<?php if (empty($project_backups)): ?>
+		<p class="text-muted">No project backups (<code>.tar.gz</code>) found for this node. Run a Project Backup above to create one.</p>
+	<?php else: ?>
+		<form method="post" id="restoreProjectForm">
+			<input type="hidden" name="action" value="restore_project">
+			<input type="hidden" name="backup_local_path" id="restoreProjLocalPath" value="">
+			<input type="hidden" name="backup_cloud_path" id="restoreProjCloudPath" value="">
+
+			<div class="mb-3">
+				<label class="form-label">Backup file</label>
+				<select name="backup_filename" id="restoreProjSelect" class="form-select" required
+					onchange="
+						var opts = this.options[this.selectedIndex].dataset;
+						document.getElementById('restoreProjLocalPath').value = opts.localPath || '';
+						document.getElementById('restoreProjCloudPath').value = opts.cloudPath || '';
+					">
+					<option value="">Select backup...</option>
+					<?php foreach ($project_backups as $f): ?>
+						<?php
+						$loc_badge = match($f['location'] ?? '') {
+							'both'  => ' [local + cloud]',
+							'cloud' => ' [cloud only]',
+							default => ' [local]',
+						};
+						$label = $f['filename'] . ' — ' . ($f['size'] ?? '') . ' — ' . ($f['date'] ?? '') . $loc_badge;
+						?>
+						<option value="<?php echo htmlspecialchars($f['filename']); ?>"
+							data-local-path="<?php echo htmlspecialchars($f['local_path'] ?? ''); ?>"
+							data-cloud-path="<?php echo htmlspecialchars($f['cloud_path'] ?? ''); ?>">
+							<?php echo htmlspecialchars($label); ?>
+						</option>
+					<?php endforeach; ?>
+				</select>
+			</div>
+
+			<div class="mb-3">
+				<label class="form-label">What to restore</label>
+				<div class="form-check">
+					<input type="checkbox" class="form-check-input restore-component" id="rp_files" name="restore_files" checked>
+					<label class="form-check-label" for="rp_files">Project files (<code><?php echo htmlspecialchars($node->get('mgn_web_root')); ?></code>)</label>
+				</div>
+				<div class="form-check">
+					<input type="checkbox" class="form-check-input restore-component" id="rp_database" name="restore_database" checked>
+					<label class="form-check-label" for="rp_database">Database (from the archive — not the current DB)</label>
+				</div>
+				<div class="form-check">
+					<input type="checkbox" class="form-check-input restore-component" id="rp_apache" name="restore_apache" checked>
+					<label class="form-check-label" for="rp_apache">Apache config</label>
+				</div>
+				<div id="rp_component_error" class="text-danger small" style="display:none">Select at least one component to restore.</div>
+			</div>
+
+			<div class="form-check mb-3">
+				<input type="checkbox" class="form-check-input" id="rp_confirm" required>
+				<label class="form-check-label" for="rp_confirm">I understand this will overwrite the current site.</label>
+			</div>
+
+			<button type="submit" class="btn btn-danger" onclick="return confirmRestoreProject();">Restore Project</button>
+		</form>
+		<script>
+		function confirmRestoreProject() {
+			var boxes = document.querySelectorAll('#restoreProjectForm .restore-component:checked');
+			var err = document.getElementById('rp_component_error');
+			if (boxes.length === 0) {
+				err.style.display = 'block';
+				return false;
+			}
+			err.style.display = 'none';
+			var parts = [];
+			if (document.getElementById('rp_files').checked)    parts.push('project files');
+			if (document.getElementById('rp_database').checked) parts.push('database');
+			if (document.getElementById('rp_apache').checked)   parts.push('Apache config');
+			var fn = document.getElementById('restoreProjSelect').value || 'the selected backup';
+			return confirm('Restore ' + parts.join(', ') + ' from ' + fn + '?\n\nThis will overwrite the current site. A pre-restore snapshot is written to /backups/ first.');
+		}
+		</script>
+	<?php endif; ?>
+<?php
+	$page->end_box();
 ?>
 
 <script>
@@ -1279,7 +1404,7 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 					<label class="form-label">Type</label>
 					<select name="job_type" class="form-select form-select-sm">
 						<option value="">All</option>
-						<?php foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'apply_update', 'refresh_archives'] as $t): ?>
+						<?php foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update', 'refresh_archives'] as $t): ?>
 							<option value="<?php echo $t; ?>" <?php echo (isset($_GET['job_type']) && $_GET['job_type'] === $t) ? 'selected' : ''; ?>><?php echo str_replace('_', ' ', $t); ?></option>
 						<?php endforeach; ?>
 					</select>
