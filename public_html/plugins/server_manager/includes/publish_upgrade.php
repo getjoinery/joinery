@@ -780,10 +780,27 @@
 	 * @param array $allowed_list List of allowed IPs/CIDRs
 	 * @return bool
 	 */
+	/**
+	 * Normalize an IP to IPv4 if it is an IPv4-mapped IPv6 address (::ffff:x.x.x.x).
+	 * Dual-stack servers may arrive via IPv6 even though they have a plain IPv4 address.
+	 */
+	function normalize_ip($ip) {
+		// Strip IPv6-mapped IPv4 prefix: ::ffff:1.2.3.4 → 1.2.3.4
+		if (strncasecmp($ip, '::ffff:', 7) === 0) {
+			$candidate = substr($ip, 7);
+			if (filter_var($candidate, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+				return $candidate;
+			}
+		}
+		return $ip;
+	}
+
 	function is_ip_in_list($ip, $allowed_list) {
 		if (empty($allowed_list)) {
 			return false; // No whitelist = deny all
 		}
+
+		$ip = normalize_ip($ip);
 
 		foreach ($allowed_list as $allowed) {
 			// Exact match
@@ -791,7 +808,7 @@
 				return true;
 			}
 
-			// CIDR match
+			// CIDR match (IPv4 only; IPv6 CIDR not supported)
 			if (strpos($allowed, '/') !== false) {
 				if (ip_in_cidr($ip, $allowed)) {
 					return true;
@@ -803,7 +820,7 @@
 	}
 
 	/**
-	 * Check if IP is within CIDR range
+	 * Check if IP is within CIDR range (IPv4 only).
 	 *
 	 * @param string $ip IP address to check
 	 * @param string $cidr CIDR notation (e.g., "10.0.0.0/24")
@@ -813,7 +830,10 @@
 		list($subnet, $bits) = explode('/', $cidr);
 		$ip_long = ip2long($ip);
 		$subnet_long = ip2long($subnet);
-		$mask = -1 << (32 - $bits);
+		if ($ip_long === false || $subnet_long === false) {
+			return false; // IPv6 addresses not supported by this function
+		}
+		$mask = -1 << (32 - (int)$bits);
 		return ($ip_long & $mask) === ($subnet_long & $mask);
 	}
 
