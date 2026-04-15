@@ -325,8 +325,13 @@ perform_restore() {
                 fi
             fi
 
-            # Run restore_database.sh
-            if bash "$RESTORE_DB_SCRIPT" "$PROJECT_NAME" "$db_file"; then
+            # Run restore_database.sh — pass --non-interactive when --force is set
+            # so the inner script never blocks on prompts or openssl password reads.
+            local db_flags=""
+            if [ "$FORCE" = true ]; then
+                db_flags="--non-interactive"
+            fi
+            if bash "$RESTORE_DB_SCRIPT" "$PROJECT_NAME" "$db_file" $db_flags; then
                 print_success "Database restored successfully"
             else
                 print_error "Database restoration failed"

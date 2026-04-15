@@ -1,5 +1,42 @@
 #!/usr/bin/env bash
-#Version 2.01 - Fixed decryption, password prompts, and connection handling
+#Version 2.10 - Added --non-interactive mode for automated restores
+
+# Parse --non-interactive flag out of the argument list without disturbing the
+# DB_NAME / FILE positional order downstream. A second pass later handles
+# --help, required-arg validation, and strips a trailing --non-interactive if
+# present.
+NON_INTERACTIVE=false
+_remaining=()
+for _a in "$@"; do
+    case "$_a" in
+        --non-interactive|-n) NON_INTERACTIVE=true ;;
+        *) _remaining+=("$_a") ;;
+    esac
+done
+set -- "${_remaining[@]}"
+unset _remaining _a
+
+# Resolve encryption key from env/file when running non-interactively so
+# openssl doesn't prompt. Matches the source lookup used by backup_database.sh.
+get_encryption_key() {
+    if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
+        ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
+        return 0
+    fi
+    local key_file="$HOME/.joinery_backup_key"
+    if [ -f "$key_file" ]; then
+        ENCRYPTION_KEY=$(cat "$key_file" | head -1 | tr -d '\n\r')
+        if [ -n "$ENCRYPTION_KEY" ]; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+ENCRYPTION_KEY=""
+if [ "$NON_INTERACTIVE" = true ]; then
+    get_encryption_key || true
+fi
 
 # Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt
 
@@ -46,6 +83,11 @@ else
     
     # If still no password, fall back to interactive prompt
     if [[ -z "$PGPASSWORD" ]]; then
+        if [ "$NON_INTERACTIVE" = true ]; then
+            echo "✗ Error: no PGPASSWORD, .pgpass, or config file with dbpassword found."
+            echo "  Set PGPASSWORD or provide a config at /var/www/html/SITENAME/config/Globalvars_site.php"
+            exit 1
+        fi
         echo "⚠️  No .pgpass file found, no config file found, and PGPASSWORD not set."
         echo "You will be prompted for the postgres password multiple times."
         echo ""
@@ -101,10 +143,25 @@ prepare_restore_file() {
     if [[ "$input_file" == *.sql.gz.enc ]]; then
         echo "🔍 Detected encrypted compressed file."
         echo ""
-        
+
         local temp_file=$(mktemp --suffix=.sql)
-        echo "🔐 Enter decryption password for backup file:"
-        if openssl enc -aes-256-cbc -d -pbkdf2 -in "$input_file" 2>/dev/null | gunzip > "$temp_file" 2>/dev/null; then
+        local decrypt_ok=false
+        if [ "$NON_INTERACTIVE" = true ]; then
+            if [ -z "$ENCRYPTION_KEY" ]; then
+                echo "✗ Error: encrypted file requires a key in non-interactive mode."
+                echo "  Set BACKUP_ENCRYPTION_KEY or ~/.joinery_backup_key."
+                exit 1
+            fi
+            if openssl enc -aes-256-cbc -d -pbkdf2 -pass pass:"$ENCRYPTION_KEY" -in "$input_file" 2>/dev/null | gunzip > "$temp_file" 2>/dev/null; then
+                decrypt_ok=true
+            fi
+        else
+            echo "🔐 Enter decryption password for backup file:"
+            if openssl enc -aes-256-cbc -d -pbkdf2 -in "$input_file" 2>/dev/null | gunzip > "$temp_file" 2>/dev/null; then
+                decrypt_ok=true
+            fi
+        fi
+        if [ "$decrypt_ok" = true ]; then
             echo "✓ File decrypted and decompressed successfully."
             echo "   Decompressed size: $(ls -lh "$temp_file" | awk '{print $5}')"
             eval "$output_var='$temp_file'"
@@ -146,30 +203,46 @@ prepare_restore_file() {
 backup_existing_database() {
     local db_name="$1"
     local now=$(date +"%m_%d_%Y_%H%M%S")
-    local backup_file="${db_name}-${now}-pre-restore.sql.gz.enc"
-    
+    # In non-interactive mode we drop encryption for this automatic pre-restore
+    # dump so the job can't hang on an openssl password prompt and so the
+    # operator can always recover without a key. File is still chmod 600.
+    local backup_file
+    local encrypt_ok=false
+
     echo "📦 Creating backup of existing database before restore..."
     echo ""
-    
+
     local temp_file=$(mktemp --suffix=.sql)
-    if pg_dump -U postgres "$db_name" > "$temp_file" 2>/dev/null; then
-        echo "✓ Database dump completed"
-        echo ""
-        echo "🔐 Enter encryption password for backup file:"
-        if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file" 2>/dev/null; then
-            rm -f "$temp_file"
-            chmod 600 "$backup_file"
-            echo "✓ Pre-restore backup complete: $backup_file"
-            echo "   File size: $(ls -lh "$backup_file" | awk '{print $5}')"
-            return 0
-        else
-            rm -f "$temp_file"
-            echo "✗ Error encrypting backup."
-            return 1
-        fi
-    else
+    if ! pg_dump -U postgres "$db_name" > "$temp_file" 2>/dev/null; then
         rm -f "$temp_file"
         echo "✗ Error creating backup of existing database."
+        return 1
+    fi
+    echo "✓ Database dump completed"
+    echo ""
+
+    if [ "$NON_INTERACTIVE" = true ]; then
+        backup_file="${db_name}-${now}-pre-restore.sql.gz"
+        if gzip -9 < "$temp_file" > "$backup_file" 2>/dev/null; then
+            encrypt_ok=true
+        fi
+    else
+        backup_file="${db_name}-${now}-pre-restore.sql.gz.enc"
+        echo "🔐 Enter encryption password for backup file:"
+        if gzip -9 < "$temp_file" | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file" 2>/dev/null; then
+            encrypt_ok=true
+        fi
+    fi
+
+    rm -f "$temp_file"
+    if [ "$encrypt_ok" = true ]; then
+        chmod 600 "$backup_file"
+        echo "✓ Pre-restore backup complete: $backup_file"
+        echo "   File size: $(ls -lh "$backup_file" | awk '{print $5}')"
+        return 0
+    else
+        rm -f "$backup_file"
+        echo "✗ Error writing pre-restore backup."
         return 1
     fi
 }
@@ -238,8 +311,13 @@ if [ "$( psql -U postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NA
     echo "✓ Database '$DB_NAME' exists."
     echo ""
     
-    read -p "Create backup before restore? (Y/n): " -n 1 -r
-    echo
+    if [ "$NON_INTERACTIVE" = true ]; then
+        REPLY="Y"
+        echo "Non-interactive: creating pre-restore backup."
+    else
+        read -p "Create backup before restore? (Y/n): " -n 1 -r
+        echo
+    fi
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         if ! backup_existing_database "$DB_NAME"; then
             echo "❌ Backup failed. Aborting restore."
@@ -256,8 +334,13 @@ if [ "$( psql -U postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NA
         echo "✓ Database '$DB_NAME' dropped successfully."
     else
         echo "⚠️  Database drop failed (likely due to active connections)."
-        read -p "Terminate active connections and retry? (Y/n): " -n 1 -r
-        echo
+        if [ "$NON_INTERACTIVE" = true ]; then
+            REPLY="Y"
+            echo "Non-interactive: terminating active connections and retrying."
+        else
+            read -p "Terminate active connections and retry? (Y/n): " -n 1 -r
+            echo
+        fi
         if [[ ! $REPLY =~ ^[Nn]$ ]]; then
             if terminate_connections "$DB_NAME"; then
                 echo "🗑️  Retrying database drop..."
