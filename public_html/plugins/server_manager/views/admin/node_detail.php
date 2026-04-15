@@ -76,16 +76,6 @@ if ($_POST && isset($_POST['action'])) {
 		exit;
 	}
 
-	if ($action === 'fetch_backup') {
-		$params = ['remote_path' => trim($_POST['remote_path'] ?? '')];
-		if ($params['remote_path']) {
-			$steps = JobCommandBuilder::build_fetch_backup($node, $params);
-			$job = ManagementJob::createJob($node->key, 'fetch_backup', $steps, $params, $session->get_user_id());
-			header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
-			exit;
-		}
-	}
-
 	// Database actions
 	if ($action === 'copy_database') {
 		$source_id = intval($_POST['source_node_id'] ?? 0);
@@ -238,13 +228,16 @@ if ($_POST && isset($_POST['action'])) {
 			'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 			'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
+			'mgn_delete_local_after_upload',
 		];
+		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload'];
 		foreach ($editable_fields as $field) {
+			if (in_array($field, $bool_fields, true)) {
+				$node->set($field, !empty($_POST[$field]));
+				continue;
+			}
 			if (isset($_POST[$field])) {
 				$value = trim($_POST[$field]);
-				if ($field === 'mgn_enabled') {
-					$value = isset($_POST[$field]) ? true : false;
-				}
 				if ($field === 'mgn_ssh_port' && $value === '') {
 					$value = 22;
 				}
@@ -253,9 +246,6 @@ if ($_POST && isset($_POST['action'])) {
 				}
 				$node->set($field, $value);
 			}
-		}
-		if (!isset($_POST['mgn_enabled'])) {
-			$node->set('mgn_enabled', false);
 		}
 
 		try {
@@ -730,6 +720,11 @@ if ($tab === 'overview') {
 	echo '<small class="text-muted">Where to upload backups after creation. <a href="/admin/server_manager/targets">Manage targets</a></small>';
 	echo '</div>';
 
+	$formwriter->checkboxinput('mgn_delete_local_after_upload', 'Delete local backup after upload', [
+		'checked' => $node->get('mgn_delete_local_after_upload'),
+		'helptext' => 'Removes the local copy on this node after a successful cloud upload. Saves disk but leaves only the cloud copy.',
+	]);
+
 	$formwriter->checkboxinput('mgn_enabled', 'Enabled', [
 		'checked' => $node->get('mgn_enabled'),
 	]);
@@ -806,20 +801,6 @@ if ($tab === 'overview') {
 			</form>
 		</div>
 	</div>
-	<hr>
-	<div class="row">
-		<div class="col-md-6">
-			<h6>Fetch Backup File</h6>
-			<form method="post">
-				<input type="hidden" name="action" value="fetch_backup">
-				<div class="mb-2">
-					<label class="form-label">Remote path</label>
-					<input type="text" name="remote_path" class="form-control form-control-sm" placeholder="/backups/backup_20260410.sql.gz" required>
-				</div>
-				<button type="submit" class="btn btn-sm btn-primary">Fetch to Control Plane</button>
-			</form>
-		</div>
-	</div>
 <?php
 	$page->end_box();
 
@@ -880,6 +861,21 @@ if ($tab === 'overview') {
 				$target = '';
 			}
 
+			$restore_type = '';
+			if (preg_match('/\.tar\.gz$/', $f['filename'])) {
+				$restore_type = 'project';
+			} elseif (preg_match('/\.sql\.gz(\.enc)?$/', $f['filename'])) {
+				$restore_type = 'database';
+			}
+
+			if ($restore_type) {
+				$ra = htmlspecialchars(json_encode($restore_type)) . ', '
+				    . htmlspecialchars(json_encode($fn)) . ', '
+				    . htmlspecialchars(json_encode($local_path)) . ', '
+				    . htmlspecialchars(json_encode($cloud_path));
+				echo '<button type="button" class="btn btn-outline-warning btn-sm me-1" onclick="openRestoreModal(' . $ra . ')">Restore</button>';
+			}
+
 			if ($target) {
 				$args = htmlspecialchars(json_encode($target)) . ', '
 				      . htmlspecialchars(json_encode($fn)) . ', '
@@ -899,98 +895,46 @@ if ($tab === 'overview') {
 
 	$page->end_box();
 
-	// ── Restore Full Project ──
-	$project_backups = [];
-	foreach ($files as $f) {
-		if (preg_match('/\.tar\.gz$/', $f['filename'] ?? '')) {
-			$project_backups[] = $f;
-		}
-	}
-
-	$pageoptions = ['title' => 'Restore Full Project from Backup'];
-	$page->begin_box($pageoptions);
+	// ── Shared Restore modal (used by per-row Restore buttons above) ──
 ?>
-	<p class="text-muted small">Replaces project files, database, and Apache config with the contents of a full project backup. The current database and project files are automatically backed up first to <code>/backups/auto_pre_project_restore_*</code>.</p>
-	<?php if (empty($project_backups)): ?>
-		<p class="text-muted">No project backups (<code>.tar.gz</code>) found for this node. Run a Project Backup above to create one.</p>
-	<?php else: ?>
-		<form method="post" id="restoreProjectForm">
-			<input type="hidden" name="action" value="restore_project">
-			<input type="hidden" name="backup_local_path" id="restoreProjLocalPath" value="">
-			<input type="hidden" name="backup_cloud_path" id="restoreProjCloudPath" value="">
-
-			<div class="mb-3">
-				<label class="form-label">Backup file</label>
-				<select name="backup_filename" id="restoreProjSelect" class="form-select" required
-					onchange="
-						var opts = this.options[this.selectedIndex].dataset;
-						document.getElementById('restoreProjLocalPath').value = opts.localPath || '';
-						document.getElementById('restoreProjCloudPath').value = opts.cloudPath || '';
-					">
-					<option value="">Select backup...</option>
-					<?php foreach ($project_backups as $f): ?>
-						<?php
-						$loc_badge = match($f['location'] ?? '') {
-							'both'  => ' [local + cloud]',
-							'cloud' => ' [cloud only]',
-							default => ' [local]',
-						};
-						$label = $f['filename'] . ' — ' . ($f['size'] ?? '') . ' — ' . ($f['date'] ?? '') . $loc_badge;
-						?>
-						<option value="<?php echo htmlspecialchars($f['filename']); ?>"
-							data-local-path="<?php echo htmlspecialchars($f['local_path'] ?? ''); ?>"
-							data-cloud-path="<?php echo htmlspecialchars($f['cloud_path'] ?? ''); ?>">
-							<?php echo htmlspecialchars($label); ?>
-						</option>
-					<?php endforeach; ?>
-				</select>
-			</div>
-
-			<div class="mb-3">
-				<label class="form-label">What to restore</label>
-				<div class="form-check">
-					<input type="checkbox" class="form-check-input restore-component" id="rp_files" name="restore_files" checked>
-					<label class="form-check-label" for="rp_files">Project files (<code><?php echo htmlspecialchars($node->get('mgn_web_root')); ?></code>)</label>
+	<div id="restoreModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.5);" onclick="if(event.target===this) closeRestoreModal();">
+		<div style="max-width:500px; margin:10vh auto; background:white; border-radius:.5rem; box-shadow:0 .5rem 1rem rgba(0,0,0,.2);">
+			<form method="post" id="restoreForm">
+				<input type="hidden" name="action" id="rm_action" value="">
+				<input type="hidden" name="backup_filename" id="rm_filename" value="">
+				<input type="hidden" name="backup_local_path" id="rm_local_path" value="">
+				<input type="hidden" name="backup_cloud_path" id="rm_cloud_path" value="">
+				<div style="padding:1rem 1.25rem; border-bottom:1px solid #dee2e6; display:flex; justify-content:space-between; align-items:center;">
+					<h5 style="margin:0">Restore from <code id="rm_title"></code></h5>
+					<button type="button" class="btn-close" aria-label="Close" onclick="closeRestoreModal();" style="background:none;border:none;font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
 				</div>
-				<div class="form-check">
-					<input type="checkbox" class="form-check-input restore-component" id="rp_database" name="restore_database" checked>
-					<label class="form-check-label" for="rp_database">Database (from the archive — not the current DB)</label>
+				<div style="padding:1.25rem;">
+					<p class="text-muted small">
+						A pre-restore snapshot of the current database and project files is written to
+						<code>/backups/auto_pre_project_restore_*</code> before the restore runs.
+					</p>
+					<label class="form-label">What to restore</label>
+					<div class="form-check" id="rm_files_wrap">
+						<input type="checkbox" class="form-check-input restore-component" id="rm_files" name="restore_files" checked>
+						<label class="form-check-label" for="rm_files">Project files (<code><?php echo htmlspecialchars($node->get('mgn_web_root')); ?></code>)</label>
+					</div>
+					<div class="form-check" id="rm_database_wrap">
+						<input type="checkbox" class="form-check-input restore-component" id="rm_database" name="restore_database" checked>
+						<label class="form-check-label" for="rm_database">Database</label>
+					</div>
+					<div class="form-check" id="rm_apache_wrap">
+						<input type="checkbox" class="form-check-input restore-component" id="rm_apache" name="restore_apache" checked>
+						<label class="form-check-label" for="rm_apache">Apache config</label>
+					</div>
+					<div id="rm_component_error" class="text-danger small mt-2" style="display:none">Select at least one component.</div>
 				</div>
-				<div class="form-check">
-					<input type="checkbox" class="form-check-input restore-component" id="rp_apache" name="restore_apache" checked>
-					<label class="form-check-label" for="rp_apache">Apache config</label>
+				<div style="padding:.75rem 1.25rem; border-top:1px solid #dee2e6; text-align:right;">
+					<button type="button" class="btn btn-secondary" onclick="closeRestoreModal();">Cancel</button>
+					<button type="submit" class="btn btn-danger" onclick="return submitRestoreModal();">Restore</button>
 				</div>
-				<div id="rp_component_error" class="text-danger small" style="display:none">Select at least one component to restore.</div>
-			</div>
-
-			<div class="form-check mb-3">
-				<input type="checkbox" class="form-check-input" id="rp_confirm" required>
-				<label class="form-check-label" for="rp_confirm">I understand this will overwrite the current site.</label>
-			</div>
-
-			<button type="submit" class="btn btn-danger" onclick="return confirmRestoreProject();">Restore Project</button>
-		</form>
-		<script>
-		function confirmRestoreProject() {
-			var boxes = document.querySelectorAll('#restoreProjectForm .restore-component:checked');
-			var err = document.getElementById('rp_component_error');
-			if (boxes.length === 0) {
-				err.style.display = 'block';
-				return false;
-			}
-			err.style.display = 'none';
-			var parts = [];
-			if (document.getElementById('rp_files').checked)    parts.push('project files');
-			if (document.getElementById('rp_database').checked) parts.push('database');
-			if (document.getElementById('rp_apache').checked)   parts.push('Apache config');
-			var fn = document.getElementById('restoreProjSelect').value || 'the selected backup';
-			return confirm('Restore ' + parts.join(', ') + ' from ' + fn + '?\n\nThis will overwrite the current site. A pre-restore snapshot is written to /backups/ first.');
-		}
-		</script>
-	<?php endif; ?>
-<?php
-	$page->end_box();
-?>
+			</form>
+		</div>
+	</div>
 
 <script>
 var backupNodeId = <?php echo $node->key; ?>;
@@ -1051,6 +995,54 @@ function pollBackupList(jobId) {
 		});
 }
 
+function openRestoreModal(type, filename, localPath, cloudPath) {
+	document.getElementById('rm_filename').value = filename;
+	document.getElementById('rm_local_path').value = localPath || '';
+	document.getElementById('rm_cloud_path').value = cloudPath || '';
+	document.getElementById('rm_title').textContent = filename;
+	document.getElementById('rm_component_error').style.display = 'none';
+
+	var isProject = (type === 'project');
+	document.getElementById('rm_action').value = isProject ? 'restore_project' : 'restore_database';
+
+	// Show/hide components based on backup type
+	document.getElementById('rm_files_wrap').style.display    = isProject ? '' : 'none';
+	document.getElementById('rm_apache_wrap').style.display   = isProject ? '' : 'none';
+	// Database is always available
+	document.getElementById('rm_files').checked    = isProject;
+	document.getElementById('rm_database').checked = true;
+	document.getElementById('rm_apache').checked   = isProject;
+
+	document.getElementById('restoreModal').style.display = 'block';
+}
+
+function closeRestoreModal() {
+	document.getElementById('restoreModal').style.display = 'none';
+}
+
+function submitRestoreModal() {
+	var action = document.getElementById('rm_action').value;
+	var fn = document.getElementById('rm_filename').value || 'the selected backup';
+
+	if (action === 'restore_project') {
+		var boxes = document.querySelectorAll('#restoreForm .restore-component:checked');
+		var err = document.getElementById('rm_component_error');
+		if (boxes.length === 0) {
+			err.style.display = 'block';
+			return false;
+		}
+		err.style.display = 'none';
+		var parts = [];
+		if (document.getElementById('rm_files').checked)    parts.push('project files');
+		if (document.getElementById('rm_database').checked) parts.push('database');
+		if (document.getElementById('rm_apache').checked)   parts.push('Apache config');
+		return confirm('Restore ' + parts.join(', ') + ' from ' + fn + '?\n\nThis will overwrite the current site. A pre-restore snapshot is written to /backups/ first.');
+	}
+
+	// restore_database
+	return confirm('Restore database from ' + fn + '?\n\nThis will overwrite the current database. A pre-restore snapshot is written first.');
+}
+
 function deleteBackup(target, filename, localPath, cloudPath) {
 	var locations;
 	if (target === 'both')       locations = 'BOTH the local copy and the cloud copy';
@@ -1087,14 +1079,9 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 // ============================================================
 } elseif ($tab === 'database') {
 
-	// Load cached status data (for Internal Copy db_list) and backup list (for Restore dropdown)
+	// Load cached status data (for Internal Copy db_list)
 	$status_data = $node->get('mgn_last_status_data');
 	if (is_string($status_data)) $status_data = json_decode($status_data, true);
-
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));
-	$_bl = BackupListHelper::get_for_node($node);
-	$backup_list_raw = ['files' => $_bl['files']];
-	$backup_list_time = $_bl['last_scan'];
 
 	// Load other nodes for the cross-node copy source dropdown
 	$other_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
@@ -1168,69 +1155,6 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 <?php
 	$page->end_box();
 
-	// Filter backup list to database backups only (.sql.gz / .sql.gz.enc)
-	$restore_files = [];
-	if (!empty($backup_list_raw['files'])) {
-		foreach ($backup_list_raw['files'] as $f) {
-			$fn = $f['filename'] ?? '';
-			if (preg_match('/\.sql\.gz(\.enc)?$/', $fn)) {
-				$restore_files[] = $f;
-			}
-		}
-	}
-
-	$pageoptions = ['title' => 'Restore Database from Backup'];
-	$page->begin_box($pageoptions);
-?>
-	<?php if (empty($restore_files)): ?>
-		<p class="text-muted" id="dbTabRefreshEmpty">
-			No database backups found.
-			<?php if ($backup_list_time): ?>
-				Last refreshed <?php echo LibraryFunctions::convert_time($backup_list_time, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?>.
-			<?php endif; ?>
-		</p>
-	<?php else: ?>
-		<form method="post">
-			<input type="hidden" name="action" value="restore_database">
-			<div class="mb-3">
-				<label class="form-label">Backup file</label>
-				<select name="backup_filename" id="restore_backup_select" class="form-select" required
-					onchange="
-						var opts = this.options[this.selectedIndex].dataset;
-						document.getElementById('restore_local_path').value = opts.localPath || '';
-						document.getElementById('restore_cloud_path').value = opts.cloudPath || '';
-					">
-					<option value="">Select backup...</option>
-					<?php foreach ($restore_files as $f): ?>
-						<?php
-						$loc_badge = match($f['location'] ?? '') {
-							'both'  => ' [local + cloud]',
-							'cloud' => ' [cloud only]',
-							default => ' [local]',
-						};
-						$label = $f['filename'] . ' — ' . ($f['size'] ?? '') . ' — ' . ($f['date'] ?? '') . $loc_badge;
-						?>
-						<option value="<?php echo htmlspecialchars($f['filename']); ?>"
-							data-local-path="<?php echo htmlspecialchars($f['local_path'] ?? ''); ?>"
-							data-cloud-path="<?php echo htmlspecialchars($f['cloud_path'] ?? ''); ?>">
-							<?php echo htmlspecialchars($label); ?>
-						</option>
-					<?php endforeach; ?>
-				</select>
-				<small class="text-muted" id="dbTabRefreshStatus">
-					<?php if ($backup_list_time): ?>
-						List refreshed <?php echo LibraryFunctions::convert_time($backup_list_time, 'UTC', $session->get_timezone(), 'M j, g:i A'); ?>.
-					<?php endif; ?>
-				</small>
-			</div>
-			<input type="hidden" name="backup_local_path" id="restore_local_path" value="">
-			<input type="hidden" name="backup_cloud_path" id="restore_cloud_path" value="">
-			<button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will overwrite the database.')">Restore Database</button>
-		</form>
-	<?php endif; ?>
-<?php
-	$page->end_box();
-
 	// Recent database ops for this node
 	$db_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_id' => 'DESC'], 20);
 	$db_jobs->load();
@@ -1272,48 +1196,6 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 <?php
 	$page->end_box();
 ?>
-
-<script>
-// Auto-refresh local backup listing on page load if stale. Matches the Backups tab behavior.
-(function() {
-	var nodeId = <?php echo $node->key; ?>;
-	var lastScanAge = <?php echo $backup_list_time ? (time() - strtotime($backup_list_time)) : 99999; ?>;
-	var STALE_SECONDS = 60;
-
-	if (lastScanAge <= STALE_SECONDS) return;
-
-	function showRefreshing() {
-		var spinner = '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing backup list...';
-		var el1 = document.getElementById('dbTabRefreshStatus');
-		if (el1) el1.innerHTML = spinner;
-		var el2 = document.getElementById('dbTabRefreshEmpty');
-		if (el2) el2.innerHTML = spinner;
-	}
-
-	function poll(jobId) {
-		fetch('/ajax/backup_actions?action=list_status&node_id=' + nodeId + '&job_id=' + jobId)
-			.then(function(r) { return r.json(); })
-			.then(function(data) {
-				if (data.status === 'pending' || data.status === 'running') {
-					setTimeout(function() { poll(jobId); }, 2000);
-					return;
-				}
-				window.location.reload();
-			})
-			.catch(function() { setTimeout(function() { poll(jobId); }, 3000); });
-	}
-
-	window.addEventListener('DOMContentLoaded', function() {
-		showRefreshing();
-		fetch('/ajax/backup_actions?action=refresh_list&node_id=' + nodeId)
-			.then(function(r) { return r.json(); })
-			.then(function(data) {
-				if (data.success && data.job_id) poll(data.job_id);
-			})
-			.catch(function() {});
-	});
-})();
-</script>
 
 <?php
 // ============================================================
