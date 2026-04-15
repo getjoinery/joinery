@@ -44,6 +44,16 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Returns 'sudo ' when the node is bare-metal with a non-root SSH user,
+	 * empty string for Docker nodes (commands run as root inside the container).
+	 */
+	private static function sudo_prefix($node) {
+		$is_docker = (bool)$node->get('mgn_container_name');
+		$ssh_user  = $node->get('mgn_ssh_user') ?: 'root';
+		return (!$is_docker && $ssh_user !== 'root') ? 'sudo ' : '';
+	}
+
+	/**
 	 * Check system health metrics on a node.
 	 */
 	public static function build_check_status($node) {
@@ -105,8 +115,9 @@ class JobCommandBuilder {
 				'cmd' => 'if [ -f ~/.joinery_backup_key ]; then echo "ENCRYPTION_KEY_OK"; else openssl rand -base64 32 > ~/.joinery_backup_key && chmod 600 ~/.joinery_backup_key && echo "ENCRYPTION_KEY_GENERATED — retrieve it via SSH: cat ~/.joinery_backup_key"; fi'];
 		}
 
+		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
-			'cmd' => 'mkdir -p /backups'];
+			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 777 /backups"];
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run database backup',
 			'cmd' => "{$creds} && cd /backups && bash {$scripts}/sysadmin_tools/backup_database.sh {$flags} \"\$DB_NAME\"",
@@ -152,8 +163,9 @@ class JobCommandBuilder {
 				'cmd' => 'if [ -f ~/.joinery_backup_key ]; then echo "ENCRYPTION_KEY_OK"; else openssl rand -base64 32 > ~/.joinery_backup_key && chmod 600 ~/.joinery_backup_key && echo "ENCRYPTION_KEY_GENERATED — retrieve it via SSH: cat ~/.joinery_backup_key"; fi'];
 		}
 
+		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
-			'cmd' => 'mkdir -p /backups'];
+			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 777 /backups"];
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run full project backup',
 			'cmd' => "bash {$scripts}/sysadmin_tools/backup_project.sh {$project_name} {$flags}",
@@ -196,24 +208,41 @@ class JobCommandBuilder {
 
 		$steps = [];
 
-		// Safety: auto-backup target database first
-		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			'cmd' => "{$target_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
-			'node_id' => $target_node->key];
+		$target_sudo = self::sudo_prefix($target_node);
+		$source_sudo = self::sudo_prefix($source_node);
 
-		// Dump source
-		$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
-			'cmd' => "{$source_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$dump_file}",
+		// Safety: auto-backup target database first (ensure /backups exists)
+		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
+			'cmd' => "{$target_sudo}mkdir -p /backups && {$target_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
+			'node_id' => $target_node->key,
 			'timeout' => 3600];
 
-		// Download from source to control plane
-		$steps[] = ['type' => 'scp', 'label' => 'Download dump from source',
-			'direction' => 'download', 'remote_path' => $dump_file, 'local_path' => $dump_file];
+		// Dump source — must run on source node
+		$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
+			'cmd' => "{$source_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$dump_file}",
+			'node_id' => $source_node->key,
+			'timeout' => 3600];
 
-		// Upload to target
+		// Download from source to control plane — must pull from source node
+		$steps[] = ['type' => 'scp', 'label' => 'Download dump from source',
+			'direction' => 'download', 'remote_path' => $dump_file, 'local_path' => $dump_file,
+			'node_id' => $source_node->key];
+
+		// Upload to target host filesystem
 		$steps[] = ['type' => 'scp', 'label' => 'Upload dump to target',
 			'direction' => 'upload', 'local_path' => $dump_file, 'remote_path' => $dump_file,
 			'node_id' => $target_node->key];
+
+		// Docker targets: SCP lands on the host but docker exec runs inside the container.
+		// Copy the dump file from host into the container so the restore step can read it.
+		$target_container = $target_node->get('mgn_container_name');
+		if ($target_container) {
+			$tc = escapeshellarg($target_container);
+			$df = escapeshellarg($dump_file);
+			$steps[] = ['type' => 'ssh', 'label' => 'Copy dump into container',
+				'cmd' => "docker cp {$dump_file} {$tc}:{$df}",
+				'node_id' => $target_node->key, 'on_host' => true];
+		}
 
 		// Restore on target
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database on target',
@@ -221,11 +250,22 @@ class JobCommandBuilder {
 			'node_id' => $target_node->key,
 			'timeout' => 3600];
 
-		// Cleanup steps (continue on error)
+		// Cleanup steps (continue on error) — source cleanup on source node
 		$steps[] = ['type' => 'ssh', 'label' => 'Clean up source dump',
-			'cmd' => "rm -f {$dump_file}", 'continue_on_error' => true];
-		$steps[] = ['type' => 'ssh', 'label' => 'Clean up target dump',
-			'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key, 'continue_on_error' => true];
+			'cmd' => "rm -f {$dump_file}", 'node_id' => $source_node->key, 'continue_on_error' => true];
+		// For Docker target: clean up both the copy inside container and the file on host
+		if ($target_container) {
+			$tc = escapeshellarg($target_container);
+			$steps[] = ['type' => 'ssh', 'label' => 'Clean up dump in container',
+				'cmd' => "docker exec {$tc} rm -f {$dump_file}", 'node_id' => $target_node->key,
+				'on_host' => true, 'continue_on_error' => true];
+			$steps[] = ['type' => 'ssh', 'label' => 'Clean up dump on target host',
+				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key,
+				'on_host' => true, 'continue_on_error' => true];
+		} else {
+			$steps[] = ['type' => 'ssh', 'label' => 'Clean up target dump',
+				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key, 'continue_on_error' => true];
+		}
 		$steps[] = ['type' => 'local', 'label' => 'Clean up control plane',
 			'cmd' => "rm -f {$dump_file}", 'continue_on_error' => true];
 
@@ -370,18 +410,20 @@ class JobCommandBuilder {
 			$local_path = $dl_path;
 		}
 
+		$sudo = self::sudo_prefix($node);
 		// 2. Auto-backup current DB before overwrite (plaintext — fast recovery, no key needed)
 		if (!$skip_db) {
 			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
-				'cmd' => "mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+				'cmd' => "{$sudo}mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
 				'timeout' => 3600];
 		}
 
 		// 3. Auto-backup current project tree (no DB, no Apache — just the files)
 		if (!$skip_files) {
-			$pd_arg = escapeshellarg($project_dir);
+			$parent = escapeshellarg(dirname($project_dir));
+			$base   = escapeshellarg(basename($project_dir));
 			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup project files before restore',
-				'cmd' => "mkdir -p /backups && tar czf /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).tar.gz -C " . escapeshellarg(dirname($project_dir)) . " " . escapeshellarg(basename($project_dir)),
+				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}tar czf /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).tar.gz -C {$parent} {$base}",
 				'timeout' => 3600];
 		}
 
@@ -392,7 +434,7 @@ class JobCommandBuilder {
 		if ($skip_files)  $skip_flags .= ' --skip-files';
 		if ($skip_apache) $skip_flags .= ' --skip-apache';
 
-		$restore_cmd = "cd /backups && bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_project.sh")
+		$restore_cmd = "cd /backups && {$sudo}bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_project.sh")
 			. ' ' . escapeshellarg($project_name)
 			. ' ' . escapeshellarg($local_path)
 			. ' --force' . $skip_flags;
@@ -749,8 +791,9 @@ class JobCommandBuilder {
 				$db_backup_remote = "/backups/install_{$transfer_id}.sql.gz";
 				$project_backup_remote = "/backups/install_{$transfer_id}_project.tar.gz";
 
+				$source_sudo = self::sudo_prefix($source_node);
 				$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory on source',
-					'node_id' => $source_node_id, 'cmd' => 'mkdir -p /backups'];
+					'node_id' => $source_node_id, 'cmd' => "{$source_sudo}mkdir -p /backups && {$source_sudo}chmod 777 /backups"];
 				$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
 					'node_id' => $source_node_id,
 					'cmd' => "{$source_creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$db_backup_remote}",
@@ -758,7 +801,7 @@ class JobCommandBuilder {
 				$steps[] = ['type' => 'ssh', 'label' => 'Archive source project files',
 					'node_id' => $source_node_id,
 					'cmd' => "bash {$source_scripts}/sysadmin_tools/backup_project.sh {$source_project} --non-interactive --plaintext --output-dir /backups "
-					       . "&& NEW_BK=\$(ls -t /backups/{$source_project}_*.tar.gz 2>/dev/null | head -1) "
+					       . "&& NEW_BK=\$(ls -t /backups/{$source_project}*.tar.gz 2>/dev/null | head -1) "
 					       . "&& test -n \"\$NEW_BK\" && mv \"\$NEW_BK\" {$project_backup_remote}",
 					'timeout' => 3600];
 			} else {
@@ -769,12 +812,35 @@ class JobCommandBuilder {
 
 			$local_db_backup = "/tmp/install_{$transfer_id}.sql.gz";
 			$local_project_backup = "/tmp/install_{$transfer_id}_project.tar.gz";
+
+			// Docker source: files are inside the container; copy them to /tmp/ on the host
+			// so that SCP (which reads from the host filesystem) can transfer them.
+			$source_container = $source_node->get('mgn_container_name');
+			$scp_db_remote  = $db_backup_remote;
+			$scp_prj_remote = $project_backup_remote;
+			if ($source_container) {
+				$sc   = escapeshellarg($source_container);
+				$db_r = escapeshellarg($db_backup_remote);
+				$pr_r = escapeshellarg($project_backup_remote);
+				// Stage to /tmp/ on the host (always writable by root)
+				$scp_db_remote  = $local_db_backup;
+				$scp_prj_remote = $local_project_backup;
+				$db_host = escapeshellarg($local_db_backup);
+				$pr_host = escapeshellarg($local_project_backup);
+				$steps[] = ['type' => 'ssh', 'label' => 'Copy DB dump from container to host',
+					'node_id' => $source_node_id, 'on_host' => true,
+					'cmd' => "docker cp {$sc}:{$db_r} {$db_host}"];
+				$steps[] = ['type' => 'ssh', 'label' => 'Copy project archive from container to host',
+					'node_id' => $source_node_id, 'on_host' => true,
+					'cmd' => "docker cp {$sc}:{$pr_r} {$pr_host}"];
+			}
+
 			$steps[] = ['type' => 'scp', 'label' => 'Fetch DB backup to control plane',
 				'node_id' => $source_node_id, 'direction' => 'download',
-				'remote_path' => $db_backup_remote, 'local_path' => $local_db_backup];
+				'remote_path' => $scp_db_remote, 'local_path' => $local_db_backup];
 			$steps[] = ['type' => 'scp', 'label' => 'Fetch project backup to control plane',
 				'node_id' => $source_node_id, 'direction' => 'download',
-				'remote_path' => $project_backup_remote, 'local_path' => $local_project_backup];
+				'remote_path' => $scp_prj_remote, 'local_path' => $local_project_backup];
 		}
 
 		// 2. Fetch the Joinery release tarball on the target and extract it.
@@ -883,6 +949,23 @@ class JobCommandBuilder {
 		$steps[] = ['type' => 'ssh', 'label' => 'Create the site',
 			'on_host' => true, 'cmd' => $install_cmd, 'timeout' => 3600];
 
+		// Docker mode: record the container name in the control plane DB so future jobs
+		// (backups, restores, status checks) correctly use docker exec to reach the site.
+		if ($docker === 'docker') {
+			$sitename_db_esc = str_replace("'", "''", $sitename);
+			$node_id_int = intval($node->key);
+			$cfg_esc = escapeshellarg(PathHelper::getSiteRoot() . '/config/Globalvars_site.php');
+			$extr = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
+			$update_cmd = "CFG={$cfg_esc} && "
+			            . "DB_NAME=\$(grep dbname \$CFG | {$extr}) && "
+			            . "DB_USER=\$(grep dbusername \$CFG | {$extr}) && "
+			            . "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extr}) && "
+			            . "psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -c \"UPDATE mgn_managed_nodes SET mgn_container_name = '{$sitename_db_esc}' WHERE mgn_id = {$node_id_int}\" && "
+			            . "echo CONTAINER_NAME_UPDATED";
+			$steps[] = ['type' => 'local', 'label' => 'Record container name in control plane',
+				'cmd' => $update_cmd];
+		}
+
 		// Docker mode: set up an HTTP reverse proxy on the host so port 80 serves the site.
 		// In docker mode, maintenance_scripts/ is baked into the container image — not on
 		// the host — so we use the still-extracted copy under /tmp/joinery_install. This runs
@@ -907,41 +990,64 @@ class JobCommandBuilder {
 			$local_db_backup = "/tmp/install_{$transfer_id}.sql.gz";
 			$local_project_backup = "/tmp/install_{$transfer_id}_project.tar.gz";
 
+			// SCP uploads to target: for Docker, files land on HOST /tmp/
 			$steps[] = ['type' => 'scp', 'label' => 'Upload DB backup to target',
 				'direction' => 'upload', 'local_path' => $local_db_backup, 'remote_path' => $remote_db_dump];
 			$steps[] = ['type' => 'scp', 'label' => 'Upload project backup to target',
 				'direction' => 'upload', 'local_path' => $local_project_backup, 'remote_path' => $remote_project_tar];
+
+			// Docker target: SCP landed on host /tmp/ but restore runs inside the container —
+			// copy files from host into the container so the restore steps can access them.
+			// Use $docker/$sitename here (not mgn_container_name — it's blank until the post-install update step runs).
+			$is_docker_install = ($docker === 'docker');
+			$restore_on_host   = !$is_docker_install; // bare-metal: on_host=true; Docker: run inside container
+			if ($is_docker_install) {
+				$tc   = escapeshellarg($sitename);   // container name = sitename for new Docker installs
+				$db_r = escapeshellarg($remote_db_dump);
+				$pr_r = escapeshellarg($remote_project_tar);
+				$steps[] = ['type' => 'ssh', 'label' => 'Copy DB dump into container',
+					'on_host' => true,
+					'cmd' => "docker cp {$remote_db_dump} {$tc}:{$db_r}"];
+				$steps[] = ['type' => 'ssh', 'label' => 'Copy project backup into container',
+					'on_host' => true,
+					'cmd' => "docker cp {$remote_project_tar} {$tc}:{$pr_r}"];
+			}
 
 			$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed s/^.// | sed s/.$//';
 			$creds = "DB_NAME=\$(grep dbname {$target_config} | {$extract}) && "
 			       . "DB_USER=\$(grep dbusername {$target_config} | {$extract}) && "
 			       . "export PGPASSWORD=\$(grep dbpassword {$target_config} | {$extract})";
 
-			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup fresh DB before restore',
-				'on_host' => true,
-				'cmd' => "mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_install_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
-				'timeout' => 3600];
+			$sudo = self::sudo_prefix($node);
+			$step_base = $restore_on_host ? ['on_host' => true] : [];
 
-			$steps[] = ['type' => 'ssh', 'label' => 'Restore source database',
-				'on_host' => true,
+			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Auto-backup fresh DB before restore',
+				'cmd' => "{$sudo}mkdir -p /backups && {$creds} && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_install_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+				'timeout' => 3600]);
+
+			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Restore source database',
 				'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$remote_db_dump} | psql -U \"\$DB_USER\" \"\$DB_NAME\"",
-				'timeout' => 3600];
+				'timeout' => 3600]);
 
-			$steps[] = ['type' => 'ssh', 'label' => 'Extract project files',
-				'on_host' => true,
+			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Extract project files',
 				'cmd' => "tar xzf {$remote_project_tar} -C /var/www/html/{$sitename} --strip-components=1 --exclude='config/Globalvars_site.php'",
-				'timeout' => 3600,
-				'continue_on_error' => true];
+				'timeout' => 3600, 'continue_on_error' => true]);
 
-			$steps[] = ['type' => 'ssh', 'label' => 'Fix permissions',
-				'on_host' => true,
+			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Fix permissions',
 				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh /var/www/html/{$sitename}",
-				'continue_on_error' => true];
+				'continue_on_error' => true]);
 
-			$steps[] = ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
-				'on_host' => true,
+			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
 				'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
-				'continue_on_error' => true];
+				'continue_on_error' => true]);
+
+			// For Docker: also clean up the staged files on the host
+			if ($is_docker_install) {
+				$steps[] = ['type' => 'ssh', 'label' => 'Clean up restore artifacts on host',
+					'on_host' => true,
+					'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
+					'continue_on_error' => true];
+			}
 
 			$steps[] = ['type' => 'local', 'label' => 'Clean up backup files on control plane',
 				'cmd' => "rm -f {$local_db_backup} {$local_project_backup}",
