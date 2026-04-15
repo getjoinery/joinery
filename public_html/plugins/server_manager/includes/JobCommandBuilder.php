@@ -562,7 +562,7 @@ class JobCommandBuilder {
 			'timeout' => 3600,
 		];
 
-		if ($target->get('bkt_delete_local')) {
+		if ($node->get('mgn_delete_local_after_upload')) {
 			$steps[] = [
 				'type' => 'ssh',
 				'label' => 'Clean up local backup',

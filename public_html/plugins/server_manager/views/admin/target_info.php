@@ -74,13 +74,13 @@ $page->begin_box([
 	'title' => 'Target Details',
 	'altlinks' => ['Edit' => '/admin/server_manager/targets?bkt_id=' . $target->key],
 ]);
-echo '<dl class="row mb-0">';
-echo '<dt class="col-sm-3">Provider</dt><dd class="col-sm-9">' . htmlspecialchars($provider_labels[$provider] ?? $provider) . '</dd>';
-echo '<dt class="col-sm-3">Bucket</dt><dd class="col-sm-9"><code>' . htmlspecialchars($target->get('bkt_bucket')) . '</code></dd>';
-echo '<dt class="col-sm-3">Path Prefix</dt><dd class="col-sm-9"><code>' . htmlspecialchars($target->get('bkt_path_prefix') ?: '-') . '</code></dd>';
-echo '<dt class="col-sm-3">Delete Local After Upload</dt><dd class="col-sm-9">' . ($target->get('bkt_delete_local') ? 'Yes' : 'No') . '</dd>';
-echo '<dt class="col-sm-3">Status</dt><dd class="col-sm-9"><span class="badge bg-' . ($target->get('bkt_enabled') ? 'success' : 'secondary') . '">' . ($target->get('bkt_enabled') ? 'Enabled' : 'Disabled') . '</span></dd>';
-echo '</dl>';
+echo '<table class="table table-sm mb-0" style="max-width:600px">';
+echo '<tbody>';
+echo '<tr><th style="width:40%">Provider</th><td>' . htmlspecialchars($provider_labels[$provider] ?? $provider) . '</td></tr>';
+echo '<tr><th>Bucket</th><td><code>' . htmlspecialchars($target->get('bkt_bucket')) . '</code></td></tr>';
+echo '<tr><th>Path Prefix</th><td><code>' . htmlspecialchars($target->get('bkt_path_prefix') ?: '-') . '</code></td></tr>';
+echo '<tr><th>Status</th><td><span class="badge bg-' . ($target->get('bkt_enabled') ? 'success' : 'secondary') . '">' . ($target->get('bkt_enabled') ? 'Enabled' : 'Disabled') . '</span></td></tr>';
+echo '</tbody></table>';
 $page->end_box();
 
 // ── Contents ──

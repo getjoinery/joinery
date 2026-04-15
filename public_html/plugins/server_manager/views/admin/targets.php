@@ -64,7 +64,6 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	$target->set('bkt_provider', trim($_POST['bkt_provider'] ?? 'b2'));
 	$target->set('bkt_bucket', trim($_POST['bkt_bucket'] ?? ''));
 	$target->set('bkt_path_prefix', trim($_POST['bkt_path_prefix'] ?? 'joinery-backups'));
-	$target->set('bkt_delete_local', !empty($_POST['bkt_delete_local']));
 	$target->set('bkt_enabled', isset($_POST['bkt_enabled']) ? true : false);
 
 	// Build credentials JSON — canonical shape for all providers:
@@ -189,7 +188,7 @@ $pageoptions = ['title' => 'Backup Targets', 'altlinks' => ['Add Target' => '/ad
 $page->begin_box($pageoptions);
 
 echo '<table class="table table-striped table-sm">';
-echo '<thead><tr><th>Name</th><th>Provider</th><th>Bucket</th><th>Path Prefix</th><th>Delete Local</th><th>Status</th><th>Actions</th></tr></thead>';
+echo '<thead><tr><th>Name</th><th>Provider</th><th>Bucket</th><th>Path Prefix</th><th>Status</th><th>Actions</th></tr></thead>';
 echo '<tbody>';
 
 $target_count = 0;
@@ -203,7 +202,6 @@ foreach ($all_targets as $t) {
 	echo '<td>' . htmlspecialchars($prov_label) . '</td>';
 	echo '<td>' . htmlspecialchars($t->get('bkt_bucket') ?: '-') . '</td>';
 	echo '<td>' . htmlspecialchars($t->get('bkt_path_prefix') ?: '-') . '</td>';
-	echo '<td>' . ($t->get('bkt_delete_local') ? 'Yes' : 'No') . '</td>';
 	echo '<td><span class="badge bg-' . ($enabled ? 'success' : 'secondary') . '">' . ($enabled ? 'Enabled' : 'Disabled') . '</span></td>';
 	echo '<td><a href="/admin/server_manager/targets?bkt_id=' . $t->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
 	echo '<a href="/admin/server_manager/targets?bkt_id=' . $t->key . '&action=test" class="btn btn-sm btn-outline-secondary">Test</a></td>';
@@ -211,7 +209,7 @@ foreach ($all_targets as $t) {
 }
 
 if ($target_count === 0) {
-	echo '<tr><td colspan="7" class="text-muted text-center">No backup targets configured. Backups are stored locally on each node.</td></tr>';
+	echo '<tr><td colspan="6" class="text-muted text-center">No backup targets configured. Backups are stored locally on each node.</td></tr>';
 }
 
 echo '</tbody></table>';
@@ -317,11 +315,6 @@ if ($target !== null) {
 					</div>
 				</div>
 			</div>
-		</div>
-
-		<div class="mb-3 form-check">
-			<input type="checkbox" name="bkt_delete_local" class="form-check-input" id="deleteLocal" value="1" <?php echo $target->get('bkt_delete_local') ? 'checked' : ''; ?>>
-			<label class="form-check-label" for="deleteLocal">Delete local backup file after successful upload</label>
 		</div>
 
 		<div class="mb-3 form-check">
