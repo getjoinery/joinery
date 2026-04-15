@@ -188,6 +188,8 @@ Health dot colors reflect actual server health, not check recency:
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
 
+**Note on bare-metal nodes with user1 SSH:** When a bare-metal install completes, `install.sh` disables root SSH and the node's `mgn_ssh_user` is automatically updated to `user1`. Subsequent jobs run as `user1` with `NOPASSWD sudo`. All backup/restore commands that need root-level paths (e.g. `/backups/`) use `sudo` automatically.
+
 ### One-Click Node Install
 
 **Dashboard → Install New Node** opens a form that provisions a fresh Joinery site on an SSH-accessible server in a single click. Two modes:
@@ -198,6 +200,11 @@ Destructive operations auto-backup the target database before proceeding. The UI
 The job composes existing primitives: the installer artifacts from `maintenance_scripts/install_tools/` are packaged locally, SCP'd, extracted on the target, and `install.sh -y -q site SITENAME - DOMAIN` runs non-interactively. Docker installs add a follow-up step that invokes `manage_domain.sh set SITENAME DOMAIN --no-ssl` on the target to auto-install Apache + mod_proxy (if missing) and wire up an HTTP reverse proxy on port 80 — so the site is reachable at `http://DOMAIN/` as soon as DNS points here. SSL stays a separate admin step (`certbot --apache -d DOMAIN` on the target). For From-Backup, source backups are captured (or an existing cached backup is used), fetched to the control plane, and pushed to the target after install.
 
 The `mgn_install_state` column tracks the lifecycle: `installing` → `NULL` (success) or `install_failed` (failure). On failure, the node detail page surfaces a **Retry Install** button; the target must be cleaned manually (e.g. `rm -rf /var/www/html/SITENAME`) before retry because `install.sh` refuses to overwrite an existing site. Postgres passwords are auto-generated and stored in the target's `Globalvars_site.php` — Server Manager does not capture or display them.
+
+**Docker notes:**
+- The reverse proxy step (`manage_domain.sh`) is skipped when the domain is a bare IP address — a routable hostname is required for Apache `ServerName`-based virtual hosting. With an IP domain, the site is accessible directly on its mapped port.
+- `backup_project.sh` requires `rsync`. The bare-metal and Docker install scripts install rsync as part of the essential packages (`install.sh` line ~948). Sites installed before this was added can install it manually with `apt install rsync`.
+- After a Docker install, `mgn_container_name` is automatically recorded in the control plane DB so future jobs correctly use `docker exec` to reach the site.
 
 ## Backup Targets
 

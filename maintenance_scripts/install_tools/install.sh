@@ -945,7 +945,7 @@ do_server_setup() {
 
     # Install essential packages
     print_step "Installing essential packages..."
-    apt install -y curl wget git unzip software-properties-common apt-transport-https ca-certificates gnupg lsb-release build-essential fail2ban
+    apt install -y curl wget git unzip rsync software-properties-common apt-transport-https ca-certificates gnupg lsb-release build-essential fail2ban
 
     # Create and configure user1
     print_step "Setting up user1..."

@@ -1197,9 +1197,10 @@
 				echo '✓ Database migration completed successfully<br>';
 			}
 
-			//UPDATE THE SYSTEM VERSION
+			//UPDATE THE SYSTEM VERSION (upsert — fresh installs have no existing row)
 			try{
-				$sql = "UPDATE stg_settings SET stg_value = :version WHERE stg_name = 'system_version'";
+				$sql = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('system_version', :version)
+				        ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value";
 				$q = $dblink->prepare($sql);
 				$q->execute([':version' => $decode_response['system_version']]);
 				if($verbose){
