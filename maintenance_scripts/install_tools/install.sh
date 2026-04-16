@@ -888,6 +888,25 @@ do_docker_install() {
         exit 1
     fi
 
+    # Block external access to Docker-exposed Postgres ports (9080-9099).
+    # Our convention publishes container Postgres on host ports 908X (5432 in-container).
+    # UFW can't do this — Docker's DNAT rewrites the dst port before the filter INPUT
+    # chain runs, so ufw deny on 9080-9099 is silently ignored. DOCKER-USER is Docker's
+    # official admin-rules hook (runs in FORWARD). --ctorigdstport matches the original
+    # pre-NAT port recorded in conntrack. Loopback traffic bypasses eth0 and this rule,
+    # so `ssh -L 908X:localhost:908X` tunnels still work.
+    # Toggle off: iptables -D DOCKER-USER -i <iface> -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP && netfilter-persistent save
+    print_step "Blocking external access to Docker Postgres ports 9080-9099..."
+    apt-get install -y iptables-persistent
+    PUBLIC_IFACE=$(ip route | awk '/^default/ {print $5; exit}')
+    if [ -z "$PUBLIC_IFACE" ]; then
+        print_warning "Could not detect public interface — skipping DOCKER-USER rule"
+    else
+        iptables -I DOCKER-USER -i "$PUBLIC_IFACE" -p tcp -m conntrack --ctorigdstport 9080:9099 -j DROP
+        netfilter-persistent save
+        print_success "Postgres ports 9080-9099 blocked on $PUBLIC_IFACE (tunnels still work)"
+    fi
+
     if [ "$QUIET_MODE" -eq 1 ]; then
         echo -e "${GREEN}Docker installation complete!${NC}"
     else
