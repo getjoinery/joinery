@@ -6,9 +6,6 @@ require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
 
 class SdDeviceBackupException extends SystemBaseException {}
 

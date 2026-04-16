@@ -126,15 +126,6 @@ $result = array(
 	'reason'  => $data['reason'],
 );
 
-// Profile info
-if (isset($data['profile_type']) && $data['profile_type'] !== '') {
-	$profile_label = ucfirst($data['profile_type']);
-	if (!empty($data['schedule_active'])) {
-		$profile_label .= ' (schedule active)';
-	}
-	$result['profile'] = $profile_label;
-}
-
 // Reason-specific details
 $reason = $data['reason'];
 if ($reason === 'category_blocklist' && isset($data['category'])) {
@@ -154,8 +145,6 @@ if ($reason === 'category_blocklist' && isset($data['category'])) {
 	$result['detail'] = 'Device not found by DNS server. It may not have synced yet.';
 } elseif ($reason === 'inactive_device') {
 	$result['detail'] = 'Device is deactivated.';
-} elseif ($reason === 'profile_not_found') {
-	$result['detail'] = 'Profile configuration error. The assigned profile was not found.';
 }
 
 echo json_encode($result);

@@ -29,6 +29,8 @@ class ScrollDaddyHelper {
 		'torrents' => 'Torrent sites',
 		'urlshort' => 'URL shorteners',
 		'dnsvpn' => 'VPN and DNS providers',
+		'safesearch' => 'SafeSearch (Google/Bing/DuckDuckGo)',
+		'safeyoutube' => 'YouTube Restricted Mode',
 	);
 
 	public static function getRestrictedFilters() {

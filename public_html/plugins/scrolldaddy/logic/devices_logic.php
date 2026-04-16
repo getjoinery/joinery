@@ -9,9 +9,6 @@ function devices_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/device_backups_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/scheduled_blocks_class.php'));
 
 	$page_vars = array();
@@ -88,19 +85,27 @@ function devices_logic($get_vars, $post_vars){
 	}
 	$page_vars['last_seen'] = $last_seen;
 	
-	//COUNT THE ALWAYS ON BLOCKS
+	//COUNT THE ALWAYS-ON BLOCK CONTENTS (filters + services + rules with action=block)
 	$num_blocks_always = array();
+	$always_on_block_ids = array();
 	foreach($devices as $device){
-		$profile = new SdProfile($device->get('sdd_sdp_profile_id_primary'), TRUE);
-		$num_blocks_always[$device->key] = $profile->count_blocks();
+		$always_on = SdScheduledBlock::getOrCreateAlwaysOnBlock($device->key);
+		$always_on_block_ids[$device->key] = $always_on->key;
+
+		$filter_rows = new MultiSdScheduledBlockFilter(['block_id' => $always_on->key, 'action' => 0]);
+		$service_rows = new MultiSdScheduledBlockService(['block_id' => $always_on->key, 'action' => 0]);
+		$rule_rows = new MultiSdScheduledBlockRule(['block_id' => $always_on->key, 'action' => 0]);
+
+		$num_blocks_always[$device->key] = $filter_rows->count_all() + $service_rows->count_all() + $rule_rows->count_all();
 	}
 	$page_vars['num_blocks_always'] = $num_blocks_always;
+	$page_vars['always_on_block_ids'] = $always_on_block_ids;
 
-	// LOAD SCHEDULED BLOCKS PER DEVICE
+	// LOAD SCHEDULED BLOCKS PER DEVICE (exclude always-on — it's rendered separately)
 	$scheduled_blocks = array();
 	foreach($devices as $device){
 		$blocks = new MultiSdScheduledBlock(
-			array('device_id' => $device->key),
+			array('device_id' => $device->key, 'is_always_on' => false),
 			array('sdb_scheduled_block_id' => 'ASC')
 		);
 		$blocks->load();

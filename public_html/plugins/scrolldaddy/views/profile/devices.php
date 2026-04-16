@@ -11,6 +11,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$num_devices =  $page_vars['num_devices'];
 	$user = $page_vars['user'];
 	$num_blocks_always = $page_vars['num_blocks_always'];
+	$always_on_block_ids = $page_vars['always_on_block_ids'] ?? array();
 	$scheduled_blocks = $page_vars['scheduled_blocks'];
 	$num_deleted_devices =$page_vars['num_deleted_devices'];
 	$deleted_devices = $page_vars['deleted_devices'];
@@ -115,7 +116,7 @@ else{
 							<div class="job-content">
 								<div class="job-post_date">
 									<span class="date"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><polyline points="20,6 9,17 4,12"/></svg>Active'.$seen_label.'</span>
-									<div class="scd-actions-wrap"><button class="scd-actions-btn" aria-expanded="false" aria-label="Device actions"><svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="scd-actions-menu" role="menu"><a href="/profile/scrolldaddy/activation?device_id='.$device->key.'" role="menuitem">Connection Details</a><a href="/profile/scrolldaddy/device_edit?device_id='.$device->key.'" role="menuitem">Edit Device</a><a href="/profile/scrolldaddy/test?device_id='.$device->key.'" role="menuitem">Test a Domain/Page</a>'.($has_custom_rules ? '<a href="/profile/scrolldaddy/rules?device_id='.$device->key.'" role="menuitem">Custom Rules</a>' : '').($device->get('sdd_log_queries') ? '<a href="/profile/scrolldaddy/querylog?device_id='.$device->key.'" role="menuitem">View Query Log</a>' : '').'</div></div>
+									<div class="scd-actions-wrap"><button class="scd-actions-btn" aria-expanded="false" aria-label="Device actions"><svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="vertical-align:-0.125em"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="scd-actions-menu" role="menu"><a href="/profile/scrolldaddy/activation?device_id='.$device->key.'" role="menuitem">Connection Details</a><a href="/profile/scrolldaddy/device_edit?device_id='.$device->key.'" role="menuitem">Edit Device</a><a href="/profile/scrolldaddy/test?device_id='.$device->key.'" role="menuitem">Test a Domain/Page</a>'.($device->get('sdd_log_queries') ? '<a href="/profile/scrolldaddy/querylog?device_id='.$device->key.'" role="menuitem">View Query Log</a>' : '').'</div></div>
 								</div>
 								<h3 class="box-title">'.$device->get_readable_name().'</h3>
 							</div>
@@ -125,11 +126,11 @@ else{
 										<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.125em"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
 									</div>
 									<div class="author-info">
-										<h3 class="company-name">Always-On Filters</h3>
+										<h3 class="company-name">Always-On Rules</h3>
 										<h5 class="price">'.$num_blocks_always[$device->key].' blocked</h5>
 									</div>
 								</div>
-								<a class="th-btn style5" href="/profile/scrolldaddy/filters_edit?device_id='.$device->key.'">Edit</a>
+								<a class="th-btn style5" href="/profile/scrolldaddy/scheduled_block_edit?device_id='.$device->key.'&block_id='.$always_on_block_ids[$device->key].'">Edit</a>
 							</div>';
 
 							// SCHEDULED BLOCKS

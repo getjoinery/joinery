@@ -22,6 +22,7 @@ class SdScheduledBlock extends SystemBase {
 	    'sdb_scheduled_block_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sdb_sdd_device_id' => array('type'=>'int4'),
 	    'sdb_name' => array('type'=>'varchar(64)'),
+	    'sdb_is_always_on' => array('type'=>'bool', 'default'=>false),
 	    'sdb_schedule_start' => array('type'=>'varchar(5)'),
 	    'sdb_schedule_end' => array('type'=>'varchar(5)'),
 	    'sdb_schedule_days' => array('type'=>'varchar(128)'),
@@ -156,10 +157,15 @@ class SdScheduledBlock extends SystemBase {
 
 	/**
 	 * Check if this scheduled block is currently active based on time and day.
+	 * Always-on blocks are active at all times.
 	 */
 	function is_active_now() {
 		if (!$this->get('sdb_is_active')) {
 			return false;
+		}
+
+		if ($this->get('sdb_is_always_on')) {
+			return true;
 		}
 
 		$start = $this->get('sdb_schedule_start');
@@ -358,6 +364,31 @@ class SdScheduledBlock extends SystemBase {
 		return true;
 	}
 
+	/**
+	 * Get or create the always-on block for a device.
+	 * Every device has exactly one always-on block, created on demand if missing.
+	 */
+	static function getOrCreateAlwaysOnBlock($device_id) {
+		$existing = new MultiSdScheduledBlock(
+			array('device_id' => $device_id, 'is_always_on' => true),
+			array('sdb_scheduled_block_id' => 'ASC'),
+			1
+		);
+		$existing->load();
+		if (count($existing) > 0) {
+			return $existing->get(0);
+		}
+
+		$block = new SdScheduledBlock(NULL);
+		$block->set('sdb_sdd_device_id', $device_id);
+		$block->set('sdb_name', 'Always-On Rules');
+		$block->set('sdb_is_always_on', true);
+		$block->set('sdb_is_active', true);
+		$block->save();
+		$block->load();
+		return $block;
+	}
+
 }
 
 class MultiSdScheduledBlock extends SystemMultiBase {
@@ -372,6 +403,10 @@ class MultiSdScheduledBlock extends SystemMultiBase {
 
         if (isset($this->options['is_active'])) {
             $filters['sdb_is_active'] = $this->options['is_active'] ? "= TRUE" : "= FALSE";
+        }
+
+        if (isset($this->options['is_always_on'])) {
+            $filters['sdb_is_always_on'] = $this->options['is_always_on'] ? "= TRUE" : "= FALSE";
         }
 
         if (isset($this->options['deleted'])) {

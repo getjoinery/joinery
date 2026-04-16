@@ -157,6 +157,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Publish/Upgrade System Analysis](docs/publish_upgrade_system_analysis.md) - Publishing workflow
 - [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
 - [Scheduled Tasks](docs/scheduled_tasks.md) - Scheduled task system, cron runner, and task development
+- [ScrollDaddy Plugin](docs/scrolldaddy_plugin.md) - DNS filtering service: unified block model, tier gating, editor UI, and resolver flow
 - [Server Manager](docs/server_manager.md) - Remote server management plugin and Go agent
 - [Settings](docs/settings.md) - System settings management
 - [Social Features](docs/social_features.md) - Like/favorite system, block system, report system, messaging/conversations
