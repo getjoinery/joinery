@@ -555,10 +555,10 @@ Production Docker server hosting multiple client sites. Each site runs in its ow
 - `empoweredhealthtn` - Empowered Health (empoweredhealthtn.com)
 - `scrolldaddy` - ScrollDaddy web app (port 8087); DB exposed on port 9087
 
-### ScrollDaddy DNS Server
+### ScrollDaddy DNS Servers
 **Source code:** `/home/user1/scrolldaddy-dns/` (Go project — this is the authoritative repo, NOT `/tmp/scrolldaddy-dns/` on the DNS server)
-**IP:** `45.56.103.84` | **SSH Key:** `~/.ssh/id_ed25519_claude` | **Service:** `scrolldaddy-dns`
-**Logs:** `/var/log/scrolldaddy/dns.log` | **API (localhost:8053):** `/reload`, `/stats`, `/test` (require `X-API-Key`)
+**Primary:** `45.56.103.84` | **Secondary:** `97.107.131.227` | **SSH Key:** `~/.ssh/id_ed25519_claude`
+**Ops guide:** `/etc/scrolldaddy/OPS_GUIDE.md` on each server — full config, file locations, deploy steps, and troubleshooting
 
 **Deploy (build installer locally, copy to server, run):**
 ```bash
@@ -566,6 +566,8 @@ cd /home/user1/scrolldaddy-dns
 make release VERSION=1.x.x
 scp scrolldaddy-dns-installer.sh root@45.56.103.84:/tmp/
 ssh root@45.56.103.84 bash /tmp/scrolldaddy-dns-installer.sh --verbose
+scp scrolldaddy-dns-installer.sh root@97.107.131.227:/tmp/
+ssh root@97.107.131.227 bash /tmp/scrolldaddy-dns-installer.sh --verbose
 ```
 The installer auto-detects install vs upgrade. On fresh install it prompts to edit `/etc/scrolldaddy/scrolldaddy.env` before starting. On upgrade it stops, swaps binary, restarts, and auto-rolls back on failure.
 
