@@ -24,13 +24,13 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	$editable_fields = [
 		'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 		'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
-		'mgn_site_url', 'mgn_notes', 'mgn_enabled',
+		'mgn_site_url', 'mgn_notes', 'mgn_enabled', 'mgn_skip_joinery_checks',
 	];
 
 	foreach ($editable_fields as $field) {
 		if (isset($_POST[$field])) {
 			$value = trim($_POST[$field]);
-			if ($field === 'mgn_enabled') {
+			if ($field === 'mgn_enabled' || $field === 'mgn_skip_joinery_checks') {
 				$value = isset($_POST[$field]) ? true : false;
 			}
 			if ($field === 'mgn_ssh_port' && $value === '') {
@@ -42,6 +42,9 @@ if ($_POST && isset($_POST['mgn_name'])) {
 
 	if (!isset($_POST['mgn_enabled'])) {
 		$node->set('mgn_enabled', false);
+	}
+	if (!isset($_POST['mgn_skip_joinery_checks'])) {
+		$node->set('mgn_skip_joinery_checks', false);
 	}
 
 	try {
@@ -300,6 +303,12 @@ $formwriter->numberinput('mgn_ssh_port', 'SSH Port', [
 	'min' => 1, 'max' => 65535,
 ]);
 
+echo '<h6 class="text-muted mt-4 mb-3">Node Type</h6>';
+
+$formwriter->checkboxinput('mgn_skip_joinery_checks', 'Skip Joinery-specific checks', [
+	'helptext' => 'Check this for DNS, Redis, or other non-Joinery servers. When checked, status checks run only the generic disk/memory/load probes, and Backups/Database/Updates tabs are hidden.',
+]);
+
 echo '<h6 class="text-muted mt-4 mb-3">Docker Settings <small>(leave blank for bare-metal servers)</small></h6>';
 
 $formwriter->textinput('mgn_container_name', 'Docker Container Name', [
@@ -312,11 +321,12 @@ $formwriter->textinput('mgn_container_user', 'Container User', [
 	'validation' => ['maxlength' => 50],
 ]);
 
-echo '<h6 class="text-muted mt-4 mb-3">Joinery Paths</h6>';
+echo '<h6 class="text-muted mt-4 mb-3">Joinery Paths <small>(leave blank for non-Joinery nodes)</small></h6>';
 
-$formwriter->textinput('mgn_web_root', 'Web Root Path *', [
+$formwriter->textinput('mgn_web_root', 'Web Root Path', [
 	'placeholder' => '/var/www/html/site/public_html',
-	'validation' => ['required' => true, 'maxlength' => 500],
+	'helptext' => 'Required for Joinery nodes. Leave blank if "Skip Joinery-specific checks" is checked.',
+	'validation' => ['maxlength' => 500],
 ]);
 
 $formwriter->textinput('mgn_site_url', 'Site URL', [

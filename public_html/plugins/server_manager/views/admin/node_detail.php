@@ -38,7 +38,10 @@ try {
 }
 
 $tab = isset($_GET['tab']) ? $_GET['tab'] : 'overview';
-$valid_tabs = ['overview', 'backups', 'database', 'updates', 'jobs'];
+$skip_joinery = $node->get('mgn_skip_joinery_checks');
+$valid_tabs = $skip_joinery
+	? ['overview', 'jobs']
+	: ['overview', 'backups', 'database', 'updates', 'jobs'];
 if (!in_array($tab, $valid_tabs)) {
 	$tab = 'overview';
 }
@@ -320,9 +323,11 @@ if (!empty($display_messages)) {
 ?>
 <ul class="nav nav-tabs mb-3">
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'overview' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=overview">Overview</a></li>
-	<li class="nav-item"><a class="nav-link <?php echo $tab === 'backups' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=backups">Backups</a></li>
-	<li class="nav-item"><a class="nav-link <?php echo $tab === 'database' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=database">Database</a></li>
-	<li class="nav-item"><a class="nav-link <?php echo $tab === 'updates' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=updates">Updates</a></li>
+	<?php if (!$skip_joinery): ?>
+		<li class="nav-item"><a class="nav-link <?php echo $tab === 'backups' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=backups">Backups</a></li>
+		<li class="nav-item"><a class="nav-link <?php echo $tab === 'database' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=database">Database</a></li>
+		<li class="nav-item"><a class="nav-link <?php echo $tab === 'updates' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=updates">Updates</a></li>
+	<?php endif; ?>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'jobs' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=jobs">Jobs</a></li>
 </ul>
 
