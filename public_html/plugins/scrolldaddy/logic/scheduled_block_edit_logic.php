@@ -27,18 +27,21 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 	$page_vars['tier'] = $tier;
 
 	if(isset($_POST['action']) && $_POST['action'] == 'delete'){
-		// DELETE A SCHEDULED BLOCK
+		// DELETE A SCHEDULED BLOCK (always-on blocks can't be deleted from the UI)
 		$block_id = LibraryFunctions::fetch_variable_local($post_vars, 'block_id', NULL, 'required', 'Block id is required.', 'safemode', 'int');
 		$block = new SdScheduledBlock($block_id, TRUE);
 		$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
-		$device_id = $block->get('sdb_sdd_device_id');
+		if($block->get('sdb_is_always_on')){
+			return LogicResult::error("The always-on block cannot be deleted.");
+		}
+
 		$block->permanent_delete();
 
 		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
 	else if(isset($_POST['action']) && $_POST['action'] == 'edit'){
-		// CREATE OR EDIT A SCHEDULED BLOCK
+		// CREATE OR EDIT A BLOCK
 		$device_id = LibraryFunctions::fetch_variable_local($post_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
 		$device = new SdDevice($device_id, TRUE);
 		$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -46,38 +49,47 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 		$block_id = LibraryFunctions::fetch_variable_local($post_vars, 'block_id', NULL, '', '', 'safemode', 'int');
 
 		if($block_id){
-			// Edit existing
+			// Edit existing (could be scheduled or always-on)
 			$block = new SdScheduledBlock($block_id, TRUE);
 			$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		}
 		else{
-			// Create new — check scheduled block limit
+			// Create new scheduled block — the always-on block is auto-created per device
+			// so this path is exclusively for scheduled blocks. Check the limit against non-always-on blocks only.
 			$max_blocks = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_max_scheduled_blocks', 1);
-			$existing_blocks = new MultiSdScheduledBlock(['device_id' => $device->key]);
+			$existing_blocks = new MultiSdScheduledBlock(['device_id' => $device->key, 'is_always_on' => false]);
 			if($existing_blocks->count_all() >= $max_blocks){
-				return LogicResult::error("Your plan allows {$max_blocks} scheduled block per device. Upgrade to add more.");
+				return LogicResult::error("Your plan allows {$max_blocks} scheduled block(s) per device. Upgrade to add more.");
 			}
 
 			$block = new SdScheduledBlock(NULL);
 			$block->set('sdb_sdd_device_id', $device->key);
 			$block->set('sdb_is_active', true);
+			$block->set('sdb_is_always_on', false);
 			$block->save();
 			$block->load();
 		}
 
-		// Save schedule fields
-		$name = LibraryFunctions::fetch_variable_local($post_vars, 'sdb_name', '', '', '', 'safemode', NULL);
-		$start_time = LibraryFunctions::fetch_variable_local($post_vars, 'start_time', '', '', '', 'safemode', NULL);
-		$end_time = LibraryFunctions::fetch_variable_local($post_vars, 'end_time', '', '', '', 'safemode', NULL);
-		$days_blocked = isset($post_vars['days_blocked']) ? $post_vars['days_blocked'] : array();
+		$is_always_on = (bool)$block->get('sdb_is_always_on');
 
-		$block->set('sdb_name', $name);
+		// Name: only editable for scheduled blocks; always-on block keeps its fixed label
+		if(!$is_always_on){
+			$name = LibraryFunctions::fetch_variable_local($post_vars, 'sdb_name', '', '', '', 'safemode', NULL);
+			$block->set('sdb_name', $name);
+		}
 
-		if($start_time !== '' && $end_time !== '' && !empty($days_blocked)){
-			$block->set('sdb_schedule_start', strip_tags($start_time));
-			$block->set('sdb_schedule_end', strip_tags($end_time));
-			$block->set('sdb_schedule_days', json_encode($days_blocked));
-			$block->set('sdb_schedule_timezone', $device->get('sdd_timezone'));
+		// Schedule: only applies to scheduled blocks
+		if(!$is_always_on){
+			$start_time = LibraryFunctions::fetch_variable_local($post_vars, 'start_time', '', '', '', 'safemode', NULL);
+			$end_time = LibraryFunctions::fetch_variable_local($post_vars, 'end_time', '', '', '', 'safemode', NULL);
+			$days_blocked = isset($post_vars['days_blocked']) ? $post_vars['days_blocked'] : array();
+
+			if($start_time !== '' && $end_time !== '' && !empty($days_blocked)){
+				$block->set('sdb_schedule_start', strip_tags($start_time));
+				$block->set('sdb_schedule_end', strip_tags($end_time));
+				$block->set('sdb_schedule_days', json_encode($days_blocked));
+				$block->set('sdb_schedule_timezone', $device->get('sdd_timezone'));
+			}
 		}
 
 		$block->save();
@@ -86,7 +98,7 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 		if(!SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_advanced_filters', false)){
 			require_once(PathHelper::getIncludePath('plugins/scrolldaddy/includes/ScrollDaddyHelper.php'));
 			foreach(ScrollDaddyHelper::getRestrictedFilters() as $restricted_key){
-				unset($post_vars['block_'.$restricted_key]);
+				unset($post_vars['rule_'.$restricted_key]);
 			}
 		}
 
@@ -110,14 +122,24 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 			$block->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		}
 		else{
-			// New block — empty object
+			// New scheduled block — empty object
 			$block = new SdScheduledBlock(NULL);
 		}
 		$page_vars['block'] = $block;
 
-		// Load existing filter and service rules for display
+		// Load existing filter/service/domain rules for display
+		require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/scheduled_block_rules_class.php'));
 		$page_vars['filter_rules'] = $block_id ? $block->get_filter_rules() : array();
 		$page_vars['service_rules'] = $block_id ? $block->get_service_rules() : array();
+
+		if($block_id){
+			$domain_rules = new MultiSdScheduledBlockRule(['block_id' => $block->key]);
+			$domain_rules->load();
+			$page_vars['domain_rules'] = $domain_rules;
+		}
+		else{
+			$page_vars['domain_rules'] = array();
+		}
 	}
 
 	return LogicResult::render($page_vars);

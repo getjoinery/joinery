@@ -274,7 +274,7 @@ echo PublicPage::EndPage();
 		btn.disabled = true;
 		var feedback = btn.parentNode.querySelector('.scd-rule-feedback');
 		var xhr = new XMLHttpRequest();
-		xhr.open('POST', '/profile/scrolldaddy/rules');
+		xhr.open('POST', '/ajax/block_rule_add');
 		xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
 		xhr.onload = function () {
 			var data;
@@ -283,7 +283,7 @@ echo PublicPage::EndPage();
 				btn.style.display = 'none';
 				feedback.style.display = 'inline';
 				feedback.style.color = '#198754';
-				feedback.innerHTML = 'Rule added. <a href="/profile/scrolldaddy/rules?device_id=' + encodeURIComponent(btn.dataset.device) + '">Manage rules \u2192</a>';
+				feedback.innerHTML = 'Rule added. <a href="/profile/scrolldaddy/devices">Manage rules \u2192</a>';
 			} else {
 				btn.disabled = false;
 				feedback.style.display = 'inline';

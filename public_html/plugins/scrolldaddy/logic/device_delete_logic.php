@@ -8,9 +8,6 @@ function device_delete_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
 
 	$page_vars = array();
 

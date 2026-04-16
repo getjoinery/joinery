@@ -328,12 +328,6 @@ foreach (array_chunk($all_domains, $batch_size) as $batch) {
 				$entry['result'] = $data['result'];
 				$entry['reason'] = isset($data['reason']) ? $data['reason'] : '';
 
-				if (!empty($data['profile_type'])) {
-					$profile_label = ucfirst($data['profile_type']);
-					if (!empty($data['schedule_active'])) $profile_label .= ' (schedule active)';
-					$entry['profile'] = $profile_label;
-				}
-
 				$reason = $entry['reason'];
 				if ($reason === 'category_blocklist' && isset($data['category'])) {
 					$cat = $data['category'];
