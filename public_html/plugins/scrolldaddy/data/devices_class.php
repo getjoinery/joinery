@@ -6,10 +6,6 @@ require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/filters_class.php'));
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/services_class.php'));
-require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/rules_class.php'));
 require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/device_backups_class.php'));
 require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/scheduled_blocks_class.php'));
 
@@ -29,8 +25,6 @@ class SdDevice extends SystemBase {
 	    'sdd_device_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sdd_device_name' => array('type'=>'varchar(64)'),
 	    'sdd_device_type' => array('type'=>'varchar(32)'),
-	    'sdd_sdp_profile_id_primary' => array('type'=>'int4'),
-	    'sdd_sdp_profile_id_secondary' => array('type'=>'int4'),
 	    'sdd_usr_user_id' => array('type'=>'int4'),
 	    'sdd_is_active' => array('type'=>'bool'),
 	    'sdd_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -63,9 +57,7 @@ class SdDevice extends SystemBase {
 		}
 	}
 
-	static function createDevice($device, $profile1, $profile2, $post_vars){
-		$user = new User($profile1->get('sdp_usr_user_id'), TRUE);
-
+	static function createDevice($device, $user, $post_vars){
 		$deactivation_pin = rand(100000, 999999);
 
 		$device_name = 'user'.$user->key . '-' . trim(preg_replace("/[^a-zA-Z0-9\s'-]/", "", $post_vars['device_name']));
@@ -79,10 +71,6 @@ class SdDevice extends SystemBase {
 		$device->set('sdd_is_active', true);
 		$device->set('sdd_allow_device_edits', $post_vars['sdd_allow_device_edits']);
 		$device->set('sdd_deactivation_pin', $deactivation_pin);
-		$device->set('sdd_sdp_profile_id_primary', $profile1->key);
-		if(isset($profile2->key)){
-			$device->set('sdd_sdp_profile_id_secondary', $profile2->key);
-		}
 		$device->set('sdd_device_type', $device_type);
 		$device->set('sdd_device_name', $device_name);
 		$device->set('sdd_resolver_uid', $resolver_uid);
@@ -90,6 +78,10 @@ class SdDevice extends SystemBase {
 
 		$device->prepare();
 		$device->save();
+
+		// Every device gets an always-on block for its baseline policy
+		SdScheduledBlock::getOrCreateAlwaysOnBlock($device->key);
+
 		return $device;
 	}
 
@@ -98,184 +90,15 @@ class SdDevice extends SystemBase {
 		return true;
 	}
 
-	private static function decodeDays($value) {
-		if (!$value) return [];
-		$decoded = json_decode($value, true);
-		if (is_array($decoded)) return $decoded;
-		// Fallback: handle legacy PHP-serialized data
-		$unserialized = @unserialize($value);
-		if (is_array($unserialized)) return $unserialized;
-		return [];
-	}
-
-	function get_time_to_active_profile($profile_choice){
-		if(!$this->get('sdd_sdp_profile_id_secondary')){
-			return [
-				'hours'   => 0,
-				'minutes' => 0
-			];
-		}
-
-		$profile = new SdProfile($this->get('sdd_sdp_profile_id_secondary'), TRUE);
-
-		if(!$profile->get('sdp_schedule_start') || !$profile->get('sdp_schedule_end')){
-			return '';
-		}
-
-		$schedule_days = self::decodeDays($profile->get('sdp_schedule_days'));
-
-		if($profile_choice == 'primary'){
-			$tz = new DateTimeZone($profile->get('sdp_schedule_timezone'));
-			$now = new DateTime('now', $tz);
-			$currentDay = strtolower($now->format('D'));
-
-			$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('sdp_schedule_start'), $tz);
-			$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('sdp_schedule_end'), $tz);
-
-			if (in_array($currentDay, $schedule_days)) {
-				if ($now < $todayEnd) {
-					$diff = $now->diff($todayEnd);
-					return [
-						'hours'   => $diff->h + ($diff->days * 24),
-						'minutes' => $diff->i
-					];
-				}
-			}
-			else{
-				return [
-					'hours'   => 0,
-					'minutes' => 0
-				];
-			}
-		}
-		else if ($profile_choice == 'secondary'){
-			$tz = new DateTimeZone($profile->get('sdp_schedule_timezone'));
-			$now = new DateTime('now', $tz);
-			$currentDay = strtolower($now->format('D'));
-
-			$todayStart = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('sdp_schedule_start'), $tz);
-			$todayEnd   = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $profile->get('sdp_schedule_end'), $tz);
-
-			if (in_array($currentDay, $schedule_days)) {
-				if ($now < $todayStart) {
-					$diff = $now->diff($todayStart);
-					return [
-						'hours'   => $diff->h + ($diff->days * 24),
-						'minutes' => $diff->i
-					];
-				} elseif ($now >= $todayStart && $now < $todayEnd) {
-					return [
-						'hours'   => 0,
-						'minutes' => 0
-					];
-				}
-			}
-
-			for ($i = 1; $i <= 7; $i++) {
-				$nextDay = clone $now;
-				$nextDay->modify("+{$i} days");
-				$nextDayAbbrev = strtolower($nextDay->format('D'));
-
-				if (in_array($nextDayAbbrev, $schedule_days)) {
-					$nextStart = DateTime::createFromFormat('Y-m-d H:i', $nextDay->format('Y-m-d') . ' ' . $profile->get('sdp_schedule_start'), $tz);
-					$diff = $now->diff($nextStart);
-					return [
-						'hours'   => $diff->h + ($diff->days * 24),
-						'minutes' => $diff->i
-					];
-				}
-			}
-		}
-	}
-
-	function get_schedule_string($profile_choice){
-		if(!$this->get('sdd_sdp_profile_id_secondary')){
-			return '';
-		}
-
-		$profile = new SdProfile($this->get('sdd_sdp_profile_id_secondary'), TRUE);
-
-		if(!$profile->get('sdp_schedule_start') || !$profile->get('sdp_schedule_end')){
-			return '';
-		}
-
-		$all_days = array('mon', 'tue','wed','thu','fri','sat','sun');
-		$schedule_days = self::decodeDays($profile->get('sdp_schedule_days'));
-
-		if($profile_choice == 'primary'){
-			$string = LibraryFunctions::convertToAmPmManual($profile->get('sdp_schedule_end')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('sdp_schedule_start')) . ' ' . implode(', ', $schedule_days);
-			$string .= ', All day '.implode(', ', array_diff($all_days, $schedule_days));
-			return $string;
-		}
-		else if ($profile_choice == 'secondary'){
-			return LibraryFunctions::convertToAmPmManual($profile->get('sdp_schedule_start')) . ' - ' . LibraryFunctions::convertToAmPmManual($profile->get('sdp_schedule_end')) . ' ' . implode(', ', $schedule_days);
-		}
-	}
-
-	function get_active_profile($readable=false){
-		if(!$this->get('sdd_sdp_profile_id_secondary')){
-			if($readable){
-				return 'Default blocklist';
-			}
-			else{
-				return 'primary';
-			}
-		}
-
-		$profile = new SdProfile($this->get('sdd_sdp_profile_id_secondary'), TRUE);
-
-		if(!$profile->get('sdp_schedule_start') || !$profile->get('sdp_schedule_end')){
-			return 'primary';
-		}
-
-		$tz = new DateTimeZone($profile->get('sdp_schedule_timezone'));
-		$now = new DateTime('now', $tz);
-		$current_time = $now->format('H:i');
-		$current_day = strtolower($now->format('D'));
-
-		$schedule_days = self::decodeDays($profile->get('sdp_schedule_days'));
-
-		if (!in_array($current_day, $schedule_days)) {
-			return false;
-		}
-
-		$start = $profile->get('sdp_schedule_start');
-		$end = $profile->get('sdp_schedule_end');
-
-		if ($end < $start) {
-			$is_in_schedule = ($current_time >= $start || $current_time < $end);
-		} else {
-			$is_in_schedule = ($current_time >= $start && $current_time < $end);
-		}
-
-		if($is_in_schedule){
-			if($readable == 'readable'){
-				return 'Scheduled blocklist';
-			}
-			else{
-				return 'secondary';
-			}
-		}
-		else{
-			if($readable){
-				return 'Default blocklist';
-			}
-			else{
-				return 'primary';
-			}
-		}
-	}
-
 	function get_readable_name(){
 		return preg_replace('/^user\d+-/', '', $this->get('sdd_device_name'));
 	}
 
+	// Sunday-only impulse-lock for the recovery audience: prevents a user from
+	// removing their own filters at 2am. Opt out via sdd_allow_device_edits.
+	// Edits are permitted today if the device was just created or just activated.
 	function are_filters_editable(){
 		if($this->get('sdd_allow_device_edits')){
-			return true;
-		}
-
-		if(!$this->get('sdd_sdp_profile_id_primary')){
 			return true;
 		}
 
@@ -306,34 +129,12 @@ class SdDevice extends SystemBase {
 		return $weekday === $currentDay;
 	}
 
-	function permanent_delete_profile($profile_choice){
-		if($profile_choice == 'primary'){
-			$profile_id = $this->get('sdd_sdp_profile_id_primary');
-		}
-		else if ($profile_choice == 'secondary'){
-			$profile_id = $this->get('sdd_sdp_profile_id_secondary');
-		}
-
-		$profile = new SdProfile($profile_id, TRUE);
-		$profile->permanent_delete();
-		return true;
-	}
-
 	function permanent_delete($debug = false){
 		// Delete all scheduled blocks for this device
 		$blocks = new MultiSdScheduledBlock(['device_id' => $this->key]);
 		$blocks->load();
 		foreach ($blocks as $block) {
 			$block->permanent_delete();
-		}
-
-		// Delete secondary profile if present (legacy)
-		if($this->get('sdd_sdp_profile_id_secondary')){
-			$this->permanent_delete_profile('secondary');
-		}
-
-		if($this->get('sdd_sdp_profile_id_primary')){
-			$this->permanent_delete_profile('primary');
 		}
 
 		// Save deactivation pin history
@@ -368,10 +169,6 @@ class MultiSdDevice extends SystemMultiBase {
 
         if (isset($this->options['user_id'])) {
             $filters['sdd_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
-        }
-
-        if (isset($this->options['profile_id'])) {
-            $filters['sdd_profile_id'] = [$this->options['profile_id'], PDO::PARAM_INT];
         }
 
         if (isset($this->options['active'])) {

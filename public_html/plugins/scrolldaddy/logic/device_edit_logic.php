@@ -8,7 +8,6 @@ function device_edit_logic($get_vars, $post_vars){
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/devices_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/profiles_class.php'));
 
 	$page_vars = array();
 
@@ -81,12 +80,7 @@ function device_edit_logic($get_vars, $post_vars){
 			$empty_device->save();
 			$empty_device->load();
 
-			// Create the primary profile
-			$profile_name = 'user'.$user->key . '-'.$empty_device->key.'-profile1';
-			$profile1 = SdProfile::createProfile($profile_name, $user);
-
-			$profile2 = null;
-			$device = SdDevice::createDevice($empty_device, $profile1, $profile2, $_POST);
+			$device = SdDevice::createDevice($empty_device, $user, $_POST);
 		}
 
 		return LogicResult::redirect('/profile/scrolldaddy/devices');
