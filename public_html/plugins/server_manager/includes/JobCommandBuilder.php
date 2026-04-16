@@ -58,17 +58,22 @@ class JobCommandBuilder {
 	 */
 	public static function build_check_status($node) {
 		$web_root = $node->get('mgn_web_root');
+		$skip_joinery = $node->get('mgn_skip_joinery_checks');
+
 		$steps = [
 			['type' => 'ssh', 'label' => 'Check disk usage', 'cmd' => 'df -h /'],
 			['type' => 'ssh', 'label' => 'Check memory', 'cmd' => 'free -m'],
 			['type' => 'ssh', 'label' => 'Check uptime', 'cmd' => 'uptime'],
-			['type' => 'ssh', 'label' => 'Check PostgreSQL', 'cmd' => 'pg_isready'],
-			['type' => 'ssh', 'label' => 'Check Joinery version',
-			 'cmd' => self::get_db_credentials_script($node) . " && psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -tAc \"SELECT 'VERSION=' || stg_value FROM stg_settings WHERE stg_name = 'system_version'\""],
-			['type' => 'ssh', 'label' => 'Recent errors',
-			 'cmd' => "grep -i 'fatal\\|error\\|exception' " . dirname($web_root) . "/logs/error.log | tail -20",
-			 'continue_on_error' => true],
 		];
+
+		if (!$skip_joinery) {
+			$steps[] = ['type' => 'ssh', 'label' => 'Check PostgreSQL', 'cmd' => 'pg_isready'];
+			$steps[] = ['type' => 'ssh', 'label' => 'Check Joinery version',
+				'cmd' => self::get_db_credentials_script($node) . " && psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -tAc \"SELECT 'VERSION=' || stg_value FROM stg_settings WHERE stg_name = 'system_version'\""];
+			$steps[] = ['type' => 'ssh', 'label' => 'Recent errors',
+				'cmd' => "grep -i 'fatal\\|error\\|exception' " . dirname($web_root) . "/logs/error.log | tail -20",
+				'continue_on_error' => true];
+		}
 
 		if ($node->get('mgn_container_name')) {
 			$container = $node->get('mgn_container_name');
@@ -76,13 +81,15 @@ class JobCommandBuilder {
 						'cmd' => "docker stats --no-stream {$container}", 'on_host' => true];
 		}
 
-		// List databases in this node's PostgreSQL instance for the Internal Copy dropdown.
-		// For Docker this runs inside the container; for bare-metal on the host. Either way,
-		// it returns the databases accessible to the node's DB user.
-		$creds = self::get_db_credentials_script($node);
-		$steps[] = ['type' => 'ssh', 'label' => 'List databases',
-			'cmd' => "{$creds} && echo \"CURRENT_DB=\$DB_NAME\" && psql -U \"\$DB_USER\" -tAc \"SELECT 'DB:' || datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres') ORDER BY datname\"",
-			'continue_on_error' => true];
+		if (!$skip_joinery) {
+			// List databases in this node's PostgreSQL instance for the Internal Copy dropdown.
+			// For Docker this runs inside the container; for bare-metal on the host. Either way,
+			// it returns the databases accessible to the node's DB user.
+			$creds = self::get_db_credentials_script($node);
+			$steps[] = ['type' => 'ssh', 'label' => 'List databases',
+				'cmd' => "{$creds} && echo \"CURRENT_DB=\$DB_NAME\" && psql -U \"\$DB_USER\" -tAc \"SELECT 'DB:' || datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres') ORDER BY datname\"",
+				'continue_on_error' => true];
+		}
 
 		return $steps;
 	}
