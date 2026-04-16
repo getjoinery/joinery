@@ -235,8 +235,8 @@ Process Area
         </div>
         <div class="col-md-4">
             <div class="p-4 border rounded shadow">
-                <h3>Install our app</h3>
-                <p>We use very simple apps that do nothing at all except change the proper DNS settings on your device.</p>
+                <h3>Connect your device</h3>
+                <p>Download a tiny setup file and tap &ldquo;Install.&rdquo; Your device handles the rest.</p>
             </div>
         </div>
         <div class="col-md-4">

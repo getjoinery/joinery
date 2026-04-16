@@ -263,3 +263,15 @@ input[type="checkbox"]:checked ~ label:before {
         padding: 60px 0 50px 0;
     }
 }
+
+/* Newsletter form: position inline SVG icon like the original <i> icon */
+.newsletter-form .form-group > svg {
+    display: inline-block;
+    position: absolute;
+    left: 25px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    color: var(--theme-color);
+    pointer-events: none;
+}
