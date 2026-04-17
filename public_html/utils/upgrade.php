@@ -1094,6 +1094,15 @@
 					if($verbose) echo 'Staging area cleared<br>';
 				}
 			}
+
+			// Remove this run's downloaded core archive (staging is cleared and we're
+			// past the point of needing the tarball). isset() guards the self-update
+			// resume path, which skips the download block and never sets this.
+			if (isset($file_download_location) && file_exists($file_download_location)) {
+				if (@unlink($file_download_location)) {
+					if ($verbose) upgrade_echo('Removed downloaded core archive: ' . basename($file_download_location) . '<br>');
+				}
+			}
 		}
 
 		// ============================================
