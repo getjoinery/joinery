@@ -2,7 +2,7 @@
  * ScrollDaddy Plugin Styles
  * Additional styles specific to ScrollDaddy plugin functionality
  * These styles work with any theme's CSS framework
- * v8
+ * v13
  */
 
 /* Fix blue bar under logo: inline <img> leaves a baseline gap that the mask-icon fills with theme color */
@@ -274,4 +274,163 @@ input[type="checkbox"]:checked ~ label:before {
     font-size: 16px;
     color: var(--theme-color);
     pointer-events: none;
+}
+
+/* ===== CMS Page Content (/page/{slug}) =====
+   Rich HTML body content — some pages use theme classes (.sec-title, .feature-card)
+   and render fine; others use plain <h2>/<h3>/<p>/<ul>. Give plain HTML sensible
+   rhythm so Privacy / Terms / FAQ don't look unstyled. */
+.sd-page-content {
+    font-size: 17px;
+    line-height: 1.75;
+    color: var(--title-color);
+}
+.sd-page-content > h1,
+.sd-page-content > h2,
+.sd-page-content > h3,
+.sd-page-content > h4,
+.sd-page-content > h5,
+.sd-page-content > h6 {
+    margin-top: 1.75em;
+    margin-bottom: 0.5em;
+    color: var(--title-color);
+    line-height: 1.25;
+}
+.sd-page-content > h1:first-child,
+.sd-page-content > h2:first-child,
+.sd-page-content > h3:first-child,
+.sd-page-content > section:first-child h2:first-child {
+    margin-top: 0;
+}
+.sd-page-content h2 { font-size: 32px; font-weight: 600; }
+.sd-page-content h3 { font-size: 24px; font-weight: 600; }
+.sd-page-content h4 { font-size: 20px; font-weight: 600; }
+.sd-page-content > p {
+    margin: 0 0 1.15em;
+}
+.sd-page-content ul,
+.sd-page-content ol {
+    padding-left: 1.5em;
+    margin: 0 0 1.15em;
+}
+.sd-page-content ul { list-style: disc outside; }
+.sd-page-content ol { list-style: decimal outside; }
+.sd-page-content li {
+    margin-bottom: 0.35em;
+}
+.sd-page-content li > ul,
+.sd-page-content li > ol {
+    margin-top: 0.35em;
+}
+/* Inline prose links only — excludes buttons and heading/box-title links which
+   inherit their own theme styling. */
+.sd-page-content p > a,
+.sd-page-content li > a {
+    color: var(--theme-color);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+.sd-page-content p > a:hover,
+.sd-page-content li > a:hover {
+    color: var(--theme-color2, #F93E5E);
+}
+.sd-page-content strong,
+.sd-page-content b {
+    color: var(--title-color);
+    font-weight: 600;
+}
+.sd-page-content blockquote {
+    border-left: 4px solid var(--theme-color);
+    padding: 0.25em 1.25em;
+    margin: 1.5em 0;
+    color: var(--body-color);
+    background: var(--smoke-color4, #F9F8FF);
+    font-style: italic;
+}
+.sd-page-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 12px;
+}
+.sd-page-content .lead {
+    font-size: 20px;
+    color: var(--body-color);
+}
+/* Some CMS content includes a leading <header> with white-on-brand text —
+   give it a purple band so it reads as a hero, not as invisible text. */
+.sd-page-content > header.text-center,
+.sd-page-content > header.hero-section {
+    background: linear-gradient(135deg, var(--theme-color) 0%, #8a82ff 100%);
+    color: #fff;
+    border-radius: 16px;
+    padding: 48px 24px;
+    margin-bottom: 2em;
+    text-align: center;
+}
+.sd-page-content > header.text-center h1,
+.sd-page-content > header.text-center h2,
+.sd-page-content > header.text-center h3,
+.sd-page-content > header.hero-section h1,
+.sd-page-content > header.hero-section h2,
+.sd-page-content > header.hero-section h3 {
+    color: #fff;
+    margin-top: 0;
+}
+.sd-page-content > header.text-center p,
+.sd-page-content > header.hero-section p {
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 18px;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+}
+/* .bg-light sections inside CMS pages (e.g. CTA at the bottom of addiction pages) */
+.sd-page-content .bg-light {
+    background: var(--smoke-color3, #EBEEFF);
+    border-radius: 16px;
+    padding: 40px 24px;
+    margin: 2em 0;
+}
+/* ===== Business / volume-discount promo (pricing page) ===== */
+.sd-business-promo {
+    margin-top: 60px;
+    padding: 40px 32px;
+    background: var(--smoke-color3, #EBEEFF);
+    border-radius: 16px;
+    text-align: center;
+}
+.sd-business-promo__title {
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--title-color);
+    margin: 0 0 0.5em;
+}
+.sd-business-promo__text {
+    font-size: 17px;
+    color: var(--body-color);
+    max-width: 540px;
+    margin: 0 auto 1.5em;
+    line-height: 1.6;
+}
+.sd-business-promo .th-btn {
+    text-transform: none;
+}
+
+/* Map generic Bootstrap button classes used in CMS content to theme button */
+.sd-page-content .btn-primary,
+.sd-page-content .btn.btn-primary {
+    display: inline-block;
+    padding: 14px 34px;
+    background: var(--theme-color);
+    color: #fff !important;
+    border-radius: 999px;
+    font-weight: 500;
+    text-decoration: none;
+    border: none;
+    transition: background 0.2s ease;
+}
+.sd-page-content .btn-primary:hover,
+.sd-page-content .btn.btn-primary:hover {
+    background: var(--title-color);
+    color: #fff !important;
 }
