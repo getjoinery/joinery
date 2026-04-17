@@ -413,6 +413,17 @@
 			mkdir($themes_dir, 0755, true);
 		}
 
+		// Wipe existing theme archives so static_files/themes/ mirrors current
+		// source after regeneration. Cleans up old versions, renamed themes,
+		// and themes removed from public_html/theme/.
+		$wiped = 0;
+		foreach (glob($themes_dir . '/*.tar.gz') ?: [] as $stale) {
+			if (@unlink($stale)) $wiped++;
+		}
+		if ($wiped > 0) {
+			publish_output("Wiped {$wiped} existing theme archive(s) before regeneration");
+		}
+
 		$theme_base_dir = $full_site_dir . '/public_html/theme';
 		foreach (glob($theme_base_dir . '/*/theme.json') as $theme_json) {
 			$theme_dir = dirname($theme_json);
@@ -460,6 +471,14 @@
 		$plugins_dir = $file_output_folder . '/plugins';
 		if (!is_dir($plugins_dir)) {
 			mkdir($plugins_dir, 0755, true);
+		}
+
+		$wiped = 0;
+		foreach (glob($plugins_dir . '/*.tar.gz') ?: [] as $stale) {
+			if (@unlink($stale)) $wiped++;
+		}
+		if ($wiped > 0) {
+			publish_output("Wiped {$wiped} existing plugin archive(s) before regeneration");
 		}
 
 		$plugin_base_dir = $full_site_dir . '/public_html/plugins';
@@ -954,6 +973,11 @@
 			mkdir($themes_dir, 0755, true);
 		}
 
+		// Wipe before regeneration so the directory mirrors current source.
+		foreach (glob($themes_dir . '/*.tar.gz') ?: [] as $stale) {
+			@unlink($stale);
+		}
+
 		$theme_base_dir = $full_site_dir . '/public_html/theme';
 		foreach (glob($theme_base_dir . '/*/theme.json') as $theme_json) {
 			$theme_dir = dirname($theme_json);
@@ -986,6 +1010,10 @@
 		$plugins_dir = $file_output_folder . '/plugins';
 		if (!is_dir($plugins_dir)) {
 			mkdir($plugins_dir, 0755, true);
+		}
+
+		foreach (glob($plugins_dir . '/*.tar.gz') ?: [] as $stale) {
+			@unlink($stale);
 		}
 
 		$plugin_base_dir = $full_site_dir . '/public_html/plugins';
