@@ -94,14 +94,14 @@ Price Area
                             <!--<p class="box-text">Perfect plan to get started</p>-->
 							<?php echo $product->get('pro_short_description'); ?>
                             <h4 class="box-price">
-								<?php 
-								echo $product->get_readable_price($product_version->key);		
+								<?php
+								echo $product->get_readable_price($product_version->key);
 								?>
-							<span class="duration">/<?php 
-							
-							echo $page_choice; 
+							<span class="duration">/<?php
+
+							echo $page_choice;
 							?></span></h4>
-                            
+
                             <div class="box-content">
 								<!--<p class="box-text2">A free plan grants you access to some cool features of Spend.</p>-->
                                 <div class="available-list">
@@ -120,7 +120,17 @@ Price Area
                         </div>
                     </div>
 					<?php } ?>
-					
+
+                </div>
+            </div>
+
+            <div class="row justify-content-center">
+                <div class="col-lg-9">
+                    <div class="sd-business-promo">
+                        <h3 class="sd-business-promo__title">Buying for a team, school, or nonprofit?</h3>
+                        <p class="sd-business-promo__text">We offer volume discounts for businesses and organizations. Drop us a line and we'll put together a plan that fits.</p>
+                        <a href="mailto:info@scrolldaddy.app?subject=Business%20Discount%20Inquiry" class="th-btn style-radius">Email info@scrolldaddy.app</a>
+                    </div>
                 </div>
             </div>
 			<!--
