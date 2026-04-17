@@ -335,9 +335,15 @@
 		);
 		exec($rsync_core_cmd, $output, $exit_code);
 
-		// Create empty theme/ and plugins/ directories in the core archive
-		mkdir($core_temp_dir . '/public_html/theme', 0755, true);
-		mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
+		// Ensure empty theme/ and plugins/ directories exist in the core archive.
+		// rsync leaves the parent dirs in place even when their contents are excluded,
+		// so check before creating to avoid "File exists" warnings.
+		if (!is_dir($core_temp_dir . '/public_html/theme')) {
+			mkdir($core_temp_dir . '/public_html/theme', 0755, true);
+		}
+		if (!is_dir($core_temp_dir . '/public_html/plugins')) {
+			mkdir($core_temp_dir . '/public_html/plugins', 0755, true);
+		}
 
 		// Copy config template
 		if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
