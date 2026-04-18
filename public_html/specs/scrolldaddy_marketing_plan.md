@@ -11,13 +11,30 @@ This document outlines the strategic marketing plan for Scrolldaddy.app, focusin
 ## Phase 1: Architecture Changes
 Technical foundations required to support efficient marketing and remove conversion friction.
 
+**Detailed specs:**
+- [`scrolldaddy_marketing_infrastructure.md`](scrolldaddy_marketing_infrastructure.md) — Parts A–D below (SEO hooks, coupon auto-apply, UTM fixes, conversion events)
+- [`ab_testing_framework.md`](ab_testing_framework.md) — platform-level multi-armed bandit A/B framework (item #5 below). Split out because it's platform infra, not ScrollDaddy-specific; ScrollDaddy is its first consumer.
+
 ### 1. SEO Metadata Hooks in Views
 *   **Goal:** Unique titles/descriptions for search engines and social sharing previews.
-*   **Action:** Update `PublicPage::public_header()` calls in plugin views (e.g., `index.php`, `pricing.php`) to include `meta_description` and `og_image` in the `$hoptions` array.
+*   **Summary:** Make `<meta name="description">` and the Open Graph block data-driven via `$hoptions`, fix the existing key-mismatch bug that renders meta descriptions empty on scrolldaddy pages, and add canonical + Twitter Card tags. Populate `index.php`, `pricing.php`, `product.php`, `page.php`.
 
 ### 2. Dynamic "Campaign" Coupon Auto-Apply
 *   **Goal:** Remove checkout friction for referral sources.
-*   **Action:** Update `pricing_logic.php` or `SessionControl.php` to detect `?coupon=CODE` URL parameters and automatically apply them to the session.
+*   **Summary:** New `CampaignCapture` helper, gated behind `isset($_GET['coupon'])` in `serve.php` for zero overhead on normal requests. Validates codes via `CouponCode`, stores on session, auto-applies to `ShoppingCart` (on next `add_item()` if no cart yet), and surfaces a trust-building flash banner on pricing/cart. Invalid codes fail silently.
+
+### 3. UTM Attribution Fixes
+*   **Goal:** Make existing UTM capture actually useful so Phase 3 launches (Product Hunt, Reddit, AlternativeTo) can be measured.
+*   **Summary:** Fix a bind-value bug in `SessionControl::save_visitor_event()` that drops `vse_medium`/`vse_content` data, and add first-touch session stickiness so UTM survives past the landing page to the moment of conversion.
+
+### 4. Named Conversion Events
+*   **Goal:** Give the funnel UI and the bandit framework real signal to work with.
+*   **Summary:** Add `TYPE_CART_ADD`, `TYPE_CHECKOUT_START`, `TYPE_PURCHASE`, `TYPE_SIGNUP` to `vse_visitor_events`, wire them into the four call sites, stamp session UTM onto the conversion row, and extend the existing admin funnel UI to let steps match on event type in addition to page URL.
+
+### 5. Bandit A/B Framework (platform-level, separate spec)
+*   **Goal:** Optimize landing-page copy without classical A/B test overhead. Use each conversion event from #4 as the reward signal.
+*   **Spec:** [`ab_testing_framework.md`](ab_testing_framework.md) — full design, data model, admin UI, implementation checklist.
+*   **Summary:** Epsilon-greedy multi-armed bandit. Client-side variant assignment (works with static cache — assignment happens in inline JS, rewards tracked server-side via Part D hooks). Sticky 30-day per-experiment cookie so returning visitors see the same variant. Admin UI for experiment + variant CRUD and a manual "crown the winner" action. First experiment target: homepage hero headline.
 
 ## Phase 2: SEO Strategy
 Capturing passive growth by ranking for high-intent problem-solution keywords.
