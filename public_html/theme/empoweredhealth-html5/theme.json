@@ -1,7 +1,7 @@
 {
     "name": "empoweredhealth-html5",
     "display_name": "Empowered Health HTML5",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Zero-dependency HTML5 version of the Empowered Health theme",
     "author": "Joinery Team",
     "is_stock": true,

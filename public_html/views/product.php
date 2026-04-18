@@ -22,6 +22,7 @@
     $edit_item_index = isset($page_vars['edit_item_index']) ? $page_vars['edit_item_index'] : null;
     $prefill_data = isset($page_vars['prefill_data']) ? $page_vars['prefill_data'] : null;
 ?>
+<div class="jy-ui">
 
 <!-- Breadcrumb -->
 <section class="page-title bg-transparent">
@@ -63,7 +64,7 @@
                 <?php if ($product->is_sold_out()): ?>
                     <div class="alert alert-warning" style="margin-bottom: 1.5rem;"><strong>Sold Out</strong></div>
                 <?php elseif ($product->get_readable_price()): ?>
-                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-primary); margin-bottom: 1.25rem;">
+                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--jy-color-primary); margin-bottom: 1.25rem;">
                         <?php echo $product->get_readable_price(); ?>
                     </div>
                 <?php endif; ?>
@@ -71,7 +72,7 @@
                 <!-- Description -->
                 <?php if ($product->get('pro_description')): ?>
                 <div style="margin-bottom: 1.5rem;">
-                    <div style="color: var(--color-muted); line-height: 1.6;"><?php echo $product->get('pro_description'); ?></div>
+                    <div style="color: var(--jy-color-text-muted); line-height: 1.6;"><?php echo $product->get('pro_description'); ?></div>
                 </div>
                 <?php endif; ?>
             </div>
@@ -104,8 +105,8 @@
                     $product->output_javascript($formwriter, []);
                 endif; ?>
 
-                <div style="padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--color-border, #eee);">
-                    <a href="/products" style="color: var(--color-muted); text-decoration: none; font-size: 0.9375rem;">&#8592; Back to Products</a>
+                <div style="padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--jy-color-border);">
+                    <a href="/products" style="color: var(--jy-color-text-muted); text-decoration: none; font-size: 0.9375rem;">&#8592; Back to Products</a>
                 </div>
             </div>
 
@@ -113,6 +114,7 @@
     </div>
 </section>
 
+</div>
 <?php
     $page->public_footer(['track' => true]);
 ?>

@@ -24,6 +24,7 @@
 
 	$session_name = 'Session ' . $page_vars['event_session']->get('evs_session_number') . ' — ' . $page_vars['event_session']->get('evs_title');
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -87,14 +88,14 @@
 
                 <!-- Current Session -->
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 1.5rem;">
-                    <div style="background: var(--color-primary); color: #fff; padding: 1rem 1.5rem;">
+                    <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
                         <h5 style="margin: 0; color: #fff;"><?php echo htmlspecialchars($session_name); ?></h5>
                     </div>
                     <div style="padding: 1.5rem;">
                         <?php
                         if(isset($time_string) && $time_string):
                         ?>
-                        <p style="margin: 0 0 1rem; font-size: 0.875rem; color: var(--color-muted);">&#128197; <?php echo htmlspecialchars($time_string); ?></p>
+                        <p style="margin: 0 0 1rem; font-size: 0.875rem; color: var(--jy-color-text-muted);">&#128197; <?php echo htmlspecialchars($time_string); ?></p>
                         <?php endif; ?>
 
                         <?php
@@ -135,7 +136,7 @@
                         }
                         if($exists):
                         ?>
-                        <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--color-border, #eee); text-align: right;">
+                        <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--jy-color-border); text-align: right;">
                             <a href="/profile/event_sessions_course?session_number=<?php echo $next_session; ?>&event_id=<?php echo $page_vars['event']->key; ?>" class="btn btn-primary">Next Session &rarr;</a>
                         </div>
                         <?php endif; ?>
@@ -149,14 +150,14 @@
 
                 <!-- Sessions nav -->
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 1.5rem;">
-                    <div style="background: var(--color-light, #f8f9fa); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
                         <h6 style="margin: 0;">All Sessions</h6>
                     </div>
                     <div style="padding: 1rem 1.25rem;">
                         <?php foreach($page_vars['event_sessions'] as $aevent_session): ?>
                         <div style="margin-bottom: 0.5rem;">
                             <a href="/profile/event_sessions_course?session_number=<?php echo $aevent_session->get('evs_session_number'); ?>&event_id=<?php echo $page_vars['event']->key; ?>"
-                               style="font-size: 0.875rem;<?php if($aevent_session->get('evs_session_number') == $page_vars['session_number']): ?> font-weight: 600; color: var(--color-primary);<?php endif; ?>">
+                               style="font-size: 0.875rem;<?php if($aevent_session->get('evs_session_number') == $page_vars['session_number']): ?> font-weight: 600; color: var(--jy-color-primary);<?php endif; ?>">
                                 Session <?php echo $aevent_session->get('evs_session_number'); ?> &mdash; <?php echo htmlspecialchars($aevent_session->get('evs_title')); ?>
                             </a>
                         </div>
@@ -167,7 +168,7 @@
                 <!-- Private info -->
                 <?php if($page_vars['event']->get('evt_private_info')): ?>
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--color-light, #f8f9fa); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
                         <h6 style="margin: 0;">Registrant Info</h6>
                     </div>
                     <div style="padding: 1.25rem;">
@@ -182,6 +183,7 @@
     </div>
 </section>
 
+</div>
 <?php
 $page->member_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

@@ -19,6 +19,7 @@ $session = SessionControl::get_instance();
 $conversations = $page_vars['conversations'];
 $other_users = $page_vars['other_users'];
 ?>
+<div class="jy-ui">
 
 <div class="msg-inbox">
 	<div class="msg-inbox-card">
@@ -259,6 +260,7 @@ $other_users = $page_vars['other_users'];
 .msg-inbox-pager a:hover { text-decoration: underline; }
 </style>
 
+</div>
 <?php
 $page->member_footer();
 ?>

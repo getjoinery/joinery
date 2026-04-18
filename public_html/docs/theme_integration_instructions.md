@@ -13,6 +13,91 @@ This document provides step-by-step instructions for integrating HTML/CSS templa
 - Theme directories live in `public_html/theme/{theme-name}/`
 - The `site_template` setting in `config/Globalvars_site.php` is **not the visual theme** — it is the site installation directory identifier (e.g., `phillyzouk`, `joinerytest`). Almost never needs changing.
 
+## Default Theme CSS Kit & `.jy-ui` Namespace
+
+The `default` theme ships a scoped CSS component kit in `assets/css/custom.css`. This file is loaded by **every** theme (via `PublicPageBase::render_base_assets()`), making it safe to use the kit's classes in base views (`/views/*.php`) regardless of which theme is active.
+
+### How Scoping Works
+
+`custom.css` uses two complementary gates so it is safe to load unconditionally on every page:
+
+**1. Component rules — scoped to `.jy-ui`**
+
+All component classes require a `.jy-ui` ancestor:
+
+```css
+/* lives in custom.css */
+.jy-ui .btn { ... }
+.jy-ui .card { ... }
+.jy-ui .alert { ... }
+```
+
+A branded theme's own `.btn` / `.card` etc. are unaffected because they sit outside `.jy-ui`.
+
+**Every base view that uses the kit must wrap its HTML in `.jy-ui`:**
+
+```php
+<?php $page->public_header([...]); ?>
+
+<div class="jy-ui">
+    <!-- page content using kit classes -->
+</div>
+
+<?php $page->public_footer([...]); ?>
+```
+
+Theme-specific views (homepage, blog, events) that manage their own full-width HTML do **not** need the `.jy-ui` wrapper.
+
+**2. Global type rules — gated to `body.jy-default`**
+
+The default theme's `body`, `h1–h6`, `a`, `p`, `code`, and `blockquote` resets are scoped to `body.jy-default`. The default theme's `PublicPage.php` outputs `<body class="jy-default">`; all other themes leave the body classless, so the type rules are completely inert for them. **Branded themes do not need to do anything special** — isolation is automatic.
+
+### `--jy-*` Token Vocabulary
+
+All design tokens use the `--jy-` prefix to prevent collision with any other CSS variable:
+
+| Token | Default value | Purpose |
+|-------|--------------|---------|
+| `--jy-color-bg` | `#ffffff` | Page background |
+| `--jy-color-surface` | `#f7f8fa` | Card / panel background |
+| `--jy-color-surface-alt` | `#eff1f5` | Alternate surface (table rows, etc.) |
+| `--jy-color-border` | `#e1e4ea` | Default border |
+| `--jy-color-border-strong` | `#c8ccd4` | Emphasized border |
+| `--jy-color-text` | `#1a1d23` | Body text |
+| `--jy-color-text-muted` | `#5a6170` | Secondary / muted text |
+| `--jy-color-text-subtle` | `#8990a0` | Placeholder / disabled text |
+| `--jy-color-primary` | `#5b7a99` | Primary action color |
+| `--jy-color-primary-hover` | `#4a6886` | Primary hover state |
+| `--jy-color-primary-text` | `#ffffff` | Text on primary background |
+| `--jy-color-link` | `#4a6886` | Hyperlink color |
+| `--jy-color-success` | `#2e7d32` | Success / positive |
+| `--jy-color-warning` | `#b45309` | Warning / caution |
+| `--jy-color-error` | `#c62828` | Error / danger |
+| `--jy-color-info` | `#0277bd` | Informational |
+| `--jy-font-sans` | `'Inter', system-ui, …` | Body / UI font stack |
+| `--jy-font-display` | `'Playfair Display', serif` | Heading display font |
+| `--jy-space-1` … `--jy-space-8` | `0.25rem` … `2rem` | Spacing scale |
+| `--jy-radius-sm/md/lg/xl/full` | `4px … 9999px` | Border radius scale |
+| `--jy-shadow-sm/md/lg` | — | Box shadow scale |
+| `--jy-control-height-sm/md/lg` | `32px / 40px / 48px` | Form control heights |
+
+### Re-skinning with a Branded Theme
+
+To give a branded theme different colors/typography while keeping all base-view components working, override tokens at `:root` in your theme's CSS:
+
+```css
+/* theme/mybrand/assets/css/style.css */
+:root {
+    --jy-color-primary:       #c0392b;   /* brand red */
+    --jy-color-primary-hover: #a93226;
+    --jy-color-link:          #c0392b;
+    --jy-font-sans:           'Lato', sans-serif;
+    --jy-font-display:        'Montserrat', sans-serif;
+}
+```
+
+Because the kit rules reference `var(--jy-color-primary)`, overriding the variable at `:root` is all that is needed — no CSS selectors to duplicate.
+
 ## Prerequisites
 
 Before starting, ensure you have:
@@ -1752,17 +1837,7 @@ HTML5 PublicPage.php follows the same structure as Bootstrap themes — the only
 
 **Base Asset Loading:**
 
-`PublicPageBase::global_includes_top()` calls `$this->render_base_assets()` which loads `base.css`, `assets/css/style.css`, and `base.js`. These provide fallback styles for themes that don't style every element.
-
-If your theme provides **complete CSS** (like `PublicPageJoinerySystem`), override `render_base_assets()` to prevent conflicts:
-
-```php
-protected function render_base_assets() {
-    // This theme provides its own complete CSS; base assets would conflict.
-}
-```
-
-Themes that rely on the base assets for fallback styling should not override this method.
+`PublicPageBase::global_includes_top()` calls `$this->render_base_assets()` which loads `base.css`, `custom.css`, and `base.js`. These are safe to load on every page — component rules are scoped to `.jy-ui` and global type rules are scoped to `body.jy-default`, so they do not conflict with branded theme CSS. **Do not override `render_base_assets()` to suppress them.**
 
 **Key pattern — always include:**
 ```php
@@ -1885,7 +1960,6 @@ Beyond the standard validation checklist, HTML5 themes must verify:
 - [ ] No icon font references — all icons are Unicode or inline SVG
 - [ ] Mobile menu works with vanilla JS toggle (no Bootstrap collapse)
 - [ ] `global_includes_top()` called in `<head>` section of PublicPage.php (loads meta tags + base assets)
-- [ ] If theme provides complete CSS, `render_base_assets()` overridden to empty to prevent conflicts
 - [ ] `$options = parent::public_header_common($options)` called inside `<head>` in `public_header()` (injects admin bar, tracking, settings defaults)
 - [ ] Comment reply toggle uses vanilla JS `addEventListener` (not jQuery)
 - [ ] Single consolidated CSS file loads in header (not multiple framework files)

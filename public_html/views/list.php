@@ -16,6 +16,7 @@
     $options['subtitle'] = $mailing_list->get('mlt_description');
     echo PublicPage::BeginPage($mailing_list->get('mlt_name'), $options);
 ?>
+<div class="jy-ui">
 
 <div class="container">
     <div class="row justify-content-center">
@@ -130,6 +131,7 @@
     </div>
 </div>
 
+</div>
 <?php
     echo PublicPage::EndPage();
     $page->public_footer(['track' => true]);

@@ -21,6 +21,7 @@
     ]);
 ?>
 
+<div class="jy-ui">
 <div class="auth-page">
     <div class="auth-card">
 
@@ -55,8 +56,10 @@
         ]);
         ?>
 
-        <div class="d-flex justify-content-between align-items-center" style="margin-top: 1rem;">
+        <div style="margin-top: var(--jy-space-4);">
             <?php $formwriter->submitbutton('login-form-submit', 'Login', ['class' => 'btn btn-primary']); ?>
+        </div>
+        <div class="auth-links">
             <a href="<?php echo $forgot_link; ?>">Forgot Password?</a>
         </div>
 
@@ -68,6 +71,7 @@
         </div>
 
     </div>
+</div>
 </div>
 
 <?php
