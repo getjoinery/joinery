@@ -1732,7 +1732,7 @@ abstract class FormWriterV2Base {
      *   - custom_colors: Additional colors to include (array of hex values)
      *   - show_custom_picker: Show "Custom..." button (default: true)
      *   - swatch_size: CSS size for swatches (default: '32px')
-     *   - sort: Sort order - 'dark_first', 'light_first', 'none' (default: 'dark_first')
+     *   - sort: Sort order - 'dark_first', 'light_first', 'frequency', 'none' (default: 'dark_first')
      *   - initial_display: Colors to show before "more" link (default: 100)
      */
     public function colorpicker($name, $label = '', $options = []) {
@@ -1858,7 +1858,7 @@ abstract class FormWriterV2Base {
      * Extract colors from theme CSS files
      *
      * @param string|null $theme_name Theme name, or null for current theme
-     * @param array $options Options: limit, sort, dedupe
+     * @param array $options Options: limit, sort ('dark_first'|'light_first'|'frequency'|'none'), dedupe
      * @return array Array of hex color codes
      */
     protected function extractThemeColors($theme_name = null, $options = []) {
@@ -1939,21 +1939,26 @@ abstract class FormWriterV2Base {
             }
         }
 
-        // Deduplicate
-        if ($dedupe) {
-            $hex_colors = array_unique($hex_colors);
-        }
-
-        // Sort by luminance
-        if ($sort !== 'none') {
-            usort($hex_colors, function($a, $b) use ($sort) {
-                $lumA = $this->getColorLuminance($a);
-                $lumB = $this->getColorLuminance($b);
-                if ($sort === 'light_first') {
-                    return $lumB <=> $lumA;
-                }
-                return $lumA <=> $lumB; // dark_first
-            });
+        // Sort by frequency (most-mentioned colors first), then deduplicate
+        if ($sort === 'frequency') {
+            $counts = array_count_values($hex_colors);
+            arsort($counts);
+            $hex_colors = array_keys($counts);
+        } else {
+            // Deduplicate, then sort by luminance
+            if ($dedupe) {
+                $hex_colors = array_unique($hex_colors);
+            }
+            if ($sort !== 'none') {
+                usort($hex_colors, function($a, $b) use ($sort) {
+                    $lumA = $this->getColorLuminance($a);
+                    $lumB = $this->getColorLuminance($b);
+                    if ($sort === 'light_first') {
+                        return $lumB <=> $lumA;
+                    }
+                    return $lumA <=> $lumB; // dark_first
+                });
+            }
         }
 
         // Limit

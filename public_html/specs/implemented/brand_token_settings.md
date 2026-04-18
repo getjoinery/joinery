@@ -47,7 +47,7 @@ Five new entries in `stg_settings`:
 | `jy_color_surface` | `--jy-color-surface` | `#f7f8fa` |
 | `jy_color_bg` | `--jy-color-bg` | `#ffffff` |
 
-Blank value = setting not set = token falls back to the `custom.css` default. Never store an empty
+Blank value = setting not set = token falls back to the `joinery-styles.css` default. Never store an empty
 string as an override.
 
 ---
@@ -62,7 +62,8 @@ block (after `logo_link`) and before the Composer section. Title: **"Brand & App
 ### Fields
 
 All five fields use `$formwriter->colorpicker()` from `FormWriterV2Base` (exists at line 1738).
-The colorpicker auto-scans the active theme's CSS for swatches — no extra code needed for that.
+The colorpicker auto-scans the active theme's CSS for swatches using `'sort' => 'frequency'` — most-used
+colors in the theme's CSS appear first, surfacing signature brand colors ahead of one-off accents.
 
 ```php
 echo '<h3>Brand &amp; Appearance</h3>';
@@ -72,31 +73,31 @@ echo '<p class="text-muted">These override the default UI kit tokens used on log
 $formwriter->colorpicker('jy_color_primary', 'Primary / Button Color', [
     'value'    => $settings->get_setting('jy_color_primary'),
     'helptext' => 'Buttons, checkboxes, links, focus rings.',
-    'sort'     => 'dark_first',
+    'sort'     => 'frequency',
 ]);
 
 $formwriter->colorpicker('jy_color_primary_hover', 'Primary Hover Color', [
     'value'    => $settings->get_setting('jy_color_primary_hover'),
     'helptext' => 'Button hover state. Typically a darker shade of the primary color.',
-    'sort'     => 'dark_first',
+    'sort'     => 'frequency',
 ]);
 
 $formwriter->colorpicker('jy_color_primary_text', 'Primary Button Text Color', [
     'value'    => $settings->get_setting('jy_color_primary_text'),
     'helptext' => 'Text on filled primary buttons. Usually white; change for light primaries.',
-    'sort'     => 'light_first',
+    'sort'     => 'frequency',
 ]);
 
 $formwriter->colorpicker('jy_color_surface', 'Surface / Card Background', [
     'value'    => $settings->get_setting('jy_color_surface'),
     'helptext' => 'Background of auth cards, panels, table rows. White removes the gray tint.',
-    'sort'     => 'light_first',
+    'sort'     => 'frequency',
 ]);
 
 $formwriter->colorpicker('jy_color_bg', 'Page Background', [
     'value'    => $settings->get_setting('jy_color_bg'),
     'helptext' => 'Overall page background behind cards.',
-    'sort'     => 'light_first',
+    'sort'     => 'frequency',
 ]);
 ```
 
@@ -193,7 +194,7 @@ hardcoded here should be entered in the admin "Brand & Appearance" fields instea
 
 ### CSS cascade order (loaded in this order, later wins)
 
-1. `custom.css` — kit defaults (`:root` token declarations)
+1. `joinery-styles.css` — kit defaults (`:root` token declarations)
 2. **Settings-based override** — `<style id="jy-brand-tokens">` output by `render_brand_token_overrides()`
 3. Theme CSS (`style.css`, `output.css`, etc.) — loaded after `global_includes_top`
 4. Per-theme hardcoded overrides (inline `<style>` blocks in theme `PublicPage.php`) — last, highest priority
@@ -212,12 +213,33 @@ Once this feature ships, any theme whose `PublicPage.php` contains a hardcoded b
 (like the one added to `jeremytunnell-html5` during Phase 6) should have that block removed. The
 admin settings become the single source of truth.
 
-**Themes to audit and clean up:**
+**Themes audited and cleaned up:**
 
 | Theme | Action |
 |---|---|
-| `jeremytunnell-html5` | Remove inline `<style>/* Joinery default UI kit */` block added in Phase 6 |
-| `empoweredhealth-html5` | Audit — currently has no token overrides, only layout fixes |
+| `jeremytunnell-html5` | Hardcoded block removed — values should be entered in admin Brand & Appearance settings |
+| `empoweredhealth-html5` | No token overrides found — only layout fixes; no action needed |
+
+---
+
+## FormWriterV2Base: Frequency Sort
+
+A `'frequency'` sort option was added to `extractThemeColors()` in `FormWriterV2Base` alongside
+the existing `'dark_first'`, `'light_first'`, and `'none'` options. All four remain available.
+
+**How it works:** The color extraction pass already collects one array entry per CSS mention
+(duplicates included). The existing `'dark_first'`/`'light_first'` path discards duplicates with
+`array_unique()` before sorting by luminance. The `'frequency'` path instead calls
+`array_count_values()` to tally mentions, sorts descending by count (`arsort`), then takes the
+keys — which are already deduplicated and ordered by frequency.
+
+**Why frequency for brand token pickers:** Colors used most often in a theme's CSS tend to be its
+signature brand colors (primary, background, headings) rather than one-off accents. Surfacing these
+first reduces scanning time for admins trying to match the active theme's palette.
+
+**Performance:** No additional file I/O. `array_count_values()` is O(n) and cheaper than the
+luminance `usort`. The result is cached in a `static` variable — runs once per page load regardless
+of how many colorpickers are present.
 
 ---
 
@@ -244,7 +266,8 @@ admin settings become the single source of truth.
 
 | File | Change |
 |---|---|
-| `/assets/css/custom.css` | Rename to `joinery-styles.css` |
-| `/includes/PublicPageBase.php` | Update `render_base_assets()` href; add new `render_brand_token_overrides()` method; add one call to it in `global_includes_top()` |
-| `/adm/admin_settings.php` | Add "Brand & Appearance" section with 5 colorpicker fields |
-| `/theme/jeremytunnell-html5/includes/PublicPage.php` | Remove hardcoded token override block (migration step) |
+| `/assets/css/custom.css` | Renamed to `joinery-styles.css`; old file deleted |
+| `/includes/PublicPageBase.php` | Updated `render_base_assets()` href to `joinery-styles.css?v=1`; added new `render_brand_token_overrides()` method; added one call to it in `global_includes_top()` |
+| `/adm/admin_settings.php` | Added "Brand & Appearance" section with 5 colorpicker fields using `'frequency'` sort |
+| `/includes/FormWriterV2Base.php` | Added `'frequency'` as a new sort option in `extractThemeColors()`; updated docblock |
+| `/theme/jeremytunnell-html5/includes/PublicPage.php` | Removed hardcoded token override block |
