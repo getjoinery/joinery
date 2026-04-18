@@ -6,10 +6,17 @@
     $location  = $page_vars['location'];
 
     $page = new PublicPage();
-    $page->public_header([
+    $location_header_options = [
         'is_valid_page' => $is_valid_page,
-        'title'         => $location->get('pag_title'),
-    ]);
+        'title'         => $location->get('loc_name'),
+    ];
+    if ($location->get('loc_short_description')) {
+        $location_header_options['meta_description'] = $location->get('loc_short_description');
+    }
+    if (method_exists($location, 'get_picture_link') && $location->get_picture_link('og_image')) {
+        $location_header_options['preview_image_url'] = $location->get_picture_link('og_image');
+    }
+    $page->public_header($location_header_options);
 ?>
 <div class="jy-ui">
 

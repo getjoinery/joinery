@@ -140,6 +140,7 @@ See `/docs/` for detailed guides on specific subsystems:
 
 - [Admin Pages](docs/admin_pages.md) - Admin interface development patterns
 - [Admin Page Reference](docs/admin_page_reference.md) - Quick reference for admin pages
+- [Analytics](docs/analytics.md) - Visitor events, conversion tracking, and attribution reporting
 - [API](docs/api.md) - REST API authentication, endpoints, and usage
 - [Component System](docs/component_system.md) - Reusable component architecture
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
@@ -158,6 +159,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
 - [Scheduled Tasks](docs/scheduled_tasks.md) - Scheduled task system, cron runner, and task development
 - [ScrollDaddy Plugin](docs/scrolldaddy_plugin.md) - DNS filtering service: unified block model, tier gating, editor UI, and resolver flow
+- [SEO Metadata](docs/seo_metadata.md) - SEO, Open Graph, and Twitter Card tag conventions for public views
 - [Server Manager](docs/server_manager.md) - Remote server management plugin and Go agent
 - [Settings](docs/settings.md) - System settings management
 - [Social Features](docs/social_features.md) - Like/favorite system, block system, report system, messaging/conversations

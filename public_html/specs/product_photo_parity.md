@@ -142,11 +142,17 @@ Rationale for the grid (Style A) over the simpler `FormWriter::imageinput()` dro
 
 The `set_primary_photo($photo_id)` form handler on the edit page invokes the model method (same wiring as `admin_page.php`).
 
-### 5. AJAX endpoint verification
+### 5. AJAX endpoint — add `product` to the entity class map
 
-**File: `ajax/entity_photos_ajax.php`** (verify, don't modify unless needed)
+**File: `ajax/entity_photos_ajax.php`**
 
-Confirm the endpoint treats `entity_type='product'` as a valid value — it likely already does since the handler is polymorphic and reads the `entity_type` from the request — but check the allow-list if one exists. If it gates on a hardcoded list, add `'product'`.
+The set-primary-photo handler uses a hardcoded `$entity_class_map` (around line 126) that currently lists event/user/location/mailing_list/post/page. Add:
+
+```php
+'product' => ['class' => 'Product', 'file' => 'data/products_class.php'],
+```
+
+The rest of the endpoint is polymorphic and reads `entity_type` from the request — no other changes needed.
 
 ### 6. Drift fixes — Location, MailingList, Page
 
@@ -210,13 +216,9 @@ After this, every entity exposes the same five-method surface:
 
 ### 7. Backfill
 
-Expected to be a **no-op.** No admin UI has ever written `eph_entity_photos` rows with `entity_type='product'`. Sanity-check:
+On `joinerytest.site` this is confirmed a no-op — `SELECT COUNT(*) FROM eph_entity_photos WHERE eph_entity_type = 'product'` returned 0. But the platform is deployed to multiple sites (docker-prod containers, etc.) where an external process or older code path may have written product rows, so **ship the backfill as a migration regardless**. It's idempotent — the `WHERE pro_fil_file_id IS NULL` + `EXISTS` filter makes it a no-op everywhere there's nothing to do.
 
-```sql
-SELECT COUNT(*) FROM eph_entity_photos WHERE eph_entity_type = 'product';
-```
-
-If the count is > 0 (some external process attached product photos), run a one-time UPDATE to populate `pro_fil_file_id` from the lowest-sort-order non-deleted EntityPhoto per product:
+Populate `pro_fil_file_id` from the lowest-sort-order non-deleted EntityPhoto per product:
 
 ```sql
 UPDATE pro_products p
@@ -235,7 +237,7 @@ WHERE pro_fil_file_id IS NULL
   );
 ```
 
-(Wrap as a migration in `/migrations/` — settings-style data migration, not schema.)
+Wrap as a migration in `/migrations/migrations.php` — settings-style data migration, not schema. The migration must run **after** `update_database` materializes `pro_fil_file_id` (which it will, since migrations run as part of the same admin-utilities pipeline and `update_database`'s schema-sync step precedes migrations).
 
 ---
 
@@ -249,7 +251,7 @@ WHERE pro_fil_file_id IS NULL
 - [ ] Extend `Product::permanent_delete()` to purge EntityPhotos for `entity_type='product'`
 - [ ] Add PhotoHelper grid UI to `adm/admin_product_edit.php` + wire `set_primary_photo($photo_id)` form POST handler
 - [ ] Verify (or update) `ajax/entity_photos_ajax.php` accepts `entity_type='product'`
-- [ ] Run the sanity-check backfill SQL; if count > 0, package the UPDATE as a migration
+- [ ] Package the backfill UPDATE as a migration in `/migrations/migrations.php` (confirmed no-op on joinerytest, but may apply on other deployments)
 - [ ] Run `php maintenance_scripts/dev_tools/validate_php_file.php data/products_class.php`
 - [ ] Manual smoke test: edit a product in admin, upload two photos, reorder, set one as primary, verify `$product->get_picture_link('og_image')` returns the primary photo's URL; delete the product permanently and verify EntityPhotos are gone
 
@@ -266,7 +268,6 @@ WHERE pro_fil_file_id IS NULL
 ---
 
 ## Out of Scope
-- Normalizing the `size_key` / `'full'` drift in `Location` and `MailingList` (separate cleanup — not blocking).
 - Extracting the five methods into a `HasPhotos` trait.
 - Rethinking whether `*_fil_file_id` denormalization is the right long-term design.
 - Product variants or per-variant photos — `Product` photos attach to the product, not variants. If variant photos become a requirement, that's a separate data model question.

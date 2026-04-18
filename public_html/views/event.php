@@ -21,12 +21,16 @@ $page         = new PublicPage();
 $page_options = [
     'is_valid_page' => $is_valid_page,
     'title'         => $evt_get('evt_name'),
+    'og_type'       => 'article',
 ];
 if ($evt_get('evt_short_description')) {
     $page_options['meta_description'] = $evt_get('evt_short_description');
 }
-if (!$is_virtual_event && $event->get_picture_link('hero')) {
-    $page_options['preview_image_url'] = $event->get_picture_link('hero');
+if (!$is_virtual_event && method_exists($event, 'get_picture_link')) {
+    $og_img = $event->get_picture_link('og_image') ?: $event->get_picture_link('hero');
+    if ($og_img) {
+        $page_options['preview_image_url'] = $og_img;
+    }
 }
 $page->public_header($page_options);
 ?>

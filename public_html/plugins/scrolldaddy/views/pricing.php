@@ -10,10 +10,19 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
-		'is_valid_page' => $is_valid_page,
-		'title' => 'Pricing'
+		'is_valid_page'    => $is_valid_page,
+		'title'            => 'ScrollDaddy Pricing | DNS Content Filtering | Save Your Sanity Online',
+		'meta_description' => 'Simple plans for DNS-level content filtering. Block social media, porn, gambling and more across every device on your network. 5-minute setup.',
+		'og_title'         => 'ScrollDaddy Pricing',
+		'og_description'   => 'Pick a plan and take control of your browsing. DNS-level filtering, every device.',
 	));
 	echo PublicPage::BeginPage('Pricing');
+
+	// Campaign coupon flash — shown once when a valid ?coupon= URL lands the visitor here
+	$coupon_flash = SessionControl::get_instance()->get_pending_coupon_flash();
+	if ($coupon_flash) {
+		echo '<div class="container" style="margin-top:1rem;"><div style="background:#d4edda;color:#155724;padding:0.875rem 1.25rem;border-radius:8px;border:1px solid #c3e6cb;" role="status">'.$coupon_flash.'</div></div>';
+	}
 
 	//echo PublicPage::BeginPanel();
 ?>
