@@ -10,10 +10,18 @@
     $settings        = Globalvars::get_instance();
 
     $page = new PublicPage();
-    $page->public_header([
+    $product_header_options = [
         'is_valid_page' => $is_valid_page,
         'title'         => $product->get('pro_name'),
-    ]);
+        'og_type'       => 'product',
+    ];
+    if ($product->get('pro_short_description')) {
+        $product_header_options['meta_description'] = $product->get('pro_short_description');
+    }
+    if (method_exists($product, 'get_picture_link') && $product->get_picture_link('og_image')) {
+        $product_header_options['preview_image_url'] = $product->get_picture_link('og_image');
+    }
+    $page->public_header($product_header_options);
 
     if (!$product->get('pro_is_active')) {
         PublicPage::OutputGenericPublicPage('Product not available', 'Product not available', 'Sorry, this item is currently not available for purchase/registration.');

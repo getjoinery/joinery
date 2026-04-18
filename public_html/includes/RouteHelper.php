@@ -1190,6 +1190,11 @@ class RouteHelper {
         $settings = Globalvars::get_instance();
         $session = SessionControl::get_instance();
         error_log("Core objects instantiated");
+
+        // Marketing coupon auto-apply — gated so zero overhead on requests without ?coupon=
+        if (isset($_GET['coupon'])) {
+            $session->capture_marketing_coupon();
+        }
         
         // Build complete route array with proper priority
         $all_routes = ['static' => [], 'custom' => [], 'dynamic' => []];

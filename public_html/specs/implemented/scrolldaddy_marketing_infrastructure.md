@@ -138,7 +138,7 @@ A marketing URL like `https://scrolldaddy.app/?coupon=PH2026` pre-applies the co
 
 ### Design decisions
 
-1. **Hook location: `serve.php` front controller, gated by `isset($_GET['coupon'])`.** Marketing capture is an HTTP-request concern, not a session concern. `serve.php` runs once per request before routing; the query-string check keeps the include out of the request path on the 99.99% of requests that have no coupon. Alternatives rejected: `pricing_logic.php` is too narrow (campaigns land on homepage/product/blog pages, not just pricing); `SessionControl::__construct` would mix marketing intake into an already-overloaded auth/session class and force work on CLI contexts that don't need it.
+1. **Hook location: `RouteHelper::processRoutes()`, gated by `isset($_GET['coupon'])`.** Marketing capture runs once per request, after `$session` is instantiated, before route dispatch. The query-string guard keeps the work off the 99.99% of requests that have no coupon. `pricing_logic.php` is too narrow (campaigns land on homepage/product/blog pages, not just pricing); `SessionControl::__construct` would force work on every request including CLI contexts that don't need it.
 
 2. **Storage: `$_SESSION['pending_coupon']`.** Persists across page loads for the length of the session. Applied to `ShoppingCart` immediately if a cart is active; applied on the next `add_item()` call otherwise (so coupons work even when users click a marketing link before adding items).
 
@@ -150,27 +150,27 @@ A marketing URL like `https://scrolldaddy.app/?coupon=PH2026` pre-applies the co
 
 ### Implementation plan
 
-**New file: `includes/CampaignCapture.php`** — static helper class.
+**No new file.** Coupon capture is the sibling feature of UTM capture — both are marketing URL intake → session stickiness → attribution log — so the logic lives on `SessionControl` next to the UTM code it mirrors. This avoids a thin helper file, avoids dragging URL/attribution concerns into `ShoppingCart`, and removes the `require_once` ceremony at every call site (SessionControl is always pre-loaded).
 
-Public methods:
-- `CampaignCapture::capture()` — reads `$_GET['coupon']`, validates via `CouponCode::GetByColumn()` + `is_valid()`. On success: stores code in `$_SESSION['pending_coupon']`, sets flash message in `$_SESSION['pending_coupon_flash']`, attempts immediate application to existing `ShoppingCart` if one is active in session. On failure: no session writes; logs the attempt for attribution (see below).
-- `CampaignCapture::apply_pending_to_cart(ShoppingCart $cart)` — called from `ShoppingCart::add_item()` (small hook) when `$_SESSION['pending_coupon']` is set. Calls the cart's existing `add_coupon()` method.
-- `CampaignCapture::get_flash_message()` — returns string or null, used by views to render the banner. Clears on read.
+**Modify `includes/SessionControl.php`:** add two class constants (`COUPON_PENDING_KEY = 'pending_coupon'`, `COUPON_FLASH_KEY = 'pending_coupon_flash'`) and three public methods, placed immediately after `save_visitor_event()`:
 
-**Modify `serve.php`:** Add the gated hook after session initialization, before route dispatch:
+- `capture_marketing_coupon()` — reads `$_GET['coupon']`, validates via `CouponCode::GetByColumn()` + `is_valid()`, logs every attempt (valid OR invalid) as `TYPE_COUPON_ATTEMPT` with the attempted code in `vse_meta`. On valid: stashes `$_SESSION['pending_coupon']` + flash message; if a cart is already active with items, applies immediately.
+- `apply_pending_coupon_to_cart($cart)` — reads the session key, calls `$cart->add_coupon()`, clears the key on successful application.
+- `get_pending_coupon_flash()` — returns HTML string or null; clears on read.
+
+**Modify `includes/RouteHelper.php` (`processRoutes()`):** gated hook right after `$session = SessionControl::get_instance()`:
 ```php
 if (isset($_GET['coupon'])) {
-    require_once(PathHelper::getIncludePath('includes/CampaignCapture.php'));
-    CampaignCapture::capture();
+    $session->capture_marketing_coupon();
 }
 ```
 Zero overhead when no coupon param is present.
 
-**Modify `includes/ShoppingCart.php`:** In `add_item()`, after adding the item, call `CampaignCapture::apply_pending_to_cart($this)`. Pending coupon key is cleared on successful application so it doesn't re-apply after manual removal.
+**Modify `includes/ShoppingCart.php`:** in `add_item()`, after the item is pushed, call `$session->apply_pending_coupon_to_cart($this)`. The pending key is cleared on successful application so manual removal sticks — the cart never knows about the session key itself.
 
-**Modify `plugins/scrolldaddy/views/pricing.php` and `cart.php`:** Check `CampaignCapture::get_flash_message()` and render a small info banner if set.
+**Modify `plugins/scrolldaddy/views/pricing.php` and `views/cart.php`:** read `$session->get_pending_coupon_flash()` and render the banner if set.
 
-**Attribution logging for invalid coupon attempts.** Reuse the existing visitor-events infrastructure — `SessionControl` already writes to `vse_visitor_events`. On both valid and invalid capture, write a `TYPE_COUPON_ATTEMPT` row (see Part D for the constant) with the attempted code in `vse_meta` — not in `vse_source`, which must stay reserved for UTM so Part E's channels report doesn't treat coupon codes as fake channels. Goal is to be able to query *"how many clicks on expired code X this week"* via `WHERE vse_type = TYPE_COUPON_ATTEMPT AND vse_meta = 'PH2026'`.
+**Attribution logging for invalid coupon attempts.** `capture_marketing_coupon()` calls `$this->save_visitor_event(VisitorEvent::TYPE_COUPON_ATTEMPT, FALSE, NULL, NULL, $code)` on both valid and invalid — the attempted code goes in `vse_meta`, not `vse_source`, so Part E's channels report doesn't treat coupon codes as fake channels. Goal: query *"how many clicks on expired code X this week"* via `WHERE vse_type = TYPE_COUPON_ATTEMPT AND vse_meta = 'PH2026'`.
 
 **No new data classes needed.** Uses existing `CouponCode` model and `ShoppingCart::add_coupon()`.
 
@@ -278,7 +278,7 @@ Populate rules:
 
 **Record events at the five call sites:**
 
-1. **CART_ADD** — in `ShoppingCart::add_item()`, after the item is pushed to `$this->items`, call `SessionControl::save_visitor_event(TYPE_CART_ADD)`. Same place as the new `CampaignCapture::apply_pending_to_cart()` hook from Part B.
+1. **CART_ADD** — in `ShoppingCart::add_item()`, after the item is pushed to `$this->items`, call `SessionControl::save_visitor_event(TYPE_CART_ADD)`. Same place as the new `$session->apply_pending_coupon_to_cart($this)` hook from Part B.
 
 2. **CHECKOUT_START** — in `views/cart.php` (the "Checkout" page that renders the payment form), immediately after the `empty($cart->items)` check passes and before the payment form renders. This fires when a user *sees* the payment form with items in cart — the natural funnel step between CART_ADD and PURCHASE, and the metric cart-abandonment rate is computed from. Guard against double-fire with a `$_SESSION['checkout_started']` flag:
 
@@ -436,7 +436,7 @@ ORDER BY revenue DESC;
 - Document the `vse_ref_type` / `vse_ref_id` convention in a `docs/analytics.md` (or extend an existing one) so future conversion-event authors know to stamp the reference. Note the attribution reporting page at `/admin/admin_analytics_attribution` and the queries it runs.
 
 **Scrolldaddy plugin docs (`docs/scrolldaddy_plugin.md`):**
-- The `?coupon=` capture flow and the `CampaignCapture` helper
+- The `?coupon=` capture flow on `SessionControl` (sibling to UTM capture)
 - First-touch UTM session stickiness and how conversion-time code can read `$_SESSION['utm_*']`
 - The new conversion event type constants and where they fire
 - Note that scrolldaddy's `PublicPage.php` no longer overrides head emission — it inherits the platform-level OG / Twitter Card / meta-description block from `PublicPageBase`. Per-page metadata comes from `$hoptions` populated by each view (Part A.2).
@@ -477,11 +477,11 @@ ORDER BY revenue DESC;
 - [ ] Confirm scrolldaddy pages render one meta description (not zero, not two) after A.3 cleanup
 
 ### Part B — Coupons
-- [ ] Create `includes/CampaignCapture.php` with `capture()`, `apply_pending_to_cart()`, `get_flash_message()`
-- [ ] Wire gated hook into `serve.php`: `if (isset($_GET['coupon'])) { require + CampaignCapture::capture(); }`
-- [ ] Hook `apply_pending_to_cart()` into `ShoppingCart::add_item()`
-- [ ] Add flash banner to `pricing.php` and `cart.php`
-- [ ] Log invalid-coupon attempts to `vse_visitor_events` for attribution
+- [ ] Add `COUPON_PENDING_KEY` / `COUPON_FLASH_KEY` constants and three methods (`capture_marketing_coupon()`, `apply_pending_coupon_to_cart($cart)`, `get_pending_coupon_flash()`) to `includes/SessionControl.php` — placed next to the UTM capture code inside `save_visitor_event()`
+- [ ] Wire gated hook into `RouteHelper::processRoutes()`: `if (isset($_GET['coupon'])) { $session->capture_marketing_coupon(); }`
+- [ ] Hook `$session->apply_pending_coupon_to_cart($this)` into `ShoppingCart::add_item()`
+- [ ] Add flash banner to `pricing.php` and `cart.php` via `$session->get_pending_coupon_flash()`
+- [ ] `capture_marketing_coupon()` logs every attempt to `vse_visitor_events` as `TYPE_COUPON_ATTEMPT` (code in `vse_meta`, not `vse_source`) for attribution
 - [ ] Test: valid code, expired code, invalid code, code-before-cart, code-then-checkout-clear, repeated `?coupon=` visits
 
 ### Part C — UTM
@@ -512,7 +512,7 @@ ORDER BY revenue DESC;
 
 ### Docs
 - [ ] Add a platform-level SEO/$hoptions doc (new `docs/seo_metadata.md` or section in `docs/theme_integration_instructions.md`) covering the standard `$hoptions` keys and the canonical "Common pattern" snippet for entity views
-- [ ] Update `docs/scrolldaddy_plugin.md` with CampaignCapture usage, session UTM reads, conversion event constants, and the PublicPage.php head-block changes
+- [ ] Update `docs/scrolldaddy_plugin.md` with the coupon capture flow (on `SessionControl`), session UTM reads, conversion event constants, and the PublicPage.php head-block changes
 
 ---
 

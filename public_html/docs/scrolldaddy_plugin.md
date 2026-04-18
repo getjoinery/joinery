@@ -74,3 +74,21 @@ See the resolver's `README.md` and `/etc/scrolldaddy/OPS_GUIDE.md` for ops detai
 - **AJAX:** `plugins/scrolldaddy/ajax/block_rule_add.php`, `block_rule_delete.php`
 - **Category list:** `plugins/scrolldaddy/includes/ScrollDaddyHelper.php` (`$filters`, `$services`)
 - **DNS resolver source:** `/home/user1/scrolldaddy-dns/` (Go)
+
+## Marketing Infrastructure
+
+### Page head metadata
+
+The scrolldaddy plugin's `PublicPage.php` no longer overrides `global_includes_top()` or emits its own Open Graph / meta-description block. Per-page SEO/OG/Twitter Card tags come from `$hoptions` populated by each view and rendered by the platform-level `PublicPageBase::global_includes_top()`. See `docs/seo_metadata.md` for the canonical pattern.
+
+### `?coupon=CODE` auto-apply
+
+A marketing URL like `https://scrolldaddy.app/?coupon=PH2026` captures the code to the session, validates it, and applies it automatically to the next cart. The capture lives on `SessionControl` (alongside UTM capture — it's the same pattern: URL → session stickiness → attribution log): `capture_marketing_coupon()`, `apply_pending_coupon_to_cart($cart)`, and `get_pending_coupon_flash()`. The hook is in `RouteHelper::processRoutes()` gated behind `isset($_GET['coupon'])`. Pricing and cart views show a brief "Coupon X will be applied at checkout" flash when the code is valid. Invalid/expired codes fail silently (campaigns outlive coupons) but are still logged as `TYPE_COUPON_ATTEMPT` rows for diagnostics.
+
+### UTM attribution
+
+UTM capture runs on every public page view via `SessionControl::save_visitor_event()`. The first touch is sticky on `$_SESSION['utm_*']`, and any conversion event fired later in the session reads back from there — so `PURCHASE`, `SIGNUP`, and `LIST_SIGNUP` rows are all attributed to the original source without needing to join the visitor history back together.
+
+### Conversion events + attribution reports
+
+Cart-add, checkout-start, purchase, signup, and list-signup events write to `vse_visitor_events` with a `vse_ref_type` / `vse_ref_id` pair pointing at the canonical entity (order/user/mailing_list). See `docs/analytics.md` for the full event catalog and the Attribution admin page at `/admin/admin_analytics_attribution`.

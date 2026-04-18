@@ -138,6 +138,12 @@ private static function UcName($string) {
 						$thismessage['message_title'] = 'Success';
 						$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
 						$messages[] = $thismessage;
+
+						// Record LIST_SIGNUP conversion event — one event per fresh subscription.
+						// Idempotent re-subscribes are skipped above (is_user_in_list branch).
+						require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+						$_session_ctrl = SessionControl::get_instance();
+						$_session_ctrl->save_visitor_event(VisitorEvent::TYPE_LIST_SIGNUP, FALSE, 'mailing_list', $mailing_list->key);
 					}
 					else{
 						$thismessage['message_type'] = 'error';
@@ -164,6 +170,12 @@ private static function UcName($string) {
 						$thismessage['message_title'] = 'Success';
 						$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
 						$messages[] = $thismessage;
+
+						// Record LIST_SIGNUP conversion event — one event per fresh subscription.
+						// Idempotent re-subscribes are skipped above (is_user_in_list branch).
+						require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+						$_session_ctrl = SessionControl::get_instance();
+						$_session_ctrl->save_visitor_event(VisitorEvent::TYPE_LIST_SIGNUP, FALSE, 'mailing_list', $mailing_list->key);
 					}
 					else{
 						$thismessage['message_type'] = 'error';
@@ -368,8 +380,9 @@ private static function UcName($string) {
 
 		$dblink->beginTransaction();
 		
+		$is_new_user = false;
 		try {
-		
+
 			$user = User::GetByEmail(trim($data['usr_email']));
 			if(!$user){
 				$tdata = array(
@@ -378,25 +391,25 @@ private static function UcName($string) {
 					'usr_email' => $data['usr_email'],
 					'send_emails' => $send_emails
 				);
-				
+
 				if($data['password']){
 					$tdata['password'] = $data['password'];
 				}
-				
+
 				if($data['usr_nickname']){
 					$tdata['usr_nickname'] = $data['usr_nickname'];
-				}			
-				
+				}
+
 				if($data['usr_timezone']){
 					$tdata['usr_timezone'] = $data['usr_timezone'];
-				}			
+				}
 
 				$user = User::CreateNew($tdata);
-				
+				$is_new_user = true;
 			}
-		
+
 			$dblink->commit();
-		} 
+		}
 		catch (TTClassException $e) {
 			$dblink->rollBack();
 			throw $e;
@@ -422,6 +435,13 @@ private static function UcName($string) {
 			if ($set_cookie) {
 				$session->save_user_to_cookie();
 			}
+		}
+
+		// Record SIGNUP conversion event — only for genuinely new users (not admin-
+		// created, not re-login of existing account during guest checkout).
+		if ($is_new_user) {
+			require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+			$session->save_visitor_event(VisitorEvent::TYPE_SIGNUP, FALSE, 'user', $user->key);
 		}
 
 		//ADD TO THE MAILING LIST IF CHOSEN

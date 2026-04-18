@@ -7,10 +7,18 @@
     $post = $page_vars['post'];
 
     $page = new PublicPage();
-    $page->public_header([
+    $post_header_options = [
         'is_valid_page' => $is_valid_page,
         'title'         => $post->get('pst_title'),
-    ]);
+        'og_type'       => 'article',
+    ];
+    if ($post->get('pst_short_description')) {
+        $post_header_options['meta_description'] = $post->get('pst_short_description');
+    }
+    if (method_exists($post, 'get_picture_link') && $post->get_picture_link('og_image')) {
+        $post_header_options['preview_image_url'] = $post->get_picture_link('og_image');
+    }
+    $page->public_header($post_header_options);
     echo PublicPage::BeginPage();
 ?>
 <div class="jy-ui">

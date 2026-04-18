@@ -1399,3 +1399,11 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Attribution menu entry under Statistics (v102) ==========
+	$migration = array();
+	$migration['database_version'] = '102';
+	$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'attribution'";
+	$migration['migration_sql'] = "INSERT INTO amu_admin_menus (amu_menudisplay, amu_parent_menu_id, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_slug, amu_setting_activate) VALUES ('Attribution', (SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = 'statistics'), 'admin_analytics_attribution', 6, 5, 0, '', 'attribution', '')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

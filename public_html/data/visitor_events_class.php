@@ -19,6 +19,20 @@ class VisitorEvent extends SystemBase {
 	const TYPE_PAGE_VIEW = 1;
 	/** Event type: Cookie consent record */
 	const TYPE_COOKIE_CONSENT = 2;
+	/** Event type: Visitor added an item to the shopping cart */
+	const TYPE_CART_ADD = 3;
+	/** Event type: Visitor reached the checkout/payment form with items in cart */
+	const TYPE_CHECKOUT_START = 4;
+	/** Event type: Order completed (payment cleared). vse_ref_type='order', vse_ref_id=ord_order_id */
+	const TYPE_PURCHASE = 5;
+	/** Event type: New user account created. vse_ref_type='user', vse_ref_id=usr_user_id */
+	const TYPE_SIGNUP = 6;
+	/** Event type: Subscribed to a mailing list. One event per list joined.
+	 *  vse_ref_type='mailing_list', vse_ref_id=mlt_mailing_list_id */
+	const TYPE_LIST_SIGNUP = 7;
+	/** Event type: Arrived with a ?coupon=CODE URL (valid or expired). Diagnostic, not a conversion.
+	 *  vse_meta holds the attempted code. Excluded from attribution reports. */
+	const TYPE_COUPON_ATTEMPT = 8;
 
 	protected static $foreign_key_actions = [
 		'vse_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
@@ -53,6 +67,11 @@ class VisitorEvent extends SystemBase {
 	    'vse_medium' => array('type'=>'varchar(255)'),
 	    'vse_content' => array('type'=>'varchar(255)'),
 	    'vse_is_404' => array('type'=>'bool'),
+	    // Generic polymorphic reference for conversion rows (order/user/mailing_list/etc.)
+	    'vse_ref_type' => array('type'=>'varchar(32)'),
+	    'vse_ref_id' => array('type'=>'int8'),
+	    // Free-form metadata for diagnostic rows (e.g. attempted coupon code on TYPE_COUPON_ATTEMPT)
+	    'vse_meta' => array('type'=>'varchar(255)'),
 	);
 
 /**

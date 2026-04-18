@@ -74,33 +74,6 @@ class PublicPage extends PublicPageBase {
 		
 	}
 	
-	public function global_includes_top($options=array()){
-		$settings = Globalvars::get_instance();
-
-		
-		//CHECK TO SEE IF WE PASSED IN A PREVIEW IMAGE
-		if(isset($options['preview_image_url']) && $options['preview_image_url']){
-			//IF NO INCREMENT IS PROVIDED, USE 1
-			if(!isset($options['preview_image_increment'])){
-				!$options['preview_image_increment'] = 1;
-			}
-			echo '<meta property="og:image" content="'.$options['preview_image_url'].'?'.$options['preview_image_increment'].'" />';			
-		}
-		else{
-			//IF NOT, USE THE DEFAULT ONE
-			$preview_image_url = $settings->get_setting('preview_image');
-			if($preview_image_url){
-				echo '<meta property="og:image" content="'.$settings->get_setting('preview_image').'?'.$settings->get_setting('preview_image_increment').'" />';
-			}
-		}
-		
-		if($settings->get_setting('custom_css')){
-			echo '<style>'.$settings->get_setting('custom_css').'</style>';
-		}
-	}
-	
-
-	
 	public static function BeginPage($title='', $options=array()) {
 		
 		$output = '';
@@ -228,7 +201,6 @@ Career Area
 	
 	
 		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-		<meta name="description" content="<?php echo $options['description']; ?>">
         <meta name="keywords" content="adblocker, social media blocker, adult content filter, malware blocker">
 
 		<title><?php echo $options['title']; ?></title>
@@ -276,16 +248,6 @@ Career Area
     <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/style.css">
     <!-- ScrollDaddy Plugin CSS -->
     <link rel="stylesheet" href="/plugins/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=13">
-
-    <!-- Facebook Open Graph Meta Tags -->
-    <meta property="og:title" content="Scrolldaddy - Take Control of Your Browsing">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://scrolldaddy.app">
-    <meta property="og:image" content="https://scrolldaddy.app/static_files/scrolldaddylogonopadding.svg">
-    <meta property="og:description" content="Block distractions, filter harmful content, and take back control of your browsing with Scrolldaddy.">
-    <meta property="og:site_name" content="Scrolldaddy">
-    <meta property="og:locale" content="en_US">
-    <!--<meta property="fb:app_id" content="YOUR_FACEBOOK_APP_ID">--> <!-- Optional -->
 
 </head>
 
