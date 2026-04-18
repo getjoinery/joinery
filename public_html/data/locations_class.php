@@ -121,16 +121,16 @@ function authenticate_write($data) {
 	/**
 	 * Get picture URL for display
 	 *
-	 * @param string $size_key Image size key (default 'content')
+	 * @param string $size_key Image size key (default 'original')
 	 * @return string|false URL or false if no picture
 	 */
-	function get_picture_link($size_key = 'content') {
+	function get_picture_link($size_key = 'original') {
 		$file_id = $this->get('loc_fil_file_id');
 		if (!$file_id) {
 			return false;
 		}
 		$file = new File($file_id, TRUE);
-		return $file->get_url($size_key);
+		return $file->get_url($size_key, 'full');
 	}
 
 }
