@@ -10,8 +10,18 @@
 		'is_valid_page' => $is_valid_page ?? false,
 		'title' => $page->get('pag_title')
 	);
-	if ($page->get_picture_link('hero')) {
-		$page_header_options['preview_image_url'] = $page->get_picture_link('hero');
+	if ($page->get('pag_body')) {
+		$pag_desc = trim(strip_tags($page->get('pag_body')));
+		if (mb_strlen($pag_desc) > 160) {
+			$pag_desc = mb_substr($pag_desc, 0, 157) . '...';
+		}
+		if ($pag_desc) {
+			$page_header_options['meta_description'] = $pag_desc;
+		}
+	}
+	$og_img = $page->get_picture_link('og_image') ?: $page->get_picture_link('hero');
+	if ($og_img) {
+		$page_header_options['preview_image_url'] = $og_img;
 	}
 	$paget->public_header($page_header_options);
 ?>

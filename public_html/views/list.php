@@ -9,10 +9,23 @@
     $session       = $page_vars['session'];
 
     $page = new PublicPage();
-    $page->public_header([
+    $list_header_options = [
         'is_valid_page' => $is_valid_page,
-        'title'         => 'Newsletter',
-    ]);
+        'title'         => $mailing_list->get('mlt_name') ?: 'Newsletter',
+    ];
+    if ($mailing_list->get('mlt_description')) {
+        $mlt_desc = trim(strip_tags($mailing_list->get('mlt_description')));
+        if (mb_strlen($mlt_desc) > 160) {
+            $mlt_desc = mb_substr($mlt_desc, 0, 157) . '...';
+        }
+        if ($mlt_desc) {
+            $list_header_options['meta_description'] = $mlt_desc;
+        }
+    }
+    if (method_exists($mailing_list, 'get_picture_link') && $mailing_list->get_picture_link('og_image')) {
+        $list_header_options['preview_image_url'] = $mailing_list->get_picture_link('og_image');
+    }
+    $page->public_header($list_header_options);
     $options['subtitle'] = $mailing_list->get('mlt_description');
     echo PublicPage::BeginPage($mailing_list->get('mlt_name'), $options);
 ?>

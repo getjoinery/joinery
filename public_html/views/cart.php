@@ -51,6 +51,16 @@
     endif;
     ?>
 
+    <?php
+    // Campaign coupon flash — shown once when a valid ?coupon= URL lands the visitor here
+    $coupon_flash = $session->get_pending_coupon_flash();
+    if ($coupon_flash):
+    ?>
+    <div style="background: #d4edda; color: #155724; padding: 0.875rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #c3e6cb;" role="status">
+        <?php echo $coupon_flash; ?>
+    </div>
+    <?php endif; ?>
+
     <?php if (empty($cart->items)): ?>
         <div style="max-width: 500px; margin: 3rem auto; text-align: center;">
             <div style="font-size: 4rem; color: var(--jy-color-text-muted); margin-bottom: 1rem;">&#128722;</div>
@@ -58,7 +68,15 @@
             <p style="color: var(--jy-color-text-muted); margin-bottom: 1.5rem;">Add some items to get started.</p>
             <a href="/products" class="btn btn-primary">Browse Products</a>
         </div>
-    <?php else: ?>
+    <?php else:
+        // CHECKOUT_START conversion event — fires once per cart cycle when the visitor
+        // reaches the checkout page with items in cart. Flag cleared on PURCHASE and on cart emptied.
+        if (empty($_SESSION['checkout_started'])) {
+            require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+            $session->save_visitor_event(VisitorEvent::TYPE_CHECKOUT_START);
+            $_SESSION['checkout_started'] = true;
+        }
+    ?>
 
         <!-- Progress Indicator -->
         <?php

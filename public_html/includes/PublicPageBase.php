@@ -522,18 +522,33 @@ abstract class PublicPageBase {
 		$canonical_url = $this->get_canonical_url();
 		echo '<link rel="canonical" href="' . htmlspecialchars($canonical_url, ENT_QUOTES, 'UTF-8') . '">' . "\n";
 
-		// Open Graph meta tags
-		$og_title = !empty($options['title']) ? $options['title'] : $settings->get_setting('site_name');
-		$og_description = !empty($options['meta_description']) ? $options['meta_description'] : $settings->get_setting('site_description');
+		// SEO + social metadata — shared source values
+		$page_title = !empty($options['title']) ? $options['title'] : $settings->get_setting('site_name');
+		$meta_description = !empty($options['meta_description']) ? $options['meta_description'] : $settings->get_setting('site_description');
 		$og_type = !empty($options['og_type']) ? $options['og_type'] : 'website';
 		$og_site_name = $settings->get_setting('site_name');
 
 		// Strip HTML and truncate description
-		if ($og_description) {
+		if ($meta_description) {
+			$meta_description = strip_tags($meta_description);
+			if (mb_strlen($meta_description) > 200) {
+				$meta_description = mb_substr($meta_description, 0, 197) . '...';
+			}
+		}
+
+		// Optional social-copy overrides — fall through to SEO copy when unset
+		$og_title = !empty($options['og_title']) ? $options['og_title'] : $page_title;
+		$og_description = !empty($options['og_description']) ? $options['og_description'] : $meta_description;
+		if (!empty($options['og_description'])) {
 			$og_description = strip_tags($og_description);
 			if (mb_strlen($og_description) > 200) {
 				$og_description = mb_substr($og_description, 0, 197) . '...';
 			}
+		}
+
+		// SEO: standard meta description
+		if ($meta_description) {
+			echo '<meta name="description" content="' . htmlspecialchars($meta_description, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
 
 		echo '<meta property="og:title" content="' . htmlspecialchars($og_title, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
@@ -545,15 +560,18 @@ abstract class PublicPageBase {
 		if ($og_site_name) {
 			echo '<meta property="og:site_name" content="' . htmlspecialchars($og_site_name, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
+		echo '<meta property="og:locale" content="en_US" />' . "\n";
 
 		// og:image - page-specific or site default
+		$emitted_og_image = null;
 		if(isset($options['preview_image_url']) && $options['preview_image_url']){
 			$og_image = $options['preview_image_url'];
 			if (strpos($og_image, 'http') !== 0) {
 				$og_image = 'https://' . $webDir . $og_image;
 			}
 			$increment = isset($options['preview_image_increment']) ? $options['preview_image_increment'] : 1;
-			echo '<meta property="og:image" content="' . htmlspecialchars($og_image, ENT_QUOTES, 'UTF-8') . '?' . htmlspecialchars($increment, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+			$emitted_og_image = $og_image . '?' . $increment;
+			echo '<meta property="og:image" content="' . htmlspecialchars($emitted_og_image, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
 		else{
 			$preview_image_url = $settings->get_setting('preview_image');
@@ -561,8 +579,19 @@ abstract class PublicPageBase {
 				if (strpos($preview_image_url, 'http') !== 0) {
 					$preview_image_url = 'https://' . $webDir . $preview_image_url;
 				}
-				echo '<meta property="og:image" content="' . htmlspecialchars($preview_image_url, ENT_QUOTES, 'UTF-8') . '?' . htmlspecialchars($settings->get_setting('preview_image_increment'), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+				$emitted_og_image = $preview_image_url . '?' . $settings->get_setting('preview_image_increment');
+				echo '<meta property="og:image" content="' . htmlspecialchars($emitted_og_image, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 			}
+		}
+
+		// Twitter Card tags — mirror the og values
+		echo '<meta name="twitter:card" content="summary_large_image" />' . "\n";
+		echo '<meta name="twitter:title" content="' . htmlspecialchars($og_title, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		if ($og_description) {
+			echo '<meta name="twitter:description" content="' . htmlspecialchars($og_description, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		}
+		if ($emitted_og_image) {
+			echo '<meta name="twitter:image" content="' . htmlspecialchars($emitted_og_image, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
 
 		$this->render_base_assets();

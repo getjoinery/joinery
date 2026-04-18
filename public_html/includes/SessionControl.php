@@ -50,6 +50,14 @@ class DisplayMessage {
 
 class SessionControl{
 
+	// Mirror of VisitorEvent::TYPE_PAGE_VIEW so save_visitor_event() can branch
+	// on page-view vs conversion without requiring the VisitorEvent class here
+	// (SessionControl is always pre-loaded; VisitorEvent is not).
+	const TYPE_PAGE_VIEW = 1;
+
+	const COUPON_PENDING_KEY = 'pending_coupon';
+	const COUPON_FLASH_KEY   = 'pending_coupon_flash';
+
 	private static $instance;
 	var $currpermissioncheck;
 
@@ -354,8 +362,8 @@ class SessionControl{
 	}	
 	
 	
-	//TYPES:  1= WEB HIT,
-	public function save_visitor_event($type=1, $is_404=FALSE){
+	//TYPES:  1= WEB HIT, 3..8 = conversion/diagnostic events — see VisitorEvent::TYPE_* constants
+	public function save_visitor_event($type=1, $is_404=FALSE, $ref_type=NULL, $ref_id=NULL, $meta=NULL){
 		if(!$_SESSION['uniqid']){
 			$_SESSION['uniqid'] = uniqid();
 		}
@@ -401,7 +409,7 @@ class SessionControl{
 		$medium = NULL;
 		$content = NULL;
 		if($_SERVER['QUERY_STRING']){
-			parse_str($_SERVER['QUERY_STRING'], $qvars); 
+			parse_str($_SERVER['QUERY_STRING'], $qvars);
 			foreach ($qvars as $qvar=>$qval){
 				if($qvar == 'vs' || $qvar == 'utm_source'){
 					$source = $qval;
@@ -414,15 +422,32 @@ class SessionControl{
 				}
 				else if($qvar == 'vt' || $qvar == 'utm_content'){
 					$content = $qval;
-				}				
+				}
 			}
+		}
+
+		// First-touch session stickiness: preserve the UTM that introduced this visitor
+		// so conversion events fired later in the session can attribute correctly.
+		if ($source   && empty($_SESSION['utm_source']))   $_SESSION['utm_source']   = $source;
+		if ($campaign && empty($_SESSION['utm_campaign'])) $_SESSION['utm_campaign'] = $campaign;
+		if ($medium   && empty($_SESSION['utm_medium']))   $_SESSION['utm_medium']   = $medium;
+		if ($content  && empty($_SESSION['utm_content']))  $_SESSION['utm_content']  = $content;
+
+		// For non-page-view events (conversions fired from POST handlers with empty
+		// query strings), fall back to session UTM so the conversion row is attributed.
+		// Page views stay landing-only — UTM describes the arrival, not subsequent nav.
+		if ($type !== self::TYPE_PAGE_VIEW) {
+			if (!$source   && !empty($_SESSION['utm_source']))   $source   = $_SESSION['utm_source'];
+			if (!$campaign && !empty($_SESSION['utm_campaign'])) $campaign = $_SESSION['utm_campaign'];
+			if (!$medium   && !empty($_SESSION['utm_medium']))   $medium   = $_SESSION['utm_medium'];
+			if (!$content  && !empty($_SESSION['utm_content']))  $content  = $_SESSION['utm_content'];
 		}
 
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-		$sql = 'INSERT INTO vse_visitor_events (vse_visitor_id, vse_usr_user_id, vse_type, vse_ip, vse_page, vse_referrer, vse_source, vse_campaign, vse_medium, vse_content, vse_is_404) 
-		VALUES (:vse_visitor_id, :vse_usr_user_id, :vse_type, :vse_ip, :vse_page, :vse_referrer, :vse_source, :vse_campaign, :vse_medium, :vse_content, :vse_is_404)';
+		$sql = 'INSERT INTO vse_visitor_events (vse_visitor_id, vse_usr_user_id, vse_type, vse_ip, vse_page, vse_referrer, vse_source, vse_campaign, vse_medium, vse_content, vse_is_404, vse_ref_type, vse_ref_id, vse_meta)
+		VALUES (:vse_visitor_id, :vse_usr_user_id, :vse_type, :vse_ip, :vse_page, :vse_referrer, :vse_source, :vse_campaign, :vse_medium, :vse_content, :vse_is_404, :vse_ref_type, :vse_ref_id, :vse_meta)';
 
 		$referer = '';
 		if(isset($_SESSION['HTTP_REFERER'])){
@@ -439,16 +464,85 @@ class SessionControl{
 			$q->bindValue(':vse_referrer', $referer, PDO::PARAM_STR);
 			$q->bindValue(':vse_source', $source, PDO::PARAM_STR);
 			$q->bindValue(':vse_campaign', $campaign, PDO::PARAM_STR);
-			$q->bindValue(':vse_medium', $source, PDO::PARAM_STR);
-			$q->bindValue(':vse_content', $campaign, PDO::PARAM_STR);
-			$q->bindValue(':vse_is_404', $is_404, PDO::PARAM_INT);		
+			$q->bindValue(':vse_medium', $medium, PDO::PARAM_STR);
+			$q->bindValue(':vse_content', $content, PDO::PARAM_STR);
+			$q->bindValue(':vse_is_404', $is_404, PDO::PARAM_INT);
+			$q->bindValue(':vse_ref_type', $ref_type, $ref_type === NULL ? PDO::PARAM_NULL : PDO::PARAM_STR);
+			$q->bindValue(':vse_ref_id', $ref_id, $ref_id === NULL ? PDO::PARAM_NULL : PDO::PARAM_INT);
+			$q->bindValue(':vse_meta', $meta, $meta === NULL ? PDO::PARAM_NULL : PDO::PARAM_STR);
 			$success = $q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
 		} catch(PDOException $e) {
 			$dbhelper->handle_query_error($e);
-		}		
-		
-		
+		}
+
+
+	}
+
+	/**
+	 * Marketing-coupon intake — sibling to UTM capture above. Reads ?coupon=CODE
+	 * from the query string, validates against CouponCode, stashes a pending code
+	 * in session for the next cart, and logs every attempt (valid or invalid) to
+	 * vse_visitor_events for attribution. Invalid codes fail silently so stale
+	 * marketing links don't surface errors on the homepage.
+	 */
+	public function capture_marketing_coupon() {
+		$code = isset($_GET['coupon']) ? trim(strtolower($_GET['coupon'])) : '';
+		if ($code === '' || strlen($code) > 64) {
+			return;
+		}
+
+		require_once(PathHelper::getIncludePath('data/coupon_codes_class.php'));
+		require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+
+		$coupon = CouponCode::GetByColumn('ccd_code', $code);
+		$valid  = $coupon && $coupon->is_valid();
+
+		try {
+			$this->save_visitor_event(VisitorEvent::TYPE_COUPON_ATTEMPT, FALSE, NULL, NULL, $code);
+		} catch (Exception $e) {
+			error_log('capture_marketing_coupon log error: ' . $e->getMessage());
+		}
+
+		if (!$valid) {
+			return;
+		}
+
+		$_SESSION[self::COUPON_PENDING_KEY] = $code;
+		$_SESSION[self::COUPON_FLASH_KEY]   = 'Coupon <strong>' . htmlspecialchars(strtoupper($code), ENT_QUOTES, 'UTF-8') . '</strong> will be applied at checkout.';
+
+		$cart = $this->get_shopping_cart();
+		if ($cart && $cart->count_items() > 0) {
+			$this->apply_pending_coupon_to_cart($cart);
+		}
+	}
+
+	/**
+	 * Apply a previously-captured pending coupon to a cart. Called from
+	 * ShoppingCart::add_item() so newly-added items pick up the discount.
+	 * Clears the pending key on success so manual removal sticks.
+	 */
+	public function apply_pending_coupon_to_cart($cart) {
+		if (empty($_SESSION[self::COUPON_PENDING_KEY])) {
+			return;
+		}
+		$result = $cart->add_coupon($_SESSION[self::COUPON_PENDING_KEY]);
+		if ($result === 1) {
+			unset($_SESSION[self::COUPON_PENDING_KEY]);
+		}
+	}
+
+	/**
+	 * Flash message for pricing/cart views after a ?coupon= URL lands a valid code.
+	 * Returns HTML string or null; clears on read so it shows once.
+	 */
+	public function get_pending_coupon_flash() {
+		if (empty($_SESSION[self::COUPON_FLASH_KEY])) {
+			return null;
+		}
+		$msg = $_SESSION[self::COUPON_FLASH_KEY];
+		unset($_SESSION[self::COUPON_FLASH_KEY]);
+		return $msg;
 	}
 
 	public function get_user_from_cookie() {

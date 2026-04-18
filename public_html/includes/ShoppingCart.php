@@ -174,6 +174,14 @@ class ShoppingCart {
 
 		// Include ProductVersion as 6th element for easy access in views
 		$this->items[] = array(1,	$product,	$form_data, $price, $discount, $product_version);
+
+		// Apply any pending marketing-campaign coupon captured via ?coupon= URL.
+		// This lands the discount on the cart without the user having to type the code.
+		$session->apply_pending_coupon_to_cart($this);
+
+		// Record conversion event: visitor added an item to the shopping cart.
+		require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+		$session->save_visitor_event(VisitorEvent::TYPE_CART_ADD);
 	}
 	
 	public function add_coupon($coupon_code){
@@ -417,6 +425,8 @@ class ShoppingCart {
 		$this->item_id = 0;
 		$this->coupon_codes = array();
 		$this->billing_user = array();
+		// Allow a fresh CHECKOUT_START event when the visitor starts a new cart
+		unset($_SESSION['checkout_started']);
 	}
 
 }

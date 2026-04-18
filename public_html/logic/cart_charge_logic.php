@@ -612,8 +612,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	//MARK THE ORDER PAID
 	$order->set('ord_status', Order::STATUS_PAID);
-	$order->save();	
-	
+	$order->save();
+
+	// Record PURCHASE conversion event — the canonical attribution signal for
+	// revenue-by-channel. UTM is carried automatically from the session by
+	// save_visitor_event() (Part C Gap 3).
+	require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+	$session->save_visitor_event(VisitorEvent::TYPE_PURCHASE, FALSE, 'order', $order->key);
+	unset($_SESSION['checkout_started']);
+
 	// Collect optional surveys for confirmation page display
 	$confirmation_surveys = array();
 	foreach ($cart->items as $key => $cart_item) {
