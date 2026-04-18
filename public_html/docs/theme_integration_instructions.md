@@ -15,18 +15,18 @@ This document provides step-by-step instructions for integrating HTML/CSS templa
 
 ## Default Theme CSS Kit & `.jy-ui` Namespace
 
-The `default` theme ships a scoped CSS component kit in `assets/css/custom.css`. This file is loaded by **every** theme (via `PublicPageBase::render_base_assets()`), making it safe to use the kit's classes in base views (`/views/*.php`) regardless of which theme is active.
+The `default` theme ships a scoped CSS component kit in `assets/css/joinery-styles.css`. This file is loaded by **every** theme (via `PublicPageBase::render_base_assets()`), making it safe to use the kit's classes in base views (`/views/*.php`) regardless of which theme is active.
 
 ### How Scoping Works
 
-`custom.css` uses two complementary gates so it is safe to load unconditionally on every page:
+`joinery-styles.css` uses two complementary gates so it is safe to load unconditionally on every page:
 
 **1. Component rules — scoped to `.jy-ui`**
 
 All component classes require a `.jy-ui` ancestor:
 
 ```css
-/* lives in custom.css */
+/* lives in joinery-styles.css */
 .jy-ui .btn { ... }
 .jy-ui .card { ... }
 .jy-ui .alert { ... }
@@ -1837,7 +1837,9 @@ HTML5 PublicPage.php follows the same structure as Bootstrap themes — the only
 
 **Base Asset Loading:**
 
-`PublicPageBase::global_includes_top()` calls `$this->render_base_assets()` which loads `base.css`, `custom.css`, and `base.js`. These are safe to load on every page — component rules are scoped to `.jy-ui` and global type rules are scoped to `body.jy-default`, so they do not conflict with branded theme CSS. **Do not override `render_base_assets()` to suppress them.**
+`PublicPageBase::global_includes_top()` calls `$this->render_base_assets()` which loads `base.css`, `joinery-styles.css`, and `base.js`. These are safe to load on every page — component rules are scoped to `.jy-ui` and global type rules are scoped to `body.jy-default`, so they do not conflict with branded theme CSS. **Do not override `render_base_assets()` to suppress them.**
+
+Immediately after `render_base_assets()`, `global_includes_top()` calls `render_brand_token_overrides()`, which outputs a `<style id="jy-brand-tokens">` block if the admin has configured any `jy_color_*` settings (Brand & Appearance section in admin settings). This block overrides the `:root` token defaults from `joinery-styles.css` with site-wide brand colors. Themes that want to enforce their own palette ahead of the admin settings should load their own token overrides **after** `global_includes_top()` — source order guarantees they win.
 
 **Key pattern — always include:**
 ```php
