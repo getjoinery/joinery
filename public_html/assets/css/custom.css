@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.1.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.2.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -38,27 +38,27 @@
   --jy-font-sans:    'Inter', system-ui, -apple-system, sans-serif;
   --jy-font-display: 'Inter', system-ui, -apple-system, sans-serif;
   --jy-font-mono:    ui-monospace, 'SF Mono', Menlo, monospace;
-  --jy-text-xs:    0.75rem;
-  --jy-text-sm:    0.875rem;
-  --jy-text-base:  1rem;
-  --jy-text-lg:    1.125rem;
-  --jy-text-xl:    1.375rem;
-  --jy-text-2xl:   1.75rem;
-  --jy-text-3xl:   2.25rem;
-  --jy-text-4xl:   3rem;
+  --jy-text-xs:    12px;
+  --jy-text-sm:    14px;
+  --jy-text-base:  16px;
+  --jy-text-lg:    18px;
+  --jy-text-xl:    22px;
+  --jy-text-2xl:   28px;
+  --jy-text-3xl:   36px;
+  --jy-text-4xl:   48px;
   --jy-leading-tight:  1.25;
   --jy-leading-base:   1.6;
   --jy-tracking-tight: -0.01em;
 
   /* Space scale */
-  --jy-space-1:  0.25rem;
-  --jy-space-2:  0.5rem;
-  --jy-space-3:  0.75rem;
-  --jy-space-4:  1rem;
-  --jy-space-5:  1.5rem;
-  --jy-space-6:  2rem;
-  --jy-space-8:  3rem;
-  --jy-space-10: 4rem;
+  --jy-space-1:  4px;
+  --jy-space-2:  8px;
+  --jy-space-3:  12px;
+  --jy-space-4:  16px;
+  --jy-space-5:  24px;
+  --jy-space-6:  32px;
+  --jy-space-8:  48px;
+  --jy-space-10: 64px;
 
   /* Radius */
   --jy-radius-sm:   4px;
@@ -427,7 +427,7 @@ body.jy-default blockquote {
 }
 
 /* Section layout helpers (used by base views like views/index.php) */
-.jy-content-section { padding: 4rem 0; }
+.jy-content-section { padding: 64px 0; }
 .section-muted   { background: var(--jy-color-surface); }
 .jy-section-dark    {
   background: var(--jy-color-text);
