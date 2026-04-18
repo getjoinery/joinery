@@ -30,6 +30,7 @@ if (!$is_virtual_event && $event->get_picture_link('hero')) {
 }
 $page->public_header($page_options);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -73,7 +74,7 @@ $page->public_header($page_options);
                             if ($is_virtual_event) {
                                 if ($evt_get('evt_start_time')) {
                                     $start_str = LibraryFunctions::convert_time($evt_get('evt_start_time'), 'UTC', $tz, 'D, M j, Y g:i a T');
-                                    echo '<p class="mb-2" style="font-size: 1.0625rem; color: var(--color-muted);">&#128197; ' . $start_str;
+                                    echo '<p class="mb-2" style="font-size: 1.0625rem; color: var(--jy-color-text-muted);">&#128197; ' . $start_str;
                                     if ($evt_get('evt_end_time')) {
                                         $end_str = LibraryFunctions::convert_time($evt_get('evt_end_time'), 'UTC', $tz, 'g:i a T');
                                         echo ' &ndash; ' . $end_str;
@@ -82,20 +83,20 @@ $page->public_header($page_options);
                                 }
                             } else {
                                 if ($time_string = $event->get_time_string()) {
-                                    echo '<p class="mb-2" style="font-size: 1.0625rem; color: var(--color-muted);">&#128197; ' . $time_string . $cancelled_badge . '</p>';
+                                    echo '<p class="mb-2" style="font-size: 1.0625rem; color: var(--jy-color-text-muted);">&#128197; ' . $time_string . $cancelled_badge . '</p>';
                                 }
                                 if ($evt_get('evt_timezone') != $page_vars['session']->get_timezone()) {
-                                    echo '<p class="mb-2" style="color: var(--color-muted);">&#9201; ' . $event->get_time_string($page_vars['session']->get_timezone()) . '</p>';
+                                    echo '<p class="mb-2" style="color: var(--jy-color-text-muted);">&#9201; ' . $event->get_time_string($page_vars['session']->get_timezone()) . '</p>';
                                 }
                             }
 
                             if (!$page_vars['location_object'] && $evt_get('evt_location')) {
-                                echo '<p class="mb-2" style="color: var(--color-muted);">&#128205; ' . htmlspecialchars($evt_get('evt_location')) . '</p>';
+                                echo '<p class="mb-2" style="color: var(--jy-color-text-muted);">&#128205; ' . htmlspecialchars($evt_get('evt_location')) . '</p>';
                             }
 
                             if ($evt_get('evt_usr_user_id_leader')) {
                                 $leader = new User($evt_get('evt_usr_user_id_leader'), TRUE);
-                                echo '<p class="mb-0" style="color: var(--color-muted);">&#128100; Led by: ' . $leader->display_name() . '</p>';
+                                echo '<p class="mb-0" style="color: var(--jy-color-text-muted);">&#128100; Led by: ' . $leader->display_name() . '</p>';
                             }
                             ?>
                         </div>
@@ -166,16 +167,16 @@ $page->public_header($page_options);
                         <?php endforeach; ?>
 
                         <?php if ($page_vars['if_registered_message']): ?>
-                        <p style="color: var(--color-muted); font-size: 0.875rem; margin-top: 1rem; margin-bottom: 0;"><?php echo $page_vars['if_registered_message']; ?></p>
+                        <p style="color: var(--jy-color-text-muted); font-size: 0.875rem; margin-top: 1rem; margin-bottom: 0;"><?php echo $page_vars['if_registered_message']; ?></p>
                         <?php endif; ?>
                         <?php else: ?>
-                        <p style="color: var(--color-muted);">Upgrade your subscription to register for this event.</p>
+                        <p style="color: var(--jy-color-text-muted);">Upgrade your subscription to register for this event.</p>
                         <?php endif; ?>
                     </div>
                     <?php else: ?>
                     <div class="widget bg-white rounded-4 shadow-sm p-4 mb-4">
                         <h4 class="mb-3">Registration</h4>
-                        <p class="mb-0" style="color: var(--color-muted);">Registration is not yet open for this date.</p>
+                        <p class="mb-0" style="color: var(--jy-color-text-muted);">Registration is not yet open for this date.</p>
                     </div>
                     <?php endif; ?>
 
@@ -305,7 +306,7 @@ $page->public_header($page_options);
                                         </div>
                                         <div class="accordion-content">
                                             <?php echo preg_replace('#<a.*?>(.*?)</a>#i', '\1', $event_session->get('evs_content')); ?>
-                                            <p style="margin-top: 1rem; margin-bottom: 0;"><a href="/profile/event_sessions?evt_event_id=<?php echo $event->key; ?>" style="color: var(--color-primary);">View videos and materials</a></p>
+                                            <p style="margin-top: 1rem; margin-bottom: 0;"><a href="/profile/event_sessions?evt_event_id=<?php echo $event->key; ?>" style="color: var(--jy-color-primary);">View videos and materials</a></p>
                                         </div>
                                         <?php
                                     }
@@ -324,6 +325,7 @@ $page->public_header($page_options);
     </div>
 </section>
 
+</div>
 <?php
 $page->public_footer(['track' => true]);
 ?>

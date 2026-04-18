@@ -16,6 +16,7 @@ $page->public_header([
     'title'         => 'Checkout confirmation',
 ]);
 ?>
+<div class="jy-ui">
 
 <section class="content-section">
     <div class="container">
@@ -27,12 +28,12 @@ $page->public_header([
             <div style="text-align: center; margin-bottom: 2.5rem;">
                 <div style="font-size: 3.5rem; color: #198754; margin-bottom: 1rem;">&#10003;</div>
                 <h1 style="font-size: 1.75rem; margin-bottom: 0.5rem;">Purchase Confirmed!</h1>
-                <p style="color: var(--color-muted);">Thank you for your purchase. An email has been sent to the email address of all registrants with your purchase confirmation and a link to provide any further info that we need.</p>
+                <p style="color: var(--jy-color-text-muted);">Thank you for your purchase. An email has been sent to the email address of all registrants with your purchase confirmation and a link to provide any further info that we need.</p>
             </div>
 
             <!-- Order Summary -->
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; overflow: hidden;">
-                <div style="background: var(--color-primary, #1abc9c); color: #fff; padding: 1rem 1.5rem;">
+                <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
                     <h5 style="margin: 0; color: #fff;">Order Summary</h5>
                 </div>
                 <div style="overflow-x: auto;">
@@ -52,7 +53,7 @@ $page->public_header([
                             <tr>
                                 <td style="padding: 0.875rem 1.5rem;">
                                     <strong><?php echo $receipt['pname']; ?></strong><br>
-                                    <small style="color: var(--color-muted);"><?php echo $receipt['name']; ?></small>
+                                    <small style="color: var(--jy-color-text-muted);"><?php echo $receipt['name']; ?></small>
                                 </td>
                                 <td style="padding: 0.875rem 1.5rem; text-align: right; font-weight: 600;">
                                     $<?php echo number_format($receipt['price'], 2, '.', ','); ?>
@@ -61,9 +62,9 @@ $page->public_header([
                             <?php endforeach; ?>
                         </tbody>
                         <tfoot>
-                            <tr style="background: var(--color-light, #f8f9fa);">
+                            <tr style="background: var(--jy-color-surface);">
                                 <td style="padding: 0.875rem 1.5rem; font-weight: 700;">Total</td>
-                                <td style="padding: 0.875rem 1.5rem; text-align: right; font-weight: 700; font-size: 1.125rem; color: var(--color-primary);">
+                                <td style="padding: 0.875rem 1.5rem; text-align: right; font-weight: 700; font-size: 1.125rem; color: var(--jy-color-primary);">
                                     $<?php echo number_format($total, 2, '.', ','); ?>
                                 </td>
                             </tr>
@@ -87,9 +88,9 @@ $page->public_header([
                     if (count($survey_questions) > 0):
             ?>
             <div id="survey-section-<?php echo $survey_info['survey_id']; ?>" style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 1.5rem; overflow: hidden;">
-                <div style="background: var(--color-light, #f8f9fa); padding: 1rem 1.5rem; border-bottom: 1px solid var(--color-border, #eee);">
+                <div style="background: var(--jy-color-surface); padding: 1rem 1.5rem; border-bottom: 1px solid var(--jy-color-border);">
                     <h5 style="margin: 0;">We'd Love Your Feedback</h5>
-                    <small style="color: var(--color-muted);"><?php echo htmlspecialchars($survey_info['event_name'], ENT_QUOTES, 'UTF-8'); ?></small>
+                    <small style="color: var(--jy-color-text-muted);"><?php echo htmlspecialchars($survey_info['event_name'], ENT_QUOTES, 'UTF-8'); ?></small>
                 </div>
                 <div style="padding: 1.5rem;" id="survey-form-<?php echo $survey_info['survey_id']; ?>">
                     <?php
@@ -106,7 +107,7 @@ $page->public_header([
                 </div>
                 <div id="survey-thanks-<?php echo $survey_info['survey_id']; ?>" style="display: none; padding: 2rem; text-align: center;">
                     <div style="font-size: 2rem; color: #198754; margin-bottom: 0.5rem;">&#10003;</div>
-                    <p style="color: var(--color-muted);">Thank you for your feedback!</p>
+                    <p style="color: var(--jy-color-text-muted);">Thank you for your feedback!</p>
                 </div>
             </div>
             <?php
@@ -118,7 +119,7 @@ $page->public_header([
             <!-- Next Steps -->
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem; text-align: center;">
                 <h5 style="margin-bottom: 0.75rem;">What's Next?</h5>
-                <p style="color: var(--color-muted); margin-bottom: 1.5rem;">All of your purchases can be found in the My Profile section of the website.</p>
+                <p style="color: var(--jy-color-text-muted); margin-bottom: 1.5rem;">All of your purchases can be found in the My Profile section of the website.</p>
                 <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
                     <a href="/profile" class="btn btn-primary">View All Purchases</a>
                     <a href="/" class="btn btn-outline">Back to Home</a>
@@ -134,7 +135,7 @@ $page->public_header([
             </div>
 
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2.5rem; text-align: center;">
-                <p style="color: var(--color-muted); margin-bottom: 1.5rem;">Your recent purchase is not available. It could be that it didn't go through, or perhaps it's been too much time since it was processed.</p>
+                <p style="color: var(--jy-color-text-muted); margin-bottom: 1.5rem;">Your recent purchase is not available. It could be that it didn't go through, or perhaps it's been too much time since it was processed.</p>
 
                 <?php $defaultemail = $settings->get_setting('defaultemail'); if ($defaultemail): ?>
                 <div class="alert alert-info" style="margin-bottom: 1.5rem; text-align: left;">
@@ -188,6 +189,7 @@ function submitConfirmSurvey(surveyId, eventId) {
 }
 </script>
 
+</div>
 <?php
 $page->public_footer(['track' => true]);
 ?>

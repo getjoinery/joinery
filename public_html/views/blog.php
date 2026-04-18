@@ -10,6 +10,7 @@ $page->public_header([
     'title'         => $page_vars['title'],
 ]);
 ?>
+<div class="jy-ui">
 
 <section id="content">
     <div class="content-wrap">
@@ -22,7 +23,7 @@ $page->public_header([
                     <?php if (!$page_vars['posts']): ?>
                     <div style="background: #fff; border-radius: 8px; padding: 3rem; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 2rem;">
                         <h2 style="margin-bottom: 1rem;">No Results</h2>
-                        <p style="color: var(--color-muted);">There are no posts matching that tag.</p>
+                        <p style="color: var(--jy-color-text-muted);">There are no posts matching that tag.</p>
                     </div>
                     <?php else: ?>
 
@@ -31,7 +32,7 @@ $page->public_header([
                             $author    = new User($post->get('pst_usr_user_id'), TRUE);
                             $post_tags = Group::get_groups_for_member($post->key, 'post_tag', false, 'names');
                         ?>
-                        <div class="entry" style="display: flex; gap: 1.5rem; padding-bottom: 2.5rem; margin-bottom: 2.5rem; border-bottom: 1px solid var(--color-border, #eee);">
+                        <div class="entry" style="display: flex; gap: 1.5rem; padding-bottom: 2.5rem; margin-bottom: 2.5rem; border-bottom: 1px solid var(--jy-color-border);">
 
                             <!-- Thumbnail -->
                             <div style="flex-shrink: 0; width: 200px;">
@@ -45,25 +46,25 @@ $page->public_header([
                             <!-- Content -->
                             <div style="flex: 1; min-width: 0;">
                                 <h2 style="font-size: 1.375rem; margin-bottom: 0.5rem;">
-                                    <a href="<?php echo $post->get_url(); ?>" style="color: var(--color-dark, #333); text-decoration: none;">
+                                    <a href="<?php echo $post->get_url(); ?>" style="color: var(--jy-color-text); text-decoration: none;">
                                         <?php echo htmlspecialchars($post->get('pst_title')); ?>
                                     </a>
                                 </h2>
 
-                                <div style="display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.875rem; color: var(--color-muted, #999); margin-bottom: 0.75rem;">
+                                <div style="display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.875rem; color: var(--jy-color-text-muted); margin-bottom: 0.75rem;">
                                     <span>&#128197; <?php echo date('jS M Y', strtotime($post->get('pst_published_time'))); ?></span>
                                     <span>&#128100; <?php echo htmlspecialchars($author->get('usr_first_name') . ' ' . $author->get('usr_last_name')); ?></span>
                                     <?php if (!empty($post_tags)):
                                         $tag_links = [];
                                         foreach ($post_tags as $tag) {
-                                            $tag_links[] = '<a href="/blog/tag/' . urlencode($tag) . '" style="color: var(--color-muted)">' . htmlspecialchars($tag) . '</a>';
+                                            $tag_links[] = '<a href="/blog/tag/' . urlencode($tag) . '" style="color: var(--jy-color-text-muted)">' . htmlspecialchars($tag) . '</a>';
                                         }
                                     ?>
                                     <span>&#128193; <?php echo implode(', ', $tag_links); ?></span>
                                     <?php endif; ?>
                                 </div>
 
-                                <p style="color: var(--color-body, #555); margin-bottom: 0.75rem;">
+                                <p style="color: var(--jy-color-text-muted); margin-bottom: 0.75rem;">
                                     <?php
                                     if ($post->get('pst_short_description')) {
                                         echo htmlspecialchars($post->get('pst_short_description'));
@@ -78,7 +79,7 @@ $page->public_header([
                 if ($post_tier_min > 0): ?>
                 <span style="display: inline-block; padding: 0.125rem 0.5rem; background: #f0f0f0; border-radius: 4px; font-size: 0.75rem; color: #888; margin-bottom: 0.5rem;">&#128274; Members Only</span><br>
                 <?php endif; ?>
-                <a href="<?php echo $post->get_url(); ?>" style="color: var(--color-primary); font-weight: 600; text-decoration: none;">Read More &#8250;</a>
+                <a href="<?php echo $post->get_url(); ?>" style="color: var(--jy-color-primary); font-weight: 600; text-decoration: none;">Read More &#8250;</a>
                             </div>
                         </div>
                         <?php endforeach; ?>
@@ -100,9 +101,9 @@ $page->public_header([
 
                     <!-- Pinned / Recent Tabs -->
                     <div style="margin-bottom: 2rem;">
-                        <div class="tabs-nav" style="display: flex; border-bottom: 2px solid var(--color-border, #eee); margin-bottom: 1rem;">
-                            <button class="tab-link active" data-tab="pinned" style="padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; font-weight: 600; color: var(--color-primary); border-bottom: 2px solid var(--color-primary); margin-bottom: -2px;">Pinned</button>
-                            <button class="tab-link" data-tab="recent" style="padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; color: var(--color-muted);">Recent</button>
+                        <div class="tabs-nav" style="display: flex; border-bottom: 2px solid var(--jy-color-border); margin-bottom: 1rem;">
+                            <button class="tab-link active" data-tab="pinned" style="padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; font-weight: 600; color: var(--jy-color-primary); border-bottom: 2px solid var(--jy-color-primary); margin-bottom: -2px;">Pinned</button>
+                            <button class="tab-link" data-tab="recent" style="padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; color: var(--jy-color-text-muted);">Recent</button>
                         </div>
 
                         <div class="tab-content active" data-tab-content="pinned">
@@ -115,20 +116,20 @@ $page->public_header([
                             $pinned_posts->load();
                             if ($pinned_posts->count_all() > 0):
                                 foreach ($pinned_posts as $pinned_post): ?>
-                            <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--color-border, #f0f0f0);">
-                                <div style="flex-shrink: 0; width: 60px; height: 60px; border-radius: 50%; background: var(--color-primary, #1abc9c); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; color: #fff;">
+                            <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--jy-color-border);">
+                                <div style="flex-shrink: 0; width: 60px; height: 60px; border-radius: 50%; background: var(--jy-color-primary); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; color: #fff;">
                                     &#128204;
                                 </div>
                                 <div>
                                     <h4 style="font-size: 0.9375rem; margin: 0 0 0.25rem;">
-                                        <a href="<?php echo $pinned_post->get_url(); ?>" style="color: var(--color-dark); text-decoration: none;"><?php echo htmlspecialchars($pinned_post->get('pst_title')); ?></a>
+                                        <a href="<?php echo $pinned_post->get_url(); ?>" style="color: var(--jy-color-text); text-decoration: none;"><?php echo htmlspecialchars($pinned_post->get('pst_title')); ?></a>
                                     </h4>
-                                    <small style="color: var(--color-muted);"><?php echo date('jS M Y', strtotime($pinned_post->get('pst_published_time'))); ?></small>
+                                    <small style="color: var(--jy-color-text-muted);"><?php echo date('jS M Y', strtotime($pinned_post->get('pst_published_time'))); ?></small>
                                 </div>
                             </div>
                             <?php endforeach;
                             else: ?>
-                            <p style="color: var(--color-muted); font-size: 0.875rem;">No pinned posts available.</p>
+                            <p style="color: var(--jy-color-text-muted); font-size: 0.875rem;">No pinned posts available.</p>
                             <?php endif; ?>
                         </div>
 
@@ -141,15 +142,15 @@ $page->public_header([
                             );
                             $recent_posts->load();
                             foreach ($recent_posts as $recent_post): ?>
-                            <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--color-border, #f0f0f0);">
-                                <div style="flex-shrink: 0; width: 60px; height: 60px; border-radius: 50%; background: var(--color-light, #f8f9fa); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; color: #adb5bd;">
+                            <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--jy-color-border);">
+                                <div style="flex-shrink: 0; width: 60px; height: 60px; border-radius: 50%; background: var(--jy-color-surface); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; color: #adb5bd;">
                                     &#128196;
                                 </div>
                                 <div>
                                     <h4 style="font-size: 0.9375rem; margin: 0 0 0.25rem;">
-                                        <a href="<?php echo $recent_post->get_url(); ?>" style="color: var(--color-dark); text-decoration: none;"><?php echo htmlspecialchars($recent_post->get('pst_title')); ?></a>
+                                        <a href="<?php echo $recent_post->get_url(); ?>" style="color: var(--jy-color-text); text-decoration: none;"><?php echo htmlspecialchars($recent_post->get('pst_title')); ?></a>
                                     </h4>
-                                    <small style="color: var(--color-muted);"><?php echo date('jS M Y', strtotime($recent_post->get('pst_published_time'))); ?></small>
+                                    <small style="color: var(--jy-color-text-muted);"><?php echo date('jS M Y', strtotime($recent_post->get('pst_published_time'))); ?></small>
                                 </div>
                             </div>
                             <?php endforeach; ?>
@@ -163,7 +164,7 @@ $page->public_header([
                         <div>
                             <?php foreach ($page_vars['tags'] as $tag): ?>
                             <a href="/blog/tag/<?php echo urlencode($tag); ?>"
-                               style="display: inline-block; padding: 0.25rem 0.75rem; margin: 0 0.25rem 0.5rem 0; background: var(--color-light, #f8f9fa); color: var(--color-body); text-decoration: none; border-radius: 3px; font-size: 0.875rem;">
+                               style="display: inline-block; padding: 0.25rem 0.75rem; margin: 0 0.25rem 0.5rem 0; background: var(--jy-color-surface); color: var(--jy-color-text); text-decoration: none; border-radius: 3px; font-size: 0.875rem;">
                                 <?php echo htmlspecialchars($tag); ?>
                             </a>
                             <?php endforeach; ?>
@@ -184,12 +185,12 @@ document.querySelectorAll('.tabs-nav .tab-link').forEach(function(btn) {
     btn.addEventListener('click', function() {
         var tab = this.dataset.tab;
         document.querySelectorAll('.tabs-nav .tab-link').forEach(function(b) {
-            b.style.color = 'var(--color-muted)';
+            b.style.color = 'var(--jy-color-text-muted)';
             b.style.borderBottom = 'none';
             b.style.fontWeight = 'normal';
         });
-        this.style.color = 'var(--color-primary)';
-        this.style.borderBottom = '2px solid var(--color-primary)';
+        this.style.color = 'var(--jy-color-primary)';
+        this.style.borderBottom = '2px solid var(--jy-color-primary)';
         this.style.fontWeight = '600';
         document.querySelectorAll('[data-tab-content]').forEach(function(c) {
             c.style.display = c.dataset.tabContent === tab ? '' : 'none';
@@ -198,6 +199,7 @@ document.querySelectorAll('.tabs-nav .tab-link').forEach(function(btn) {
 });
 </script>
 
+</div>
 <?php
 $page->public_footer();
 ?>

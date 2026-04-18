@@ -13,6 +13,7 @@
     ]);
     echo PublicPage::BeginPage($survey->get('svy_name'));
 ?>
+<div class="jy-ui">
 
 <div class="container">
     <div class="row justify-content-center">
@@ -39,6 +40,7 @@
     </div>
 </div>
 
+</div>
 <?php
     echo PublicPage::EndPage();
     $page->public_footer(['track' => true]);

@@ -24,6 +24,7 @@ $page->member_header($hoptions);
 
 $session = $page_vars['session'];
 ?>
+<div class="jy-ui">
 
 <div class="card mb-3">
 	<div class="card-header bg-body-tertiary">
@@ -79,6 +80,7 @@ $session = $page_vars['session'];
 	<?php endif; ?>
 </div>
 
+</div>
 <?php
 $page->member_footer(array('track' => TRUE));
 ?>

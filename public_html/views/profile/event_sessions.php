@@ -23,6 +23,7 @@
 	);
 	$page->member_header($hoptions, NULL);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -90,7 +91,7 @@
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem;">
                     <h5 style="margin: 0 0 0.75rem;">Location: <?php echo htmlspecialchars($page_vars['location_object']->get('loc_name')); ?></h5>
                     <?php if($page_vars['location_object']->get('loc_address')): ?>
-                    <p style="margin: 0 0 0.5rem; color: var(--color-muted);">Address: <?php echo htmlspecialchars($page_vars['location_object']->get('loc_address')); ?></p>
+                    <p style="margin: 0 0 0.5rem; color: var(--jy-color-text-muted);">Address: <?php echo htmlspecialchars($page_vars['location_object']->get('loc_address')); ?></p>
                     <?php endif; ?>
                     <?php if($page_vars['location_object']->get('loc_website')): ?>
                     <p style="margin: 0 0 0.75rem;"><a href="<?php echo htmlspecialchars($page_vars['location_object']->get('loc_website')); ?>"><?php echo htmlspecialchars($page_vars['location_object']->get('loc_website')); ?></a></p>
@@ -121,11 +122,11 @@
                 }
                 ?>
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 1.5rem;">
-                    <div style="background: var(--color-light, #f8f9fa); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
                         <h6 style="margin: 0;">Next Session: <?php echo htmlspecialchars($next_name); ?></h6>
                     </div>
                     <div style="padding: 1.25rem;">
-                        <p style="margin: 0 0 0.5rem; font-size: 0.875rem; color: var(--color-muted);">&#128197; <?php echo htmlspecialchars($next_time); ?></p>
+                        <p style="margin: 0 0 0.5rem; font-size: 0.875rem; color: var(--jy-color-text-muted);">&#128197; <?php echo htmlspecialchars($next_time); ?></p>
                         <?php if($next_cal): ?><p style="margin: 0 0 0.75rem; font-size: 0.875rem;"><?php echo $next_cal; ?></p><?php endif; ?>
                         <p><?php echo $page_vars['next_session']->get('evs_content'); ?></p>
                     </div>
@@ -134,7 +135,7 @@
 
                 <!-- Sessions List -->
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--color-primary); color: #fff; padding: 1rem 1.5rem;">
+                    <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
                         <h5 style="margin: 0; color: #fff;">Sessions</h5>
                     </div>
                     <?php
@@ -161,9 +162,9 @@
                             $time_string = $event_session->get_time_string($page_vars['event']->get('evt_timezone')) . ' (Your time: ' . $event_session->get_time_string($page_vars['session']->get_timezone()) . ')';
                         }
                     ?>
-                    <div style="border-bottom: 1px solid var(--color-border, #eee); padding: 1.5rem;">
-                        <h6 style="margin: 0 0 0.375rem; color: var(--color-primary);"><?php echo htmlspecialchars($session_name); ?></h6>
-                        <p style="margin: 0 0 1rem; font-size: 0.875rem; color: var(--color-muted);">&#128197; <?php echo htmlspecialchars($time_string); ?></p>
+                    <div style="border-bottom: 1px solid var(--jy-color-border); padding: 1.5rem;">
+                        <h6 style="margin: 0 0 0.375rem; color: var(--jy-color-primary);"><?php echo htmlspecialchars($session_name); ?></h6>
+                        <p style="margin: 0 0 1rem; font-size: 0.875rem; color: var(--jy-color-text-muted);">&#128197; <?php echo htmlspecialchars($time_string); ?></p>
                         <?php echo $video->get_embed(); ?>
                         <?php if($event_session->get('evs_content')): ?>
                         <div style="margin-top: 0.75rem;"><?php echo $event_session->get('evs_content'); ?></div>
@@ -187,7 +188,7 @@
                     <?php } ?>
 
                     <?php if($pager->num_records() > 5): ?>
-                    <div style="padding: 1rem 1.5rem; text-align: center; font-size: 0.875rem; color: var(--color-muted);">
+                    <div style="padding: 1rem 1.5rem; text-align: center; font-size: 0.875rem; color: var(--jy-color-text-muted);">
                         <?php
                         if($page_number = $pager->is_valid_page('+1')){
                             echo '<a href="' . $pager->get_url($page_number) . '">Show next ' . $pager->num_per_page() . ' of ' . $pager->num_records() . ' sessions</a>';
@@ -205,7 +206,7 @@
             <div style="flex: 1; min-width: 240px; max-width: 300px;">
                 <?php if($page_vars['event']->get('evt_private_info')): ?>
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--color-light, #f8f9fa); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
                         <h6 style="margin: 0;">Registrant Info</h6>
                     </div>
                     <div style="padding: 1.25rem;">
@@ -219,6 +220,7 @@
     </div>
 </section>
 
+</div>
 <?php
 $page->member_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

@@ -14,6 +14,7 @@
     ]);
 ?>
 
+<div class="jy-ui">
 <div class="auth-page">
     <div class="auth-card">
 
@@ -55,6 +56,7 @@
         </div>
 
     </div>
+</div>
 </div>
 
 <?php

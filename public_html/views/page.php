@@ -16,6 +16,7 @@
 	}
 	$paget->public_header($page_header_options);
 ?>
+<div class="jy-ui">
 
 	<!-- Page Title
 	============================================= -->
@@ -76,6 +77,7 @@
 		</div>
 	</section><!-- #content end -->
 
+</div>
 <?php
 	$paget->public_footer($foptions=array('track'=>TRUE));
 ?>

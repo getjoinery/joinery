@@ -17,6 +17,7 @@
 	);
 	$page->member_header($hoptions);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -76,6 +77,7 @@
     </div>
 </section>
 
+</div>
 <?php
 $page->member_footer($foptions=array('track'=>TRUE));
 ?>

@@ -15,6 +15,7 @@
     $options = ['subtitle' => 'Add yourself to the waiting list, and we will notify you as soon as registration is available.'];
     echo PublicPage::BeginPage('Waiting list for ' . $event->get('evt_name'), $options);
 ?>
+<div class="jy-ui">
 
 <div class="container">
     <div class="row justify-content-center">
@@ -124,6 +125,7 @@
     </div>
 </div>
 
+</div>
 <?php
     echo PublicPage::EndPage();
     $page->public_footer(['track' => true]);

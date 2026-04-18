@@ -13,6 +13,7 @@ $page->public_header([
     'header_only'   => true,
 ]);
 ?>
+<div class="jy-ui">
 
 <section style="min-height: 75vh; display: flex; align-items: center; padding: 4rem 0;">
     <div class="container">
@@ -20,7 +21,7 @@ $page->public_header([
 
             <!-- 404 Visual -->
             <div style="text-align: center;">
-                <div style="font-size: 8rem; font-weight: 900; color: var(--color-primary, #1abc9c); opacity: 0.15; line-height: 1;">404</div>
+                <div style="font-size: 8rem; font-weight: 900; color: var(--jy-color-primary); opacity: 0.15; line-height: 1;">404</div>
                 <div style="margin-top: -2rem; font-size: 4rem;">&#9888;</div>
             </div>
 
@@ -29,23 +30,23 @@ $page->public_header([
                 <?php if ($settings->get_setting('logo_link')): ?>
                 <div style="margin-bottom: 1.5rem;">
                     <img src="<?php echo htmlspecialchars($settings->get_setting('logo_link')); ?>" alt="Logo" style="max-height: 40px; vertical-align: middle; margin-right: 0.75rem;">
-                    <span style="font-size: 1.25rem; font-weight: 700; color: var(--color-primary);"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
+                    <span style="font-size: 1.25rem; font-weight: 700; color: var(--jy-color-primary);"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
                 </div>
                 <?php else: ?>
                 <div style="margin-bottom: 1.5rem;">
-                    <span style="font-size: 1.25rem; font-weight: 700; color: var(--color-primary);"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
+                    <span style="font-size: 1.25rem; font-weight: 700; color: var(--jy-color-primary);"><?php echo htmlspecialchars($settings->get_setting('site_name')); ?></span>
                 </div>
                 <?php endif; ?>
 
                 <h1 style="margin-bottom: 1rem;">Oops! Page Not Found</h1>
-                <p style="font-size: 1.0625rem; color: var(--color-muted, #6c757d); margin-bottom: 2rem;">
+                <p style="font-size: 1.0625rem; color: var(--jy-color-text-muted); margin-bottom: 2rem;">
                     The page you're looking for couldn't be found. It might have been moved, deleted, or the URL might be incorrect.
                 </p>
 
                 <!-- Search -->
                 <form action="/search" method="get" style="margin-bottom: 2rem;">
                     <div style="display: flex; gap: 0;">
-                        <input type="text" name="q" placeholder="Search our site..." style="flex: 1; padding: 0.75rem 1rem; border: 1px solid var(--color-border, #ccc); border-right: none; border-radius: 4px 0 0 4px; font-size: 1rem;">
+                        <input type="text" name="q" placeholder="Search our site..." style="flex: 1; padding: 0.75rem 1rem; border: 1px solid var(--jy-color-border); border-right: none; border-radius: 4px 0 0 4px; font-size: 1rem;">
                         <button type="submit" class="btn btn-primary" style="border-radius: 0 4px 4px 0;">Search</button>
                     </div>
                 </form>
@@ -78,6 +79,7 @@ $page->public_header([
     </div>
 </section>
 
+</div>
 <?php
 $page->public_footer(['track' => true, 'header_only' => true, 'is_404' => 1]);
 ?>

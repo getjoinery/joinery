@@ -10,6 +10,7 @@ $page->public_header([
     'title'         => 'Products',
 ]);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -43,12 +44,12 @@ $page->public_header([
                 </a>
                 <div style="padding: 1.25rem; flex: 1; display: flex; flex-direction: column;">
                     <h3 style="font-size: 1.0625rem; margin: 0 0 0.5rem;">
-                        <a href="<?php echo $product->get_url(); ?>" style="color: var(--color-dark); text-decoration: none;">
+                        <a href="<?php echo $product->get_url(); ?>" style="color: var(--jy-color-text); text-decoration: none;">
                             <?php echo htmlspecialchars($product->get('pro_name')); ?>
                         </a>
                     </h3>
                     <?php if ($product->get('pro_description')): ?>
-                    <p style="color: var(--color-muted); font-size: 0.875rem; margin: 0 0 1rem; flex: 1;">
+                    <p style="color: var(--jy-color-text-muted); font-size: 0.875rem; margin: 0 0 1rem; flex: 1;">
                         <?php
                         $desc = strip_tags($product->get('pro_description'));
                         echo strlen($desc) > 120 ? substr($desc, 0, 120) . '...' : $desc;
@@ -67,8 +68,8 @@ $page->public_header([
 
         <!-- Pagination -->
         <?php if ($page_vars['pager']->is_valid_page('-1') || $page_vars['pager']->is_valid_page('+1')): ?>
-        <div style="margin-top: 3rem; display: flex; justify-content: space-between; align-items: center; background: var(--color-light, #f8f9fa); border-radius: 8px; padding: 1.25rem 1.5rem;">
-            <p style="margin: 0; color: var(--color-muted); font-size: 0.9rem;">
+        <div style="margin-top: 3rem; display: flex; justify-content: space-between; align-items: center; background: var(--jy-color-surface); border-radius: 8px; padding: 1.25rem 1.5rem;">
+            <p style="margin: 0; color: var(--jy-color-text-muted); font-size: 0.9rem;">
                 Showing <?php echo $page_vars['offsetdisp']; ?> to <?php echo $page_vars['numperpage'] + $page_vars['offset']; ?> of <?php echo $page_vars['numrecords']; ?> results
             </p>
             <div style="display: flex; gap: 0.5rem;">
@@ -95,6 +96,7 @@ $page->public_header([
 }
 </style>
 
+</div>
 <?php
 $page->public_footer(['track' => true]);
 ?>

@@ -21,6 +21,7 @@
         'noheader'      => true,
     ]);
 ?>
+<div class="jy-ui">
 
 <?php if (StripeHelper::isTestMode()): ?>
 <div style="background: #fff3cd; color: #856404; padding: 0.5rem 1rem; text-align: center; font-size: 0.875rem; border-bottom: 1px solid #ffc107;">
@@ -52,9 +53,9 @@
 
     <?php if (empty($cart->items)): ?>
         <div style="max-width: 500px; margin: 3rem auto; text-align: center;">
-            <div style="font-size: 4rem; color: var(--color-muted); margin-bottom: 1rem;">&#128722;</div>
+            <div style="font-size: 4rem; color: var(--jy-color-text-muted); margin-bottom: 1rem;">&#128722;</div>
             <h2 style="margin-bottom: 0.5rem;">Your cart is empty</h2>
-            <p style="color: var(--color-muted); margin-bottom: 1.5rem;">Add some items to get started.</p>
+            <p style="color: var(--jy-color-text-muted); margin-bottom: 1.5rem;">Add some items to get started.</p>
             <a href="/products" class="btn btn-primary">Browse Products</a>
         </div>
     <?php else: ?>
@@ -72,10 +73,10 @@
         ?>
         <div style="margin-bottom: 1.5rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <span style="font-size: 0.875rem; color: var(--color-muted);" aria-current="step">Step <?php echo $active_number; ?> of <?php echo $total_sections; ?></span>
+                <span style="font-size: 0.875rem; color: var(--jy-color-text-muted);" aria-current="step">Step <?php echo $active_number; ?> of <?php echo $total_sections; ?></span>
             </div>
             <div style="height: 4px; background: #e9ecef; border-radius: 2px; overflow: hidden;">
-                <div id="progress-bar" style="height: 100%; background: var(--color-primary); border-radius: 2px; transition: width 0.3s; width: <?php echo $progress_pct; ?>%;"></div>
+                <div id="progress-bar" style="height: 100%; background: var(--jy-color-primary); border-radius: 2px; transition: width 0.3s; width: <?php echo $progress_pct; ?>%;"></div>
             </div>
         </div>
 
@@ -89,11 +90,11 @@
                         echo htmlspecialchars($first_item[1]->get('pro_name'), ENT_QUOTES, 'UTF-8');
                     ?></span>
                     <span style="display: flex; align-items: center; gap: 0.5rem;">
-                        <strong style="color: var(--color-primary);"><?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></strong>
+                        <strong style="color: var(--jy-color-primary);"><?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></strong>
                         <span class="chevron" style="display: inline-block; transition: transform 0.2s; font-size: 0.75rem;">&#9660;</span>
                     </span>
                 </div>
-                <div class="mobile-summary-detail" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--color-border, #eee);">
+                <div class="mobile-summary-detail" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border);">
                     <?php foreach ($cart->items as $key => $cart_item):
                         list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
                     ?>
@@ -113,7 +114,7 @@
                 .chevron.expanded { transform: rotate(180deg); }
             }
             .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-            .checkout-section:focus-within .section-header { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+            .checkout-section:focus-within .section-header { outline: 2px solid var(--jy-color-primary); outline-offset: -2px; }
         </style>
 
         <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
@@ -132,8 +133,8 @@
                         aria-expanded="<?php echo ($section['state'] == 'active') ? 'true' : 'false'; ?>"
                         aria-controls="body-<?php echo $section_key; ?>"
                         style="padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; cursor: pointer;
-                        <?php if ($section['state'] == 'active'): ?>background: var(--color-primary); color: #fff;
-                        <?php elseif ($section['state'] == 'completed'): ?>background: var(--color-light, #f8f9fa); border-bottom: 1px solid var(--color-border, #eee);
+                        <?php if ($section['state'] == 'active'): ?>background: var(--jy-color-primary); color: #fff;
+                        <?php elseif ($section['state'] == 'completed'): ?>background: var(--jy-color-surface); border-bottom: 1px solid var(--jy-color-border);
                         <?php else: ?>background: #f5f5f5; color: #aaa; cursor: default;<?php endif; ?>"
                         <?php if ($section['state'] == 'completed'): ?>onclick="openSection('<?php echo $section_key; ?>')"<?php endif; ?>
                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();if(this.parentElement.dataset.state==='completed')openSection('<?php echo $section_key; ?>');}">
@@ -148,8 +149,8 @@
                         </div>
                         <?php if ($section['state'] == 'completed' && $section['summary']): ?>
                         <div style="display: flex; align-items: center; gap: 1rem;">
-                            <span style="font-size: 0.875rem; color: var(--color-muted);"><?php echo $section['summary']; ?></span>
-                            <span style="font-size: 0.8125rem; color: var(--color-primary); font-weight: 600;">Edit</span>
+                            <span style="font-size: 0.875rem; color: var(--jy-color-text-muted);"><?php echo $section['summary']; ?></span>
+                            <span style="font-size: 0.8125rem; color: var(--jy-color-primary); font-weight: 600;">Edit</span>
                         </div>
                         <?php endif; ?>
                     </div>
@@ -176,12 +177,12 @@
                                 $contact_email = $cart->billing_user['billing_email'];
                             }
                             ?>
-                            <label for="contact_email" style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Email Address <span style="color: var(--color-danger);">*</span></label>
+                            <label for="contact_email" style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Email Address <span style="color: var(--jy-color-danger);">*</span></label>
                             <input type="email" id="contact_email" name="email" value="<?php echo htmlspecialchars($contact_email, ENT_QUOTES, 'UTF-8'); ?>"
-                                   style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;"
+                                   style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
                                    required aria-required="true" autocomplete="email" placeholder="your@email.com"
                                    aria-describedby="contact_email_error">
-                            <div id="contact_email_error" role="alert" style="color: var(--color-danger, #dc3545); font-size: 0.875rem; margin-top: 0.25rem; display: none;"></div>
+                            <div id="contact_email_error" role="alert" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.25rem; display: none;"></div>
                             <div id="contact_email_exists" style="background: #e8f4fd; padding: 0.75rem 1rem; border-radius: 6px; margin-top: 0.75rem; font-size: 0.9375rem; display: none;">
                                 Welcome back! <a href="#" onclick="showLoginModal(); return false;">Log in</a> for faster checkout, or continue as guest.
                             </div>
@@ -217,12 +218,12 @@
 
                         <div style="display: flex; gap: 0.5rem;">
                             <input type="text" id="coupon_code_input" placeholder="Enter coupon code"
-                                   style="flex: 1; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;">
+                                   style="flex: 1; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;">
                             <button type="button" class="btn btn-outline" onclick="applyCoupon()">Apply</button>
                         </div>
-                        <div id="coupon_error" style="color: var(--color-danger, #dc3545); font-size: 0.875rem; margin-top: 0.5rem; display: none;"></div>
+                        <div id="coupon_error" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.5rem; display: none;"></div>
                         <?php if (!empty($page_vars['coupon_error'])): ?>
-                        <div style="color: var(--color-danger, #dc3545); font-size: 0.875rem; margin-top: 0.5rem;">
+                        <div style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.5rem;">
                             <?php echo htmlspecialchars($page_vars['coupon_error'], ENT_QUOTES, 'UTF-8'); ?>
                         </div>
                         <?php endif; ?>
@@ -235,19 +236,19 @@
                         <?php if ($session->is_logged_in()):
                             if (!isset($user)) $user = new User($session->get_user_id(), TRUE);
                         ?>
-                            <div style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--color-light, #f8f9fa); border-radius: 6px;">
+                            <div style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--jy-color-surface); border-radius: 6px;">
                                 <strong><?php echo htmlspecialchars($user->get('usr_fname') . ' ' . $user->get('usr_lname'), ENT_QUOTES, 'UTF-8'); ?></strong>
-                                <br><span style="color: var(--color-muted); font-size: 0.9375rem;"><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></span>
+                                <br><span style="color: var(--jy-color-text-muted); font-size: 0.9375rem;"><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></span>
                             </div>
                         <?php else: ?>
                             <!-- Name (read-only from cart or editable) -->
                             <?php if ($has_name_from_cart): ?>
-                            <div id="billing_name_display" style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--color-light, #f8f9fa); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                            <div id="billing_name_display" style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--jy-color-surface); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <strong id="billing_name_text"><?php echo htmlspecialchars($prefill_name['first'] . ' ' . $prefill_name['last'], ENT_QUOTES, 'UTF-8'); ?></strong>
-                                    <br><span style="color: var(--color-muted); font-size: 0.9375rem;" id="billing_email_text"><?php echo htmlspecialchars($cart->billing_user['billing_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <br><span style="color: var(--jy-color-text-muted); font-size: 0.9375rem;" id="billing_email_text"><?php echo htmlspecialchars($cart->billing_user['billing_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?></span>
                                 </div>
-                                <a href="#" onclick="document.getElementById('billing_name_fields').style.display='block'; this.parentElement.style.display='none'; return false;" style="font-size: 0.8125rem; color: var(--color-primary);">Change</a>
+                                <a href="#" onclick="document.getElementById('billing_name_fields').style.display='block'; this.parentElement.style.display='none'; return false;" style="font-size: 0.8125rem; color: var(--jy-color-primary);">Change</a>
                             </div>
                             <div id="billing_name_fields" style="display: none; margin-bottom: 1rem;">
                             <?php else: ?>
@@ -255,17 +256,17 @@
                             <?php endif; ?>
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                                     <div>
-                                        <label for="billing_first_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">First Name <span style="color: var(--color-danger);">*</span></label>
+                                        <label for="billing_first_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">First Name <span style="color: var(--jy-color-danger);">*</span></label>
                                         <input type="text" id="billing_first_name" name="billing_first_name"
                                                value="<?php echo htmlspecialchars($cart->billing_user['billing_first_name'] ?? $prefill_name['first'], ENT_QUOTES, 'UTF-8'); ?>"
-                                               style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;"
+                                               style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
                                                required autocomplete="given-name">
                                     </div>
                                     <div>
-                                        <label for="billing_last_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Last Name <span style="color: var(--color-danger);">*</span></label>
+                                        <label for="billing_last_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Last Name <span style="color: var(--jy-color-danger);">*</span></label>
                                         <input type="text" id="billing_last_name" name="billing_last_name"
                                                value="<?php echo htmlspecialchars($cart->billing_user['billing_last_name'] ?? $prefill_name['last'], ENT_QUOTES, 'UTF-8'); ?>"
-                                               style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;"
+                                               style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
                                                required autocomplete="family-name">
                                     </div>
                                 </div>
@@ -278,9 +279,9 @@
                                     Create an account for faster checkout next time
                                 </label>
                                 <div id="password_field" style="display: none; margin-top: 0.75rem;">
-                                    <label for="billing_password" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Password <span style="color: var(--color-danger);">*</span></label>
+                                    <label for="billing_password" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Password <span style="color: var(--jy-color-danger);">*</span></label>
                                     <input type="password" id="billing_password" name="password"
-                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;"
+                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
                                            autocomplete="new-password">
                                 </div>
                             </div>
@@ -290,12 +291,12 @@
                         <div style="margin-bottom: 1rem;">
                             <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-size: 0.9375rem;">
                                 <input type="checkbox" id="billing_privacy" name="privacy" required style="margin-top: 0.2rem;">
-                                <span>I agree to the <a href="/terms" target="_blank">Terms of Use</a> and <a href="/privacy" target="_blank">Privacy Policy</a>. <span style="color: var(--color-danger);">*</span></span>
+                                <span>I agree to the <a href="/terms" target="_blank">Terms of Use</a> and <a href="/privacy" target="_blank">Privacy Policy</a>. <span style="color: var(--jy-color-danger);">*</span></span>
                             </label>
-                            <div id="billing_privacy_error" style="color: var(--color-danger, #dc3545); font-size: 0.875rem; margin-top: 0.25rem; display: none;"></div>
+                            <div id="billing_privacy_error" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.25rem; display: none;"></div>
                         </div>
 
-                        <div id="billing_errors" style="color: var(--color-danger, #dc3545); font-size: 0.875rem; margin-bottom: 0.75rem; display: none;"></div>
+                        <div id="billing_errors" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-bottom: 0.75rem; display: none;"></div>
 
                         <div style="margin-top: 1.25rem;">
                             <?php if ($cart->get_total() <= 0): ?>
@@ -330,7 +331,7 @@
 
                             <?php if ($settings->get_setting('use_paypal_checkout') && !empty($page_vars['paypal_helper'])): ?>
                             <?php if ($cart->is_paypal_available()): ?>
-                            <div style="<?php if ($settings->get_setting('checkout_type')): ?>border-top: 1px solid var(--color-border, #eee); padding-top: 1.5rem; margin-top: 1.5rem;<?php endif; ?>">
+                            <div style="<?php if ($settings->get_setting('checkout_type')): ?>border-top: 1px solid var(--jy-color-border); padding-top: 1.5rem; margin-top: 1.5rem;<?php endif; ?>">
                                 <h5 style="margin-bottom: 1rem;">Pay with PayPal</h5>
                                 <?php
                                 if ($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0) {
@@ -341,13 +342,13 @@
                                 ?>
                             </div>
                             <?php else: ?>
-                            <div style="border-top: 1px solid var(--color-border, #eee); padding-top: 1.5rem; margin-top: 1.5rem; color: var(--color-muted); font-size: 0.875rem;">
+                            <div style="border-top: 1px solid var(--jy-color-border); padding-top: 1.5rem; margin-top: 1.5rem; color: var(--jy-color-text-muted); font-size: 0.875rem;">
                                 PayPal is not available for carts containing a mix of subscriptions and other items. You can pay with Stripe, or check out subscriptions separately.
                             </div>
                             <?php endif; ?>
                             <?php endif; ?>
 
-                            <div style="margin-top: 1.5rem; text-align: center; color: var(--color-muted); font-size: 0.8125rem;">
+                            <div style="margin-top: 1.5rem; text-align: center; color: var(--jy-color-text-muted); font-size: 0.8125rem;">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px;" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                                 Your order is protected by 256-bit SSL encryption
                             </div>
@@ -363,7 +364,7 @@
             <!-- Order Summary (right) -->
             <div style="flex: 0 0 340px; min-width: 260px; position: sticky; top: 2rem;" id="order-summary">
                 <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--color-primary, #1abc9c); color: #fff; padding: 1rem 1.5rem;">
+                    <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
                         <h3 style="margin: 0; color: #fff; font-size: 1.0625rem;">Order Summary</h3>
                     </div>
 
@@ -373,21 +374,21 @@
                         list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
                         if ($discount) $total_discount += $discount;
                     ?>
-                    <div style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <div style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--jy-color-border);">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
                             <div style="flex: 1; min-width: 0;">
                                 <h6 style="margin: 0 0 0.25rem; font-size: 0.9375rem;">
                                     <?php echo htmlspecialchars($product->get('pro_name'), ENT_QUOTES, 'UTF-8'); ?>
-                                    <small style="color: var(--color-muted);"><?php echo htmlspecialchars($product_version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?></small>
+                                    <small style="color: var(--jy-color-text-muted);"><?php echo htmlspecialchars($product_version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?></small>
                                 </h6>
                                 <?php if (!empty($data['full_name_first'])): ?>
-                                <small style="color: var(--color-muted);">
+                                <small style="color: var(--jy-color-text-muted);">
                                     <?php echo htmlspecialchars($data['full_name_first'] . ' ' . $data['full_name_last'], ENT_QUOTES, 'UTF-8'); ?>
                                 </small>
                                 <?php endif; ?>
                             </div>
                             <div style="text-align: right; flex-shrink: 0;">
-                                <div style="font-weight: 700; color: var(--color-primary);">
+                                <div style="font-weight: 700; color: var(--jy-color-primary);">
                                     <?php echo $currency_symbol . number_format($price, 2, '.', ','); ?>
                                     <?php if ($discount): ?>
                                     <div style="font-size: 0.8125rem; color: #198754;">-<?php echo $currency_symbol . number_format($discount, 2, '.', ','); ?></div>
@@ -397,13 +398,13 @@
                         </div>
                         <!-- Per-item actions -->
                         <div style="margin-top: 0.5rem; display: flex; gap: 1rem; font-size: 0.8125rem;">
-                            <a href="<?php echo $product->get_url(); ?>?edit_item=<?php echo $key; ?>" style="color: var(--color-primary); text-decoration: none;">Edit</a>
-                            <a href="/cart?r=<?php echo $key; ?>" style="color: var(--color-danger, #dc3545); text-decoration: none;">Remove</a>
+                            <a href="<?php echo $product->get_url(); ?>?edit_item=<?php echo $key; ?>" style="color: var(--jy-color-primary); text-decoration: none;">Edit</a>
+                            <a href="/cart?r=<?php echo $key; ?>" style="color: var(--jy-color-danger); text-decoration: none;">Remove</a>
                         </div>
                     </div>
                     <?php endforeach; ?>
 
-                    <div style="background: var(--color-light, #f8f9fa); padding: 1rem 1.5rem;">
+                    <div style="background: var(--jy-color-surface); padding: 1rem 1.5rem;">
                         <dl style="margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 0.375rem 1rem;">
                             <?php if ($total_discount > 0): ?>
                             <dt style="font-weight: 400;">Subtotal:</dt>
@@ -411,15 +412,15 @@
                             <dt style="color: #198754;">Discount:</dt>
                             <dd style="margin: 0; text-align: right; color: #198754;">-<?php echo $currency_symbol . number_format($total_discount, 2, '.', ','); ?></dd>
                             <?php endif; ?>
-                            <dt style="font-weight: 700; font-size: 1.0625rem; <?php if ($total_discount > 0): ?>padding-top: 0.75rem; border-top: 1px solid var(--color-border, #eee);<?php endif; ?>">Total:</dt>
-                            <dd style="margin: 0; text-align: right; font-weight: 700; font-size: 1.0625rem; color: var(--color-primary); <?php if ($total_discount > 0): ?>padding-top: 0.75rem; border-top: 1px solid var(--color-border, #eee);<?php endif; ?>">
+                            <dt style="font-weight: 700; font-size: 1.0625rem; <?php if ($total_discount > 0): ?>padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border);<?php endif; ?>">Total:</dt>
+                            <dd style="margin: 0; text-align: right; font-weight: 700; font-size: 1.0625rem; color: var(--jy-color-primary); <?php if ($total_discount > 0): ?>padding-top: 0.75rem; border-top: 1px solid var(--jy-color-border);<?php endif; ?>">
                                 <?php echo $currency_symbol . number_format($cart->get_total() - $total_discount, 2, '.', ','); ?>
                             </dd>
                         </dl>
                     </div>
 
                     <div style="padding: 1rem 1.5rem; text-align: center;">
-                        <a href="/products" style="font-size: 0.875rem; color: var(--color-muted); text-decoration: none;">+ Add another item</a>
+                        <a href="/products" style="font-size: 0.875rem; color: var(--jy-color-text-muted); text-decoration: none;">+ Add another item</a>
                     </div>
                 </div>
             </div><!-- /order summary -->
@@ -433,20 +434,20 @@
 <!-- Login Modal -->
 <div id="login-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center;">
     <div style="background: #fff; border-radius: 12px; padding: 2rem; max-width: 400px; width: 90%; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
-        <button onclick="closeLoginModal()" style="position: absolute; top: 0.75rem; right: 1rem; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--color-muted);">&times;</button>
+        <button onclick="closeLoginModal()" style="position: absolute; top: 0.75rem; right: 1rem; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--jy-color-text-muted);">&times;</button>
         <h3 style="margin: 0 0 1.5rem;">Log In</h3>
-        <div id="login-modal-error" style="color: var(--color-danger, #dc3545); font-size: 0.875rem; margin-bottom: 1rem; display: none;"></div>
+        <div id="login-modal-error" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-bottom: 1rem; display: none;"></div>
         <div style="margin-bottom: 1rem;">
             <label for="login_modal_email" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Email</label>
-            <input type="email" id="login_modal_email" name="email" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;" autocomplete="email">
+            <input type="email" id="login_modal_email" name="email" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;" autocomplete="email">
         </div>
         <div style="margin-bottom: 1.5rem;">
             <label for="login_modal_password" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Password</label>
-            <input type="password" id="login_modal_password" name="password" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--color-border, #ccc); border-radius: 6px; font-size: 1rem;" autocomplete="current-password">
+            <input type="password" id="login_modal_password" name="password" style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;" autocomplete="current-password">
         </div>
         <button onclick="submitLogin()" class="btn btn-primary" style="width: 100%;">Log In</button>
         <div style="margin-top: 1rem; text-align: center;">
-            <a href="/forgot_password" style="font-size: 0.875rem; color: var(--color-muted);">Forgot password?</a>
+            <a href="/forgot_password" style="font-size: 0.875rem; color: var(--jy-color-text-muted);">Forgot password?</a>
         </div>
     </div>
 </div>
@@ -461,7 +462,7 @@
             if (el.dataset.section === sectionKey) {
                 el.dataset.state = 'active';
                 body.style.display = 'block';
-                header.style.background = 'var(--color-primary)';
+                header.style.background = 'var(--jy-color-primary)';
                 header.style.color = '#fff';
                 header.style.cursor = 'pointer';
                 header.setAttribute('aria-expanded', 'true');
@@ -490,7 +491,7 @@
         var header = el.querySelector('.section-header');
         var body = el.querySelector('.section-body');
         body.style.display = 'none';
-        header.style.background = 'var(--color-light, #f8f9fa)';
+        header.style.background = 'var(--jy-color-surface)';
         header.style.color = '';
         header.style.cursor = 'pointer';
         header.onclick = function() { openSection(sectionKey); };
@@ -510,7 +511,7 @@
             var sumDiv = document.createElement('div');
             sumDiv.className = 'section-summary';
             sumDiv.style.cssText = 'display:flex;align-items:center;gap:1rem;';
-            sumDiv.innerHTML = '<span style="font-size:0.875rem;color:var(--color-muted);">' + summary + '</span><span style="font-size:0.8125rem;color:var(--color-primary);font-weight:600;">Edit</span>';
+            sumDiv.innerHTML = '<span style="font-size:0.875rem;color:var(--jy-color-text-muted);">' + summary + '</span><span style="font-size:0.8125rem;color:var(--jy-color-primary);font-weight:600;">Edit</span>';
             header.appendChild(sumDiv);
         }
         updateProgress();
@@ -832,6 +833,7 @@
 })();
 </script>
 
+</div>
 <?php
     $page->public_footer(['track' => true]);
 ?>

@@ -60,6 +60,7 @@ function dashboard_notification_icon_svg($type) {
 	return $icons[$type] ?? $default;
 }
 ?>
+<div class="jy-ui">
 
 <?php
 // =====================================================================
@@ -374,6 +375,7 @@ if ($has_actions):
 	</div>
 </div>
 
+</div>
 <?php
 $page->member_footer(array('track' => TRUE));
 ?>

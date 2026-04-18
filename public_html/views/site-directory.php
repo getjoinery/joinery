@@ -15,6 +15,7 @@
     ]);
     echo PublicPage::BeginPage('Site Directory');
 ?>
+<div class="jy-ui">
 
 <div class="container">
     <div class="text-center mb-5">
@@ -144,6 +145,7 @@
     </div>
 </div>
 
+</div>
 <?php
     echo PublicPage::EndPage();
     $paged->public_footer(['track' => true]);

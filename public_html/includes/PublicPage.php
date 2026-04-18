@@ -14,7 +14,6 @@ class PublicPage extends PublicPageBase {
 
     protected function render_base_assets() {
         parent::render_base_assets();
-        echo '<link rel="stylesheet" href="/assets/css/style.css?v=2">' . "\n";
     }
 
     public function get_logo() {
@@ -100,10 +99,9 @@ class PublicPage extends PublicPageBase {
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/css/custom.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="jy-default">
 <?php
         if (isset($options['header_only']) && $options['header_only']) {
             return;
@@ -114,7 +112,7 @@ class PublicPage extends PublicPageBase {
 
         if ($this->_noheader) {
 ?>
-<header class="site-header header-light" style="border-bottom: 1px solid var(--color-border, #eee);">
+<header class="site-header header-light" style="border-bottom: 1px solid var(--jy-color-border);">
     <div class="header-inner" style="justify-content: center; position: relative;">
         <a href="/" class="logo" style="position: absolute; left: 1.5rem;" onclick="return confirm('Leave checkout? Your cart will be saved.');">
             <?php $this->get_logo(); ?>

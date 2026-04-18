@@ -22,6 +22,7 @@
 		}
 	}
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -93,6 +94,7 @@
     </div>
 </section>
 
+</div>
 <?php
 // Photo grid scripts
 PhotoHelper::render_photo_scripts('grid', 'user', $page_vars['user']->key, [

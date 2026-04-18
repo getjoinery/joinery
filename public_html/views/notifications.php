@@ -33,6 +33,7 @@ function notification_icon_svg($type) {
 	return $icons[$type] ?? $default;
 }
 ?>
+<div class="jy-ui">
 
 <div class="ntf-inbox">
 	<div class="ntf-inbox-card">
@@ -367,6 +368,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
+</div>
 <?php
 $page->member_footer();
 ?>
