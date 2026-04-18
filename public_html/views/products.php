@@ -14,7 +14,7 @@ $page->public_header([
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1>Our Products</h1>
@@ -30,8 +30,8 @@ $page->public_header([
     </div>
 </section>
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
 
         <!-- Products Grid -->
         <div class="grid-3" style="gap: 1.5rem;">

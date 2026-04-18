@@ -37,7 +37,7 @@ $text_class = ($style === 'centered') ? 'text-center' : '';
 ?>
 
 <section class="feature-grid py-5" style="background-color: <?php echo htmlspecialchars($background_color); ?>;">
-	<div class="container">
+	<div class="jy-container">
 		<?php if ($heading || $subheading): ?>
 			<div class="row mb-5">
 				<div class="col-lg-8 mx-auto text-center">

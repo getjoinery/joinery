@@ -51,7 +51,7 @@ if ($text_color) {
 ?>
 
 <section class="hero-static <?php echo $height_class; ?>" style="<?php echo $bg_style; ?>">
-	<div class="container">
+	<div class="jy-container">
 		<div class="row justify-content-center">
 			<div class="col-lg-8 <?php echo $align_class; ?>">
 				<?php if ($heading): ?>

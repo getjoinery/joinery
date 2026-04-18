@@ -587,7 +587,7 @@ abstract class PublicPageBase {
 	 */
 	protected function render_base_assets() {
 		echo '<link rel="stylesheet" href="/assets/css/base.css?v=3">' . "\n";
-		echo '<link rel="stylesheet" href="/assets/css/custom.css?v=5">' . "\n";
+		echo '<link rel="stylesheet" href="/assets/css/custom.css?v=7">' . "\n";
 		echo '<script defer src="/assets/js/base.js?v=2"></script>' . "\n";
 	}
 

@@ -25,7 +25,7 @@ if (empty($html)) {
 }
 ?>
 <section class="custom-html py-4">
-	<div class="container">
+	<div class="jy-container">
 		<?php echo $html; // Note: HTML is not escaped - intentionally allows raw HTML ?>
 	</div>
 </section>

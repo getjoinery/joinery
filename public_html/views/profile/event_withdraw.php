@@ -16,7 +16,7 @@
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1>Withdraw from Event/Course</h1>
@@ -32,8 +32,8 @@
     </div>
 </section>
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
         <div style="max-width: 640px; margin: 0 auto;">
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem;">
 

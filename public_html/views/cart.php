@@ -30,7 +30,7 @@
 <?php endif; ?>
 
 <section style="padding: 2rem 0;">
-    <div class="container">
+    <div class="jy-container">
 
     <?php
     // Display session messages (payment errors, etc.)

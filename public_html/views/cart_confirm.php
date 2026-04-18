@@ -18,8 +18,8 @@ $page->public_header([
 ?>
 <div class="jy-ui">
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
         <div style="max-width: 680px; margin: 0 auto;">
 
             <?php if ($receipts): ?>

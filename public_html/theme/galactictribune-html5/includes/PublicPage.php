@@ -30,17 +30,10 @@ class PublicPage extends PublicPageBase {
             <title><?php echo htmlspecialchars($options['title'] ?? $menu_data['site_info']['site_name'] ?? 'Galactic Tribune'); ?></title>
 
             <?php echo $_head_inject; ?>
-            <script src="/assets/js/joinery-validate.js" defer></script>
+            <?php $this->global_includes_top($options); ?>
 
             <!-- CSS -->
             <link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
-
-            <?php
-            $settings = Globalvars::get_instance();
-            if($settings && $settings->get_setting('custom_css')){
-                echo '<style>'.$settings->get_setting('custom_css').'</style>';
-            }
-            ?>
 
             <script>
             document.addEventListener('DOMContentLoaded', function() {

@@ -21,7 +21,7 @@
 	<!-- Page Title
 	============================================= -->
 	<section class="page-title bg-transparent">
-		<div class="container">
+		<div class="jy-container">
 			<div class="page-title-row">
 
 				<div class="page-title-content">
@@ -43,7 +43,7 @@
 	============================================= -->
 	<section id="content">
 		<div class="content-wrap">
-			<div class="container">
+			<div class="jy-container">
 
 				<div class="row gx-5">
 					<div class="col-lg-12">

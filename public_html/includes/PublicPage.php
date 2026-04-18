@@ -19,9 +19,9 @@ class PublicPage extends PublicPageBase {
     public function get_logo() {
         $settings = Globalvars::get_instance();
         if ($settings->get_setting('logo_link')) {
-            echo '<img src="' . htmlspecialchars($settings->get_setting('logo_link'), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8') . '" class="logo-img">';
+            echo '<img src="' . htmlspecialchars($settings->get_setting('logo_link'), ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8') . '" class="jy-logo-img">';
         }
-        echo '<span class="logo-text">' . htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8') . '</span>';
+        echo '<span class="jy-logo-text">' . htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8') . '</span>';
     }
 
     public function top_right_menu() {
@@ -31,9 +31,9 @@ class PublicPage extends PublicPageBase {
 
         // Cart
         if ($cart['has_items']) {
-            echo '<a href="' . htmlspecialchars($cart['link'], ENT_QUOTES, 'UTF-8') . '" class="header-cart-link" title="Cart (' . (int)$cart['item_count'] . ' items)">';
+            echo '<a href="' . htmlspecialchars($cart['link'], ENT_QUOTES, 'UTF-8') . '" class="jy-header-cart-link" title="Cart (' . (int)$cart['item_count'] . ' items)">';
             echo '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>';
-            echo '<span class="cart-count">' . (int)$cart['item_count'] . '</span>';
+            echo '<span class="jy-cart-count">' . (int)$cart['item_count'] . '</span>';
             echo '</a>';
         }
 
@@ -55,14 +55,14 @@ class PublicPage extends PublicPageBase {
                 echo ' <a href="' . htmlspecialchars($user_menu['register_link'], ENT_QUOTES, 'UTF-8') . '" class="btn btn-sm btn-primary">Register</a>';
             }
         } else {
-            echo '<details class="user-dropdown">';
-            echo '<summary class="user-dropdown-toggle" aria-label="User menu">';
+            echo '<details class="jy-user-dropdown">';
+            echo '<summary class="jy-user-dropdown-toggle" aria-label="User menu">';
             echo '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>';
             if ($user_menu['display_name']) {
-                echo ' <span class="user-name">' . htmlspecialchars($user_menu['display_name'], ENT_QUOTES, 'UTF-8') . '</span>';
+                echo ' <span class="jy-user-name">' . htmlspecialchars($user_menu['display_name'], ENT_QUOTES, 'UTF-8') . '</span>';
             }
             echo '</summary>';
-            echo '<div class="user-dropdown-menu">';
+            echo '<div class="jy-user-dropdown-menu">';
             foreach ($user_menu['items'] as $item) {
                 if (!in_array($item['label'], ['Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) {
                     echo '<a href="' . htmlspecialchars($item['link'], ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8') . '</a>';
@@ -112,9 +112,9 @@ class PublicPage extends PublicPageBase {
 
         if ($this->_noheader) {
 ?>
-<header class="site-header header-light" style="border-bottom: 1px solid var(--jy-color-border);">
-    <div class="header-inner" style="justify-content: center; position: relative;">
-        <a href="/" class="logo" style="position: absolute; left: 1.5rem;" onclick="return confirm('Leave checkout? Your cart will be saved.');">
+<header class="jy-site-header header-light" style="border-bottom: 1px solid var(--jy-color-border);">
+    <div class="jy-header-inner" style="justify-content: center; position: relative;">
+        <a href="/" class="jy-logo" style="position: absolute; left: 1.5rem;" onclick="return confirm('Leave checkout? Your cart will be saved.');">
             <?php $this->get_logo(); ?>
         </a>
         <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1.0625rem;">
@@ -124,25 +124,25 @@ class PublicPage extends PublicPageBase {
     </div>
 </header>
 
-<main class="main-content">
+<main class="jy-main-content">
 <?php
         } else {
 ?>
-<header class="site-header header-light">
-    <div class="header-inner">
-        <a href="/" class="logo">
+<header class="jy-site-header header-light">
+    <div class="jy-header-inner">
+        <a href="/" class="jy-logo">
             <?php $this->get_logo(); ?>
         </a>
-        <div class="header-right">
-            <nav class="nav-links" aria-label="Main navigation">
+        <div class="jy-header-right">
+            <nav class="jy-nav-links" aria-label="Main navigation">
                 <?php
                 $menu_data = $this->get_menu_data();
                 foreach ($menu_data['main_menu'] as $menu_item) {
                     $active_class = !empty($menu_item['is_active']) ? ' class="active"' : '';
                     if (!empty($menu_item['submenu'])) {
-                        echo '<div class="nav-dropdown">';
+                        echo '<div class="jy-nav-dropdown">';
                         echo '<a href="' . htmlspecialchars($menu_item['link'], ENT_QUOTES, 'UTF-8') . '"' . $active_class . '>' . htmlspecialchars($menu_item['name'], ENT_QUOTES, 'UTF-8') . ' <span aria-hidden="true">&#9660;</span></a>';
-                        echo '<div class="nav-dropdown-menu">';
+                        echo '<div class="jy-nav-dropdown-menu">';
                         foreach ($menu_item['submenu'] as $sub) {
                             $sub_active = !empty($sub['is_active']) ? ' class="active"' : '';
                             echo '<a href="' . htmlspecialchars($sub['link'], ENT_QUOTES, 'UTF-8') . '"' . $sub_active . '>' . htmlspecialchars($sub['name'], ENT_QUOTES, 'UTF-8') . '</a>';
@@ -155,17 +155,17 @@ class PublicPage extends PublicPageBase {
                 }
                 ?>
             </nav>
-            <div class="header-icons">
+            <div class="jy-header-icons">
                 <?php $this->top_right_menu(); ?>
             </div>
-            <button class="menu-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+            <button class="jy-menu-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
                 <span></span><span></span><span></span>
             </button>
         </div>
     </div>
 </header>
 
-<main class="main-content">
+<main class="jy-main-content">
 <?php
         }
     }
@@ -185,10 +185,10 @@ class PublicPage extends PublicPageBase {
 ?>
 </main>
 
-<footer class="site-footer">
-    <div class="container">
-        <div class="footer-bottom">
-            <p class="copyright">&copy; <?php echo date('Y'); ?> <?php echo htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8'); ?>. All rights reserved.</p>
+<footer class="jy-site-footer">
+    <div class="jy-container">
+        <div class="jy-footer-bottom">
+            <p class="jy-copyright">&copy; <?php echo date('Y'); ?> <?php echo htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8'); ?>. All rights reserved.</p>
         </div>
     </div>
 </footer>
@@ -206,7 +206,7 @@ class PublicPage extends PublicPageBase {
     public static function BeginPage($title = '', $options = array()) {
         $output = '<div class="page-content">';
         if ($title) {
-            $output .= '<div class="page-header">';
+            $output .= '<div class="jy-page-header">';
             $output .= '<h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>';
             if (!empty($options['subtitle'])) {
                 $output .= '<p class="page-subtitle">' . $options['subtitle'] . '</p>';
@@ -221,7 +221,7 @@ class PublicPage extends PublicPageBase {
     }
 
     public static function BeginPanel($options = array()) {
-        return '<div class="panel">';
+        return '<div class="jy-panel">';
     }
 
     public static function EndPanel($options = array()) {
@@ -229,12 +229,12 @@ class PublicPage extends PublicPageBase {
     }
 
     public static function BeginPageNoCard($options = array()) {
-        $output = '<div class="page-header-bar">';
+        $output = '<div class="jy-page-header-bar">';
         if (!empty($options['readable_title'])) {
             $output .= '<h2>' . htmlspecialchars($options['readable_title'], ENT_QUOTES, 'UTF-8') . '</h2>';
         }
         if (!empty($options['breadcrumbs']) && is_array($options['breadcrumbs'])) {
-            $output .= '<nav class="breadcrumbs" aria-label="Breadcrumb"><ol>';
+            $output .= '<nav class="jy-breadcrumbs" aria-label="Breadcrumb"><ol>';
             $count = count($options['breadcrumbs']);
             $i     = 0;
             foreach ($options['breadcrumbs'] as $name => $url) {
@@ -248,7 +248,7 @@ class PublicPage extends PublicPageBase {
             $output .= '</ol></nav>';
         }
         if (!empty($options['header_action'])) {
-            $output .= '<div class="page-header-action">' . $options['header_action'] . '</div>';
+            $output .= '<div class="jy-page-header-action">' . $options['header_action'] . '</div>';
         }
         $output .= '</div>';
         return $output;
@@ -262,7 +262,7 @@ class PublicPage extends PublicPageBase {
         $page = new PublicPage();
         $page->public_header(array_merge(['title' => $title, 'showheader' => true], $options));
         echo PublicPage::BeginPage($header);
-        echo '<div class="container"><p>' . $body . '</p></div>';
+        echo '<div class="jy-container"><p>' . $body . '</p></div>';
         echo PublicPage::EndPage();
         $page->public_footer();
         exit;

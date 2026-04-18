@@ -24,7 +24,7 @@
 
 			<div class="section bg-transparent min-vh-100 p-0 m-0 d-flex">
 				<div class="vertical-middle">
-					<div class="container py-5">
+					<div class="jy-container py-5">
 
 						<div class="text-center">
 							<a href="/">

@@ -15,7 +15,7 @@
 ?>
 <div class="jy-ui">
 
-<div class="container">
+<div class="jy-container">
     <div class="row justify-content-center">
         <div class="col-lg-8 col-xl-7">
 
