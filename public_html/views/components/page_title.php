@@ -34,7 +34,7 @@ $bg_style = "background-color: " . htmlspecialchars($background_color) . "; colo
 ?>
 
 <section class="page-title-section py-4" style="<?php echo $bg_style; ?>">
-	<div class="container">
+	<div class="jy-container">
 		<?php if ($show_breadcrumbs && !empty($breadcrumbs)): ?>
 			<nav aria-label="breadcrumb" class="mb-2">
 				<ol class="breadcrumb mb-0">

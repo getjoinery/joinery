@@ -21,7 +21,7 @@ $formwriter = $page->getFormWriter('tier_form');
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1>Choose Your Membership Level</h1>
@@ -40,8 +40,8 @@ $formwriter = $page->getFormWriter('tier_form');
     </div>
 </section>
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
 
         <?php if (isset($page_vars['success_message'])): ?>
         <div class="alert alert-success" style="margin-bottom: 1.5rem;">

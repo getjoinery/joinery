@@ -26,7 +26,7 @@
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1>Edit Account</h1>
@@ -42,8 +42,8 @@
     </div>
 </section>
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
         <div style="max-width: 720px; margin: 0 auto;">
 
             <?php echo PublicPage::tab_menu($page_vars['tab_menus'], 'Edit Account'); ?>

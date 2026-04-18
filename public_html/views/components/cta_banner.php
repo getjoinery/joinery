@@ -48,7 +48,7 @@ $bg_style .= " color: " . htmlspecialchars($text_color) . ";";
 ?>
 
 <section class="cta-banner py-5" style="<?php echo $bg_style; ?>">
-	<div class="container">
+	<div class="jy-container">
 		<div class="row justify-content-center">
 			<div class="col-lg-10 text-center">
 				<?php if ($heading): ?>

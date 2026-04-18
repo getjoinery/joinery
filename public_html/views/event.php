@@ -34,7 +34,7 @@ $page->public_header($page_options);
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1>Event Details</h1>
@@ -53,7 +53,7 @@ $page->public_header($page_options);
 <!-- Content -->
 <section id="content">
     <div class="content-wrap">
-        <div class="container">
+        <div class="jy-container">
 
             <div class="row gx-5 col-mb-80">
 

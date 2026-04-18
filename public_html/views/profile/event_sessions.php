@@ -27,7 +27,7 @@
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1><?php echo htmlspecialchars($page_vars['event']->get('evt_name')); ?></h1>
@@ -47,8 +47,8 @@
     </div>
 </section>
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
         <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
 
             <!-- Main content -->

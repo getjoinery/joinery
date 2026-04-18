@@ -13,8 +13,8 @@ $page->public_header([
 <div class="jy-ui">
 
 <!-- Hero Section -->
-<section class="content-section section-muted" style="padding: 5rem 0; text-align: center;">
-    <div class="container">
+<section class="jy-content-section section-muted" style="padding: 5rem 0; text-align: center;">
+    <div class="jy-container">
         <h1 style="font-size: 2.5rem; font-weight: 700; margin-bottom: 1.5rem;">
             Welcome to <?php echo htmlspecialchars($site_name); ?>
         </h1>
@@ -29,8 +29,8 @@ $page->public_header([
 </section>
 
 <!-- Features Section -->
-<section class="content-section" style="padding: 4rem 0;">
-    <div class="container">
+<section class="jy-content-section" style="padding: 4rem 0;">
+    <div class="jy-container">
         <div style="text-align: center; margin-bottom: 3rem;">
             <h2>Platform Features</h2>
             <p style="color: var(--jy-color-text-muted);">Everything you need to manage your membership organization</p>
@@ -56,8 +56,8 @@ $page->public_header([
 </section>
 
 <!-- Getting Started Section -->
-<section class="content-section section-muted">
-    <div class="container">
+<section class="jy-content-section section-muted">
+    <div class="jy-container">
         <div class="grid-2" style="gap: 3rem; align-items: start;">
 
             <div>
@@ -112,8 +112,8 @@ $page->public_header([
 </section>
 
 <!-- Footer CTA -->
-<section class="content-section section-dark" style="padding: 4rem 0; text-align: center;">
-    <div class="container">
+<section class="jy-content-section jy-section-dark" style="padding: 4rem 0; text-align: center;">
+    <div class="jy-container">
         <h3 style="color: #fff; margin-bottom: 1rem;">Ready to get started?</h3>
         <p style="color: rgba(255,255,255,0.8); margin-bottom: 2rem;">Sign in to begin configuring your membership platform.</p>
         <a href="/login" class="btn" style="background: #fff; color: var(--jy-color-text); font-size: 1.0625rem; padding: 0.75rem 2.5rem;">Get Started</a>

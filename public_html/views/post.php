@@ -15,7 +15,7 @@
 ?>
 <div class="jy-ui">
 
-<div class="container" style="padding: 2rem 1rem;">
+<div class="jy-container" style="padding: 2rem 1rem;">
     <div class="row gx-5">
 
         <main class="col-lg-9">
