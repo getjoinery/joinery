@@ -566,6 +566,7 @@ abstract class PublicPageBase {
 		}
 
 		$this->render_base_assets();
+		$this->render_brand_token_overrides();
 
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';
@@ -587,8 +588,28 @@ abstract class PublicPageBase {
 	 */
 	protected function render_base_assets() {
 		echo '<link rel="stylesheet" href="/assets/css/base.css?v=3">' . "\n";
-		echo '<link rel="stylesheet" href="/assets/css/custom.css?v=8">' . "\n";
+		echo '<link rel="stylesheet" href="/assets/css/joinery-styles.css?v=1">' . "\n";
 		echo '<script defer src="/assets/js/base.js?v=2"></script>' . "\n";
+	}
+
+	protected function render_brand_token_overrides() {
+		$settings = Globalvars::get_instance();
+		$map = [
+			'jy_color_primary'       => '--jy-color-primary',
+			'jy_color_primary_hover' => '--jy-color-primary-hover',
+			'jy_color_primary_text'  => '--jy-color-primary-text',
+			'jy_color_surface'       => '--jy-color-surface',
+			'jy_color_bg'            => '--jy-color-bg',
+		];
+		$overrides = [];
+		foreach ($map as $setting => $token) {
+			$val = $settings->get_setting($setting, false, true);
+			if ($val !== '' && $val !== null && preg_match('/^#[0-9a-fA-F]{3,6}$/', $val)) {
+				$overrides[] = '  ' . $token . ': ' . htmlspecialchars($val, ENT_QUOTES) . ';';
+			}
+		}
+		if (empty($overrides)) return;
+		echo '<style id="jy-brand-tokens">:root {' . "\n" . implode("\n", $overrides) . "\n" . '}</style>' . "\n";
 	}
 
 	public function public_header_common($options=array()) {
