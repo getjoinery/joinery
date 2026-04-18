@@ -175,6 +175,18 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 		return $photos;
 	}
 
+	function get_primary_photo() {
+		$file_id = $this->get('pag_fil_file_id');
+		if (!$file_id) return null;
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'page', 'entity_id' => $this->key, 'file_id' => $file_id, 'deleted' => false],
+			[], 1
+		);
+		$photos->load();
+		return $photos->count() > 0 ? $photos->get(0) : null;
+	}
+
 	function save($debug=false) {
 		
 		//CHECK FOR DUPLICATES

@@ -29,7 +29,8 @@ class Product extends SystemBase {
 	public static $url_namespace = 'product';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [
-		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist']
+		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist'],
+		'pro_fil_file_id' => ['action' => 'null'],
 	];
 
 	public static $currency_symbols = array(
@@ -85,6 +86,7 @@ class Product extends SystemBase {
 	    'pro_stripe_product_id_test' => array('type'=>'varchar(64)'),
 	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),
 	    'pro_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	    'pro_fil_file_id' => array('type'=>'int4'),
 	);
 
 public function get_requirement_info($output='text') {
@@ -718,10 +720,84 @@ public function get_requirement_info($output='text') {
 				throw new SystemDisplayableError('This product link already exists.');
 				exit;
 			}
-		}	
-		
+		}
+
 	}
-	
+
+	// ===== Entity Photo Methods =====
+
+	function get_picture_link($size_key='original'){
+		if($this->get('pro_fil_file_id')){
+			require_once(PathHelper::getIncludePath('data/files_class.php'));
+			$file = new File($this->get('pro_fil_file_id'), TRUE);
+			return $file->get_url($size_key, 'full');
+		}
+		return false;
+	}
+
+	function set_primary_photo($photo_id) {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photo = new EntityPhoto($photo_id, TRUE);
+		$this->set('pro_fil_file_id', $photo->get('eph_fil_file_id'));
+		$this->save();
+	}
+
+	function clear_primary_photo() {
+		$this->set('pro_fil_file_id', NULL);
+		$this->save();
+	}
+
+	function get_photos() {
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'product', 'entity_id' => $this->key, 'deleted' => false],
+			['eph_sort_order' => 'ASC']
+		);
+		$photos->load();
+		return $photos;
+	}
+
+	function get_primary_photo() {
+		$file_id = $this->get('pro_fil_file_id');
+		if (!$file_id) return null;
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'product', 'entity_id' => $this->key, 'file_id' => $file_id, 'deleted' => false],
+			[], 1
+		);
+		$photos->load();
+		return $photos->count() > 0 ? $photos->get(0) : null;
+	}
+
+	function permanent_delete($debug=false){
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+		$this_transaction = false;
+		if(!$dblink->inTransaction()){
+			$dblink->beginTransaction();
+			$this_transaction = true;
+		}
+
+		//DELETE ENTITY PHOTOS
+		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
+		$photos = new MultiEntityPhoto(
+			['entity_type' => 'product', 'entity_id' => $this->key]
+		);
+		$photos->load();
+		foreach($photos as $photo){
+			$photo->permanent_delete();
+		}
+
+		parent::permanent_delete($debug);
+
+		if($this_transaction){
+			$dblink->commit();
+		}
+
+		return true;
+	}
+
 }
 
 class MultiProduct extends SystemMultiBase {
