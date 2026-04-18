@@ -86,6 +86,15 @@ class PublicPage extends PublicPageBase {
 
     <link rel="stylesheet" href="/theme/jeremytunnell-html5/assets/css/style.css?v=1.0.3">
 
+    <style>
+    /* Joinery default UI kit — brand token overrides */
+    :root {
+        --jy-color-primary:       #c62641;
+        --jy-color-primary-hover: #a81e36;
+        --jy-color-surface:       #ffffff;
+    }
+    </style>
+
     <?php
     if($settings->get_setting('custom_css')){
         echo '<style>' . $settings->get_setting('custom_css') . '</style>';
