@@ -784,7 +784,7 @@ Theme assets are served through the theme asset route with automatic caching:
 
 **Base Assets:**
 
-`PublicPageBase` loads fallback CSS/JS (`base.css`, `assets/css/style.css`, `base.js`) via the `render_base_assets()` method, called from `global_includes_top()`. Themes that provide their own complete CSS (like `PublicPageJoinerySystem`) override `render_base_assets()` with an empty body to prevent style conflicts. See [Theme Integration Instructions](theme_integration_instructions.md) for details.
+`PublicPageBase` loads fallback CSS/JS (`base.css`, `joinery-styles.css`, `base.js`) via the `render_base_assets()` method, called from `global_includes_top()`. Themes that provide their own complete CSS (like `PublicPageJoinerySystem`) override `render_base_assets()` with an empty body to prevent style conflicts. See [Theme Integration Instructions](theme_integration_instructions.md) for details.
 
 **Using ThemeHelper for Assets:**
 ```php
