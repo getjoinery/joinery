@@ -11,6 +11,7 @@ $page->public_header([
     'title'         => 'Pricing',
 ]);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -45,29 +46,29 @@ $page->public_header([
                 $isPopular = ($cardIndex == 2);
             ?>
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; position: relative;
-                        <?php echo $isPopular ? 'border: 2px solid var(--color-primary); box-shadow: 0 4px 20px rgba(0,0,0,0.12);' : ''; ?>">
+                        <?php echo $isPopular ? 'border: 2px solid var(--jy-color-primary); box-shadow: 0 4px 20px rgba(0,0,0,0.12);' : ''; ?>">
 
                 <?php if ($isPopular): ?>
-                <div style="background: var(--color-primary); color: #fff; text-align: center; padding: 0.375rem; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.05em;">
+                <div style="background: var(--jy-color-primary); color: #fff; text-align: center; padding: 0.375rem; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.05em;">
                     MOST POPULAR
                 </div>
                 <?php endif; ?>
 
-                <div style="padding: 2rem; text-align: center; border-bottom: 1px solid var(--color-border, #eee);">
+                <div style="padding: 2rem; text-align: center; border-bottom: 1px solid var(--jy-color-border);">
                     <div style="width: 64px; height: 64px; background: rgba(26,188,156,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.25rem; font-size: 1.75rem;">
                         &#11088;
                     </div>
                     <h3 style="font-size: 1.25rem; margin-bottom: 1rem;"><?php echo htmlspecialchars($product->get('pro_name')); ?></h3>
-                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--color-primary); margin-bottom: 0.25rem;">
+                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--jy-color-primary); margin-bottom: 0.25rem;">
                         <?php echo $product->get_readable_price($version->key); ?>
                     </div>
-                    <p style="color: var(--color-muted); font-size: 0.875rem; margin: 0;"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></p>
+                    <p style="color: var(--jy-color-text-muted); font-size: 0.875rem; margin: 0;"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></p>
                 </div>
 
                 <div style="padding: 1.5rem 2rem; flex: 1; display: flex; flex-direction: column;">
 
                     <?php if ($product->get('pro_description')): ?>
-                    <p style="color: var(--color-muted); font-size: 0.9rem; text-align: center; margin-bottom: 1.25rem;">
+                    <p style="color: var(--jy-color-text-muted); font-size: 0.9rem; text-align: center; margin-bottom: 1.25rem;">
                         <?php echo $product->get('pro_description'); ?>
                     </p>
                     <?php endif; ?>
@@ -85,9 +86,9 @@ $page->public_header([
         </div>
 
         <!-- Help Box -->
-        <div style="max-width: 640px; margin: 3rem auto 0; background: var(--color-light, #f8f9fa); border-radius: 8px; padding: 2.5rem; text-align: center;">
+        <div style="max-width: 640px; margin: 3rem auto 0; background: var(--jy-color-surface); border-radius: 8px; padding: 2.5rem; text-align: center;">
             <h4 style="margin-bottom: 0.75rem;">Need Help Choosing?</h4>
-            <p style="color: var(--color-muted); margin-bottom: 1.5rem;">Not sure which plan is right for you? Our team is here to help you find the perfect solution for your needs.</p>
+            <p style="color: var(--jy-color-text-muted); margin-bottom: 1.5rem;">Not sure which plan is right for you? Our team is here to help you find the perfect solution for your needs.</p>
             <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
                 <a href="/contact" class="btn btn-primary">Contact Us</a>
                 <a href="/products" class="btn btn-outline">View All Products</a>
@@ -98,7 +99,7 @@ $page->public_header([
         <div style="margin-top: 3rem;">
             <div style="text-align: center; margin-bottom: 1.5rem;">
                 <h3>Compare Plans</h3>
-                <p style="color: var(--color-muted);">See what's included in each plan</p>
+                <p style="color: var(--jy-color-text-muted);">See what's included in each plan</p>
             </div>
 
             <div style="overflow-x: auto;">
@@ -129,7 +130,7 @@ $page->public_header([
                                 <?php if ($supportIndex >= 2): ?>
                                 <span style="color: #198754; font-weight: 700;">&#10003;</span>
                                 <?php else: ?>
-                                <span style="color: var(--color-muted);">&#8212;</span>
+                                <span style="color: var(--jy-color-text-muted);">&#8212;</span>
                                 <?php endif; ?>
                             </td>
                             <?php endforeach; ?>
@@ -145,7 +146,7 @@ $page->public_header([
                                 <?php if ($analyticsIndex >= 3): ?>
                                 <span style="color: #198754; font-weight: 700;">&#10003;</span>
                                 <?php else: ?>
-                                <span style="color: var(--color-muted);">&#8212;</span>
+                                <span style="color: var(--jy-color-text-muted);">&#8212;</span>
                                 <?php endif; ?>
                             </td>
                             <?php endforeach; ?>
@@ -158,6 +159,7 @@ $page->public_header([
     </div>
 </section>
 
+</div>
 <?php
 $page->public_footer(['track' => true]);
 ?>

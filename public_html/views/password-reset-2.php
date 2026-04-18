@@ -12,6 +12,7 @@
     ]);
 ?>
 
+<div class="jy-ui">
 <div class="auth-page">
     <div class="auth-card">
 
@@ -59,6 +60,7 @@
         <?php endif; ?>
 
     </div>
+</div>
 </div>
 
 <?php

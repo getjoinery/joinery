@@ -17,6 +17,7 @@
 	);
 	$page->member_header($hoptions, NULL);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -45,9 +46,9 @@
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
                 <div>
                     <h5 style="margin: 0 0 0.25rem;"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></h5>
-                    <p style="margin: 0; font-size: 0.875rem; color: var(--color-muted);"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
+                    <p style="margin: 0; font-size: 0.875rem; color: var(--jy-color-text-muted);"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
                     <?php if($page_vars['user']->get('usr_timezone')): ?>
-                    <p style="margin: 0; font-size: 0.875rem; color: var(--color-muted);"><?php echo htmlspecialchars($page_vars['user']->get('usr_timezone')); ?></p>
+                    <p style="margin: 0; font-size: 0.875rem; color: var(--jy-color-text-muted);"><?php echo htmlspecialchars($page_vars['user']->get('usr_timezone')); ?></p>
                     <?php endif; ?>
                 </div>
                 <a href="/profile/account_edit" class="btn btn-outline">Edit Profile</a>
@@ -56,12 +57,12 @@
             <!-- Active Subscriptions -->
             <?php if($page_vars['settings']->get_setting('products_active') && $page_vars['settings']->get_setting('subscriptions_active')): ?>
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 1.5rem;">
-                <div style="background: var(--color-primary); color: #fff; padding: 1rem 1.5rem;">
+                <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
                     <h5 style="margin: 0; color: #fff;">Your Subscriptions</h5>
                 </div>
                 <div style="padding: 1.5rem;">
                     <?php if(empty($page_vars['active_subscriptions'])): ?>
-                        <p style="color: var(--color-muted); margin: 0;">No active subscriptions.</p>
+                        <p style="color: var(--jy-color-text-muted); margin: 0;">No active subscriptions.</p>
                     <?php else: ?>
                         <?php foreach($page_vars['active_subscriptions'] as $subscription): ?>
                         <?php
@@ -73,10 +74,10 @@
                             $action = '<a href="/profile/orders_recurring_action?order_item_id=' . $subscription->key . '" style="font-size: 0.875rem; color: #dc3545; margin-left: 0.75rem;">Cancel</a>';
                         }
                         ?>
-                        <div style="border-bottom: 1px solid var(--color-border, #eee); padding: 1rem 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+                        <div style="border-bottom: 1px solid var(--jy-color-border); padding: 1rem 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
                             <div>
                                 <p style="margin: 0; font-weight: 600;">$<?php echo htmlspecialchars($subscription->get('odi_price')); ?>/month</p>
-                                <p style="margin: 0; font-size: 0.875rem; color: var(--color-muted);"><?php echo htmlspecialchars($status); ?></p>
+                                <p style="margin: 0; font-size: 0.875rem; color: var(--jy-color-text-muted);"><?php echo htmlspecialchars($status); ?></p>
                             </div>
                             <?php if($action): ?>
                             <div><?php echo $action; ?></div>
@@ -91,7 +92,7 @@
                     </div>
                     <?php endif; ?>
 
-                    <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border, #eee); display: flex; gap: 1.5rem; flex-wrap: wrap;">
+                    <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--jy-color-border); display: flex; gap: 1.5rem; flex-wrap: wrap;">
                         <a href="/profile/change-tier" style="font-size: 0.875rem;">Change Subscription Plan</a>
                         <a href="/profile/billing" style="font-size: 0.875rem;">Manage Payment Method</a>
                     </div>
@@ -102,17 +103,17 @@
             <!-- Order History -->
             <?php if($page_vars['settings']->get_setting('products_active')): ?>
             <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                <div style="background: var(--color-primary); color: #fff; padding: 1rem 1.5rem;">
+                <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
                     <h5 style="margin: 0; color: #fff;">Your Orders</h5>
                 </div>
                 <div style="padding: 1.5rem;">
                     <?php if(empty($page_vars['orders'])): ?>
-                        <p style="color: var(--color-muted); margin: 0;">No orders found.</p>
+                        <p style="color: var(--jy-color-text-muted); margin: 0;">No orders found.</p>
                     <?php else: ?>
                         <?php foreach($page_vars['orders'] as $order): ?>
-                        <div style="border-bottom: 1px solid var(--color-border, #eee); padding: 0.875rem 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+                        <div style="border-bottom: 1px solid var(--jy-color-border); padding: 0.875rem 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
                             <p style="margin: 0; font-weight: 600;">Order #<?php echo htmlspecialchars($order->key); ?> &mdash; $<?php echo htmlspecialchars($order->get('ord_total_cost')); ?></p>
-                            <p style="margin: 0; font-size: 0.875rem; color: var(--color-muted);"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?></p>
+                            <p style="margin: 0; font-size: 0.875rem; color: var(--jy-color-text-muted);"><?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $page_vars['session']->get_timezone(), 'M d, Y'); ?></p>
                         </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -124,6 +125,7 @@
     </div>
 </section>
 
+</div>
 <?php
 $page->member_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

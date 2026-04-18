@@ -14,6 +14,7 @@
         'submenu'  => 'Book',
     ]);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -42,7 +43,7 @@
                 <div class="alert alert-info" style="margin-bottom: 1.5rem; text-align: left;">
                     Booking functionality is temporarily disabled while we review our calendar integration.
                 </div>
-                <p style="color: var(--color-muted); margin-bottom: 2rem;">We apologize for any inconvenience. Please check back soon or contact us directly for scheduling assistance.</p>
+                <p style="color: var(--jy-color-text-muted); margin-bottom: 2rem;">We apologize for any inconvenience. Please check back soon or contact us directly for scheduling assistance.</p>
                 <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
                     <a href="/contact" class="btn btn-primary">Contact Us</a>
                     <a href="/" class="btn btn-outline">Back to Home</a>
@@ -52,6 +53,7 @@
     </div>
 </section>
 
+</div>
 <?php
     $page->public_footer(['track' => true]);
 ?>

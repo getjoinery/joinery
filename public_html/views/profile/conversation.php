@@ -22,6 +22,7 @@ $conversation = $page_vars['conversation'];
 $other_user = $page_vars['other_user'];
 $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QUOTES, 'UTF-8') : 'Unknown';
 ?>
+<div class="jy-ui">
 
 <div class="conversation-page">
 	<!-- Header -->
@@ -100,7 +101,7 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 .conversation-page { display: flex; flex-direction: column; min-height: 400px; }
 .conversation-messages { display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem 0; flex: 1; }
 .message-bubble { max-width: 70%; padding: 0.75rem 1rem; border-radius: 1rem; word-wrap: break-word; }
-.message-bubble.message-mine { align-self: flex-end; background: var(--color-primary, #2563eb); color: #fff; border-bottom-right-radius: 0.25rem; }
+.message-bubble.message-mine { align-self: flex-end; background: var(--jy-color-primary); color: #fff; border-bottom-right-radius: 0.25rem; }
 .message-bubble.message-theirs { align-self: flex-start; background: #f0f0f0; color: #333; border-bottom-left-radius: 0.25rem; }
 .message-sender { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem; }
 .message-body { line-height: 1.4; }
@@ -108,7 +109,7 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 .message-bubble.message-mine .message-time { text-align: right; }
 .conversation-compose { display: flex; gap: 0.5rem; padding: 1rem 0; border-top: 1px solid #eee; align-items: flex-end; }
 .conversation-compose textarea { flex: 1; resize: none; min-height: 44px; max-height: 120px; padding: 0.5rem 0.75rem; border: 1px solid #ccc; border-radius: 0.5rem; font-family: inherit; font-size: 0.95rem; }
-.conversation-compose textarea:focus { outline: none; border-color: var(--color-primary, #2563eb); }
+.conversation-compose textarea:focus { outline: none; border-color: var(--jy-color-primary); }
 .conversation-action-btn:hover { background: #f5f5f5; }
 </style>
 
@@ -226,6 +227,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
+</div>
 <?php
 $page->member_footer();
 ?>

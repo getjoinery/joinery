@@ -25,6 +25,7 @@ $page->member_header($hoptions);
 $status_filter = $page_vars['status_filter'];
 $session = $page_vars['session'];
 ?>
+<div class="jy-ui">
 
 <!-- Status filter tabs -->
 <ul class="nav-tabs" style="margin-bottom:1.5rem;">
@@ -103,6 +104,7 @@ $session = $page_vars['session'];
 	<?php endif; ?>
 </div>
 
+</div>
 <?php
 $page->member_footer(array('track' => TRUE));
 ?>

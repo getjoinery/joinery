@@ -12,7 +12,7 @@
     echo PublicPage::BeginPage('Set a Password');
 ?>
 
-<div class="container">
+<div class="jy-ui"><div class="container">
     <div class="row justify-content-center">
         <div class="col-lg-6 col-xl-5">
 
@@ -59,6 +59,7 @@
 
         </div>
     </div>
+</div>
 </div>
 
 <?php

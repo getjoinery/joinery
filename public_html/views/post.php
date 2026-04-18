@@ -13,6 +13,7 @@
     ]);
     echo PublicPage::BeginPage();
 ?>
+<div class="jy-ui">
 
 <div class="container" style="padding: 2rem 1rem;">
     <div class="row gx-5">
@@ -224,6 +225,7 @@
 
 </div>
 
+</div>
 <?php
     echo PublicPage::EndPage();
     $page->public_footer(['track' => true]);

@@ -25,6 +25,7 @@
     $formwriter->antispam_question_validate([]);
 ?>
 
+<div class="jy-ui">
 <div class="auth-page">
     <div class="auth-card" style="max-width: 540px;">
 
@@ -130,6 +131,7 @@
         </div>
 
     </div>
+</div>
 </div>
 
 <?php

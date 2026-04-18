@@ -10,6 +10,7 @@ $page->public_header([
     'title'         => $page_vars['events_label'],
 ]);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -49,7 +50,7 @@ $page->public_header([
             </div>
 
             <div style="text-align: right; margin-bottom: 1rem;">
-                <a href="/events/calendar.ics" style="color: var(--color-muted, #6c757d); font-size: 0.875rem;">&#128197; Subscribe to Calendar</a>
+                <a href="/events/calendar.ics" style="color: var(--jy-color-text-muted); font-size: 0.875rem;">&#128197; Subscribe to Calendar</a>
             </div>
 
             <!-- Mobile Dropdown for Categories -->
@@ -107,7 +108,7 @@ $page->public_header([
                                     </a>
                                 <?php else: ?>
                                     <a href="<?php echo $event_url; ?>">
-                                        <div style="height: 250px; background: var(--color-light, #f8f9fa); display: flex; align-items: center; justify-content: center; font-size: 4rem; color: var(--color-border, #ddd);">
+                                        <div style="height: 250px; background: var(--jy-color-surface); display: flex; align-items: center; justify-content: center; font-size: 4rem; color: var(--jy-color-border);">
                                             &#128197;
                                         </div>
                                     </a>
@@ -169,6 +170,7 @@ $page->public_header([
     </div>
 </section>
 
+</div>
 <?php
 $page->public_footer(['track' => true]);
 ?>

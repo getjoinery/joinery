@@ -17,6 +17,7 @@ $page->member_header($hoptions, NULL);
 
 $formwriter = $page->getFormWriter('tier_form');
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -87,18 +88,18 @@ $formwriter = $page->getFormWriter('tier_form');
             $tier = $tier_data['tier'];
             $is_current = $tier_data['is_current'];
             ?>
-            <div style="flex: 1; min-width: 240px; max-width: 340px; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;<?php if($is_current): ?> box-shadow: 0 0 0 3px var(--color-primary), 0 2px 8px rgba(0,0,0,0.15);<?php endif; ?>">
-                <div style="background: <?php echo $is_current ? 'var(--color-primary)' : 'var(--color-light, #f8f9fa)'; ?>; color: <?php echo $is_current ? '#fff' : 'inherit'; ?>; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--color-border, #eee);">
+            <div style="flex: 1; min-width: 240px; max-width: 340px; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;<?php if($is_current): ?> box-shadow: 0 0 0 3px var(--jy-color-primary), 0 2px 8px rgba(0,0,0,0.15);<?php endif; ?>">
+                <div style="background: <?php echo $is_current ? 'var(--jy-color-primary)' : 'var(--jy-color-surface)'; ?>; color: <?php echo $is_current ? '#fff' : 'inherit'; ?>; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--jy-color-border);">
                     <h4 style="margin: 0; color: <?php echo $is_current ? '#fff' : 'inherit'; ?>;"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></h4>
                     <?php if ($is_current): ?>
                     <p style="margin: 0.25rem 0 0; font-size: 0.875rem; color: rgba(255,255,255,0.85);">Your Current Plan</p>
                     <?php elseif ($tier_data['action_type'] == 'downgrade' || $tier_data['action_type'] == 'downgrade_disabled'): ?>
-                    <p style="margin: 0.25rem 0 0; font-size: 0.875rem; color: var(--color-muted);">Downgrade</p>
+                    <p style="margin: 0.25rem 0 0; font-size: 0.875rem; color: var(--jy-color-text-muted);">Downgrade</p>
                     <?php endif; ?>
                 </div>
                 <div style="padding: 1.5rem;">
                     <?php if ($tier->get('sbt_description')): ?>
-                    <div style="font-size: 0.9rem; color: var(--color-muted); margin-bottom: 1.25rem;">
+                    <div style="font-size: 0.9rem; color: var(--jy-color-text-muted); margin-bottom: 1.25rem;">
                         <?php echo $tier->get('sbt_description'); ?>
                     </div>
                     <?php endif; ?>
@@ -106,13 +107,13 @@ $formwriter = $page->getFormWriter('tier_form');
                     <?php if (!empty($tier_data['products'])): ?>
                     <div style="margin-bottom: 1.25rem;">
                         <?php foreach ($tier_data['products'] as $product): ?>
-                        <div style="border-top: 1px solid var(--color-border, #eee); padding-top: 0.875rem; margin-top: 0.875rem;">
+                        <div style="border-top: 1px solid var(--jy-color-border); padding-top: 0.875rem; margin-top: 0.875rem;">
                             <p style="margin: 0 0 0.25rem; font-weight: 600;"><?php echo htmlspecialchars($product['name']); ?></p>
                             <?php if ($product['price'] > 0): ?>
                             <p style="margin: 0; font-size: 1.5rem; font-weight: 700;">
                                 $<?php echo number_format($product['price'], 2); ?>
                                 <?php if ($product['period']): ?>
-                                <span style="font-size: 0.875rem; font-weight: 400; color: var(--color-muted);">/<?php echo htmlspecialchars($product['period']); ?></span>
+                                <span style="font-size: 0.875rem; font-weight: 400; color: var(--jy-color-text-muted);">/<?php echo htmlspecialchars($product['period']); ?></span>
                                 <?php endif; ?>
                             </p>
                             <?php endif; ?>
@@ -122,7 +123,7 @@ $formwriter = $page->getFormWriter('tier_form');
                     <?php endif; ?>
 
                     <?php if ($tier_data['message']): ?>
-                    <p style="font-size: 0.875rem; color: var(--color-muted); margin-bottom: 0.75rem;">
+                    <p style="font-size: 0.875rem; color: var(--jy-color-text-muted); margin-bottom: 0.75rem;">
                         <?php echo htmlspecialchars($tier_data['message']); ?>
                     </p>
                     <?php endif; ?>
@@ -148,7 +149,7 @@ $formwriter = $page->getFormWriter('tier_form');
                             <?php $formwriter->begin_form(); ?>
                             <input type="hidden" name="action" value="<?php echo htmlspecialchars($tier_data['action_type']); ?>">
                             <div style="margin-bottom: 0.75rem;">
-                                <select name="product_id" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border, #ccc); border-radius: 4px; font-size: 0.9375rem;">
+                                <select name="product_id" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--jy-color-border); border-radius: 4px; font-size: 0.9375rem;">
                                     <option value="">Select a product</option>
                                     <?php foreach ($tier_data['products'] as $product): ?>
                                     <option value="<?php echo $product['id']; ?>">
@@ -190,6 +191,7 @@ $formwriter = $page->getFormWriter('tier_form');
     </div>
 </section>
 
+</div>
 <?php
 $page->member_footer($hoptions, NULL);
 ?>

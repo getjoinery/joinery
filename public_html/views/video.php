@@ -11,6 +11,7 @@
         'title'         => $video->get('vid_title'),
     ]);
 ?>
+<div class="jy-ui">
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
@@ -56,7 +57,7 @@
                     <?php endif; ?>
                     <?php if ($video->get('vid_duration')): ?>
                     <div style="flex-shrink: 0;">
-                        <span style="display: inline-block; background: var(--color-muted, #6c757d); color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.75rem; border-radius: 4px;">
+                        <span style="display: inline-block; background: var(--jy-color-text-muted); color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.75rem; border-radius: 4px;">
                             &#9201; <?php echo htmlspecialchars($video->get('vid_duration')); ?>
                         </span>
                     </div>
@@ -71,7 +72,7 @@
 
                 <?php if ($video->get('vid_transcript')): ?>
                 <div style="flex: 2; min-width: 240px; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--color-light, #f8f9fa); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
                         <h5 style="margin: 0; font-size: 1rem;">&#128221; Transcript</h5>
                     </div>
                     <div style="padding: 1.25rem;">
@@ -82,7 +83,7 @@
 
                 <?php if ($video->get('vid_tags')): ?>
                 <div style="flex: 1; min-width: 180px; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--color-light, #f8f9fa); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--color-border, #eee);">
+                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
                         <h6 style="margin: 0; font-size: 0.9375rem;">&#127991; Tags</h6>
                     </div>
                     <div style="padding: 1.25rem;">
@@ -92,7 +93,7 @@
                             $tag = trim($tag);
                             if ($tag):
                         ?>
-                        <span style="display: inline-block; background: var(--color-primary); color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.625rem; border-radius: 4px; margin: 0 0.25rem 0.375rem 0;">
+                        <span style="display: inline-block; background: var(--jy-color-primary); color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.625rem; border-radius: 4px; margin: 0 0.25rem 0.375rem 0;">
                             <?php echo htmlspecialchars($tag); ?>
                         </span>
                         <?php endif; endforeach; ?>
@@ -107,6 +108,7 @@
     </div>
 </section>
 
+</div>
 <?php
     $page->public_footer(['track' => true]);
 ?>
