@@ -14,7 +14,7 @@ $page->public_header([
 
 <section id="content">
     <div class="content-wrap">
-        <div class="container">
+        <div class="jy-container">
             <div class="row gx-5">
 
                 <!-- Main Blog Content -->

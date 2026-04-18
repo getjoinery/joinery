@@ -26,7 +26,7 @@
 
 <!-- Breadcrumb -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1><?php echo htmlspecialchars($product->get('pro_name'), ENT_QUOTES, 'UTF-8'); ?></h1>
@@ -42,8 +42,8 @@
     </div>
 </section>
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
         <div style="display: flex; gap: 3rem; align-items: flex-start; flex-wrap: wrap;">
 
             <!-- Left: Product Info -->

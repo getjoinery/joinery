@@ -14,7 +14,7 @@ $page->public_header([
 
 <!-- Page Title -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1><?php echo $page_vars['events_label']; ?></h1>
@@ -33,7 +33,7 @@ $page->public_header([
 <!-- Content -->
 <section id="content">
     <div class="content-wrap">
-        <div class="container">
+        <div class="jy-container">
 
             <div class="grid-filter-wrap">
                 <ul class="grid-filter grid-filter-links" style="position: relative;">

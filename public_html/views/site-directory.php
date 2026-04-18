@@ -17,7 +17,7 @@
 ?>
 <div class="jy-ui">
 
-<div class="container">
+<div class="jy-container">
     <div class="text-center mb-5">
         <p class="text-muted">Browse all content on our website</p>
     </div>

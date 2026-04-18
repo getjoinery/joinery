@@ -27,7 +27,7 @@ $page->member_header([
 
 <!-- Breadcrumb -->
 <section class="page-title bg-transparent">
-    <div class="container">
+    <div class="jy-container">
         <div class="page-title-row">
             <div class="page-title-content">
                 <h1>Billing & Payment</h1>
@@ -43,8 +43,8 @@ $page->member_header([
     </div>
 </section>
 
-<section class="content-section">
-    <div class="container">
+<section class="jy-content-section">
+    <div class="jy-container">
         <div style="max-width: 720px; margin: 0 auto;">
 
             <?php

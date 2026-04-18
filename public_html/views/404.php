@@ -16,7 +16,7 @@ $page->public_header([
 <div class="jy-ui">
 
 <section style="min-height: 75vh; display: flex; align-items: center; padding: 4rem 0;">
-    <div class="container">
+    <div class="jy-container">
         <div class="grid-2" style="align-items: center; gap: 3rem;">
 
             <!-- 404 Visual -->
