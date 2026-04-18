@@ -1407,3 +1407,15 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Backfill pro_fil_file_id from EntityPhotos (v103) ==========
+	// Populate primary photo FK on products that already have EntityPhoto rows
+	// but no denormalized pro_fil_file_id pointer. No-op on deployments where
+	// product photos have never been written. Idempotent — relies on hash-based
+	// one-shot protection (no test condition needed).
+	$migration = array();
+	$migration['database_version'] = '103';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = "UPDATE pro_products p SET pro_fil_file_id = (SELECT eph_fil_file_id FROM eph_entity_photos WHERE eph_entity_type = 'product' AND eph_entity_id = p.pro_product_id AND eph_delete_time IS NULL ORDER BY eph_sort_order ASC LIMIT 1) WHERE pro_fil_file_id IS NULL AND EXISTS (SELECT 1 FROM eph_entity_photos WHERE eph_entity_type = 'product' AND eph_entity_id = p.pro_product_id AND eph_delete_time IS NULL)";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

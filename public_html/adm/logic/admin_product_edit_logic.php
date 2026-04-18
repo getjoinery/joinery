@@ -35,6 +35,17 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 		$product = new Product(NULL);
 	}
 
+	// Photo action handlers (early return — skip full product save)
+	if ($product->key && isset($post_vars['action']) && $post_vars['action'] == 'set_primary_photo') {
+		$product->set_primary_photo((int)$post_vars['photo_id']);
+		return LogicResult::redirect('/admin/admin_product_edit?pro_product_id='.$product->key);
+	}
+
+	if ($product->key && isset($post_vars['action']) && $post_vars['action'] == 'clear_primary_photo') {
+		$product->clear_primary_photo();
+		return LogicResult::redirect('/admin/admin_product_edit?pro_product_id='.$product->key);
+	}
+
 	// Process POST actions
 	// CRITICAL: Check for POST submission
 	if ($post_vars) {

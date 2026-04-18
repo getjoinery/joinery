@@ -1,6 +1,7 @@
 <?php
 
 require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('/includes/PhotoHelper.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_product_edit_logic.php'));
 
 $page_vars = process_logic(admin_product_edit_logic($_GET, $_POST));
@@ -198,6 +199,25 @@ $formwriter->submitbutton('btn_submit', 'Submit');
 $formwriter->end_form();
 
 $page->end_box();
+
+// Product Photos card — only for saved products
+if ($product->key) {
+	$product_photos = $product->get_photos();
+	$photo_editable = !$product->get('pro_delete_time') && $_SESSION['permission'] > 4;
+	PhotoHelper::render_photo_card('grid', 'product', $product->key, $product_photos, [
+		'set_primary_url' => '/admin/admin_product_edit?pro_product_id=' . $product->key,
+		'card_title' => 'Product Photos',
+		'editable' => $photo_editable,
+		'primary_file_id' => $product->get('pro_fil_file_id'),
+	]);
+
+	if ($photo_editable) {
+		PhotoHelper::render_photo_scripts('grid', 'product', $product->key, [
+			'set_primary_url' => '/admin/admin_product_edit?pro_product_id=' . $product->key,
+			'confirm_delete_msg' => 'Remove this photo from this product?',
+		]);
+	}
+}
 
 $page->admin_footer();
 

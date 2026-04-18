@@ -203,6 +203,36 @@ Drives the whole pipeline at once. The goal is to verify that UTM + coupon + con
 
 ---
 
-## 7. Log sanity check
+## 7. Product photo parity
 
-- [ ] After the above tests, `tail -n 200 /var/www/html/joinerytest/logs/error.log | grep -iE 'Fatal|PDO|attribution|campaign'` returns nothing alarming (PDO syntax errors in any of the new queries, uncaught exceptions from `CampaignCapture`, etc.). Known-noise lines from pre-existing code are fine.
+Covers the entity photo work in [`implemented/product_photo_parity.md`](implemented/product_photo_parity.md). Only platform-level checks here — verifying Product now matches the other entities and that drift fixes didn't break anything.
+
+### 7.1 — Schema + migration
+
+- [ ] `\d pro_products` shows `pro_fil_file_id int4` (nullable).
+- [ ] `SELECT mig_success FROM mig_migrations WHERE mig_version = '103' ORDER BY mig_migration_id DESC LIMIT 1;` → `t` (backfill migration applied).
+
+### 7.2 — Admin UI + upload round-trip
+
+- [ ] Load `/admin/admin_product_edit?pro_product_id=<any product>`. "Product Photos" card renders under the form; "No photos yet" empty state shows when the product has none.
+- [ ] Upload two photos via the card's "Upload" button. Both thumbnails render in the grid. Toolbar action "Set as primary" is available on each.
+- [ ] After upload, check the DB: `SELECT eph_entity_type, eph_sort_order FROM eph_entity_photos WHERE eph_entity_id = <product id> ORDER BY eph_sort_order ASC;` → two rows with `eph_entity_type = 'product'`.
+- [ ] The product's `pro_fil_file_id` is populated (auto-set on first upload via the AJAX `$entity_class_map` path).
+- [ ] Set the second photo as primary — page reloads, `pro_fil_file_id` updates. `Product::get_primary_photo()` returns the matching EntityPhoto.
+
+### 7.3 — Permanent delete cleans up EntityPhotos
+
+- [ ] Permanently delete the test product from the admin UI.
+- [ ] Query: `SELECT count(*) FROM eph_entity_photos WHERE eph_entity_id = <deleted product id> AND eph_entity_type = 'product';` → 0. No orphan EntityPhoto rows.
+
+### 7.4 — Drift fixes didn't regress other entities
+
+- [ ] Load a public Location detail page (e.g. `/location/<slug>`) that has a primary photo. View-source: `<img>` URL for the primary photo still renders (confirms `get_picture_link()` default change from `'content'` → `'original'` was a no-op at runtime).
+- [ ] Same for a MailingList detail page (`/list/<slug>`).
+- [ ] Load a Page with a primary photo (`/page/<slug>`). `og:image` in head is populated (confirms new `Page::get_primary_photo()` works alongside the existing SEO metadata pipeline from Part A).
+
+---
+
+## 8. Log sanity check
+
+- [ ] After the above tests, `tail -n 200 /var/www/html/joinerytest/logs/error.log | grep -iE 'Fatal|PDO|attribution|campaign|entity_photo'` returns nothing alarming (PDO syntax errors in any of the new queries, uncaught exceptions from `SessionControl::capture_marketing_coupon()` or the entity photo AJAX handler, etc.). Known-noise lines from pre-existing code are fine.
