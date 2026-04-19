@@ -211,6 +211,7 @@ class TableName extends SystemBase {
     
     // Data Access Methods
     function get($key);
+    function get_json_decoded($key);  // opt-in JSON decode helper — normalizes the string-post-load vs. array-post-set() asymmetry on JSON columns; returns raw string on decode failure
     function set($key, $value, $check_existance = TRUE);
     function export_as_array();
     

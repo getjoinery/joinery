@@ -126,6 +126,11 @@ class ComponentRenderer {
 			return self::debug_output("Component is deleted", $debug_label);
 		}
 
+		// A/B variant application — no-op unless PageContent has an active test.
+		// Runs before fields are read so variant body overrides flow into rendering.
+		require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
+		AbTest::apply_variant($component_instance);
+
 		$component_type = $component_instance->get_component_type();
 		if (!$component_type) {
 			return self::debug_output("Component type not found (pac_com_component_id may reference deleted type)", $debug_label);
@@ -438,32 +443,6 @@ class ComponentRenderer {
 			return false;
 		}
 		return true;
-	}
-
-	/**
-	 * Get all components for a page, ordered by pac_order
-	 *
-	 * @param int $page_id Page ID
-	 * @return array Array of PageContent objects
-	 */
-	public static function get_page_components($page_id) {
-		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
-
-		$options = [
-			'page_id' => $page_id,
-			'components_only' => true,
-			'deleted' => false
-		];
-
-		$components = new MultiPageContent($options, ['pac_order' => 'ASC']);
-		$components->load();
-
-		$result = [];
-		foreach ($components as $component) {
-			$result[] = $component;
-		}
-
-		return $result;
 	}
 
 	/**

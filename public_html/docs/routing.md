@@ -58,6 +58,18 @@ views/foo.php                   → base system view
 
 This applies to logic files too (`logic/foo_logic.php`).
 
+## Dynamic content pages: `pag_template`
+
+Most Pages render through `views/page.php` (and its themed overrides), which reads `pag_title`, `pag_body`, and `pag_component_layout` and produces markup. For Pages whose content depends on runtime state (e.g. a "thanks for signing up" page that formats the new user's name), set `pag_template` on the Page row:
+
+```
+pag_template = 'page_register_thanks'
+```
+
+`views/page.php` then delegates to `theme/{theme}/views/page_register_thanks.php`. That template is a normal view with `$page` available and no framework magic — write whatever PHP you need inline.
+
+This replaces the legacy `pag_script_filename` + `{{var}}` placeholder mechanism, which has been removed.
+
 ## Route Configuration Reference
 
 Routes are defined in `serve.php` in three categories:

@@ -29,11 +29,13 @@ if (isset($_POST['edit_primary_key_value'])) {
 	$content = new PageContent($_GET['pac_page_content_id'], TRUE);
 } else {
 	$content = new PageContent(NULL);
-	// Pre-fill page_id if passed from admin_page
-	if (isset($_GET['pag_page_id']) && $_GET['pag_page_id']) {
-		$content->set('pac_pag_page_id', intval($_GET['pag_page_id']));
-	}
 }
+
+// Page context for post-save redirect only — comes from querystring or referrer,
+// never stored on the component.
+$return_page_id = isset($_GET['pag_page_id']) && $_GET['pag_page_id']
+	? intval($_GET['pag_page_id'])
+	: null;
 
 // Check if loading a previous version
 $loading_version = false;
@@ -73,12 +75,6 @@ if ($_POST && !$loading_version) {
 
 	// Set component type
 	$content->set('pac_com_component_id', $_POST['pac_com_component_id'] ?: null);
-
-	// Set page assignment (optional)
-	$content->set('pac_pag_page_id', $_POST['pac_pag_page_id'] ?: null);
-
-	// Set order
-	$content->set('pac_order', intval($_POST['pac_order']));
 
 	// Set layout fields — empty = no restriction (NULL), any CSS value = stored directly
 	$content->set('pac_max_width', trim($_POST['pac_max_width'] ?? '') ?: null);
@@ -149,10 +145,10 @@ if ($_POST && !$loading_version) {
 			$content->prepare();
 			$content->save();
 
-			// Redirect based on context: back to page if attached, otherwise to components list
-			$page_id = $content->get('pac_pag_page_id');
-			if ($page_id) {
-				LibraryFunctions::redirect('/admin/admin_page?pag_page_id=' . $page_id);
+			// Redirect: back to the referring page if a page context came through,
+			// otherwise to the global components list.
+			if ($return_page_id) {
+				LibraryFunctions::redirect('/admin/admin_page?pag_page_id=' . $return_page_id);
 			} else {
 				LibraryFunctions::redirect('/admin/admin_components');
 			}
@@ -166,14 +162,6 @@ if ($_POST && !$loading_version) {
 // Get component types for dropdown
 $component_types = new MultiComponent(array('deleted' => false, 'active' => true), array('com_title' => 'ASC'));
 $component_types->load();
-
-// Get pages for dropdown
-$pages = new MultiPage(array('deleted' => false), array('pag_title' => 'ASC'));
-$pages->load();
-$pages_dropdown = array('' => '-- Not assigned to a page --');
-foreach ($pages as $pg) {
-	$pages_dropdown[$pg->key] = $pg->get('pag_title');
-}
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -257,8 +245,8 @@ if ($content->key) {
 } else {
 	// Add mode - show editable dropdown with redirect on change
 	$type_change_url = '/admin/admin_component_edit?';
-	if ($content->get('pac_pag_page_id')) {
-		$type_change_url .= 'pag_page_id=' . $content->get('pac_pag_page_id') . '&';
+	if ($return_page_id) {
+		$type_change_url .= 'pag_page_id=' . $return_page_id . '&';
 	}
 	echo '<select name="pac_com_component_id" id="pac_com_component_id" class="form-select" onchange="location.href=\'' . $type_change_url . 'component_type=\'+this.value">';
 	echo '<option value="">-- Select Component Type --</option>';
@@ -275,12 +263,6 @@ if ($content->key) {
 	echo '<div class="form-text">Select the type of component to create</div>';
 }
 echo '</div>';
-
-// Assign to Page - right after component type
-$formwriter->dropinput('pac_pag_page_id', 'Assign to Page', [
-	'options' => $pages_dropdown,
-	'helptext' => 'Optional. Auto-render on this page via get_filled_content()'
-]);
 
 $formwriter->textinput('pac_title', 'Label', [
 	'helptext' => 'Internal name for identifying this component'
@@ -400,7 +382,7 @@ if ($current_type_id) {
 
 		// Render advanced fields in collapsible section
 		$layout_field_count = $type_skip_wrapper ? 0 : 3;
-		$advanced_count = count($advanced_fields) + $layout_field_count + 2; // + slug + order
+		$advanced_count = count($advanced_fields) + $layout_field_count + 1; // + slug
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
 		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
@@ -425,11 +407,6 @@ if ($current_type_id) {
 			'helptext' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 		]);
 
-		// Display order (always advanced)
-		$formwriter->textinput('pac_order', 'Display Order', [
-			'helptext' => 'Order when multiple components on same page (lower = first)'
-		]);
-
 		// Schema-defined advanced fields
 		foreach ($advanced_fields as $field) {
 			$render_field($field, $formwriter, $current_config);
@@ -442,7 +419,7 @@ if ($current_type_id) {
 		$advanced_id = 'advanced_fields_' . uniqid();
 		echo '<div class="advanced-fields-section mt-4">';
 		echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
-		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (' . ($layout_field_count + 2) . ')';
+		echo '<i class="fas fa-cog me-1"></i>Show advanced fields (' . ($layout_field_count + 1) . ')';
 		echo '</a>';
 		echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 		echo '<div class="mt-3 pt-3 border-top">';
@@ -460,9 +437,6 @@ if ($current_type_id) {
 		$formwriter->textinput('pac_location_name', 'Slug (optional)', [
 			'helptext' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
 		]);
-		$formwriter->textinput('pac_order', 'Display Order', [
-			'helptext' => 'Order when multiple components on same page (lower = first)'
-		]);
 		echo '</div></div></div>';
 
 		echo '<div class="alert alert-info mt-3">This component type has no configurable fields.</div>';
@@ -472,7 +446,7 @@ if ($current_type_id) {
 	$advanced_id = 'advanced_fields_' . uniqid();
 	echo '<div class="advanced-fields-section mt-4">';
 	echo '<a href="#" class="advanced-fields-toggle text-muted" data-target="' . $advanced_id . '">';
-	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (5)';
+	echo '<i class="fas fa-cog me-1"></i>Show advanced fields (4)';
 	echo '</a>';
 	echo '<div id="' . $advanced_id . '" class="advanced-fields-content" style="display:none;">';
 	echo '<div class="mt-3 pt-3 border-top">';
@@ -487,9 +461,6 @@ if ($current_type_id) {
 
 	$formwriter->textinput('pac_location_name', 'Slug (optional)', [
 		'helptext' => 'Only needed for explicit rendering via ComponentRenderer::render(\'slug\'). Leave empty for page-attached components.'
-	]);
-	$formwriter->textinput('pac_order', 'Display Order', [
-		'helptext' => 'Order when multiple components on same page (lower = first)'
 	]);
 	echo '</div></div></div>';
 
@@ -544,6 +515,12 @@ if ($content->key && $content->get('pac_location_name')) {
 echo '</div></div>';
 
 $page->end_box();
+
+// A/B Testing panel — only if PageContent is opted in and the component is saved
+if ($content->key && !empty(PageContent::$ab_testable)) {
+	require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
+	AbTestVersionsPanel::render('PageContent', $content->key);
+}
 
 // JavaScript for advanced fields toggle
 ?>

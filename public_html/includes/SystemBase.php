@@ -317,6 +317,23 @@ abstract class SystemBase {
 		return $this->data->$key ?? NULL;
 	}
 
+	/**
+	 * Opt-in JSON decoder for JSON-typed columns.
+	 *
+	 * SystemBase::load() stores JSON columns as raw strings and save() auto-encodes
+	 * arrays/objects on the way back, so get() returns a string after load() but an
+	 * array after set(). Callers that want a consistently-typed PHP value call this
+	 * helper instead of get(). Returns decoded PHP for JSON strings, the value as-is
+	 * if already decoded, null for null/empty, and the raw string if decode fails.
+	 */
+	function get_json_decoded($key) {
+		$value = $this->data->$key ?? null;
+		if ($value === null || $value === '') return $value;
+		if (!is_string($value)) return $value;
+		$decoded = json_decode($value, true);
+		return $decoded !== null ? $decoded : $value;
+	}
+
 
 	//TAKES AN OBJECT TO SEARCH FOR AND A STRING OR AN ARRAY REPRESENTING NAMES OF FIELDS TO CHECK WITH CURRENT OBJECT
 	//IT WILL RETURN A LIST OF DUPLICATES, SEPARATING FIELDS WITH 'AND' IN THE SQL

@@ -17,6 +17,10 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $pkey_column = 'pag_page_id';
 	public static $url_namespace = 'page';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
+	// A/B testing opt-in — title, body, and layout are all testable.
+	public static $ab_testable = true;
+	public static $ab_testable_fields = array('pag_title', 'pag_body', 'pag_component_layout');
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
@@ -40,11 +44,12 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	    'pag_usr_user_id' => array('type'=>'int4'),
 	    'pag_published_time' => array('type'=>'timestamp(6)'),
 	    'pag_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-	    'pag_script_filename' => array('type'=>'varchar(255)'),
 	    'pag_fil_file_id' => array('type'=>'int4'),
 	    'pag_delete_time' => array('type'=>'timestamp(6)'),
 	    'pag_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'pag_tier_public_after_hours' => array('type'=>'int4', 'is_nullable'=>true),
+	    'pag_component_layout' => array('type'=>'json', 'is_nullable'=>true),
+	    'pag_template' => array('type'=>'varchar(128)', 'is_nullable'=>true),
 	);
 
 	protected static $foreign_key_actions = [
@@ -52,77 +57,67 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	];
 
 /**
-	 * Get page content with component rendering support
-	 *
-	 * If the page has components assigned (pac_pag_page_id), renders them in order.
-	 * Otherwise falls back to traditional page body with placeholder substitution.
-	 *
-	 * @see /specs/page_component_system.md
-	 * @return string Rendered content
+	 * A/B testing: URLs to invalidate from the static cache when this page's
+	 * test lifecycle changes state. Scoped per-page so activation/pause/crown
+	 * don't wipe unrelated cached pages.
 	 */
-	function get_filled_content() {
-		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
-
-		// Check for components assigned to this page
-		$components = new MultiPageContent(
-			['page_id' => $this->key, 'components_only' => true, 'published' => true, 'deleted' => false],
-			['pac_order' => 'ASC']
-		);
-
-		if ($components->count_all() > 0) {
-			// Has components - render them, ignore page body
-			require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
-			$output = '';
-			$components->load();
-			foreach ($components as $component) {
-				$output .= ComponentRenderer::render_component($component);
-			}
-			return $output;
-		}
-
-		// No components - fall back to traditional page body + placeholders
-		return $this->get_body_content();
+	function get_tested_cache_urls() {
+		$url = $this->get_url();
+		return $url ? [$url] : [];
 	}
 
 	/**
-	 * Get page body with placeholder substitution (extracted from original get_filled_content)
+	 * Get typed component-layout array. Tolerates both raw JSON strings
+	 * (fresh-loaded rows) and already-decoded arrays (after a set()).
 	 *
-	 * This is the legacy content system where *!**slug**!* placeholders in pag_body
-	 * are replaced with pac_body from PageContent records.
-	 *
-	 * @return string Processed content
+	 * @return array Ordered list of pac_page_content_id values, empty if unset
 	 */
-	protected function get_body_content() {
-		// LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
-		if ($this->get('pag_script_filename')) {
-			// Include the logic file using ThemeHelper
-			require_once(PathHelper::getThemeFilePath($this->get('pag_script_filename'), 'logic'));
+	function get_component_layout() {
+		$layout = $this->get_json_decoded('pag_component_layout');
+		return is_array($layout) ? $layout : [];
+	}
 
-			$content_out = $this->get('pag_body');
+	/**
+	 * Render page content from pag_component_layout, or pag_body if the
+	 * layout is empty.
+	 *
+	 * @return string Rendered content
+	 */
+	function get_filled_content() {
+		$layout = $this->get_component_layout();
 
-			if (isset($replace_values) && is_array($replace_values)) {
-				foreach ($replace_values as $var => $val) {
-					$content_out = str_replace('{{' . $var . '}}', $val, $content_out);
-				}
-			}
-		} else {
-			$content_out = $this->get('pag_body');
+		if (empty($layout)) {
+			return $this->get('pag_body');
 		}
 
-		// LOOK FOR PAGE CONTENTS AND REPLACE
-		$search_criteria = array();
-		$search_criteria['page_id'] = $this->key;
-		$page_contents = new MultiPageContent($search_criteria);
-		$numrecords = $page_contents->count_all();
-		$page_contents->load();
+		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
+		require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
 
-		foreach ($page_contents as $page_content) {
-			if ($temp_content = $page_content->get_content()) {
-				$content_out = str_replace('*!**' . $page_content->get('pac_link') . '**!*', $temp_content, $content_out);
-			}
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$placeholders = implode(',', array_fill(0, count($layout), '?'));
+		$sql = 'SELECT * FROM pac_page_contents
+				WHERE pac_page_content_id IN (' . $placeholders . ')
+				  AND pac_delete_time IS NULL';
+		$q = $dblink->prepare($sql);
+		$q->execute(array_map('intval', $layout));
+		$rows = $q->fetchAll(PDO::FETCH_ASSOC);
+
+		$fields = array_keys(PageContent::$field_specifications);
+		$by_id = [];
+		foreach ($rows as $row) {
+			$component = new PageContent($row['pac_page_content_id']);
+			$component->load_from_data($row, $fields);
+			$by_id[(int)$row['pac_page_content_id']] = $component;
 		}
 
-		return $content_out;
+		$output = '';
+		foreach ($layout as $pac_id) {
+			$pac_id = (int)$pac_id;
+			if (isset($by_id[$pac_id])) {
+				$output .= ComponentRenderer::render_component($by_id[$pac_id]);
+			}
+		}
+		return $output;
 	}
 	
 	/**
