@@ -6,12 +6,12 @@
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('notifications_logic.php', 'logic'));
-require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 $page_vars = process_logic(notifications_logic($_GET, $_POST));
 
-$page = new MemberPage();
-$page->member_header([
+$page = new PublicPage();
+$page->public_header([
 	'title' => $page_vars['title'],
 ]);
 
@@ -34,6 +34,22 @@ function notification_icon_svg($type) {
 }
 ?>
 <div class="jy-ui">
+<section class="jy-content-section">
+    <div class="jy-container">
+        <div style="max-width: 860px; margin: 0 auto;">
+
+            <div class="jy-page-header">
+                <div class="jy-page-header-bar">
+                    <h1>Notifications</h1>
+                    <nav class="jy-breadcrumbs" aria-label="breadcrumb">
+                        <ol>
+                            <li><a href="/">Home</a></li>
+                            <li><a href="/profile">My Profile</a></li>
+                            <li class="active">Notifications</li>
+                        </ol>
+                    </nav>
+                </div>
+            </div>
 
 <div class="ntf-inbox">
 	<div class="ntf-inbox-card">
@@ -156,7 +172,7 @@ function notification_icon_svg($type) {
 	color: #344050;
 }
 .ntf-inbox-count {
-	background: var(--primary, #2c7be5);
+	background: var(--jy-color-primary);
 	color: #fff;
 	font-size: 0.75rem;
 	font-weight: 600;
@@ -213,7 +229,7 @@ function notification_icon_svg($type) {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: var(--primary, #2c7be5);
+	background: var(--jy-color-primary);
 }
 
 /* Icon */
@@ -231,7 +247,7 @@ function notification_icon_svg($type) {
 }
 .ntf-row-unread .ntf-row-icon {
 	background: #dbe8f9;
-	color: var(--primary, #2c7be5);
+	color: var(--jy-color-primary);
 }
 
 /* Content */
@@ -243,7 +259,7 @@ function notification_icon_svg($type) {
 	text-decoration: none;
 	color: inherit;
 }
-.ntf-row-link:hover .ntf-row-title { color: var(--primary, #2c7be5); }
+.ntf-row-link:hover .ntf-row-title { color: var(--jy-color-primary); }
 .ntf-row-title {
 	display: block;
 	font-size: 0.875rem;
@@ -307,7 +323,7 @@ function notification_icon_svg($type) {
 	color: #748194;
 }
 .ntf-inbox-pager a {
-	color: var(--primary, #2c7be5);
+	color: var(--jy-color-primary);
 	text-decoration: none;
 	font-weight: 500;
 }
@@ -368,7 +384,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
+        </div>
+    </div>
+</section>
 </div>
 <?php
-$page->member_footer();
+$page->public_footer();
 ?>

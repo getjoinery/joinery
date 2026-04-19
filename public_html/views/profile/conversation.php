@@ -6,12 +6,12 @@
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('conversation_logic.php', 'logic'));
-require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 $page_vars = process_logic(conversation_logic($_GET, $_POST));
 
-$page = new MemberPage();
-$page->member_header([
+$page = new PublicPage();
+$page->public_header([
 	'title' => $page_vars['title'],
 ]);
 
@@ -23,6 +23,9 @@ $other_user = $page_vars['other_user'];
 $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QUOTES, 'UTF-8') : 'Unknown';
 ?>
 <div class="jy-ui">
+<section class="jy-content-section">
+    <div class="jy-container">
+        <div style="max-width: 720px; margin: 0 auto;">
 
 <div class="conversation-page">
 	<!-- Header -->
@@ -227,7 +230,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
+        </div>
+    </div>
+</section>
 </div>
 <?php
-$page->member_footer();
+$page->public_footer();
 ?>
