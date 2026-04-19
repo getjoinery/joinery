@@ -6,16 +6,6 @@ A platform-level multi-armed bandit (epsilon-greedy) A/B testing framework. Ship
 
 The framework is **client-side assignment, server-side reward tracking**, designed around the hard constraint that the static page cache (`StaticPageCache`, serves via `readfile()` bypassing PHP) makes server-side per-visitor variant selection impossible for exactly the pages most worth testing (marketing landing pages, pricing pages, product pages).
 
-**Parent / sibling docs:**
-- [`scrolldaddy_marketing_plan.md`](scrolldaddy_marketing_plan.md) — the marketing push that motivated building this
-- [`scrolldaddy_marketing_infrastructure.md`](scrolldaddy_marketing_infrastructure.md) — Phase 1 prerequisites (Part D conversion events are this framework's reward signal; Part C UTM stickiness is a quality multiplier for attribution)
-
-## Dependencies
-
-- **Hard dependency: Part D conversion events** from the marketing infrastructure spec. No conversion events = no reward signal = no bandit.
-- **Quality multiplier: Part C UTM stickiness** from the marketing infrastructure spec. Makes "which Reddit campaign drove variant B's conversions" a one-query answer. Without it, the bandit still works, just with weaker attribution.
-- **Independent: Parts A, B** of the marketing infrastructure spec — nice to have shipped first, not required.
-
 ---
 
 ## Algorithm
@@ -71,7 +61,7 @@ The inline `abtest.js` loader (bundled into every cached page's `<head>`) runs o
 
 ## Reward tracking (server-side)
 
-When a conversion event fires via the Part D hooks (see `scrolldaddy_marketing_infrastructure.md`), the server reads the `ab_*` cookies from the request and bumps `rewards` for each matching variant in each active experiment.
+When a conversion event fires, the server reads the `ab_*` cookies from the request and bumps `rewards` for each matching variant in each active experiment.
 
 In `SessionControl::save_visitor_event()`, after the insert, call a new `AbTest::record_conversion_for_request($vse_type)`. The helper:
 1. Enumerates active experiments where `abe_conversion_event_type = $vse_type`.
@@ -146,7 +136,7 @@ No external framework dependency. Must be inline so there's no external-script-f
 
 Pages:
 - **List** — all experiments, with columns: name, status, total trials, leader variant, leader conversion rate, actions (view / pause / crown).
-- **Edit** — experiment name, description, conversion event type dropdown (from the `vse_type` constants defined in Part D), epsilon slider, cold-start threshold.
+- **Edit** — experiment name, description, conversion event type dropdown (from `VisitorEvent::TYPE_*` constants), epsilon slider, cold-start threshold.
 - **Variants** — CRUD for variants within an experiment. Each variant has a name and a JSON config editor (validated as JSON, schema-free for MVB — the view template decides what fields it reads).
 - **Crown action** — sets status to `crowned`, sets `abe_winner_abv_variant_id`, and from then on `render_variants()` serves only the winner. Irreversible from UI (edit in DB if you need to un-crown).
 
@@ -154,7 +144,7 @@ No reporting beyond the leaderboard view for MVB — the admin funnel UI handles
 
 ## Cache invalidation
 
-When variants are added/edited/deleted or an experiment is crowned, the rendered HTML for pages using that experiment changes. The `StaticPageCache` must be invalidated. The simplest approach: on any variant/experiment write, call `StaticPageCache::flush_all()` (or the narrowest equivalent — investigate during implementation). Experiment edits are rare relative to page views, so flush-all is acceptable.
+When variants are added/edited/deleted or an experiment is crowned, the rendered HTML for pages using that experiment changes. The `StaticPageCache` must be invalidated. The simplest approach: on any variant/experiment write, call `StaticPageCache::clearAll()`. Experiment edits are rare relative to page views, so flush-all is acceptable.
 
 ## First live experiment
 

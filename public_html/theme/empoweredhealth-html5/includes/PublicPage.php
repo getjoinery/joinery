@@ -59,8 +59,6 @@ class PublicPage extends PublicPageBase {
         <link rel="apple-touch-icon-precomposed" sizes="72x72" href="/theme/empoweredhealth-html5/assets/img/favicons/apple-icon-72x72.png">
         <link rel="apple-touch-icon-precomposed" href="/theme/empoweredhealth-html5/assets/img/favicons/apple-icon-57x57.png">
 
-        <!-- Meta Description -->
-        <meta name="description" content="<?php echo htmlspecialchars($description); ?>">
         <!-- meta character set -->
         <meta charset="UTF-8">
         <!-- Site Title -->
@@ -71,7 +69,20 @@ class PublicPage extends PublicPageBase {
         <style>/* Fixed 185px header: push jy-ui base views below it */
         body > .jy-ui { padding-top: 185px; }
         /* Auth pages have no hero image — force opaque dark header so white logo is visible */
-        body:has(.jy-ui) #header { background-color: rgba(34, 34, 34, 0.9) !important; }</style>
+        body:has(.jy-ui) #header { background-color: rgba(34, 34, 34, 0.9) !important; }
+        /* Header layout: prevent flex-wrap so logo and nav stay on one line */
+        .main-menu .row { flex-wrap: nowrap; align-items: center; }
+        /* Logo: override the theme's img{width:100%} cascade; constrain to natural content size */
+        #logo { flex: 0 0 auto; width: max-content; }
+        #logo img { width: auto !important; max-height: 70px; padding: 0 !important; margin: 0 !important; display: block; }
+        /* Nav: fill remaining space, switch items from float to flex so the container has proper intrinsic width */
+        #nav-menu-container { flex: 1 1 auto; display: flex; justify-content: flex-end; align-items: center; }
+        #nav-menu-container .nav-menu { display: flex; align-items: center; list-style: none; margin: 0; padding: 0; }
+        #nav-menu-container .nav-menu > li { float: none; display: flex; align-items: center; }
+        /* Dropdown hover: bridge the gap so moving the mouse from the link to the submenu doesn't close it */
+        .nav-menu ul { margin-top: 0; padding-top: 8px; top: calc(100% - 8px); }
+        /* Push fixed header below Joinery admin bar when it's active */
+        body.joinery-admin-bar-active #header { top: 32px !important; }</style>
 
         <?php $this->global_includes_top($options); ?>
     </head>
@@ -215,6 +226,17 @@ Copyright <?php echo htmlspecialchars($site_name); ?> &copy;<?php echo date('Y')
 
         <script src="/assets/js/joinery-validate.js"></script>
         <script src="/theme/empoweredhealth-html5/assets/js/main.js"></script>
+        <script>
+        // Hover delay for desktop nav: adds sfHover class with a 150ms grace period so
+        // moving the mouse from a menu item to its dropdown doesn't snap the menu closed.
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('#nav-menu-container .nav-menu > li').forEach(function(li) {
+                var t;
+                li.addEventListener('mouseenter', function() { clearTimeout(t); li.classList.add('sfHover'); });
+                li.addEventListener('mouseleave', function() { t = setTimeout(function() { li.classList.remove('sfHover'); }, 150); });
+            });
+        });
+</script>
     </body>
 </html>
         <?php

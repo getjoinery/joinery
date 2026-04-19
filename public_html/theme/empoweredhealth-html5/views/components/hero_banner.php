@@ -10,9 +10,10 @@ $heading = $component_config['heading'] ?? 'Empowering You to Be Healthy';
 $subheading = $component_config['subheading'] ?? '';
 $button_text = $component_config['button_text'] ?? 'Learn More';
 $button_url = $component_config['button_url'] ?? '/about';
-$height = $component_config['height'] ?? '493';
+$height = $component_config['height'] ?? '394';
 ?>
 
+<style>.banner-area .fullscreen { height: 80vh !important; }</style>
 <section class="banner-area relative" id="home">
     <div class="overlay overlay-bg"></div>
     <div class="container">
@@ -27,7 +28,9 @@ $height = $component_config['height'] ?? '493';
                 </p>
                 <?php endif; ?>
                 <?php if ($button_text): ?>
-                <a href="<?= htmlspecialchars($button_url) ?>" class="primary-btn text-uppercase"><?= htmlspecialchars($button_text) ?></a>
+                <div style="margin-top: 2rem;">
+                    <a href="<?= htmlspecialchars($button_url) ?>" class="primary-btn text-uppercase"><?= htmlspecialchars($button_text) ?></a>
+                </div>
                 <?php endif; ?>
             </div>
         </div>

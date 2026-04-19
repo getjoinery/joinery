@@ -12,10 +12,18 @@ $author = $page_vars['author'];
 $tags = $page_vars['tags'];
 
 $paget = new PublicPage();
-$paget->public_header(array(
+$post_header_opts = [
     'is_valid_page' => $is_valid_page,
-    'title' => $post->get('pst_title')
-));
+    'title'         => $post->get('pst_title'),
+    'og_type'       => 'article',
+];
+if ($post->get('pst_short_description')) {
+    $post_header_opts['meta_description'] = $post->get('pst_short_description');
+}
+if (method_exists($post, 'get_picture_link') && $post->get_picture_link('og_image')) {
+    $post_header_opts['preview_image_url'] = $post->get_picture_link('og_image');
+}
+$paget->public_header($post_header_opts);
 ?>
 
 <!-- Banner Section -->
