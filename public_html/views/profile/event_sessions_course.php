@@ -1,7 +1,7 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('event_sessions_course_logic.php', 'logic'));
 
 	$page_vars = process_logic(event_sessions_course_logic($_GET, $_POST));
@@ -11,48 +11,39 @@
 		exit();
 	}
 
-	$page = new MemberPage();
-	$hoptions = array(
-		'is_valid_page' => $is_valid_page,
+	$page = new PublicPage();
+	$page->public_header([
+		'is_valid_page' => $is_valid_page ?? false,
 		'title' => 'Sessions',
-		'breadcrumbs' => array(
-			'My Profile' => '/profile/profile',
-			'Event' => '',
-		),
-	);
-	$page->member_header($hoptions, NULL);
+	]);
 
 	$session_name = 'Session ' . $page_vars['event_session']->get('evs_session_number') . ' — ' . $page_vars['event_session']->get('evs_title');
 ?>
 <div class="jy-ui">
-
-<!-- Page Title -->
-<section class="page-title bg-transparent">
-    <div class="jy-container">
-        <div class="page-title-row">
-            <div class="page-title-content">
-                <h1><?php echo htmlspecialchars($page_vars['event']->get('evt_name')); ?></h1>
-                <span><?php echo $page_vars['event']->get_time_string($page_vars['session']->get_timezone()); ?></span>
-            </div>
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="/">Home</a></li>
-                    <li class="breadcrumb-item"><a href="/profile/profile">My Profile</a></li>
-                    <li class="breadcrumb-item active">Sessions</li>
-                </ol>
-            </nav>
-        </div>
-    </div>
-</section>
-
 <section class="jy-content-section">
     <div class="jy-container">
-        <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
+
+        <div class="jy-page-header">
+            <div class="jy-page-header-bar">
+                <div>
+                    <h1><?php echo htmlspecialchars($page_vars['event']->get('evt_name')); ?></h1>
+                    <span class="muted"><?php echo $page_vars['event']->get_time_string($page_vars['session']->get_timezone()); ?></span>
+                </div>
+                <nav class="jy-breadcrumbs" aria-label="breadcrumb">
+                    <ol>
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/profile">My Profile</a></li>
+                        <li class="active">Sessions</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: var(--jy-space-6); align-items: flex-start; flex-wrap: wrap;">
 
             <!-- Main content -->
             <div style="flex: 2; min-width: 0;">
 
-                <!-- Calendar links -->
                 <?php
                 $calendar_text = '';
                 if($page_vars['event']->get('evt_status') != 2 && $page_vars['event']->get('evt_status') != 3){
@@ -66,48 +57,42 @@
                 }
                 if($calendar_text):
                 ?>
-                <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1rem 1.5rem; margin-bottom: 1.5rem; font-size: 0.875rem;">
+                <div class="jy-panel text-sm">
                     <?php echo $calendar_text; ?>
                 </div>
                 <?php endif; ?>
 
-                <?php
-                if($page_vars['event']->get('evt_end_time') > date('Y-m-d H:i:s')):
-                ?>
-                <div style="margin-bottom: 1.5rem;">
-                    <a href="/profile/event_withdraw?evr_event_registrant_id=<?php echo $page_vars['event_registrant']->key; ?>" class="btn btn-outline" style="font-size: 0.875rem;">Withdraw from Course</a>
+                <?php if($page_vars['event']->get('evt_end_time') > date('Y-m-d H:i:s')): ?>
+                <div style="margin-bottom: var(--jy-space-5);">
+                    <a href="/profile/event_withdraw?evr_event_registrant_id=<?php echo $page_vars['event_registrant']->key; ?>" class="btn btn-outline btn-sm">Withdraw from Course</a>
                 </div>
                 <?php endif; ?>
 
-                <!-- Event description -->
                 <?php if($page_vars['event']->get('evt_short_description')): ?>
-                <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem;">
+                <div class="jy-panel">
                     <?php echo $page_vars['event']->get('evt_short_description'); ?>
                 </div>
                 <?php endif; ?>
 
-                <!-- Current Session -->
-                <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 1.5rem;">
-                    <div style="background: var(--jy-color-primary); color: #fff; padding: 1rem 1.5rem;">
+                <div class="card">
+                    <div class="card-header" style="background: var(--jy-color-primary); color: #fff;">
                         <h5 style="margin: 0; color: #fff;"><?php echo htmlspecialchars($session_name); ?></h5>
                     </div>
-                    <div style="padding: 1.5rem;">
-                        <?php
-                        if(isset($time_string) && $time_string):
-                        ?>
-                        <p style="margin: 0 0 1rem; font-size: 0.875rem; color: var(--jy-color-text-muted);">&#128197; <?php echo htmlspecialchars($time_string); ?></p>
+                    <div class="card-body">
+                        <?php if(isset($time_string) && $time_string): ?>
+                        <p class="muted text-sm" style="margin: 0 0 var(--jy-space-4);">&#128197; <?php echo htmlspecialchars($time_string); ?></p>
                         <?php endif; ?>
 
                         <?php
                         if($page_vars['video']->key && !$page_vars['video']->get('vid_delete_time')){
                             echo $page_vars['video']->get_embed(784, 441);
                         } else if($page_vars['event_session']->get('evs_picture_link')){
-                            echo '<img src="' . htmlspecialchars($page_vars['event_session']->get('evs_picture_link')) . '" style="max-width:100%; border-radius: 4px;" alt="">';
+                            echo '<img src="' . htmlspecialchars($page_vars['event_session']->get('evs_picture_link')) . '" style="max-width: 100%; border-radius: var(--jy-radius-sm);" alt="">';
                         }
                         ?>
 
                         <?php if($page_vars['event_session']->get('evs_content')): ?>
-                        <div style="margin-top: 1rem;"><?php echo $page_vars['event_session']->get('evs_content'); ?></div>
+                        <div style="margin-top: var(--jy-space-4);"><?php echo $page_vars['event_session']->get('evs_content'); ?></div>
                         <?php endif; ?>
 
                         <?php
@@ -116,9 +101,9 @@
                         foreach($session_files as $sf){ $file_list[] = $sf; }
                         if(!empty($file_list)):
                         ?>
-                        <div style="margin-top: 1rem;">
-                            <h6 style="font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Materials:</h6>
-                            <ul style="margin: 0; padding-left: 1.25rem;">
+                        <div style="margin-top: var(--jy-space-4);">
+                            <h6 class="text-sm" style="text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--jy-space-2);">Materials:</h6>
+                            <ul style="margin: 0; padding-left: var(--jy-space-5);">
                                 <?php foreach($file_list as $sf): ?>
                                 <li><a href="<?php echo $sf->get_url(); ?>"><?php echo htmlspecialchars($sf->get_name()); ?></a></li>
                                 <?php endforeach; ?>
@@ -136,7 +121,7 @@
                         }
                         if($exists):
                         ?>
-                        <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--jy-color-border); text-align: right;">
+                        <div style="margin-top: var(--jy-space-5); padding-top: var(--jy-space-5); border-top: 1px solid var(--jy-color-border); text-align: right;">
                             <a href="/profile/event_sessions_course?session_number=<?php echo $next_session; ?>&event_id=<?php echo $page_vars['event']->key; ?>" class="btn btn-primary">Next Session &rarr;</a>
                         </div>
                         <?php endif; ?>
@@ -148,16 +133,15 @@
             <!-- Sidebar -->
             <div style="flex: 1; min-width: 220px; max-width: 280px;">
 
-                <!-- Sessions nav -->
-                <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 1.5rem;">
-                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
+                <div class="card">
+                    <div class="card-header">
                         <h6 style="margin: 0;">All Sessions</h6>
                     </div>
-                    <div style="padding: 1rem 1.25rem;">
+                    <div class="card-body">
                         <?php foreach($page_vars['event_sessions'] as $aevent_session): ?>
-                        <div style="margin-bottom: 0.5rem;">
+                        <div style="margin-bottom: var(--jy-space-2);">
                             <a href="/profile/event_sessions_course?session_number=<?php echo $aevent_session->get('evs_session_number'); ?>&event_id=<?php echo $page_vars['event']->key; ?>"
-                               style="font-size: 0.875rem;<?php if($aevent_session->get('evs_session_number') == $page_vars['session_number']): ?> font-weight: 600; color: var(--jy-color-primary);<?php endif; ?>">
+                               class="text-sm"<?php if($aevent_session->get('evs_session_number') == $page_vars['session_number']): ?> style="font-weight: 600; color: var(--jy-color-primary);"<?php endif; ?>>
                                 Session <?php echo $aevent_session->get('evs_session_number'); ?> &mdash; <?php echo htmlspecialchars($aevent_session->get('evs_title')); ?>
                             </a>
                         </div>
@@ -165,13 +149,12 @@
                     </div>
                 </div>
 
-                <!-- Private info -->
                 <?php if($page_vars['event']->get('evt_private_info')): ?>
-                <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); overflow: hidden;">
-                    <div style="background: var(--jy-color-surface); padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--jy-color-border);">
+                <div class="card">
+                    <div class="card-header">
                         <h6 style="margin: 0;">Registrant Info</h6>
                     </div>
-                    <div style="padding: 1.25rem;">
+                    <div class="card-body">
                         <?php echo $page_vars['event']->get('evt_private_info'); ?>
                     </div>
                 </div>
@@ -182,8 +165,7 @@
         </div>
     </div>
 </section>
-
 </div>
 <?php
-$page->member_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
+$page->public_footer(['track' => TRUE, 'show_survey' => TRUE]);
 ?>

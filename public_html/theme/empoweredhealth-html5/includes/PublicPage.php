@@ -67,7 +67,7 @@ class PublicPage extends PublicPageBase {
         <title><?php echo htmlspecialchars($title); ?></title>
 
         <link href="https://fonts.googleapis.com/css?family=Poppins:100,200,400,300,500,600,700" rel="stylesheet">
-        <link rel="stylesheet" href="/theme/empoweredhealth-html5/assets/css/empoweredhealth.min.css?v=1.0.2">
+        <link rel="stylesheet" href="/theme/empoweredhealth-html5/assets/css/empoweredhealth.min.css?v=1.0.3">
         <style>/* Fixed 185px header: push jy-ui base views below it */
         body > .jy-ui { padding-top: 185px; }
         /* Auth pages have no hero image — force opaque dark header so white logo is visible */

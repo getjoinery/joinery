@@ -1,48 +1,37 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password_edit_logic.php', 'logic'));
 
 	$page_vars = process_logic(password_edit_logic($_GET, $_POST));
 
-	$page = new MemberPage();
-	$hoptions=array(
-		'title'=>$page_vars['page_title'],
-		'breadcrumbs' => array(
-			'My Profile' => '/profile/profile',
-			$page_vars['page_title'] => '',
-		),
-	);
-	$page->member_header($hoptions);
+	$page = new PublicPage();
+	$page->public_header([
+		'title' => $page_vars['page_title'],
+	]);
 ?>
 <div class="jy-ui">
-
-<!-- Page Title -->
-<section class="page-title bg-transparent">
-    <div class="jy-container">
-        <div class="page-title-row">
-            <div class="page-title-content">
-                <h1><?php echo htmlspecialchars($page_vars['page_title']); ?></h1>
-            </div>
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="/">Home</a></li>
-                    <li class="breadcrumb-item"><a href="/profile/profile">My Profile</a></li>
-                    <li class="breadcrumb-item active"><?php echo htmlspecialchars($page_vars['page_title']); ?></li>
-                </ol>
-            </nav>
-        </div>
-    </div>
-</section>
-
 <section class="jy-content-section">
     <div class="jy-container">
         <div style="max-width: 720px; margin: 0 auto;">
 
+            <div class="jy-page-header">
+                <div class="jy-page-header-bar">
+                    <h1><?php echo htmlspecialchars($page_vars['page_title']); ?></h1>
+                    <nav class="jy-breadcrumbs" aria-label="breadcrumb">
+                        <ol>
+                            <li><a href="/">Home</a></li>
+                            <li><a href="/profile">My Profile</a></li>
+                            <li class="active"><?php echo htmlspecialchars($page_vars['page_title']); ?></li>
+                        </ol>
+                    </nav>
+                </div>
+            </div>
+
             <?php echo PublicPage::tab_menu($page_vars['tab_menus'], 'Change Password'); ?>
 
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem; margin-top: 1.5rem;">
+            <div class="jy-panel" style="margin-top: var(--jy-space-4);">
                 <?php
                 $formwriter = $page->getFormWriter('form1', [
                     'action' => '/profile/password_edit'
@@ -73,8 +62,7 @@
         </div>
     </div>
 </section>
-
 </div>
 <?php
-$page->member_footer($foptions=array('track'=>TRUE));
+$page->public_footer(['track' => TRUE]);
 ?>
