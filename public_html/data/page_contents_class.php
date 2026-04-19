@@ -1,14 +1,13 @@
 <?php
 /**
- * PageContent - Component Instances and Page Content Placeholders
+ * PageContent - Component Instances
  *
- * Stores component instances (when pac_com_component_id is set) or
- * legacy page content placeholders (when pac_link is set).
+ * Stores component instances. Components are identified by pac_location_name (slug)
+ * and rendered via ComponentRenderer. Membership on a page is expressed by
+ * Page::pag_component_layout (an ordered array of pac_page_content_id values) —
+ * components themselves no longer carry a parent page FK.
  *
- * Components are identified by pac_location_name (slug) and rendered via ComponentRenderer.
- *
- * @see /specs/page_component_system.md
- * @version 1.4.0
+ * @see /specs/ab_testing_framework.md
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -24,6 +23,10 @@ class PageContent extends SystemBase {
 	public static $prefix = 'pac';
 	public static $tablename = 'pac_page_contents';
 	public static $pkey_column = 'pac_page_content_id';
+
+	// A/B testing opt-in. pac_config is deferred for now (component-specific schema).
+	public static $ab_testable = true;
+	public static $ab_testable_fields = array('pac_body');
 
 	protected static $foreign_key_actions = [
 		'pac_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
@@ -46,17 +49,13 @@ class PageContent extends SystemBase {
 	 */
 	public static $field_specifications = array(
 		'pac_page_content_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'pac_pag_page_id' => array('type'=>'int4'),
 		'pac_com_component_id' => array('type'=>'int4'),
 		'pac_location_name' => array('type'=>'varchar(255)', 'unique'=>true),
 		'pac_title' => array('type'=>'varchar(255)'),
-		'pac_link' => array('type'=>'varchar(255)'),
 		'pac_usr_user_id' => array('type'=>'int4'),
 		'pac_body' => array('type'=>'text'),
 		'pac_config' => array('type'=>'json'),
-		'pac_order' => array('type'=>'int2', 'default'=>0),
 		'pac_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'pac_script_filename' => array('type'=>'varchar(255)'),
 		'pac_delete_time' => array('type'=>'timestamp(6)'),
 		'pac_max_width' => array('type'=>'varchar(50)', 'is_nullable'=>true),
 		'pac_max_height' => array('type'=>'varchar(50)', 'is_nullable'=>true),
@@ -134,40 +133,49 @@ class PageContent extends SystemBase {
 	}
 
 	/**
-	 * Legacy: Get content for placeholder system
+	 * A/B testing: every page that includes this component in its
+	 * pag_component_layout. Used by the admin panel's shared-entity
+	 * disclosure to warn admins that a test here will affect multiple pages.
 	 *
-	 * @return string Content body or empty string
+	 * @return array [ ['label' => Page title, 'url' => deep-link], ... ]
+	 */
+	function get_test_contexts() {
+		if (!$this->key) return [];
+		$dblink = DbConnector::get_instance()->get_db_link();
+		try {
+			$sql = "SELECT pag_page_id, pag_title
+					  FROM pag_pages
+					 WHERE pag_component_layout IS NOT NULL
+					   AND pag_component_layout::jsonb @> to_jsonb(?::int)
+					   AND pag_delete_time IS NULL
+					 ORDER BY pag_title ASC";
+			$q = $dblink->prepare($sql);
+			$q->execute([(int)$this->key]);
+			$rows = $q->fetchAll(PDO::FETCH_ASSOC);
+		} catch (\Throwable $e) {
+			error_log('PageContent::get_test_contexts error: ' . $e->getMessage());
+			return [];
+		}
+		$out = [];
+		foreach ($rows as $row) {
+			$out[] = [
+				'label' => $row['pag_title'],
+				'url'   => '/admin/admin_page?pag_page_id=' . (int)$row['pag_page_id'],
+			];
+		}
+		return $out;
+	}
+
+	/**
+	 * Get visible body content.
+	 *
+	 * @return string Content body or empty string if deleted
 	 */
 	function get_content() {
 		if (!$this->get('pac_delete_time')) {
 			return $this->get('pac_body');
 		}
 		return '';
-	}
-
-	/**
-	 * Get filled content with script file variable replacement
-	 *
-	 * @return string Processed content
-	 */
-	function get_filled_content() {
-		// LOOK FOR THE SCRIPT FILE AND REPLACE CONTENT PLACEHOLDERS {{}}
-		if ($this->get('pac_script_filename')) {
-			// Include the logic file using ThemeHelper
-			require_once(PathHelper::getThemeFilePath($this->get('pac_script_filename'), 'logic'));
-
-			$content_out = $this->get_content();
-
-			if (isset($replace_values) && is_array($replace_values)) {
-				foreach ($replace_values as $var => $val) {
-					$content_out = str_replace('{{' . $var . '}}', $val, $content_out);
-				}
-			}
-
-			return $content_out;
-		} else {
-			return $this->get('pac_body');
-		}
 	}
 
 	function authenticate_write($data) {
@@ -183,15 +191,8 @@ class PageContent extends SystemBase {
 	}
 
 	function save($debug = false) {
-		// Only check for duplicate pac_link if it's not empty (legacy placeholder system)
-		$pac_link = $this->get('pac_link');
-		if (!empty($pac_link) && $this->check_for_duplicate('pac_link')) {
-			throw new SystemAuthenticationError('This page link is a duplicate.');
-		}
-
 		if ($this->key) {
 			// SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			// Version pac_config (JSON) for components, fall back to pac_body for legacy content
 			$config_json = $this->get('pac_config');
 			$version_content = $config_json ?: $this->get('pac_body');
 
@@ -232,10 +233,6 @@ class MultiPageContent extends SystemMultiBase {
 			$filters['pac_usr_user_id'] = array($this->options['user_id'], PDO::PARAM_INT);
 		}
 
-		if (isset($this->options['page_id'])) {
-			$filters['pac_pag_page_id'] = array($this->options['page_id'], PDO::PARAM_INT);
-		}
-
 		// Filter by component type
 		if (isset($this->options['component_id'])) {
 			$filters['pac_com_component_id'] = array($this->options['component_id'], PDO::PARAM_INT);
@@ -246,22 +243,9 @@ class MultiPageContent extends SystemMultiBase {
 			$filters['pac_com_component_id'] = "IS NOT NULL";
 		}
 
-		// Filter for legacy content only (no component type)
-		if (isset($this->options['legacy_only']) && $this->options['legacy_only']) {
-			$filters['pac_com_component_id'] = "IS NULL";
-		}
-
 		// Filter by slug
 		if (isset($this->options['slug'])) {
 			$filters['pac_location_name'] = array($this->options['slug'], PDO::PARAM_STR);
-		}
-
-		if (isset($this->options['link'])) {
-			$filters['pac_link'] = array($this->options['link'], PDO::PARAM_STR);
-		}
-
-		if (isset($this->options['has_link'])) {
-			$filters['pac_link'] = "LENGTH(pac_link) > 0";
 		}
 
 		if (isset($this->options['deleted'])) {

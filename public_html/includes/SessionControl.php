@@ -290,38 +290,27 @@ class SessionControl{
 	
 	
 	public function crawlerDetect($USER_AGENT){
-		$crawlers = array(
-			  'Google' => 'Google',
-			  'MSN' => 'msnbot',
-			  'Rambler' => 'Rambler',
-			  'Yahoo' => 'Yahoo',
-			  'Bing' => 'Bing',
-			  'AbachoBOT' => 'AbachoBOT',
-			  'accoona' => 'Accoona',
-			  'AcoiRobot' => 'AcoiRobot',
-			  'ASPSeek' => 'ASPSeek',
-			  'CrocCrawler' => 'CrocCrawler',
-			  'Dumbot' => 'Dumbot',
-			  'FAST-WebCrawler' => 'FAST-WebCrawler',
-			  'GeonaBot' => 'GeonaBot',
-			  'Gigabot' => 'Gigabot',
-			  'Lycos spider' => 'Lycos',
-			  'MSRBOT' => 'MSRBOT',
-			  'Altavista robot' => 'Scooter',
-			  'AltaVista robot' => 'Altavista',
-			  'ID-Search Bot' => 'IDBot',
-			  'eStyle Bot' => 'eStyle',
-			  'Scrubby robot' => 'Scrubby',
-			  'Baidu' => 'Baidu',
-			  'Facebook' => 'facebookexternalhit',
-		  );
+		if (empty($USER_AGENT)) return true;
 
-		   $crawlers_agents = implode('|',$crawlers);
-		  if (strpos($crawlers_agents, $USER_AGENT) === false)
-			  return false;
-			else {
-				return TRUE;
-		  }
+		$crawlers = array(
+			'Googlebot', 'AdsBot-Google', 'Mediapartners-Google', 'FeedFetcher-Google',
+			'bingbot', 'msnbot', 'BingPreview',
+			'Slurp', 'Yahoo',
+			'Baiduspider', 'YandexBot', 'YandexImages', 'DuckDuckBot', 'DuckDuckGo',
+			'facebookexternalhit', 'Facebot', 'Twitterbot', 'LinkedInBot', 'Slackbot',
+			'Discordbot', 'TelegramBot', 'WhatsApp', 'Pinterestbot', 'Applebot',
+			'AhrefsBot', 'SemrushBot', 'MJ12bot', 'DotBot', 'PetalBot', 'SeznamBot',
+			'DataForSeoBot', 'BLEXBot', 'SiteAuditBot', 'Screaming Frog',
+			'HeadlessChrome', 'PhantomJS', 'Lighthouse', 'PageSpeed',
+			'curl/', 'Wget', 'python-requests', 'python-urllib', 'Go-http-client', 'Java/',
+			'crawler', 'spider', 'bot/', 'bot ', 'Bot/', 'Bot ', 'archiver',
+			'W3C_Validator', 'feedparser',
+		);
+
+		foreach ($crawlers as $pattern) {
+			if (stripos($USER_AGENT, $pattern) !== false) return true;
+		}
+		return false;
 	}
 	
 	public static function is_valid_page($page){
@@ -476,7 +465,12 @@ class SessionControl{
 			$dbhelper->handle_query_error($e);
 		}
 
-
+		// A/B testing: flush trial + reward counters for this request. The
+		// bandit piggybacks on this pipeline so all counter updates inherit
+		// the bot filter above.
+		if (class_exists('AbTest', false)) {
+			AbTest::flush_request_accounting($type);
+		}
 	}
 
 	/**
