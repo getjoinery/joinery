@@ -19,6 +19,16 @@ Constants on `VisitorEvent` (`data/visitor_events_class.php`):
 
 ## Recording events
 
+### Bot filtering
+
+Before any row is inserted, `save_visitor_event()` short-circuits on `SessionControl::crawlerDetect($USER_AGENT)`. The filter is a case-insensitive substring match against a list of known bot patterns (Googlebot, bingbot, facebookexternalhit, Ahrefs, Semrush, curl, python-requests, etc.), plus any request with an empty UA.
+
+**Historical note:** The filter was silently reporting every real bot as *not a bot* for a long time due to a reversed `strpos()` — so bot traffic was being counted in `vse_visitor_events`. When the filter was fixed, page-view totals typically drop by 20–40% on small sites as bot traffic stops being recorded. If you compare pre- and post-fix analytics numbers, expect that discontinuity.
+
+The same filter gates A/B test counters — see [`ab_testing.md`](ab_testing.md).
+
+### Recording events
+
 The canonical call is on `SessionControl`:
 
 ```php

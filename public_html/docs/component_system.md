@@ -116,16 +116,16 @@ echo ComponentRenderer::render_component($component, ['heading' => 'Override']);
 
 **`render_component()` signature:** `render_component($component_instance, $overrides = [])`
 
-### Get Page Components
+### Render a Page's Components
+
+Pages store an ordered array of `pac_page_content_id` values in `Page::pag_component_layout`. `Page::get_filled_content()` reads that array, loads the referenced `PageContent` rows in one query, and renders them in order via `render_component()`. If the layout is empty, the page renders `pag_body` directly.
 
 ```php
-// Get all components for a page (excludes deleted)
-$components = ComponentRenderer::get_page_components($page_id);
-
-foreach ($components as $component) {
-    echo ComponentRenderer::render_component($component);
-}
+// In a view:
+echo $page->get_filled_content();   // reads pag_component_layout, renders in order
 ```
+
+The legacy `pac_order` / `pac_pag_page_id` / `pac_link` placeholder system has been removed. Components are no longer bound to a single page — the same `PageContent` row can appear in multiple pages' layout arrays (edit once, render many places). Use the drag-reorder picker on the admin page edit surface to manage a page's layout.
 
 ### Render Multiple by Slug
 

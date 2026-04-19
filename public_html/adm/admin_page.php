@@ -22,31 +22,17 @@
 
 	$page = new Page($_GET['pag_page_id'], TRUE);
 
-	$search_criteria = array();
-
-	$search_criteria['page_id'] = $page->key;
-	$search_criteria['legacy_only'] = true;  // Exclude components from legacy content list
-
-	$page_contents = new MultiPageContent(
-		$search_criteria,
-		//array($sort=>$sdirection),
-		//$numperpage,
-		//$offset
-		);
-	$numrecords = $page_contents->count_all();
-	$page_contents->load();
-
-	// Load components for this page (include deleted for superadmins)
-	$component_options = array('page_id' => $page->key, 'components_only' => true);
-	if ($_SESSION['permission'] < 10) {
-		$component_options['deleted'] = false;
+	// Handle layout save from the drag-reorder picker
+	if (isset($_POST['action']) && $_POST['action'] === 'save_layout') {
+		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$ids = isset($_POST['layout']) && is_array($_POST['layout'])
+			? array_values(array_map('intval', $_POST['layout']))
+			: [];
+		$page->set('pag_component_layout', $ids);
+		$page->save();
+		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
+		exit();
 	}
-	$page_components = new MultiPageContent(
-		$component_options,
-		array('pac_order' => 'ASC', 'pac_title' => 'ASC')
-	);
-	$num_components = $page_components->count_all();
-	$page_components->load();
 
 	if($_REQUEST['action'] == 'delete'){
 		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -62,17 +48,31 @@
 		header("Location: /admin/admin_pages");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'delete_component'){
-		$component = new PageContent($_POST['pac_page_content_id'], TRUE);
-		$component->soft_delete();
-
+	else if($_REQUEST['action'] == 'remove_component'){
+		// Remove a component from this page's layout (keeps the component itself)
+		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$remove_id = intval($_POST['pac_page_content_id'] ?? 0);
+		$layout = $page->get_component_layout();
+		$layout = array_values(array_filter($layout, function($id) use ($remove_id) {
+			return (int)$id !== $remove_id;
+		}));
+		$page->set('pag_component_layout', $layout);
+		$page->save();
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'undelete_component'){
-		$component = new PageContent($_POST['pac_page_content_id'], TRUE);
-		$component->undelete();
-
+	else if($_REQUEST['action'] == 'add_component'){
+		// Append an existing component to this page's layout
+		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$add_id = intval($_POST['pac_page_content_id'] ?? 0);
+		if ($add_id) {
+			$layout = $page->get_component_layout();
+			if (!in_array($add_id, array_map('intval', $layout), true)) {
+				$layout[] = $add_id;
+				$page->set('pag_component_layout', $layout);
+				$page->save();
+			}
+		}
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
 	}
@@ -89,16 +89,8 @@
 		exit();
 	}
 
-	// Check if page uses legacy placeholder system
-	$page_body_check = $page->get('pag_body') ?: '';
-	$page_has_placeholders = preg_match('/\*!\*\*[^*]+\*\*!\*/', $page_body_check);
-
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Page' => '/admin/admin_page_edit?pag_page_id='.$page->key);
-	// Only show "New Content" for legacy pages with placeholders
-	if ($page_has_placeholders && $num_components == 0) {
-		$options['altlinks'] += array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
-	}
 	if(!$page->get('pag_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = '/admin/admin_page?action=delete&pag_page_id='.$page->key;
 	}
@@ -119,6 +111,47 @@
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';
+	}
+
+	// Load the layout and its components for the picker
+	$layout = $page->get_component_layout();
+	$layout_components = [];
+	if (!empty($layout)) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$placeholders = implode(',', array_fill(0, count($layout), '?'));
+		$sql = 'SELECT * FROM pac_page_contents
+				WHERE pac_page_content_id IN (' . $placeholders . ')
+				  AND pac_delete_time IS NULL';
+		$q = $dblink->prepare($sql);
+		$q->execute(array_map('intval', $layout));
+		$rows = $q->fetchAll(PDO::FETCH_ASSOC);
+		$fields = array_keys(PageContent::$field_specifications);
+		$by_id = [];
+		foreach ($rows as $row) {
+			$component = new PageContent($row['pac_page_content_id']);
+			$component->load_from_data($row, $fields);
+			$by_id[(int)$row['pac_page_content_id']] = $component;
+		}
+		foreach ($layout as $pac_id) {
+			$pac_id = (int)$pac_id;
+			if (isset($by_id[$pac_id])) {
+				$layout_components[] = $by_id[$pac_id];
+			}
+		}
+	}
+
+	// Components available to add (not already in this page's layout)
+	$available_components_ms = new MultiPageContent(
+		['components_only' => true, 'deleted' => false],
+		['pac_title' => 'ASC']
+	);
+	$available_components_ms->load();
+	$layout_ids = array_map('intval', $layout);
+	$available_components = [];
+	foreach ($available_components_ms as $comp) {
+		if (!in_array((int)$comp->key, $layout_ids, true)) {
+			$available_components[(int)$comp->key] = $comp->get('pac_title') ?: ('(' . $comp->get('pac_location_name') . ')') ?: ('#' . $comp->key);
+		}
 	}
 
 	$paget = new AdminPage();
@@ -187,124 +220,81 @@
 		</div>
 	</div>
 
+	<!-- Page Layout: drag-reorder picker over pag_component_layout -->
+	<div class="card mb-3">
+		<div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">
+			<h5 class="mb-0">Page Layout</h5>
+			<a href="/admin/admin_component_edit?pag_page_id=<?php echo (int)$page->key; ?>" class="btn btn-sm btn-outline-primary">New Component</a>
+		</div>
+		<div class="card-body">
+			<?php
+			$has_legacy_body_content = !empty(trim($page->get('pag_body') ?? ''));
+			if ($has_legacy_body_content && empty($layout_components)) {
+				echo '<div class="alert alert-warning">';
+				echo 'This page renders its <code>pag_body</code> HTML directly. Adding any component to the layout will switch rendering to the component list — edit the page body out or leave it as fallback.';
+				echo '</div>';
+			}
+			?>
+			<form method="post" id="layoutForm">
+				<input type="hidden" name="action" value="save_layout">
+				<ul id="layoutList" class="list-group mb-3">
+					<?php if (empty($layout_components)): ?>
+						<li class="list-group-item text-muted text-center py-3" id="layoutEmpty">
+							No components in the layout. Add one below.
+						</li>
+					<?php else: foreach ($layout_components as $component): ?>
+						<li class="list-group-item d-flex justify-content-between align-items-center" data-id="<?php echo (int)$component->key; ?>">
+							<span>
+								<span class="drag-handle me-2" style="cursor:move;">&#x2630;</span>
+								<?php
+								$comp_type = $component->get_component_type();
+								$type_label = $comp_type ? $comp_type->get('com_title') : 'Unknown';
+								$title = $component->get('pac_title') ?: '(untitled)';
+								?>
+								<a href="/admin/admin_component_edit?pac_page_content_id=<?php echo (int)$component->key; ?>&pag_page_id=<?php echo (int)$page->key; ?>"><?php echo htmlspecialchars($title); ?></a>
+								<small class="text-muted ms-2">&middot; <?php echo htmlspecialchars($type_label); ?></small>
+							</span>
+							<span>
+								<input type="hidden" name="layout[]" value="<?php echo (int)$component->key; ?>">
+								<?php
+								echo AdminPage::action_button('Remove', '', [
+									'hidden' => ['action' => 'remove_component', 'pac_page_content_id' => $component->key, 'pag_page_id' => $page->key],
+									'confirm' => 'Remove this component from the page layout? (The component itself is not deleted.)',
+									'class'  => 'btn btn-sm btn-outline-danger',
+								]);
+								?>
+							</span>
+						</li>
+					<?php endforeach; endif; ?>
+				</ul>
+				<?php if (!empty($layout_components)): ?>
+					<button type="submit" class="btn btn-primary btn-sm">Save Order</button>
+				<?php endif; ?>
+			</form>
+
+			<hr>
+
+			<form method="post" class="mt-3">
+				<input type="hidden" name="action" value="add_component">
+				<div class="row g-2">
+					<div class="col-md-8">
+						<select name="pac_page_content_id" class="form-select form-select-sm" required>
+							<option value="">-- Select a component to add --</option>
+							<?php foreach ($available_components as $id => $label): ?>
+								<option value="<?php echo (int)$id; ?>"><?php echo htmlspecialchars($label); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</div>
+					<div class="col-md-4">
+						<button type="submit" class="btn btn-sm btn-outline-primary w-100">Add to Layout</button>
+					</div>
+				</div>
+			</form>
+		</div>
+	</div>
+
 	<?php
-	// Page Content Table - Legacy placeholder system
-	// Only show if page body contains placeholders (*!**slug**!*) and page isn't using components
-	$page_body = $page->get('pag_body') ?: '';
-	$has_placeholders = preg_match('/\*!\*\*[^*]+\*\*!\*/', $page_body);
-	$uses_components = $num_components > 0;
-
-	// Show legacy content section only if placeholders exist and not using components
-	if ($has_placeholders && !$uses_components):
-
-	$headers = array("Content", "Creator", "Status");
-	$altlinks = array('New Content'=>'/admin/admin_page_content_edit?pag_page_id='.$page->key);
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
-	$table_options = array(
-		'altlinks' => $altlinks,
-		'title' => 'Page Content (Legacy)',
-		'card' => true
-	);
-	$paget->tableheader($headers, $table_options, NULL);
-
-	foreach ($page_contents as $page_content){
-
-		$user = new User($page_content->get('pac_usr_user_id'), TRUE);
-
-		$title = $page_content->get('pac_location_name');
-		if(!$title){
-			$title = 'Untitled';
-		}
-
-		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_page_content?pac_page_content_id=$page_content->key'>".$title."</a>");
-		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
-
-		$status = $page_content->get('pac_delete_time') ? 'Deleted' : 'Active';
-		array_push($rowvalues, $status);
-
-		$paget->disprow($rowvalues);
-	}
-	$paget->endtable($pager);
-
-	endif; // has_placeholders && !uses_components
-
-	// Components Table
-	// Check if page has legacy body content (prevents adding components)
-	$has_legacy_body_content = !empty(trim($page->get('pag_body') ?? ''));
-
-	$comp_headers = array("Component", "Type", "Actions");
-	$comp_altlinks = array();
-	if (!$has_legacy_body_content) {
-		$comp_altlinks['Add Component'] = '/admin/admin_component_edit?pag_page_id='.$page->key;
-	}
-	$comp_table_options = array(
-		'altlinks' => $comp_altlinks,
-		'title' => 'Components (' . $num_components . ')',
-		'card' => true
-	);
-	$paget->tableheader($comp_headers, $comp_table_options, NULL);
-
-	// Show warning if page has legacy body content (always show, even if components exist)
-	if ($has_legacy_body_content) {
-		echo '<tr><td colspan="5" class="py-3">';
-		echo '<div class="alert alert-warning mb-0">';
-		echo '<i class="fas fa-exclamation-triangle me-2"></i>';
-		echo 'This page has legacy body content. To use components, <a href="/admin/admin_page_edit?pag_page_id=' . $page->key . '">edit this page</a> and remove the content there.';
-		echo '</div>';
-		echo '</td></tr>';
-	}
-
-	// Show components if any exist
-	foreach ($page_components as $component) {
-		$rowvalues = array();
-		$is_deleted = (bool)$component->get('pac_delete_time');
-
-		// Component title
-		$title = $component->get('pac_title') ?: '(untitled)';
-		$title_display = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '">' . htmlspecialchars($title) . '</a>';
-		if ($is_deleted) {
-			$title_display .= ' <span class="badge bg-danger">Deleted</span>';
-		}
-		array_push($rowvalues, $title_display);
-
-		// Component type
-		$comp_type = $component->get_component_type();
-		if ($comp_type) {
-			array_push($rowvalues, htmlspecialchars($comp_type->get('com_title')));
-		} else {
-			array_push($rowvalues, '<span class="text-muted">Unknown</span>');
-		}
-
-		// Actions
-		$actions = '<a href="/admin/admin_component_edit?pac_page_content_id=' . $component->key . '" class="btn btn-sm btn-outline-primary me-1">Edit</a>';
-		if ($is_deleted) {
-			$actions .= AdminPage::action_button('Undelete', '', [
-				'hidden' => ['action' => 'undelete_component', 'pac_page_content_id' => $component->key],
-				'class'  => 'btn btn-sm btn-outline-success',
-			]);
-		} else {
-			$actions .= AdminPage::action_button('Delete', '', [
-				'hidden'  => ['action' => 'delete_component', 'pac_page_content_id' => $component->key],
-				'confirm' => 'Are you sure you want to delete this component?',
-				'class'   => 'btn btn-sm btn-outline-danger',
-			]);
-		}
-		array_push($rowvalues, $actions);
-
-		$paget->disprow($rowvalues);
-	}
-
-	// Show "no components" message only if no legacy content and no components
-	if ($num_components == 0 && !$has_legacy_body_content) {
-		echo '<tr><td colspan="5" class="text-center text-muted py-3">No components on this page. <a href="/admin/admin_component_edit?pag_page_id=' . $page->key . '">Add one</a></td></tr>';
-	}
-
-	$paget->endtable(NULL);
-	?>
-
-	<!-- Page Photos Card -->
-	<?php
+	// Page Photos Card
 	$page_photos = $page->get_photos();
 	$photo_editable = !$page->get('pag_delete_time') && $_SESSION['permission'] > 4;
 	PhotoHelper::render_photo_card('grid', 'page', $page->key, $page_photos, [
@@ -322,6 +312,14 @@
 	]); ?>
 	<?php endif; ?>
 
+	<?php
+	// A/B Testing Panel — only renders if Page has opted into the framework
+	if (!empty(Page::$ab_testable)) {
+		require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));
+		AbTestVersionsPanel::render('Page', $page->key);
+	}
+	?>
+
 	<!-- Page Preview Card (Full Width) -->
 	<div class="card mt-3">
 		<div class="card-header bg-body-tertiary">
@@ -332,8 +330,37 @@
 		</div>
 	</div>
 
+	<script>
+	(function(){
+		var list = document.getElementById('layoutList');
+		if (!list) return;
+		var dragSrc = null;
+		Array.from(list.querySelectorAll('li[data-id]')).forEach(function(li){
+			li.setAttribute('draggable', 'true');
+			li.addEventListener('dragstart', function(e){
+				dragSrc = li;
+				li.classList.add('opacity-50');
+				e.dataTransfer.effectAllowed = 'move';
+			});
+			li.addEventListener('dragover', function(e){
+				e.preventDefault();
+				e.dataTransfer.dropEffect = 'move';
+				var rect = li.getBoundingClientRect();
+				var before = (e.clientY - rect.top) < rect.height / 2;
+				if (dragSrc && dragSrc !== li) {
+					if (before) list.insertBefore(dragSrc, li);
+					else list.insertBefore(dragSrc, li.nextSibling);
+				}
+			});
+			li.addEventListener('dragend', function(){
+				li.classList.remove('opacity-50');
+				dragSrc = null;
+			});
+		});
+	})();
+	</script>
+
 	<?php
 
 	$paget->admin_footer();
 ?>
-
