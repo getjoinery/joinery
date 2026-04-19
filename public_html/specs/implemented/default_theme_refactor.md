@@ -271,9 +271,53 @@ Tradeoff accepted: bigger single push, no incremental isolation win. If a specif
   - The scope class and the fact that base views are self-contained.
   - Removal of the old "you must manually include `joinery-custom.css` in your theme" pattern — no longer needed.
 
-### Phase 6 — Branded theme cleanup (optional, per-theme)
+### Phase 6 — Branded theme cleanup (per-theme)
 
-- For each branded theme, audit whether it was working around the old conflict (e.g., redefining auth styles locally). Remove workarounds and set brand tokens instead.
+Audit each branded theme for legacy workarounds (local redefinitions of `.auth-card`, `.card`, `.btn-primary`, etc. that predate the `.jy-ui` scope). Remove workarounds and, where the brand still wants its own look on those components, express it via `.jy-ui` token overrides instead.
+
+**Scoped audit results (as of 2026-04-18):**
+
+Grepping the `theme/` tree for the legacy collision classes (`auth-card`, `auth-page`, `auth-logo`, `.card `, `.btn-primary `) narrows the in-scope themes to three:
+
+| Theme | Hits | Action |
+|-------|-----|--------|
+| `empoweredhealth-html5` | 3 | Audit + token overrides |
+| `getjoinery` | 4 | Audit + token overrides |
+| `joinery-system` | 8 | Audit + token overrides |
+
+The other ~11 themes (`devonandjerry*`, `devonnearhill-html5`, `galactictribune-html5`, `jeremytunnell-html5`, `linka-reference-html5`, `phillyzouk-html5`, `tailwind`, `xandyliberato-html5`, `zoukphilly-html5`, `zoukroom-html5`) have no matches on the obvious collision surface — skip unless a visual regression surfaces.
+
+**Per-theme task shape:**
+1. Grep for the collision classes in the theme's CSS; inspect each rule.
+2. If the rule is a workaround (was only there because the old unscoped `custom.css` conflicted), delete it — `.jy-ui` now handles that component.
+3. If the rule expresses a genuine brand choice (different primary color, different radius, etc.), convert it to a token override on `.jy-ui` or at `:root`.
+4. Visually spot-check the theme's auth pages and primary buttons after the changes.
+
+### Phase 7 — Profile view deep conversion
+
+The original refactor wrapped all 16 `/views/profile/*.php` files in `.jy-ui` but left the interior markup using inline styles and legacy Bootstrap-style class names. This is a follow-up pass to bring the interiors onto the kit.
+
+**Observed drift** (example: `views/profile/account_edit.php`):
+
+```html
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item">...</li>
+
+<div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem; margin-top: 1.5rem;">
+```
+
+Both patterns are out of place under `.jy-ui`:
+- `breadcrumb` / `breadcrumb-item` are Bootstrap conventions; the jy-ui kit has its own breadcrumb component (see Phase 2 component inventory, item 16).
+- Inline `background` / `border-radius` / `box-shadow` / `padding` should resolve to a jy-ui panel/card component using tokens.
+
+**Task shape:**
+1. Inventory the 16 profile views; flag each with the specific legacy constructs it contains.
+2. For recurring patterns (card/panel wrapper, breadcrumb), ensure the jy-ui kit has a component; if missing, add it.
+3. Replace inline styles and legacy classes with jy-ui components. No raw hex/px/shadow values should remain in the profile views.
+4. Spot-check each profile page visually in both the default theme and one branded theme (`empoweredhealth-html5`).
+
+**Scope boundary:** profile views only. The public content views (event, product, page, etc.) were converted in Phase 3 of the original refactor and are out of scope here unless similar drift is found during the spot-check.
 
 ## Content Conventions (for base views)
 

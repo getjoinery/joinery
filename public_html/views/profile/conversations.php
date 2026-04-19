@@ -6,12 +6,12 @@
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('conversations_logic.php', 'logic'));
-require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
+require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 $page_vars = process_logic(conversations_logic($_GET, $_POST));
 
-$page = new MemberPage();
-$page->member_header([
+$page = new PublicPage();
+$page->public_header([
 	'title' => $page_vars['title'],
 ]);
 
@@ -20,6 +20,21 @@ $conversations = $page_vars['conversations'];
 $other_users = $page_vars['other_users'];
 ?>
 <div class="jy-ui">
+<section class="jy-content-section">
+    <div class="jy-container">
+
+        <div class="jy-page-header">
+            <div class="jy-page-header-bar">
+                <h1>Messages</h1>
+                <nav class="jy-breadcrumbs" aria-label="breadcrumb">
+                    <ol>
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/profile">My Profile</a></li>
+                        <li class="active">Messages</li>
+                    </ol>
+                </nav>
+            </div>
+        </div>
 
 <div class="msg-inbox">
 	<div class="msg-inbox-card">
@@ -145,7 +160,7 @@ $other_users = $page_vars['other_users'];
 	display: inline-flex;
 	align-items: center;
 	gap: 0.375rem;
-	background: var(--primary, #2c7be5);
+	background: var(--jy-color-primary);
 	color: #fff;
 	border: none;
 	border-radius: 0.25rem;
@@ -194,7 +209,7 @@ $other_users = $page_vars['other_users'];
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: var(--primary, #2c7be5);
+	background: var(--jy-color-primary);
 }
 
 /* Avatar */
@@ -253,14 +268,16 @@ $other_users = $page_vars['other_users'];
 	color: #748194;
 }
 .msg-inbox-pager a {
-	color: var(--primary, #2c7be5);
+	color: var(--jy-color-primary);
 	text-decoration: none;
 	font-weight: 500;
 }
 .msg-inbox-pager a:hover { text-decoration: underline; }
 </style>
 
+    </div>
+</section>
 </div>
 <?php
-$page->member_footer();
+$page->public_footer();
 ?>

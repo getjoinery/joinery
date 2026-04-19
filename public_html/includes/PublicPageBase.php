@@ -461,15 +461,15 @@ abstract class PublicPageBase {
 	 * @return string HTML output
 	 */
 	protected static function renderTabMenu($tab_menus, $current=NULL){
-		$output = '<nav class="tab-menu" aria-label="Tabs">';
+		$output = '<nav class="tabs" aria-label="Tabs">';
 		foreach($tab_menus as $name => $link){
 			if($name == 'Edit Address' || $name == 'Edit Phone Number'){
 				continue;
 			}
 			if($name == $current){
-				$output .= '<span class="tab-link active" aria-current="page">' . htmlspecialchars($name) . '</span>';
+				$output .= '<span class="tab active" aria-current="page">' . htmlspecialchars($name) . '</span>';
 			} else {
-				$output .= '<a href="' . htmlspecialchars($link) . '" class="tab-link">' . htmlspecialchars($name) . '</a>';
+				$output .= '<a href="' . htmlspecialchars($link) . '" class="tab">' . htmlspecialchars($name) . '</a>';
 			}
 		}
 		$output .= '</nav>';

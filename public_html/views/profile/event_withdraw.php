@@ -1,41 +1,35 @@
 <?php
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getThemeFilePath('MemberPage.php', 'includes'));
+	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('event_withdraw_logic.php', 'logic'));
 
 	$page_vars = process_logic(event_withdraw_logic($_GET, $_POST));
 
-	$page = new MemberPage();
-	$hoptions=array(
-		'title'=>'Withdraw from Event/Course'
-	);
-	$page->member_header($hoptions);
+	$page = new PublicPage();
+	$page->public_header([
+		'title' => 'Withdraw from Event/Course',
+	]);
 ?>
 <div class="jy-ui">
-
-<!-- Page Title -->
-<section class="page-title bg-transparent">
-    <div class="jy-container">
-        <div class="page-title-row">
-            <div class="page-title-content">
-                <h1>Withdraw from Event/Course</h1>
-            </div>
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="/">Home</a></li>
-                    <li class="breadcrumb-item"><a href="/profile/profile">My Profile</a></li>
-                    <li class="breadcrumb-item active">Withdraw</li>
-                </ol>
-            </nav>
-        </div>
-    </div>
-</section>
-
 <section class="jy-content-section">
     <div class="jy-container">
         <div style="max-width: 640px; margin: 0 auto;">
-            <div style="background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 2rem;">
+
+            <div class="jy-page-header">
+                <div class="jy-page-header-bar">
+                    <h1>Withdraw from Event/Course</h1>
+                    <nav class="jy-breadcrumbs" aria-label="breadcrumb">
+                        <ol>
+                            <li><a href="/">Home</a></li>
+                            <li><a href="/profile">My Profile</a></li>
+                            <li class="active">Withdraw</li>
+                        </ol>
+                    </nav>
+                </div>
+            </div>
+
+            <div class="jy-panel">
 
                 <?php
                 $event_registrant = $page_vars['event_registrant'] ?? null;
@@ -52,14 +46,14 @@
                     ]);
                     $formwriter->begin_form();
 
-                    echo '<h4 style="margin-bottom: 1rem;">Confirm withdrawal from ' . htmlspecialchars($event->get('evt_name')) . '</h4>';
-                    echo '<p style="margin-bottom: 0.75rem;">Withdrawing from the course/event will remove you from the attendee list and the mailing list.</p>';
-                    echo '<p style="margin-bottom: 1.5rem;"><strong>It will NOT refund any payments.</strong> To refund a payment, contact us at <a href="mailto:' . htmlspecialchars($settings->get_setting('defaultemail')) . '">' . htmlspecialchars($settings->get_setting('defaultemail')) . '</a>.</p>';
+                    echo '<h4>Confirm withdrawal from ' . htmlspecialchars($event->get('evt_name')) . '</h4>';
+                    echo '<p>Withdrawing from the course/event will remove you from the attendee list and the mailing list.</p>';
+                    echo '<p><strong>It will NOT refund any payments.</strong> To refund a payment, contact us at <a href="mailto:' . htmlspecialchars($settings->get_setting('defaultemail')) . '">' . htmlspecialchars($settings->get_setting('defaultemail')) . '</a>.</p>';
 
                     $formwriter->hiddeninput('confirm', '', ['value' => 1]);
                     $formwriter->hiddeninput('evr_event_registrant_id', '', ['value' => $evr_event_registrant_id]);
 
-                    echo '<div style="display: flex; gap: 1rem; align-items: center;">';
+                    echo '<div style="display: flex; gap: var(--jy-space-4); align-items: center;">';
                     $formwriter->submitbutton('btn_submit', 'Confirm Withdrawal', ['class' => 'btn btn-primary']);
                     echo ' <a href="/profile">Cancel, I changed my mind</a>';
                     echo '</div>';
@@ -75,8 +69,7 @@
         </div>
     </div>
 </section>
-
 </div>
 <?php
-$page->member_footer();
+$page->public_footer();
 ?>
