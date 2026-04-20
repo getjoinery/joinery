@@ -14,7 +14,7 @@ The Page Component System enables composing pages from reusable, configurable co
 6. [Logic Functions](#6-logic-functions)
 7. [Config Schema Reference](#7-config-schema-reference)
 8. [Admin Interface](#8-admin-interface)
-9. [Legacy Content Systems](#9-legacy-content-systems)
+9. [Body Content Fallback](#9-body-content-fallback)
 
 ---
 
@@ -41,7 +41,7 @@ HTML Output
 
 ### Three Ways to Use Components
 
-1. **Page-Attached** - Automatically rendered with page content via `pac_pag_page_id` (most common — no slug needed)
+1. **Page-Attached** - Automatically rendered with page content via `pag_component_layout` on the Page record (most common — no slug needed)
 2. **Standalone (Slug-Based)** - Explicitly rendered in a template via `ComponentRenderer::render('slug')`
 3. **Programmatic** - Rendered from PHP code by type key, no database instance needed
 
@@ -125,7 +125,7 @@ Pages store an ordered array of `pac_page_content_id` values in `Page::pag_compo
 echo $page->get_filled_content();   // reads pag_component_layout, renders in order
 ```
 
-The legacy `pac_order` / `pac_pag_page_id` / `pac_link` placeholder system has been removed. Components are no longer bound to a single page — the same `PageContent` row can appear in multiple pages' layout arrays (edit once, render many places). Use the drag-reorder picker on the admin page edit surface to manage a page's layout.
+Components are cross-page reusable — the same `PageContent` row can appear in multiple pages' layout arrays (edit once, render many places). Use the drag-reorder picker on the admin page edit surface to manage a page's layout.
 
 ### Render Multiple by Slug
 
@@ -280,14 +280,14 @@ Component instances are configured uses of component types. Stored in `pac_page_
 |-------|------|-------------|
 | `pac_page_content_id` | int8 | Primary key |
 | `pac_com_component_id` | int4 | FK to component type |
-| `pac_pag_page_id` | int4 | FK to page (optional) |
 | `pac_location_name` | varchar(255) | Slug for explicit rendering |
 | `pac_title` | varchar(255) | Admin label |
 | `pac_config` | json | Configured values |
-| `pac_order` | int2 | Display order on page |
 | `pac_max_width` | varchar(50) | Layout: max width CSS value (e.g., `720px`) |
 | `pac_max_height` | varchar(50) | Layout: max height CSS value |
 | `pac_vertical_margin` | varchar(20) | Layout: vertical margin keyword (`none`, `sm`, `md`, `lg`, `xl`) |
+
+> **Note:** Components are cross-page reusable. Page membership and display order are managed by `pag_component_layout` — a JSON array of `pac_page_content_id` values on the `Page` record, not by fields on the component itself.
 
 ### Loading Components
 
@@ -314,15 +314,15 @@ require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
 // All components (not legacy content)
 $components = new MultiPageContent(
-    ['components_only' => true, 'deleted' => false],
-    ['pac_order' => 'ASC']
+    ['components_only' => true, 'deleted' => false]
 );
+$components->load();
 
-// Components for a specific page
-$page_components = new MultiPageContent(
-    ['page_id' => $page_id, 'components_only' => true, 'deleted' => false],
-    ['pac_order' => 'ASC']
-);
+// Components attached to a specific page — load via the Page record
+require_once(PathHelper::getIncludePath('data/pages_class.php'));
+$page = new Page($page_id, TRUE);
+$rendered = $page->get_filled_content();   // renders layout components in order
+$layout_ids = $page->get_component_layout(); // returns array of pac_page_content_id values
 ```
 
 ---
@@ -864,9 +864,9 @@ $all_fields = $component_type->get_default_config(true);
 **URL:** `/admin/admin_page?pag_page_id=X`
 
 The page edit view includes a Components card showing:
-- Components attached to this page
+- Components attached to this page (sourced from `pag_component_layout`)
 - Quick add/edit/delete actions
-- Ordered by `pac_order`
+- Ordered by position in `pag_component_layout` — drag-reorder picker to rearrange
 
 ### Component Instance Edit
 
@@ -875,8 +875,9 @@ The page edit view includes a Components card showing:
 Dynamic form based on component type:
 1. Select component type (triggers page reload to show fields)
 2. Configure component-specific fields from schema
-3. Set page assignment (order is in advanced fields)
-4. Save returns to appropriate list (page or components)
+3. Save returns to appropriate list (page or components)
+
+Page membership and display order are managed from the page edit surface (`/admin/admin_page`), not from the component edit form.
 
 ---
 
@@ -1017,74 +1018,33 @@ function my_logic($config) {
 
 ---
 
-## 9. Legacy Content Systems
+## 9. Body Content Fallback
 
-The component system replaces two older content approaches. Both are preserved for backward compatibility but are considered legacy features.
+Pages have a `pag_body` field that stores plain HTML. It is the fallback when no `pag_component_layout` is set.
 
-### 9.1 Legacy Body Content (`pag_body`)
+### How Rendering Works
 
-Pages can store HTML directly in the `pag_body` field. This is now a legacy feature.
-
-**Admin UI Behavior (`/admin/admin_page_edit`):**
-- Content editor **only appears** when the page already has body content
-- New pages do not show the content editor (use components instead)
-- Field is labeled "Content (Legacy)" with migration guidance
-
-**Admin UI Behavior (`/admin/admin_page`):**
-- Warning displays when page has legacy body content: "This page has legacy body content. To use components, edit this page and remove the content there."
-- "Add Component" button is **hidden** when legacy body content exists
-- Warning appears even if components already exist on the page
-
-**Migration:** To switch a page to components, edit the page and remove all body content.
-
-### 9.2 Legacy Placeholder System
-
-Before components, pages used placeholder markers in `pag_body` that were replaced with content from `pac_page_contents` records.
-
-**How It Works:**
-1. Page body contains placeholder: `*!**about**!*`
-2. System finds `PageContent` record with matching `pac_link` = "about"
-3. Placeholder is replaced with `pac_body` content
-
-**Admin UI Behavior:**
-The "Page Content (Legacy)" section in `/admin/admin_page` is **hidden** when:
-- The page body contains no placeholders (`*!**slug**!*`), OR
-- The page is already using the component system
-
-### 9.3 Content Rendering Priority
-
-The rendering logic in `Page::get_filled_content()`:
+`Page::get_filled_content()` checks `pag_component_layout` first:
 
 ```php
-// Check for components first
-$components = new MultiPageContent(['page_id' => $this->key, 'components_only' => true, ...]);
+$layout = $this->get_component_layout(); // JSON array of pac_page_content_id values
 
-if ($components->count_all() > 0) {
-    // Has components - render them, ignore page body entirely
-    foreach ($components as $component) {
-        $output .= ComponentRenderer::render_component($component);
-    }
-    return $output;
+if (empty($layout)) {
+    return $this->get('pag_body'); // fallback to plain body HTML
 }
 
-// No components - fall back to body content (with placeholder substitution)
-return $this->get_body_content();
+// Fetch components by ID, render in layout order
 ```
 
-**Priority order:**
-1. **Components** - If any components are attached, they render and body content is ignored
-2. **Body content with placeholders** - Placeholders are substituted
-3. **Plain body content** - Rendered as-is
+1. **`pag_component_layout`** — if non-empty, its components render in order; `pag_body` is ignored
+2. **`pag_body`** — plain HTML, rendered as-is when no layout is set
 
-### 9.4 Migration Path
+### Switching a Page to Components
 
-For sites using legacy content:
-
-1. **Keep using legacy content** - It continues to work indefinitely
-2. **Migrate to components:**
-   - Create component instances and attach to the page
-   - Remove legacy body content from the page
-   - Once body content is removed, the "Add Component" button appears
+1. Create component instances via `/admin/admin_components`
+2. Add them to the page via the drag-reorder picker on `/admin/admin_page`
+3. Once `pag_component_layout` is populated, `pag_body` is ignored
+4. Edit the page and clear `pag_body` to remove the fallback entirely
 
 ---
 
