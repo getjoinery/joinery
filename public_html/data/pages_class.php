@@ -17,9 +17,8 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $pkey_column = 'pag_page_id';
 	public static $url_namespace = 'page';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
-	// A/B testing opt-in — title, body, and layout are all testable.
 	public static $ab_testable = true;
-	public static $ab_testable_fields = array('pag_title', 'pag_body', 'pag_component_layout');
+	public static $ab_testable_fields = array('pag_title', 'pag_component_layout');
 
 		/**
 	 * Field specifications define database column properties and validation rules
@@ -40,8 +39,7 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	    'pag_page_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'pag_title' => array('type'=>'varchar(255)'),
 	    'pag_link' => array('type'=>'varchar(255)'),
-	    'pag_body' => array('type'=>'text'),
-	    'pag_usr_user_id' => array('type'=>'int4'),
+		    'pag_usr_user_id' => array('type'=>'int4'),
 	    'pag_published_time' => array('type'=>'timestamp(6)'),
 	    'pag_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'pag_fil_file_id' => array('type'=>'int4'),
@@ -77,17 +75,11 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 		return is_array($layout) ? $layout : [];
 	}
 
-	/**
-	 * Render page content from pag_component_layout, or pag_body if the
-	 * layout is empty.
-	 *
-	 * @return string Rendered content
-	 */
 	function get_filled_content() {
 		$layout = $this->get_component_layout();
 
 		if (empty($layout)) {
-			return $this->get('pag_body');
+			return '';
 		}
 
 		require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
@@ -191,8 +183,7 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 		}
 
 		if ($this->key) {
-			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE, $this->key, $this->get('pag_body'), $this->get('pag_title'), $this->get('pag_title'));			
+			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE, $this->key, $this->get_filled_content(), $this->get('pag_title'), $this->get('pag_title'));
 		}
 		
 		parent::save($debug);

@@ -103,8 +103,8 @@ section("Fixtures");
 
 $page = new Page(null);
 $page->set('pag_title', 'Control Title');
-$page->set('pag_body', '<p>Control body</p>');
-$page->set('pag_link', 'ab-test-fixture-' . bin2hex(random_bytes(3)));
+$pag_link_fixture = 'ab-test-fixture-' . bin2hex(random_bytes(3));
+$page->set('pag_link', $pag_link_fixture);
 $page->set('pag_published_time', 'now()');
 $page->save();
 echo "  Page fixture created: id=" . $page->key . "\n";
@@ -207,7 +207,7 @@ $p = new Page($page->key, true);
 assert_eq('Control Title', $p->get('pag_title'), 'Pre-apply: parent title');
 AbTest::apply_variant($p);
 assert_eq('Challenger Title', $p->get('pag_title'), 'Post-apply: variant B title applied');
-assert_eq('<p>Control body</p>', $p->get('pag_body'), 'Non-overridden field (pag_body) unchanged');
+assert_eq($pag_link_fixture, $p->get('pag_link'), 'Non-overridden field (pag_link) unchanged');
 
 // ---------------------------------------------------------------------------
 // Test 5: Dedup stash — repeat apply_variant doesn't double-stash
