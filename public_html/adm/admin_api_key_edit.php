@@ -33,11 +33,16 @@
 	$formwriter->textinput('apk_name', 'Key name');
 
 	$formwriter->dropinput('apk_is_active', 'Active', [
-		'options' => ['No' => 0, 'Yes' => 1]
+		'options' => [0 => 'No', 1 => 'Yes']
 	]);
 
 	$formwriter->dropinput('apk_permission', 'Permission', [
-		'options' => ['Read only' => 1, 'Write only' => 2, 'Read/Write' => 3, 'Read/Write/Delete' => 4]
+		'options' => [
+			1 => 'Read only',
+			2 => 'Write only',
+			3 => 'Read + Write',
+			4 => 'Read + Write + Delete',
+		]
 	]);
 
 	$formwriter->textinput('apk_ip_restriction', 'Allowed IP addresses (comma separated) (optional)');
