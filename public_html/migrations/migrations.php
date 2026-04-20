@@ -1419,3 +1419,14 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Drop pag_body column (v104) ==========
+	// Page content is now stored entirely via pag_component_layout (JSON array of
+	// pac_page_content_id values). All existing pag_body data was migrated to
+	// custom_html components before this migration was added.
+	$migration = array();
+	$migration['database_version'] = '104';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = "ALTER TABLE pag_pages DROP COLUMN IF EXISTS pag_body";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
