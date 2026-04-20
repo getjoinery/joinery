@@ -348,6 +348,61 @@ Returns a list of all available actions with descriptions. Useful for API consum
 }
 ```
 
+## Management API (Read-Only)
+
+The `/api/v1/management/*` namespace is a separate **read-only** surface used by the server_manager control plane to observe managed nodes (stats, version, backup files, error log). It is **not part of the public CRUD API**: endpoints don't map to SystemBase models and have their own convention.
+
+### Authorization
+
+Management endpoints reuse the existing `stg_api_keys` table unchanged. The gate is **user-level**, not key-level:
+
+- The API key's owning user must have `usr_permission >= 10` (superadmin).
+- `apk_permission` (1–4 CRUD gradient) is NOT the gate here — it is **orthogonal** to the management check. A superadmin's key with `apk_permission = 1` (read-only CRUD) can call management endpoints; a permission-5 admin's key cannot, regardless of `apk_permission`.
+- All other existing auth checks (active, not expired, IP restriction, bcrypt secret) apply unchanged — management dispatch only happens after `apiv1.php`'s full auth chain has passed.
+
+### Endpoints
+
+All under `/api/v1/management/`, all `GET`, all return the standard success envelope except `backups/fetch` which streams a binary file.
+
+| Endpoint | Description |
+|----------|-------------|
+| `health` | Liveness probe: `{ok: true, version: "…"}` — used by `JobCommandBuilder::has_api()` |
+| `stats` | Disk, memory, load, uptime, PostgreSQL liveness, Joinery version, DB list |
+| `version` | System version, schema version, per-plugin versions |
+| `databases` | List of PostgreSQL databases accessible to the site |
+| `errors/recent` | Last N error.log lines matching Fatal/Exception/Error (default 20, cap 200) |
+| `backups/list` | Files in `/backups/` with size and date |
+| `backups/fetch?path=…` | Streams a backup file as `application/octet-stream` (path must be under `/backups/`) |
+
+Discovery: `GET /api/v1/management` lists every endpoint with its method and description. Parallels `/api/v1/actions`.
+
+### Adding a management endpoint
+
+Convention-based, mirrors the action-endpoints layout. A single file defines two functions:
+
+```php
+// includes/management_api/my_thing_handler.php
+
+function my_thing_handler($request) {
+    return ['value' => 42];   // non-null array → router wraps with api_success()
+}
+
+function my_thing_handler_api() {
+    return [
+        'method' => 'GET',
+        'description' => 'What this endpoint does',
+    ];
+}
+```
+
+`$request` is an associative array: `method`, `path`, `query` (`$_GET`), `body` (decoded JSON for non-GET), `headers`. Handlers should use `$request` rather than touching `$_GET`/`$_POST` directly. For streaming endpoints (`backups/fetch`), write bytes yourself and return `null` — the router will not append an envelope.
+
+Nested paths mirror subdirectories: `includes/management_api/backups/list_handler.php` → `GET /api/v1/management/backups/list` → function `backups_list_handler()`.
+
+### Writes? Not here.
+
+The management API is permanently read-only. Mutating operations (backups, restores, upgrades, installs, deletions) stay on SSH — SSH is the more deliberate transport for state changes, and a compromised read-only key cannot do damage. If you find yourself wanting to add a write endpoint, extend SSH instead.
+
 ## Error Types
 
 ### CRUD Error Types

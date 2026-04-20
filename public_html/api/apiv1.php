@@ -135,7 +135,10 @@ if (!RequestLogger::check_rate_limit('api_auth', $api_auth_rate_limit, $api_auth
 $classes = LibraryFunctions::discover_model_classes();
 
 $source_ip = $_SERVER['REMOTE_ADDR'];
-$headers = getallheaders();
+// HTTP header names are case-insensitive (RFC 7230). Clients such as Go's
+// net/http canonicalize `public_key` → `Public_key` on HTTP/1.1, where case is
+// preserved on the wire. Normalize to lowercase for lookup.
+$headers = array_change_key_case(getallheaders(), CASE_LOWER);
 $public_key = isset($headers['public_key']) ? $headers['public_key'] : null;
 $secret_key = isset($headers['secret_key']) ? $headers['secret_key'] : null;
 
@@ -265,6 +268,15 @@ $request_method = strtolower($_SERVER['REQUEST_METHOD']);
 $auth_data = array('current_user_id' => $api_user->key, 'current_user_permission' => $api_user->get('usr_permission'));
 
 $response = NULL;
+
+// Management API — intercepted before class matching.
+// Operation matches "management" (case-insensitive via ucwords above).
+if (strtolower($url_segments[2] ?? '') === 'management') {
+	require_once(PathHelper::getIncludePath('includes/ManagementApiRouter.php'));
+	ManagementApiRouter::dispatch($url_segments, $auth_data, $request_method);
+	// dispatch() always exits.
+}
+
 if (in_array($operation, $classes)) {
 	$class_name = $operation;
 

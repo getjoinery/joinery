@@ -26,61 +26,24 @@ class JobResultProcessor {
 
 	/**
 	 * Parse check_status output into structured data and update the node record.
+	 *
+	 * Handles both transports:
+	 *   - API path: output is a JSON envelope {api_version,data:{...}} — extract data.
+	 *   - SSH path: output is concatenated command output — parse with regexes.
 	 */
 	private static function process_check_status($job) {
 		$output = $job->get('mjb_output') ?: '';
-		$result = [];
 
-		// Parse disk usage from df output
-		if (preg_match('/(\d+)%\s+\/\s*$/m', $output, $m)) {
-			$result['disk_usage_percent'] = intval($m[1]);
+		// API path: look for the JSON envelope from /api/v1/management/stats.
+		// The envelope lives inside step-header wrappers, so extract by finding
+		// the first "{" through the matching "}".
+		$api_data = self::extract_api_envelope_data($output);
+		if (is_array($api_data) && !empty($api_data)) {
+			$result = $api_data;
+		} else {
+			$result = self::parse_check_status_ssh_output($output);
 		}
-		if (preg_match('/(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)%\s+\/\s*$/m', $output, $m)) {
-			$result['disk_total'] = $m[2];
-			$result['disk_used'] = $m[3];
-			$result['disk_available'] = $m[4];
-		}
-
-		// Parse memory from free output
-		if (preg_match('/Mem:\s+(\d+)\s+(\d+)\s+(\d+)/m', $output, $m)) {
-			$result['memory_total_mb'] = intval($m[1]);
-			$result['memory_used_mb'] = intval($m[2]);
-			$result['memory_free_mb'] = intval($m[3]);
-		}
-
-		// Parse uptime
-		if (preg_match('/up\s+(.+?),\s+\d+\s+user/m', $output, $m)) {
-			$result['uptime'] = trim($m[1]);
-		}
-
-		// Parse load averages
-		if (preg_match('/load average:\s+([\d.]+),\s+([\d.]+),\s+([\d.]+)/m', $output, $m)) {
-			$result['load_1m'] = floatval($m[1]);
-			$result['load_5m'] = floatval($m[2]);
-			$result['load_15m'] = floatval($m[3]);
-		}
-
-		// Parse PostgreSQL status
-		if (preg_match('/accepting connections/i', $output)) {
-			$result['postgres_status'] = 'accepting connections';
-		} elseif (preg_match('/no response|not accepting/i', $output)) {
-			$result['postgres_status'] = 'not responding';
-		}
-
-		// Parse version
-		$version = null;
-		if (preg_match("/VERSION\s*=\s*['\"]?([^'\";\s]+)/", $output, $m)) {
-			$version = trim($m[1]);
-			$result['joinery_version'] = $version;
-		}
-
-		// Parse database list (bare-metal nodes only — Docker nodes skip this step)
-		if (preg_match('/^CURRENT_DB=(\S+)$/m', $output, $m)) {
-			$result['current_db'] = trim($m[1]);
-		}
-		if (preg_match_all('/^DB:(\S+)$/m', $output, $m)) {
-			$result['db_list'] = $m[1];
-		}
+		$version = $result['joinery_version'] ?? null;
 
 		// Update the node record
 		$node_id = $job->get('mjb_mgn_node_id');
@@ -97,6 +60,84 @@ class JobResultProcessor {
 		// Save structured result on the job
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * Pull the `data` field out of an api_success-style JSON envelope that the
+	 * agent appended to mjb_output. The envelope is wrapped in step-header text
+	 * ("=== [Step 1/1] ... ==="), so we scan for the first "{" and parse from
+	 * there. Returns the decoded data array on success, null otherwise.
+	 */
+	private static function extract_api_envelope_data($output) {
+		$start = strpos($output, '{');
+		if ($start === false) return null;
+		$candidate = substr($output, $start);
+		// Trim trailing step-footer text ("[Step 1/1 OK ...") if present.
+		$decoded = json_decode($candidate, true);
+		if (is_array($decoded) && isset($decoded['api_version'], $decoded['data'])) {
+			return is_array($decoded['data']) ? $decoded['data'] : null;
+		}
+		// Try progressively shorter prefixes — agents may append bytes after the JSON.
+		$end = strrpos($candidate, '}');
+		while ($end !== false && $end > 0) {
+			$decoded = json_decode(substr($candidate, 0, $end + 1), true);
+			if (is_array($decoded) && isset($decoded['api_version'], $decoded['data'])) {
+				return is_array($decoded['data']) ? $decoded['data'] : null;
+			}
+			$end = strrpos(substr($candidate, 0, $end), '}');
+		}
+		return null;
+	}
+
+	/**
+	 * Parse the multi-command SSH output into the structured result array.
+	 */
+	private static function parse_check_status_ssh_output($output) {
+		$result = [];
+
+		if (preg_match('/(\d+)%\s+\/\s*$/m', $output, $m)) {
+			$result['disk_usage_percent'] = intval($m[1]);
+		}
+		if (preg_match('/(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)%\s+\/\s*$/m', $output, $m)) {
+			$result['disk_total']     = $m[2];
+			$result['disk_used']      = $m[3];
+			$result['disk_available'] = $m[4];
+		}
+
+		if (preg_match('/Mem:\s+(\d+)\s+(\d+)\s+(\d+)/m', $output, $m)) {
+			$result['memory_total_mb'] = intval($m[1]);
+			$result['memory_used_mb']  = intval($m[2]);
+			$result['memory_free_mb']  = intval($m[3]);
+		}
+
+		if (preg_match('/up\s+(.+?),\s+\d+\s+user/m', $output, $m)) {
+			$result['uptime'] = trim($m[1]);
+		}
+
+		if (preg_match('/load average:\s+([\d.]+),\s+([\d.]+),\s+([\d.]+)/m', $output, $m)) {
+			$result['load_1m']  = floatval($m[1]);
+			$result['load_5m']  = floatval($m[2]);
+			$result['load_15m'] = floatval($m[3]);
+		}
+
+		if (preg_match('/accepting connections/i', $output)) {
+			$result['postgres_status'] = 'accepting connections';
+		} elseif (preg_match('/no response|not accepting/i', $output)) {
+			$result['postgres_status'] = 'not responding';
+		}
+
+		if (preg_match("/VERSION\s*=\s*['\"]?([^'\";\s]+)/", $output, $m)) {
+			$result['joinery_version'] = trim($m[1]);
+		}
+
+		if (preg_match('/^CURRENT_DB=(\S+)$/m', $output, $m)) {
+			$result['current_db'] = trim($m[1]);
+		}
+		if (preg_match_all('/^DB:(\S+)$/m', $output, $m)) {
+			$result['db_list'] = $m[1];
+		}
+
+		return $result;
 	}
 
 	/**
@@ -227,13 +268,18 @@ class JobResultProcessor {
 	 * fetched web-server-side at display time via TargetLister, merged by
 	 * BackupListHelper.
 	 *
-	 * Local output format: LOCAL|size_bytes|mtime_epoch|filepath
+	 * Handles both transports:
+	 *   - API path: JSON envelope with data.files[] (already structured).
+	 *   - SSH path: LOCAL|size_bytes|mtime_epoch|filepath lines.
 	 */
 	private static function process_list_backups($job) {
 		$output = $job->get('mjb_output') ?: '';
 		$files = [];
 
-		if (preg_match_all('/^LOCAL\|(\d+)\|(\d+)\|(.+)$/m', $output, $matches, PREG_SET_ORDER)) {
+		$api_data = self::extract_api_envelope_data($output);
+		if (is_array($api_data) && isset($api_data['files']) && is_array($api_data['files'])) {
+			$files = $api_data['files'];
+		} elseif (preg_match_all('/^LOCAL\|(\d+)\|(\d+)\|(.+)$/m', $output, $matches, PREG_SET_ORDER)) {
 			foreach ($matches as $m) {
 				$path = trim($m[3]);
 				$filename = basename($path);
