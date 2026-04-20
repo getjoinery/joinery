@@ -10,6 +10,179 @@
 
 class JobCommandBuilder {
 
+	// ── Transport capability helpers ──
+	//
+	// Two orthogonal questions:
+	//   1. Does the node HAVE the transport configured? (has_api_creds / has_ssh)
+	//   2. Does the operation HAVE an implementation for a transport? (transports_for)
+	// can_run() combines both: this node + this operation ⇒ can the builder build a job?
+	// has_api() adds a live /health probe on top of has_api_creds (used at job-build time).
+
+	public static function has_api_creds($node) {
+		return !empty($node->get('mgn_api_public_key'))
+			&& !empty($node->get('mgn_api_secret_key'))
+			&& !empty($node->get('mgn_site_url'));
+	}
+
+	public static function has_ssh($node) {
+		return !empty($node->get('mgn_host'))
+			&& !empty($node->get('mgn_ssh_user'))
+			&& !empty($node->get('mgn_ssh_key_path'));
+	}
+
+	/**
+	 * Which transports does this operation have an implementation for?
+	 * Looks for build_<op>_api and build_<op>_ssh methods.
+	 */
+	public static function transports_for($operation) {
+		$transports = [];
+		if (method_exists(static::class, "build_{$operation}_api")) {
+			$transports[] = 'api';
+		}
+		if (method_exists(static::class, "build_{$operation}_ssh")) {
+			$transports[] = 'ssh';
+		}
+		return $transports;
+	}
+
+	/**
+	 * Optimistic: do we have at least one viable (transport, credentials) pair for this
+	 * node + operation? Uses has_api_creds (config check, no probe) so the UI isn't
+	 * gray-out-flickering on a transient endpoint hiccup.
+	 */
+	public static function can_run($node, $operation) {
+		$op_transports = self::transports_for($operation);
+		if (in_array('api', $op_transports) && self::has_api_creds($node)) return true;
+		if (in_array('ssh', $op_transports) && self::has_ssh($node)) return true;
+		return false;
+	}
+
+	/**
+	 * Return a human-readable reason explaining why can_run() is false.
+	 * Used for tooltips on disabled action buttons.
+	 */
+	public static function why_cannot_run($node, $operation) {
+		$op_transports = self::transports_for($operation);
+		if (empty($op_transports)) {
+			return "Operation '{$operation}' has no implementation on the control plane.";
+		}
+		$parts = [];
+		if (in_array('api', $op_transports) && !self::has_api_creds($node)) {
+			$parts[] = 'no API credentials are configured';
+		}
+		if (in_array('ssh', $op_transports) && !self::has_ssh($node)) {
+			$parts[] = 'SSH is not configured';
+		}
+		if (!in_array('api', $op_transports)) {
+			$parts[] = 'no API implementation exists';
+		}
+		if (!in_array('ssh', $op_transports)) {
+			$parts[] = 'no SSH implementation exists';
+		}
+		return "Cannot run '{$operation}' on this node: " . implode('; ', $parts) . '.';
+	}
+
+	/**
+	 * Routing decision at job-build time: should the dispatcher emit API steps
+	 * for this (node, operation) pair? True iff:
+	 *   1. The node has API credentials configured.
+	 *   2. build_<op>_api exists on this class.
+	 *   3. A fresh GET /health probe against the node succeeds (1s timeout).
+	 */
+	public static function has_api($node, $operation) {
+		if (!self::has_api_creds($node)) return false;
+		if (!method_exists(static::class, "build_{$operation}_api")) return false;
+
+		$probe = self::probe_api_health($node, 1);
+		return !empty($probe['ok']);
+	}
+
+	/**
+	 * Synchronously probe /api/v1/management/health on a node.
+	 * Returns ['ok' => bool, 'elapsed_ms' => int, 'message' => string|null, 'reason' => string|null].
+	 * Never throws — all failures come back as ok=false with a reason string.
+	 */
+	public static function probe_api_health($node, $timeout_seconds = 2) {
+		$start = microtime(true);
+		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
+		$public_key = (string)$node->get('mgn_api_public_key');
+		$secret_key = (string)$node->get('mgn_api_secret_key');
+
+		if ($site_url === '' || $public_key === '' || $secret_key === '') {
+			return [
+				'ok' => false,
+				'elapsed_ms' => 0,
+				'message' => 'API credentials or site URL not configured',
+				'reason' => 'config',
+			];
+		}
+
+		$url = $site_url . '/api/v1/management/health';
+		$ch = curl_init($url);
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CONNECTTIMEOUT => $timeout_seconds,
+			CURLOPT_TIMEOUT        => $timeout_seconds,
+			CURLOPT_HTTPHEADER     => [
+				'public_key: ' . $public_key,
+				'secret_key: ' . $secret_key,
+				'Accept: application/json',
+			],
+			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
+			CURLOPT_SSL_VERIFYHOST => $node->get('mgn_tls_insecure') ? 0 : 2,
+			CURLOPT_FOLLOWLOCATION => false,
+		]);
+		$body = curl_exec($ch);
+		$errno = curl_errno($ch);
+		$errmsg = curl_error($ch);
+		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		$elapsed_ms = intval(round((microtime(true) - $start) * 1000));
+
+		if ($errno) {
+			return [
+				'ok' => false,
+				'elapsed_ms' => $elapsed_ms,
+				'message' => $errmsg ?: 'transport failure',
+				'reason' => 'transport',
+			];
+		}
+		if ($status === 401 || $status === 403) {
+			return [
+				'ok' => false,
+				'elapsed_ms' => $elapsed_ms,
+				'message' => 'authentication failed',
+				'reason' => 'auth',
+			];
+		}
+		if ($status !== 200) {
+			return [
+				'ok' => false,
+				'elapsed_ms' => $elapsed_ms,
+				'message' => 'HTTP ' . intval($status),
+				'reason' => 'status',
+			];
+		}
+
+		$decoded = json_decode((string)$body, true);
+		if (!is_array($decoded) || empty($decoded['data']['ok'])) {
+			return [
+				'ok' => false,
+				'elapsed_ms' => $elapsed_ms,
+				'message' => 'unexpected response body',
+				'reason' => 'body',
+			];
+		}
+
+		return [
+			'ok' => true,
+			'elapsed_ms' => $elapsed_ms,
+			'message' => null,
+			'reason' => null,
+		];
+	}
+
 	/**
 	 * Get the path to Globalvars_site.php on a remote node.
 	 * Config is one level up from web_root (public_html).
@@ -54,9 +227,40 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Check system health metrics on a node.
+	 * Check system health metrics on a node. Dispatches between API and SSH
+	 * implementations based on has_api(). If API creds exist and /health probes
+	 * green, the job runs as a single api step; otherwise it runs the six-ish
+	 * SSH steps that have always been the default.
 	 */
 	public static function build_check_status($node) {
+		if (self::has_api($node, 'check_status')) {
+			return self::build_check_status_api($node);
+		}
+		if (self::has_ssh($node)) {
+			return self::build_check_status_ssh($node);
+		}
+		throw new Exception(
+			"Node '{$node->get('mgn_slug')}' cannot run check_status: "
+			. "no API credentials (or health probe failed) and no SSH credentials configured."
+		);
+	}
+
+	/**
+	 * API path: a single GET to /api/v1/management/stats. The response JSON
+	 * is parsed by JobResultProcessor::process_check_status into the same
+	 * mgn_last_status_data shape the SSH path produces.
+	 */
+	public static function build_check_status_api($node) {
+		return [
+			['type' => 'api', 'label' => 'Fetch node stats', 'method' => 'GET', 'endpoint' => 'stats', 'timeout' => 30],
+		];
+	}
+
+	/**
+	 * Legacy SSH path — unchanged. Not called directly; the dispatcher above
+	 * routes here when API isn't available.
+	 */
+	public static function build_check_status_ssh($node) {
 		$web_root = $node->get('mgn_web_root');
 		$skip_joinery = $node->get('mgn_skip_joinery_checks');
 
@@ -188,9 +392,38 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * SCP a backup file from the remote node to the control plane.
+	 * Download a backup file from a node to the control plane. Dispatches
+	 * between API (streaming HTTP GET) and SCP based on has_api().
 	 */
 	public static function build_fetch_backup($node, $params) {
+		if (self::has_api($node, 'fetch_backup')) {
+			return self::build_fetch_backup_api($node, $params);
+		}
+		if (self::has_ssh($node)) {
+			return self::build_fetch_backup_ssh($node, $params);
+		}
+		throw new Exception(
+			"Node '{$node->get('mgn_slug')}' cannot run fetch_backup: "
+			. "no API credentials (or health probe failed) and no SSH credentials configured."
+		);
+	}
+
+	public static function build_fetch_backup_api($node, $params) {
+		$remote_path = $params['remote_path'];
+		$filename = basename($remote_path);
+		$local_path = "/tmp/fetched_{$filename}";
+
+		return [
+			['type' => 'api', 'label' => 'Download backup via API',
+			 'method' => 'GET', 'endpoint' => 'backups/fetch',
+			 'query' => ['path' => $remote_path],
+			 'local_path' => $local_path,
+			 // Large files — allow plenty of time for the stream. Matches old SCP default.
+			 'timeout' => 3600],
+		];
+	}
+
+	public static function build_fetch_backup_ssh($node, $params) {
 		$remote_path = $params['remote_path'];
 		$filename = basename($remote_path);
 		$local_path = "/tmp/fetched_{$filename}";
@@ -652,8 +885,28 @@ class JobCommandBuilder {
 	/**
 	 * List backup files on a node. Local only — cloud listings are done
 	 * web-server-side via TargetLister when the Backups tab renders.
+	 * Dispatches to API or SSH based on has_api().
 	 */
 	public static function build_list_backups($node) {
+		if (self::has_api($node, 'list_backups')) {
+			return self::build_list_backups_api($node);
+		}
+		if (self::has_ssh($node)) {
+			return self::build_list_backups_ssh($node);
+		}
+		throw new Exception(
+			"Node '{$node->get('mgn_slug')}' cannot run list_backups: "
+			. "no API credentials (or health probe failed) and no SSH credentials configured."
+		);
+	}
+
+	public static function build_list_backups_api($node) {
+		return [
+			['type' => 'api', 'label' => 'List local backups', 'method' => 'GET', 'endpoint' => 'backups/list', 'timeout' => 30],
+		];
+	}
+
+	public static function build_list_backups_ssh($node) {
 		return [
 			['type' => 'ssh', 'label' => 'List local backups',
 			 'cmd' => "for f in /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz; do "

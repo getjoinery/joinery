@@ -287,7 +287,7 @@ cat ~/.joinery_backup_key
 
 ## How It Works: Smart Plugin, Dumb Agent
 
-All job-type intelligence lives in `JobCommandBuilder.php`. The Go agent is a generic executor that understands only three primitives: `ssh`, `scp`, and `local`.
+All job-type intelligence lives in `JobCommandBuilder.php`. The Go agent is a generic executor that understands four primitives: `ssh`, `scp`, `local`, and `api`.
 
 **When an admin triggers an operation:**
 
@@ -349,16 +349,49 @@ header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `type` | Yes | `ssh`, `scp`, or `local` |
+| `type` | Yes | `ssh`, `scp`, `local`, or `api` |
 | `label` | Yes | Human-readable description (shown in UI and output) |
 | `cmd` | ssh/local | Shell command to execute |
 | `node_id` | No | Override target node (defaults to job's node). Used for multi-node operations like `copy_database` |
 | `on_host` | No | If `true`, run on the SSH host directly, not inside the Docker container. Used for `docker stats`, etc. |
 | `direction` | scp | `upload` (local to remote) or `download` (remote to local) |
 | `remote_path` | scp | File path on the remote host |
-| `local_path` | scp | File path on the control plane |
+| `local_path` | scp/api | File path on the control plane (for `api`, set to stream the response body to a file instead of appending to job output — used by `backups/fetch`) |
+| `method` | api | HTTP method: `GET`, `POST`, `PUT`, `DELETE` (in practice always `GET` — the management API is read-only) |
+| `endpoint` | api | Path relative to `/api/v1/management/` — e.g. `stats`, `backups/list`, `backups/fetch` |
+| `expect_status` | api | HTTP status code that counts as success (default 200) |
+| `query` | api | Object of query-string params (e.g. `{"path": "/backups/foo.sql.gz"}`) |
+| `body` | api | Request body object (serialized as JSON; ignored for GET/DELETE) |
 | `continue_on_error` | No | If `true`, don't abort the job when this step fails. Used for cleanup steps. |
 | `timeout` | No | Max seconds for this step (default: 1800 = 30 minutes) |
+
+## Management API (Read-Only)
+
+Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/management/*`. The control plane prefers this over SSH for observability operations (`check_status`, `list_backups`, `fetch_backup`) because it's faster, parallelizable, and auditable.
+
+**Endpoints** (all under `/api/v1/management/`, all `GET`, all JSON except `backups/fetch` which streams binary):
+
+| Endpoint | Replaces SSH step(s) |
+|----------|----------------------|
+| `health` | (new — liveness probe) |
+| `stats` | all steps of `check_status` |
+| `version` | `Check Joinery version` |
+| `databases` | `List databases` |
+| `errors/recent` | `Recent errors` |
+| `backups/list` | `list_backups` |
+| `backups/fetch?path=...` | `fetch_backup` (SCP) |
+
+Discovery: `GET /api/v1/management` returns every endpoint with its description.
+
+**Authentication** uses the existing API key system (`stg_api_keys` — same bcrypt flow as public CRUD). The gate is **user-level**: the key's owning user must have `usr_permission >= 10` (superadmin). `apk_permission` is NOT the gate here — it's the CRUD-axis permission and is orthogonal. A superadmin's key with `apk_permission=1` can call management endpoints (read-only across both axes); a permission-5 admin's key cannot, regardless of `apk_permission`.
+
+**Adding a management key for a node:** on the target node, Admin → API Keys → New Key, owner = a superadmin user, `apk_permission = 1`, IP-restrict to the control plane's egress IP. Paste the public/secret pair into the node's Overview tab on the control plane's Server Manager ("API Credential" panel).
+
+**Build-time routing:** `JobCommandBuilder::build_<op>()` dispatches to `build_<op>_api()` or `build_<op>_ssh()` based on `has_api($node, $op)`, which checks: (1) credentials stored on the node row, (2) a matching `build_<op>_api` exists, (3) a fresh `/health` probe succeeds. No runtime fallback — a job is decided at build-time and runs that path or fails. The existing SSH implementation stays in place; clearing the stored credentials or breaking `/health` routes the next job back to SSH automatically.
+
+**Adding a new management endpoint:** drop a file under `includes/management_api/<name>_handler.php` with `<name>_handler($request)` + `<name>_handler_api()` meta function. Nested paths mirror directories (`backups/list_handler.php` → `GET /api/v1/management/backups/list`). Parallels the action-endpoint convention in `logic/*_logic.php`.
+
+**TLS verification** is strict by default. The `mgn_tls_insecure` boolean on `mgn_managed_nodes` opts a single node out for dev/local instances without a cert from a trusted CA. Audit: `SELECT mgn_slug FROM mgn_managed_nodes WHERE mgn_tls_insecure = true`.
 
 ## Data Models
 
