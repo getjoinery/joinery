@@ -14,7 +14,6 @@ The Page Component System enables composing pages from reusable, configurable co
 6. [Logic Functions](#6-logic-functions)
 7. [Config Schema Reference](#7-config-schema-reference)
 8. [Admin Interface](#8-admin-interface)
-9. [Body Content Fallback](#9-body-content-fallback)
 
 ---
 
@@ -1015,36 +1014,6 @@ function my_logic($config) {
     return ['key' => $value];
 }
 ```
-
----
-
-## 9. Body Content Fallback
-
-Pages have a `pag_body` field that stores plain HTML. It is the fallback when no `pag_component_layout` is set.
-
-### How Rendering Works
-
-`Page::get_filled_content()` checks `pag_component_layout` first:
-
-```php
-$layout = $this->get_component_layout(); // JSON array of pac_page_content_id values
-
-if (empty($layout)) {
-    return $this->get('pag_body'); // fallback to plain body HTML
-}
-
-// Fetch components by ID, render in layout order
-```
-
-1. **`pag_component_layout`** — if non-empty, its components render in order; `pag_body` is ignored
-2. **`pag_body`** — plain HTML, rendered as-is when no layout is set
-
-### Switching a Page to Components
-
-1. Create component instances via `/admin/admin_components`
-2. Add them to the page via the drag-reorder picker on `/admin/admin_page`
-3. Once `pag_component_layout` is populated, `pag_body` is ignored
-4. Edit the page and clear `pag_body` to remove the fallback entirely
 
 ---
 

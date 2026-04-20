@@ -227,13 +227,6 @@
 			<a href="/admin/admin_component_edit?pag_page_id=<?php echo (int)$page->key; ?>" class="btn btn-sm btn-outline-primary">New Component</a>
 		</div>
 		<div class="card-body">
-			<?php
-			$has_legacy_body_content = !empty(trim($page->get('pag_body') ?? ''));
-			if ($has_legacy_body_content && empty($layout_components)) {
-				echo '<div class="alert alert-warning">';
-				echo 'This page renders its <code>pag_body</code> HTML directly. Adding any component to the layout will switch rendering to the component list — edit the page body out or leave it as fallback.';
-				echo '</div>';
-			}
 			?>
 			<form method="post" id="layoutForm">
 				<input type="hidden" name="action" value="save_layout">

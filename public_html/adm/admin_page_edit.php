@@ -55,8 +55,6 @@
 			$page->set('pag_fil_file_id', NULL);
 		}
 
-		$page->set('pag_body', $_POST['pag_body']);
-
 		if(!$page->key){
 			$page->set('pag_usr_user_id',$session->get_user_id());
 		}	
@@ -70,14 +68,6 @@
 	}
 
 	$title = $page->get('pag_title');
-	$content = $page->get('pag_body');
-
-	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($_GET['cnv_content_version_id']){
-		$content_version = new ContentVersion($_GET['cnv_content_version_id'], TRUE);
-		$content = $content_version->get('cnv_content');
-		$title = $content_version->get('cnv_title');
-	}
 
 	$paget = new AdminPage();
 	$paget->admin_header(	
@@ -107,7 +97,6 @@
 	// Prepare override values for form
 	$override_values = [
 		'pag_title' => $title,
-		'pag_body' => $content,
 		'pag_is_published' => $is_published
 	];
 
@@ -162,18 +151,6 @@
 		'options' => $early_access_options,
 		'helptext' => 'Automatically remove the tier gate after this delay from publish time'
 	]);
-
-	// Only show body content editor for legacy pages that already have content
-	// New pages should use the component system instead
-	$has_legacy_content = !empty(trim($content ?? ''));
-
-	if ($has_legacy_content) {
-		$formwriter->textbox('pag_body', 'Content (Legacy)', [
-			'validation' => ['required' => false],
-			'htmlmode' => 'yes',
-			'helptext' => 'This page uses legacy body content. To switch to the component system, remove all content from this field.'
-		]);
-	}
 
 	$formwriter->submitbutton('btn_submit', 'Submit');
 	$formwriter->end_form();

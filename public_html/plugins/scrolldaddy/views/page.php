@@ -21,14 +21,12 @@
 		'is_valid_page' => $is_valid_page ?? false,
 		'title' => $page->get('pag_title')
 	);
-	if ($page->get('pag_body')) {
-		$pag_desc = trim(strip_tags($page->get('pag_body')));
-		if (mb_strlen($pag_desc) > 160) {
-			$pag_desc = mb_substr($pag_desc, 0, 157) . '...';
-		}
-		if ($pag_desc) {
-			$page_header_options['meta_description'] = $pag_desc;
-		}
+	$pag_desc = trim(strip_tags($page->get_filled_content()));
+	if (mb_strlen($pag_desc) > 160) {
+		$pag_desc = mb_substr($pag_desc, 0, 157) . '...';
+	}
+	if ($pag_desc) {
+		$page_header_options['meta_description'] = $pag_desc;
 	}
 	$og_img = $page->get_picture_link('og_image') ?: $page->get_picture_link('hero');
 	if ($og_img) {
@@ -64,7 +62,7 @@
 							echo $page->get_filled_content();
 						} else {
 							require_once(PathHelper::getIncludePath('includes/tier_gate_prompt.php'));
-							$preview_html = get_tier_gate_preview_html($page->get('pag_body'));
+							$preview_html = get_tier_gate_preview_html($page->get_filled_content());
 							render_tier_gate_prompt($page_tier_access, ['preview_html' => $preview_html]);
 						}
 						?>
