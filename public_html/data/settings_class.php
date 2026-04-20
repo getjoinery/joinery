@@ -37,7 +37,7 @@ class Setting extends SystemBase {	public static $prefix = 'stg';
 	 */
 	public static $field_specifications = array(
 	    'stg_setting_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'stg_name' => array('type'=>'varchar(100)', 'required'=>true),
+	    'stg_name' => array('type'=>'varchar(100)', 'required'=>true, 'unique'=>true),
 	    'stg_value' => array('type'=>'text'),
 	    'stg_group_name' => array('type'=>'varchar(255)'),
 	    'stg_usr_user_id' => array('type'=>'int4'),

@@ -1207,6 +1207,7 @@
 			}
 
 			//UPDATE THE SYSTEM VERSION (upsert — fresh installs have no existing row)
+			// Requires the unique constraint on stg_name — ensured by update_database running first.
 			try{
 				$sql = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('system_version', :version)
 				        ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value";
@@ -1217,18 +1218,12 @@
 				}
 			}
 			catch(PDOException $e){
-				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-				echo '<strong>❌ Database Error:</strong> Failed to update system version.<br>';
+				// Log the error but don't roll back — deployment and DB updates already succeeded.
+				// system_version was already set correctly by update_database above.
+				echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
+				echo '<strong>⚠ Warning:</strong> Could not re-confirm system version after upgrade (non-fatal — update_database already set it).<br>';
 				echo 'Error: ' . htmlspecialchars($e->getMessage()) . '<br>';
 				echo '</div>';
-				echo '<br><strong>Rolling back deployment...</strong><br>';
-				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
-				if ($rollback['success']) {
-					echo "✓ Rollback completed successfully<br>";
-				} else {
-					echo "✗ Rollback FAILED: " . htmlspecialchars($rollback['error']) . "<br>";
-				}
-				exit(1);
 			}
 		}
 
@@ -1289,18 +1284,14 @@
 						upgrade_echo("  Migration: " . htmlspecialchars($mm) . "<br>");
 					}
 				}
-			} catch (Exception $e) {
-				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
-				echo '<strong>❌ Theme/Plugin Sync Failed:</strong> ' . htmlspecialchars($e->getMessage()) . '<br>';
+			} catch (\Throwable $e) {
+				// Sync is a post-deployment step — deployment and DB migration already succeeded.
+				// Do not roll back; just warn. Re-run update_database to retry sync.
+				echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
+				echo '<strong>⚠ Warning:</strong> Theme/Plugin sync failed (non-fatal — deployment and DB updates succeeded).<br>';
+				echo 'Error: ' . htmlspecialchars($e->getMessage()) . '<br>';
+				echo 'To retry: run update_database from the admin utilities page.<br>';
 				echo '</div>';
-				echo '<br><strong>Rolling back deployment...</strong><br>';
-				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
-				if ($rollback['success']) {
-					echo "✓ Rollback completed successfully<br>";
-				} else {
-					echo "✗ Rollback FAILED: " . htmlspecialchars($rollback['error']) . "<br>";
-				}
-				exit(1);
 			}
 		}
 
