@@ -199,7 +199,14 @@ function pollDiscoveryJob(jobId, host) {
 			}
 
 			var r = data.result;
-			status.innerHTML = '<div class="alert alert-success">Found <strong>' + r.instances.length + '</strong> Joinery instance(s) on <strong>' + (r.hostname || host) + '</strong>' + (r.has_docker ? ' (Docker)' : '') + ':</div>';
+			var unadded = r.instances.filter(function(i) { return !i.already_added; }).length;
+			var addAllBtn = unadded >= 2
+				? ' <button type="button" class="btn btn-sm btn-primary ms-3" id="add_all_btn" onclick=\'addAllDetected(' + JSON.stringify(r) + ')\'>Add All (' + unadded + ')</button>'
+				: '';
+			status.innerHTML = '<div class="alert alert-success d-flex align-items-center justify-content-between">'
+				+ '<div>Found <strong>' + r.instances.length + '</strong> Joinery instance(s) on <strong>' + (r.hostname || host) + '</strong>' + (r.has_docker ? ' (Docker)' : '') + ':</div>'
+				+ addAllBtn
+				+ '</div>';
 
 			var html = '<div class="row">';
 			r.instances.forEach(function(inst) {
@@ -256,6 +263,57 @@ function fillFromDetected(inst, data) {
 
 	document.body.appendChild(form);
 	form.submit();
+}
+
+function addAllDetected(data) {
+	var btn = document.getElementById('add_all_btn');
+	var status = document.getElementById('detect_status');
+	if (btn) { btn.disabled = true; btn.textContent = 'Adding...'; }
+
+	var unadded = data.instances.filter(function(i) { return !i.already_added; });
+	var payload = {
+		host: data.host,
+		ssh_user: data.ssh_user,
+		ssh_key_path: data.ssh_key_path,
+		ssh_port: data.ssh_port || 22,
+		instances: unadded,
+	};
+
+	fetch('/ajax/add_discovered_nodes', {
+		method: 'POST',
+		credentials: 'same-origin',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload),
+	})
+		.then(function(r) { return r.json(); })
+		.then(function(j) {
+			if (!j.ok) {
+				status.innerHTML = '<div class="alert alert-danger">' + (j.message || 'Bulk add failed') + '</div>';
+				if (btn) { btn.disabled = false; btn.textContent = 'Add All (' + unadded.length + ')'; }
+				return;
+			}
+			var parts = [j.created + ' added'];
+			if (j.skipped) parts.push(j.skipped + ' already present');
+			if (j.errors && j.errors.length) parts.push(j.errors.length + ' failed');
+			var cls = (j.errors && j.errors.length) ? 'alert-warning' : 'alert-success';
+			var html = '<div class="alert ' + cls + '"><strong>' + parts.join(', ') + '.</strong>';
+			if (j.errors && j.errors.length) {
+				html += '<ul class="mb-0 mt-2">';
+				j.errors.forEach(function(e) {
+					html += '<li><code>' + e.slug + '</code>: ' + e.message + '</li>';
+				});
+				html += '</ul>';
+			}
+			html += ' <a href="/admin/server_manager" class="ms-2">Return to dashboard</a></div>';
+			status.innerHTML = html;
+			if (j.created > 0 && (!j.errors || j.errors.length === 0)) {
+				setTimeout(function() { window.location.href = '/admin/server_manager'; }, 800);
+			}
+		})
+		.catch(function(err) {
+			status.innerHTML = '<div class="alert alert-danger">Request failed: ' + err.message + '</div>';
+			if (btn) { btn.disabled = false; btn.textContent = 'Add All (' + unadded.length + ')'; }
+		});
 }
 </script>
 
