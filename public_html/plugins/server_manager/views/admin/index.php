@@ -21,7 +21,18 @@ $session->set_return();
 // This catches cases where the user navigated away from job_detail before the
 // AJAX poll could trigger the result processor.
 $db = DbConnector::get_instance()->get_db_link();
-$q = $db->query("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_status IN ('completed','failed') AND mjb_job_type IN ('check_status','install_node') AND mjb_result IS NULL AND mjb_delete_time IS NULL");
+// Skip jobs whose node has been soft-deleted — processing them would spawn
+// chained check_status jobs against hosts that no longer exist, producing
+// spurious failures (see VPS-A cleanup, 2026-04-21).
+$q = $db->query(
+	"SELECT j.mjb_id FROM mjb_management_jobs j " .
+	"JOIN mgn_managed_nodes n ON n.mgn_id = j.mjb_mgn_node_id " .
+	"WHERE j.mjb_status IN ('completed','failed') " .
+	"  AND j.mjb_job_type IN ('check_status','install_node','apply_update','refresh_archives') " .
+	"  AND j.mjb_result IS NULL " .
+	"  AND j.mjb_delete_time IS NULL " .
+	"  AND n.mgn_delete_time IS NULL"
+);
 foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 	$unprocessed_job = new ManagementJob($row['mjb_id'], TRUE);
 	JobResultProcessor::process($unprocessed_job);
@@ -53,7 +64,7 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 ?>
 
 <style>
-	.node-row { cursor: pointer; transition: background-color 0.12s ease; }
+	.node-row { cursor: pointer; transition: background-color 0.12s ease; min-height: 58px; }
 	.node-row:hover { background-color: #f8f9fa; }
 </style>
 
@@ -68,7 +79,7 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 					<span class="text-muted ms-2">v<?php echo htmlspecialchars($agent->get('ahb_agent_version')); ?></span>
 				<?php endif; ?>
 				<span class="text-muted ms-2">
-					Last heartbeat: <?php echo LibraryFunctions::convert_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>
+					Last heartbeat: <?php echo LibraryFunctions::time_ago_or_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>
 				</span>
 			<?php else: ?>
 				<span class="text-muted ms-2">No agent has connected yet</span>
@@ -83,7 +94,7 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 					The joinery-agent service runs on the control plane and services all connected sites.
 					Install it here: <code>cd /home/user1/joinery-agent &amp;&amp; make release VERSION=1.0.0 &amp;&amp; sudo bash joinery-agent-installer.sh --verbose</code>
 				<?php else: ?>
-					The agent was last seen at <?php echo LibraryFunctions::convert_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
+					The agent was last seen <?php echo LibraryFunctions::time_ago_or_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
 					Check: <code>sudo systemctl status joinery-agent</code> &mdash; <code>journalctl -u joinery-agent -f</code>
 				<?php endif; ?>
 			</small>
@@ -161,11 +172,17 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 						}
 					}
 					?>
+					<?php
+					$api_refreshable = JobCommandBuilder::has_api_creds($node)
+						&& !in_array($install_state, ['installing', 'install_failed'], true);
+					?>
 					<div class="list-group-item node-row d-flex justify-content-between align-items-center"
 						data-href="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>"
+						data-node-id="<?php echo $node->key; ?>"
+						data-api-refreshable="<?php echo $api_refreshable ? '1' : '0'; ?>"
 						onclick="if(!event.target.closest('form,button,input,a')) window.location=this.dataset.href">
 						<div class="d-flex align-items-center" style="min-width:0;flex:1">
-							<span class="badge bg-<?php echo $status_color; ?> me-2">&bull;</span>
+							<span class="badge bg-<?php echo $status_color; ?> me-2 js-status-badge">&bull;</span>
 							<div style="min-width:0">
 								<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
 								<?php if ($install_state === 'installing'): ?>
@@ -173,11 +190,18 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 								<?php elseif ($install_state === 'install_failed'): ?>
 									<span class="badge bg-danger ms-1">Install failed</span>
 								<?php endif; ?>
-								<?php if ($version_cmp === -1): ?>
-									<span class="badge bg-warning ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?>">upgrade available</span>
-								<?php elseif ($version_cmp === 1): ?>
-									<span class="badge bg-danger ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?>">ahead of control plane</span>
-								<?php endif; ?>
+								<span class="js-version-indicator">
+									<?php if ($version_cmp === -1): ?>
+										<span class="badge bg-warning ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?>">upgrade available</span>
+									<?php elseif ($version_cmp === 1): ?>
+										<span class="badge bg-danger ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version); ?>">ahead of control plane</span>
+									<?php endif; ?>
+								</span>
+								<small class="text-muted ms-1 js-last-check"><?php
+									if ($last_check) {
+										echo '(' . htmlspecialchars(LibraryFunctions::time_ago_or_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A')) . ')';
+									}
+								?></small>
 								<?php if ($node->get('mgn_site_url')): ?>
 									<div><small class="text-muted"><?php echo htmlspecialchars($node->get('mgn_site_url')); ?></small></div>
 								<?php endif; ?>
@@ -246,7 +270,7 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 						<td><?php echo htmlspecialchars($node_name); ?></td>
 						<td><?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?></td>
 						<td><span class="badge bg-<?php echo $status_class; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span></td>
-						<td><?php echo $job->get('mjb_started_time') ? LibraryFunctions::convert_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') : '-'; ?></td>
+						<td><?php echo $job->get('mjb_started_time') ? LibraryFunctions::time_ago_or_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') : '-'; ?></td>
 						<td><?php echo $duration; ?></td>
 					</tr>
 				<?php endforeach; ?>
@@ -258,6 +282,56 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 		<?php $page->end_box(); ?>
 	</div>
 </div>
+
+<script>
+// Auto-refresh status for nodes that have API credentials. Fires once on page
+// load, in parallel, bypassing the agent/job pipeline. Silent on failure — the
+// pre-rendered badge (from last stored status) stays as the fallback.
+(function() {
+	var rows = document.querySelectorAll('.node-row[data-api-refreshable="1"]');
+	if (!rows.length) return;
+
+	var colorClasses = ['bg-secondary','bg-success','bg-warning','bg-danger','bg-info','bg-primary'];
+
+	rows.forEach(function(row) {
+		var nodeId = row.getAttribute('data-node-id');
+		var badge = row.querySelector('.js-status-badge');
+		var versionSpan = row.querySelector('.js-version-indicator');
+		var lastCheckSpan = row.querySelector('.js-last-check');
+		if (badge) badge.style.opacity = '0.4';
+
+		fetch('/ajax/refresh_node_status?node_id=' + encodeURIComponent(nodeId), { credentials: 'same-origin' })
+			.then(function(r) { return r.json(); })
+			.then(function(j) {
+				if (badge) badge.style.opacity = '';
+				if (!j.ok) return;
+
+				if (badge && j.status_color) {
+					colorClasses.forEach(function(c) { badge.classList.remove(c); });
+					badge.classList.add('bg-' + j.status_color);
+				}
+
+				if (versionSpan) {
+					versionSpan.innerHTML = '';
+					if (j.version_cmp === -1) {
+						versionSpan.innerHTML = ' <span class="badge bg-warning ms-1" title="Control plane is at ' +
+							(j.cp_version || '') + '">upgrade available</span>';
+					} else if (j.version_cmp === 1) {
+						versionSpan.innerHTML = ' <span class="badge bg-danger ms-1" title="Control plane is at ' +
+							(j.cp_version || '') + '">ahead of control plane</span>';
+					}
+				}
+
+				if (lastCheckSpan && j.last_check) {
+					lastCheckSpan.textContent = '(' + j.last_check + ')';
+				}
+			})
+			.catch(function() {
+				if (badge) badge.style.opacity = '';
+			});
+	});
+})();
+</script>
 
 <?php
 $page->admin_footer();

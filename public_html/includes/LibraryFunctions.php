@@ -737,6 +737,23 @@ class LibraryFunctions {
 		return $dt->format($format) ;
 	}
 	
+	/**
+	 * Return "N minutes ago" / "just now" if the UTC timestamp is within the
+	 * last hour, otherwise the formatted absolute time in the user's timezone.
+	 * Mirrors convert_time's signature so the two are interchangeable.
+	 */
+	static function time_ago_or_time($starttime, $fromtz, $totz, $format='M j, g:i A'){
+		if (empty($starttime)) return '';
+		$age = time() - strtotime($starttime . ' UTC');
+		if ($age < 0) $age = 0;
+		if ($age < 60)   return 'just now';
+		if ($age < 3600) {
+			$m = intval(floor($age / 60));
+			return $m . ' minute' . ($m === 1 ? '' : 's') . ' ago';
+		}
+		return self::convert_time($starttime, $fromtz, $totz, $format);
+	}
+
 	//RETURN NEW TIME SHIFTED BY INTERVAL FROM INPUT TIME
 	static function time_shift($starttime, $interval='7 days', $format='M j, Y g:i a T'){
 		if(is_null($starttime)){

@@ -184,6 +184,103 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Synchronously call GET /api/v1/management/stats, persist the result to
+	 * the node record (mgn_last_status_check, mgn_last_status_data, and
+	 * mgn_joinery_version if returned), and return the parsed data.
+	 *
+	 * No job record is created — this is a lightweight refresh used by the
+	 * dashboard on page load. For user-initiated status checks with audit
+	 * history, go through the job pipeline (build_check_status).
+	 *
+	 * Returns ['ok' => bool, 'elapsed_ms' => int, 'data' => array|null,
+	 *          'message' => string|null, 'reason' => string|null].
+	 */
+	public static function fetch_status_via_api($node, $timeout_seconds = 5) {
+		$start = microtime(true);
+		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
+		$public_key = (string)$node->get('mgn_api_public_key');
+		$secret_key = (string)$node->get('mgn_api_secret_key');
+
+		if ($site_url === '' || $public_key === '' || $secret_key === '') {
+			return [
+				'ok' => false, 'elapsed_ms' => 0, 'data' => null,
+				'message' => 'API credentials or site URL not configured',
+				'reason' => 'config',
+			];
+		}
+
+		$ch = curl_init($site_url . '/api/v1/management/stats');
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_CONNECTTIMEOUT => $timeout_seconds,
+			CURLOPT_TIMEOUT        => $timeout_seconds,
+			CURLOPT_HTTPHEADER     => [
+				'public_key: ' . $public_key,
+				'secret_key: ' . $secret_key,
+				'Accept: application/json',
+			],
+			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
+			CURLOPT_SSL_VERIFYHOST => $node->get('mgn_tls_insecure') ? 0 : 2,
+			CURLOPT_FOLLOWLOCATION => false,
+		]);
+		$body = curl_exec($ch);
+		$errno = curl_errno($ch);
+		$errmsg = curl_error($ch);
+		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		$elapsed_ms = intval(round((microtime(true) - $start) * 1000));
+
+		if ($errno) {
+			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
+				'message' => $errmsg ?: 'transport failure', 'reason' => 'transport'];
+		}
+		if ($status === 401 || $status === 403) {
+			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
+				'message' => 'authentication failed', 'reason' => 'auth'];
+		}
+		if ($status !== 200) {
+			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
+				'message' => 'HTTP ' . intval($status), 'reason' => 'status'];
+		}
+
+		$decoded = json_decode((string)$body, true);
+		if (!is_array($decoded) || !isset($decoded['data']) || !is_array($decoded['data'])) {
+			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
+				'message' => 'unexpected response body', 'reason' => 'body'];
+		}
+		$data = $decoded['data'];
+
+		$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
+		$node->set('mgn_last_status_data', json_encode($data));
+		if (!empty($data['joinery_version'])) {
+			$node->set('mgn_joinery_version', $data['joinery_version']);
+		}
+		$node->save();
+
+		return ['ok' => true, 'elapsed_ms' => $elapsed_ms, 'data' => $data,
+			'message' => null, 'reason' => null];
+	}
+
+	/**
+	 * Derive the dashboard badge color from a parsed status_data array.
+	 * Pure function — same thresholds as the inline logic in the dashboard view.
+	 * Caller layers install_state / last_job_failed on top if relevant.
+	 */
+	public static function status_color_from_data($status_data) {
+		if (!is_array($status_data) || empty($status_data)) return 'secondary';
+		if ((isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
+			(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')) {
+			return 'danger';
+		}
+		if ((isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
+			(isset($status_data['load_1m']) && $status_data['load_1m'] > 5)) {
+			return 'warning';
+		}
+		return 'success';
+	}
+
+	/**
 	 * Get the path to Globalvars_site.php on a remote node.
 	 * Config is one level up from web_root (public_html).
 	 */
