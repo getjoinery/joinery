@@ -1,0 +1,39 @@
+# Joinery Base Image
+# VERSION 1.0
+#
+# Builds the shared OS/runtime layer used by all site images.
+# Contains: Ubuntu 24.04 + Apache + PHP 8.3 + PostgreSQL + Composer + Cron
+# Does NOT contain site code or site-specific config.
+#
+# Build:
+#   ./install.sh build-base
+# Or manually (from a prepared context containing install.sh):
+#   docker build -f Dockerfile.base -t joinery-base:1.0 .
+#
+# After building, all `install.sh site` runs use this image automatically.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Copy only the install script - site code is NOT included in the base.
+# Build context is the prepared install_tools/ directory (see do_build_base),
+# so install.sh is at the context root.
+COPY install.sh /tmp/install.sh
+
+# Install all system dependencies.
+# --skip-postgres-password tells install.sh server not to set a postgres user
+# password during the base build - that is a per-site concern and is handled
+# by _site_init.sh at first container run. This avoids baking any credential
+# (not even a placeholder) into the shared base image.
+RUN chmod +x /tmp/install.sh && \
+    /tmp/install.sh server --skip-postgres-password && \
+    rm /tmp/install.sh
+
+# Label the image with a hash of the install.sh server code path so
+# do_site_docker can detect drift between the base and the current install.sh.
+# (See "Drift detection" in do_site_docker.)
+ARG INSTALL_SH_HASH=unknown
+LABEL joinery.install_sh_hash="${INSTALL_SH_HASH}"
+
+EXPOSE 80 5432

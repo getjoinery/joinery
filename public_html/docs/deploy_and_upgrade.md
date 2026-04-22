@@ -14,6 +14,41 @@ Tools 1, 4, and 5 use **DeploymentHelper** (`/includes/DeploymentHelper.php`) fo
 
 For Docker and bare-metal deployments, see **[Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)**.
 
+### Docker Shared Base Image
+
+Docker site images build `FROM joinery-base:VERSION` rather than `FROM ubuntu:24.04`. The base image contains Ubuntu + Apache + PHP 8.3 + PostgreSQL + Composer + cron and is shared across all site containers on a host. Per-site images only layer the site code, config, and VirtualHost on top.
+
+**Two-step build on a Docker host:**
+
+```bash
+# 1. One-time per host — build the shared base image (~5-10 minutes, ~2.3 GB).
+./install.sh build-base
+
+# 2. Create sites normally — each site image builds in seconds and is ~500 MB.
+./install.sh site mysite mysite.com 8080
+```
+
+`install.sh site` refuses to run if `joinery-base:VERSION` is missing and tells you to run `build-base` first.
+
+**`BASE_IMAGE_VERSION`** is a constant at the top of `install.sh`. Bump it and run `build-base` again whenever the system stack changes:
+
+- Ubuntu base version changes
+- PHP major/minor version changes
+- New apt packages or PHP extensions added to `do_server_setup`
+- Any other change to `Dockerfile.base`
+
+Existing containers keep running on their old base image until they are rebuilt — no disruption. Site rebuilds fire a **drift warning** if the current `install.sh do_server_setup` hash differs from the hash baked into the base image (stored as the `joinery.install_sh_hash` label). That's the signal to bump `BASE_IMAGE_VERSION` and rebuild the base.
+
+#### Upgrade-flow split (important)
+
+This is the behavioural change most likely to trip up an operator who remembers the pre-shared-base model:
+
+- **Code / theme / plugin changes** (PHP files under `public_html/`, migrations, settings) — deliver via the existing publish/upgrade pipeline (`publish_upgrade.php` + `upgrade.php`). **No base image work required.** Nothing changes here.
+- **System stack changes** (new apt package, new PHP extension, Ubuntu bump, PHP bump, anything in `do_server_setup`) — now require **base rebuild + container rebuild**, not just `upgrade.php`. `upgrade.php` refreshes the application layer only; it cannot modify a running container's system packages. Operators must:
+  1. Bump `BASE_IMAGE_VERSION` in `install.sh`
+  2. Run `./install.sh build-base` on the host
+  3. Rebuild each site container (see migration steps in `specs/implemented/docker_shared_base_image.md`)
+
 ### Distribution Architecture
 
 Updates are distributed as separate archives:
@@ -380,4 +415,4 @@ The `publish_theme.php` catalog endpoints (`?list=themes`, `?list=plugins`) incl
 
 ---
 
-*Last Updated: 2026-04-12*
+*Last Updated: 2026-04-22*
