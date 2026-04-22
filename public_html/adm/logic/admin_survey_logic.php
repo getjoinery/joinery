@@ -21,7 +21,6 @@ function admin_survey_logic($get, $post) {
         if (isset($post['action'])) {
             switch ($post['action']) {
                 case 'addquestion':
-                    error_log("DEBUG addquestion: svy_survey_id=" . ($post['svy_survey_id'] ?? 'NULL') . ", qst_question_id=" . ($post['qst_question_id'] ?? 'NULL'));
                     $survey_question = new SurveyQuestion(NULL);
                     $survey_question->set('srq_svy_survey_id', $post['svy_survey_id']);
                     $survey_question->set('srq_qst_question_id', $post['qst_question_id']);
