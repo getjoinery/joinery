@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.13 - Shared joinery-base image; add build-base subcommand and drift detection
+#VERSION 2.14 - Auto-download fresh core archive from upgrade server on every site build
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -631,6 +631,64 @@ download_themes_and_plugins() {
     fi
 
     print_success "Theme and plugin download complete"
+}
+
+# Download fresh core application files from distribution server and overlay
+# them onto TARGET_DIR (the public_html directory in the build context).
+# Theme/ and plugins/ subdirectories are excluded so freshly-downloaded
+# themes and plugins are never overwritten by the empty stubs in the core archive.
+# Gracefully warns and continues if the server is unreachable or download fails.
+# Usage: download_core_archive TARGET_DIR
+download_core_archive() {
+    local target_dir="$1"
+
+    print_step "Downloading fresh core archive from $UPGRADE_SERVER..."
+
+    # Fetch upgrade metadata
+    local upgrade_info
+    upgrade_info=$(curl -sf --max-time 30 "${UPGRADE_SERVER}/utils/upgrade?serve-upgrade=1" 2>/dev/null)
+    if [[ -z "$upgrade_info" ]]; then
+        print_warning "Could not reach $UPGRADE_SERVER — building with archive copy as-is"
+        return 0
+    fi
+
+    # Extract core_location from JSON response
+    local core_location
+    core_location=$(echo "$upgrade_info" | grep -oP '"core_location"\s*:\s*"\K[^"]+')
+    if [[ -z "$core_location" ]]; then
+        print_warning "Upgrade server response missing core_location — building with archive copy as-is"
+        return 0
+    fi
+
+    print_info "Core archive: $(basename "$core_location")"
+
+    local tmp_archive tmp_extract
+    tmp_archive=$(mktemp /tmp/joinery-core-XXXXXX.tar.gz)
+    tmp_extract=$(mktemp -d /tmp/joinery-core-extract-XXXXXX)
+
+    # Download
+    if ! curl -sf --max-time 300 -o "$tmp_archive" "$core_location"; then
+        print_warning "Failed to download core archive — building with archive copy as-is"
+        rm -f "$tmp_archive"; rm -rf "$tmp_extract"
+        return 0
+    fi
+
+    # Extract
+    if ! tar -xzf "$tmp_archive" -C "$tmp_extract" 2>/dev/null; then
+        print_warning "Failed to extract core archive — building with archive copy as-is"
+        rm -f "$tmp_archive"; rm -rf "$tmp_extract"
+        return 0
+    fi
+
+    # Overlay core files, skipping theme/ and plugins/ (already downloaded fresh)
+    if [[ -d "$tmp_extract/public_html" ]]; then
+        rsync -a --exclude='theme/' --exclude='plugins/' "$tmp_extract/public_html/" "$target_dir/"
+        print_success "Core archive applied: $(basename "$core_location")"
+    else
+        print_warning "Core archive has unexpected structure — building with archive copy as-is"
+    fi
+
+    rm -f "$tmp_archive"; rm -rf "$tmp_extract"
 }
 
 # Download a single theme or plugin
@@ -2119,6 +2177,13 @@ do_site_docker() {
 
     print_info "Copying public_html..."
     cp -r "$ARCHIVE_ROOT/public_html" "$BUILD_DIR/$SITENAME/"
+
+    # Overlay fresh core files from the upgrade server so the image always ships
+    # with current code, not whatever was in the local archive.  Skip when cloning:
+    # the clone source manages its own versioning.
+    if [ -z "$CLONE_FROM" ]; then
+        download_core_archive "$BUILD_DIR/$SITENAME/public_html"
+    fi
 
     print_info "Setting up config directory..."
     mkdir -p "$BUILD_DIR/$SITENAME/config"
