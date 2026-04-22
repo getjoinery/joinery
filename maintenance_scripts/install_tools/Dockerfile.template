@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 3.0 - Built on shared joinery-base image (see Dockerfile.base)
+# VERSION 3.1 - Install Composer dependencies during image build
 #
 # Usage:
 #   docker build \
@@ -43,8 +43,12 @@ COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
 # filesystem and execute bits may not carry over consistently).
 RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh
 
+# Install Composer dependencies (vendor-dir is ../vendor relative to public_html per composer.json)
+RUN if [ -f "/var/www/html/${SITENAME}/public_html/composer.json" ]; then \
+        cd /var/www/html/${SITENAME}/public_html && composer install --no-dev --no-interaction 2>/dev/null || true; \
+    fi
+
 # Create VirtualHost configuration during build (persists across restarts)
-# Note: Composer install and 000-default disable are handled by _site_init.sh
 RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtualhost.conf /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{SERVER_IP}}/*/g" /etc/apache2/sites-available/${SITENAME}.conf && \
     sed -i "s/{{DOMAIN_NAME}}/${DOMAIN_NAME}/g" /etc/apache2/sites-available/${SITENAME}.conf && \
