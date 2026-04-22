@@ -155,9 +155,6 @@ $routes = [
             $admin_page = $params[4] ?? 'index';
             $admin_file = "plugins/{$plugin}/admin/{$admin_page}.php";
 
-            // Debug: will show in route debug logs when enabled
-            error_log("Plugin admin route: plugin={$plugin}, admin_page={$admin_page}, file={$admin_file}, exists=" . (file_exists($admin_file) ? 'yes' : 'no'));
-
             if (file_exists($admin_file)) {
                 $is_valid_page = true;
                 require_once($admin_file);
