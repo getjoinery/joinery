@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-#VERSION 2.11 - Remove volumes when removing existing container to ensure clean reinstall
+#VERSION 2.12 - Add host-harden subcommand for Docker host security hardening
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
+#   ./install.sh host-harden                          # One-time: harden a Docker host server
 #   ./install.sh server                              # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
@@ -915,6 +916,145 @@ do_docker_install() {
 }
 
 #==============================================================================
+# SUBCOMMAND: host-harden - Harden a Docker host server after initial provisioning
+#==============================================================================
+
+do_host_harden() {
+    print_header "Docker Host Security Hardening"
+
+    if [ "$EUID" -ne 0 ]; then
+        print_error "This command must be run as root (use sudo)"
+        exit 1
+    fi
+
+    # Safety check: require at least one authorized SSH key before disabling password auth
+    local AUTH_KEYS="${HOME}/.ssh/authorized_keys"
+    if [ ! -f "$AUTH_KEYS" ] || [ ! -s "$AUTH_KEYS" ]; then
+        print_error "No SSH authorized_keys found at $AUTH_KEYS"
+        print_error "Add your SSH public key before running host-harden to avoid being locked out"
+        exit 1
+    fi
+    local KEY_COUNT
+    KEY_COUNT=$(grep -c 'ssh-' "$AUTH_KEYS" 2>/dev/null || echo 0)
+    print_info "Found $KEY_COUNT SSH key(s) in authorized_keys — safe to disable password auth"
+
+    if [ "$ASSUME_YES" -ne 1 ]; then
+        echo ""
+        print_warning "This will disable SSH password authentication on this server."
+        print_warning "You will only be able to log in with the key(s) listed above."
+        read -p "Proceed? [y/N] " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Aborted"
+            exit 0
+        fi
+    fi
+
+    # --- SSH hardening ---
+    print_step "Hardening SSH..."
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+    sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+    sed -i 's/#PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+    sed -i 's/PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+    sed -i 's/#MaxAuthTries 6/MaxAuthTries 3/' /etc/ssh/sshd_config
+    systemctl restart ssh
+    print_success "SSH: password auth disabled, key-only login enforced"
+
+    # --- fail2ban ---
+    print_step "Installing and configuring fail2ban..."
+    apt-get install -y fail2ban > /dev/null 2>&1
+    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+    tee -a /etc/fail2ban/jail.local > /dev/null << 'EOF'
+
+# Joinery host hardening
+[sshd]
+enabled = true
+bantime = 1h
+findtime = 10m
+maxretry = 3
+EOF
+    systemctl enable fail2ban
+    systemctl start fail2ban
+    print_success "fail2ban: installed and running, SSH jail active (ban after 3 failures in 10m)"
+
+    # --- journald size limit ---
+    print_step "Capping systemd journal size..."
+    mkdir -p /etc/systemd/journald.conf.d
+    tee /etc/systemd/journald.conf.d/size-limit.conf > /dev/null << 'EOF'
+[Journal]
+SystemMaxUse=100M
+EOF
+    systemctl restart systemd-journald
+    print_success "journald: capped at 200M, 2-week retention"
+
+    # --- Docker BuildKit GC policy ---
+    if command -v docker &> /dev/null; then
+        print_step "Configuring Docker BuildKit GC policy..."
+        local DAEMON_JSON="/etc/docker/daemon.json"
+        if [ -f "$DAEMON_JSON" ] && grep -q '"builder"' "$DAEMON_JSON"; then
+            print_info "daemon.json already has builder config — skipping"
+        else
+            if [ -f "$DAEMON_JSON" ]; then
+                # Merge into existing daemon.json — insert before closing brace
+                sed -i 's/}$/,"builder":{"gc":{"enabled":true,"defaultKeepStorage":"2GB"}}}/' "$DAEMON_JSON"
+            else
+                tee "$DAEMON_JSON" > /dev/null << 'EOF'
+{
+  "builder": {
+    "gc": {
+      "enabled": true,
+      "defaultKeepStorage": "0"
+    }
+  }
+}
+EOF
+            fi
+            systemctl reload docker 2>/dev/null || true
+            print_success "Docker BuildKit GC: auto-prune to 2GB"
+        fi
+    else
+        print_info "Docker not installed — skipping BuildKit GC config"
+    fi
+
+    # --- Orphaned build dir scan ---
+    print_step "Scanning for orphaned build directories..."
+    local ORPHANS
+    ORPHANS=$(find ~ -maxdepth 1 -type d -name 'joinery-docker-build-*' 2>/dev/null)
+    if [ -n "$ORPHANS" ]; then
+        print_warning "Orphaned build directories found:"
+        echo "$ORPHANS"
+        if [ "$ASSUME_YES" -ne 1 ]; then
+            read -p "Delete them? [y/N] " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo "$ORPHANS" | xargs rm -rf
+                print_success "Orphaned build directories removed"
+            fi
+        else
+            echo "$ORPHANS" | xargs rm -rf
+            print_success "Orphaned build directories removed"
+        fi
+    else
+        print_success "No orphaned build directories found"
+    fi
+
+    # --- Truncate btmp ---
+    print_step "Truncating failed-login logs..."
+    truncate -s 0 /var/log/btmp 2>/dev/null || true
+    truncate -s 0 /var/log/btmp.1 2>/dev/null || true
+    print_success "btmp logs cleared"
+
+    print_header "Host Hardening Complete!"
+    echo -e "${GREEN}✓${NC} SSH password authentication disabled"
+    echo -e "${GREEN}✓${NC} fail2ban active (SSH jail)"
+    echo -e "${GREEN}✓${NC} journald capped at 200M"
+    echo -e "${GREEN}✓${NC} Docker BuildKit GC configured"
+    echo -e "${GREEN}✓${NC} btmp logs cleared"
+    echo ""
+}
+
+#==============================================================================
 # SUBCOMMAND: server - Set up bare-metal server (integrated from server_setup.sh)
 #==============================================================================
 
@@ -1113,6 +1253,8 @@ EOF
     print_info "Configuring PostgreSQL to listen on port 5432..."
     sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/#port = 5432/port = 5432/" ${PG_CONFIG_DIR}/postgresql.conf
+    sed -i "s/#max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
+    sed -i "s/max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
 
     # Restart PostgreSQL to apply configuration
     service_restart postgresql
@@ -1181,6 +1323,12 @@ EOF
         sed -i 's/#MaxAuthTries 6/MaxAuthTries 3/' /etc/ssh/sshd_config
         sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 300/' /etc/ssh/sshd_config
         sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' /etc/ssh/sshd_config
+
+        # To disable password auth entirely (key-based only), uncomment these lines.
+        # Requires SSH keys to be in place first — run 'install.sh host-harden' after keys are confirmed.
+        # sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+        # sed -i 's/#PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+        # sed -i 's/PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
 
         service_restart ssh
 
@@ -1810,6 +1958,23 @@ do_site_docker() {
         print_success "No existing container found"
     fi
 
+    # Warn about orphaned build dirs from previous interrupted installs
+    ORPHANED_BUILDS=$(find ~ -maxdepth 1 -type d -name 'joinery-docker-build-*' ! -name "joinery-docker-build-${SITENAME}" 2>/dev/null)
+    if [ -n "$ORPHANED_BUILDS" ]; then
+        print_warning "Orphaned build directories found from previous installs:"
+        echo "$ORPHANED_BUILDS" | while read -r d; do echo "  $d ($(du -sh "$d" 2>/dev/null | cut -f1))"; done
+        if [ "$ASSUME_YES" -eq 1 ]; then
+            echo "$ORPHANED_BUILDS" | xargs rm -rf
+            print_success "Orphaned build directories removed"
+        else
+            read -p "Remove them now? [y/N] " -n 1 -r; echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo "$ORPHANED_BUILDS" | xargs rm -rf
+                print_success "Orphaned build directories removed"
+            fi
+        fi
+    fi
+
     # Prepare build context
     print_step "Preparing build context..."
 
@@ -2028,6 +2193,11 @@ EOF
         list_docker_containers
 
         print_success "Docker site installation complete!"
+
+        # Remind about source archive disk usage
+        ARCHIVE_SIZE=$(du -sh "$ARCHIVE_ROOT" 2>/dev/null | cut -f1)
+        print_info "Note: Source archive at $ARCHIVE_ROOT (${ARCHIVE_SIZE}) is no longer needed for this site."
+        print_info "If all sites are installed, you can free space with: rm -rf $ARCHIVE_ROOT"
     fi
 
     # Set up SSL with reverse proxy if domain provided
@@ -2284,10 +2454,11 @@ show_help() {
     echo "  -q, --quiet   Suppress most output, show only errors and final status"
     echo ""
     echo "Commands:"
-    echo "  docker    Install Docker (one-time, for Docker deployments)"
-    echo "  server    Set up base server (one-time, for bare-metal deployments)"
-    echo "  site      Create a new Joinery site"
-    echo "  list      List existing Joinery sites (Docker and bare-metal)"
+    echo "  docker       Install Docker (one-time, for Docker deployments)"
+    echo "  host-harden   Harden a Docker host server (one-time, run after docker install)"
+    echo "  server       Set up base server (one-time, for bare-metal deployments)"
+    echo "  site         Create a new Joinery site"
+    echo "  list         List existing Joinery sites (Docker and bare-metal)"
     echo ""
     echo "Site Command Options:"
     echo "  --activate THEME       Activate specified theme after installation"
@@ -2304,8 +2475,9 @@ show_help() {
     echo "  Use --no-ssl to skip SSL setup."
     echo ""
     echo "Examples:"
-    echo "  # Install Docker (once)"
+    echo "  # Install Docker (once), then harden the host"
     echo "  sudo ./install.sh docker"
+    echo "  sudo ./install.sh host-harden"
     echo ""
     echo "  # Create Docker site (with automatic SSL)"
     echo "  sudo ./install.sh site production SecurePass! prod.example.com 8080"
@@ -2367,6 +2539,10 @@ case "${1:-}" in
     docker)
         shift
         do_docker_install "$@"
+        ;;
+    host-harden)
+        shift
+        do_host_harden "$@"
         ;;
     server)
         shift
