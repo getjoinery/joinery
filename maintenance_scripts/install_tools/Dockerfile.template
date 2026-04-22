@@ -1,14 +1,16 @@
 # Joinery Docker Template
-# VERSION 2.2 - Added log rotation
+# VERSION 3.0 - Built on shared joinery-base image (see Dockerfile.base)
 #
 # Usage:
 #   docker build \
+#     --build-arg BASE_IMAGE_VERSION=1.0 \
 #     --build-arg SITENAME=clientsite \
 #     --build-arg POSTGRES_PASSWORD=secure_password \
 #     --build-arg DOMAIN_NAME=client.example.com \
 #     -t joinery-clientsite .
 #
 # Build Arguments:
+#   BASE_IMAGE_VERSION - joinery-base image tag to build from (required)
 #   SITENAME          - Site directory name (default: dockertest)
 #   POSTGRES_PASSWORD - Database password (required)
 #   DOMAIN_NAME       - Domain for VirtualHost (default: localhost)
@@ -17,7 +19,9 @@
 #   CLONE_FROM        - URL to clone database and uploads from (optional)
 #   CLONE_KEY         - Authentication key for clone source (optional)
 
-FROM ubuntu:24.04
+# BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
+ARG BASE_IMAGE_VERSION
+FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)
 ARG SITENAME=dockertest
@@ -31,16 +35,13 @@ ENV POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 ENV DOMAIN_NAME=${DOMAIN_NAME}
 
 # Copy source files
+# System dependencies (Apache, PHP, PostgreSQL, Composer, cron) come from joinery-base.
 COPY ${SITENAME}/ /var/www/html/${SITENAME}/
 COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
 
-# Run server setup (installs all dependencies)
-RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh && \
-    cd /var/www/html/${SITENAME}/maintenance_scripts/install_tools && \
-    ./install.sh server
-
-# Install cron for scheduled tasks
-RUN apt-get update -qq && apt-get install -y -qq cron > /dev/null 2>&1
+# Ensure install_tools scripts remain executable (they are copied from host
+# filesystem and execute bits may not carry over consistently).
+RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh
 
 # Create VirtualHost configuration during build (persists across restarts)
 # Note: Composer install and 000-default disable are handled by _site_init.sh

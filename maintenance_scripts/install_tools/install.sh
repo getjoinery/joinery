@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-#VERSION 2.12 - Add host-harden subcommand for Docker host security hardening
+#VERSION 2.13 - Shared joinery-base image; add build-base subcommand and drift detection
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
 #   ./install.sh host-harden                          # One-time: harden a Docker host server
+#   ./install.sh build-base                          # One-time per host: build joinery-base image
 #   ./install.sh server                              # One-time: set up bare-metal server
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
@@ -51,6 +52,15 @@ set +H  # Disable history expansion (prevents ! in passwords from being interpre
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+#==============================================================================
+# GLOBAL CONSTANTS
+#==============================================================================
+
+# joinery-base image tag. Bump when Dockerfile.base or do_server_setup changes
+# (Ubuntu version, PHP version, new apt packages, new system config, etc.).
+# After bumping: run './install.sh build-base' on each host, then rebuild sites.
+BASE_IMAGE_VERSION="1.0"
 
 #==============================================================================
 # GLOBAL FLAGS (parsed before command dispatch)
@@ -1055,11 +1065,91 @@ EOF
 }
 
 #==============================================================================
+# SUBCOMMAND: build-base - Build the shared joinery-base image
+#==============================================================================
+
+# Hash the do_server_setup function body so we can label the base image and
+# detect drift later. Whole-file hash produces too many false positives when
+# unrelated functions change. The range end is `^}$` (bare closing brace on
+# its own line), not `^}`, because do_server_setup contains heredocs with
+# `};` lines that would otherwise truncate the range.
+compute_install_sh_hash() {
+    awk '/^do_server_setup\(\) \{/,/^\}$/' "$SCRIPT_DIR/install.sh" \
+        | sha256sum | cut -c1-16
+}
+
+do_build_base() {
+    print_header "Building Joinery Base Image"
+
+    if ! command -v docker >/dev/null 2>&1; then
+        print_error "Docker is not installed. Run './install.sh docker' first."
+        exit 1
+    fi
+
+    if [ ! -f "$SCRIPT_DIR/Dockerfile.base" ]; then
+        print_error "Dockerfile.base not found in $SCRIPT_DIR"
+        exit 1
+    fi
+
+    # Build context: just install.sh at the context root (matches
+    # Dockerfile.base's `COPY install.sh /tmp/install.sh`).
+    BUILD_DIR=$(mktemp -d)
+    mkdir -p "$BUILD_DIR/install_tools"
+    cp "$SCRIPT_DIR/install.sh" "$BUILD_DIR/install_tools/install.sh"
+    cp "$SCRIPT_DIR/Dockerfile.base" "$BUILD_DIR/install_tools/Dockerfile.base"
+
+    INSTALL_SH_HASH=$(compute_install_sh_hash)
+
+    print_step "Building joinery-base:${BASE_IMAGE_VERSION} (takes 5-10 minutes)..."
+    print_info "install.sh hash: ${INSTALL_SH_HASH}"
+
+    local BUILD_STATUS=0
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        docker build -q \
+            -f "$BUILD_DIR/install_tools/Dockerfile.base" \
+            --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
+            -t "joinery-base:${BASE_IMAGE_VERSION}" \
+            -t "joinery-base:latest" \
+            "$BUILD_DIR/install_tools" > /dev/null || BUILD_STATUS=$?
+    else
+        docker build \
+            -f "$BUILD_DIR/install_tools/Dockerfile.base" \
+            --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
+            -t "joinery-base:${BASE_IMAGE_VERSION}" \
+            -t "joinery-base:latest" \
+            "$BUILD_DIR/install_tools" || BUILD_STATUS=$?
+    fi
+
+    rm -rf "$BUILD_DIR"
+
+    if [ "$BUILD_STATUS" -eq 0 ]; then
+        print_success "joinery-base:${BASE_IMAGE_VERSION} built successfully"
+        print_info "install.sh hash: ${INSTALL_SH_HASH}"
+        print_info "Run './install.sh site SITENAME ...' to create a site using this base"
+    else
+        print_error "Base image build failed"
+        exit 1
+    fi
+}
+
+#==============================================================================
 # SUBCOMMAND: server - Set up bare-metal server (integrated from server_setup.sh)
 #==============================================================================
 
 do_server_setup() {
     print_header "Bare-Metal Server Setup"
+
+    # Parse do_server_setup-specific flags.
+    # --skip-postgres-password is used when building the shared joinery-base
+    # image: the base image must not bake any postgres credential (real or
+    # placeholder). Per-site postgres passwords are set by _site_init.sh at
+    # first container run.
+    local SKIP_POSTGRES_PASSWORD=0
+    for arg in "$@"; do
+        case "$arg" in
+            --skip-postgres-password) SKIP_POSTGRES_PASSWORD=1 ;;
+        esac
+    done
 
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
@@ -1072,10 +1162,10 @@ do_server_setup() {
         print_warning "This script is designed for Ubuntu 24.04. Continuing anyway..."
     fi
 
-    # Get PostgreSQL password
+    # Get PostgreSQL password (skipped when building the shared base image)
     POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 
-    if [[ -z "$POSTGRES_PASSWORD" ]]; then
+    if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ] && [[ -z "$POSTGRES_PASSWORD" ]]; then
         print_info "PostgreSQL password not set."
         echo -n "Please enter a password for PostgreSQL postgres user: "
         read -s POSTGRES_PASSWORD
@@ -1104,7 +1194,7 @@ do_server_setup() {
 
     # Install essential packages
     print_step "Installing essential packages..."
-    apt install -y curl wget git unzip rsync software-properties-common apt-transport-https ca-certificates gnupg lsb-release build-essential fail2ban
+    apt install -y curl wget git unzip rsync software-properties-common apt-transport-https ca-certificates gnupg lsb-release build-essential fail2ban cron
 
     # Create and configure user1
     print_step "Setting up user1..."
@@ -1259,25 +1349,32 @@ EOF
     # Restart PostgreSQL to apply configuration
     service_restart postgresql
 
-    # Set PostgreSQL postgres user password automatically
-    print_info "Setting PostgreSQL postgres user password..."
+    # Set PostgreSQL postgres user password automatically.
+    # Skipped when --skip-postgres-password is set (shared base image build);
+    # in that case _site_init.sh handles the same trust/ALTER/md5 dance at
+    # first container run per-site.
+    if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ]; then
+        print_info "Setting PostgreSQL postgres user password..."
 
-    # Temporarily allow trust authentication for postgres user to set password
-    sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' ${PG_CONFIG_DIR}/pg_hba.conf
+        # Temporarily allow trust authentication for postgres user to set password
+        sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' ${PG_CONFIG_DIR}/pg_hba.conf
 
-    # Reload PostgreSQL configuration
-    service_reload postgresql
+        # Reload PostgreSQL configuration
+        service_reload postgresql
 
-    # Set the postgres user password
-    su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres
+        # Set the postgres user password
+        su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres
 
-    # Restore secure md5 authentication
-    sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' ${PG_CONFIG_DIR}/pg_hba.conf
+        # Restore secure md5 authentication
+        sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' ${PG_CONFIG_DIR}/pg_hba.conf
 
-    # Reload PostgreSQL configuration again
-    service_reload postgresql
+        # Reload PostgreSQL configuration again
+        service_reload postgresql
 
-    print_success "PostgreSQL postgres user password set successfully"
+        print_success "PostgreSQL postgres user password set successfully"
+    else
+        print_info "Skipping postgres user password (--skip-postgres-password)"
+    fi
 
     # Start and enable services
     print_step "Starting services..."
@@ -1895,6 +1992,30 @@ do_site_docker() {
         print_success "Ports $PORT and $DB_PORT are available"
     fi
 
+    # Require joinery-base image (all site images build FROM it)
+    print_step "Checking for joinery-base:${BASE_IMAGE_VERSION}..."
+    if ! docker image inspect "joinery-base:${BASE_IMAGE_VERSION}" > /dev/null 2>&1; then
+        print_error "joinery-base:${BASE_IMAGE_VERSION} not found."
+        print_info "Build it first with:  ./install.sh build-base"
+        exit 1
+    fi
+    print_success "joinery-base:${BASE_IMAGE_VERSION} found"
+
+    # Drift detection: warn (do not fail) if the current install.sh
+    # do_server_setup differs from the hash baked into the base image. A
+    # mismatch means someone edited install.sh without bumping
+    # BASE_IMAGE_VERSION and rebuilding the base.
+    CURRENT_HASH=$(compute_install_sh_hash)
+    BASE_HASH=$(docker image inspect "joinery-base:${BASE_IMAGE_VERSION}" \
+        --format '{{ index .Config.Labels "joinery.install_sh_hash" }}' 2>/dev/null)
+    if [ -n "$BASE_HASH" ] && [ "$BASE_HASH" != "unknown" ] && [ "$CURRENT_HASH" != "$BASE_HASH" ]; then
+        print_warning "install.sh do_server_setup has changed since joinery-base was built"
+        print_warning "  base image hash:  ${BASE_HASH}"
+        print_warning "  current hash:     ${CURRENT_HASH}"
+        print_warning "  If system packages or PHP extensions changed, bump BASE_IMAGE_VERSION"
+        print_warning "  and rebuild:  ./install.sh build-base"
+    fi
+
     # Verify archive structure
     print_step "Verifying archive structure..."
 
@@ -2032,14 +2153,17 @@ EOF
 
     # Build with -q flag in quiet mode to suppress build output
     # Note: Clone options are passed at runtime, not build time (security)
+    # BASE_IMAGE_VERSION is consumed by Dockerfile.template's `ARG` before FROM.
     if [ "$QUIET_MODE" -eq 1 ]; then
         docker build -q \
+            --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
             --build-arg SITENAME="$SITENAME" \
             --build-arg POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
             --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
             -t "joinery-$SITENAME" . > /dev/null
     else
         docker build \
+            --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
             --build-arg SITENAME="$SITENAME" \
             --build-arg POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
             --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
@@ -2456,6 +2580,7 @@ show_help() {
     echo "Commands:"
     echo "  docker       Install Docker (one-time, for Docker deployments)"
     echo "  host-harden   Harden a Docker host server (one-time, run after docker install)"
+    echo "  build-base   Build the shared joinery-base image (one-time per Docker host)"
     echo "  server       Set up base server (one-time, for bare-metal deployments)"
     echo "  site         Create a new Joinery site"
     echo "  list         List existing Joinery sites (Docker and bare-metal)"
@@ -2543,6 +2668,10 @@ case "${1:-}" in
     host-harden)
         shift
         do_host_harden "$@"
+        ;;
+    build-base)
+        shift
+        do_build_base "$@"
         ;;
     server)
         shift
