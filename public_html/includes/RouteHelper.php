@@ -972,41 +972,12 @@ class RouteHelper {
             error_log("[ROUTE_DEBUG] Debugging enabled for this request");
         }
         
-        // EXTENSIVE DEBUGGING - Log everything that comes in
-        error_log("Type of request_path: " . gettype($request_path));
-        error_log("Length of request_path: " . strlen($request_path ?? ''));
-        error_log("Is request_path empty: " . (empty($request_path) ? 'YES' : 'NO'));
-        error_log("request_path === null: " . ($request_path === null ? 'YES' : 'NO'));
-        error_log("request_path === '': " . ($request_path === '' ? 'YES' : 'NO'));
-        
-        // Log $_REQUEST contents
-        error_log("Full \$_REQUEST array: " . var_export($_REQUEST, true));
-        error_log("Specific \$_REQUEST['path']: " . var_export($_REQUEST['path'] ?? 'NOT_SET', true));
-        
-        // Log routes structure
-        error_log("Routes structure passed in: " . var_export(array_keys($routes), true));
-        if (isset($routes['static'])) {
-            error_log("Static routes count: " . count($routes['static']));
-            error_log("Static routes keys: " . var_export(array_keys($routes['static']), true));
-        }
-        if (isset($routes['dynamic'])) {
-            error_log("Dynamic routes count: " . count($routes['dynamic']));
-            error_log("Dynamic routes keys: " . var_export(array_keys($routes['dynamic']), true));
-        }
-        if (isset($routes['custom'])) {
-            error_log("Custom routes count: " . count($routes['custom']));
-            error_log("Custom routes keys: " . var_export(array_keys($routes['custom']), true));
-        }
-        
         // Initialize global variables
         global $is_valid_page;
         if (!isset($is_valid_page)) {
             $is_valid_page = false;
         }
-        error_log("Initial \$is_valid_page: " . ($is_valid_page ? 'true' : 'false'));
-        
         // Handle .php extension - strict 404 policy
-        error_log("Checking for .php extension in: " . var_export($request_path, true));
         if (substr($request_path, -4) === '.php') {
             $clean_path = substr($request_path, 0, -4);
             // Log error for monitoring
@@ -1036,11 +1007,6 @@ class RouteHelper {
         $static_routes_path = rtrim($request_path, '/');
         $static_routes_path = ltrim($static_routes_path, '/');
         
-        error_log("After normalization:");
-        error_log("  full_path: " . var_export($full_path, true));
-        error_log("  static_routes_path: " . var_export($static_routes_path, true));
-        error_log("  params: " . var_export($params, true));
-        
         self::debugLog('request_parsing', "Request parsing completed", [
             'original_request_path' => $request_path,
             'normalized_full_path' => $full_path,
@@ -1051,9 +1017,7 @@ class RouteHelper {
         
         // STEP 1: Check static routes FIRST (before loading any dependencies)
         // This optimization allows static assets to be served without loading PHP dependencies
-        error_log("Checking static routes first (before loading dependencies)...");
         if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
-            error_log("Static route matched: " . var_export($route, true));
             if (self::$match_only_mode) {
                 self::$match_only_result = [
                     'matched' => true,
@@ -1065,16 +1029,11 @@ class RouteHelper {
                 ];
                 return;
             }
-            error_log("Calling handleStaticRoute (without dependencies)...");
             if (self::handleStaticRoute($route, $params, null)) {
-                error_log("Static route handled successfully - exiting");
                 exit();
-            } else {
-                // Static route matched but failed - continue to load dependencies and show 404
-                error_log("Static route matched but handler failed");
             }
+            // Static route matched but failed - continue to load dependencies and show 404
         }
-        error_log("No static routes matched");
 
         // STEP 1.5: Fast-serve check for uploads
         // If the file exists in static_files/uploads/, serve it without loading dependencies.
@@ -1088,27 +1047,20 @@ class RouteHelper {
             $real_path = realpath($fast_path);
             $real_dir = realpath($fast_dir);
             if ($real_path && $real_dir && strpos($real_path, $real_dir . '/') === 0) {
-                error_log("Fast-serve hit: " . $full_path);
                 self::serveStaticFile($real_path, 43200);
                 exit();
             }
         }
 
-        error_log("Loading core dependencies");
-
         // STEP 2: Not a static route - now load core dependencies
-        // Load core files first using require_once
-        error_log("Loading core dependencies...");
         require_once(__DIR__ . '/PathHelper.php');
         require_once(__DIR__ . '/Globalvars.php');
         require_once(__DIR__ . '/SessionControl.php');
-        error_log("  ✓ Core files loaded (PathHelper, Globalvars, SessionControl)");
 
         // Register ErrorManager for comprehensive error handling (exceptions + fatal errors)
         require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
         $errorManager = ErrorManager::getInstance();
         $errorManager->register();
-        error_log("  ✓ ErrorManager registered for fatal error handling");
 
         // Load StaticPageCache for caching functionality
         require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
@@ -1175,21 +1127,18 @@ class RouteHelper {
         // Now use PathHelper for other dependencies
         try {
             require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'));
-            error_log("  ✓ ThemeHelper loaded");
         } catch (Exception $e) {
             error_log("  ✗ Failed to load ThemeHelper: " . $e->getMessage());
         }
         
         try {
             require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
-            error_log("  ✓ PluginHelper loaded");
         } catch (Exception $e) {
             error_log("  ✗ Failed to load PluginHelper: " . $e->getMessage());
         }
         
         $settings = Globalvars::get_instance();
         $session = SessionControl::get_instance();
-        error_log("Core objects instantiated");
 
         // Marketing coupon auto-apply — gated so zero overhead on requests without ?coupon=
         if (isset($_GET['coupon'])) {
@@ -1247,8 +1196,6 @@ class RouteHelper {
             // PathHelper::getActiveThemeDirectory() already validates directory exists
             $theme_dir = PathHelper::getActiveThemeDirectory();
             $template_directory = PathHelper::getIncludePath($theme_dir);
-            error_log("Template directory: " . var_export($template_directory, true));
-            
         } catch (Exception $e) {
             // Plugin theme configuration error - log and throw
             error_log("Template directory error: " . $e->getMessage());
@@ -1257,10 +1204,8 @@ class RouteHelper {
 
         // 3. Check for database-stored URL redirects
         if (self::checkUrlRedirects($static_routes_path, $settings)) {
-            error_log("URL redirect found and handled - exiting");
             exit(); // Redirect handled
         }
-        error_log("No URL redirects found");
         
         // Static routes were already checked before loading dependencies
         // If we got here and there was a matched static route that failed,
@@ -1273,37 +1218,27 @@ class RouteHelper {
         }
         
         // 3. Load and merge plugin routes (pull approach)
-        error_log("=== STEP 3: Loading plugin routes ===");
         $plugin_routes = self::loadPluginRoutes();
-        error_log("Plugin routes loaded: " . var_export($plugin_routes, true));
-        
         if (!empty($plugin_routes)) {
-            error_log("Merging plugin routes...");
             foreach ($plugin_routes as $type => $plugin_type_routes) {
                 if (!isset($routes[$type])) {
                     $routes[$type] = [];
                 }
-                error_log("Merging {$type} routes: " . count($plugin_type_routes) . " routes");
                 // MERGE #2: PREPEND all plugin routes before main routes
                 // This ensures plugins can override core functionality
                 // Order: [all plugin routes] then [main routes]
                 $routes[$type] = array_merge($plugin_type_routes, $routes[$type]);
             }
-        } else {
-            error_log("No plugin routes found");
         }
         
         // 4. Check custom routes (complex logic)
-        error_log("=== STEP 4: Checking custom routes ===");
         self::debugLog('route_matching', "Starting custom route processing", [
             'available_routes' => array_keys($routes['custom'] ?? []),
             'request_path' => $full_path
         ]);
         
         if (!empty($routes['custom'])) {
-            error_log("Custom routes available: " . var_export(array_keys($routes['custom']), true));
             foreach ($routes['custom'] as $pattern => $handler) {
-                error_log("Testing custom route pattern: " . var_export($pattern, true) . " against path: " . var_export($full_path, true));
                 self::debugLog('route_matching', "Testing pattern: {$pattern}", [
                     'pattern' => $pattern,
                     'path' => $full_path,
@@ -1311,7 +1246,6 @@ class RouteHelper {
                 ]);
                 
                 if (self::matchesPattern($pattern, $full_path)) {
-                    error_log("Custom route matched - calling handler");
                     self::debugLog('handler_execution', "Custom route matched, calling handler", [
                         'matched_pattern' => $pattern,
                         'params_passed_to_handler' => $params,
@@ -1331,7 +1265,6 @@ class RouteHelper {
                     }
 
                     if ($handler($params, $settings, $session, $template_directory)) {
-                        error_log("Custom route handler succeeded - exiting");
                         self::debugLog('handler_execution', "Handler succeeded, exiting");
                         // Save cache before exiting
                         if ($cache_buffer_started && $cache_result === false) {
@@ -1355,9 +1288,6 @@ class RouteHelper {
                     self::debugLog('route_matching', "Pattern did not match");
                 }
             }
-            error_log("No custom routes matched");
-        } else {
-            error_log("No custom routes available");
         }
         
         // 5. Check dynamic routes (unified content + simple)
@@ -1393,7 +1323,6 @@ class RouteHelper {
         }
 
         // 6. View directory fallback (automatic theme-aware view lookup)
-        error_log("=== STEP 6: View directory fallback ===");
         // Try to find view file for any remaining paths
         $view_file = 'views/' . trim($request_path, '/') . '.php';
 
@@ -1424,8 +1353,6 @@ class RouteHelper {
             $plugin_name = $plugin_ns['plugin_name'];
             $view_subdir = $plugin_ns['view_subdir'];
             $remaining   = $plugin_ns['remaining'] !== '' ? $plugin_ns['remaining'] : 'index';
-            error_log("View fallback: plugin namespace match — plugin=$plugin_name subdir=$view_subdir remaining=$remaining");
-
             // 1. Theme override at full URL path (e.g. theme/getjoinery/views/profile/scrolldaddy/devices.php)
             $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
 
@@ -1433,7 +1360,6 @@ class RouteHelper {
             if (!$view_full_path) {
                 $plugin_rel = 'plugins/' . $plugin_name . '/views/' . ($view_subdir ? $view_subdir . '/' : '') . $remaining . '.php';
                 $plugin_abs = PathHelper::getAbsolutePath($plugin_rel);
-                error_log("Trying plugin namespace fallback: " . var_export($plugin_abs, true));
                 if (file_exists($plugin_abs)) {
                     $view_full_path = $plugin_abs;
                 }
@@ -1442,14 +1368,12 @@ class RouteHelper {
             // 3. Base fallback at full URL path (e.g. views/profile/scrolldaddy/devices.php — unlikely for plugin pages)
             if (!$view_full_path) {
                 $base_abs = PathHelper::getAbsolutePath($view_file);
-                error_log("Trying base fallback: " . var_export($base_abs, true));
                 if (file_exists($base_abs)) {
                     $view_full_path = $base_abs;
                 }
             }
         } else {
             // No plugin namespace match — existing behavior: theme → base
-            error_log("Trying view fallback file: " . var_export($view_file, true));
             $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
         }
 
@@ -1476,7 +1400,6 @@ class RouteHelper {
         try {
             if ($view_full_path) {
                 require_once($view_full_path);
-                error_log("View fallback succeeded - exiting");
                 // Save cache before exiting
                 if ($cache_buffer_started && $cache_result === false) {
                     $content = ob_get_contents();
@@ -1490,20 +1413,14 @@ class RouteHelper {
                 }
                 exit();
             }
-            error_log("View fallback failed");
         } catch (Exception $e) {
             error_log("Asset/view not found: " . $request_path . " - " . $e->getMessage());
             LibraryFunctions::display_404_page();
         }
         
         // 7. Allow plugins to add custom routes (backward compatibility)
-        error_log("=== STEP 7: Legacy plugin route handler ===");
-        // Check if global plugin route handler exists
         if (function_exists('handlePluginRoutes')) {
-            error_log("Legacy handlePluginRoutes function exists - calling it");
             handlePluginRoutes($params);
-        } else {
-            error_log("No legacy handlePluginRoutes function found");
         }
 
         // Note: Cache saving is now handled by register_shutdown_function above
