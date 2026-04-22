@@ -30,8 +30,6 @@ $settings = Globalvars::get_instance();
 $run_test = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $run_test = true;
-    // Debug: Log that form was submitted
-    error_log('Form submitted with POST data: ' . print_r($_POST, true));
 }
 
 // Configuration
