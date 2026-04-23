@@ -569,6 +569,20 @@
 		if (!empty($all_errors)) {
 			echo "❗ " . count($all_errors) . " error(s) occurred<br>\n";
 		}
+
+		// Prominent summary of unresolved unique-constraint drift. These silently
+		// block ON CONFLICT queries downstream (e.g. upgrade.php system_version
+		// upsert), so keep them visible even when the overall run succeeds.
+		$unresolved = $database_updater->getUnresolvedConstraints();
+		if (!empty($unresolved)) {
+			echo "<br><strong>🛑 UNRESOLVED UNIQUE CONSTRAINTS (" . count($unresolved) . ")</strong><br>\n";
+			echo "The following unique constraints could not be created because duplicate rows exist.<br>\n";
+			echo "Deduplicate the data, then re-run update_database to add the constraint.<br>\n";
+			foreach ($unresolved as $entry) {
+				$cols = implode(', ', $entry['columns']);
+				echo "  • <code>{$entry['table']}</code> on (<code>{$cols}</code>)<br>\n";
+			}
+		}
 		
 		$migration_log = new Migration(null);
 		$migration_log->set('mig_hash', $db_structure_hash);
