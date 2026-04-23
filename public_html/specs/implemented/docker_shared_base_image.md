@@ -1,6 +1,6 @@
 # Docker Shared Base Image
 
-**Status:** Partially implemented — plugin startup sync pending  
+**Status:** Implemented 2026-04-23 — all 8 docker-prod sites migrated to shared base (joinery-base:1.0), stock asset sync via _reconcile_stock_assets.sh, upgrade 0.8.23 → 0.8.24 applied. Net disk savings ~17GB.  
 **Context:** docker-prod currently stores ~2.3 GB of OS/PHP/Apache layers independently inside each of 8 site images, totalling ~22 GB for image storage. All sites run identical system stacks. Splitting the build into a shared base image and thin per-site images reduces image storage to ~6 GB and makes new site installs much faster.
 
 ---
