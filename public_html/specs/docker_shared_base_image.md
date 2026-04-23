@@ -1,6 +1,6 @@
 # Docker Shared Base Image
 
-**Status:** Spec — awaiting implementation  
+**Status:** Partially implemented — plugin startup sync pending  
 **Context:** docker-prod currently stores ~2.3 GB of OS/PHP/Apache layers independently inside each of 8 site images, totalling ~22 GB for image storage. All sites run identical system stacks. Splitting the build into a shared base image and thin per-site images reduces image storage to ~6 GB and makes new site installs much faster.
 
 ---
@@ -327,6 +327,41 @@ Keep `:prev` tagged until at least one full operational cycle has passed (a sche
 
 **Order of operations for docker-prod:** Build base → migrate one test site → verify → migrate the rest. No need to do all at once.
 
+### ⚠️ CRITICAL: Never Use `-y` on a Production Site
+
+The `-y` / `--assume-yes` flag tells `install.sh site` to **delete the existing container AND all its data volumes** without prompting. This is correct for fresh installs. It is catastrophic on running production sites.
+
+**`-y` is only for fresh installs on empty machines. Never pass it when a named container already exists with live data.**
+
+For migrating a production site to a new image, always do the steps manually (stop → rm → tag :prev → rmi → install.sh without -y) so volumes are never touched.
+
+```bash
+# ✅ CORRECT: image-only rebuild, data volumes preserved
+docker stop getjoinery
+docker rm getjoinery            # removes container only; volumes survive
+docker tag joinery-getjoinery joinery-getjoinery:prev
+docker rmi joinery-getjoinery
+./install.sh site getjoinery getjoinery.com PORT --no-ssl
+# Docker reattaches existing volumes automatically on next run
+
+# ❌ WRONG: wipes all production data
+./install.sh site getjoinery getjoinery.com PORT -y --no-ssl
+```
+
+### Testing Changes Before Production
+
+When validating new container startup behaviour (e.g. the plugin sync step), always test against a throwaway site, not a production container:
+
+```bash
+# Use joinerydemo — it is the designated test container
+docker stop joinerydemo && docker rm joinerydemo
+docker rmi joinery-joinerydemo
+./install.sh site joinerydemo localhost 8099 -y --no-ssl
+docker logs joinerydemo | grep '\[sync\]'
+```
+
+`-y` is safe here because joinerydemo has no irreplaceable data.
+
 ---
 
 ## Operational Notes
@@ -368,6 +403,182 @@ Update `docs/deploy_and_upgrade.md` to cover:
 - The two-step build process: `install.sh build-base` once per host, then `install.sh site ...` per site.
 - The `BASE_IMAGE_VERSION` bump procedure.
 - The **upgrade-flow split** (from the Operational Notes section above): code/theme/plugin changes still flow through `publish_upgrade.php` + `upgrade.php`; system-stack changes now require a base rebuild and container rebuild. This is the behavioural change most likely to trip up an operator who remembers the old "just run upgrade.php" model.
+
+---
+
+## Plugin / Theme Sync at Container Startup
+
+### Problem
+
+The Docker image bakes in only the plugins and themes present in the archive at build time plus whatever `download_themes_and_plugins` retrieves as "system" plugins (those with `is_system: true`). Site-specific plugins — like `scrolldaddy`, which serves as the active theme for scrolldaddy.app — are `is_stock: true` but `is_system: false`, so they are never downloaded during the build.
+
+When a container is rebuilt (e.g., during base-image migration), the old container's writable layer is discarded. If the active plugin-theme is not in the new image, PathHelper throws on every request before Apache can serve anything — resulting in an immediate 500.
+
+The general principle: the Docker build process has no way to know which site-specific plugins a given container needs. That information lives in the running site's database, which doesn't exist yet at build time.
+
+### Solution
+
+Add a plugin/theme sync step to the container startup CMD that runs **after PostgreSQL is up but before Apache starts**. This step:
+
+1. Reads `upgrade_source` from the `stg_settings` table (already populated by `_site_init.sh`).
+2. Fetches the stock plugin and theme lists from `${upgrade_source}/utils/publish_theme?list=plugins` and `?list=themes`.
+3. For each `is_stock: true` item, downloads and installs it if the directory does not already exist under `public_html/plugins/` or `public_html/theme/`.
+4. Falls back gracefully if the upgrade server is unreachable — logs a warning and continues. Apache starts regardless; a missing plugin will cause errors, but blocking the container from starting would be worse.
+
+The download logic mirrors what `download_themes_and_plugins` does in `install.sh`, but runs inside the container at startup rather than on the host at build time.
+
+### Implementation
+
+**New file: `maintenance_scripts/install_tools/_sync_stock_assets.sh`**
+
+A small standalone script (not install.sh) that performs the sync. Kept separate so the CMD line stays readable and the logic is testable independently.
+
+```bash
+#!/bin/bash
+# Sync stock themes and plugins from the upgrade server.
+# Called at container startup before Apache starts.
+# Exits 0 always — a failed sync is non-fatal.
+
+UPGRADE_SOURCE=$(psql -U postgres -d "${SITENAME}" -t -A \
+    -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'upgrade_source'" \
+    2>/dev/null | tr -d '[:space:]')
+
+if [ -z "$UPGRADE_SOURCE" ]; then
+    echo "[sync] upgrade_source not set — skipping stock asset sync"
+    exit 0
+fi
+
+PUBLIC_HTML="/var/www/html/${SITENAME}/public_html"
+
+sync_items() {
+    local type="$1"       # "plugins" or "themes"
+    local target_dir="$2" # absolute path to plugins/ or theme/
+
+    local list_json
+    list_json=$(curl -sf --max-time 20 "${UPGRADE_SOURCE}/utils/publish_theme?list=${type}" 2>/dev/null)
+    if [ -z "$list_json" ]; then
+        echo "[sync] Could not fetch ${type} list from ${UPGRADE_SOURCE} — skipping"
+        return
+    fi
+
+    echo "$list_json" | grep -oP '"name"\s*:\s*"\K[^"]+' | while read -r name; do
+        # Only download is_stock items
+        if ! echo "$list_json" | grep -A10 "\"name\".*\"${name}\"" | grep -q '"is_stock"\s*:\s*true'; then
+            continue
+        fi
+        if [ -d "${target_dir}/${name}" ]; then
+            continue  # already present
+        fi
+
+        echo "[sync] Downloading missing ${type%s}: ${name}"
+        local archive
+        archive=$(curl -sf --max-time 20 \
+            "${UPGRADE_SOURCE}/admin/server_manager/publish_theme?download=${name}&type=${type%s}" \
+            2>/dev/null | grep -oP '"url"\s*:\s*"\K[^"]+' | head -1)
+
+        if [ -z "$archive" ]; then
+            echo "[sync] Could not get download URL for ${name} — skipping"
+            continue
+        fi
+
+        local tmp
+        tmp=$(mktemp /tmp/joinery-asset-XXXXXX.tar.gz)
+        if curl -sf --max-time 120 -o "$tmp" "$archive" 2>/dev/null; then
+            tar -xzf "$tmp" -C "$target_dir/" 2>/dev/null && \
+                echo "[sync] Installed ${name}" || \
+                echo "[sync] Extract failed for ${name}"
+        else
+            echo "[sync] Download failed for ${name}"
+        fi
+        rm -f "$tmp"
+    done
+}
+
+sync_items "plugins" "${PUBLIC_HTML}/plugins"
+sync_items "themes"  "${PUBLIC_HTML}/theme"
+```
+
+**Modified file: `Dockerfile.template` CMD**
+
+Add the sync call after `_site_init.sh` / `update_database` and before `apache2ctl`:
+
+```bash
+# Sync any missing stock plugins/themes before Apache starts
+PGPASSWORD="${POSTGRES_PASSWORD}" bash \
+    /var/www/html/${SITENAME}/maintenance_scripts/install_tools/_sync_stock_assets.sh \
+    || true && \
+```
+
+The `|| true` ensures a sync failure never prevents the container from starting.
+
+**Modified file: `install.sh`**
+
+- Copy `_sync_stock_assets.sh` into the build context alongside the other `install_tools/` files (it's already in `COPY maintenance_scripts/` so no Dockerfile change needed beyond the CMD addition).
+- Bump VERSION to 2.15.
+
+### Behaviour
+
+| Scenario | Result |
+|---|---|
+| Fresh install, upgrade server reachable | All stock plugins/themes present before first request |
+| Rebuild of existing site | Active plugin-theme downloaded on startup; 500 avoided |
+| Upgrade server unreachable at startup | Warning logged; Apache starts anyway; missing plugins cause errors until server is reachable |
+| Plugin already in image | Directory exists → skipped (no duplicate download) |
+| Clone from another site | Runs same sync; clone source is the upgrade_source | 
+
+### Testing
+
+1. Build a site image that has `scrolldaddy` as the active plugin-theme but does not include the scrolldaddy plugin directory in the image (verify with `docker run --rm joinery-scrolldaddy ls /var/www/html/scrolldaddy/public_html/plugins/`).
+2. Start the container; check `docker logs` for `[sync] Installed scrolldaddy`.
+3. Verify `curl -sI https://scrolldaddy.app/` returns HTTP 200.
+4. Restart the container; confirm sync step runs and is a no-op (directory already exists).
+5. Test with upgrade server unreachable: container must still start and Apache must serve requests.
+
+---
+
+## Postmortem: scrolldaddy.app Data Loss (2026-04-22)
+
+### What Happened
+
+During implementation of the plugin startup sync feature, the running `scrolldaddy` container was used as a test target to validate the full build→startup flow. The rebuild command included the `-y` flag:
+
+```bash
+./install.sh site scrolldaddy scrolldaddy.app 8087 -y --no-ssl
+```
+
+The `-y` flag triggered automatic removal of the existing container **and all its named data volumes** (`scrolldaddy_postgres`, `scrolldaddy_uploads`, `scrolldaddy_config`, `scrolldaddy_backups`, and six others). A fresh install ran in their place, destroying all production data: user accounts, device configurations, subscriptions, DNS block schedules, and uploads.
+
+The site was restored from a host-level backup. The box was rolled back to the state before the migration session began.
+
+### Root Causes
+
+**1. Wrong tool for the job.** The `-y` flag exists to automate fresh installs on clean machines. It is explicitly unsafe on production containers because `install.sh site` has only one code path when it finds an existing container — wipe it. There is no "rebuild image only, keep data" mode invoked by any flag. The operator (Claude) did not check what `-y` does to existing containers before using it.
+
+**2. Testing on production.** The plugin sync script had already been validated correctly against the running container using `docker exec`. A full container rebuild was not required to validate that the script ran at startup — checking `docker logs` on the already-running container after copying the script in was sufficient. The decision to do a full rebuild, and the choice to do it against the live site rather than `joinerydemo`, were both errors in judgement.
+
+**3. No safeguard in install.sh against volume deletion on named containers.** The `-y` flag deletes volumes unconditionally. There is no check like "this container has a postgres volume with data — are you sure you want to destroy it?" Volume deletion is irreversible and should require stronger confirmation than a general-purpose `-y` flag.
+
+### Fixes Being Implemented
+
+**1. `install.sh` safety guard for volume deletion (install.sh v2.16)**
+
+Split the meaning of `-y` for Docker mode: when an existing container is found, `-y` will stop and remove the container (safe — volumes survive `docker rm`) but will **not** delete data volumes without an explicit `--wipe-data` flag. Volume deletion in unattended mode now requires both `-y --wipe-data`.
+
+```bash
+# New behaviour:
+./install.sh site mysite example.com 8080 -y           # stops/removes container, reuses volumes
+./install.sh site mysite example.com 8080 -y --wipe-data  # full wipe (fresh install)
+```
+
+**2. Spec updated** with explicit warnings in the Migration section about `-y` and a testing procedure that uses `joinerydemo` as the designated throwaway container.
+
+**3. `joinerydemo` designated as the canonical test container** — it has no irreplaceable data and exists for exactly this purpose.
+
+### What Not to Do
+
+- **Never run `./install.sh site SITENAME ... -y` on a container that has live user data.** The `-y` flag will delete the database, uploads, and config with no confirmation and no recovery path.
+- **Never test container startup behaviour against a production site.** Copy the script into the running container with `docker cp` and test with `docker exec`, or use `joinerydemo` for full rebuild tests.
+- **Never assume `:prev` image is a recovery path for data.** `:prev` is an image tag, not a volume snapshot. It contains only the application layer baked at build time. Postgres data, uploads, and config all live in volumes and are not in the image.
 
 ---
 

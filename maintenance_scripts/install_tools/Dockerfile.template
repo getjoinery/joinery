@@ -1,5 +1,5 @@
 # Joinery Docker Template
-# VERSION 3.1 - Install Composer dependencies during image build
+# VERSION 3.2 - Sync missing stock plugins/themes at container startup before Apache
 #
 # Usage:
 #   docker build \
@@ -91,6 +91,7 @@ CMD set +H && \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
+    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_sync_stock_assets.sh" || true && \
     echo "*/15 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
     chmod 644 /etc/cron.d/scheduled-tasks && \
     echo "" >> /etc/cron.d/scheduled-tasks && \
