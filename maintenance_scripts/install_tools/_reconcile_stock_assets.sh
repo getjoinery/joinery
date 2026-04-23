@@ -1,14 +1,29 @@
 #!/bin/bash
-# _sync_stock_assets.sh
-# Sync missing stock themes and plugins from the upgrade server.
-# Runs at container startup (CMD) after update_database, before Apache starts.
-# Always exits 0 — a failed sync is non-fatal; Apache starts regardless.
+# _reconcile_stock_assets.sh
 #
-# Only downloads items the site actually needs: stock themes/plugins that are
-# registered in the site's own database (plg_plugins / thm_themes with is_stock=true)
-# but missing from the filesystem. Non-stock items and items the site does not
-# have registered are never downloaded — the base image ships with no site
-# assets, so each per-site container pulls down exactly its own set.
+# NARROW PURPOSE: bridge a specific drift case we've actually hit.
+#
+# When a site is cloned or restored, _site_init.sh streams the source's
+# DATABASE (which contains plg_plugins / thm_themes rows naming the source's
+# stock plugins & themes) but does NOT stream the source's theme/ or plugins/
+# DIRECTORIES. The build context only contains whatever was on the admin
+# machine at `install.sh site` time. If the source used stock items the admin
+# machine didn't have, the cloned DB references plugins/themes whose files
+# don't exist — PluginManager / ThemeManager can't download at activation
+# time, so those rows point at nothing until this script fetches them.
+#
+# This script runs at container startup (CMD), after update_database but
+# before Apache starts, and downloads ONLY stock items (plg_is_stock / thm_is_stock
+# = true) that are registered in the local DB but missing from disk. Non-stock
+# items are custom/private and are not available on the upgrade server — those
+# must be brought over by whoever did the clone.
+#
+# On a FRESH install (no clone), the fresh SQL dump has no stock plugin rows
+# and only the joinery-system theme row, so this script does nothing — by
+# design. Keep that behavior: fresh installs get their system theme baked in
+# at build time and nothing else until the admin activates something.
+#
+# Always exits 0 — a failed sync is non-fatal; Apache starts regardless.
 #
 # Requires env vars: SITENAME, POSTGRES_PASSWORD (set in Dockerfile.template)
 

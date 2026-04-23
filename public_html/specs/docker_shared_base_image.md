@@ -429,7 +429,7 @@ The download logic mirrors what `download_themes_and_plugins` does in `install.s
 
 ### Implementation
 
-**New file: `maintenance_scripts/install_tools/_sync_stock_assets.sh`**
+**New file: `maintenance_scripts/install_tools/_reconcile_stock_assets.sh`**
 
 A small standalone script (not install.sh) that performs the sync. Kept separate so the CMD line stays readable and the logic is testable independently.
 
@@ -505,7 +505,7 @@ Add the sync call after `_site_init.sh` / `update_database` and before `apache2c
 ```bash
 # Sync any missing stock plugins/themes before Apache starts
 PGPASSWORD="${POSTGRES_PASSWORD}" bash \
-    /var/www/html/${SITENAME}/maintenance_scripts/install_tools/_sync_stock_assets.sh \
+    /var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_stock_assets.sh \
     || true && \
 ```
 
@@ -513,7 +513,7 @@ The `|| true` ensures a sync failure never prevents the container from starting.
 
 **Modified file: `install.sh`**
 
-- Copy `_sync_stock_assets.sh` into the build context alongside the other `install_tools/` files (it's already in `COPY maintenance_scripts/` so no Dockerfile change needed beyond the CMD addition).
+- Copy `_reconcile_stock_assets.sh` into the build context alongside the other `install_tools/` files (it's already in `COPY maintenance_scripts/` so no Dockerfile change needed beyond the CMD addition).
 - Bump VERSION to 2.15.
 
 ### Behaviour
