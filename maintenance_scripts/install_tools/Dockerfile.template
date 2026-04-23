@@ -1,5 +1,6 @@
 # Joinery Docker Template
-# VERSION 3.2 - Sync missing stock plugins/themes at container startup before Apache
+# VERSION 3.3 - Write logrotate config on every container start (was first-run-only via _site_init.sh);
+#               rename _sync_stock_assets.sh -> _reconcile_stock_assets.sh to reflect its narrow purpose
 #
 # Usage:
 #   docker build \
@@ -91,12 +92,14 @@ CMD set +H && \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
-    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_sync_stock_assets.sh" || true && \
+    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_stock_assets.sh" || true && \
     echo "*/15 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
     chmod 644 /etc/cron.d/scheduled-tasks && \
     echo "" >> /etc/cron.d/scheduled-tasks && \
     echo "0 2 * * * root /usr/sbin/logrotate /etc/logrotate.d/joinery-${SITENAME} > /dev/null 2>&1" > /etc/cron.d/logrotate-joinery && \
     chmod 644 /etc/cron.d/logrotate-joinery && \
     echo "" >> /etc/cron.d/logrotate-joinery && \
+    sed "s|{{SITE_ROOT}}|/var/www/html/${SITENAME}|g" "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/logrotate_joinery.conf" > "/etc/logrotate.d/joinery-${SITENAME}" && \
+    chmod 644 "/etc/logrotate.d/joinery-${SITENAME}" && \
     service cron start && \
     apache2ctl -D FOREGROUND

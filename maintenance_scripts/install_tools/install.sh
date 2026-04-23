@@ -684,8 +684,13 @@ download_core_archive() {
     # Overlay core files, skipping theme/ and plugins/ (already downloaded fresh)
     # .claude is a development artifact (Claude Code config) that must never ship to containers.
     if [[ -d "$tmp_extract/public_html" ]]; then
-        rsync -a --exclude='theme/' --exclude='plugins/' --exclude='.claude' "$tmp_extract/public_html/" "$target_dir/" || true
-        print_success "Core archive applied: $(basename "$core_location")"
+        rsync -a --exclude='theme/' --exclude='plugins/' --exclude='.claude' "$tmp_extract/public_html/" "$target_dir/"
+        local rsync_rc=$?
+        if [ "$rsync_rc" -eq 0 ]; then
+            print_success "Core archive applied: $(basename "$core_location")"
+        else
+            print_warning "Core archive rsync failed (exit ${rsync_rc}) — container may be missing fresh core files"
+        fi
     else
         print_warning "Core archive has unexpected structure — building with archive copy as-is"
     fi
