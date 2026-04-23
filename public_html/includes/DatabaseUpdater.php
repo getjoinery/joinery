@@ -12,6 +12,7 @@ class DatabaseUpdater {
     private $verbose;
     private $upgrade;
     private $cleanup;
+    private $unresolved_constraints = [];
     
     /**
      * Constructor
@@ -60,8 +61,17 @@ class DatabaseUpdater {
     }
     
     /**
+     * Unique constraints that could not be created because of existing duplicate rows.
+     * Populated by executeConstraintSql() during this run. Each entry:
+     *   ['table' => string, 'columns' => string[], 'duplicates' => array]
+     */
+    public function getUnresolvedConstraints() {
+        return $this->unresolved_constraints;
+    }
+
+    /**
      * Core database update logic
-     * 
+     *
      * @param array $options Update options
      * @return array Results with success status and messages
      */
@@ -955,12 +965,20 @@ class DatabaseUpdater {
                 
                 echo "<br>";
                 echo "Action: Unique constraint creation skipped<br>";
-                echo "Impact: Database will continue to function normally<br>";
+                echo "Resolution: Deduplicate the rows above, then re-run update_database to create the constraint.<br>";
+                echo "Impact: Code paths that use ON CONFLICT on these columns (e.g. upgrade.php re-confirming system_version) will fail until resolved.<br>";
                 echo "═══════════════════════════════════════════════════════════════════════════════<br>";
                 echo "<br>";
-                
-                // Return true to indicate we handled this gracefully (not an error)
-                return true;
+
+                $this->unresolved_constraints[] = [
+                    'table'      => $table_name,
+                    'columns'    => $columns,
+                    'duplicates' => $duplicate_info['duplicates'],
+                ];
+
+                // Return false: the constraint was NOT added. Callers route this to the
+                // warnings collection so it surfaces in update_database.php's final summary.
+                return false;
             }
         }
         
