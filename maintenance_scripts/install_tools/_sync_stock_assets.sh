@@ -4,6 +4,12 @@
 # Runs at container startup (CMD) after update_database, before Apache starts.
 # Always exits 0 — a failed sync is non-fatal; Apache starts regardless.
 #
+# Only downloads items the site actually needs: stock themes/plugins that are
+# registered in the site's own database (plg_plugins / thm_themes with is_stock=true)
+# but missing from the filesystem. Non-stock items and items the site does not
+# have registered are never downloaded — the base image ships with no site
+# assets, so each per-site container pulls down exactly its own set.
+#
 # Requires env vars: SITENAME, POSTGRES_PASSWORD (set in Dockerfile.template)
 
 PUBLIC_HTML="/var/www/html/${SITENAME}/public_html"
@@ -20,32 +26,31 @@ fi
 
 echo "[sync] Syncing stock assets from ${UPGRADE_SOURCE}..."
 
-# Download all is_stock items of a given type that are missing from the filesystem.
-# Args: TYPE (plugins|themes)  TARGET_DIR  URL_TYPE_SUFFIX (&type=plugin or "")
+# Download stock items registered in the local DB that are missing from the filesystem.
+# Args: TYPE_LABEL (plugin|theme)  TARGET_DIR  SQL_QUERY  URL_TYPE_SUFFIX
 sync_items() {
-    local type="$1"
+    local type_label="$1"
     local target_dir="$2"
-    local url_suffix="$3"
+    local sql_query="$3"
+    local url_suffix="$4"
 
-    local list_json
-    list_json=$(curl -sf --max-time 20 \
-        "${UPGRADE_SOURCE}/utils/publish_theme?list=${type}" 2>/dev/null)
-    if [ -z "$list_json" ]; then
-        echo "[sync] Could not fetch ${type} list from ${UPGRADE_SOURCE} — skipping"
+    local names
+    names=$(PGPASSWORD="${POSTGRES_PASSWORD}" psql -U postgres -d "${SITENAME}" -t -A \
+        -c "$sql_query" 2>/dev/null)
+
+    if [ -z "$names" ]; then
+        echo "[sync] No stock ${type_label}s registered in site database — nothing to fetch"
         return
     fi
 
     while IFS= read -r name; do
-        # Skip non-stock items
-        if ! echo "$list_json" | grep -A10 "\"name\".*\"${name}\"" | grep -q '"is_stock"[[:space:]]*:[[:space:]]*true'; then
-            continue
-        fi
+        [ -z "$name" ] && continue
 
         if [ -d "${target_dir}/${name}" ]; then
             continue  # already present
         fi
 
-        echo "[sync] Downloading missing ${type%s}: ${name}"
+        echo "[sync] Downloading missing ${type_label}: ${name}"
         if curl -sfL --max-time 120 \
             "${UPGRADE_SOURCE}/utils/publish_theme?download=${name}${url_suffix}" \
             | tar xz -C "${target_dir}" 2>/dev/null \
@@ -54,11 +59,16 @@ sync_items() {
         else
             echo "[sync] Failed to install ${name}"
         fi
-    done < <(echo "$list_json" | grep -oP '"name"\s*:\s*"\K[^"]+')
+    done <<< "$names"
 }
 
-sync_items "plugins" "${PUBLIC_HTML}/plugins" "&type=plugin"
-sync_items "themes"  "${PUBLIC_HTML}/theme"   ""
+sync_items "plugin" "${PUBLIC_HTML}/plugins" \
+    "SELECT plg_name FROM plg_plugins WHERE plg_is_stock = true" \
+    "&type=plugin"
+
+sync_items "theme"  "${PUBLIC_HTML}/theme" \
+    "SELECT thm_name FROM thm_themes WHERE thm_is_stock = true" \
+    ""
 
 echo "[sync] Stock asset sync complete"
 exit 0
