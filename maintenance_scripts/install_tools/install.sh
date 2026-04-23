@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-#VERSION 2.16 - Split -y from --wipe-data: -y no longer deletes volumes on existing containers
+#VERSION 2.17 - Rebuild safety: preflight-stop the target container before the port check
+#               so rebuilds of a running site don't auto-pick a stray alternate port;
+#               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -2015,6 +2017,17 @@ do_site_docker() {
         fi
     fi
 
+    # Preflight: if a container with this SITENAME is already running, stop it
+    # BEFORE the port check. Otherwise is_port_in_use sees the target's own
+    # docker-proxy listener and treats $PORT as "taken by something else,"
+    # causing install.sh to auto-pick a stray alternate port (breaks the
+    # domain→port mapping on rebuild). The container-exists block below still
+    # runs and does the actual `docker rm` (and --wipe-data if requested).
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
+        print_info "Existing container '${SITENAME}' is running — stopping it before port check"
+        docker stop "$SITENAME" > /dev/null 2>&1 || true
+    fi
+
     # Port conflict detection
     print_step "Checking port availability..."
 
@@ -2356,6 +2369,10 @@ EOF
     # Cleanup build directory
     print_step "Cleaning up build directory..."
     if [ -d "$BUILD_DIR" ]; then
+        # Move out of $BUILD_DIR before removing it — otherwise any subshell
+        # spawned after this point (e.g., manage_domain.sh invocation) will
+        # print "sh: 0: getcwd() failed" because the cwd was deleted.
+        cd "$SCRIPT_DIR"
         rm -rf "$BUILD_DIR"
         print_success "Build directory removed"
     fi
