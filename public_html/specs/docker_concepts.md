@@ -242,7 +242,7 @@ joinery-docker-build-scrolldaddy/
     ├── config/                   (Globalvars_site.php template)
     └── maintenance_scripts/
         └── install_tools/
-            ├── _sync_stock_assets.sh
+            ├── _reconcile_stock_assets.sh
             ├── Dockerfile.template
             └── ...
 ```
@@ -265,18 +265,18 @@ A common source of confusion: some things happen at **build time** (when `docker
 - Set postgres password (first run only, if `Globalvars_site.php` doesn't exist)
 - Run `_site_init.sh` (first run only — creates database, configures site)
 - Run `update_database.php` (applies schema migrations)
-- Run `_sync_stock_assets.sh` (download any missing stock plugins/themes)
+- Run `_reconcile_stock_assets.sh` (download any missing stock plugins/themes)
 - Start cron
 - Start Apache in the foreground
 
 **Why this matters:**
-The sync script (`_sync_stock_assets.sh`) runs at startup, not at build time. This means even if the image was built without the `scrolldaddy` plugin, by the time Apache starts serving its first request, the plugin is already in place. The startup sequence is:
+The sync script (`_reconcile_stock_assets.sh`) runs at startup, not at build time. This means even if the image was built without the `scrolldaddy` plugin, by the time Apache starts serving its first request, the plugin is already in place. The startup sequence is:
 
 ```
 PostgreSQL up → DB initialized → plugins synced → Apache starts → requests served
 ```
 
-If `_sync_stock_assets.sh` ran at build time instead, it couldn't read `upgrade_source` from the database (because PostgreSQL hasn't started yet and the database may not exist). Running it at startup, after the database is ready, is what makes the pattern work.
+If `_reconcile_stock_assets.sh` ran at build time instead, it couldn't read `upgrade_source` from the database (because PostgreSQL hasn't started yet and the database may not exist). Running it at startup, after the database is ready, is what makes the pattern work.
 
 ---
 
@@ -288,7 +288,7 @@ If `_sync_stock_assets.sh` ran at build time instead, it couldn't read `upgrade_
 | PHP/Apache/Postgres layers | 8 independent copies (~2.3 GB × 8) | 1 shared copy (386 MB) |
 | Total image storage | ~22 GB | ~6 GB (after `:prev` cleanup) |
 | Build time for new site | ~10 minutes (installs packages) | ~1–2 minutes (packages already in base) |
-| Missing plugins on rebuild | 500 error until manually fixed | `_sync_stock_assets.sh` fixes at startup |
+| Missing plugins on rebuild | 500 error until manually fixed | `_reconcile_stock_assets.sh` fixes at startup |
 | Stale core files on rebuild | Silently used old code | `download_core_archive` pulls fresh (now fixed) |
 | `-y` flag behavior | Deleted container + volumes | Deletes container only; `--wipe-data` required for volumes |
 
