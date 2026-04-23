@@ -64,6 +64,19 @@ This allows themes to override any view while providing automatic fallback to pl
 
 ## Plugin Development
 
+### Where does each piece go?
+
+Before diving in, a quick reference for the four common things plugins need to register. Use this to jump to the right section — each row points to the one canonical path.
+
+| What you're adding | Where it goes | Section |
+|---|---|---|
+| Tables and columns | `$field_specifications` in a data class under `data/` — applied automatically on install and sync | [Table Creation](#table-creation-automatic) |
+| Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Admin Menus](#admin-menus-declarative) |
+| Default settings rows, seed data | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
+| Activate/deactivate/uninstall logic | `activate.php`, `deactivate.php`, `uninstall.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` / `_uninstall()` | [Plugin Lifecycle](#plugin-lifecycle) |
+
+If you find yourself writing SQL to INSERT menu rows, or CREATE TABLE statements in a migration, stop — you're on the wrong path. Those pieces come from the data class and `plugin.json` respectively.
+
 ### Core File Guarantees
 
 When developing plugins, the following core files are guaranteed to be available without requiring them:
@@ -331,9 +344,7 @@ $page->admin_footer();
 
 ### Admin Menus (Declarative)
 
-Plugin admin menus are declared in `plugin.json` using the `adminMenu` key. The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. No migrations needed.
-
-> **Deprecation:** The migration-based approach (INSERT into `amu_admin_menus`) still works for existing plugins but is deprecated for new development. Use `adminMenu` in `plugin.json` instead.
+Plugin admin menus are declared in `plugin.json` using the `adminMenu` key. The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. This is the only supported way to register plugin admin menus — do not INSERT into `amu_admin_menus` from migrations.
 
 **Three placement patterns:**
 
@@ -480,9 +491,9 @@ class MyData extends SystemBase {
 
 ### Migration System
 
-**Current status:** The migration runner only processes `.sql` files in `plugins/{name}/migrations/`. The PHP `return []` format with `up`/`down` closures shown below is the intended future format but is **not yet executed automatically** during plugin installation.
+Migrations are for **settings rows and initial data only**. Schema is handled automatically from `$field_specifications` (see [Table Creation](#table-creation-automatic) above), and admin menus are declared in `plugin.json` (see [Admin Menus](#admin-menus-declarative) above) — neither belongs in a migration.
 
-**For settings, menu entries, and initial data**, use `.sql` migration files:
+Migrations are `.sql` files placed in `plugins/{name}/migrations/`:
 
 ```sql
 -- plugins/my-plugin/migrations/001_initial_settings.sql
@@ -491,40 +502,11 @@ SELECT 'my_plugin_enabled', '1', 1, NOW(), NOW(), 'general'
 WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'my_plugin_enabled');
 ```
 
-SQL migration files are:
-- Located in `plugins/{name}/migrations/`
-- Named with a numeric prefix for ordering (e.g., `001_initial_settings.sql`, `002_add_menu.sql`)
-- Executed in filename order during plugin installation
-- Tracked in `plm_plugin_migrations` to prevent re-execution
-- Run only once — if a migration has already been recorded, it is skipped
-
-**PHP migration format (not yet auto-executed):**
-
-The `return []` format below is used by some existing plugins but requires manual execution or running `update_database` from the admin utilities page. It is the intended future format:
-
-```php
-// plugins/my-plugin/migrations/migrations.php
-return [
-    [
-        'id' => '001_initial_setup',
-        'version' => '1.0.0',
-        'description' => 'Initial plugin setup',
-        'up' => function($dbconnector) {
-            $dblink = $dbconnector->get_db_link();
-            $sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
-                    VALUES ('my_plugin_enabled', '1', 1, NOW(), NOW(), 'general')";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            return true;
-        },
-        'down' => function($dbconnector) {
-            $dblink = $dbconnector->get_db_link();
-            $dblink->exec("DELETE FROM stg_settings WHERE stg_name LIKE 'my_plugin_%'");
-            return true;
-        }
-    ]
-];
-```
+Rules:
+- Name files with a numeric prefix for ordering (e.g. `001_initial_settings.sql`, `002_seed_categories.sql`).
+- Files run in filename order during plugin installation.
+- Execution is tracked in `plm_plugin_migrations`; each file runs exactly once per site.
+- Write idempotent SQL (`WHERE NOT EXISTS`, `ON CONFLICT DO NOTHING`) so a file that partially applied can be safely re-run after the tracking row is cleared.
 
 ### Plugin Settings Form
 
@@ -1035,13 +1017,14 @@ Always use the two-parameter format:
 
 1. Create plugin directory under `/plugins/{name}/` with `plugin.json`
 2. Create data model classes in `plugins/{name}/data/` with `$field_specifications` (tables created automatically on install)
-3. Create `.sql` migration files in `plugins/{name}/migrations/` for settings, menu entries, and initial data
-4. Create admin interface in `plugins/{name}/admin/` if needed
-5. Create `uninstall.php` for clean removal of settings, menu entries, and other non-table data
-6. **Install** the plugin via Admin > System > Plugins (creates tables, runs SQL migrations)
-7. **Activate** the plugin to make it live
-8. Test admin functionality via `/plugins/{plugin}/admin/*`
-9. No user-facing routes - these go in themes
+3. Declare admin menus in `plugin.json` under the `adminMenu` key (see [Admin Menus](#admin-menus-declarative))
+4. Create `.sql` migration files in `plugins/{name}/migrations/` for settings rows and initial data seeds
+5. Create admin interface in `plugins/{name}/admin/` if needed
+6. Create `uninstall.php` for clean removal of settings and other non-table data
+7. **Install** the plugin via Admin > System > Plugins (creates tables, runs SQL migrations)
+8. **Activate** the plugin to make it live
+9. Test admin functionality via `/plugins/{plugin}/admin/*`
+10. No user-facing routes - these go in themes
 
 ### Creating a New Theme
 
