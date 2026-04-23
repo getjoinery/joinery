@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 2.14 - Auto-download fresh core archive from upgrade server on every site build
+#VERSION 2.16 - Split -y from --wipe-data: -y no longer deletes volumes on existing containers
 #
 # Usage:
 #   ./install.sh docker                              # One-time: install Docker
@@ -66,7 +66,8 @@ BASE_IMAGE_VERSION="1.0"
 # GLOBAL FLAGS (parsed before command dispatch)
 #==============================================================================
 
-ASSUME_YES=0      # -y/--yes: Auto-accept all prompts
+ASSUME_YES=0      # -y/--yes: Auto-accept all prompts (never deletes volumes on its own)
+WIPE_DATA=0       # --wipe-data: Also delete data volumes when removing an existing container (requires -y)
 QUIET_MODE=0      # -q/--quiet: Suppress most output
 CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
 
@@ -652,9 +653,9 @@ download_core_archive() {
         return 0
     fi
 
-    # Extract core_location from JSON response
+    # Extract core_location from JSON response and unescape \/ -> /
     local core_location
-    core_location=$(echo "$upgrade_info" | grep -oP '"core_location"\s*:\s*"\K[^"]+')
+    core_location=$(echo "$upgrade_info" | grep -oP '"core_location"\s*:\s*"\K[^"]+' | sed 's/\\\//\//g')
     if [[ -z "$core_location" ]]; then
         print_warning "Upgrade server response missing core_location — building with archive copy as-is"
         return 0
@@ -1690,6 +1691,10 @@ do_site_create() {
                 ASSUME_YES=1
                 shift
                 ;;
+            --wipe-data)
+                WIPE_DATA=1
+                shift
+                ;;
             --activate)
                 ACTIVATE_THEME="$2"
                 shift 2
@@ -1764,6 +1769,11 @@ do_site_create() {
                 echo "Clone Options:"
                 echo "  --clone-from=URL       Clone database and uploads from existing site"
                 echo "  --clone-key=KEY        Authentication key for clone source"
+                echo ""
+                echo "Automation:"
+                echo "  -y / --yes     Auto-accept: remove existing container, keep volumes"
+                echo "  --wipe-data    Combined with -y: also delete data volumes (fresh install)"
+                echo "                 DANGER: irreversible, destroys all site data"
                 echo ""
                 echo "Parameters:"
                 echo "  SITENAME      Site/database name (required)"
@@ -2105,14 +2115,23 @@ do_site_docker() {
         print_warning "A container named '$SITENAME' already exists"
 
         if [ "$ASSUME_YES" -eq 1 ]; then
-            print_info "Auto-removing existing container and volumes (-y flag)"
-            docker stop "$SITENAME" 2>/dev/null || true
-            docker rm "$SITENAME" 2>/dev/null || true
-            # Remove associated volumes to ensure clean reinstall
-            for vol in postgres uploads config backups static logs cache sessions apache_logs pg_logs; do
-                docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
-            done
-            print_success "Existing container and volumes removed"
+            if [ "$WIPE_DATA" -eq 1 ]; then
+                # Full wipe: remove container AND all data volumes (fresh install)
+                print_warning "Auto-removing existing container AND data volumes (-y --wipe-data)"
+                docker stop "$SITENAME" 2>/dev/null || true
+                docker rm "$SITENAME" 2>/dev/null || true
+                for vol in postgres uploads config backups static logs cache sessions apache_logs pg_logs; do
+                    docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
+                done
+                print_success "Existing container and volumes removed"
+            else
+                # Safe rebuild: remove only the container; volumes survive and reattach
+                print_info "Auto-removing existing container (-y flag); data volumes preserved"
+                print_info "Add --wipe-data to also delete volumes (irreversible)"
+                docker stop "$SITENAME" 2>/dev/null || true
+                docker rm "$SITENAME" 2>/dev/null || true
+                print_success "Existing container removed (volumes intact)"
+            fi
         else
             echo ""
             print_warning "Removing container will also delete all site data (database, uploads, config)!"
@@ -2123,7 +2142,6 @@ do_site_docker() {
                 print_info "Stopping and removing existing container and volumes..."
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                # Remove associated volumes to ensure clean reinstall
                 for vol in postgres uploads config backups static logs cache sessions apache_logs pg_logs; do
                     docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
                 done
