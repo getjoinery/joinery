@@ -19,6 +19,17 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **CRITICAL:** NEVER commit to git unless explicitly directed to by the user. File changes are allowed, but git commits require explicit user permission.
 
+## Secret Handling Rules
+
+**CRITICAL:** NEVER echo, print, log, or otherwise surface passwords, API keys, tokens, or other credentials into the chat transcript when it can be avoided. This includes:
+
+- **Do not print a secret just to "confirm" it** — say "password read from Globalvars" instead of pasting the value.
+- **Do not include a secret in a tool-result summary** if the tool already handled it. The raw tool output may contain it (unavoidable when reading a config file), but your own text to the user should not repeat it.
+- **When passing a password to a command**, prefer mechanisms that don't echo it: env vars set on the remote side (`ssh host 'docker exec X bash -c "export PGPASSWORD=\$POSTGRES_PASSWORD && ..."'`), password files with `--password-file`, or piping via stdin — not positional arguments that show up in logs.
+- **If a secret slips into a response**, flag it to the user so they can decide whether to rotate.
+
+The goal is minimizing the blast radius if a transcript is shared, archived, or logged. Reading a secret from a file into a tool call is fine; narrating its value back to the user is not.
+
 ## File Permissions
 
 This is a development server. When creating new files, set liberal permissions to avoid access issues:

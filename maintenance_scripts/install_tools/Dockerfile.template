@@ -1,4 +1,6 @@
 # Joinery Docker Template
+# VERSION 3.4 - Add default to ARG BASE_IMAGE_VERSION so BuildKit can statically
+#               evaluate FROM without --build-arg (silences InvalidDefaultArgInFrom warning).
 # VERSION 3.3 - Write logrotate config on every container start (was first-run-only via _site_init.sh);
 #               rename _sync_stock_assets.sh -> _reconcile_stock_assets.sh to reflect its narrow purpose
 #
@@ -21,7 +23,9 @@
 #   CLONE_KEY         - Authentication key for clone source (optional)
 
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
-ARG BASE_IMAGE_VERSION
+# Default matches the version install.sh always passes via --build-arg; the
+# default only exists to satisfy BuildKit's static-evaluation check.
+ARG BASE_IMAGE_VERSION=1.0
 FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)
