@@ -4,7 +4,9 @@
 
 Plugin settings currently live in SQL migration files — a developer writes `INSERT INTO stg_settings ...` in `plugins/{name}/migrations/001_settings.sql` to seed defaults on install, then maintains parallel `DELETE` logic in `uninstall.php`. This mirrors the pattern `adminMenu` previously had and which was already cleaned up: declared once in `plugin.json`, managed by `PluginManager`.
 
-This spec brings settings to the same model. A new `settings` key in `plugin.json` (and a new `/config/settings.json` file for core settings) declares the names and defaults. `PluginManager` seeds missing rows on activate/sync and removes them on uninstall. Migrations are no longer the place to put default settings.
+This spec brings settings to the same model. A new `settings` key in `plugin.json` (and a new `settings.json` file at the `public_html/` root for core settings) declares the names and defaults. `PluginManager` seeds missing rows on activate/sync and removes them on uninstall. Migrations are no longer the place to put default settings.
+
+**File location note:** `settings.json` lives at `public_html/settings.json`, alongside `composer.json`. The front controller (`serve.php`) doesn't route unknown top-level files, so the file is not web-accessible — no `.htaccess` rule is needed. This is the same treatment `composer.json` already gets.
 
 **Explicit non-goal:** settings UI metadata (labels, types, help text, form widgets). Settings forms today use `settings_form.php`, and that mechanism continues to work. Adding UI schema to the JSON is tempting and will be a separate conversation if and when it earns its place.
 
@@ -62,7 +64,7 @@ New optional top-level `settings` key in `plugin.json`:
 
 **Naming validation, applied on install and sync — two rules:**
 1. Each declared `name` must start with the plugin's directory name (e.g. a plugin at `/plugins/email_forwarding/` must declare names like `email_forwarding_enabled`). Catches typos and cross-plugin mistakes.
-2. A plugin may not declare a `name` that is already present in `/config/settings.json` (core owns its namespace).
+2. A plugin may not declare a `name` that is already present in `settings.json` (core owns its namespace).
 
 No cross-plugin name-collision check. Rule 1 makes cross-plugin collisions impossible in practice (every plugin's names start with its own unique directory name), and under seed-only + `ON CONFLICT DO NOTHING` semantics, even a pathological collision would just silently no-op rather than corrupt data. Not worth the N×M manifest walk on every sync.
 
@@ -72,7 +74,7 @@ Validation failures throw — on `install()` the plugin does not install; on `ac
 
 ### Core settings file
 
-New file `/config/settings.json`:
+New file `settings.json` at the `public_html/` root:
 
 ```json
 {
@@ -95,7 +97,7 @@ A grep of `get_setting('literal')` in the codebase returns ~223 distinct literal
 - **Omit** settings whose values are environment-derived and set by deployment tooling rather than factory defaults (`composerAutoLoad`, `baseDir`, `siteDir`).
 - **Omit** settings that are strictly per-site state (`database_version`, sequence counters).
 
-A fresh install with an empty DB plus `config/settings.json` should result in a site that boots, renders, and lets an admin finish configuration through the UI. That's the bar, not "every setting anyone ever reads."
+A fresh install with an empty DB plus `settings.json` should result in a site that boots, renders, and lets an admin finish configuration through the UI. That's the bar, not "every setting anyone ever reads."
 
 This file is additive. Settings already in existing databases from historical migrations keep working untouched. Adding a setting here causes it to be seeded on next `update_database` for sites that don't yet have the row.
 
@@ -121,17 +123,20 @@ Existing sites keep the old value (seed-only — we don't touch existing rows). 
 
 ## Implementation Plan
 
-### Phase 1 — Shared seeder + PluginManager integration
+### Phase 1 — Setting class bulk helpers + PluginManager integration
 
-Put the seed-insert logic in a new `includes/SettingsSeeder.php` so both PluginManager and the core `update_database` path share it:
+Add two static methods to `Setting` in `data/settings_class.php` so both PluginManager and the core `update_database` path share them. Putting this on `Setting` instead of a new helper class colocates the bulk stg_settings write logic with the model that already owns that table:
 
 ```php
-class SettingsSeeder {
+class Setting extends SystemBase {
+    // ... existing fields ...
+
     /**
-     * Insert rows from $declarations into stg_settings, skipping any that already exist.
+     * Bulk-insert declared default settings, skipping any stg_name that
+     * already exists. Seed-only — never overwrites.
      * $declarations: [['name' => ..., 'default' => ...], ...]
      */
-    public static function seed(array $declarations): void {
+    public static function seed_declared(array $declarations): void {
         if (empty($declarations)) return;
         $dblink = DbConnector::get_instance()->get_db_link();
         $sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
@@ -139,8 +144,23 @@ class SettingsSeeder {
                 ON CONFLICT (stg_name) DO NOTHING";
         $stmt = $dblink->prepare($sql);
         foreach ($declarations as $d) {
+            if (empty($d['name'])) continue;
             $stmt->execute([$d['name'], $d['default'] ?? '']);
         }
+    }
+
+    /**
+     * Delete settings rows whose names appear in $declarations. Used during
+     * plugin uninstall. Only currently-declared names are removed; orphans
+     * from previously-declared-but-now-dropped settings are left in place.
+     */
+    public static function unseed_declared(array $declarations): void {
+        if (empty($declarations)) return;
+        $names = array_values(array_filter(array_column($declarations, 'name')));
+        if (empty($names)) return;
+        $dblink = DbConnector::get_instance()->get_db_link();
+        $placeholders = implode(',', array_fill(0, count($names), '?'));
+        $dblink->prepare("DELETE FROM stg_settings WHERE stg_name IN ({$placeholders})")->execute($names);
     }
 }
 ```
@@ -156,13 +176,13 @@ private function syncSettings($pluginName) {
     if (empty($declared)) return;
 
     $this->validateDeclaredSettings($pluginName, $declared);   // prefix + core collision
-    SettingsSeeder::seed($declared);
+    Setting::seed_declared($declared);
 }
 ```
 
 No `plg_metadata` cache. Uninstall reads the manifest directly via `PluginHelper::getDeclaredSettings()` at uninstall time, and deletes only the names currently declared. Rows from settings that were declared in earlier versions but dropped from the current manifest are left in place (see "What happens when v2 drops a setting" above).
 
-Validation method enforces the two rules from the design section: every declared `name` must start with the plugin's directory name, and no declared `name` may collide with a core setting in `/config/settings.json`.
+Validation method enforces the two rules from the design section: every declared `name` must start with the plugin's directory name, and no declared `name` may collide with a core setting in `settings.json`.
 
 Add `PluginHelper::getDeclaredSettings()` at `includes/PluginHelper.php`:
 
@@ -186,8 +206,8 @@ For uninstall specifically, the deletion reads `plugin.json` directly — no met
 
 ### Phase 3 — Core settings seeding
 
-1. Create `/config/settings.json` with declarations following the scope principle above. Initial pass: start from the settings the admin settings page currently expects (by auditing `admin_settings_logic.php` and the `settings_form.php` files), plus the ~20 boolean feature-gate settings (`*_active`, `*_enabled`). Aim for a file under ~100 entries in the first pass; it can grow over time.
-2. In `utils/update_database.php`: after core migrations run but before the plugin sync step, read `/config/settings.json` and call `SettingsSeeder::seed()` directly (no validation wrapper needed — core is trusted).
+1. Create `settings.json` at the `public_html/` root with declarations following the scope principle above. Initial pass: start from the settings the admin settings page currently expects (by auditing `admin_settings_logic.php` and the `settings_form.php` files), plus the ~20 boolean feature-gate settings (`*_active`, `*_enabled`). Aim for a file under ~100 entries in the first pass; it can grow over time.
+2. In `utils/update_database.php`: after core migrations run but before the plugin sync step, read `settings.json` (via `PathHelper::getIncludePath('settings.json')`) and call `Setting::seed_declared()` directly (no validation wrapper needed — core is trusted).
 3. The core seeder runs on every `update_database` invocation (deploy, admin utility run). Safe because it's seed-only.
 
 Core does **not** use the `plg_metadata` caching mechanism — core settings are never "uninstalled," so there's no need to track what was seeded.
@@ -196,13 +216,13 @@ Core does **not** use the `plg_metadata` caching mechanism — core settings are
 
 For each plugin, add `settings` key to its `plugin.json`, then delete the INSERT statements from its migrations. If a migration ends up empty, delete it.
 
-| Plugin | Settings to move | Current location |
+| Plugin | Settings declared in plugin.json | Migration file fate |
 |---|---|---|
-| `bookings` | `bookings_enabled` | `plugins/bookings/migrations/` |
-| `items` | `items_enabled` | `plugins/items/migrations/` |
-| `email_forwarding` | TBD — enumerate by reading the plugin's migration files | `plugins/email_forwarding/migrations/` |
-| `scrolldaddy` | TBD — enumerate | `plugins/scrolldaddy/migrations/` |
-| `server_manager` | TBD — enumerate | `plugins/server_manager/migrations/` |
+| `bookings` | `bookings_active` (moved from core `settings.json` — starts with plugin prefix, so it's plugin-owned) | Settings INSERT removed; migration retained for default booking-type seed |
+| `items` | (none — the historical `items_enabled` migration INSERT was a zombie; no code reads it. Left undeclared; existing rows, if any, become orphans) | Settings INSERT removed; migration retained for default relation-type seed |
+| `email_forwarding` | `email_forwarding_enabled`, `email_forwarding_log_retention_days`, `email_forwarding_max_destinations`, `email_forwarding_rate_limit_per_alias`, `email_forwarding_rate_limit_per_domain`, `email_forwarding_rate_limit_window`, `email_forwarding_srs_enabled`, `email_forwarding_srs_secret`, `email_forwarding_smtp_host`, `email_forwarding_smtp_port`, `email_forwarding_smtp_username`, `email_forwarding_smtp_password` (12 total) | `migrations.php` reduced to `return [];` (only held settings) |
+| `scrolldaddy` | `scrolldaddy_dns_host`, `scrolldaddy_dns_internal_url`, `scrolldaddy_dns_api_key`, `scrolldaddy_dns_server_ip`, `scrolldaddy_dns_secondary_internal_url`, `scrolldaddy_dns_secondary_api_key`, `scrolldaddy_dns_secondary_server_ip` (7 total) | `migrations.php` reduced to `return [];` (three former migrations all held settings only; `scrolldaddy_blocklist_version` is per-site state, not declared) |
+| `server_manager` | (none — its settings (`upgrade_server_active`, `upgrade_source`, `upgrade_location`, `archive_refresh_allowed_ips`, `allow_remote_archive_refresh`) don't start with the `server_manager_` prefix, so they cannot be plugin-owned under the prefix rule — left in core `settings.json`) | Unchanged |
 
 Each plugin conversion is an independent small change. Verify by:
 1. Fresh install in a throwaway site — settings appear in DB with correct defaults.
@@ -227,7 +247,7 @@ This is the primary reference for plugin authors. Five changes:
 
 2. **New "Plugin Settings" section** after "Admin Menus (Declarative)" (around line 345). Parallel structure to the admin menus section. Contents:
    - The `settings` JSON shape with a full example (three settings with varied defaults).
-   - The two validation rules (prefix must match plugin directory name; no collision with `/config/settings.json`).
+   - The two validation rules (prefix must match plugin directory name; no collision with `settings.json`).
    - Seed-only policy stated explicitly: *"Existing setting values are never overwritten. If a plugin v2 changes a declared default, existing sites keep their old value; new installs get the new default. If you need existing sites to pick up a new default, write an SQL migration."*
    - Orphan-row behavior: *"Settings dropped from the manifest in a later version are not automatically deleted. Use an SQL migration if you need the row gone."*
    - Uninstall behavior: *"On uninstall, the rows named in the current manifest are deleted. Nothing else is touched."*
@@ -252,7 +272,7 @@ This is the dedicated settings reference. Current framing centers on "auto-creat
    > *"For plugin-owned settings that need to exist on fresh install without admin intervention, declare them in `plugin.json` — see the Plugin Developer Guide. For settings that only need to exist once an admin fills them in (the historical pattern), the auto-create-on-save mechanism described below still applies."*
 
 2. **"Adding New Settings → For Core Settings"** (line 50). Current text says add a form field to `/adm/admin_settings.php`. Add an adjacent path:
-   > *"For core settings that should exist on every fresh install with a factory default, add an entry to `/config/settings.json`. This file is read by `update_database` on every run and seeds missing rows. Use this when the setting needs a sensible value from day one (feature gates, rate limits). Use the form-only path when the setting has no meaningful default and only exists once an admin configures it."*
+   > *"For core settings that should exist on every fresh install with a factory default, add an entry to `settings.json` at the `public_html/` root. This file is read by `update_database` on every run and seeds missing rows. Use this when the setting needs a sensible value from day one (feature gates, rate limits). Use the form-only path when the setting has no meaningful default and only exists once an admin configures it."*
 
 3. **"Adding New Settings → For Plugin Settings"** (line 68). Currently three steps: create settings_form.php, use prefix convention, "that's it." Add a new "Step 0" before the existing Step 1:
    > *"**Step 0: Declare defaults in `plugin.json`.** For any setting that should exist on fresh install with a default value, add it to the `settings` array in your plugin manifest. See the Plugin Developer Guide for the full shape. This replaces writing `INSERT INTO stg_settings` statements in migrations."*
@@ -265,7 +285,7 @@ This is the dedicated settings reference. Current framing centers on "auto-creat
 
 Minimal. The "Configuration" section at line 184 currently describes `Globalvars::get_setting()` and notes "no `set_setting()` method." Both stay true. Add one line after the existing bullets:
 
-> *"- Plugin-owned settings with factory defaults are declared in the plugin's `plugin.json` under `settings`. Core settings with factory defaults are declared in `/config/settings.json`. Both are seeded into `stg_settings` automatically; no migrations needed."*
+> *"- Plugin-owned settings with factory defaults are declared in the plugin's `plugin.json` under `settings`. Core settings with factory defaults are declared in `settings.json` at the `public_html/` root. Both are seeded into `stg_settings` automatically; no migrations needed."*
 
 No other changes needed — CLAUDE.md intentionally indexes into the detailed docs, and the detailed changes above carry the weight.
 
@@ -282,11 +302,11 @@ No other changes needed — CLAUDE.md intentionally indexes into the detailed do
 4. **Plugin drops a setting in v2** — v1 declared `foo_a` and `foo_b`; v2 declares only `foo_a`. Sync is a no-op for `foo_b` (the row stays). Uninstall removes `foo_a` but leaves `foo_b` as an orphan row. This is the intended behavior.
 5. **Plugin changes a default in v2** — existing sites keep the old value, new installs get the new default.
 6. **Prefix validation** — plugin at `/plugins/bookings/` declaring a setting named `other_plugin_something` fails install with an error naming the expected prefix (`bookings`).
-7. **Core collision** — plugin declaring a name present in `/config/settings.json` fails install.
+7. **Core collision** — plugin declaring a name present in `settings.json` fails install.
 8. **Race-safe seeding** — run two syncs in parallel (test fixture). No duplicate key errors; `ON CONFLICT DO NOTHING` handles the overlap.
 9. **Blank default** — `default: ""` creates a row with empty `stg_value`. Admin settings page renders an editable field for it.
 10. **JSON-native non-string default rejected** — a plugin declaring `default: true` (JSON boolean) fails validation with a message pointing to the offending setting.
-11. **Core seeding, fresh DB** — empty DB, run `update_database`, core settings from `config/settings.json` are all present with correct defaults.
+11. **Core seeding, fresh DB** — empty DB, run `update_database`, core settings from `settings.json` are all present with correct defaults.
 12. **Core seeding, existing DB** — DB with all core settings pre-existing, `update_database` is a no-op for settings.
 13. **Plugin uninstall** — rows whose names appear in the current manifest are deleted. Rows whose names are *not* in the current manifest (orphans from dropped settings, or unrelated settings sharing the prefix) are untouched.
 
@@ -294,10 +314,31 @@ No other changes needed — CLAUDE.md intentionally indexes into the detailed do
 
 - Settings UI metadata in JSON (labels, types, form widgets) — future consideration.
 - Auto-generating `settings_form.php` from the JSON declarations — requires UI metadata first.
-- Migrating the ~4500 lines of historical core migrations into `config/settings.json`. The file is seed-for-new-installs, not a rewrite of history.
+- Migrating the ~4500 lines of historical core migrations into `settings.json`. The file is seed-for-new-installs, not a rewrite of history.
 - Per-user settings, per-environment overrides. Settings today are single-tenant global; this spec does not change that.
 - Changing the `stg_settings` table schema.
 
 ## Dependencies
 
 None — this change is self-contained. The auto-uninstall spec depends on this one (it reads the plugin's manifest at uninstall time to know which settings to delete), so land this first.
+
+## Implementation notes (what actually shipped)
+
+Deviations from the spec as originally drafted:
+
+- **No new `SettingsSeeder` class.** The two bulk helpers live as static methods on `Setting` (`data/settings_class.php`): `Setting::seed_declared()` and `Setting::unseed_declared()`. Colocates the stg_settings write logic with the model that owns the table, one fewer class in `includes/`.
+- **Core-name lookup is inlined** in `PluginManager::validateDeclaredSettings()` — read `settings.json` at the top of the method and build the lookup map there. No separate `getCoreSettingNames()` method and no per-request cache; the callers (activate, sync) are rare enough that re-parsing a 7KB JSON on each call is immeasurably cheap.
+- **Core `settings.json` location:** `public_html/settings.json` (not `/config/settings.json`). The front controller doesn't route unknown top-level files, so the file isn't web-accessible — same treatment `composer.json` gets, no `.htaccess` rule needed.
+- **Validated end-to-end** via admin "Sync with Filesystem" on joinerytest.site after implementation: sync completed cleanly for all 3 active plugins (email_forwarding with 12 declared settings, scrolldaddy with 7, server_manager with 0), no errors in the log, all declared rows already existed in DB so `ON CONFLICT DO NOTHING` was a full no-op as expected.
+
+Files changed:
+- Added: `public_html/settings.json` (122 core declarations)
+- Added: `Setting::seed_declared()` and `Setting::unseed_declared()` in `data/settings_class.php`
+- Added: `PluginHelper::getDeclaredSettings()` in `includes/PluginHelper.php`
+- Added: `PluginManager::syncSettings()` + `validateDeclaredSettings()` in `includes/PluginManager.php`
+- Modified: `PluginManager::onActivate()` seeds settings before activate.php hook
+- Modified: `PluginManager::sync()` calls `syncSettings()` per active plugin
+- Modified: `PluginManager::uninstall()` calls `Setting::unseed_declared()` with current manifest
+- Modified: `utils/update_database.php` seeds core `settings.json` before plugin sync step
+- Converted: `plugins/bookings/plugin.json`, `plugins/email_forwarding/plugin.json`, `plugins/scrolldaddy/plugin.json`, and their migrations
+- Docs: `docs/plugin_developer_guide.md`, `docs/settings.md`, `CLAUDE.md`

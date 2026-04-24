@@ -4,9 +4,10 @@ require_once(PathHelper::getIncludePath('includes/AbstractExtensionManager.php')
 require_once(PathHelper::getIncludePath('data/plugins_class.php'));
 require_once(PathHelper::getIncludePath('data/plugin_dependencies_class.php'));
 require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
+require_once(PathHelper::getIncludePath('data/settings_class.php'));
 
 /**
- * PluginManager - Comprehensive plugin management including installation, 
+ * PluginManager - Comprehensive plugin management including installation,
  * activation, dependencies, and migrations
  * 
  * This consolidated class replaces the previous multi-class structure with
@@ -628,6 +629,9 @@ class PluginManager extends AbstractExtensionManager {
             throw new Exception("Plugin '$name' table update failed: " . implode('; ', $table_result['errors']));
         }
 
+        // Seed declared default settings from plugin.json
+        $this->syncSettings($name);
+
         // Run activate.php hook if it exists
         $activate_file = PathHelper::getAbsolutePath("plugins/{$name}/activate.php");
         if (file_exists($activate_file)) {
@@ -871,6 +875,17 @@ class PluginManager extends AbstractExtensionManager {
         // Remove declarative admin menus before uninstall hook
         $this->syncAdminMenus($name, []);
 
+        // Remove declared settings (from the current plugin.json manifest).
+        // Settings that appeared in an earlier manifest but have been dropped
+        // in the current version are left in place as orphan rows.
+        try {
+            $helper_for_settings = PluginHelper::getInstance($name);
+            $declared_settings = $helper_for_settings->getDeclaredSettings();
+            Setting::unseed_declared($declared_settings);
+        } catch (Exception $e) {
+            error_log("Failed to remove declared settings for plugin '$name' during uninstall: " . $e->getMessage());
+        }
+
         // Run uninstall hook
         $uninstall_file = PathHelper::getAbsolutePath("plugins/{$name}/uninstall.php");
         if (file_exists($uninstall_file)) {
@@ -1023,6 +1038,22 @@ class PluginManager extends AbstractExtensionManager {
             $this->syncAdminMenus($plugin->get('plg_name'));
         }
 
+        // Sync declarative settings for all active plugins — seeds any that
+        // were added in a newer manifest version
+        $settings_messages = [];
+        foreach ($active_plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            try {
+                $this->syncSettings($plugin_name);
+            } catch (Exception $e) {
+                $settings_messages[] = "$plugin_name: " . $e->getMessage();
+                error_log("syncSettings skipped for '$plugin_name': " . $e->getMessage());
+            }
+        }
+        if (!empty($settings_messages)) {
+            $result['settings_messages'] = $settings_messages;
+        }
+
         return $result;
     }
     
@@ -1054,6 +1085,76 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     // ========== Declarative Admin Menus ==========
+
+    /**
+     * Seed a plugin's declared default settings into stg_settings.
+     *
+     * Reads the 'settings' array from plugin.json, validates it, then inserts
+     * any rows that don't already exist (seed-only — existing values are
+     * preserved).
+     *
+     * @param string $plugin_name Plugin directory name
+     * @throws Exception if validation fails
+     */
+    public function syncSettings($plugin_name) {
+        try {
+            $helper = PluginHelper::getInstance($plugin_name);
+        } catch (Exception $e) {
+            error_log("syncSettings: could not read plugin.json for '$plugin_name': " . $e->getMessage());
+            return;
+        }
+
+        $declared = $helper->getDeclaredSettings();
+        if (empty($declared)) return;
+
+        $this->validateDeclaredSettings($plugin_name, $declared);
+        Setting::seed_declared($declared);
+    }
+
+    /**
+     * Validate a plugin's declared settings against the two design rules:
+     *   1. Every declared 'name' must start with the plugin's directory name.
+     *   2. No declared 'name' may collide with a core setting in settings.json.
+     *
+     * Also rejects non-string defaults (e.g. JSON booleans or numbers) — values
+     * in stg_settings are always strings, so the manifest must match.
+     *
+     * @param string $plugin_name
+     * @param array $declared
+     * @throws Exception on any rule violation
+     */
+    protected function validateDeclaredSettings($plugin_name, array $declared) {
+        $prefix = $plugin_name . '_';
+
+        // Load core setting names as a lookup map for collision checks.
+        $core_names = [];
+        $core_path = PathHelper::getIncludePath('settings.json');
+        if (file_exists($core_path)) {
+            $core_data = json_decode(file_get_contents($core_path), true);
+            foreach ($core_data['settings'] ?? [] as $entry) {
+                if (!empty($entry['name'])) $core_names[$entry['name']] = true;
+            }
+        }
+
+        foreach ($declared as $i => $entry) {
+            if (!is_array($entry) || empty($entry['name'])) {
+                throw new Exception("Plugin '$plugin_name' settings entry #$i is missing a 'name'.");
+            }
+            $name = $entry['name'];
+
+            if (strpos($name, $prefix) !== 0) {
+                throw new Exception("Plugin '$plugin_name' declares setting '$name' — must start with the plugin's directory name ('$prefix').");
+            }
+
+            if (isset($core_names[$name])) {
+                throw new Exception("Plugin '$plugin_name' declares setting '$name' — collides with a core setting in settings.json.");
+            }
+
+            if (array_key_exists('default', $entry) && !is_string($entry['default'])) {
+                throw new Exception("Plugin '$plugin_name' setting '$name' has non-string default — use \"0\"/\"1\" for booleans and \"42\" for numbers.");
+            }
+        }
+    }
 
     /**
      * Sync a plugin's admin menus from its plugin.json adminMenu declaration.

@@ -84,6 +84,54 @@ private function _check_for_duplicate_setting() {
 		}
 	}
 
+	/**
+	 * Bulk-insert declared default settings, skipping any stg_name that
+	 * already exists. Used by PluginManager (plugin.json settings array) and
+	 * update_database (core settings.json). Seed-only — never overwrites.
+	 *
+	 * @param array $declarations list of [['name' => ..., 'default' => ...], ...]
+	 */
+	public static function seed_declared(array $declarations): void {
+		if (empty($declarations)) return;
+
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$sql = "INSERT INTO stg_settings
+					(stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
+				VALUES (?, ?, 1, NOW(), NOW(), 'general')
+				ON CONFLICT (stg_name) DO NOTHING";
+		$stmt = $dblink->prepare($sql);
+
+		foreach ($declarations as $d) {
+			if (empty($d['name'])) continue;
+			$stmt->execute([$d['name'], $d['default'] ?? '']);
+		}
+	}
+
+	/**
+	 * Delete settings rows whose names appear in $declarations.
+	 *
+	 * Used during plugin uninstall. Deletes only the currently-declared names —
+	 * orphan rows from previously-declared-but-now-dropped settings are left
+	 * in place by design.
+	 *
+	 * @param array $declarations list of [['name' => ..., ...], ...]
+	 */
+	public static function unseed_declared(array $declarations): void {
+		if (empty($declarations)) return;
+
+		$names = [];
+		foreach ($declarations as $d) {
+			if (!empty($d['name'])) $names[] = $d['name'];
+		}
+		if (empty($names)) return;
+
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$placeholders = implode(',', array_fill(0, count($names), '?'));
+		$sql = "DELETE FROM stg_settings WHERE stg_name IN ({$placeholders})";
+		$stmt = $dblink->prepare($sql);
+		$stmt->execute($names);
+	}
+
 }
 
 class MultiSetting extends SystemMultiBase {
