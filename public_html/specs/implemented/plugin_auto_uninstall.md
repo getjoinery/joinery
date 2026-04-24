@@ -251,3 +251,51 @@ Check any other `/docs/` file for "Permanently Delete" or "uninstalled" referenc
 **Depends on `declarative_plugin_settings` spec.** That spec introduces the `settings` key in `plugin.json` and the `PluginHelper::getDeclaredSettings()` accessor that `deleteDeclaredSettings()` calls. Land the settings spec first.
 
 **Orphan cost of manifest-reading:** a plugin that removes a setting from its manifest between versions and is later uninstalled leaves the removed setting's row in `stg_settings`. The system has no record that it ever existed. Matches the orphan-tolerant stance in the settings spec.
+
+## Implementation Notes
+
+Recording concrete decisions and divergences from the plan above, for future readers.
+
+### Phase 1 step 1 used the existing `Setting::unseed_declared()` helper
+
+The spec proposed writing a new `PluginManager::deleteDeclaredSettings()` with a raw `DELETE ... WHERE stg_name IN (...)` query. The settings spec had already shipped a `Setting::unseed_declared($declarations)` helper with the exact same semantics, and `PluginManager::uninstall()` was already calling it — we kept the existing wiring rather than introducing a parallel method.
+
+### Phases 1 and 3 shipped together
+
+Phase 1 step 4 deletes `Plugin::permanent_delete_with_files()`, but that method's only caller is the admin UI's "Permanently Delete" action, which Phase 3 removes. Landing Phase 1 alone would break the admin page in the intermediate state. The two phases ship as a single unit.
+
+### Step 7 drops orphan sequences too
+
+The spec flagged this as "verify during implementation": Joinery's `SERIAL` columns create sequences that are **not** registered as column-owned in `pg_depend`, so `DROP TABLE ... CASCADE` leaves them behind. Verified on `bkn_bookings_bkn_booking_id_seq` and the `efl_* / efa_* / efd_*` sequences. Step 7 now enumerates sequences matching `{tablename}\_%` via `pg_class` and drops each one explicitly. `cleanup_uninstalled_plugins.php` mirrors the same logic so the legacy-row migration cleans up orphans it would otherwise leave.
+
+### Plugin migration records are cleaned in step 5
+
+`plm_plugin_migrations` cleanup was previously done per-plugin (visible in `email_forwarding/uninstall.php` before deletion). The spec asked to verify whether the existing "version/dependency records" step covered it — it didn't. Added a third `MultiPluginMigration` sweep to step 5 so the hook and the post-hook table-drop both see a clean slate.
+
+### `refreshFromUpstream()` extracts with `PharData`, not shell `tar`
+
+`upgrade.php`'s bulk extraction uses `exec('tar -xzf ...')`, and the natural choice for `refreshFromUpstream()` was the same. But shell `tar` tries to restore archive directory modes on existing directories and fails with `Operation not permitted` in mixed-ownership environments (PHP process running as `user1` against `www-data`-owned plugin dirs). `--no-overwrite-dir`, `--no-same-permissions`, and `--touch` didn't suppress the chmod attempts. Switched to PHP-native `PharData::extractTo($root, null, $overwrite=true)`, which uses PHP file operations and leaves existing directory metadata alone. File content replacement is unchanged.
+
+Minor wrinkle: `PharData` requires a recognized archive extension on the file path, so the download writes to `tempnam() . '.tar.gz'` rather than using `tempnam()` directly.
+
+Open question worth revisiting later: `upgrade.php` still uses shell `tar` for its bulk extraction. If we want both paths to use the same extractor we could move them both onto `PharData`, but the use cases differ enough that the divergence is defensible for now.
+
+### `is_stock` keeps structural roles outside uninstall/upgrade-discovery
+
+The spec narrowed the flag's role to "the upgrade endpoint publishes this plugin." That's accurate for the two paths this spec touched (upgrade-time discovery, install-time refresh), but three other subsystems still consult it and must continue to:
+
+- `publish_upgrade.php` skips `is_stock: false` plugins/themes when building distribution archives.
+- `DeploymentHelper` / `deploy.sh` preserve `is_stock: false` plugins across the deploy swap (otherwise custom plugins would be wiped).
+- `_reconcile_stock_assets.sh` uses `plg_is_stock = true` to decide what to re-download on container boot.
+
+Docs and inline comments were adjusted to reflect that `is_stock`'s role contracted, not disappeared.
+
+### Legacy-menu conversion for `bookings`
+
+Out of scope of this spec but a blocker for a clean uninstall: `bookings` still had three migration-seeded admin menu rows (`bookings-parent`, `bookings`, `booking-types`) that weren't declared in its `plugin.json`. Under the new destructive uninstall, `syncAdminMenus($name, [])` would have left them orphaned. Added a nested `adminMenu` block to `plugins/bookings/plugin.json`; `syncAdminMenus` now tracks their slugs in `plg_metadata._menu_slugs` and cleans them on uninstall. `email_forwarding` and `server_manager` were already declarative; `items` and `scrolldaddy` have no admin menus to declare.
+
+The old migration that originally seeded bookings' menus is now redundant (its `test` SQL skips when the rows exist, and activate's declarative sync upserts the same rows regardless). Left in place — touching old migrations is higher-risk than the payoff justifies.
+
+### `plg_uninstalled_time` column removal required `--cleanup`
+
+The spec stated that removing `plg_uninstalled_time` from `$field_specifications` would cause `update_database` to drop the column on its next run. Verified that the column-drop pass (`processColumnCleanup()`) only runs when `update_database` is invoked with `--cleanup` or `--upgrade` — the default run doesn't touch obsolete columns. One-time `php utils/update_database.php --cleanup` dropped the column on this site; production sites pick it up on their next deploy (upgrade.php runs `update_database` in upgrade mode, which enables cleanup).

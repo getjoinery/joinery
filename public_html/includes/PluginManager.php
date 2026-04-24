@@ -760,6 +760,91 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
+     * Fetch a fresh plugin archive from the upgrade endpoint and extract it over
+     * plugins/{name}/. The upgrade endpoint is the authoritative source of truth
+     * for stock plugin files; this runs at install time so stale on-disk code
+     * (e.g. after an uninstall/reinstall cycle) gets replaced with upstream.
+     *
+     * Does not read the on-disk plugin.json to decide — the endpoint's response
+     * is what determines whether this plugin is upstream-published. A 404 means
+     * the plugin is custom (not a stock catalog member); any other failure means
+     * the endpoint is unreachable or the transfer failed.
+     *
+     * Failure modes are non-fatal: install falls through to on-disk files.
+     *
+     * @param string $name Plugin name
+     */
+    public function refreshFromUpstream($name) {
+        $settings = Globalvars::get_instance();
+        $upgrade_source = $settings->get_setting('upgrade_source');
+
+        if (empty($upgrade_source)) {
+            error_log("refreshFromUpstream: upgrade_source not configured; skipping refresh for '$name'");
+            return;
+        }
+
+        $url = rtrim($upgrade_source, '/') . '/admin/server_manager/publish_theme'
+             . '?download=' . urlencode($name) . '&type=plugin';
+
+        // Append .tar.gz so PharData recognizes the archive format on extract.
+        $temp_base = tempnam(sys_get_temp_dir(), 'joinery_plugin_');
+        $temp_file = $temp_base . '.tar.gz';
+        @unlink($temp_base);
+        $fp = fopen($temp_file, 'w');
+        if (!$fp) {
+            @unlink($temp_file);
+            error_log("refreshFromUpstream: could not open temp file for '$name'");
+            return;
+        }
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_FILE => $fp,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_FOLLOWLOCATION => true,
+        ]);
+        $ok = curl_exec($ch);
+        $curl_error = curl_error($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        fclose($fp);
+
+        if ($http_code === 404) {
+            // Custom plugin — upstream doesn't know about it. On-disk files are source of truth.
+            @unlink($temp_file);
+            return;
+        }
+
+        if (!$ok || $http_code !== 200 || filesize($temp_file) < 100) {
+            @unlink($temp_file);
+            error_log("refreshFromUpstream: fetch failed for '$name' (HTTP $http_code" .
+                      ($curl_error ? ", curl: $curl_error" : '') . "); falling back to on-disk files");
+            return;
+        }
+
+        $plugins_root = PathHelper::getAbsolutePath('plugins');
+        if (!is_dir($plugins_root)) {
+            @unlink($temp_file);
+            error_log("refreshFromUpstream: plugins root directory not found; skipping refresh for '$name'");
+            return;
+        }
+
+        // Archive root contains the plugin directory (e.g. bookings/data/...),
+        // so extracting into plugins/ overwrites plugins/{name}/ contents in-place.
+        // PharData (PHP-native) avoids the chmod-on-existing-directory failures
+        // the tar binary hits in mixed-ownership dev environments.
+        try {
+            $phar = new PharData($temp_file);
+            $phar->extractTo($plugins_root, null, true);
+        } catch (Exception $e) {
+            error_log("refreshFromUpstream: extract failed for '$name': " . $e->getMessage());
+        }
+        @unlink($temp_file);
+    }
+
+    /**
      * Install a plugin — creates tables, runs migrations, sets status=inactive.
      * Transaction-wrapped. Validates first; rolls back on failure.
      *
@@ -770,6 +855,11 @@ class PluginManager extends AbstractExtensionManager {
         if (!$this->validateName($name)) {
             throw new Exception("Invalid plugin name: $name");
         }
+
+        // Before any DB work, attempt to refresh the plugin's files from the
+        // upgrade endpoint. Stock plugins get fresh code on every install;
+        // custom plugins 404 silently and install proceeds with on-disk files.
+        $this->refreshFromUpstream($name);
 
         $plugin_path = $this->getExtensionPath($name);
         if (!is_dir($plugin_path)) {
@@ -848,10 +938,16 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Uninstall a plugin — runs uninstall hook, removes deletion rules, deletes task records,
-     * dependency records, version records. Tables and files are preserved.
+     * Uninstall a plugin — destructive. Removes scaffolding (settings, menus,
+     * deletion rules, scheduled tasks, version/dependency/migration records),
+     * runs the plugin's optional uninstall.php hook, drops plugin tables, and
+     * deletes the plg_plugins row. Files on disk are preserved.
      *
      * Plugin must be inactive before calling.
+     *
+     * Hook failure is fatal: if the hook throws or returns false, the table
+     * drop and row deletion are skipped. Scaffolding cleanup (steps 1-5) is
+     * idempotent, so the operator can fix the hook and re-run uninstall.
      *
      * @param string $name Plugin name
      * @throws Exception on failure
@@ -866,27 +962,66 @@ class PluginManager extends AbstractExtensionManager {
             throw new Exception("Cannot uninstall active plugin '$name'. Deactivate it first.");
         }
 
-        // Check dependents
         $dependents = $this->getDependents($name);
         if (!empty($dependents)) {
             throw new Exception("Cannot uninstall plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
         }
 
-        // Remove declarative admin menus before uninstall hook
-        $this->syncAdminMenus($name, []);
+        require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+        $plugin_helper = PluginHelper::getInstance($name);
 
-        // Remove declared settings (from the current plugin.json manifest).
-        // Settings that appeared in an earlier manifest but have been dropped
-        // in the current version are left in place as orphan rows.
+        // Step 1: Delete declared settings. Settings previously declared and
+        // since removed from the manifest are left as orphans by design.
         try {
-            $helper_for_settings = PluginHelper::getInstance($name);
-            $declared_settings = $helper_for_settings->getDeclaredSettings();
+            $declared_settings = $plugin_helper->getDeclaredSettings();
             Setting::unseed_declared($declared_settings);
         } catch (Exception $e) {
             error_log("Failed to remove declared settings for plugin '$name' during uninstall: " . $e->getMessage());
         }
 
-        // Run uninstall hook
+        // Step 2: Delete admin menus
+        $this->syncAdminMenus($name, []);
+
+        // Step 3: Remove deletion rules
+        try {
+            $plugin_helper->removePluginDeletionRules();
+        } catch (Exception $e) {
+            error_log("Failed to remove deletion rules for plugin '$name' during uninstall: " . $e->getMessage());
+        }
+
+        // Step 4: Delete scheduled task records
+        require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+        $tasks = new MultiScheduledTask(array('plugin_name' => $name, 'deleted' => false));
+        $tasks->load();
+        foreach ($tasks as $task) {
+            $task->permanent_delete();
+        }
+
+        // Step 5: Delete version, dependency, and migration records
+        require_once(PathHelper::getIncludePath('data/plugin_versions_class.php'));
+        $versions = new MultiPluginVersion(array('plv_plugin_name' => $name));
+        $versions->load();
+        foreach ($versions as $version) {
+            $version->permanent_delete();
+        }
+
+        require_once(PathHelper::getIncludePath('data/plugin_dependencies_class.php'));
+        $deps = new MultiPluginDependency(array('pld_plugin_name' => $name));
+        $deps->load();
+        foreach ($deps as $dep) {
+            $dep->permanent_delete();
+        }
+
+        require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
+        $migrations = new MultiPluginMigration(array('plm_plugin_name' => $name));
+        $migrations->load();
+        foreach ($migrations as $migration) {
+            $migration->permanent_delete();
+        }
+
+        // Step 6: Run uninstall hook. Runs after scaffolding cleanup but before
+        // tables are dropped, so the hook can still query the plugin's own
+        // tables for external teardown (e.g. revoking cached API keys).
         $uninstall_file = PathHelper::getAbsolutePath("plugins/{$name}/uninstall.php");
         if (file_exists($uninstall_file)) {
             require_once($uninstall_file);
@@ -899,87 +1034,37 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
 
-        // Remove deletion rules
-        require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
-        try {
-            $plugin_helper = PluginHelper::getInstance($name);
-            $plugin_helper->removePluginDeletionRules();
-        } catch (Exception $e) {
-            error_log("Failed to remove deletion rules for plugin '$name' during uninstall: " . $e->getMessage());
-        }
-
-        // Delete scheduled task records by plugin_name
-        require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
-        $tasks = new MultiScheduledTask(array('plugin_name' => $name, 'deleted' => false));
-        $tasks->load();
-        foreach ($tasks as $task) {
-            $task->permanent_delete();
-        }
-
-        // Delete version tracking records
-        require_once(PathHelper::getIncludePath('data/plugin_versions_class.php'));
-        $versions = new MultiPluginVersion(array('plv_plugin_name' => $name));
-        $versions->load();
-        foreach ($versions as $version) {
-            $version->permanent_delete();
-        }
-
-        // Delete dependency records
-        require_once(PathHelper::getIncludePath('data/plugin_dependencies_class.php'));
-        $deps = new MultiPluginDependency(array('pld_plugin_name' => $name));
-        $deps->load();
-        foreach ($deps as $dep) {
-            $dep->permanent_delete();
-        }
-
-        // Update plugin record
-        $plugin->set('plg_status', 'uninstalled');
-        $plugin->set('plg_active', 0);
-        $plugin->set('plg_activated_time', null);
-        $plugin->set('plg_uninstalled_time', gmdate('Y-m-d H:i:s'));
-        $plugin->save();
-    }
-
-    /**
-     * Drop all plugin database tables. Uses regex to extract table names from
-     * *_class.php files (avoids loading classes with potentially missing deps).
-     * Also cleans up plm_plugin_migrations records.
-     *
-     * Call BEFORE deleting plugin files.
-     *
-     * @param string $name Plugin name
-     */
-    public function permanentDeleteTables($name) {
+        // Step 7: Drop plugin tables. Regex-extracts table names from *_class.php
+        // files rather than loading the classes (avoids missing-dep issues when
+        // the plugin's code path is partially torn down). Also drops orphan
+        // sequences — Joinery's sequences aren't column-owned in pg_depend, so
+        // DROP TABLE CASCADE doesn't sweep them automatically.
         $dblink = DbConnector::get_instance()->get_db_link();
         $data_dir = PathHelper::getAbsolutePath("plugins/{$name}/data");
+        if (is_dir($data_dir)) {
+            foreach (glob($data_dir . '/*_class.php') as $class_file) {
+                $content = file_get_contents($class_file);
+                if (preg_match('/\$tablename\s*=\s*[\'"]([^\'"]+)[\'"]/', $content, $matches)) {
+                    $tablename = $matches[1];
+                    if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tablename)) {
+                        $dblink->exec("DROP TABLE IF EXISTS " . $tablename . " CASCADE");
 
-        if (!is_dir($data_dir)) {
-            return;
-        }
-
-        $class_files = glob($data_dir . '/*_class.php');
-        if (empty($class_files)) {
-            return;
-        }
-
-        foreach ($class_files as $class_file) {
-            $content = file_get_contents($class_file);
-            if (preg_match('/\$tablename\s*=\s*[\'"]([^\'"]+)[\'"]/', $content, $matches)) {
-                $tablename = $matches[1];
-                // Validate table name to prevent injection (should only be alphanumeric + underscore)
-                if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tablename)) {
-                    $dblink->exec("DROP TABLE IF EXISTS " . $tablename . " CASCADE");
+                        $seq_stmt = $dblink->prepare(
+                            "SELECT relname FROM pg_class WHERE relkind = 'S' AND relname LIKE ?"
+                        );
+                        $seq_stmt->execute([$tablename . '\_%']);
+                        foreach ($seq_stmt->fetchAll(PDO::FETCH_COLUMN) as $seqname) {
+                            if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $seqname)) {
+                                $dblink->exec("DROP SEQUENCE IF EXISTS " . $seqname . " CASCADE");
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Clean up migration records
-        require_once(PathHelper::getIncludePath('data/plugin_migrations_class.php'));
-        $migrations = new MultiPluginMigration(array('plm_plugin_name' => $name));
-        $migrations->load();
-        foreach ($migrations as $migration) {
-            $migration->permanent_delete();
-        }
+        // Step 8: Delete the plg_plugins row
+        $plugin->permanent_delete();
     }
 
     // ========== Public API Methods (Backward Compatibility) ==========
