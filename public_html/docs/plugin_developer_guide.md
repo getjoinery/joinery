@@ -74,7 +74,8 @@ Before diving in, a quick reference for the four common things plugins need to r
 | Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Admin Menus](#admin-menus-declarative) |
 | Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
 | Other initial data (seed rows, categories, etc.) | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
-| Activate/deactivate/uninstall logic | `activate.php`, `deactivate.php`, `uninstall.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` / `_uninstall()` | [Plugin Lifecycle](#plugin-lifecycle) |
+| Activate/deactivate logic | `activate.php`, `deactivate.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` | [Plugin Lifecycle](#plugin-lifecycle) |
+| Uninstall external cleanup *(optional)* | `uninstall.php` defining `{plugin}_uninstall()` — only for work the declarative systems can't do (external API calls, filesystem cleanup) | [Uninstall Script](#uninstall-script) |
 
 If you find yourself writing SQL to INSERT menu rows, or CREATE TABLE statements in a migration, stop — you're on the wrong path. Those pieces come from the data class and `plugin.json` respectively.
 
@@ -192,7 +193,7 @@ Routes outside the namespace are dropped with a logged warning.
 ├── ajax/                        # AJAX endpoints
 ├── includes/                    # Helper classes and libraries
 ├── migrations/                  # Database migrations
-└── uninstall.php               # Clean uninstall script
+└── uninstall.php               # (optional) external-cleanup hook — most plugins don't need one
 ```
 
 ### Plugin.json Requirements
@@ -459,15 +460,20 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 
 **PluginManager is the single entry point for all lifecycle operations.** Plugin models (`Plugin`, `PluginHelper`) are pure CRUD — never call lifecycle methods directly on them.
 
+Three states: `active`, `inactive`, and *uninstalled* (no row at all).
+
 ```
-Discovery → Install → Activate ↔ Deactivate → Uninstall → Permanent Delete
+Discovery → Install → Activate ↔ Deactivate → Uninstall
+              ↑                                    │
+              └────────────── Install ─────────────┘
 ```
 
 **Install** (`PluginManager::install($name)`)
-1. Validates plugin structure and dependencies
-2. Creates/updates database tables from data class `$field_specifications` (via `DatabaseUpdater::runPluginTablesOnly()`)
-3. Runs pending `.sql` migration files in `plugins/{name}/migrations/`
-4. Records the plugin in `plg_plugins` with status `inactive`
+1. Fetches a fresh archive from the upgrade endpoint and extracts over `plugins/{name}/`, so stock plugins get current code on every install. Custom plugins 404 silently and install proceeds with on-disk files.
+2. Validates plugin structure and dependencies
+3. Creates/updates database tables from data class `$field_specifications` (via `DatabaseUpdater::runPluginTablesOnly()`)
+4. Runs pending `.sql` migration files in `plugins/{name}/migrations/`
+5. Records the plugin in `plg_plugins` with status `inactive`
 
 **Activate** (`PluginManager::activate($name)`)
 1. Re-validates dependencies
@@ -493,15 +499,20 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 3. Suspends active scheduled tasks (`sct_is_active = false`) — tasks resume on reactivation
 4. Sets `plg_active = 0`
 
-**Uninstall** (`PluginManager::uninstall($name)`)
-- Runs `uninstall.php` hook
-- Removes deletion rules
-- Deletes scheduled task records (not just suspended — permanently removed)
-- Deletes version and dependency records
-- Sets status to `uninstalled`, preserves plugin files and database tables
-- Allows reinstall (tables/data preserved)
+**Uninstall** (`PluginManager::uninstall($name)`) — **destructive, cannot be undone.** Plugin files stay on disk; everything else is removed.
 
-**Permanent Delete** — Drops plugin database tables, removes migration records, deletes plugin files and DB record. Cannot be undone.
+1. Deletes declared settings (from current `plugin.json`). Settings dropped from a later manifest version are left as orphans.
+2. Deletes declared admin menus
+3. Removes deletion rules
+4. Deletes scheduled task records
+5. Deletes version, dependency, and migration records
+6. Runs `uninstall.php` hook if present. Tables are still available here for external teardown (e.g., revoking cached external state).
+7. Drops plugin tables and orphan sequences
+8. Deletes the `plg_plugins` row
+
+**Hook failure is fatal.** If step 6 throws or returns false, steps 7 and 8 do NOT run — tables and the row remain intact. Steps 1–5 are idempotent, so the operator fixes the hook and re-runs uninstall. Use this to guard external work: if you can't revoke an API key, don't let the plugin's local state be destroyed.
+
+**After uninstall,** the plugin appears in the admin UI as "Inactive" with an **Install** action (no DB row, files still on disk). Reinstall goes through the normal install path — on install the upgrade-endpoint refresh pulls fresh stock code, so stale on-disk files don't linger.
 
 **Important:** The core `update_database.php` script excludes plugins from its main pipeline (`include_plugins => false`) because plugin tables have independent lifecycles. However, `update_database` runs a plugin/theme sync as its final step, so plugin schema changes are still applied when you run it.
 
@@ -589,25 +600,40 @@ $formwriter->checkboxinput('my_plugin_enabled', 'Enable My Plugin', [
 
 ### Uninstall Script
 
+`uninstall.php` is **optional**. Most plugins don't need one — the system automatically drops tables, deletes declared settings and menus, removes scheduled task / version / dependency / migration records, and deletes the `plg_plugins` row.
+
+Create `uninstall.php` only when you need external cleanup the system can't do:
+- Revoking an API key or token with a third-party service
+- Removing uploaded files or cached assets outside the database
+- Writing a final archival record to a log table before teardown
+- Notifying a paired service (resolver, remote node) to drop cached state
+
+**Contract:**
+- Function name: `{plugin_name}_uninstall()` — must match the plugin directory name.
+- Runs **after** settings/menus/scaffolding are deleted but **before** plugin tables are dropped, so you can still query your own tables.
+- Return `true` on success. Return `false` or throw to signal failure.
+- **Failure is fatal**: tables and the `plg_plugins` row are preserved, leaving the plugin in a recoverable state. Fix the hook and re-run uninstall — the scaffolding cleanup steps are idempotent.
+
 ```php
 // plugins/my-plugin/uninstall.php
 function my_plugin_uninstall() {
     try {
-        $dbconnector = DbConnector::get_instance();
-        
-        // Drop plugin tables
-        $dbconnector->exec("DROP TABLE IF EXISTS mdt_my_data CASCADE");
-        
-        // Remove settings
-        $dbconnector->exec("DELETE FROM stg_settings WHERE stg_name LIKE 'my_plugin_%'");
-        
+        // Example: revoke an API key with an external service.
+        // Tables are still available here if you need to read credentials
+        // or enumerate records that reference external resources.
+        $api_key = Globalvars::get_instance()->get_setting('my_plugin_api_key');
+        if ($api_key) {
+            external_api_revoke_key($api_key);
+        }
         return true;
     } catch (Exception $e) {
         error_log("My Plugin uninstall failed: " . $e->getMessage());
-        return false;
+        return false; // preserves tables + row so operator can fix and retry
     }
 }
 ```
+
+**Do not** include `DROP TABLE`, `DELETE FROM stg_settings`, or `DELETE FROM amu_admin_menus` in the hook — those are the system's job now. A hook that duplicates them isn't harmful (drops are `IF EXISTS`, deletes match exact keys the system already cleared), but the extra code rots.
 
 ## Theme Development
 
@@ -1061,7 +1087,7 @@ Always use the two-parameter format:
 4. Declare default settings in `plugin.json` under the `settings` key (see [Plugin Settings](#plugin-settings-declarative))
 5. Create `.sql` migration files in `plugins/{name}/migrations/` only if you have other initial data seeds (dropdowns, categories, reference rows)
 6. Create admin interface in `plugins/{name}/admin/` if needed
-7. Create `uninstall.php` for clean removal of any data not covered by the declarative systems (settings declared in `plugin.json` are removed automatically)
+7. *(Optional)* Create `uninstall.php` only if you have external cleanup to perform (API calls, filesystem, remote-service notifications) — the system handles tables, settings, menus, and scaffolding automatically. See [Uninstall Script](#uninstall-script).
 8. **Install** the plugin via Admin > System > Plugins (creates tables, runs SQL migrations)
 9. **Activate** the plugin to make it live (seeds declared settings)
 10. Test admin functionality via `/plugins/{plugin}/admin/*`

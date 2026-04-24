@@ -227,56 +227,23 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // Build actions array
                     $actions = array();
 
-                    if (!$plugin['plugin'] || !$plugin_status) {
-                        // Not installed (no database record) - allow install and permanent delete
-                        $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
-                        // Permanent delete - assume custom since no database record
-                        $warning = 'WARNING: This will permanently delete all plugin files. Custom plugins cannot be recovered!';
-                        $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
-                    } elseif ($plugin_status === 'uninstalled') {
-                        // Uninstalled - could be legacy plugin or failed installation
-                        if ($plugin['plugin']->get('plg_install_error')) {
-                            $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
-                        } else {
-                            $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
-                        }
+                    $uninstall_warning = "This will drop all of this plugin's tables and delete its data. Plugin files will stay on disk. This cannot be undone.";
 
-                        // Permanent delete with stock/custom warning
-                        $is_stock = $plugin['plugin'] ? $plugin['plugin']->is_stock() : false;
-                        $warning = $is_stock
-                            ? 'This will permanently delete all plugin files. Stock plugins can be re-downloaded later via the upgrade system.'
-                            : 'WARNING: This will permanently delete all plugin files and data. Custom plugins cannot be recovered!';
-                        $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
+                    if (!$plugin['plugin'] || !$plugin_status) {
+                        // Not installed (no database record) — files on disk, awaiting install.
+                        // Post-uninstall lands here too, since uninstall removes the row.
+                        $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
                     } elseif ($plugin_status === 'active') {
-                        // Active
                         $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
                     } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed') {
-                        // Inactive
                         $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
-                        // Only allow uninstall/delete if not active theme provider
                         if (!$is_active_theme_provider) {
-                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
-
-                            // Permanent delete with stock/custom warning
-                            $is_stock = $plugin['plugin'] ? $plugin['plugin']->is_stock() : false;
-                            $warning = $is_stock
-                                ? 'This will permanently delete all plugin files. Stock plugins can be re-downloaded later via the upgrade system.'
-                                : 'WARNING: This will permanently delete all plugin files and data. Custom plugins cannot be recovered!';
-                            $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
+                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
                         }
                     } elseif ($plugin_status === 'error') {
-                        // Error
                         $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
-                        // Only allow uninstall/delete if not active theme provider
                         if (!$is_active_theme_provider) {
-                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', 'Are you sure you want to uninstall this plugin?')";
-
-                            // Permanent delete with stock/custom warning
-                            $is_stock = $plugin['plugin'] ? $plugin['plugin']->is_stock() : false;
-                            $warning = $is_stock
-                                ? 'This will permanently delete all plugin files. Stock plugins can be re-downloaded later via the upgrade system.'
-                                : 'WARNING: This will permanently delete all plugin files and data. Custom plugins cannot be recovered!';
-                            $actions['Permanently Delete'] = "javascript:confirmPluginAction('permanent_delete', '$plugin_name', '$warning')";
+                            $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
                         }
                     }
 

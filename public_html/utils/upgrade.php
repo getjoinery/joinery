@@ -439,7 +439,7 @@
 
 		// Determine which themes/plugins to download based on what's installed
 		$themes_to_download = get_installed_stock_themes($live_directory . '/theme');
-		$plugins_to_download = get_installed_stock_plugins($live_directory . '/plugins');
+		$plugins_to_download = get_installed_plugins();
 
 		// Get detailed info for status display
 		$all_themes_info = get_all_themes_info($live_directory . '/theme');
@@ -1550,38 +1550,26 @@
 	}
 
 	/**
-	 * Get list of installed stock plugins (those with is_stock=true in plugin.json)
+	 * Get list of plugins to attempt to refresh during upgrade — every plugin
+	 * with a plg_plugins row, regardless of stock/custom. The download loop
+	 * tries each one; stock plugins succeed via the upgrade endpoint, custom
+	 * plugins 404 and are skipped via the existing warning path.
 	 */
-	function get_installed_stock_plugins($plugin_dir) {
-		$plugins = [];
-
-		// Get list of uninstalled plugins from database
-		$uninstalled = [];
+	function get_installed_plugins() {
 		try {
 			require_once(PathHelper::getIncludePath('data/plugins_class.php'));
 			$all_plugins = new MultiPlugin();
 			$all_plugins->load();
+			$names = [];
 			foreach ($all_plugins as $plugin) {
-				if ($plugin->get('plg_status') === 'uninstalled') {
-					$uninstalled[] = $plugin->get('plg_name');
-				}
+				$names[] = $plugin->get('plg_name');
 			}
+			return $names;
 		} catch (Exception $e) {
-			// If we can't check database, proceed with all stock plugins
+			// DB unreachable — skip plugin refresh rather than crash the upgrade
+			error_log("get_installed_plugins: failed to query plg_plugins: " . $e->getMessage());
+			return [];
 		}
-
-		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
-			$plugin_data = json_decode(file_get_contents($json_file), true);
-			if ($plugin_data) {
-				$is_stock = $plugin_data['is_stock'] ?? false;
-				$plugin_name = basename(dirname($json_file));
-				// Skip uninstalled plugins
-				if ($is_stock && !in_array($plugin_name, $uninstalled)) {
-					$plugins[] = $plugin_name;
-				}
-			}
-		}
-		return $plugins;
 	}
 
 	/**
@@ -1606,39 +1594,28 @@
 	}
 
 	/**
-	 * Get detailed info about all installed plugins
-	 * Returns array with plugin name as key and metadata as value
+	 * Get detailed info about all plugins present on disk, annotated with
+	 * whether they are installed (have a plg_plugins row). Upgrade attempts
+	 * each installed plugin; on-disk-only plugins are shown for context but
+	 * not refreshed. is_stock is surfaced here for display; upgrade no longer
+	 * filters by it, but the publish / deploy-swap / container-reconcile
+	 * paths still consult it, so it's not vestigial.
 	 */
 	function get_all_plugins_info($plugin_dir) {
+		$installed = array_flip(get_installed_plugins());
+
 		$plugins = [];
-
-		// Get list of uninstalled plugins from database
-		$uninstalled = [];
-		try {
-			require_once(PathHelper::getIncludePath('data/plugins_class.php'));
-			$all_plugins = new MultiPlugin();
-			$all_plugins->load();
-			foreach ($all_plugins as $plugin) {
-				if ($plugin->get('plg_status') === 'uninstalled') {
-					$uninstalled[] = $plugin->get('plg_name');
-				}
-			}
-		} catch (Exception $e) {
-			// If we can't check database, proceed without status info
-		}
-
 		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
 			$plugin_data = json_decode(file_get_contents($json_file), true);
 			$plugin_name = basename(dirname($json_file));
-			$is_stock = $plugin_data['is_stock'] ?? false;
-			$is_uninstalled = in_array($plugin_name, $uninstalled);
+			$is_installed = isset($installed[$plugin_name]);
 			$plugins[$plugin_name] = [
 				'name' => $plugin_name,
 				'display_name' => $plugin_data['display_name'] ?? $plugin_name,
 				'version' => $plugin_data['version'] ?? 'unknown',
-				'is_stock' => $is_stock,
-				'is_uninstalled' => $is_uninstalled,
-				'will_upgrade' => $is_stock && !$is_uninstalled
+				'is_stock' => $plugin_data['is_stock'] ?? false,
+				'is_installed' => $is_installed,
+				'will_upgrade' => $is_installed,
 			];
 		}
 		ksort($plugins);
@@ -1658,25 +1635,23 @@
 			return;
 		}
 
+		// 'will_upgrade' means: this component will be refreshed during upgrade.
+		// For plugins, that's "installed" (has a plg_plugins row). For themes,
+		// it's still "is_stock" until/if the theme upgrade path is reworked.
 		if ($is_cli) {
-			// CLI table output
 			echo str_pad("Name", 25) . str_pad("Version", 12) . str_pad("Stock", 8) . "Status\n";
 			echo str_repeat("-", 60) . "\n";
 			foreach ($components as $info) {
-				$is_uninstalled = $info['is_uninstalled'] ?? false;
 				if ($info['will_upgrade']) {
 					$status = '✓ Will upgrade';
-				} elseif ($is_uninstalled) {
-					$status = '⊗ Uninstalled (skipped)';
 				} else {
-					$status = '⊘ Skipped (not stock)';
+					$status = '⊘ Skipped';
 				}
 				$stock = $info['is_stock'] ? 'Yes' : 'No';
 				echo str_pad($info['name'], 25) . str_pad($info['version'], 12) . str_pad($stock, 8) . $status . "\n";
 			}
 			echo "\n";
 		} else {
-			// HTML table output
 			echo '<table style="border-collapse: collapse; width: 100%; margin: 10px 0; font-family: monospace;">';
 			echo '<tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">';
 			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Name</th>';
@@ -1685,16 +1660,12 @@
 			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Status</th>';
 			echo '</tr>';
 			foreach ($components as $info) {
-				$is_uninstalled = $info['is_uninstalled'] ?? false;
 				if ($info['will_upgrade']) {
 					$row_style = 'background-color: #d4edda;';
 					$status = '<span style="color: #155724;">✓ Will upgrade</span>';
-				} elseif ($is_uninstalled) {
-					$row_style = 'background-color: #e2e3e5;';
-					$status = '<span style="color: #495057;">⊗ Uninstalled (skipped)</span>';
 				} else {
 					$row_style = 'background-color: #fff3cd;';
-					$status = '<span style="color: #856404;">⊘ Skipped (not stock)</span>';
+					$status = '<span style="color: #856404;">⊘ Skipped</span>';
 				}
 				$stock = $info['is_stock']
 					? '<span style="color: #155724;">Yes</span>'

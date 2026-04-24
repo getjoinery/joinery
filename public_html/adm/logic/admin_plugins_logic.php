@@ -180,45 +180,6 @@ function admin_plugins_logic($get, $post) {
 						}
 					}
 
-				} elseif ($action === 'permanent_delete') {
-					// Permanently delete plugin files and database record
-					$plugin = Plugin::get_by_plugin_name($plugin_name);
-
-					if ($plugin) {
-						// Use the model's permanent_delete_with_files method
-						$result = $plugin->permanent_delete_with_files();
-					} else {
-						// No DB record - just delete files directly
-						$plugin_dir = PathHelper::getAbsolutePath('plugins/' . $plugin_name);
-						$result = array('success' => false, 'errors' => array(), 'messages' => array());
-
-						if (is_dir($plugin_dir)) {
-							// Pre-flight permission check
-							$perm_check = LibraryFunctions::check_directory_deletable($plugin_dir);
-							if (!$perm_check['can_delete']) {
-								$result['errors'][] = "Permission denied. Cannot delete: " . implode(', ', array_slice($perm_check['errors'], 0, 3));
-							} else {
-								if (LibraryFunctions::delete_directory($plugin_dir)) {
-									$result['success'] = true;
-									$result['messages'][] = "Plugin files deleted";
-								} else {
-									$result['errors'][] = "Failed to delete plugin files";
-								}
-							}
-						} else {
-							$result['success'] = true;
-							$result['messages'][] = "Plugin directory already removed";
-						}
-					}
-
-					if ($result['success']) {
-						$message = "Plugin '$plugin_name' permanently deleted.<br>" . implode('<br>', $result['messages']);
-						$message_type = 'success';
-					} else {
-						$message = 'Permanent delete failed:<br>' . implode('<br>', $result['errors']);
-						$message_type = 'danger';
-					}
-
 				} else {
 					$message = 'Invalid action.';
 					$message_type = 'danger';
