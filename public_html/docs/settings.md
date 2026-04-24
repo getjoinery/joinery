@@ -4,6 +4,8 @@
 
 The Joinery CMS settings system provides a flexible, auto-creating configuration management system that eliminates the need for migrations when adding new settings. Settings are stored in the `stg_settings` database table and can be managed through the admin interface.
 
+For plugin-owned settings that need to exist on fresh install without admin intervention, declare them in `plugin.json` under the `settings` key — see the [Plugin Developer Guide](plugin_developer_guide.md#plugin-settings-declarative). For core settings with factory defaults, declare them in `settings.json` at the `public_html/` root. For settings that only need to exist once an admin fills them in (the historical pattern), the auto-create-on-save mechanism described below still applies.
+
 ## How the Settings System Works
 
 ### Core Components
@@ -49,6 +51,21 @@ Some settings are managed by the system and should not be edited by hand via mig
 
 ### For Core Settings
 
+Two paths, choose based on whether the setting needs a factory default:
+
+**Path A — Setting with a factory default** (recommended when the setting has a sensible value from day one):
+
+1. Add an entry to `settings.json` at the `public_html/` root:
+
+```json
+{ "name": "my_new_setting", "default": "1" }
+```
+
+2. Add the form field to `/adm/admin_settings.php` so admins can edit it.
+3. The setting is seeded on every `update_database` run — it exists immediately on fresh installs.
+
+**Path B — Setting created on first admin save** (the historical pattern, still works):
+
 1. Open `/adm/admin_settings.php`
 2. Add your form field using FormWriter where appropriate:
 
@@ -63,11 +80,24 @@ echo $formwriter->textinput("My New Setting", 'my_new_setting', '', 20,
 5. Fill in the value and click Submit
 6. The setting is automatically created in the database
 
-**That's it! No migration needed.**
+Use Path A when the setting needs a sensible default from day one (feature gates, rate limits). Use Path B when the setting has no meaningful default and only exists once an admin configures it.
 
 ### For Plugin Settings
 
 Plugins can integrate their settings directly into the main settings page using a simple include-based approach.
+
+#### Step 0: Declare defaults in plugin.json
+
+For any setting that should exist on fresh install with a default value, add it to the `settings` array in your plugin manifest. See the [Plugin Developer Guide](plugin_developer_guide.md#plugin-settings-declarative) for the full shape. This replaces writing `INSERT INTO stg_settings` statements in migrations.
+
+```json
+{
+  "settings": [
+    { "name": "myplugin_api_key", "default": "" },
+    { "name": "myplugin_feature_enabled", "default": "1" }
+  ]
+}
+```
 
 #### Step 1: Create settings_form.php
 
@@ -179,24 +209,11 @@ $max_items = intval($max_items);
 
 ## Plugin Uninstall
 
-When creating an uninstall script for your plugin, clean up all plugin settings using the naming convention:
+Settings declared in a plugin's `plugin.json` are **automatically removed** on uninstall — PluginManager reads the current manifest and deletes each declared name. You do not need to repeat this work in `uninstall.php`.
 
-```php
-// In /plugins/{plugin_name}/uninstall.php
-function myplugin_uninstall() {
-    $dbconnector = DbConnector::get_instance();
-    $dblink = $dbconnector->get_db_link();
+One caveat: settings that were declared in an earlier version of the plugin but dropped from the current manifest are left in place as orphan rows. The orphan has no runtime cost (nothing reads it), but if you need it gone, delete it with an SQL migration before removing the declaration, or clean it up by hand.
 
-    // Remove all plugin settings using the naming convention
-    $sql = "DELETE FROM stg_settings WHERE stg_name LIKE 'myplugin_%'";
-    $q = $dblink->prepare($sql);
-    $q->execute();
-
-    // ... rest of cleanup ...
-
-    return true;
-}
-```
+An uninstall hook is still useful for cleaning up things the declarative systems don't cover — tables not created from a data class, external resources, scheduled tasks created outside the normal pattern, etc.
 
 ## Troubleshooting
 
@@ -298,30 +315,53 @@ echo '<h4>Email Settings</h4>';
 echo $formwriter->textinput("From Email", 'myplugin_from_email', ...);
 ```
 
-## Migration Guide for Existing Plugins
+## Migration Guide: Converting SQL Migrations to Declarative Settings
 
-If you have an existing plugin with a separate settings page:
+Older plugins seeded defaults with `INSERT INTO stg_settings` inside `migrations/migrations.php`. The declarative path (plugin.json) is now preferred. Here's how to convert.
 
-### Before (Old Way)
+### Before
 
+`plugins/bookings/migrations/migrations.php`:
+
+```php
+'up' => function($dbconnector) {
+    $dblink = $dbconnector->get_db_link();
+    $sql = "INSERT INTO stg_settings (stg_name, stg_value, ...)
+            VALUES ('bookings_enabled', '1', ...)";
+    $dblink->prepare($sql)->execute();
+}
 ```
-/plugins/myplugin/admin/admin_settings_myplugin.php  <- Separate page
+
+### After
+
+`plugins/bookings/plugin.json`:
+
+```json
+{
+  "name": "Bookings Management",
+  "version": "1.0.0",
+  "settings": [
+    { "name": "bookings_enabled", "default": "1" }
+  ]
+}
 ```
 
-### After (New Way)
+And remove the `INSERT INTO stg_settings` from the migration. If the migration is now empty, replace its body with `return true;` or delete the migration file entirely.
 
-1. Create `/plugins/myplugin/settings_form.php` with form fields
-2. Remove `/plugins/myplugin/admin/admin_settings_myplugin.php`
-3. Update `uninstall.php` to use `LIKE 'myplugin_%'` pattern
-4. Settings now appear in main Settings page automatically
+### What happens to existing installs
+
+Nothing changes on existing sites. The old migration's tracking row in `plm_plugin_migrations` stays put, which prevents the (now-removed) INSERT from ever running again. The seed-only declarative path doesn't overwrite the existing value.
+
+### What happens on fresh installs
+
+The plugin.json `settings` array is seeded on activate. Existing sites pick it up on the next `sync()`.
 
 ### Benefits
 
-- Consistent UI across all plugins
-- No separate settings pages to maintain
-- Auto-creation eliminates migrations
-- Cleaner admin menu
-- Better user experience
+- No SQL boilerplate for simple default-value seeding.
+- Declared settings are automatically removed on plugin uninstall.
+- One source of truth for "what settings does this plugin own" — the manifest.
+- Consistent with how admin menus already work.
 
 ## Advanced Topics
 

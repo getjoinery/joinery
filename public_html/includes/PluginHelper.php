@@ -267,7 +267,15 @@ class PluginHelper extends ComponentBase {
     public function getAdminMenuItems() {
         return $this->manifestData['adminMenu'] ?? [];
     }
-    
+
+    /**
+     * Get plugin setting declarations from plugin.json.
+     * Returns [['name' => 'foo_bar', 'default' => '1'], ...].
+     */
+    public function getDeclaredSettings() {
+        return $this->manifestData['settings'] ?? [];
+    }
+
     /**
      * Get plugin API endpoints
      */

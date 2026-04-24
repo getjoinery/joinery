@@ -72,7 +72,8 @@ Before diving in, a quick reference for the four common things plugins need to r
 |---|---|---|
 | Tables and columns | `$field_specifications` in a data class under `data/` — applied automatically on install and sync | [Table Creation](#table-creation-automatic) |
 | Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Admin Menus](#admin-menus-declarative) |
-| Default settings rows, seed data | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
+| Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
+| Other initial data (seed rows, categories, etc.) | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
 | Activate/deactivate/uninstall logic | `activate.php`, `deactivate.php`, `uninstall.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` / `_uninstall()` | [Plugin Lifecycle](#plugin-lifecycle) |
 
 If you find yourself writing SQL to INSERT menu rows, or CREATE TABLE statements in a migration, stop — you're on the wrong path. Those pieces come from the data class and `plugin.json` respectively.
@@ -417,6 +418,43 @@ The `parent` value is the `amu_slug` of any menu in the system -- core menus, ot
 
 **Important:** Menus declared in `plugin.json` are the source of truth. Manual edits via the admin menu UI will be overwritten on the next sync.
 
+### Plugin Settings (Declarative)
+
+Plugin default settings are declared in `plugin.json` under an optional `settings` key. On activate and on every sync, PluginManager seeds any declared row that doesn't already exist in `stg_settings`. Existing values are never overwritten.
+
+```json
+{
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "settings": [
+    { "name": "myplugin_enabled", "default": "1" },
+    { "name": "myplugin_max_items", "default": "50" },
+    { "name": "myplugin_api_key", "default": "" }
+  ]
+}
+```
+
+**Fields:**
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `name` | Yes | — | Setting key. Must start with the plugin's directory name. |
+| `default` | No | `""` | String value stored in `stg_value`. Always a string — use `"0"`/`"1"` for booleans, `"42"` for numbers. JSON-native booleans/numbers are rejected at validation time. |
+
+**Validation rules** (enforced on activate and sync):
+1. Every declared `name` must start with the plugin's directory name (e.g., a plugin at `/plugins/bookings/` must declare settings named `bookings_*`).
+2. No declared `name` may collide with a core setting in `settings.json` at the `public_html/` root.
+
+Validation failures throw. On `activate()` the plugin does not activate; on `sync()` the offending plugin is skipped with a logged error and other plugins continue.
+
+**Seed-only policy:** Existing setting values are never overwritten. If your plugin's v2 changes a declared default, existing sites keep their old value and only new installs get the new default. If you need existing sites to pick up a new default, write an SQL migration — silent default changes across upgrades have bitten production systems badly enough that the operator needs to opt in.
+
+**Orphan rows:** Settings dropped from the manifest in a later version are **not** automatically deleted. Use an SQL migration if you need the row gone. Orphan setting rows are otherwise harmless — nothing reads them.
+
+**Blank defaults:** `default: ""` creates a row with an empty value. Use this for anything you want admins to see in the settings page even without a meaningful factory default (API keys, SMTP hosts, custom CSS). Omitting the declaration entirely means no row and no UI field.
+
+**Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
+
 ### Plugin Lifecycle
 
 **PluginManager is the single entry point for all lifecycle operations.** Plugin models (`Plugin`, `PluginHelper`) are pure CRUD — never call lifecycle methods directly on them.
@@ -491,24 +529,26 @@ class MyData extends SystemBase {
 
 ### Migration System
 
-Migrations are for **settings rows and initial data only**. Schema is handled automatically from `$field_specifications` (see [Table Creation](#table-creation-automatic) above), and admin menus are declared in `plugin.json` (see [Admin Menus](#admin-menus-declarative) above) — neither belongs in a migration.
+For default plugin settings, use the `settings` key in `plugin.json` (see [Plugin Settings](#plugin-settings-declarative) above). Migrations are for **initial data seeds only** — dropdown options, category rows, reference data — that doesn't fit the settings model. Schema is handled automatically from `$field_specifications` (see [Table Creation](#table-creation-automatic) above), and admin menus are declared in `plugin.json` (see [Admin Menus](#admin-menus-declarative) above) — none of those belong in a migration.
 
 Migrations are `.sql` files placed in `plugins/{name}/migrations/`:
 
 ```sql
--- plugins/my-plugin/migrations/001_initial_settings.sql
-INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
-SELECT 'my_plugin_enabled', '1', 1, NOW(), NOW(), 'general'
-WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'my_plugin_enabled');
+-- plugins/my-plugin/migrations/001_seed_categories.sql
+INSERT INTO mpc_my_plugin_categories (mpc_name)
+SELECT 'Default Category'
+WHERE NOT EXISTS (SELECT 1 FROM mpc_my_plugin_categories WHERE mpc_name = 'Default Category');
 ```
 
 Rules:
-- Name files with a numeric prefix for ordering (e.g. `001_initial_settings.sql`, `002_seed_categories.sql`).
+- Name files with a numeric prefix for ordering (e.g. `001_seed_categories.sql`, `002_seed_defaults.sql`).
 - Files run in filename order during plugin installation.
 - Execution is tracked in `plm_plugin_migrations`; each file runs exactly once per site.
 - Write idempotent SQL (`WHERE NOT EXISTS`, `ON CONFLICT DO NOTHING`) so a file that partially applied can be safely re-run after the tracking row is cleared.
 
 ### Plugin Settings Form
+
+Settings declared in `plugin.json`'s `settings` array (see [Plugin Settings](#plugin-settings-declarative) above) are seeded into the database on plugin activate. The `settings_form.php` file renders them in the admin settings page. The names used in both must match exactly — the manifest handles seeding, the form file handles UI.
 
 If your plugin has configurable settings, create a `settings_form.php` file in your plugin directory. The admin settings page (`/adm/admin_settings`) **automatically discovers and includes** this file — no registration required.
 
@@ -545,7 +585,7 @@ $formwriter->checkboxinput('my_plugin_enabled', 'Enable My Plugin', [
 - Use `$settings->get_setting('name')` to read current values — this handles missing rows gracefully.
 - Use `passwordinput` for secrets (API keys, tokens) so the value is masked in the browser.
 - The form submit is handled by the settings page — your fields are saved automatically alongside all other settings.
-- Use a migration to INSERT the setting row(s) into `stg_settings` so they exist on fresh installs (see Migration System above).
+- Declare the setting in `plugin.json`'s `settings` array so it exists on fresh installs (see [Plugin Settings](#plugin-settings-declarative) above).
 
 ### Uninstall Script
 
@@ -1018,13 +1058,14 @@ Always use the two-parameter format:
 1. Create plugin directory under `/plugins/{name}/` with `plugin.json`
 2. Create data model classes in `plugins/{name}/data/` with `$field_specifications` (tables created automatically on install)
 3. Declare admin menus in `plugin.json` under the `adminMenu` key (see [Admin Menus](#admin-menus-declarative))
-4. Create `.sql` migration files in `plugins/{name}/migrations/` for settings rows and initial data seeds
-5. Create admin interface in `plugins/{name}/admin/` if needed
-6. Create `uninstall.php` for clean removal of settings and other non-table data
-7. **Install** the plugin via Admin > System > Plugins (creates tables, runs SQL migrations)
-8. **Activate** the plugin to make it live
-9. Test admin functionality via `/plugins/{plugin}/admin/*`
-10. No user-facing routes - these go in themes
+4. Declare default settings in `plugin.json` under the `settings` key (see [Plugin Settings](#plugin-settings-declarative))
+5. Create `.sql` migration files in `plugins/{name}/migrations/` only if you have other initial data seeds (dropdowns, categories, reference rows)
+6. Create admin interface in `plugins/{name}/admin/` if needed
+7. Create `uninstall.php` for clean removal of any data not covered by the declarative systems (settings declared in `plugin.json` are removed automatically)
+8. **Install** the plugin via Admin > System > Plugins (creates tables, runs SQL migrations)
+9. **Activate** the plugin to make it live (seeds declared settings)
+10. Test admin functionality via `/plugins/{plugin}/admin/*`
+11. No user-facing routes - these go in themes
 
 ### Creating a New Theme
 

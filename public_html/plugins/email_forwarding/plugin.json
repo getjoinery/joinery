@@ -18,5 +18,19 @@
             "order": 10,
             "settingActivate": "email_forwarding_enabled"
         }
+    ],
+    "settings": [
+        { "name": "email_forwarding_enabled", "default": "0" },
+        { "name": "email_forwarding_log_retention_days", "default": "30" },
+        { "name": "email_forwarding_max_destinations", "default": "10" },
+        { "name": "email_forwarding_rate_limit_per_alias", "default": "50" },
+        { "name": "email_forwarding_rate_limit_per_domain", "default": "200" },
+        { "name": "email_forwarding_rate_limit_window", "default": "3600" },
+        { "name": "email_forwarding_srs_enabled", "default": "0" },
+        { "name": "email_forwarding_srs_secret", "default": "" },
+        { "name": "email_forwarding_smtp_host", "default": "" },
+        { "name": "email_forwarding_smtp_port", "default": "" },
+        { "name": "email_forwarding_smtp_username", "default": "" },
+        { "name": "email_forwarding_smtp_password", "default": "" }
     ]
 }
