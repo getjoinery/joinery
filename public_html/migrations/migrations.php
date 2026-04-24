@@ -1430,3 +1430,13 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Collapse legacy plg_status='uninstalled' rows (v105) ==========
+	// The three-state lifecycle removes the 'uninstalled' status; any existing
+	// rows represent an operator's committed intent to uninstall that was left
+	// partially done under the old model. Finish the destructive half.
+	$migration = array();
+	$migration['database_version'] = '105';
+	$migration['migration_file'] = 'cleanup_uninstalled_plugins.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

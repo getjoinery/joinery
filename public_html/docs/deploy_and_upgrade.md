@@ -145,6 +145,10 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --refresh-archives -
 - Database migrations and composer integration
 - **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
 
+**Plugin refresh scope:** the upgrade download loop iterates **plugins that are installed** (rows in `plg_plugins`) and attempts an archive fetch for each. Stock plugins succeed; custom plugins 404 at the upgrade endpoint (they were never packaged — see [Stock vs. Custom](#stock-vs-custom-themesplugins) below) and are skipped via the warning path above. Uninstalling a plugin removes its row, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks. Conversely, a new upstream stock plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.
+
+The `is_stock` flag on the plugin's manifest still governs the distribution pipeline (what `publish_upgrade.php` packages, what `DeploymentHelper` preserves across a deploy swap, what `_reconcile_stock_assets.sh` re-downloads on container boot). What changed: the upgrade-time refresh loop no longer *filters* by `is_stock` — it just tries everything installed and lets the endpoint's response be the source of truth for whether a given plugin is first-party.
+
 **`--refresh-archives` flag:**
 
 For small fixes that don't warrant a version bump, `--refresh-archives` tells `upgrade.php` to first call back to the upgrade server and ask it to rebuild its archives from the current source files, then download and apply them. This avoids the need to run `publish_upgrade` manually.
@@ -153,7 +157,7 @@ For small fixes that don't warrant a version bump, `--refresh-archives` tells `u
 1. Fetches available upgrade info from upgrade server
 2. Downloads core archive (`joinery-core-X.XX.upg.zip`)
 3. Downloads each stock theme archive (`theme-THEMENAME-X.XX.upg.zip`)
-4. Downloads each stock plugin archive (`plugin-PLUGINNAME-X.XX.upg.zip`)
+4. Downloads an archive (`plugin-PLUGINNAME-X.XX.upg.zip`) for each plugin with a row in `plg_plugins`
 5. If any theme/plugin archive is unavailable (404), logs a warning and continues
 6. Extracts and validates all archives
 7. Performs deployment with rollback protection

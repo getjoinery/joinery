@@ -35,7 +35,6 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	    'plg_installed_time' => array('type'=>'timestamp(6)'),
 	    'plg_last_activated_time' => array('type'=>'timestamp(6)'),
 	    'plg_last_deactivated_time' => array('type'=>'timestamp(6)'),
-	    'plg_uninstalled_time' => array('type'=>'timestamp(6)'),
 	    'plg_status' => array('type'=>'varchar(20)'),
 	    'plg_install_error' => array('type'=>'text'),
 	    'plg_metadata' => array('type'=>'text'),
@@ -85,16 +84,11 @@ function authenticate_write($data) {
 	public function get_status_badge() {
 		$status = $this->get('plg_status');
 		$install_error = $this->get('plg_install_error');
-		
-		// If there's an install error, show that regardless of status
+
 		if ($install_error) {
-			if ($status === 'uninstalled') {
-				return '<span class="badge bg-warning">Install Failed</span>';
-			} else {
-				return '<span class="badge bg-danger">Error</span>';
-			}
+			return '<span class="badge bg-danger">Error</span>';
 		}
-		
+
 		switch ($status) {
 			case 'active':
 				return '<span class="badge bg-success">Active</span>';
@@ -104,10 +98,7 @@ function authenticate_write($data) {
 				return '<span class="badge bg-info">Installed</span>';
 			case 'error':
 				return '<span class="badge bg-danger">Error</span>';
-			case 'uninstalled':
-				return '<span class="badge bg-light text-dark border border-secondary"><i class="fas fa-times-circle"></i> Uninstalled</span>';
 			default:
-				// Legacy support
 				if ($this->is_active()) {
 					return '<span class="badge bg-success">Active</span>';
 				} else {
@@ -239,91 +230,6 @@ function authenticate_write($data) {
 		return (bool)$this->get('plg_is_stock');
 	}
 
-	/**
-	 * Permanently delete plugin files from filesystem
-	 * Runs uninstall first if not already uninstalled
-	 * @return array Results with success, errors, messages
-	 */
-	public function permanent_delete_with_files() {
-		$results = array(
-			'success' => false,
-			'errors' => array(),
-			'messages' => array(),
-			'warnings' => array()
-		);
-
-		try {
-			$plugin_name = $this->get('plg_name');
-			$plugin_dir = PathHelper::getAbsolutePath('plugins/' . $plugin_name);
-
-			// Check if this plugin is the active theme provider
-			try {
-				$plugin_helper = PluginHelper::getInstance($plugin_name);
-				if ($plugin_helper->isActiveThemeProvider()) {
-					$results['errors'][] = "Cannot delete plugin '$plugin_name' - it is the active theme provider. Switch to a different theme first.";
-					return $results;
-				}
-			} catch (Exception $e) {
-				// Plugin helper not available - proceed
-			}
-
-			// Pre-flight check: verify we can delete files before making any changes
-			if (is_dir($plugin_dir)) {
-				$perm_check = LibraryFunctions::check_directory_deletable($plugin_dir);
-				if (!$perm_check['can_delete']) {
-					$results['errors'][] = "Permission denied. Cannot delete: " . implode(', ', array_slice($perm_check['errors'], 0, 3));
-					if (count($perm_check['errors']) > 3) {
-						$results['errors'][0] .= ' (and ' . (count($perm_check['errors']) - 3) . ' more)';
-					}
-					return $results;
-				}
-			}
-
-			// Uninstall if not already done
-			if ($this->get('plg_status') !== 'uninstalled') {
-				require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
-				$plugin_manager = new PluginManager();
-				try {
-					$plugin_manager->uninstall($plugin_name);
-					$results['messages'][] = "Plugin uninstalled";
-				} catch (Exception $uninstall_error) {
-					$results['errors'][] = $uninstall_error->getMessage();
-					return $results;
-				}
-			}
-
-			// Drop plugin database tables BEFORE deleting files (needs class definitions)
-			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
-			$plugin_manager = new PluginManager();
-			if (is_dir($plugin_dir)) {
-				$plugin_manager->permanentDeleteTables($plugin_name);
-				$results['messages'][] = "Dropped plugin database tables";
-			}
-
-			// Delete files
-			if (is_dir($plugin_dir)) {
-				if (LibraryFunctions::delete_directory($plugin_dir)) {
-					$results['messages'][] = "Deleted plugin directory";
-				} else {
-					$results['errors'][] = "Failed to delete plugin directory";
-					return $results;
-				}
-			} else {
-				$results['messages'][] = "Plugin directory already removed";
-			}
-
-			// Delete the database record (permanent delete removes the record entirely)
-			$this->permanent_delete();
-			$results['messages'][] = "Removed plugin from database";
-			$results['success'] = true;
-
-		} catch (Exception $e) {
-			$results['errors'][] = $e->getMessage();
-		}
-
-		return $results;
-	}
-	
 	/**
 	 * Load stock status from plugin.json metadata
 	 */

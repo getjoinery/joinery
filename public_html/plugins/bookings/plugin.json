@@ -4,6 +4,32 @@
     "description": "Booking and booking type management system",
     "author": "System Developer",
     "is_stock": true,
+    "adminMenu": [
+        {
+            "slug": "bookings-parent",
+            "title": "Bookings",
+            "icon": "clock",
+            "order": 6,
+            "permission": 8,
+            "settingActivate": "bookings_active",
+            "items": [
+                {
+                    "slug": "bookings",
+                    "title": "Bookings",
+                    "url": "admin_bookings",
+                    "order": 3,
+                    "settingActivate": "bookings_active"
+                },
+                {
+                    "slug": "booking-types",
+                    "title": "Booking Types",
+                    "url": "admin_booking_types",
+                    "order": 5,
+                    "settingActivate": "bookings_active"
+                }
+            ]
+        }
+    ],
     "settings": [
         { "name": "bookings_active", "default": "1" }
     ]
