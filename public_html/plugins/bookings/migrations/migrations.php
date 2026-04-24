@@ -17,13 +17,9 @@ return [
             // This migration only handles settings, initial data, etc.
             
             $dblink = $dbconnector->get_db_link();
-            
-            // Add plugin settings
-            $sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) 
-                    VALUES ('bookings_enabled', '1', 1, NOW(), NOW(), 'general')";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            
+
+            // Plugin settings are declared in plugin.json and seeded automatically.
+
             // Add default booking types (if needed)
             // Check if any booking types already exist to avoid duplicates
             $check_sql = "SELECT COUNT(*) as count FROM bkt_booking_types";
@@ -43,12 +39,9 @@ return [
         },
         'down' => function($dbconnector) {
             $dblink = $dbconnector->get_db_link();
-            
-            // Remove settings
-            $sql = "DELETE FROM stg_settings WHERE stg_name LIKE 'bookings_%'";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            
+
+            // Settings removal is handled by PluginManager::uninstall() via the manifest.
+
             // Remove default booking types we added (be careful not to remove user-created ones)
             $sql = "DELETE FROM bkt_booking_types WHERE bkt_name = 'Standard' AND bkt_description_plain = 'Standard booking type'";
             $q = $dblink->prepare($sql);

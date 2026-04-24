@@ -592,6 +592,30 @@
 		$migration_log->prepare();
 		$migration_log->save();
 		
+		// Step: Seed core settings from public_html/settings.json
+		// Runs after core DB is fully up to date, before plugin sync — ensures
+		// any core setting a plugin might collision-check against already exists.
+		echo "<br>\n<strong>Core Settings Seed</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('data/settings_class.php'));
+			$core_settings_path = PathHelper::getIncludePath('settings.json');
+			if (file_exists($core_settings_path)) {
+				$core_raw = file_get_contents($core_settings_path);
+				$core_data = json_decode($core_raw, true);
+				if (!is_array($core_data) || !isset($core_data['settings']) || !is_array($core_data['settings'])) {
+					echo "⚠️  settings.json exists but is missing a 'settings' array.<br>\n";
+				} else {
+					Setting::seed_declared($core_data['settings']);
+					echo "✓ Core settings seeded (" . count($core_data['settings']) . " declared)<br>\n";
+				}
+			} else {
+				echo "⚠️  settings.json not found at public_html root; skipping core setting seed.<br>\n";
+			}
+		} catch (Exception $e) {
+			echo "⚠️  Core settings seed failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+			// Non-fatal — individual settings will still get added via admin settings save
+		}
+
 		// Step: Sync plugins and themes
 		// Runs after core DB is fully up to date so plugin tables are created against current schema
 		echo "<br>\n<strong>Plugin &amp; Theme Sync</strong><br>\n";

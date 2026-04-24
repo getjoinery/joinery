@@ -187,6 +187,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - `$settings = Globalvars::get_instance()` - Get settings singleton
 - `$settings->get_setting('setting_name')` - Get configuration value
 - **Note:** There is no `set_setting()` method - see `/adm/admin_settings.php` for how to change settings
+- Plugin-owned settings with factory defaults are declared in the plugin's `plugin.json` under `settings`. Core settings with factory defaults are declared in `settings.json` at the `public_html/` root. Both are seeded into `stg_settings` automatically; no migrations needed. See `docs/plugin_developer_guide.md#plugin-settings-declarative`.
 
 ### Important Settings
 - **composerAutoLoad**: Path to vendor directory (e.g., `/home/user1/vendor/`)

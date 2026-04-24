@@ -17,13 +17,9 @@ return [
             // This migration only handles settings, initial data, indexes, etc.
             
             $dblink = $dbconnector->get_db_link();
-            
-            // Add plugin settings
-            $sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) 
-                    VALUES ('items_enabled', '1', 1, NOW(), NOW(), 'general')";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            
+
+            // Plugin settings (if any) are declared in plugin.json and seeded automatically.
+
             // Add default item relation types (if needed)
             // Note: Check if these already exist to avoid duplicates
             $check_sql = "SELECT COUNT(*) as count FROM itt_item_relation_types WHERE itt_name = 'Contains'";
@@ -45,12 +41,9 @@ return [
         },
         'down' => function($dbconnector) {
             $dblink = $dbconnector->get_db_link();
-            
-            // Remove settings
-            $sql = "DELETE FROM stg_settings WHERE stg_name LIKE 'items_%'";
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            
+
+            // Settings removal is handled by PluginManager::uninstall() via the manifest.
+
             // Remove default relation types we added
             $sql = "DELETE FROM itt_item_relation_types WHERE itt_name IN ('Contains', 'Related To')";
             $q = $dblink->prepare($sql);

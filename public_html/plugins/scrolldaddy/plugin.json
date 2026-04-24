@@ -8,5 +8,14 @@
     "requires": {
         "php": ">=8.0",
         "extensions": []
-    }
+    },
+    "settings": [
+        { "name": "scrolldaddy_dns_host", "default": "" },
+        { "name": "scrolldaddy_dns_internal_url", "default": "" },
+        { "name": "scrolldaddy_dns_api_key", "default": "" },
+        { "name": "scrolldaddy_dns_server_ip", "default": "" },
+        { "name": "scrolldaddy_dns_secondary_internal_url", "default": "" },
+        { "name": "scrolldaddy_dns_secondary_api_key", "default": "" },
+        { "name": "scrolldaddy_dns_secondary_server_ip", "default": "" }
+    ]
 }
