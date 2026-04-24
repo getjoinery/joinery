@@ -606,15 +606,29 @@
 		];
 
 		$files_needing_update = [];
+		$files_skipped_older = [];
 		foreach ($self_update_files as $rel_path) {
 			$staged_file = $stage_directory . '/' . $rel_path;
 			$live_file = $live_directory . '/' . $rel_path;
 
 			if (file_exists($staged_file)) {
-				if (!file_exists($live_file) || md5_file($staged_file) !== md5_file($live_file)) {
+				if (!file_exists($live_file)) {
 					$files_needing_update[] = $rel_path;
+				} elseif (md5_file($staged_file) !== md5_file($live_file)) {
+					// Only overwrite if the staged file is strictly newer than the live file.
+					// Guards against stale distribution archives (built before recent local edits
+					// or hotfixes) silently downgrading deployment tooling on re-run.
+					if (filemtime($staged_file) > filemtime($live_file)) {
+						$files_needing_update[] = $rel_path;
+					} else {
+						$files_skipped_older[] = $rel_path;
+					}
 				}
 			}
+		}
+
+		if (!empty($files_skipped_older) && $verbose) {
+			upgrade_echo('Self-update: skipping ' . count($files_skipped_older) . ' file(s) whose staged copy is not newer than the live file (likely stale distribution archive): ' . implode(', ', $files_skipped_older) . '.<br>');
 		}
 
 		if (!empty($files_needing_update)) {
