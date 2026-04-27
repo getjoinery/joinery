@@ -92,7 +92,7 @@ Add one column to `fil_files`:
 
 - `'local'` — file's bytes live on disk under `upload_dir` /
   `static_files/uploads/`. Existing behavior.
-- `'s3'` — file's bytes live in the bucket. Object keys are derived
+- `'cloud'` — file's bytes live in the bucket. Object keys are derived
   from `fil_name`: original at `<site_template>/<fil_name>`, variants
   at `<site_template>/<size>/<fil_name>`. The prefix is automatic
   (§9a).
@@ -153,12 +153,13 @@ retry on conflict.
 
 ### 4. Upload flow (synchronous, local only)
 
-The upload request never touches the bucket. It runs the existing flow
-unchanged:
+The upload request never touches the bucket. The flow is the existing
+local-only path:
 
 1. Receive upload → write to local (existing `UploadHandler`).
 2. Run all resize variants locally.
-3. Save the `File` row with `fil_storage_driver = 'local'`.
+3. Save the `File` row with `fil_storage_driver = 'local'` (the
+   column's default value).
 4. Respond.
 
 Upload latency is identical to today. The file is publicly visible
@@ -166,6 +167,17 @@ immediately via the existing local-serve path.
 
 A separate background task moves public files to the bucket
 asynchronously (§4a).
+
+**The only behavior change in the upload critical path** is
+`UploadHandler::get_unique_filename()` (§3a) — it now also
+consults `fil_files`, so collision detection still works after
+locals are deleted post-migration. Everything else in the upload
+flow runs unchanged: `save()`, `move_to_correct_directory()`, and
+`resize()` all see a fresh `'local'` row and take their existing
+code paths. The new dispatch branches added to `File` methods
+(see "Modified files") fire at *post-upload* lifecycle moments
+(URL generation, delete, permission flip, re-resize) — not during
+the upload request itself.
 
 ### 4a. Async sync task
 
@@ -187,7 +199,7 @@ For each row, in batches:
 3. Re-load the row and re-check `is_public()`. The file may have been
    soft-deleted, undeleted to a different state, or had permission
    fields changed during the push.
-   - **Still public:** flip `fil_storage_driver = 's3'`, delete all
+   - **Still public:** flip `fil_storage_driver = 'cloud'`, delete all
      local copies. Done.
    - **No longer public:** delete the just-pushed bucket objects, leave
      the row at `'local'` and the local files in place. The normal
@@ -274,7 +286,7 @@ Scheduled Tasks page:
   `sct_is_active = true` and `frequency = 'every_run'`.
 - When the admin disables cloud storage, the task is deactivated
   (`sct_is_active = false`). Already-cloud-stored files keep
-  serving from the bucket via their existing `fil_storage_driver = 's3'`
+  serving from the bucket via their existing `fil_storage_driver = 'cloud'`
   flag — disabling just stops *new* migrations.
 - The standard Scheduled Tasks admin page still shows the task
   and can be used as a fallback to activate/deactivate manually.
@@ -283,8 +295,8 @@ Scheduled Tasks page:
 the codebase), the cron entry is present (from `_site_init.sh`),
 and the `sct_scheduled_tasks` row does not exist. The task is
 discovered as "Available" on the Scheduled Tasks admin page but
-makes no S3 calls until the storage admin page activates it. No
-accidental activity, no errors.
+makes no bucket calls until the storage admin page activates it.
+No accidental activity, no errors.
 
 **Migration starts on the next cron tick.** When cloud storage is
 enabled via the Save flow (§10), the storage logic activates the
@@ -316,7 +328,7 @@ Activation flow: admin clicks "Disable and Pull Files Back to
 Local" on the storage admin page → the storage logic activates the
 task with `frequency = 'every_run'`. The task processes a bounded
 batch each cron tick. When `run()` finds zero rows remaining
-(`fil_storage_driver = 's3'` count is 0), it deactivates itself
+(`fil_storage_driver = 'cloud'` count is 0), it deactivates itself
 (`sct_is_active = false`). Admin can also manually deactivate from
 either admin page to pause.
 
@@ -330,7 +342,7 @@ ordering with bucket-deletes after DB commit) is detailed in §11
 
 - **`fil_storage_driver = 'local'`**: existing `/uploads/...` URL,
   served by the fast path or the auth route as today. Unchanged.
-- **`fil_storage_driver = 's3'`**: `driver->url(<remote_key>)` —
+- **`fil_storage_driver = 'cloud'`**: `driver->url(<remote_key>)` —
   the public CDN/bucket URL. Browser hits the bucket directly. PHP is
   not in the loop. URL is stable and cacheable.
 
@@ -350,7 +362,7 @@ the file row by basename and dispatches based on row state:
 |-----------|----------|
 | No live row (deleted or missing) | Existing 404 / fall-through behavior. |
 | Live row, `fil_storage_driver = 'local'` | Existing local-serve + `authenticate_read()` path. Unchanged. |
-| Live row, `fil_storage_driver = 's3'` | 302 redirect to `driver->url(<remote_key>)` with `Cache-Control: public, max-age=86400`. Browser caches the redirect; subsequent hits skip PHP entirely. |
+| Live row, `fil_storage_driver = 'cloud'` | 302 redirect to `driver->url(<remote_key>)` with `Cache-Control: public, max-age=86400`. Browser caches the redirect; subsequent hits skip PHP entirely. |
 
 `get_url()` for cloud files returns the bucket URL directly (no
 redirect hop) for *new* outbound URLs the platform generates. The
@@ -392,7 +404,7 @@ The operation is split into three explicit phases with strict
 ordering. The two non-negotiable invariants are:
 
 - **Bucket-authoritative until DB commit.** The DB row says
-  `fil_storage_driver = 's3'` until the file is correctly placed
+  `fil_storage_driver = 'cloud'` until the file is correctly placed
   locally. If anything fails before the commit, the bucket must
   still hold the bytes (so the existing public URL keeps serving),
   even if that means re-PUTting deleted objects.
@@ -441,18 +453,18 @@ On any delete failure after retries:
 If Phase 3 step 1 (local copy) or step 2 (DB commit) fails:
 
 - This is the worst case: bucket is empty, temps still exist, DB
-  still says `'s3'`.
+  still says `'cloud'`.
 - Best-effort: clean up any partially-written restricted-dir
-  files, then re-PUT all temps to bucket so the row's `'s3'` flag
+  files, then re-PUT all temps to bucket so the row's `'cloud'` flag
   remains truthful. Drop temps.
 - Surface error to caller with a `CLOUD_STORAGE_PARTIAL_FLIP`
   marker in `error_log`. If the re-PUT *also* fails, the row is
-  genuinely broken (DB says `'s3'`, bucket is empty) — a
+  genuinely broken (DB says `'cloud'`, bucket is empty) — a
   double-failure case that's not automatically detected. The
   marker in the log is the breadcrumb; manual recovery is
   flipping the row to `'local'` and re-uploading. If this turns
   out to fire in practice, an integrity-check sweep (`driver->exists()`
-  over `'s3'` rows) is straightforward to add later, since the
+  over `'cloud'` rows) is straightforward to add later, since the
   log marker is already unique and greppable.
 
 **Peak local disk during a flip ≈ 2× total file size** (temp +
@@ -462,8 +474,8 @@ worth noting for sites near disk capacity.
 
 **Realistic failure rates.** Phase 1 failures are network blips;
 retry on the next admin click works. Phase 2 failures imply broader
-storage trouble (creds revoked, S3 down) and are also surfaced by
-the dashboard's driver-ping health check. Phase 3 failures (after a
+storage trouble (creds revoked, cloud storage down) and are also
+surfaced by the dashboard's driver-ping health check. Phase 3 failures (after a
 successful Phase 2) are very rare — local disk full or DB outage —
 and when they occur the file is genuinely broken and admin
 intervention is required. The detailed rollback paths above are
@@ -506,8 +518,8 @@ variant generated:
   if they care, then delete the row. The orphan exists in the
   customer's bucket consuming a few KB to MB; manual cleanup via
   `aws s3 rm` or equivalent is the recovery path. This is rare
-  (effectively only fires when the broader S3 health check is also
-  red).
+  (effectively only fires when the broader cloud storage health
+  check is also red).
 
 ### 9. Settings
 
@@ -655,7 +667,7 @@ appear alongside Save:
 
 - **Pause Cloud Storage** — sets `cloud_storage_enabled = false`.
   Deactivates the sync task. New uploads stay local. Existing
-  cloud-stored files (`fil_storage_driver = 's3'`) continue serving
+  cloud-stored files (`fil_storage_driver = 'cloud'`) continue serving
   from the bucket via their existing URLs. Click Save to re-enable.
 
 - **Disable and Pull Files Back to Local** — same as Pause, *plus*
@@ -720,7 +732,7 @@ Reads `scheduled_tasks_last_cron_run` (the existing heartbeat).
   without a second banner.
 
 **Driver health.**
-On page load, runs `driver->ping()` — a single S3 `HeadBucket` call
+On page load, runs `driver->ping()` — a single `HeadBucket` call
 against the configured bucket. No object dependency, no state left
 behind. Round-trip is single-digit ms from the platform's region;
 the dashboard isn't a high-traffic surface (loaded by an admin a
@@ -812,12 +824,12 @@ storage cost). The realistic cost wins are:
 
 - **B2 + Cloudflare** via the Bandwidth Alliance — free egress
 - **Cloudflare R2** — free egress built in
-- **Bunny.net** or another CDN in front of S3 — cheap egress
+- **Bunny.net** or another CDN in front of a bucket — cheap egress
 
-A customer who configures S3 with a raw bucket URL and walks away
-may see *higher* total cost than they had before. We can't enforce
-a CDN, but we can warn loudly enough that they make an informed
-choice.
+A customer who configures cloud storage with a raw bucket URL and
+walks away may see *higher* total cost than they had before. We
+can't enforce a CDN, but we can warn loudly enough that they make
+an informed choice.
 
 #### Detection — two complementary checks
 
@@ -850,7 +862,7 @@ the common case (admin pastes the bucket URL directly) without any
 network call.
 
 Limitation: doesn't catch custom domains (e.g. `images.example.com`
-CNAMEd to a raw S3 bucket with no CDN). The header check covers that.
+CNAMEd to a raw bucket with no CDN). The header check covers that.
 
 **2. Response-header check (definitive, runs during Test Connection).**
 
@@ -918,8 +930,8 @@ public static function inspectPublicUrl(string $probe_url): array {
    > "This looks like a raw `<provider>` bucket URL. Without a CDN,
    > you'll pay egress on every file view. Common cheaper patterns:
    > B2 + Cloudflare (free egress via Bandwidth Alliance),
-   > Cloudflare R2, or Bunny.net in front of S3. See the storage
-   > docs."
+   > Cloudflare R2, or Bunny.net in front of a bucket. See the
+   > storage docs."
 
 2. **Test Connection step 2 status line** (§10b). The same HEAD
    that verifies public read also runs the response-header check
@@ -936,7 +948,7 @@ public static function inspectPublicUrl(string $probe_url): array {
    > a CDN you'll pay egress on every file view, which can exceed
    > storage savings. Continue anyway?"
    
-   Trigger is the hostname check only. The custom-domain-CNAMEd-to-raw-S3
+   Trigger is the hostname check only. The custom-domain-CNAMEd-to-raw-bucket
    case (where hostname looks fine but headers reveal raw markers)
    is caught earlier by Test Connection's step 2 status line — the
    admin sees it during diagnostics and can decide to back out
@@ -977,7 +989,7 @@ The reverse migration is `CloudStorageReverseSync` (§4a). It is
 "Disable and Pull Files Back to Local" button on the storage admin
 page (§10), which surfaces a confirmation dialog before activating.
 The dialog shows the count of files to pull back
-(`SELECT COUNT(*) FROM fil_files WHERE fil_storage_driver = 's3'`)
+(`SELECT COUNT(*) FROM fil_files WHERE fil_storage_driver = 'cloud'`)
 and the current free local disk space (`disk_free_space()`), with
 a recommendation: "Ensure several GB of free space before
 continuing." Both queries are O(1); no bucket traversal, no
@@ -985,13 +997,13 @@ size-tracking column.
 
 The task does **not** pre-flight a definitive size estimate. If
 local disk fills mid-migration, per-row Phase 2 placement fails
-gracefully — the row stays at `'s3'`, the bucket bytes are
+gracefully — the row stays at `'cloud'`, the bucket bytes are
 untouched, and `fil_sync_failed_count` increments. The admin sees
 stuck rows accumulate, frees space, clicks Retry, and the run
 continues. Once running, it processes a bounded batch each cron
 tick; it self-deactivates when no more rows remain.
 
-**Per-row flow.** For each row with `fil_storage_driver = 's3'`:
+**Per-row flow.** For each row with `fil_storage_driver = 'cloud'`:
 
 1. **Phase 1 — Pull bytes to temp.** `driver->get(<remote_key>, <temp>)`
    for original + every variant. On any failure: drop temps, leave
@@ -1019,12 +1031,12 @@ tick; it self-deactivates when no more rows remain.
 4. Drop temps.
 
 **Why re-evaluate `is_public()` on every row.** In the steady state,
-every `'s3'` row should also be `is_public() === true` (the §6
+every `'cloud'` row should also be `is_public() === true` (the §6
 public→private flow pulls back to local synchronously when
 permissions flip). But two real cases break that assumption:
 
 - A previous `CLOUD_STORAGE_PARTIAL_FLIP` event left a row at
-  `'s3'` with `is_public() === false`. The reverse migration is
+  `'cloud'` with `is_public() === false`. The reverse migration is
   the natural recovery for these — pulling the bytes back to the
   *restricted* directory makes `authenticate_read()` gating
   effective again.
@@ -1037,7 +1049,7 @@ method call per row.
 **Phase ordering differs from §6** (public→private flip). §6 must
 delete from bucket *before* DB commit to avoid serving private
 bytes publicly during the window. Reverse migration has the
-opposite property: the row's `'s3'` flag means "bucket is
+opposite property: the row's `'cloud'` flag means "bucket is
 authoritative" until DB commit flips it to `'local'`. So we
 commit first, then clean up the bucket. If bucket delete fails,
 the file is already correctly served locally with proper auth
@@ -1067,9 +1079,9 @@ correctness issue.
     re-PUT from temps to restore bucket-authoritative state, temps
     dropped, DB untouched. Retry works.
   - *Phase 3 (local placement / DB commit)* — temps re-PUT to
-    bucket on best-effort basis to restore the `'s3'` flag's
+    bucket on best-effort basis to restore the `'cloud'` flag's
     truth. If the re-PUT also fails, the row is genuinely broken
-    (DB says `'s3'`, bucket empty); logged with
+    (DB says `'cloud'`, bucket empty); logged with
     `CLOUD_STORAGE_PARTIAL_FLIP` for manual recovery. Not
     automatically surfaced — the log marker is the breadcrumb.
 - **`permanent_delete()` bucket-delete fails:** logged to `error_log`
@@ -1120,25 +1132,69 @@ correctness issue.
 
 ### Modified files
 
-- `data/files_class.php`
+- `data/files_class.php` — grouped by *when* each change fires:
+
+  **Schema (passive — no behavior change):**
   - Add `fil_storage_driver`, `fil_sync_failed_count`,
     `fil_sync_last_attempt` to `$field_specifications`.
-  - Extend `get_by_name($name, $search_deleted = false)` to filter
-    `fil_delete_time IS NULL` by default, add `ORDER BY fil_file_id
-    DESC LIMIT 1`. Matches the existing `get_by_link()` convention.
-    See §5a for the audit.
+    Defaults make existing code work unchanged.
+
+  **Pre-existing bug fix (independent of cloud, but a prereq):**
   - **Fix `is_public()` to also check `fil_tier_min_level`.** The
     current implementation only checks `fil_delete_time`,
     `fil_min_permission`, `fil_grp_group_id`, `fil_evt_event_id` —
     a file gated only by `fil_tier_min_level` is wrongly classified
-    as public. This is a pre-existing bug in the local
-    fast-serve gating, but the cloud feature would amplify it by
-    pushing tier-gated files into a world-readable bucket. Fix
-    `is_public()` first; cloud eligibility then derives correctly.
-  - `get_url()`: dispatch to driver for `'s3'` rows, existing path otherwise.
+    as public. The cloud feature would amplify this by pushing
+    tier-gated files into a world-readable bucket, so the fix
+    must land first; cloud eligibility then derives correctly.
+
+  **Upload critical path (lifecycle moment: new file arriving):**
+  - `get_by_name($name, $search_deleted = false)` — extend to
+    filter `fil_delete_time IS NULL` by default, add `ORDER BY
+    fil_file_id DESC LIMIT 1`. Matches the existing `get_by_link()`
+    convention. The audit (§5a) confirms upload's duplicate-detection
+    caller wants live-rows-only behavior, so this fix aligns with
+    what upload already needs.
+  - *No other upload-time methods are behaviorally changed.*
+    `save()`, `move_to_correct_directory()`, and `resize()` all
+    see a fresh `'local'` row on a new upload and take their
+    existing code paths. (Their cloud branches only fire on
+    pre-existing `'cloud'` rows, which a new upload never is.)
+
+  **Outbound URL generation (lifecycle moment: rendering pages):**
+  - `get_url()`: dispatch to driver for `'cloud'` rows, existing
+    path otherwise.
+
+  **Permission flip (lifecycle moment: admin edits permissions /
+  soft-delete / undelete — §6):**
+  - `move_to_correct_directory()`: extend to handle cross-storage
+    transitions. For `'local'` → `'local'` (which is every brand-new
+    upload) the new code is dead. The new branches fire only when
+    the file is currently in the bucket and needs to be pulled
+    back, or vice versa.
+
+  **Delete (lifecycle moment: admin deletes file):**
+  - `delete_resized()`: dispatch on `fil_storage_driver` at the top.
+    For `'cloud'` rows, iterate sizes and call `driver->delete()`
+    per variant key. For `'local'` rows, existing behavior.
+  - `permanent_delete()`: dispatch on `fil_storage_driver` at the
+    **top of the method**. Cloud branch: `driver->delete()` for
+    original + variants (best-effort with `CLOUD_STORAGE_ORPHAN`
+    log on failure, per §8). Local branch: existing
+    `get_filesystem_path()` → `unlink` flow.
+
+  **Re-resize (lifecycle moment: theme adds a new image size — §7):**
+  - `resize()`: dispatch on `fil_storage_driver` at the top. For
+    `'cloud'` rows: `driver->get(<original_key>, <temp_path>)` →
+    derive a temp upload_dir → run the existing variant generation
+    against temp → `driver->put()` each variant back to
+    `<prefix>/<size>/<filename>` → drop all temp files. For
+    `'local'` rows, existing behavior.
+
+  **Defensive instrumentation (only fires if a caller is missed):**
   - `get_filesystem_path()`: keeps its existing contract — returns
-    the would-be-local path. Does **not** throw on `'s3'` rows;
-    instead, when called on an `'s3'` row, emits a single
+    the would-be-local path. Does **not** throw on `'cloud'` rows;
+    instead, when called on a `'cloud'` row, emits a single
     `error_log('CLOUD_STORAGE_UNEXPECTED_LOCAL_PATH_QUERY: fil=' . $this->key)`
     warning so we can surface any caller we missed without breaking
     them. The four in-tree callers (`permanent_delete`,
@@ -1146,24 +1202,6 @@ correctness issue.
     dispatch on the driver flag *before* calling
     `get_filesystem_path()`, so the warning should never fire in
     practice. See the caller audit below.
-  - `delete_resized()`: dispatch on `fil_storage_driver` at the top.
-    For `'s3'` rows, iterate sizes and call `driver->delete()` per
-    variant key. For `'local'` rows, existing behavior (current
-    `get_filesystem_path()` → `unlink` loop).
-  - `move_to_correct_directory()`: extend to handle cross-storage
-    transitions (public→private pulls back from bucket; private→public
-    pushes to bucket if cloud is enabled).
-  - `permanent_delete()`: dispatch on `fil_storage_driver` at the
-    **top of the method**. Cloud branch: `driver->delete()` for
-    original + variants (best-effort with `CLOUD_STORAGE_ORPHAN`
-    log on failure, per §8). Local branch: existing
-    `get_filesystem_path()` → `unlink` flow.
-  - `resize()`: dispatch on `fil_storage_driver` at the top. For
-    `'s3'` rows: `driver->get(<original_key>, <temp_path>)` →
-    derive a temp upload_dir → run the existing variant generation
-    against temp → `driver->put()` each variant back to
-    `<prefix>/<size>/<filename>` → drop all temp files. For
-    `'local'` rows, existing behavior.
 
   **`get_filesystem_path()` caller audit (all four sites in tree):**
 
