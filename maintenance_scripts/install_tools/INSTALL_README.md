@@ -822,11 +822,12 @@ The container detects this is not a first run and skips initial setup. Your data
 
 **Bare-metal:**
 ```bash
-# Use the deploy.sh script for git-based deployments
-./deploy.sh $SITENAME --verbose
-
-# Or use upgrade.php for archive-based upgrades
+# Production: use upgrade.php for archive-based upgrades
 php /var/www/html/$SITENAME/public_html/utils/upgrade.php
+
+# Development only: deploy.sh does git-based deployments.
+# Not recommended for production — see docs/deploy_and_upgrade.md.
+./deploy.sh $SITENAME --verbose
 ```
 
 ### Run Database Migrations

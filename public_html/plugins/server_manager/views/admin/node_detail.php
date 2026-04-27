@@ -184,6 +184,55 @@ if ($_POST && isset($_POST['action'])) {
 		exit;
 	}
 
+	if ($action === 'apply_update_all_on_host') {
+		$params = ['dry_run' => !empty($_POST['dry_run'])];
+
+		$siblings = new MultiManagedNode(
+			['host' => $node->get('mgn_host'), 'enabled' => true, 'deleted' => false],
+			['mgn_slug' => 'ASC']
+		);
+		$siblings->load();
+
+		if ($siblings->count() === 0) {
+			$session->save_message(new DisplayMessage(
+				'No eligible sites found on this host.', 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url . '&tab=updates');
+			exit;
+		}
+
+		$queued = 0;
+		foreach ($siblings as $sibling) {
+			try {
+				$steps = JobCommandBuilder::build_apply_update($sibling, $params);
+				ManagementJob::createJob(
+					$sibling->key, 'apply_update', $steps, $params, $session->get_user_id()
+				);
+				$queued++;
+			} catch (Exception $e) {
+				error_log("apply_update_all_on_host: failed to queue node {$sibling->key}: " . $e->getMessage());
+			}
+		}
+
+		if ($queued === 0) {
+			$session->save_message(new DisplayMessage(
+				'No jobs were queued.', 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url . '&tab=updates');
+			exit;
+		}
+
+		$session->save_message(new DisplayMessage(
+			"Queued {$queued} upgrade " . ($queued === 1 ? 'job' : 'jobs') . " for sites on this host.",
+			'Success', $page_regex,
+			DisplayMessage::MESSAGE_SUCCESS, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+		header('Location: /admin/server_manager?tab=jobs');
+		exit;
+	}
+
 	if ($action === 'refresh_archives') {
 		$steps = JobCommandBuilder::build_refresh_archives($node);
 		$job = ManagementJob::createJob($node->key, 'refresh_archives', $steps, null, $session->get_user_id());
@@ -1300,6 +1349,20 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 			<input type="hidden" name="action" value="refresh_archives">
 			<button type="submit" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Refresh archives and apply to <?php echo $node_name; ?>?')">Refresh &amp; Apply</button>
 		</form>
+	</div>
+	<hr>
+	<div class="mt-3">
+		<form method="post" style="display:inline"
+		      onsubmit="return confirm('Queue an upgrade job for every enabled site on host <?php echo htmlspecialchars($node->get('mgn_host')); ?>?');">
+			<input type="hidden" name="action" value="apply_update_all_on_host">
+			<button type="submit" class="btn btn-sm btn-warning">Upgrade All Sites on This Host</button>
+		</form>
+		<p class="text-muted small mt-2 mb-0">
+			Queues one independent upgrade job per enabled, non-deleted site that shares this host
+			(<code><?php echo htmlspecialchars($node->get('mgn_host')); ?></code>).
+			Jobs run as the agent picks them up; one site failing does not affect the others.
+			Disable a site first to skip it.
+		</p>
 	</div>
 <?php
 	$page->end_box();
