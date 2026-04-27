@@ -61,8 +61,8 @@ Active community engagement and product launches using AI-assisted copy.
 *   **Micro-Influencer Outreach:** Reach out to productivity and digital detox creators for honest reviews.
 
 ## Implementation Checklist
-- [ ] **Phase 1:** Update landing page views with `meta_description` hooks.
-- [ ] **Phase 1:** Implement `?coupon=` auto-apply logic.
+- [x] **Phase 1:** Update landing page views with `meta_description` hooks.
+- [x] **Phase 1:** Implement `?coupon=` auto-apply logic.
 - [ ] **Phase 2:** Claim AlternativeTo.net profile and set up listing.
 - [ ] **Phase 2:** Set up Google Search Console to monitor keyword rankings.
 - [ ] **Phase 2:** Create first 3 Comparison "War" pages in Admin.
