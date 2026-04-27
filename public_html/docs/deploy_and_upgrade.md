@@ -162,6 +162,13 @@ For small fixes that don't warrant a version bump, `--refresh-archives` tells `u
 6. Extracts and validates all archives
 7. Performs deployment with rollback protection
 
+**Dashboard surfaces (Server Manager):**
+
+On any node detail page (`/admin/server_manager/node_detail?mgn_id=N`), the **Updates** tab exposes:
+
+- **Apply Update** / **Dry Run** / **Refresh & Apply** — single-site actions, queue one `apply_update` (or `refresh_archives`) job for that node.
+- **Upgrade All Sites on This Host** — fans out to every enabled, non-deleted node sharing the same `mgn_host`. Queues one independent `apply_update` job per sibling (so a per-site failure doesn't affect the others), then redirects to the Jobs page. To skip a specific site in the bulk run, disable it (`mgn_enabled = false`) via its node detail page first.
+
 ---
 
 ### publish_upgrade.php
