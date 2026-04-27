@@ -199,10 +199,12 @@ For each row, in batches:
 Bounded per-run: process at most N rows or run for at most M seconds,
 whichever comes first. A persistent-failure row never blocks the queue.
 
-The same task, kicked manually from the admin UI with a progress
-display, serves as the **one-time forward migration** of existing
-public files. There is no separate migration task — bulk migration
-and ongoing post-upload sync are the same operation.
+The same task serves as the **one-time forward migration** of
+existing public files: when cloud storage is first enabled, the
+batch query naturally selects every public local file, and the
+task drains them across cron ticks until the queue is empty.
+There is no separate migration task — bulk migration and ongoing
+post-upload sync are the same operation.
 
 #### Failure handling
 
@@ -1180,7 +1182,7 @@ correctness issue.
   - `/uploads/*` route extended to 302-redirect cloud-stored files to
     their bucket URL (see §5a), preserving pre-migration URLs in
     emails, search indexes, and embedded HTML.
-- `settings.json` — declare the new `storage_*` settings.
+- `settings.json` — declare the new `cloud_storage_*` settings.
 - `composer.json` — add `aws/aws-sdk-php` if not already present.
   The existing upgrade pipeline (`utils/upgrade.php` →
   `utils/composer_install_if_needed.php`) and Docker build flow
@@ -1262,8 +1264,10 @@ visibly.
 
 **Failure modes:**
 17. Configure with bad credentials. Test Connection fails clearly.
-    Sync task logs failures and backs off. Admin dashboard surfaces
-    the failure count.
+    Sync task logs per-row failures, increments
+    `fil_sync_failed_count`, and stops attempting each row after
+    5 consecutive failures. Admin dashboard surfaces the stuck
+    rows and the driver-ping health check goes red.
 18. Pull-back with simulated bucket failure (revoke delete permission
     temporarily). Operation aborts cleanly; admin sees error;
     retry after permissions restored succeeds.
@@ -1298,11 +1302,11 @@ before shipping):**
 24. Verify the `get_filesystem_path()` audit hasn't grown new
     callers since the spec was written: `grep -rn
     "get_filesystem_path" public_html/ --include="*.php"` should
-    return the four sites already enumerated in the §10 caller
-    audit (`permanent_delete`, `delete_resized`, `resize`,
-    `regenerate_image_sizes.php`), the method definition itself,
-    and nothing else. Any new caller needs the same dispatch
-    treatment.
+    return the four sites already enumerated in the caller audit
+    in "Modified files" (`permanent_delete`, `delete_resized`,
+    `resize`, `regenerate_image_sizes.php`), the method
+    definition itself, and nothing else. Any new caller needs
+    the same dispatch treatment.
 25. Verify the existing resize-on-demand vs eager-resize behavior
     when a theme adds a new image size. If lazy, document or fix
     the cloud-storage gap (missing variants 404 from the bucket).
