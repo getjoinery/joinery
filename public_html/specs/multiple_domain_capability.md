@@ -33,6 +33,26 @@ Option B is more work upfront but is the only option that produces a reusable pl
 
 ---
 
+## Open decisions (resolve before implementation)
+
+### Email handling across brands
+
+Two independent questions, either or both of which may need to be answered "yes":
+
+**Decision A — Is email *identity* brand-scoped?**
+- *Unified (current spec):* email uniqueness is global. One human → one user row, regardless of how many brands. Sign-in works on any brand. Friction case: a user signing up on brand 2 with an email they already used on brand 1 sees an "account already exists" message and may not realize why.
+- *Brand-scoped:* email uniqueness is `(brand_id, email)`. Same person on two brands gets two user rows, possibly two passwords. Cleaner per-brand isolation; some users would prefer it; introduces a constraint change that **must** land before public launch (it's a breaking change otherwise).
+
+**Decision B — Is email *content/delivery* brand-aware beyond settings?**
+- *Settings-level (current spec):* per-brand from-address, logo URL, support address, etc., live in `brd_config`. Templates and delivery config (Mailgun domain, SPF/DKIM, inbound routing) are global.
+- *Full per-brand:* per-brand email templates, per-brand sender domains with their own DKIM/SPF, per-brand inbound email routing, possibly per-brand Mailgun configurations. Significant additional surface area; only needed if brands have meaningfully different voice/copy or deliverability needs.
+
+The spec as written assumes "unified identity, settings-level content branding" (the lower-cost combination). If either decision flips, the corresponding sections need revision before Phase 0 starts:
+- Flipping A: restore the email uniqueness constraint change to Phase 0; add cross-brand login UX to Phase 1; add the `usr_brd_brand_id` to relevant unique indexes.
+- Flipping B: pull "per-brand email template engine" out of Out-of-Scope and design the template/delivery layer; likely a Phase 2.5 or its own spec.
+
+---
+
 ## Data model
 
 ### New tables

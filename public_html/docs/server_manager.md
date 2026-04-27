@@ -387,6 +387,8 @@ Discovery: `GET /api/v1/management` returns every endpoint with its description.
 
 **Adding a management key for a node:** on the target node, Admin → API Keys → New Key, owner = a superadmin user, `apk_permission = 1`, IP-restrict to the control plane's egress IP. Paste the public/secret pair into the node's Overview tab on the control plane's Server Manager ("API Credential" panel).
 
+> **IP restriction on docker-prod nodes:** for sites fronted directly by host Apache (no Cloudflare), the container now reads the real client IP via `mod_remoteip` + the host's `X-Forwarded-For: %{REMOTE_ADDR}s` header, so IP restriction works end-to-end. For Cloudflare-fronted sites, the container sees Cloudflare's edge IP — IP restriction is not yet meaningful in that case (a future spec will trust Cloudflare's ranges and read `CF-Connecting-IP`).
+
 **Build-time routing:** `JobCommandBuilder::build_<op>()` dispatches to `build_<op>_api()` or `build_<op>_ssh()` based on `has_api($node, $op)`, which checks: (1) credentials stored on the node row, (2) a matching `build_<op>_api` exists, (3) a fresh `/health` probe succeeds. No runtime fallback — a job is decided at build-time and runs that path or fails. The existing SSH implementation stays in place; clearing the stored credentials or breaking `/health` routes the next job back to SSH automatically.
 
 **Adding a new management endpoint:** drop a file under `includes/management_api/<name>_handler.php` with `<name>_handler($request)` + `<name>_handler_api()` meta function. Nested paths mirror directories (`backups/list_handler.php` → `GET /api/v1/management/backups/list`). Parallels the action-endpoint convention in `logic/*_logic.php`.
