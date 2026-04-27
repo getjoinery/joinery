@@ -322,6 +322,10 @@ set_domain_docker() {
     ProxyPass / http://127.0.0.1:${port}/
     ProxyPassReverse / http://127.0.0.1:${port}/
 
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "http"
+
     ErrorLog /var/www/html/${sitename}/logs/proxy_error.log
     CustomLog /var/www/html/${sitename}/logs/proxy_access.log combined
 </VirtualHost>

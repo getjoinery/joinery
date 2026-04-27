@@ -39,6 +39,18 @@ Docker site images build `FROM joinery-base:VERSION` rather than `FROM ubuntu:24
 
 Existing containers keep running on their old base image until they are rebuilt — no disruption. Site rebuilds fire a **drift warning** if the current `install.sh do_server_setup` hash differs from the hash baked into the base image (stored as the `joinery.install_sh_hash` label). That's the signal to bump `BASE_IMAGE_VERSION` and rebuild the base.
 
+#### Two-tier Apache: real client IP
+
+A docker-prod request crosses two Apache instances: **host Apache** terminates TLS and reverse-proxies to `127.0.0.1:{container_port}`; **container Apache** runs PHP. Without help, `$_SERVER['REMOTE_ADDR']` inside the container is always `172.17.0.1` (the docker bridge gateway), which silently breaks IP-based features (rate limiting, API key IP restriction, analytics, audit logs).
+
+The contract:
+
+1. **Host proxy** (written by `install.sh` and `manage_domain.sh`) sets `RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s` — explicit `set` (not append) so the container receives a single trustworthy value.
+2. **Container Apache** loads `mod_remoteip` with `RemoteIPInternalProxy 172.17.0.0/16`, rewriting `REMOTE_ADDR` from the `X-Forwarded-For` header before PHP runs. This is baked into `Dockerfile.template` (since v3.5).
+3. **Access logs** use `%a` instead of `%h` so they show the rewritten address, not the bridge gateway.
+
+Cloudflare-fronted sites are partial: the container sees Cloudflare's edge IP, not the original client. A future spec will trust Cloudflare's IP ranges at the host and read `CF-Connecting-IP`.
+
 #### Upgrade-flow split (important)
 
 This is the behavioural change most likely to trip up an operator who remembers the pre-shared-base model:
