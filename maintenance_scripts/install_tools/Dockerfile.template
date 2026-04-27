@@ -1,4 +1,7 @@
 # Joinery Docker Template
+# VERSION 3.5 - Enable mod_remoteip and switch access-log %h -> %a so PHP and
+#               access logs see the real client IP from the host's X-Forwarded-For
+#               header instead of the docker bridge gateway (172.17.0.1).
 # VERSION 3.4 - Add default to ARG BASE_IMAGE_VERSION so BuildKit can statically
 #               evaluate FROM without --build-arg (silences InvalidDefaultArgInFrom warning).
 # VERSION 3.3 - Write logrotate config on every container start (was first-run-only via _site_init.sh);
@@ -62,6 +65,17 @@ RUN cp /var/www/html/${SITENAME}/maintenance_scripts/install_tools/default_virtu
     mkdir -p /var/www/html/${SITENAME}_test/logs && \
     a2dissite 000-default.conf 2>/dev/null || true && \
     a2ensite ${SITENAME}.conf
+
+# Trust the docker bridge gateway for X-Forwarded-For; everything beyond it
+# (Cloudflare, etc.) is handled by the host proxy, not here. Write the .conf
+# BEFORE a2enmod so the symlink for it is created alongside .load.
+RUN printf '%s\n' \
+      'RemoteIPHeader X-Forwarded-For' \
+      'RemoteIPInternalProxy 172.17.0.0/16' \
+      'RemoteIPInternalProxy 127.0.0.1' \
+      > /etc/apache2/mods-available/remoteip.conf && \
+    a2enmod remoteip && \
+    sed -i 's/%h /%a /' /etc/apache2/apache2.conf
 
 # Expose ports
 EXPOSE 80 5432

@@ -226,3 +226,41 @@ Land in this order to keep things reversible at every step:
 3. The management API key created for empoweredhealthtn, IP-restricted to `69.164.209.253`, authenticates successfully from the joinerytest.site control plane.
 4. `RequestLogger` rate-limit counters are per-real-client, not per-docker-bridge.
 5. New sites created via either `install.sh site` or the Server Manager's install_node flow end up with identical proxy configs — no post-install patchup required.
+
+## Implementation notes (2026-04-27)
+
+### The `a2enmod` ordering gotcha
+
+The spec's `enable_remoteip.sh` originally ran `a2enmod remoteip` *before* writing `remoteip.conf`. Debian's `a2enmod` only symlinks files that exist at invocation time, so `remoteip.load` got linked into `mods-enabled/` but `remoteip.conf` did not — the module loaded but the directives (`RemoteIPHeader`, `RemoteIPInternalProxy`) never took effect. Symptom: container access log still showed `172.17.0.1` after a clean `apachectl graceful`.
+
+Fix: write `remoteip.conf` first, then `a2enmod remoteip`. Both the ad-hoc script and the new `Dockerfile.template` `RUN` block use this order. Future code that drops in a new module config should follow the same pattern.
+
+### Step 4 (host proxy regeneration) was a no-op
+
+The spec assumed some existing host proxy configs would be missing the three `RequestHeader set` lines (because `manage_domain.sh` didn't write them). In practice, all 8 docker-prod sites' `*-proxy.conf` files already had them — they appear to have been created via `install.sh` rather than `install_node`, or were manually fixed earlier. Audit on rollout day:
+
+```bash
+ssh root@23.239.11.53 'for f in /etc/apache2/sites-available/*-proxy.conf; do
+  grep -c "RequestHeader set X-Forwarded-For" "$f"; done'
+# All 8 returned: 1
+```
+
+The `manage_domain.sh` repo update still matters for *future* `install_node`-created sites; existing hosts needed no regeneration.
+
+### Cloudflare sites: partial fix as expected
+
+On Cloudflare-fronted sites (e.g. `empoweredhealthtn.com`), the container now logs Cloudflare edge IPs (`172.70.x`, `104.23.x`, `162.158.x`) instead of `172.17.0.1`. Real client IP requires a follow-on spec to trust Cloudflare's IP ranges at the host proxy and read `CF-Connecting-IP`. Strict improvement over the bridge gateway, and per the original spec's explicit out-of-scope.
+
+### Live state vs. baked-in state
+
+Running containers got the fix via the ad-hoc `enable_remoteip.sh` (changes inside the container's writable layer — survives restarts, does NOT survive a rebuild). New containers built from `Dockerfile.template` v3.5+ get the fix baked into the image layer. Either path produces identical runtime behavior.
+
+`upgrade.php` does not enable `mod_remoteip` — it only refreshes PHP files. That's why the live ad-hoc script was necessary; future docker rebuilds use the new template.
+
+### Files changed
+
+- `maintenance_scripts/install_tools/Dockerfile.template` — bumped to v3.5; new `RUN` block writes `remoteip.conf`, runs `a2enmod remoteip`, swaps `%h` → `%a` in `apache2.conf`.
+- `maintenance_scripts/sysadmin_tools/manage_domain.sh:317-332` — added 3 `RequestHeader set` lines (X-Real-IP, X-Forwarded-For, X-Forwarded-Proto) to the docker-site proxy heredoc.
+- `docs/server_manager.md` — note on IP restriction semantics per site type (direct vs. Cloudflare-fronted).
+- `docs/deploy_and_upgrade.md` — new "Two-tier Apache: real client IP" subsection documenting the X-Forwarded-For/mod_remoteip contract.
+- `enable_remoteip.sh` — written and run ad-hoc from `/tmp/`, not committed (single-use; future containers handled by Dockerfile.template).
