@@ -84,6 +84,11 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_date_of_birth' => array('type'=>'date'),
 	    'usr_gender' => array('type'=>'varchar(30)'),
 	    'usr_profile_visibility' => array('type'=>'varchar(20)', 'default'=>'members_only'),
+	    'usr_totp_secret' => array('type'=>'varchar(255)'),
+	    'usr_totp_backup_codes' => array('type'=>'jsonb'),
+	    'usr_totp_enabled_time' => array('type'=>'timestamp(6)'),
+	    'usr_totp_last_used_step' => array('type'=>'int8'),
+	    'usr_totp_hmac_key' => array('type'=>'varchar(128)'),
 	);
 
 private static function UcName($string) {
@@ -625,6 +630,146 @@ private static function UcName($string) {
 				error_log('Password rehash failed for user ' . $this->key . ': ' . $e->getMessage());
 			}
 			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check whether 2FA (TOTP) is enabled for this user
+	 * Single source of truth: usr_totp_enabled_time IS NOT NULL
+	 */
+	function has_totp_enabled() {
+		return !empty($this->get('usr_totp_enabled_time'));
+	}
+
+	/**
+	 * Enable TOTP 2FA for this user. Stores the Base32 secret, sets enabled time,
+	 * generates a fresh per-user HMAC key for trusted-device cookies, and saves.
+	 *
+	 * @param string $secret Base32-encoded TOTP secret (already validated against a TOTP code)
+	 */
+	function enable_totp($secret) {
+		$this->set('usr_totp_secret', $secret);
+		$this->set('usr_totp_enabled_time', gmdate('Y-m-d H:i:s'));
+		$this->set('usr_totp_last_used_step', null);
+		$this->set('usr_totp_hmac_key', bin2hex(random_bytes(64)));
+		$this->save();
+	}
+
+	/**
+	 * Disable TOTP 2FA for this user. Clears all TOTP state including the
+	 * per-user HMAC key, which invalidates outstanding trusted-device cookies.
+	 */
+	function disable_totp() {
+		$this->set('usr_totp_secret', null);
+		$this->set('usr_totp_enabled_time', null);
+		$this->set('usr_totp_backup_codes', null);
+		$this->set('usr_totp_last_used_step', null);
+		$this->set('usr_totp_hmac_key', null);
+		$this->save();
+	}
+
+	/**
+	 * Verify a 6-digit TOTP code against the stored secret.
+	 * Allows +-1 time-step window (30s each) for clock drift.
+	 * Rejects codes from the same or earlier step than the last accepted code (replay prevention).
+	 * On success, updates usr_totp_last_used_step and saves.
+	 *
+	 * @param string $code 6-digit TOTP code
+	 * @return bool true if valid and not replayed
+	 */
+	function verify_totp($code) {
+		$secret = $this->get('usr_totp_secret');
+		if (empty($secret)) {
+			return false;
+		}
+
+		$code = preg_replace('/[\s-]+/', '', (string)$code);
+		if (!preg_match('/^\d{6}$/', $code)) {
+			return false;
+		}
+
+		$settings = Globalvars::get_instance();
+		$composer_path = $settings->get_setting('composerAutoLoad');
+		require_once($composer_path . 'autoload.php');
+
+		$totp = \OTPHP\TOTP::createFromSecret($secret);
+
+		$current_step = (int)floor(time() / 30);
+		$last_used = (int)$this->get('usr_totp_last_used_step');
+
+		// Try current and +-1 step
+		for ($delta = -1; $delta <= 1; $delta++) {
+			$candidate_step = $current_step + $delta;
+			if ($candidate_step <= $last_used) {
+				continue; // Replay prevention
+			}
+			$ts = $candidate_step * 30;
+			if (hash_equals($totp->at($ts), $code)) {
+				$this->set('usr_totp_last_used_step', $candidate_step);
+				$this->save();
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Generate 10 backup codes, store Argon2id hashes in usr_totp_backup_codes,
+	 * and return the plaintext codes for one-time display to the user.
+	 * Display format is XXXX-XXXX (8 alphanumeric chars + dash for readability).
+	 * Hashes are computed against the canonical (dash-stripped) form.
+	 *
+	 * @return array<string> Array of 10 plaintext codes formatted as XXXX-XXXX
+	 */
+	function generate_backup_codes() {
+		$alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Skip 0/O, 1/I/L for readability
+		$display_codes = [];
+		$hashes = [];
+		for ($i = 0; $i < 10; $i++) {
+			$raw = '';
+			for ($j = 0; $j < 8; $j++) {
+				$raw .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+			}
+			$display_codes[] = substr($raw, 0, 4) . '-' . substr($raw, 4, 4);
+			$hashes[] = password_hash($raw, PASSWORD_ARGON2ID);
+		}
+		$this->set('usr_totp_backup_codes', json_encode($hashes));
+		$this->save();
+		return $display_codes;
+	}
+
+	/**
+	 * Verify a backup code against the stored hashes. Strips dashes and
+	 * whitespace before comparison so users can paste with or without the dash.
+	 * On success, removes the used code from the array and saves.
+	 *
+	 * @param string $code 8-character backup code (with or without dash)
+	 * @return bool true if valid
+	 */
+	function verify_backup_code($code) {
+		$code = strtoupper(preg_replace('/[\s-]+/', '', (string)$code));
+		if (!preg_match('/^[A-Z0-9]{8}$/', $code)) {
+			return false;
+		}
+
+		$hashes = $this->get('usr_totp_backup_codes');
+		if (is_string($hashes)) {
+			$hashes = json_decode($hashes, true);
+		}
+		if (!is_array($hashes) || empty($hashes)) {
+			return false;
+		}
+
+		foreach ($hashes as $idx => $hash) {
+			if (password_verify($code, $hash)) {
+				array_splice($hashes, $idx, 1);
+				$this->set('usr_totp_backup_codes', json_encode($hashes));
+				$this->save();
+				return true;
+			}
 		}
 
 		return false;

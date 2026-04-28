@@ -609,9 +609,65 @@ class SessionControl{
 			return FALSE;
 		}
 
+		// 2FA check: if user has TOTP enabled and no valid trusted-device cookie,
+		// stash a pending state and redirect to /verify-totp instead of completing login.
+		// Leave the 'tt' cookie alone so a successful TOTP completes the auto-login.
+		if ($user_obj->has_totp_enabled() && !$this->has_valid_trusted_device_cookie($user_obj)) {
+			session_regenerate_id(true);
+			$_SESSION['totp_pending_user_id']  = $user_obj->key;
+			$_SESSION['totp_pending_remember'] = false; // Already had a remember cookie
+			$_SESSION['totp_pending_return']   = $this->get_return();
+			$_SESSION['totp_pending_expires']  = time() + 600;
+			header('Location: /verify-totp');
+			exit();
+		}
+
 		$this->store_session_variables($user_obj);
 		LoginClass::StoreUserLogin($user_obj->key, LoginClass::LOGIN_COOKIE);
 		return TRUE;
+	}
+
+	/**
+	 * Trusted-device cookie format: {user_id};{expiry};{hmac_sha256(user_id+expiry+enabled_time, usr_totp_hmac_key)}
+	 * Allows skipping the TOTP step on devices the user has approved, for N days.
+	 * Invalidated automatically if the user disables/re-enables 2FA (rotates both enabled_time and hmac_key).
+	 */
+	private function compute_trusted_device_hmac($user, $expiry) {
+		$key = $user->get('usr_totp_hmac_key');
+		if (empty($key)) {
+			return null;
+		}
+		$enabled_time = $user->get('usr_totp_enabled_time');
+		$payload = $user->key . ':' . $expiry . ':' . $enabled_time;
+		return hash_hmac('sha256', $payload, $key);
+	}
+
+	public function has_valid_trusted_device_cookie($user) {
+		if (empty($_COOKIE['totp_trusted'])) return false;
+		$parts = explode(';', $_COOKIE['totp_trusted']);
+		if (count($parts) !== 3) return false;
+		[$cookie_user_id, $expiry, $sig] = $parts;
+		if ((int)$cookie_user_id !== (int)$user->key) return false;
+		if ((int)$expiry < time()) return false;
+		if (!ctype_xdigit($sig) || strlen($sig) !== 64) return false;
+		$expected = $this->compute_trusted_device_hmac($user, (int)$expiry);
+		if (!$expected) return false;
+		return hash_equals($expected, $sig);
+	}
+
+	public function set_trusted_device_cookie($user) {
+		$settings = Globalvars::get_instance();
+		$days = (int)$settings->get_setting('totp_remember_device_days');
+		if ($days <= 0) return;
+		$expiry = time() + ($days * 86400);
+		$sig = $this->compute_trusted_device_hmac($user, $expiry);
+		if (!$sig) return;
+		$value = $user->key . ';' . $expiry . ';' . $sig;
+		$this->set_secure_cookie('totp_trusted', $value, $expiry);
+	}
+
+	public function delete_trusted_device_cookie() {
+		$this->delete_cookie('totp_trusted');
 	}
 
 	public static function get_instance(){
@@ -953,12 +1009,38 @@ class SessionControl{
 				}
 			}
 
+			// Enforce 2FA on admin accounts when totp_require_admins is set.
+			// Exempt /profile/security (where they enable it) and /logout to avoid loops.
+			if ($this->must_enable_totp_for_admin()) {
+				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+				if ($current_path !== '/profile/security' && $current_path !== '/logout') {
+					$msgtxt = urlencode('Your administrator account requires two-factor authentication.');
+					header('Location: /profile/security?msgtext=' . $msgtxt);
+					exit();
+				}
+			}
+
 			if(!isset($_SESSION['permission']) || $_SESSION['permission'] < $level){
 				header("HTTP/1.1 401 Unauthorized");
 				throw new SystemAuthenticationError(
 					'Sorry, you do not have the needed permissions to view this page.');
 			}
 		}
+	}
+
+	/**
+	 * Returns true if the current user has admin permission (>=5) AND the
+	 * totp_require_admins setting is enabled AND TOTP is not yet enabled on
+	 * their account. Used to gate admin pages until 2FA is set up.
+	 */
+	function must_enable_totp_for_admin() {
+		if (!isset($_SESSION['usr_user_id'])) return false;
+		if (($_SESSION['permission'] ?? 0) < 5) return false;
+		$settings = Globalvars::get_instance();
+		if (!$settings->get_setting('totp_require_admins')) return false;
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$user = new User($_SESSION['usr_user_id'], true);
+		return !$user->has_totp_enabled();
 	}
 
 	/**
