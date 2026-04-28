@@ -913,17 +913,19 @@
 		$migrations[] = $migration;
 
 		// Drop timezone table - dead table with no code references
+		// Test: returns 0 while the table still exists (→ run), 1 after it has been dropped (→ skip)
 		$migration = array();
 		$migration['database_version'] = '67';
-		$migration['test'] = "SELECT count(1) as count FROM pg_tables WHERE tablename = 'timezone' AND schemaname = 'public'";
+		$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM pg_tables WHERE tablename = 'timezone' AND schemaname = 'public') THEN 0 ELSE 1 END as count";
 		$migration['migration_sql'] = 'DROP TABLE IF EXISTS public.timezone CASCADE;';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;
 
 		// Drop country table - consolidated into cco_country_codes
+		// Test: returns 0 while the table still exists (→ run), 1 after it has been dropped (→ skip)
 		$migration = array();
 		$migration['database_version'] = '67';
-		$migration['test'] = "SELECT count(1) as count FROM pg_tables WHERE tablename = 'country' AND schemaname = 'public'";
+		$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM pg_tables WHERE tablename = 'country' AND schemaname = 'public') THEN 0 ELSE 1 END as count";
 		$migration['migration_sql'] = 'DROP TABLE IF EXISTS public.country CASCADE;';
 		$migration['migration_file'] = NULL;
 		$migrations[] = $migration;

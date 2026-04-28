@@ -319,6 +319,33 @@ If manifest is missing, it's auto-generated with `is_stock: true`.
 
 Migrations stop on the **first failure** — subsequent migrations are skipped. Fix the failing migration and re-run `update_database.php` to continue.
 
+### Migration `test` Semantics
+
+Each migration has an optional `test` SQL query that returns a row with a `count` column. The runner interprets it as:
+
+- **`count > 0` → migration is skipped** (already applied)
+- **`count = 0` → migration runs**
+
+This works naturally for INSERT-style migrations — test whether the row already exists:
+
+```php
+// Insert a settings row — skip if it already exists
+$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'my_setting'";
+$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('my_setting', 'default')";
+```
+
+**Drop-table migrations require inverted logic.** If you test for the table's presence the same way, the migration is skipped *while the table still exists* — the opposite of what you want. Use a `CASE` expression to flip the sense:
+
+```php
+// Drop a table — run while table is present, skip once it's gone
+$migration['test'] = "SELECT CASE WHEN EXISTS(
+    SELECT 1 FROM pg_tables WHERE tablename = 'old_table' AND schemaname = 'public'
+) THEN 0 ELSE 1 END as count";
+$migration['migration_sql'] = 'DROP TABLE IF EXISTS public.old_table CASCADE;';
+```
+
+The `CASE` returns 0 while the table exists (→ run) and 1 once it has been dropped (→ skip). The `DROP TABLE IF EXISTS` makes the migration idempotent — safe to run even if the table is already gone.
+
 ### Plugin Tables Excluded
 
 `update_database.php` always runs with `include_plugins => false`. Plugin tables are managed through the plugin activation workflow (`PluginManager::activate()` calls `DatabaseUpdater::runPluginTablesOnly()`), not through the core updater. This is intentional — core can't know about plugins at compile time.

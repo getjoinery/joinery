@@ -2,7 +2,7 @@
 
 ## Goal
 
-Remove dead reference tables, dead reference-table callsites, and prevent
+Remove dead reference tables and prevent
 unused plugin tables from being created on sites that don't have the
 plugin active. Reduce per-site Postgres footprint, backup size, WAL
 churn, and replication load — without changing any live behaviour.
@@ -35,19 +35,6 @@ The migration runner in `data/migrations_class.php:196` skips when
 `count > 0`. Because the table exists, count is 1, so the drop is
 permanently skipped. The test needs to be inverted (skip *when the
 drop has already been done*, run *when the table is still present*).
-
-### Dead `geoip.*` callsites
-
-The `geoip` schema does **not** exist on any prod container, but two
-callsites still reference it:
-
-- `data/address_class.php:138` — `Address::IsInMetroCode()` queries
-  `geoip.locations`. Will throw a "schema does not exist" error if
-  ever called. Search for callers shows none.
-- `includes/LibraryFunctions.php:556` — `getCityStateFromIP()` is
-  fully wrapped in a `/* … */` block and unconditionally returns
-  `FALSE`. The body referencing `geoip.locations` / `geoip.blocks`
-  is unreachable.
 
 ### Unused-but-installed plugin tables
 
@@ -97,17 +84,7 @@ migrations don't repeat it.
 After the fix, the next deploy applies the drops automatically via
 `update_database` during upgrade.
 
-### 2. Remove dead `geoip` callsites
-
-- Delete `Address::IsInMetroCode()` in `data/address_class.php`.
-- Delete `LibraryFunctions::getCityStateFromIP()` in
-  `includes/LibraryFunctions.php` (it already returns `FALSE`
-  unconditionally).
-
-Per project rules in CLAUDE.md, do not leave `// removed` comments
-or empty stubs.
-
-### 3. Make plugin schema sync conditional on plugin activation
+### 2. Make plugin schema sync conditional on plugin activation
 
 `PluginManager::sync()` should only create / sync tables for
 plugins that are *active* on the current site, not merely installed.
@@ -132,7 +109,7 @@ post-deploy: for each inactive plugin, drop its tables if they
 contain zero rows. This is opt-in; default is to leave existing
 tables alone.
 
-### 4. Update existing developer docs
+### 3. Update existing developer docs
 
 Per project convention (specs add to existing docs, not new ones):
 
@@ -155,17 +132,13 @@ After deploying:
    - `timezone` no longer present on any site.
    - `country` no longer present on any site.
    - `bld_blocklist_domains` only present on the ScrollDaddy site.
-2. `php -l` and `validate_php_file.php` on edited files in
-   `data/address_class.php` and `includes/LibraryFunctions.php`.
-3. Smoke test register / profile / event-edit pages to confirm
+2. Smoke test register / profile / event-edit pages to confirm
    timezone dropdowns still populate (`zone` table is untouched).
 
 ## Estimated Payoff
 
 - **~58 MB** dead `timezone` data removed across the fleet
   (data + indexes + WAL on every backup).
-- **Dead code removed:** `IsInMetroCode`, `getCityStateFromIP`,
-  references to a schema that doesn't exist on prod.
 - **Future bloat avoided:** plugin tables stop appearing on
   sites that don't use the plugin.
 - **No live behaviour change.**
