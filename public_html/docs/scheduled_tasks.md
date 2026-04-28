@@ -87,6 +87,31 @@ class MyTaskName implements ScheduledTaskInterface {
 }
 ```
 
+#### Self-deactivating tasks
+
+A task can ask the runner to flip its `sct_is_active` to `false` after the
+current run by adding `'deactivate' => true` to the result array:
+
+```php
+return array(
+    'status'     => 'success',
+    'message'    => 'No more work to do.',
+    'deactivate' => true,
+);
+```
+
+This is the right pattern for one-shot drain tasks (e.g.
+`CloudStorageReverseSync` deactivates itself once every cloud-stored
+file has been pulled back). The runner reads the flag, sets
+`sct_is_active = false` on the task row, and saves — so the row is not
+re-evaluated on subsequent ticks until something explicitly reactivates
+it.
+
+Setting `sct_is_active = false` from inside the task with a separate
+`save()` does *not* work: the runner holds an in-memory snapshot of
+the row from before the call to `run()`, and its post-run save would
+overwrite the deactivation. Use the `deactivate` flag.
+
 ### 3. (Optional) Add Dry Run Support
 
 Tasks can implement the `ScheduledTaskDryRunnable` interface to support preview/dry run from the admin UI. This is especially useful for email tasks where you want to see what would be sent without actually sending.
@@ -179,6 +204,20 @@ Returns `sct_task_config` as an associative array.
 - Loads active, non-deleted tasks
 - Runs due tasks and updates their status
 - Outputs timestamped results to stdout (logged by cron)
+
+### Per-task advisory locking
+
+Each task's `run()` is wrapped in `pg_try_advisory_lock(hashtext(sct_name))`,
+so a long-running task cannot be re-entered by the next cron tick. If the
+lock cannot be acquired the task is skipped with `skipped: already running`
+and the runner moves on to the next task. The lock auto-releases when the
+PHP connection closes, so a crashed process self-recovers on the next tick.
+
+This is transparent to task implementations — no `run()` code needs to
+know about the lock — but it means tasks that legitimately want to run
+in parallel across ticks would be serialized. In practice the cron tick
+interval (15 min) is long compared to almost every task's runtime, so
+the serialization is rarely visible.
 
 ### Setup
 
