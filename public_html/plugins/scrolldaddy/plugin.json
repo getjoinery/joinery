@@ -16,6 +16,7 @@
         { "name": "scrolldaddy_dns_server_ip", "default": "" },
         { "name": "scrolldaddy_dns_secondary_internal_url", "default": "" },
         { "name": "scrolldaddy_dns_secondary_api_key", "default": "" },
-        { "name": "scrolldaddy_dns_secondary_server_ip", "default": "" }
+        { "name": "scrolldaddy_dns_secondary_server_ip", "default": "" },
+        { "name": "scrolldaddy_blocklist_version", "default": "" }
     ]
 }
