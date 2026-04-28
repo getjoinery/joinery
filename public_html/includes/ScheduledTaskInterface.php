@@ -20,8 +20,15 @@ interface ScheduledTaskInterface {
      * - 'skipped'  — Task could not run (misconfigured, missing prerequisite)
      * - 'error'    — Task attempted to run but failed
      *
+     * Optional 'deactivate' => true in the result array tells the runner
+     * to flip sct_is_active to false after this run. Use this for
+     * one-shot drain tasks that should stop scheduling themselves once
+     * their queue is empty. (Setting sct_is_active from inside the task
+     * via the model does NOT work — the runner's post-run save would
+     * overwrite it; the flag is the supported mechanism.)
+     *
      * @param array $config  Task-specific configuration from sct_task_config
-     * @return string|array  Status string, or array('status'=>'...', 'message'=>'...')
+     * @return string|array  Status string, or array('status'=>'...', 'message'=>'...', 'deactivate'=>bool)
      */
     public function run(array $config);
 }
