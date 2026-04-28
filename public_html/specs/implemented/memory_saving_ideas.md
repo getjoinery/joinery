@@ -41,6 +41,7 @@ Issues:
 Proposed low-traffic profile:
 
 ```
+ServerLimit             50
 StartServers            2
 MinSpareServers         2
 MaxSpareServers         4
@@ -48,32 +49,34 @@ MaxRequestWorkers       50
 MaxConnectionsPerChild  2000
 ```
 
+`ServerLimit` must match `MaxRequestWorkers` — without it, prefork allocates shared memory for the compiled default of 256 slots regardless.
+
 Expected saving: ~100–150 MB across the fleet. Applied via the base Dockerfile / mpm_prefork.conf, rebuild on next upgrade cycle. No functional change for sites at current traffic levels.
 
 ### 2. Shrink Postgres `shared_buffers` on small sites (low effort, medium risk)
 
 Current: every container has `shared_buffers = 128 MB`, `max_connections = 100`.
 
-8 × 128 MB = 1 GB pre-reserved for Postgres page cache, most of it wasted on tiny databases. Low-traffic sites could drop to 32–64 MB with no measurable performance impact.
+8 × 128 MB = 1 GB pre-reserved for Postgres page cache, most of it wasted on tiny databases. Use `shared_buffers = 64 MB` as a safe universal floor — enough headroom for real queries, half the current allocation.
 
 Requires a Postgres restart per site. Best done in the same rebuild window as #1.
 
-### 3. Consolidate to a single shared Postgres instance (high effort)
+## Implementation
 
-Each container runs its own walwriter, checkpointer, autovacuum launcher, logical-replication launcher — ~25–30 MB of duplicated postmaster overhead per site. Collapsing 8 instances to 1 would save 200+ MB.
+Both changes are applied in two places:
 
-Trade-offs:
-- One bad query or lock affects every site.
-- Shared restart / upgrade windows.
-- Backup / restore tooling has to change.
-- Cross-site isolation via roles + `pg_hba.conf` becomes a real security boundary that has to be audited.
+### install.sh (future containers)
 
-Not low-hanging. Revisit if the host ever becomes memory-constrained.
+`install.sh` version 2.18 writes the MPM prefork config and sets `shared_buffers`:
 
-### 4. Migrate from mod_php + mpm_prefork to PHP-FPM + mpm_event (high effort)
+- After the Apache config block: writes `/etc/apache2/mods-available/mpm_prefork.conf` with the profile above.
+- In the PostgreSQL config block: adds `sed -i "s/shared_buffers = 128MB/shared_buffers = 64MB/"` alongside the existing `max_wal_size` tweak.
 
-Biggest long-term per-request efficiency win, but it's a real migration: base image rebuild, Apache config rewrite, php-fpm pool tuning per site, testing every site's request lifecycle. Only worth it if we're also doing other infrastructure work at the same time.
+All future `build-base` runs and new site deployments pick this up automatically.
 
-## Recommendation
+### Live containers (applied 2026-04-28)
 
-Do #1 now as a Dockerfile tweak — 10 minutes of work, pays off on every future site rebuild, and fixes the latent `MaxConnectionsPerChild = 0` leak-accumulation issue as a bonus. Do #2 opportunistically in the same rebuild window. Leave #3 and #4 alone until there's actual memory pressure or another reason to touch that layer.
+All 8 running containers were patched in-place via `docker exec`:
+- Overwrote `mpm_prefork.conf` + `apache2ctl graceful` (no dropped connections)
+- Patched `shared_buffers` in `postgresql.conf` + Postgres restart per container
+
