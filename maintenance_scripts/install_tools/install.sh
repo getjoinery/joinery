@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.18 - Right-size Apache MPM prefork (ServerLimit/MaxRequestWorkers 50, MaxConnectionsPerChild 2000)
+#               and Postgres shared_buffers (128MB -> 64MB) for low-traffic container sites.
 #VERSION 2.17 - Rebuild safety: preflight-stop the target container before the port check
 #               so rebuilds of a running site don't auto-pick a stray alternate port;
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
@@ -1358,6 +1360,19 @@ do_server_setup() {
 </Directory>
 EOF
 
+    # Right-size MPM prefork for low-traffic sites.
+    # ServerLimit must match MaxRequestWorkers — without it prefork allocates
+    # shared memory for the compiled default of 256 slots regardless.
+    cat > /etc/apache2/mods-available/mpm_prefork.conf << 'EOF'
+# prefork MPM
+ServerLimit             50
+StartServers            2
+MinSpareServers         2
+MaxSpareServers         4
+MaxRequestWorkers       50
+MaxConnectionsPerChild  2000
+EOF
+
     print_success "Apache configured"
 
     # Install PostgreSQL Database
@@ -1412,6 +1427,7 @@ EOF
     sed -i "s/#port = 5432/port = 5432/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/#max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
+    sed -i "s/shared_buffers = 128MB/shared_buffers = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
 
     # Restart PostgreSQL to apply configuration
     service_restart postgresql
