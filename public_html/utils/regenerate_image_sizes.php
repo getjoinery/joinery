@@ -90,16 +90,12 @@ while ($offset < $total) {
 	foreach ($batch as $file) {
 		$processed++;
 		$file_name = $file->get('fil_name');
-		$source_path = $file->get_filesystem_path('original');
-
-		if (!file_exists($source_path)) {
-			output("[{$processed}/{$total}] SKIP - File not on disk: {$file_name}", $is_cli);
-			$errors++;
-			continue;
-		}
 
 		output("[{$processed}/{$total}] Processing: {$file_name}", $is_cli);
 
+		// resize() is driver-aware — it handles both local and cloud-stored
+		// rows internally. No path probing needed; if bytes are missing,
+		// the driver / Imagick surfaces an exception we count.
 		try {
 			$file->resize('all');
 		} catch (Exception $e) {

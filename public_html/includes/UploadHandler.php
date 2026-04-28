@@ -478,7 +478,29 @@ class UploadHandler
             }
             $name = $this->upcount_name($name);
         }
+        // Also consult fil_files: once cloud storage migrates a file's bytes
+        // off disk, the filesystem checks above would let a new upload reuse
+        // the same fil_name and overwrite the bucket object. (§3a)
+        while ($this->fil_files_has_active_row($name)) {
+            $name = $this->upcount_name($name);
+        }
         return $name;
+    }
+
+    protected function fil_files_has_active_row($name) {
+        try {
+            $dbconnector = DbConnector::get_instance();
+            $dblink = $dbconnector->get_db_link();
+            $q = $dblink->prepare(
+                "SELECT 1 FROM fil_files WHERE fil_name = ? AND fil_delete_time IS NULL LIMIT 1"
+            );
+            $q->execute([$name]);
+            return (bool)$q->fetchColumn();
+        } catch (PDOException $e) {
+            // Don't block uploads if fil_files isn't queryable.
+            error_log('UploadHandler fil_files dedupe failed: ' . $e->getMessage());
+            return false;
+        }
     }
 
     protected function fix_file_extension($file_path, $name, $size, $type, $error,

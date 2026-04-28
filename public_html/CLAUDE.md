@@ -153,6 +153,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Admin Page Reference](docs/admin_page_reference.md) - Quick reference for admin pages
 - [Analytics](docs/analytics.md) - Visitor events, conversion tracking, and attribution reporting
 - [API](docs/api.md) - REST API authentication, endpoints, and usage
+- [Cloud Storage](docs/cloud_storage.md) - S3-compatible cloud bucket for public uploaded files
 - [Component System](docs/component_system.md) - Reusable component architecture
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
