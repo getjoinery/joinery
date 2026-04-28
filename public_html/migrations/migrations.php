@@ -1121,23 +1121,6 @@
 	// when they upgrade. New installations already have everything via the SQL dump.
 	// =============================================================================
 
-	// ========== Remote Archive Refresh (v77) ==========
-	// Add setting to enable remote archive refresh requests
-	$migration = array();
-	$migration['database_version'] = '77';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'allow_remote_archive_refresh'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('allow_remote_archive_refresh', '0', 1, now(), now(), 'general');";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	// Add setting for allowed IPs for archive refresh
-	$migration = array();
-	$migration['database_version'] = '77';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'archive_refresh_allowed_ips'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('archive_refresh_allowed_ips', '[]', 1, now(), now(), 'general');";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
 	// ========== Event Types Menu Item (v78) ==========
 	// Add Event Types menu item under Events
 	$migration = array();
@@ -1147,23 +1130,7 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
-	// ========== Mailgun Webhook Signing Key Setting (v79) ==========
-	$migration = array();
-	$migration['database_version'] = '79';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'mailgun_webhook_signing_key'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('mailgun_webhook_signing_key', '', 1, now(), now(), 'email');";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
 	// ========== Entity Photos System (v80) ==========
-	// Add max_entity_photos setting
-	$migration = array();
-	$migration['database_version'] = '80';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'max_entity_photos'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('max_entity_photos', '{\"user\": 6, \"event\": 10, \"location\": 10, \"mailing_list\": 10}', 1, now(), now(), 'general');";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
 	// Migrate existing FK data into eph_entity_photos
 	$migration = array();
 	$migration['database_version'] = '80';
@@ -1207,14 +1174,6 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
-	// ========== Add Venmo checkout setting (v85) ==========
-	$migration = array();
-	$migration['database_version'] = '85';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'use_venmo_checkout'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('use_venmo_checkout', '0', 1, 'now()', 'now()', 'general');";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
 	// ========== Product Requirements Refactor (v86) ==========
 	// Migrate bitmask requirements and old prq/pri rows to new class_name-based system
 	$migration = array();
@@ -1243,73 +1202,6 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
-	// ========== API Security Hardening Settings (v88) ==========
-	$migration = array();
-	$migration['database_version'] = '88';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_require_https'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_require_https', 'true', 1, now(), now(), 'api')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	$migration = array();
-	$migration['database_version'] = '88';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_allowed_origins'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_allowed_origins', '', 1, now(), now(), 'api')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	$migration = array();
-	$migration['database_version'] = '88';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'request_log_retention_days'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('request_log_retention_days', '90', 1, now(), now(), 'api')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	// ========== API Rate Limit Settings (v89) ==========
-	$migration = array();
-	$migration['database_version'] = '89';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_rate_limit_requests'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_rate_limit_requests', '1000', 1, now(), now(), 'api')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	$migration = array();
-	$migration['database_version'] = '89';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_rate_limit_window'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_rate_limit_window', '3600', 1, now(), now(), 'api')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	$migration = array();
-	$migration['database_version'] = '89';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_auth_rate_limit_requests'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_auth_rate_limit_requests', '10', 1, now(), now(), 'api')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	$migration = array();
-	$migration['database_version'] = '89';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'api_auth_rate_limit_window'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('api_auth_rate_limit_window', '900', 1, now(), now(), 'api')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	// ========== Admin Bar Setting (v90) ==========
-	$migration = array();
-	$migration['database_version'] = '90';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'show_admin_bar'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('show_admin_bar', '1', 1, now(), now(), 'general')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	// ========== Messaging Active Setting (v91) ==========
-	$migration = array();
-	$migration['database_version'] = '91';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'messaging_active'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('messaging_active', '1', 1, now(), now(), 'general')";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
 	// ========== Subscription Email Templates (v92) ==========
 	$migration = array();
 	$migration['database_version'] = '92';
@@ -1323,14 +1215,6 @@
 	$migration['database_version'] = '93';
 	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'paypal_webhook_events' AND table_schema = 'public') THEN 0 ELSE 1 END as count";
 	$migration['migration_sql'] = "DROP TABLE IF EXISTS paypal_webhook_events";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	// ========== ScrollDaddy blocklist version tracking (v94) ==========
-	$migration = array();
-	$migration['database_version'] = '94';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'scrolldaddy_blocklist_version'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('scrolldaddy_blocklist_version', '', 1, now(), now(), 'scrolldaddy')";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
@@ -1372,22 +1256,6 @@
 	// =============================================================================
 	// TIER GATING SETTINGS
 	// =============================================================================
-
-	// ========== Tier gate preview length setting (v99) ==========
-	$migration = array();
-	$migration['database_version'] = '99';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'tier_gate_preview_length'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('tier_gate_preview_length', '0');";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
-
-	// ========== Tier gate hide from listings setting (v100) ==========
-	$migration = array();
-	$migration['database_version'] = '100';
-	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'tier_gate_hide_from_listings'";
-	$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('tier_gate_hide_from_listings', '0');";
-	$migration['migration_file'] = NULL;
-	$migrations[] = $migration;
 
 	// =============================================================================
 	// ADMIN MENU CLEANUP
