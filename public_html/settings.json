@@ -54,6 +54,7 @@
     { "name": "api_auth_rate_limit_window", "default": "900" },
     { "name": "api_rate_limit_requests", "default": "1000" },
     { "name": "api_rate_limit_window", "default": "3600" },
+    { "name": "max_entity_photos", "default": "{\"user\": 6, \"event\": 10, \"location\": 10, \"mailing_list\": 10}" },
     { "name": "max_subscriptions_per_user", "default": "10" },
     { "name": "request_log_retention_days", "default": "90" },
     { "name": "allowed_upload_extensions", "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a" },
