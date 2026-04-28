@@ -97,5 +97,24 @@ $formwriter->end_form();
 
 $page->end_box();
 
+// 2FA admin controls — separate form so the reset action is independent of the main edit
+$totp_enabled_time = $user->get('usr_totp_enabled_time');
+$page->begin_box(['title' => 'Two-Factor Authentication']);
+if (!empty($totp_enabled_time)) {
+	echo '<p><strong>Status:</strong> Enabled (since '
+		. htmlspecialchars(LibraryFunctions::convert_time($totp_enabled_time, 'UTC',
+			$session->get_timezone(), 'M j, Y g:i A T')) . ')</p>';
+	echo '<form method="POST" action="/admin/admin_users_edit?usr_user_id=' . (int)$user->key . '"'
+		. ' onsubmit="return confirm(\'Reset 2FA for this user? They will need to set it up again on their next login.\');">';
+	echo '<input type="hidden" name="action" value="reset_2fa">';
+	echo '<input type="hidden" name="edit_primary_key_value" value="' . (int)$user->key . '">';
+	echo '<button type="submit" class="btn btn-warning">Reset 2FA</button>';
+	echo '</form>';
+	echo '<p style="margin-top: 1em; font-size: 0.9em; color: #666;">Use this if the user has lost access to their authenticator and exhausted their backup codes.</p>';
+} else {
+	echo '<p><strong>Status:</strong> Not enabled</p>';
+}
+$page->end_box();
+
 $page->admin_footer();
 ?>

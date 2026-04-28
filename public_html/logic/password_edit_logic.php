@@ -53,6 +53,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		'Edit Address' => '/profile/address_edit',
 		'Edit Phone Number' => '/profile/phone_numbers_edit',
 		'Change Contact Preferences' => '/profile/contact_preferences',
+		'Security' => '/profile/security',
 	);
 
 	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);

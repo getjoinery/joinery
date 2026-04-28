@@ -10,7 +10,9 @@
         "jhut89/mailchimp3php": "^3.2",
         "stripe/stripe-php": "^10.16",
         "phpmailer/phpmailer": "^6.10.0",
-        "aws/aws-sdk-php": "^3.300"
+        "aws/aws-sdk-php": "^3.300",
+        "spomky-labs/otphp": "^11.0",
+        "chillerlan/php-qrcode": "^5.0"
     },
     "config": {
         "allow-plugins": {

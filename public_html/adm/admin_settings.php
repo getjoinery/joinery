@@ -1211,6 +1211,21 @@
 		'value' => $allowed_upload_extensions
 	]);
 
+	echo '<h3>Two-Factor Authentication</h3>';
+	$formwriter->dropinput('totp_require_admins', 'Require 2FA for admin accounts (permission 5+)', [
+		'options' => $yes_no_options,
+		'value' => $settings->get_setting('totp_require_admins'),
+		'helptext' => 'When enabled, admins without 2FA are redirected to /profile/security until they enroll.'
+	]);
+	$formwriter->textinput('totp_remember_device_days', 'Trust device for N days (0 = always require)', [
+		'value' => $settings->get_setting('totp_remember_device_days') ?: '0',
+		'helptext' => 'After a successful 2FA verification, set a trusted-device cookie that skips the TOTP step for this many days. 0 means always require TOTP.'
+	]);
+	$formwriter->textinput('totp_issuer_name', 'App name shown in authenticator', [
+		'value' => $settings->get_setting('totp_issuer_name'),
+		'helptext' => 'Optional. Displayed by the user\'s authenticator app (Google Authenticator, etc.). Falls back to the site name if blank.'
+	]);
+
 	echo '<h3>Cookie Consent</h3>';
 	$formwriter->dropinput('cookie_consent_mode', 'Cookie consent mode', [
 		'options' => [
