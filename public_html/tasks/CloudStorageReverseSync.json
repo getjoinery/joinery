@@ -1,0 +1,5 @@
+{
+    "name": "Cloud Storage Reverse Sync",
+    "description": "Pulls all bucket-stored files back to local disk and clears bucket objects. Activated only when an admin clicks 'Disable and Pull Files Back to Local'. Self-deactivates when no more cloud rows remain.",
+    "default_frequency": "every_run"
+}

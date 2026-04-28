@@ -8,7 +8,7 @@
  * Crontab (one line per site):
  * STAR/15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
  *
- * @version 1.1
+ * @version 1.2
  */
 
 // Reject non-CLI access
@@ -68,67 +68,102 @@ foreach ($tasks as $task) {
 
 	echo "[$timestamp] Running task: $task_name ($task_class)\n";
 
-	// Resolve the task class file
-	$task_file = $task->resolve_task_file();
-	if (!$task_file) {
-		echo "[$timestamp]   ERROR: Could not resolve class file for $task_class\n";
-		$task->set('sct_last_run_time', 'now()');
-		$task->set('sct_last_run_status', 'error');
-		$task->set('sct_last_run_message', 'Could not resolve class file');
-		$task->save();
-		$tasks_errored++;
+	// Acquire a per-task advisory lock so a long-running task can't be
+	// re-entered by the next cron tick. hashtext() is deterministic, so
+	// the same task name always maps to the same lock. The lock auto-
+	// releases when the connection closes, so a crashed PHP process
+	// self-recovers on the next tick.
+	$lock_acquired = false;
+	try {
+		$lock_q = $dblink->prepare("SELECT pg_try_advisory_lock(hashtext(:n)) AS got");
+		$lock_q->execute([':n' => $task_name]);
+		$lock_row = $lock_q->fetch(PDO::FETCH_ASSOC);
+		$lock_acquired = !empty($lock_row['got']);
+	} catch (PDOException $e) {
+		echo "[$timestamp]   WARNING: Could not acquire advisory lock: " . $e->getMessage() . "\n";
+	}
+	if (!$lock_acquired) {
+		echo "[$timestamp]   skipped: already running\n";
+		$tasks_skipped++;
 		continue;
 	}
 
-	// Load and instantiate the task
 	try {
-		require_once($task_file);
-
-		if (!class_exists($task_class)) {
-			throw new Exception("Class $task_class not found in $task_file");
+		// Resolve the task class file
+		$task_file = $task->resolve_task_file();
+		if (!$task_file) {
+			echo "[$timestamp]   ERROR: Could not resolve class file for $task_class\n";
+			$task->set('sct_last_run_time', 'now()');
+			$task->set('sct_last_run_status', 'error');
+			$task->set('sct_last_run_message', 'Could not resolve class file');
+			$task->save();
+			$tasks_errored++;
+			continue;
 		}
 
-		$task_instance = new $task_class();
+		// Load and instantiate the task
+		try {
+			require_once($task_file);
 
-		if (!($task_instance instanceof ScheduledTaskInterface)) {
-			throw new Exception("Class $task_class does not implement ScheduledTaskInterface");
-		}
+			if (!class_exists($task_class)) {
+				throw new Exception("Class $task_class not found in $task_file");
+			}
 
-		// Run the task with its config
-		$config = $task->get_task_config();
-		$result = $task_instance->run($config);
+			$task_instance = new $task_class();
 
-		// Parse result (supports string or array with status+message)
-		if (is_array($result)) {
-			$status = $result['status'] ?? 'error';
-			$message = $result['message'] ?? null;
-		} else {
-			$status = $result;
-			$message = null;
-		}
+			if (!($task_instance instanceof ScheduledTaskInterface)) {
+				throw new Exception("Class $task_class does not implement ScheduledTaskInterface");
+			}
 
-		// Update task record
-		$task->set('sct_last_run_time', 'now()');
-		$task->set('sct_last_run_status', $status);
-		$task->set('sct_last_run_message', $message);
-		$task->save();
+			// Run the task with its config
+			$config = $task->get_task_config();
+			$result = $task_instance->run($config);
 
-		echo "[$timestamp]   Result: $status" . ($message ? " — $message" : "") . "\n";
+			// Parse result (supports string or array with status+message,
+			// plus an optional 'deactivate' flag for self-deactivating tasks)
+			$deactivate = false;
+			if (is_array($result)) {
+				$status = $result['status'] ?? 'error';
+				$message = $result['message'] ?? null;
+				$deactivate = !empty($result['deactivate']);
+			} else {
+				$status = $result;
+				$message = null;
+			}
 
-		if ($status === 'success') {
-			$tasks_run++;
-		} elseif ($status === 'skipped') {
-			$tasks_skipped++;
-		} else {
+			// Update task record
+			$task->set('sct_last_run_time', 'now()');
+			$task->set('sct_last_run_status', $status);
+			$task->set('sct_last_run_message', $message);
+			if ($deactivate) {
+				$task->set('sct_is_active', false);
+			}
+			$task->save();
+
+			echo "[$timestamp]   Result: $status" . ($message ? " — $message" : "") . "\n";
+
+			if ($status === 'success') {
+				$tasks_run++;
+			} elseif ($status === 'skipped') {
+				$tasks_skipped++;
+			} else {
+				$tasks_errored++;
+			}
+		} catch (Exception $e) {
+			echo "[$timestamp]   EXCEPTION: " . $e->getMessage() . "\n";
+			$task->set('sct_last_run_time', 'now()');
+			$task->set('sct_last_run_status', 'error');
+			$task->set('sct_last_run_message', substr($e->getMessage(), 0, 500));
+			$task->save();
 			$tasks_errored++;
 		}
-	} catch (Exception $e) {
-		echo "[$timestamp]   EXCEPTION: " . $e->getMessage() . "\n";
-		$task->set('sct_last_run_time', 'now()');
-		$task->set('sct_last_run_status', 'error');
-		$task->set('sct_last_run_message', substr($e->getMessage(), 0, 500));
-		$task->save();
-		$tasks_errored++;
+	} finally {
+		try {
+			$unlock_q = $dblink->prepare("SELECT pg_advisory_unlock(hashtext(:n))");
+			$unlock_q->execute([':n' => $task_name]);
+		} catch (PDOException $e) {
+			// Lock auto-releases on connection close; non-fatal.
+		}
 	}
 }
 

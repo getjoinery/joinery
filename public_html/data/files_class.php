@@ -49,15 +49,20 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_grp_group_id' => array('type'=>'int4'),
 	    'fil_evt_event_id' => array('type'=>'int4'),
 	    'fil_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
+	    'fil_storage_driver' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>"'local'"),
+	    'fil_sync_failed_count' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0'),
+	    'fil_sync_last_attempt' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
-public static function get_by_name($name) {
+public static function get_by_name($name, $search_deleted = false) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-		//SET ALL DEFAULT FOR THIS USER TO ZERO
-		$sql = "SELECT fil_file_id FROM fil_files
-			WHERE fil_name = :fil_name";
+		$sql = "SELECT fil_file_id FROM fil_files WHERE fil_name = :fil_name";
+		if (!$search_deleted) {
+			$sql .= " AND fil_delete_time IS NULL";
+		}
+		$sql .= " ORDER BY fil_file_id DESC LIMIT 1";
 
 		try{
 			$q = $dblink->prepare($sql);
@@ -69,15 +74,13 @@ public static function get_by_name($name) {
 			$dbhelper->handle_query_error($e);
 		}
 
-		if (!$q->rowCount()) {
-			//throw new AddressException('This user doesn\'t have a default address.');
+		$r = $q->fetch();
+		if (!$r) {
 			return FALSE;
 		}
 
-		$r = $q->fetch();
-
 		return new File($r->fil_file_id, TRUE);
-	}	
+	}
 	
 	function get_name() {
 		if($this->get('fil_title')){
@@ -119,17 +122,40 @@ public static function get_by_name($name) {
 		if ($this->get('fil_min_permission')) return false;
 		if ($this->get('fil_grp_group_id')) return false;
 		if ($this->get('fil_evt_event_id')) return false;
+		if ($this->get('fil_tier_min_level')) return false;
 		return true;
+	}
+
+	/**
+	 * Bucket object key (without the driver-applied path prefix) for a given
+	 * size variant of this file. 'original' → "<filename>"; otherwise
+	 * "<size>/<filename>".
+	 */
+	function remote_key_for($size_key = 'original') {
+		$filename = $this->get('fil_name');
+		if ($size_key === 'original') {
+			return $filename;
+		}
+		return $size_key . '/' . $filename;
 	}
 
 	/**
 	 * Get the actual filesystem path for this file, checking both directories.
 	 * Checks fast-serve directory first since most files are public.
 	 *
+	 * Defensive instrumentation: emits a warning if called on a 'cloud' row,
+	 * so any caller we missed during the cloud-storage rollout is surfaced
+	 * without breaking them. Callers that are cloud-aware dispatch on
+	 * fil_storage_driver before calling this method.
+	 *
 	 * @param string $size_key Size key from ImageSizeRegistry, or 'original'
 	 * @return string Filesystem path (may not exist if file is missing from disk)
 	 */
 	function get_filesystem_path($size_key = 'original') {
+		if ($this->get('fil_storage_driver') === 'cloud') {
+			error_log('CLOUD_STORAGE_UNEXPECTED_LOCAL_PATH_QUERY: fil=' . $this->key . ' size=' . $size_key);
+		}
+
 		$settings = Globalvars::get_instance();
 		$filename = $this->get('fil_name');
 
@@ -165,6 +191,17 @@ public static function get_by_name($name) {
 	 * @throws FileException on duplicate filenames or move failures
 	 */
 	function move_to_correct_directory() {
+		// Cloud-stored row that just became private: must pull bytes back
+		// to the restricted local dir so authenticate_read() can gate them.
+		// (The bucket is public-readable, so leaving private bytes there
+		// would expose them.) Three-phase rollback per spec §6.
+		if ($this->get('fil_storage_driver') === 'cloud') {
+			if (!$this->is_public()) {
+				$this->_pull_back_from_cloud_to_private();
+			}
+			return;
+		}
+
 		$settings = Globalvars::get_instance();
 		$filename = $this->get('fil_name');
 
@@ -294,6 +331,20 @@ public static function get_by_name($name) {
 	 */
 	function get_url($size_key='original', $format='short') {
 
+		// Cloud-stored files: bucket URL goes directly to the browser, no PHP
+		// in the loop. Stable and cacheable. Note: $format=='short' is treated
+		// as 'full' here because the bucket lives on a different domain.
+		if ($this->get('fil_storage_driver') === 'cloud') {
+			require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+			$driver = CloudStorageDriverFactory::default();
+			if ($driver) {
+				return $driver->url($this->remote_key_for($size_key));
+			}
+			// Falls through to the local URL pattern if cloud is unconfigured.
+			// /uploads/* will then 302-redirect once cloud is reconfigured —
+			// or 404 if the bucket bytes are gone.
+		}
+
 		$settings = Globalvars::get_instance();
 		$upload_web_dir = $settings->get_setting('upload_web_dir');
 
@@ -313,15 +364,18 @@ public static function get_by_name($name) {
 		} else {
 			return $file_path;
 		}
-	}	
+	}
 
 	function permanent_delete($debug=false){
-		$file_path = $this->get_filesystem_path('original');
-		if (file_exists($file_path)) {
-			@unlink($file_path);
+		if ($this->get('fil_storage_driver') === 'cloud') {
+			$this->_permanent_delete_cloud();
+		} else {
+			$file_path = $this->get_filesystem_path('original');
+			if (file_exists($file_path)) {
+				@unlink($file_path);
+			}
+			$this->delete_resized();
 		}
-
-		$this->delete_resized();
 
 		// Clean up all entity_photos rows referencing this file
 		$dbconnector = DbConnector::get_instance();
@@ -338,7 +392,49 @@ public static function get_by_name($name) {
 		parent::permanent_delete($debug);
 		return true;
 	}
-	
+
+	/**
+	 * Delete original + every variant from the bucket. Best-effort: failures
+	 * are logged with CLOUD_STORAGE_ORPHAN so the admin can clean up manually,
+	 * then the row is deleted anyway. The orphan consumes a few KB-MB until
+	 * cleared with `aws s3 rm` or equivalent.
+	 */
+	private function _permanent_delete_cloud() {
+		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+		$driver = CloudStorageDriverFactory::default();
+		if (!$driver) {
+			error_log('CLOUD_STORAGE_ORPHAN: bucket=unknown keys=' . $this->remote_key_for('original') . ' (driver unconfigured)');
+			return;
+		}
+
+		$keys = [$this->remote_key_for('original')];
+		if ($this->is_image()) {
+			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
+				$keys[] = $this->remote_key_for($size_key);
+			}
+		}
+
+		$failed_keys = [];
+		foreach ($keys as $k) {
+			try {
+				$driver->delete($k);
+			} catch (Exception $e) {
+				// One brief retry — bucket DELETEs are rare and almost always succeed.
+				try {
+					usleep(500000);
+					$driver->delete($k);
+				} catch (Exception $e2) {
+					$failed_keys[] = $k;
+				}
+			}
+		}
+		if (!empty($failed_keys)) {
+			$bucket = Globalvars::get_instance()->get_setting('cloud_storage_bucket') ?: 'unknown';
+			error_log('CLOUD_STORAGE_ORPHAN: bucket=' . $bucket . ' keys=' . implode(',', $failed_keys));
+		}
+	}
+
 	/**
 	 * Delete resized versions of this image
 	 *
@@ -351,6 +447,25 @@ public static function get_by_name($name) {
 
 		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
 		$sizes = ImageSizeRegistry::get_sizes();
+
+		if ($this->get('fil_storage_driver') === 'cloud') {
+			require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+			$driver = CloudStorageDriverFactory::default();
+			if (!$driver) {
+				return false;
+			}
+			foreach ($sizes as $key => $config) {
+				if ($size_key !== 'all' && $size_key !== $key) {
+					continue;
+				}
+				try {
+					$driver->delete($this->remote_key_for($key));
+				} catch (Exception $e) {
+					error_log('delete_resized cloud: ' . $e->getMessage());
+				}
+			}
+			return;
+		}
 
 		foreach ($sizes as $key => $config) {
 			if ($size_key !== 'all' && $size_key !== $key) {
@@ -373,6 +488,14 @@ public static function get_by_name($name) {
 			return false;
 		}
 
+		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+		$sizes = ImageSizeRegistry::get_sizes();
+
+		if ($this->get('fil_storage_driver') === 'cloud') {
+			$this->_resize_cloud($size_key, $sizes);
+			return;
+		}
+
 		$old_path = $this->get_filesystem_path('original');
 		if (!file_exists($old_path)) {
 			return false;
@@ -380,9 +503,6 @@ public static function get_by_name($name) {
 
 		// Derive the base directory from where the original actually lives
 		$upload_dir = dirname($old_path);
-
-		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
-		$sizes = ImageSizeRegistry::get_sizes();
 
 		// Ensure all resize subdirectories exist
 		foreach ($sizes as $key => $config) {
@@ -405,6 +525,60 @@ public static function get_by_name($name) {
 			}
 			$new_path = $upload_dir . '/' . $key . '/' . $this->get('fil_name');
 			$this->generate_resized($old_path, $new_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
+		}
+	}
+
+	/**
+	 * Re-resize for a cloud-stored file: pull original to temp, generate
+	 * variants in temp dir, push each variant back to bucket, drop temp dir.
+	 * Used when ImageSizeRegistry gains a new size and existing files need
+	 * a new variant (§7).
+	 */
+	private function _resize_cloud($size_key, $sizes) {
+		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+		$driver = CloudStorageDriverFactory::default();
+		if (!$driver) {
+			throw new FileException('Cannot re-resize cloud file: cloud storage driver not configured.');
+		}
+
+		$filename = $this->get('fil_name');
+		$tmp_dir = sys_get_temp_dir() . '/cloud_resize_' . $this->key . '_' . uniqid();
+		if (!mkdir($tmp_dir, 0777, true)) {
+			throw new FileException('Failed to create temp dir for cloud resize: ' . $tmp_dir);
+		}
+
+		$cleanup = function() use ($tmp_dir) {
+			if (!is_dir($tmp_dir)) return;
+			$files = glob($tmp_dir . '/{,*/}{,.}*', GLOB_BRACE);
+			foreach ($files as $f) {
+				if (is_file($f)) @unlink($f);
+			}
+			foreach (glob($tmp_dir . '/*', GLOB_ONLYDIR) as $d) @rmdir($d);
+			@rmdir($tmp_dir);
+		};
+
+		try {
+			$tmp_original = $tmp_dir . '/' . $filename;
+			$driver->get($this->remote_key_for('original'), $tmp_original);
+
+			$content_type = $this->get('fil_type') ?: 'image/jpeg';
+
+			foreach ($sizes as $key => $config) {
+				if ($size_key !== 'all' && $size_key !== $key) {
+					continue;
+				}
+				$variant_dir = $tmp_dir . '/' . $key;
+				if (!is_dir($variant_dir)) {
+					mkdir($variant_dir, 0777, true);
+				}
+				$variant_path = $variant_dir . '/' . $filename;
+				$this->generate_resized($tmp_original, $variant_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
+				if (file_exists($variant_path)) {
+					$driver->put($variant_path, $this->remote_key_for($key), $content_type);
+				}
+			}
+		} finally {
+			$cleanup();
 		}
 	}
 
@@ -491,7 +665,160 @@ public static function get_by_name($name) {
 		}
 		
 		return $event_sessions;
-	}		
+	}
+
+	/**
+	 * Pull bucket bytes back to the restricted local directory and flip the
+	 * row to fil_storage_driver='local'. Called from move_to_correct_directory()
+	 * when a cloud-stored row's permissions tighten so it's no longer public.
+	 *
+	 * Three explicit phases with strict ordering (spec §6):
+	 *
+	 *   Phase 1: pull every key (original + variants) to a temp dir. Failure
+	 *            → drop temps, leave bucket+DB unchanged, throw.
+	 *   Phase 2: delete keys from bucket (with brief retries). Any delete
+	 *            failure after retries → re-PUT successfully-deleted keys
+	 *            from temps (best-effort), drop temps, throw.
+	 *   Phase 3: copy temps to restricted dir, then BEGIN/UPDATE/COMMIT.
+	 *            Failure here → re-PUT all temps to bucket so the row's
+	 *            'cloud' flag stays truthful, log CLOUD_STORAGE_PARTIAL_FLIP.
+	 *
+	 * Invariants: bucket is authoritative until DB commit; temps live until
+	 * DB commit so they remain rollback material.
+	 */
+	private function _pull_back_from_cloud_to_private() {
+		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+		$driver = CloudStorageDriverFactory::default();
+		if (!$driver) {
+			throw new FileException('Cannot pull file back from cloud: driver not configured.');
+		}
+
+		$filename = $this->get('fil_name');
+		$settings = Globalvars::get_instance();
+		$restricted_dir = $settings->get_setting('upload_dir');
+
+		// Build the list of keys to pull (original + variants for images).
+		$keys = ['original'];
+		if ($this->is_image()) {
+			require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+			foreach (ImageSizeRegistry::get_sizes() as $size_key => $cfg) {
+				$keys[] = $size_key;
+			}
+		}
+
+		$tmp_dir = sys_get_temp_dir() . '/cloud_pullback_' . $this->key . '_' . uniqid();
+		if (!mkdir($tmp_dir, 0777, true)) {
+			throw new FileException('Failed to create temp dir for pull-back: ' . $tmp_dir);
+		}
+		$temp_paths = []; // size_key => temp filesystem path
+
+		$drop_temps = function() use (&$temp_paths, $tmp_dir) {
+			foreach ($temp_paths as $p) {
+				if (is_file($p)) @unlink($p);
+			}
+			foreach (glob($tmp_dir . '/*', GLOB_ONLYDIR) as $d) @rmdir($d);
+			@rmdir($tmp_dir);
+		};
+
+		// PHASE 1 — pull every key to temp.
+		try {
+			foreach ($keys as $size_key) {
+				$tmp_path = ($size_key === 'original')
+					? $tmp_dir . '/' . $filename
+					: $tmp_dir . '/' . $size_key . '/' . $filename;
+				$driver->get($this->remote_key_for($size_key), $tmp_path);
+				$temp_paths[$size_key] = $tmp_path;
+			}
+		} catch (Exception $e) {
+			$drop_temps();
+			throw new FileException('Phase 1 (pull from bucket) failed: ' . $e->getMessage(), 0, $e);
+		}
+
+		// PHASE 2 — delete from bucket with brief retries.
+		$deleted_keys = [];
+		$retry_delays = [0, 1, 2]; // ~3s window
+		foreach ($keys as $size_key) {
+			$delete_ok = false;
+			$last_err = null;
+			foreach ($retry_delays as $delay) {
+				if ($delay) sleep($delay);
+				try {
+					$driver->delete($this->remote_key_for($size_key));
+					$delete_ok = true;
+					break;
+				} catch (Exception $e) {
+					$last_err = $e;
+				}
+			}
+			if (!$delete_ok) {
+				// Roll back: re-PUT successfully-deleted keys from temps. Best-effort.
+				foreach ($deleted_keys as $rb_size) {
+					try {
+						$driver->put($temp_paths[$rb_size], $this->remote_key_for($rb_size), $this->get('fil_type') ?: 'application/octet-stream');
+					} catch (Exception $rb_err) {
+						// Swallow — original failure already indicates broader trouble.
+					}
+				}
+				$drop_temps();
+				throw new FileException('Phase 2 (bucket delete) failed for ' . $size_key . ': ' . ($last_err ? $last_err->getMessage() : 'unknown'), 0, $last_err);
+			}
+			$deleted_keys[] = $size_key;
+		}
+
+		// PHASE 3 — copy temps to restricted dir, then commit DB row.
+		$copied_paths = []; // restricted-dir paths actually written
+		try {
+			if (!is_dir($restricted_dir)) {
+				mkdir($restricted_dir, 0777, true);
+			}
+			foreach ($keys as $size_key) {
+				$dest = ($size_key === 'original')
+					? $restricted_dir . '/' . $filename
+					: $restricted_dir . '/' . $size_key . '/' . $filename;
+				$dest_parent = dirname($dest);
+				if (!is_dir($dest_parent)) {
+					mkdir($dest_parent, 0777, true);
+				}
+				if (!copy($temp_paths[$size_key], $dest)) {
+					throw new FileException('Phase 3 (local copy) failed for ' . $size_key);
+				}
+				$copied_paths[] = $dest;
+			}
+
+			$dbconnector = DbConnector::get_instance();
+			$dblink = $dbconnector->get_db_link();
+			$dblink->beginTransaction();
+			try {
+				$q = $dblink->prepare("UPDATE fil_files SET fil_storage_driver = 'local' WHERE fil_file_id = ?");
+				$q->execute([$this->key]);
+				$dblink->commit();
+			} catch (PDOException $e) {
+				$dblink->rollBack();
+				throw new FileException('Phase 3 (DB commit) failed: ' . $e->getMessage(), 0, $e);
+			}
+
+			// Refresh in-memory state to match committed DB.
+			$this->set('fil_storage_driver', 'local', false);
+		} catch (Exception $e) {
+			// Worst case: bucket empty, DB still 'cloud'. Best-effort: clean up
+			// any partial restricted-dir writes, then re-PUT all temps to bucket
+			// so the row's 'cloud' flag stays truthful.
+			foreach ($copied_paths as $p) @unlink($p);
+			foreach ($keys as $size_key) {
+				try {
+					$driver->put($temp_paths[$size_key], $this->remote_key_for($size_key), $this->get('fil_type') ?: 'application/octet-stream');
+				} catch (Exception $reput) {
+					// If re-PUT fails too, the row is genuinely broken (DB says
+					// 'cloud', bucket empty). Logged below; manual recovery required.
+				}
+			}
+			$drop_temps();
+			error_log('CLOUD_STORAGE_PARTIAL_FLIP: fil=' . $this->key . ' name=' . $filename . ' err=' . $e->getMessage());
+			throw $e;
+		}
+
+		$drop_temps();
+	}
 
 	function authenticate_write($data) {
 		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {

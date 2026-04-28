@@ -1,0 +1,5 @@
+{
+    "name": "Cloud Storage Sync",
+    "description": "Pushes public local files to the configured cloud bucket and finalizes migration status per row. Also serves as the one-time forward migration when cloud storage is first enabled.",
+    "default_frequency": "every_run"
+}

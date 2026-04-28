@@ -375,6 +375,27 @@ $routes = [
             // params[0] is empty, params[1] is "uploads", params[2+] is the subpath
             $subpath_parts = array_slice($params, 2);
             $subpath = implode('/', $subpath_parts);
+            $basename = basename($subpath);
+
+            require_once(PathHelper::getIncludePath('data/files_class.php'));
+
+            // Cloud-stored files: bytes live in the bucket. Honor pre-migration
+            // /uploads/<filename> URLs by 302-redirecting to the bucket URL.
+            // Browser caches the redirect for 24h, so subsequent hits skip PHP.
+            $file_obj = File::get_by_name($basename);
+            if ($file_obj && $file_obj->get('fil_storage_driver') === 'cloud') {
+                require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
+                $driver = CloudStorageDriverFactory::default();
+                if ($driver) {
+                    // Determine size_key from the URL path: '/uploads/<size>/<file>' or '/uploads/<file>'.
+                    $size_key = (count($subpath_parts) > 1) ? $subpath_parts[0] : 'original';
+                    $url = $driver->url($file_obj->remote_key_for($size_key));
+                    header('Cache-Control: public, max-age=86400');
+                    header('Location: ' . $url, true, 302);
+                    return true;
+                }
+                // Fall through to local check if driver isn't available.
+            }
 
             // Check both directories for the file
             $file = null;
@@ -385,8 +406,9 @@ $routes = [
             }
 
             if($file){
-                require_once(PathHelper::getIncludePath('data/files_class.php'));
-                $file_obj = File::get_by_name(basename($file));
+                if(!$file_obj){
+                    $file_obj = File::get_by_name($basename);
+                }
 
                 if($file_obj && $file_obj->authenticate_read(array('session'=>$session))){
                     RouteHelper::serveStaticFile($file, 43200);
