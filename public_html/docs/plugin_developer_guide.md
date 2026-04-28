@@ -485,6 +485,8 @@ Discovery → Install → Activate ↔ Deactivate → Uninstall
 
 **Developer workflow for schema changes** — If you add columns to `$field_specifications` on an already-installed plugin: modify the class, then run **Sync with Filesystem** from the admin Plugins page (`/admin/admin_plugins?action=sync_filesystem`). Sync calls `runPluginTablesOnly()` for all active plugins, which picks up new columns and creates new tables. Schema changes are also applied automatically during deploys (`upgrade.php`) and when running `update_database` from admin utilities.
 
+**Schema changes on inactive plugins are deferred.** Sync and `update_database` only touch tables for active plugins. If you modify `$field_specifications` on a plugin that is installed but not active, the schema change will not be applied until the plugin is next activated (`PluginManager::activate()` calls `runPluginTablesOnly()` as its first step).
+
 **Sync** (`PluginManager::sync()`)
 1. Scans filesystem — discovers new plugins, updates metadata from manifests, detects missing directories
 2. Updates database tables for **all active plugins** via `DatabaseUpdater::runPluginTablesOnly()`
