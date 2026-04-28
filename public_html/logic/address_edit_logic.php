@@ -80,6 +80,7 @@ function address_edit_logic($get_vars, $post_vars){
 		'Edit Address' => '/profile/address_edit',
 		'Edit Phone Number' => '/profile/phone_numbers_edit',
 		'Change Contact Preferences' => '/profile/contact_preferences',
+		'Security' => '/profile/security',
 	);
 
 	return LogicResult::render($page_vars);

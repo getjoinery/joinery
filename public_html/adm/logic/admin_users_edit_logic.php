@@ -37,6 +37,23 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 	// Process POST actions
 	if ($post_vars) {
 
+		// Admin 2FA reset — clears the user's TOTP state so they can re-enroll.
+		// Logged via ChangeTracking so the action is auditable.
+		if (isset($post_vars['action']) && $post_vars['action'] === 'reset_2fa') {
+			require_once(PathHelper::getIncludePath('data/change_tracking_class.php'));
+			$previous_enabled_time = $user->get('usr_totp_enabled_time');
+			$user->disable_totp();
+			ChangeTracking::logChange(
+				'user', $user->key, $user->key,
+				'usr_totp_enabled_time',
+				$previous_enabled_time, null,
+				'admin_2fa_reset',
+				'user', $session->get_user_id(),
+				$session->get_user_id()
+			);
+			return LogicResult::redirect('/admin/admin_users_edit?usr_user_id=' . $user->key);
+		}
+
 		$user->set('usr_calendly_uri', trim($post_vars['usr_calendly_uri']));
 		$user->set('usr_first_name', trim($post_vars['usr_first_name']));
 		$user->set('usr_last_name', trim($post_vars['usr_last_name']));

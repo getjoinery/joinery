@@ -142,6 +142,21 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
+		// 2FA check: if user has TOTP enabled and no valid trusted-device cookie,
+		// stash a pending state and redirect to /verify-totp instead of completing login
+		if ($user->has_totp_enabled() && !$session->has_valid_trusted_device_cookie($user)) {
+			session_regenerate_id(true);
+			$_SESSION['totp_pending_user_id']  = $user->key;
+			$_SESSION['totp_pending_remember'] = !empty($post_vars['setcookie']) || !empty($post_vars['lbx_setcookie']);
+			$_SESSION['totp_pending_return']   = $session->get_return();
+			$_SESSION['totp_pending_expires']  = time() + 600;
+
+			if ($ajax) {
+				return LogicResult::redirect('/verify-totp');
+			}
+			return LogicResult::redirect('/verify-totp');
+		}
+
 		// Log successful login
 		RequestLogger::log('login', 'login_attempt', true, [
 			'user_id' => $user->key,
