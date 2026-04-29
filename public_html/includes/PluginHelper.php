@@ -112,6 +112,7 @@ class PluginHelper extends ComponentBase {
         // Validate admin menu items if present
         $menuItems = $this->getAdminMenuItems();
         $seen_slugs = [];
+        $plugin_slug_prefix = $this->name . '-';
         foreach ($menuItems as $index => $item) {
             $prefix = "adminMenu[{$index}]";
 
@@ -121,6 +122,8 @@ class PluginHelper extends ComponentBase {
                 $errors[] = "{$prefix}: slug must contain only lowercase letters, numbers, and hyphens";
             } elseif (strlen($item['slug']) > 32) {
                 $errors[] = "{$prefix}: slug exceeds 32 characters";
+            } elseif (strpos($item['slug'], 'core-') === 0) {
+                $errors[] = "{$prefix}: slug must not start with 'core-' (reserved for core menu items)";
             } elseif (in_array($item['slug'], $seen_slugs)) {
                 $errors[] = "{$prefix}: duplicate slug '{$item['slug']}'";
             } else {
@@ -158,6 +161,8 @@ class PluginHelper extends ComponentBase {
                         $errors[] = "{$childPrefix}: missing required field 'slug'";
                     } elseif (!preg_match('/^[a-z0-9][a-z0-9-]*$/', $child['slug'])) {
                         $errors[] = "{$childPrefix}: slug must contain only lowercase letters, numbers, and hyphens";
+                    } elseif (strpos($child['slug'], 'core-') === 0) {
+                        $errors[] = "{$childPrefix}: slug must not start with 'core-' (reserved for core menu items)";
                     } elseif (in_array($child['slug'], $seen_slugs)) {
                         $errors[] = "{$childPrefix}: duplicate slug '{$child['slug']}'";
                     } else {
@@ -176,6 +181,56 @@ class PluginHelper extends ComponentBase {
                         $errors[] = "{$childPrefix}: url must not contain .php extension";
                     }
                 }
+            }
+        }
+
+        // Validate profile menu items if present
+        $profileItems = $this->getProfileMenuItems();
+        foreach ($profileItems as $index => $item) {
+            $prefix = "profileMenu[{$index}]";
+
+            if (empty($item['slug']) || !is_string($item['slug'])) {
+                $errors[] = "{$prefix}: missing required field 'slug'";
+            } elseif (!preg_match('/^[a-z0-9][a-z0-9-]*$/', $item['slug'])) {
+                $errors[] = "{$prefix}: slug must contain only lowercase letters, numbers, and hyphens";
+            } elseif (strlen($item['slug']) > 32) {
+                $errors[] = "{$prefix}: slug exceeds 32 characters";
+            } elseif (strpos($item['slug'], 'core-') === 0) {
+                $errors[] = "{$prefix}: slug must not start with 'core-' (reserved for core menu items)";
+            } elseif (strpos($item['slug'], $plugin_slug_prefix) !== 0) {
+                $errors[] = "{$prefix}: slug must start with '{$plugin_slug_prefix}' (the plugin's directory name)";
+            } elseif (in_array($item['slug'], $seen_slugs)) {
+                $errors[] = "{$prefix}: duplicate slug '{$item['slug']}'";
+            } else {
+                $seen_slugs[] = $item['slug'];
+            }
+
+            if (empty($item['title']) || !is_string($item['title'])) {
+                $errors[] = "{$prefix}: missing required field 'title'";
+            } elseif (strlen($item['title']) > 32) {
+                $errors[] = "{$prefix}: title exceeds 32 characters";
+            }
+
+            if (!isset($item['order']) || !is_int($item['order'])) {
+                $errors[] = "{$prefix}: missing or non-integer 'order'";
+            }
+
+            if (empty($item['url']) || !is_string($item['url'])) {
+                $errors[] = "{$prefix}: missing required field 'url'";
+            } elseif (preg_match('/\.php/', $item['url'])) {
+                $errors[] = "{$prefix}: url must not contain .php extension";
+            }
+
+            if (isset($item['permission']) && (!is_int($item['permission']) || $item['permission'] < 0 || $item['permission'] > 10)) {
+                $errors[] = "{$prefix}: permission must be an integer 0-10";
+            }
+
+            if (isset($item['visibility']) && !in_array($item['visibility'], ['in', 'out', 'both'], true)) {
+                $errors[] = "{$prefix}: visibility must be 'in', 'out', or 'both'";
+            }
+
+            if (isset($item['parent']) || isset($item['items'])) {
+                $errors[] = "{$prefix}: profile menu items must be flat — 'parent' and 'items' are not supported";
             }
         }
         
@@ -266,6 +321,14 @@ class PluginHelper extends ComponentBase {
      */
     public function getAdminMenuItems() {
         return $this->manifestData['adminMenu'] ?? [];
+    }
+
+    /**
+     * Get plugin profile (user dropdown) menu items declared in plugin.json
+     * @return array The profileMenu array from the manifest
+     */
+    public function getProfileMenuItems() {
+        return $this->manifestData['profileMenu'] ?? [];
     }
 
     /**

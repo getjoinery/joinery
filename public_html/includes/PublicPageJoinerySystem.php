@@ -469,7 +469,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
           <div class="dropdown-menu" style="min-width:16rem;right:0;left:auto;">
             <div style="display:grid;grid-template-columns:repeat(3,1fr);padding:0.5rem;gap:0.125rem;">
               <?php foreach ($user_menu['items'] as $item):
-                if (!in_array($item['label'], ['Home', 'My Profile', 'Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) continue;
+                if (!self::isAdminLauncherItem($item)) continue;
                 $icon = $this->get_admin_icon_svg($item['icon']);
                 ?>
                 <a href="<?php echo htmlspecialchars($item['link']); ?>"
@@ -508,7 +508,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
           </button>
           <div class="dropdown-menu" style="right:0;left:auto;">
             <?php foreach ($user_menu['items'] as $item):
-              if (in_array($item['label'], ['Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) continue;
+              if (self::isAdminMenuItem($item)) continue;
               echo '<a class="dropdown-item" href="' . htmlspecialchars($item['link']) . '">' . htmlspecialchars($item['label']) . '</a>';
             endforeach; ?>
           </div>

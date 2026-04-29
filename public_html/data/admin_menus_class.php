@@ -45,7 +45,12 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	    'amu_disable' => array('type'=>'int2', 'default'=>0),
 	    'amu_icon' => array('type'=>'varchar(16)'),
 	    'amu_setting_activate' => array('type'=>'varchar(64)'),
+	    'amu_location' => array('type'=>'varchar(32)', 'default'=>'admin_sidebar', 'is_nullable'=>false),
+	    'amu_visibility' => array('type'=>'varchar(8)', 'default'=>'in', 'is_nullable'=>false),
 	);
+
+	const LOCATIONS = array('admin_sidebar', 'user_dropdown');
+	const VISIBILITIES = array('in', 'out', 'both');
 
 function authenticate_write($data) {
 		// If the user's ID doesn't match, we have to make
@@ -74,25 +79,26 @@ class MultiAdminMenu extends SystemMultiBase {
 
 	}
 	
-	static function getadminmenu($user_permission, $current_menu_slug, $get_all=false){
+	static function getadminmenu($user_permission, $current_menu_slug, $get_all=false, $location='admin_sidebar'){
 		require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 		$settings = Globalvars::get_instance();
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-		
+
 		//TOP MENU
 		if($get_all){
-			$sql = "SELECT * FROM amu_admin_menus WHERE true ORDER BY amu_admin_menus.amu_order ASC";
+			$sql = "SELECT * FROM amu_admin_menus WHERE amu_location = :location ORDER BY amu_admin_menus.amu_order ASC";
 		}
 		else{
-			$sql = "SELECT * FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 ORDER BY amu_admin_menus.amu_order ASC";
+			$sql = "SELECT * FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 AND amu_location = :location ORDER BY amu_admin_menus.amu_order ASC";
 		}
-		
+
 		try{
 			$q = $dblink->prepare($sql);
 			if(!$get_all){
 				$q->bindParam(':currpermission', $user_permission, PDO::PARAM_INT);
 			}
+			$q->bindParam(':location', $location, PDO::PARAM_STR);
 			$count = $q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
 		}
@@ -143,6 +149,58 @@ class MultiAdminMenu extends SystemMultiBase {
 		}
 
 		return $finalmenu;
+	}
+
+	/**
+	 * Get user dropdown menu items filtered by login state, permission, setting, and disable.
+	 * Returns AdminMenu objects ordered by amu_order ASC, amu_slug ASC.
+	 *
+	 * @param bool $is_logged_in Whether the current session is authenticated
+	 * @param int $user_permission Effective permission level (0 when logged out)
+	 * @return AdminMenu[] Array of loaded AdminMenu objects
+	 */
+	static function get_user_dropdown_items($is_logged_in, $user_permission) {
+		$settings = Globalvars::get_instance();
+		$dbhelper = DbConnector::get_instance();
+		$dblink = $dbhelper->get_db_link();
+
+		// Visibility filter: logged-in sees in/both, logged-out sees out/both
+		$allowed_visibilities = $is_logged_in ? array('in', 'both') : array('out', 'both');
+		$placeholders = implode(',', array_fill(0, count($allowed_visibilities), '?'));
+
+		// Permission gate only applies when logged in
+		$permission_value = $is_logged_in ? (int)$user_permission : 0;
+
+		$sql = "SELECT * FROM amu_admin_menus
+				WHERE amu_location = ?
+				AND amu_disable = 0
+				AND amu_visibility IN ({$placeholders})
+				AND amu_min_permission <= ?
+				ORDER BY amu_order ASC, amu_slug ASC";
+
+		$params = array_merge(['user_dropdown'], $allowed_visibilities, [$permission_value]);
+
+		$q = $dblink->prepare($sql);
+		$q->execute($params);
+		$rows = $q->fetchAll(PDO::FETCH_OBJ);
+
+		$results = array();
+		foreach ($rows as $row) {
+			// Honor setting_activate gate
+			if (!empty($row->amu_setting_activate)) {
+				if (!$settings->get_setting($row->amu_setting_activate, true, true)) {
+					continue;
+				}
+			}
+			$obj = new AdminMenu($row->amu_admin_menu_id);
+			// Hydrate from row data we already have to avoid an extra query per item
+			foreach ((array)$row as $col => $val) {
+				$obj->set($col, $val, false);
+			}
+			$results[] = $obj;
+		}
+
+		return $results;
 	}
 
 	protected function getMultiResults($only_count = false, $debug = false) {
