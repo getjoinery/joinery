@@ -479,6 +479,8 @@ Profile menu items appear in the user dropdown. They are flat — no parent/item
 
 ### Plugin Settings (Declarative)
 
+> ⚠️ **Settings are a two-step setup.** Declaring in `plugin.json` only seeds the row in `stg_settings` — it does **not** make the setting appear in the admin UI. To expose a setting on `/admin/admin_settings`, you must also create a `settings_form.php` file in your plugin directory (see [Plugin Settings Form](#plugin-settings-form) below). Setting names in the two files must match exactly.
+
 Plugin default settings are declared in `plugin.json` under an optional `settings` key. On activate and on every sync, PluginManager seeds any declared row that doesn't already exist in `stg_settings`. Existing values are never overwritten.
 
 ```json
@@ -510,7 +512,7 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 
 **Orphan rows:** Settings dropped from the manifest in a later version are **not** automatically deleted. Use an SQL migration if you need the row gone. Orphan setting rows are otherwise harmless — nothing reads them.
 
-**Blank defaults:** `default: ""` creates a row with an empty value. Use this for anything you want admins to see in the settings page even without a meaningful factory default (API keys, SMTP hosts, custom CSS). Omitting the declaration entirely means no row and no UI field.
+**Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, custom CSS) so the row exists for `settings_form.php` to render and for admins to fill in. Omitting the declaration entirely means no row in `stg_settings`, even if `settings_form.php` references the name — the form-page save logic auto-creates missing rows on first submit, but until then `get_setting()` returns `null` and the field renders empty.
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
 
