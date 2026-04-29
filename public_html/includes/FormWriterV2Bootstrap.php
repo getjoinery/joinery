@@ -462,7 +462,15 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
             $html .= '<label>' . htmlspecialchars($data['label']) . '</label>';
         }
 
-        $html .= '<div class="row g-2">';
+        // The data-time-* attributes wire this widget to the shared
+        // outputTimeInputJavaScript() handler, which keeps the hidden input in
+        // sync with the per-part inputs so consumers can read just
+        // $post_vars[$field_name] regardless of widget flavor.
+        $html .= '<div class="row g-2"'
+              . ' data-time-hour="' . htmlspecialchars($hour_id) . '"'
+              . ' data-time-minute="' . htmlspecialchars($minute_id) . '"'
+              . ' data-time-ampm="' . htmlspecialchars($ampm_id) . '"'
+              . ' data-time-hidden="' . htmlspecialchars($id) . '">';
 
         // Hour input
         $html .= '<div class="col-auto">';

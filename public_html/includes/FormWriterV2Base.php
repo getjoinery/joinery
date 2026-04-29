@@ -2683,38 +2683,49 @@ abstract class FormWriterV2Base {
         if (!$time_input_js_loaded) {
             echo '<script type="text/javascript">
 function updateTimeInput(hourId, minuteId, ampmId, hiddenId) {
-    var hour = document.getElementById(hourId).value;
-    var minute = document.getElementById(minuteId).value;
-    var ampm = document.getElementById(ampmId).value;
+    var hourEl = document.getElementById(hourId);
+    var minuteEl = document.getElementById(minuteId);
+    var ampmEl = document.getElementById(ampmId);
+    var hiddenEl = document.getElementById(hiddenId);
+    if (!hourEl || !minuteEl || !ampmEl || !hiddenEl) return;
 
-    if (hour && minute) {
-        var h = parseInt(hour);
-        if (ampm === "PM" && h !== 12) h += 12;
-        if (ampm === "AM" && h === 12) h = 0;
+    var hour = hourEl.value;
+    var minute = minuteEl.value;
+    var ampm = ampmEl.value;
 
-        var timeValue = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
-        document.getElementById(hiddenId).value = timeValue;
+    if (hour === "" || minute === "") {
+        hiddenEl.value = "";
+        return;
     }
+
+    var h = parseInt(hour, 10);
+    if (ampm === "PM" && h !== 12) h += 12;
+    if (ampm === "AM" && h === 12) h = 0;
+
+    hiddenEl.value = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
+}
+
+function wireTimeInput(el) {
+    var hourId = el.getAttribute("data-time-hour");
+    var minuteId = el.getAttribute("data-time-minute");
+    var ampmId = el.getAttribute("data-time-ampm");
+    var hiddenId = el.getAttribute("data-time-hidden");
+    var ids = [hourId, minuteId, ampmId];
+    var update = function() { updateTimeInput(hourId, minuteId, ampmId, hiddenId); };
+    ids.forEach(function(id) {
+        var node = document.getElementById(id);
+        if (!node) return;
+        node.addEventListener("change", update);
+        node.addEventListener("input", update);
+    });
+    // Normalize the hidden input on page load so server sees a clean value
+    // even if the user submits without changing any of the parts.
+    update();
 }
 
 document.addEventListener("DOMContentLoaded", function() {
     var timeInputs = document.querySelectorAll("[data-time-hour]");
-    timeInputs.forEach(function(el) {
-        var hourId = el.getAttribute("data-time-hour");
-        var minuteId = el.getAttribute("data-time-minute");
-        var ampmId = el.getAttribute("data-time-ampm");
-        var hiddenId = el.getAttribute("data-time-hidden");
-
-        document.getElementById(hourId).addEventListener("change", function() {
-            updateTimeInput(hourId, minuteId, ampmId, hiddenId);
-        });
-        document.getElementById(minuteId).addEventListener("change", function() {
-            updateTimeInput(hourId, minuteId, ampmId, hiddenId);
-        });
-        document.getElementById(ampmId).addEventListener("change", function() {
-            updateTimeInput(hourId, minuteId, ampmId, hiddenId);
-        });
-    });
+    timeInputs.forEach(wireTimeInput);
 });
 </script>';
             $time_input_js_loaded = true;
@@ -2738,6 +2749,15 @@ document.addEventListener("DOMContentLoaded", function() {
 
         if (!$value) {
             return ['hour' => $hour, 'minute' => $minute, 'ampm' => $ampm];
+        }
+
+        // If value is a datetime string ("Y-m-d H:i:s" — e.g. produced by
+        // convertDateTimeFieldsToLocalTime for a time-only column), strip the
+        // date portion so we only parse the time. Without this, the colon-split
+        // below treats "2026-04-28 23" as the hour part and intval gives 2026.
+        if (strpos($value, ' ') !== false && strpos($value, '-') !== false) {
+            $parts = explode(' ', $value);
+            $value = end($parts);
         }
 
         // Check if value contains AM/PM (e.g., "3:15 PM" from datetimeinput)
