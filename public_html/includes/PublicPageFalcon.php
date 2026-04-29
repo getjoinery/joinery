@@ -209,16 +209,14 @@ class PublicPageFalcon extends PublicPageBase {
 		            <?php
 		            // Render admin menu items from menu data
 		            foreach($user_menu['items'] as $item) {
-		              // Only show admin items
-		              if(in_array($item['label'], ['Home', 'My Profile', 'Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) {
-		                $icon_svg = $this->get_admin_icon_svg($item['icon']);
-		                echo '<div class="col-4">
-		                  <a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="' . $item['link'] . '">
-		                    <div class="avatar avatar-2xl">' . $icon_svg . '</div>
-		                    <p class="mb-0 fw-medium text-800 text-truncate fs-11">' . $item['label'] . '</p>
-		                  </a>
-		                </div>';
-		              }
+		              if(!self::isAdminLauncherItem($item)) continue;
+		              $icon_svg = $this->get_admin_icon_svg($item['icon']);
+		              echo '<div class="col-4">
+		                <a class="d-block hover-bg-200 px-2 py-3 rounded-3 text-center text-decoration-none" href="' . $item['link'] . '">
+		                  <div class="avatar avatar-2xl">' . $icon_svg . '</div>
+		                  <p class="mb-0 fw-medium text-800 text-truncate fs-11">' . $item['label'] . '</p>
+		                </a>
+		              </div>';
 		            }
 		            ?>
 		          </div>
@@ -253,10 +251,8 @@ class PublicPageFalcon extends PublicPageBase {
 		      <?php
 		      // Render user menu items from menu data
 		      foreach($user_menu['items'] as $item) {
-		        // Only show user profile items (not admin items)
-		        if(!in_array($item['label'], ['Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) {
-		          echo '<a class="dropdown-item" href="' . $item['link'] . '">' . $item['label'] . '</a>';
-		        }
+		        if(self::isAdminMenuItem($item)) continue;
+		        echo '<a class="dropdown-item" href="' . $item['link'] . '">' . $item['label'] . '</a>';
 		      }
 		      ?>
 		    </div>

@@ -64,9 +64,8 @@ class PublicPage extends PublicPageBase {
             echo '</summary>';
             echo '<div class="jy-user-dropdown-menu">';
             foreach ($user_menu['items'] as $item) {
-                if (!in_array($item['label'], ['Admin Dashboard', 'Admin Settings', 'Admin Utilities', 'Admin Help'])) {
-                    echo '<a href="' . htmlspecialchars($item['link'], ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8') . '</a>';
-                }
+                if (self::isAdminMenuItem($item)) continue;
+                echo '<a href="' . htmlspecialchars($item['link'], ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8') . '</a>';
             }
             echo '</div>';
             echo '</details>';

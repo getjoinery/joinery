@@ -669,8 +669,8 @@ class PluginManager extends AbstractExtensionManager {
             $task->save();
         }
 
-        // Sync declarative admin menus from plugin.json
-        $this->syncAdminMenus($name);
+        // Sync declarative menus (admin sidebar + user dropdown) from plugin.json
+        $this->syncMenus($name);
     }
 
     /**
@@ -741,8 +741,8 @@ class PluginManager extends AbstractExtensionManager {
             error_log("Failed to remove deletion rules for plugin '$name': " . $e->getMessage());
         }
 
-        // Remove declarative admin menus
-        $this->syncAdminMenus($name, []);
+        // Remove declarative menus (both admin sidebar + user dropdown)
+        $this->syncMenus($name, ['admin' => [], 'profile' => []]);
 
         // Set inactive flag and timestamps
         $model->set('plg_active', 0);
@@ -979,8 +979,8 @@ class PluginManager extends AbstractExtensionManager {
             error_log("Failed to remove declared settings for plugin '$name' during uninstall: " . $e->getMessage());
         }
 
-        // Step 2: Delete admin menus
-        $this->syncAdminMenus($name, []);
+        // Step 2: Delete menus (admin sidebar + user dropdown)
+        $this->syncMenus($name, ['admin' => [], 'profile' => []]);
 
         // Step 3: Remove deletion rules
         try {
@@ -1118,9 +1118,9 @@ class PluginManager extends AbstractExtensionManager {
         require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
         PluginHelper::registerAllActiveDeletionRules();
 
-        // Sync declarative admin menus for all active plugins
+        // Sync declarative menus (admin sidebar + user dropdown) for all active plugins
         foreach ($active_plugins as $plugin) {
-            $this->syncAdminMenus($plugin->get('plg_name'));
+            $this->syncMenus($plugin->get('plg_name'));
         }
 
         // Sync declarative settings for all active plugins — seeds any that
@@ -1242,35 +1242,49 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Sync a plugin's admin menus from its plugin.json adminMenu declaration.
+     * Sync a plugin's menus (admin sidebar + user dropdown) from its plugin.json
+     * adminMenu and profileMenu declarations.
      *
-     * Handles creation, update, and removal. On deactivate/uninstall, pass an
-     * empty array for $declared_menus to remove all the plugin's menus.
+     * Handles creation, update, and removal. Pass ['admin' => [], 'profile' => []]
+     * to remove all the plugin's menus (deactivate/uninstall).
+     *
+     * Refuses to write rows whose slug starts with 'core-' (reserved for core
+     * menu items) — logs a warning and skips.
      *
      * @param string $plugin_name Plugin directory name
-     * @param array|null $declared_menus Menu items from plugin.json, or null to read from file.
-     *                                   Pass empty array [] to remove all menus (deactivate/uninstall).
+     * @param array|null $declared When null, reads from plugin.json. When an array,
+     *                             must use shape ['admin' => [...], 'profile' => [...]].
+     *                             Missing keys are treated as empty arrays.
      */
-    public function syncAdminMenus($plugin_name, $declared_menus = null) {
+    public function syncMenus(string $plugin_name, ?array $declared = null): void {
         require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 
         // Read declared menus from plugin.json if not explicitly provided
-        if ($declared_menus === null) {
+        if ($declared === null) {
             try {
                 $helper = PluginHelper::getInstance($plugin_name);
-                $declared_menus = $helper->getAdminMenuItems();
+                $declared = [
+                    'admin'   => $helper->getAdminMenuItems(),
+                    'profile' => $helper->getProfileMenuItems(),
+                ];
             } catch (Exception $e) {
-                error_log("syncAdminMenus: could not read plugin.json for '$plugin_name': " . $e->getMessage());
-                $declared_menus = [];
+                error_log("syncMenus: could not read plugin.json for '$plugin_name': " . $e->getMessage());
+                $declared = ['admin' => [], 'profile' => []];
             }
         }
 
+        $admin_items   = $declared['admin']   ?? [];
+        $profile_items = $declared['profile'] ?? [];
+
         $dblink = DbConnector::get_instance()->get_db_link();
 
-        // Flatten the tree into an ordered list: parents first, then children
-        $parents = [];
-        $children = [];
-        foreach ($declared_menus as $item) {
+        // Build flat entry list with location tag
+        $flat_entries = [];
+
+        // Admin items: support parent/children nesting
+        $admin_parents  = [];
+        $admin_children = [];
+        foreach ($admin_items as $item) {
             $entry = [
                 'slug' => $item['slug'],
                 'title' => $item['title'],
@@ -1281,13 +1295,15 @@ class PluginManager extends AbstractExtensionManager {
                 'settingActivate' => $item['settingActivate'] ?? null,
                 'disabled' => $item['disabled'] ?? false,
                 'parent_slug' => $item['parent'] ?? null,
+                'location' => 'admin_sidebar',
+                'visibility' => 'in',
             ];
 
             if (!empty($item['items']) && is_array($item['items'])) {
-                $parents[] = $entry;
+                $admin_parents[] = $entry;
                 $parent_permission = $item['permission'] ?? 10;
                 foreach ($item['items'] as $child) {
-                    $children[] = [
+                    $admin_children[] = [
                         'slug' => $child['slug'],
                         'title' => $child['title'],
                         'url' => $child['url'] ?? '',
@@ -1297,32 +1313,63 @@ class PluginManager extends AbstractExtensionManager {
                         'settingActivate' => $child['settingActivate'] ?? null,
                         'disabled' => $child['disabled'] ?? false,
                         'parent_slug' => $item['slug'],
+                        'location' => 'admin_sidebar',
+                        'visibility' => 'in',
                     ];
                 }
             } elseif (!empty($item['parent'])) {
-                $children[] = $entry;
+                $admin_children[] = $entry;
             } else {
-                $parents[] = $entry;
+                $admin_parents[] = $entry;
             }
         }
-        $flat_entries = array_merge($parents, $children);
+
+        // Profile items: flat only
+        $profile_entries = [];
+        foreach ($profile_items as $item) {
+            $profile_entries[] = [
+                'slug' => $item['slug'],
+                'title' => $item['title'],
+                'url' => $item['url'] ?? '',
+                'order' => $item['order'],
+                'permission' => $item['permission'] ?? 0,
+                'icon' => $item['icon'] ?? null,
+                'settingActivate' => $item['settingActivate'] ?? null,
+                'disabled' => $item['disabled'] ?? false,
+                'parent_slug' => null,
+                'location' => 'user_dropdown',
+                'visibility' => $item['visibility'] ?? 'in',
+            ];
+        }
+
+        $flat_entries = array_merge($admin_parents, $admin_children, $profile_entries);
+
+        // Filter out core-* slugs (defense in depth — validator should have caught these)
+        $flat_entries = array_filter($flat_entries, function ($entry) use ($plugin_name) {
+            if (strpos($entry['slug'], 'core-') === 0) {
+                error_log("syncMenus: plugin '$plugin_name' attempted to declare reserved slug '{$entry['slug']}' — skipped.");
+                return false;
+            }
+            return true;
+        });
+
         $declared_slugs = array_column($flat_entries, 'slug');
 
         // Get previously synced slugs from plg_metadata
         $previous_slugs = $this->getMenuSlugsFromMetadata($plugin_name);
 
-        // Upsert: process parents first (they have no parent_slug), then children
+        // Upsert
         foreach ($flat_entries as $entry) {
             $parent_menu_id = null;
 
-            // Resolve parent slug to ID
+            // Resolve parent slug to ID (admin items only)
             if (!empty($entry['parent_slug'])) {
                 $q = $dblink->prepare("SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = ?");
                 $q->execute([$entry['parent_slug']]);
                 $parent_menu_id = $q->fetchColumn();
 
                 if ($parent_menu_id === false) {
-                    error_log("syncAdminMenus: plugin '$plugin_name' references parent slug '{$entry['parent_slug']}' which does not exist. Skipping menu '{$entry['slug']}'.");
+                    error_log("syncMenus: plugin '$plugin_name' references parent slug '{$entry['parent_slug']}' which does not exist. Skipping menu '{$entry['slug']}'.");
                     continue;
                 }
             }
@@ -1333,13 +1380,12 @@ class PluginManager extends AbstractExtensionManager {
             $existing_id = $q->fetchColumn();
 
             $url = $entry['url'] ?? '';
-            $permission = $entry['permission'] ?? 10;
-            $icon = $entry['icon'] ?? null;
-            $setting_activate = $entry['settingActivate'] ?? null;
+            $permission = $entry['permission'];
+            $icon = $entry['icon'];
+            $setting_activate = $entry['settingActivate'];
             $disabled = (!empty($entry['disabled'])) ? 1 : 0;
 
             if ($existing_id !== false) {
-                // Update existing row
                 $q = $dblink->prepare(
                     "UPDATE amu_admin_menus SET
                         amu_menudisplay = ?,
@@ -1349,7 +1395,9 @@ class PluginManager extends AbstractExtensionManager {
                         amu_min_permission = ?,
                         amu_icon = ?,
                         amu_setting_activate = ?,
-                        amu_disable = ?
+                        amu_disable = ?,
+                        amu_location = ?,
+                        amu_visibility = ?
                     WHERE amu_admin_menu_id = ?"
                 );
                 $q->execute([
@@ -1361,14 +1409,15 @@ class PluginManager extends AbstractExtensionManager {
                     $icon,
                     $setting_activate,
                     $disabled,
+                    $entry['location'],
+                    $entry['visibility'],
                     $existing_id
                 ]);
             } else {
-                // Insert new row
                 $q = $dblink->prepare(
                     "INSERT INTO amu_admin_menus
-                        (amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_setting_activate, amu_disable)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        (amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_setting_activate, amu_disable, amu_location, amu_visibility)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 );
                 $q->execute([
                     $entry['title'],
@@ -1379,7 +1428,9 @@ class PluginManager extends AbstractExtensionManager {
                     $permission,
                     $icon,
                     $setting_activate,
-                    $disabled
+                    $disabled,
+                    $entry['location'],
+                    $entry['visibility']
                 ]);
             }
         }
@@ -1403,6 +1454,25 @@ class PluginManager extends AbstractExtensionManager {
 
         // Cache current declared slugs in plg_metadata for next sync
         $this->saveMenuSlugsToMetadata($plugin_name, $declared_slugs);
+    }
+
+    /**
+     * Backward-compatible alias for the renamed syncMenus(). Reads adminMenu only
+     * when the legacy single-array signature is used. New code should call
+     * syncMenus() directly.
+     *
+     * @param string $plugin_name
+     * @param array|null $declared_menus Legacy admin-only items, or null to read both keys from plugin.json
+     * @deprecated Use syncMenus() instead.
+     */
+    public function syncAdminMenus($plugin_name, $declared_menus = null) {
+        if ($declared_menus === null) {
+            $this->syncMenus($plugin_name, null);
+            return;
+        }
+        // Legacy callers pass admin-only items. To deactivate (empty array), wipe
+        // both menu types so plugins migrating to syncMenus don't strand profile rows.
+        $this->syncMenus($plugin_name, ['admin' => $declared_menus, 'profile' => []]);
     }
 
     /**
