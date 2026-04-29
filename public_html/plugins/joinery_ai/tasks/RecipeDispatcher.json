@@ -1,0 +1,6 @@
+{
+    "name": "Joinery AI Recipe Dispatcher",
+    "description": "Reaps stuck runs, fires scheduled recipes, and drains the pending queue up to the concurrency cap. Runs every cron tick.",
+    "default_frequency": "every_run",
+    "config_fields": {}
+}

@@ -1,0 +1,32 @@
+{
+    "name": "Joinery AI",
+    "version": "0.1.0",
+    "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
+    "author": "Joinery",
+    "is_stock": true,
+    "adminMenu": [
+        {
+            "slug": "joinery-ai",
+            "title": "Joinery AI",
+            "icon": "smart_toy",
+            "permission": 10,
+            "order": 16,
+            "items": [
+                { "slug": "joinery-ai-recipes", "title": "Recipes", "url": "/admin/joinery_ai", "order": 1 },
+                { "slug": "joinery-ai-runs", "title": "Run History", "url": "/admin/joinery_ai/runs", "order": 2 },
+                { "slug": "joinery-ai-notes", "title": "Notes", "url": "/admin/joinery_ai/notes", "order": 3 }
+            ]
+        }
+    ],
+    "settings": [
+        { "name": "joinery_ai_anthropic_api_key", "default": "" },
+        { "name": "joinery_ai_brave_search_api_key", "default": "" },
+        { "name": "joinery_ai_market_data_provider", "default": "finnhub" },
+        { "name": "joinery_ai_market_data_api_key", "default": "" },
+        { "name": "joinery_ai_default_model", "default": "claude-haiku-4-5" },
+        { "name": "joinery_ai_failure_email_throttle_seconds", "default": "86400" },
+        { "name": "joinery_ai_workspace_max_chars", "default": "8000" },
+        { "name": "joinery_ai_max_concurrent_workers", "default": "3" },
+        { "name": "joinery_ai_global_monthly_token_cap", "default": "1000000" }
+    ]
+}
