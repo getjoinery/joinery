@@ -202,10 +202,10 @@ A run is always two-phase: a **trigger** that inserts a pending row and a **work
 - **Scheduled trigger** — `RecipeDispatcher` (cron-driven) inserts a pending row when a recipe is due, then spawns a worker for it.
 - **Manual trigger** — admin "Run Now" button posts to a logic handler that inserts a pending row with `rcr_trigger='manual'`, spawns a worker, and immediately redirects back to the runs page where the row appears with status `pending` → `running` → `success`/`failed`.
 
-**Worker process** — `utils/run_recipe.php <run_id>` is a CLI entrypoint that loads the run, calls `RecipeRunner::run()`, exits. Spawned via:
+**Worker process** — `plugins/joinery_ai/cli/run_recipe.php <run_id>` is a CLI entrypoint that bootstraps PathHelper, loads the run, calls `RecipeRunner::run()`, exits. Spawned via:
 
 ```php
-exec('php ' . escapeshellarg(PathHelper::getIncludePath('utils/run_recipe.php'))
+exec('php ' . escapeshellarg(PathHelper::getIncludePath('plugins/joinery_ai/cli/run_recipe.php'))
     . ' ' . (int)$run_id . ' > /dev/null 2>&1 &');
 ```
 
@@ -288,9 +288,14 @@ Implemented as a single view with one helper that fetches latest run per recipe.
 
 ## File layout
 
+Reflects what shipped — modern plugins put admin pages under `views/admin/`
+(URL: `/admin/{plugin}/{slug}`) and logic in `logic/`, not in a top-level
+`admin/` directory.
+
 ```
 plugins/joinery_ai/
   plugin.json
+  settings_form.php                # API keys + caps; included by /admin/admin_settings
   data/
     recipes_class.php              # Recipe + MultiRecipe
     recipe_runs_class.php          # RecipeRun + MultiRecipeRun
@@ -301,16 +306,14 @@ plugins/joinery_ai/
     RecipeRunContext.php
     RecipeToolInterface.php
     RecipeToolRegistry.php
+    RecipeWorkerSpawner.php        # concurrency cap + detached exec spawn
     UrlSafetyValidator.php
     CostGuard.php
     MarketDataProviderInterface.php
     market_data/
       FinnhubProvider.php
-    WebSearchProviderInterface.php
-    web_search/
-      BraveSearchProvider.php
   recipe_tools/
-    WebSearchTool.php
+    WebSearchTool.php              # Brave Search (free tier)
     FetchUrlTool.php
     GetWorkspaceTool.php
     SetWorkspaceTool.php
@@ -319,24 +322,35 @@ plugins/joinery_ai/
     GetMyNotesTool.php
     GetStockDataTool.php
   tasks/
-    RecipeDispatcher.php
+    RecipeDispatcher.php           # reaper + scheduler + queue drain
     RecipeDispatcher.json
-  admin/
-    admin_recipes.php
-    admin_recipes_edit.php
-    admin_recipes_runs.php
-    logic/
-      admin_recipes_logic.php
-      admin_recipes_edit_logic.php
-      admin_recipes_runs_logic.php
   views/
-    joinery_ai/
-      dashboard.php                # owner dashboard at /joinery_ai
+    index.php                      # public dashboard at /joinery_ai
+    admin/
+      index.php                    # /admin/joinery_ai (recipes list)
+      edit.php                     # /admin/joinery_ai/edit (recipe edit)
+      run.php                      # /admin/joinery_ai/run (single run viewer)
+      run_now.php                  # /admin/joinery_ai/run_now (manual trigger)
+      runs.php                     # /admin/joinery_ai/runs (run history)
+      notes.php                    # /admin/joinery_ai/notes (note list)
+      note.php                     # /admin/joinery_ai/note (note edit)
   logic/
+    admin_edit_logic.php
+    admin_note_logic.php
     joinery_ai_dashboard_logic.php
+  cli/
+    run_recipe.php                 # CLI worker entrypoint, spawned via exec()
 ```
 
-`utils/run_recipe.php` lives at the project root (not in the plugin) because it's a CLI entrypoint and matches the existing `utils/` convention.
+The plugin is fully self-contained — no files outside `plugins/joinery_ai/`.
+The CLI worker bootstraps PathHelper at the top of the script (the one
+explicit `require_once` allowed for CLI scripts running outside the normal
+serve.php flow, per CLAUDE.md).
+
+**Brave web-search lives directly in `WebSearchTool.php`** rather than behind
+its own provider interface — the spec earlier called for one, but with a
+single implementation it was YAGNI noise. Adding a provider abstraction is
+a 10-minute refactor when a second implementation actually shows up.
 
 ## Acceptance checklist
 
