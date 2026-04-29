@@ -483,7 +483,16 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
 
         $html .= '<input type="hidden" name="' . htmlspecialchars($data['name']) . '" id="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($data['value']) . '">';
 
-        $html .= '<div class="time-input-group" style="display: flex; align-items: center; gap: 8px;">';
+        // The data-time-* attributes wire this widget to the shared
+        // outputTimeInputJavaScript() handler, which keeps the hidden input
+        // in sync with the three select dropdowns. Without these, the dropdowns
+        // (which intentionally have no `name` attribute) would never propagate
+        // their values to the form POST.
+        $html .= '<div class="time-input-group" style="display: flex; align-items: center; gap: 8px;"'
+              . ' data-time-hour="' . htmlspecialchars($id . '_hour') . '"'
+              . ' data-time-minute="' . htmlspecialchars($id . '_minute') . '"'
+              . ' data-time-ampm="' . htmlspecialchars($id . '_ampm') . '"'
+              . ' data-time-hidden="' . htmlspecialchars($id) . '">';
 
         $html .= '<select id="' . htmlspecialchars($id) . '_hour" class="' . htmlspecialchars($class) . '" style="width: auto;">';
         $html .= '<option value="">HH</option>';
