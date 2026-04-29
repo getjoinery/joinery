@@ -344,9 +344,29 @@ $page->admin_footer();
 ?>
 ```
 
-### Admin Menus (Declarative)
+### Plugin Menus (Declarative)
 
-Plugin admin menus are declared in `plugin.json` using the `adminMenu` key. The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. This is the only supported way to register plugin admin menus — do not INSERT into `amu_admin_menus` from migrations.
+Plugins declare menu contributions in `plugin.json` under two keys:
+
+- `adminMenu` — items in the admin sidebar (`/admin/*`).
+- `profileMenu` — items in the user dropdown shown by themes (logged-in avatar menu, logged-out auth links, etc.).
+
+Both keys are synced into the same `amu_admin_menus` table, distinguished by an `amu_location` column (`admin_sidebar` vs `user_dropdown`). The system automatically creates menu rows on activation, updates them on sync, and removes them on deactivation/uninstall. This is the only supported way to register plugin menus — do not INSERT into `amu_admin_menus` from migrations.
+
+**Locations:**
+
+| Location        | Source key    | Permission floor | Visibility |
+|-----------------|---------------|------------------|------------|
+| `admin_sidebar` | `adminMenu`   | ≥ 1              | always `in` (logged in) |
+| `user_dropdown` | `profileMenu` | ≥ 0              | `in` / `out` / `both` |
+
+**Slug rules (both locations):**
+
+- Must match `[a-z0-9-]`, max 32 chars, unique within the plugin.
+- Must start with `<plugin-name>-` (e.g. `mybooks-shelf`). For `adminMenu`, this is recommended; for `profileMenu`, it is required by validation.
+- Must not start with `core-` — that prefix is reserved for core menu rows seeded by migrations.
+
+#### `adminMenu`
 
 **Three placement patterns:**
 
@@ -418,6 +438,44 @@ The `parent` value is the `amu_slug` of any menu in the system -- core menus, ot
 | `items` | No | null | Array of child menu items |
 
 **Important:** Menus declared in `plugin.json` are the source of truth. Manual edits via the admin menu UI will be overwritten on the next sync.
+
+#### `profileMenu`
+
+Profile menu items appear in the user dropdown. They are flat — no parent/items nesting — and support a per-row `visibility` value that selects between logged-in, logged-out, and both states.
+
+```json
+{
+  "profileMenu": [
+    {
+      "slug": "scrolldaddy-filtering",
+      "title": "Filtering",
+      "url": "/profile/scrolldaddy",
+      "icon": "shield",
+      "visibility": "in",
+      "permission": 1,
+      "order": 75
+    }
+  ]
+}
+```
+
+**Available fields:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `slug` | Yes | -- | Unique identifier (`[a-z0-9-]`, max 32). Must start with `<plugin-name>-`. |
+| `title` | Yes | -- | Display text (max 32 chars). |
+| `url` | Yes | -- | Target page (no `.php`). Stored as-is. |
+| `order` | Yes | -- | Sort position in the dropdown. Core slots: home=10, profile=50, signout=200. |
+| `icon` | No | null | Icon identifier passed through to theme renderers. |
+| `visibility` | No | `"in"` | One of `"in"` (logged-in), `"out"` (logged-out), `"both"`. |
+| `permission` | No | 0 | Min permission level (0-10). Only applies when logged in. |
+| `settingActivate` | No | null | Setting that must be truthy for the row to display. |
+| `disabled` | No | false | Whether disabled by default. |
+
+`parent` and `items` are not supported on `profileMenu` — the user dropdown is rendered as a flat list. Themes that need additional grouping handle it at the render layer.
+
+**Themes consuming the dropdown:** themes read `$menu_data['user_menu']['items']` returned by `PublicPageBase::get_menu_data()`. Each item carries `label`, `link`, `icon`, and `slug`. Filter by `slug` (e.g. `str_starts_with($item['slug'], 'core-admin-')`) — never by `label`, since admins can rename labels in the admin UI.
 
 ### Plugin Settings (Declarative)
 

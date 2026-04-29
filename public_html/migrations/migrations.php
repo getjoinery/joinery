@@ -1310,3 +1310,60 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// =============================================================================
+	// DECLARATIVE PROFILE MENU — shared menu infrastructure
+	// =============================================================================
+
+	// ========== Backfill amu_location/amu_visibility on existing rows (v106) ==========
+	// update_database adds the columns but does not backfill pre-existing rows.
+	// Set every NULL row to the admin sidebar with visibility='in'. No test
+	// condition — relies on hash-based one-shot protection.
+	$migration = array();
+	$migration['database_version'] = '106';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_location = COALESCE(amu_location, 'admin_sidebar'), amu_visibility = COALESCE(amu_visibility, 'in') WHERE amu_location IS NULL OR amu_visibility IS NULL";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Seed core user_dropdown rows (v107) ==========
+	// Migrates the hardcoded user-menu items from PublicPageBase::get_menu_data()
+	// into amu_admin_menus rows tagged amu_location='user_dropdown'. Idempotent —
+	// the per-row test guards each insert.
+	$core_user_dropdown_rows = array(
+		array('slug'=>'core-home',                'display'=>'Home',              'page'=>'/',                          'visibility'=>'both', 'permission'=>0, 'setting'=>'',                'icon'=>'home',           'order'=>10),
+		array('slug'=>'core-signin',              'display'=>'Sign in',           'page'=>'/login',                     'visibility'=>'out',  'permission'=>0, 'setting'=>'',                'icon'=>'sign-in',        'order'=>20),
+		array('slug'=>'core-forgot-password',     'display'=>'Forgot Password',   'page'=>'/password-reset-1',          'visibility'=>'out',  'permission'=>0, 'setting'=>'',                'icon'=>'key',            'order'=>30),
+		array('slug'=>'core-signup',              'display'=>'Sign up',           'page'=>'/register',                  'visibility'=>'out',  'permission'=>0, 'setting'=>'register_active', 'icon'=>'user-plus',      'order'=>40),
+		array('slug'=>'core-profile',             'display'=>'My Profile',        'page'=>'/profile',                   'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'user',           'order'=>50),
+		array('slug'=>'core-orders',              'display'=>'Orders',            'page'=>'/profile#orders',            'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'shopping-bag',   'order'=>60),
+		array('slug'=>'core-subscriptions',       'display'=>'Subscriptions',     'page'=>'/profile/subscriptions',     'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'refresh',        'order'=>70),
+		array('slug'=>'core-events',              'display'=>'My Events',         'page'=>'/profile#events',            'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'calendar',       'order'=>80),
+		array('slug'=>'core-event-sessions',      'display'=>'Event Sessions',    'page'=>'/profile/event_sessions',    'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'clock',          'order'=>90),
+		array('slug'=>'core-admin-dashboard',     'display'=>'Admin Dashboard',   'page'=>'/admin/admin_users',         'visibility'=>'in',   'permission'=>5, 'setting'=>'',                'icon'=>'dashboard',      'order'=>100),
+		array('slug'=>'core-admin-help',          'display'=>'Admin Help',        'page'=>'/admin/admin_help',          'visibility'=>'in',   'permission'=>5, 'setting'=>'',                'icon'=>'question-circle','order'=>110),
+		array('slug'=>'core-admin-settings',      'display'=>'Admin Settings',    'page'=>'/admin/admin_settings',      'visibility'=>'in',   'permission'=>6, 'setting'=>'',                'icon'=>'wrench',         'order'=>120),
+		array('slug'=>'core-admin-utilities',     'display'=>'Admin Utilities',   'page'=>'/admin/admin_utilities',     'visibility'=>'in',   'permission'=>6, 'setting'=>'',                'icon'=>'tools',          'order'=>130),
+		array('slug'=>'core-signout',             'display'=>'Sign out',          'page'=>'/logout',                    'visibility'=>'in',   'permission'=>1, 'setting'=>'',                'icon'=>'sign-out',       'order'=>200),
+	);
+	$version_counter = 107;
+	foreach ($core_user_dropdown_rows as $row) {
+		$migration = array();
+		$migration['database_version'] = (string)$version_counter;
+		$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = '" . $row['slug'] . "'";
+		$setting_sql = $row['setting'] === '' ? 'NULL' : ("'" . $row['setting'] . "'");
+		$migration['migration_sql'] = sprintf(
+			"INSERT INTO amu_admin_menus (amu_menudisplay, amu_slug, amu_defaultpage, amu_order, amu_min_permission, amu_disable, amu_icon, amu_setting_activate, amu_location, amu_visibility) VALUES ('%s', '%s', '%s', %d, %d, 0, '%s', %s, 'user_dropdown', '%s')",
+			str_replace("'", "''", $row['display']),
+			$row['slug'],
+			$row['page'],
+			$row['order'],
+			$row['permission'],
+			$row['icon'],
+			$setting_sql,
+			$row['visibility']
+		);
+		$migration['migration_file'] = NULL;
+		$migrations[] = $migration;
+		$version_counter++;
+	}
+

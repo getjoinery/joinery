@@ -114,6 +114,25 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * Whether a user-menu item belongs in the admin launcher (9-dots / nine-dots dropdown).
+	 * Includes the home and profile shortcuts plus every core admin item.
+	 */
+	protected static function isAdminLauncherItem(array $item): bool {
+		$slug = $item['slug'] ?? '';
+		return $slug === 'core-home'
+			|| $slug === 'core-profile'
+			|| str_starts_with($slug, 'core-admin-');
+	}
+
+	/**
+	 * Whether a user-menu item is a core admin item (Dashboard, Settings, etc.).
+	 * Used by user-dropdown renderers to exclude admin items from the regular dropdown.
+	 */
+	protected static function isAdminMenuItem(array $item): bool {
+		return str_starts_with($item['slug'] ?? '', 'core-admin-');
+	}
+
+	/**
 	 * Get comprehensive menu data for all menu types
 	 * Consolidates menu logic from various theme implementations
 	 *
@@ -178,134 +197,34 @@ abstract class PublicPageBase {
 			'items' => []
 		];
 
-		if ($is_logged_in) {
-			// Get user information
-			if ($session->get_user_id()) {
-				try {
-					$user = new User($session->get_user_id(), TRUE);
-					$menu_data['user_menu']['user_name'] = $user->get('usr_email');
-					$menu_data['user_menu']['display_name'] = $user->display_name();
-
-					// Default avatar path
-					$menu_data['user_menu']['avatar_url'] = PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web');
-				} catch (Exception $e) {
-					// User load failed, use session data only
-					$menu_data['user_menu']['display_name'] = 'User';
-				}
+		if ($is_logged_in && $session->get_user_id()) {
+			try {
+				$user = new User($session->get_user_id(), TRUE);
+				$menu_data['user_menu']['user_name'] = $user->get('usr_email');
+				$menu_data['user_menu']['display_name'] = $user->display_name();
+				$menu_data['user_menu']['avatar_url'] = PathHelper::getThemeFilePath('avatar.png', 'assets/images', 'web');
+			} catch (Exception $e) {
+				$menu_data['user_menu']['display_name'] = 'User';
 			}
+		}
 
-			// Logged in menu items - only include items that should be shown
-			$menu_data['user_menu']['items'] = [
-				// Navigation
-				[
-					'label' => 'Home',
-					'link' => '/',
-					'icon' => 'home'
-				],
-				[
-					'label' => 'My Profile',
-					'link' => '/profile',
-					'icon' => 'user'
-				],
-
-				// E-commerce related
-				[
-					'label' => 'Orders',
-					'link' => '/profile#orders',
-					'icon' => 'shopping-bag'
-				],
-				[
-					'label' => 'Subscriptions',
-					'link' => '/profile/subscriptions',
-					'icon' => 'refresh'
-				],
-
-				// Event related
-				[
-					'label' => 'My Events',
-					'link' => '/profile#events',
-					'icon' => 'calendar'
-				],
-				[
-					'label' => 'Event Sessions',
-					'link' => '/profile/event_sessions',
-					'icon' => 'clock'
-				],
-
-				// Authentication
-				[
-					'label' => 'Sign out',
-					'link' => '/logout',
-					'icon' => 'sign-out'
-				]
-			];
-
-			// Add admin items based on permission level (checked here, not in array)
-			$permission = $session->get_permission();
-			if ($permission >= 5) {
-				// Insert admin items before logout
-				array_splice($menu_data['user_menu']['items'], -1, 0, [
-					[
-						'label' => 'Admin Dashboard',
-						'link' => '/admin/admin_users',
-						'icon' => 'dashboard'
-					]
-				]);
-
-				// Advanced admin items for permission > 5
-				if ($permission > 5) {
-					array_splice($menu_data['user_menu']['items'], -1, 0, [
-						[
-							'label' => 'Admin Settings',
-							'link' => '/admin/admin_settings',
-							'icon' => 'wrench'
-						],
-						[
-							'label' => 'Admin Utilities',
-							'link' => '/admin/admin_utilities',
-							'icon' => 'tools'
-						]
-					]);
-				}
-
-				// Help available to all admin users
-				array_splice($menu_data['user_menu']['items'], -1, 0, [
-					[
-						'label' => 'Admin Help',
-						'link' => '/admin/admin_help',
-						'icon' => 'question-circle'
-					]
-				]);
-			}
-		} else {
-			// Logged out menu items
-			$register_active = $settings->get_setting('register_active', false, true);
-
-			$menu_data['user_menu']['items'] = [
-				[
-					'label' => 'Home',
-					'link' => '/',
-					'icon' => 'home'
-				],
-				[
-					'label' => 'Sign in',
-					'link' => '/login',
-					'icon' => 'sign-in'
-				],
-				[
-					'label' => 'Forgot Password',
-					'link' => '/password-reset-1',
-					'icon' => 'key'
-				]
-			];
-
-			if ($register_active) {
-				$menu_data['user_menu']['items'][] = [
-					'label' => 'Sign up',
-					'link' => '/register',
-					'icon' => 'user-plus'
+		require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
+		$user_permission = $is_logged_in ? $session->get_permission() : 0;
+		try {
+			$rows = MultiAdminMenu::get_user_dropdown_items($is_logged_in, $user_permission);
+			$items = array();
+			foreach ($rows as $row) {
+				$items[] = [
+					'label' => $row->get('amu_menudisplay'),
+					'link'  => $row->get('amu_defaultpage'),
+					'icon'  => $row->get('amu_icon'),
+					'slug'  => $row->get('amu_slug'),
 				];
 			}
+			$menu_data['user_menu']['items'] = $items;
+		} catch (PDOException $e) {
+			// Columns missing during initial deploy / before update_database has run.
+			$menu_data['user_menu']['items'] = [];
 		}
 
 		// 3. Process shopping cart data
