@@ -77,6 +77,8 @@
     { "name": "default_timezone", "default": "UTC" },
     { "name": "email_fallback_service", "default": "smtp" },
     { "name": "email_service", "default": "mailgun" },
+    { "name": "mailing_list_provider", "default": "mailchimp" },
+    { "name": "mailchimp_default_merge_fields", "default": "" },
     { "name": "form_style", "default": "Default (UIKit)" },
     { "name": "protocol_mode", "default": "auto" },
     { "name": "site_currency", "default": "US Dollar" },

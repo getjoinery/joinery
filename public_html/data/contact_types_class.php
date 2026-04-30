@@ -35,7 +35,7 @@ class ContactType extends SystemBase {	public static $prefix = 'ctt';
 	    'ctt_name' => array('type'=>'varchar(255)', 'required'=>true),
 	    'ctt_description' => array('type'=>'varchar(255)'),
 	    'ctt_delete_time' => array('type'=>'timestamp(6)'),
-	    'ctt_mailchimp_list_id' => array('type'=>'varchar(255)'),
+	    'ctt_provider_list_id' => array('type'=>'varchar(255)'),
 	);
 
 public static function ToReadable($ctt_contact_type_id){

@@ -33,7 +33,9 @@
 
 	$formwriter->textinput('ctt_name', 'Name');
 	$formwriter->textinput('ctt_description', 'Description');
-	$formwriter->textinput('ctt_mailchimp_list_id', 'Mailchimp List ID');
+	$formwriter->textinput('ctt_provider_list_id', 'Remote List ID', [
+		'helptext' => 'Identifier in your mailing list provider (e.g., MailChimp audience ID).'
+	]);
 	$formwriter->submitbutton('btn_submit', 'Submit');
 	echo $formwriter->end_form();
 

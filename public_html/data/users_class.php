@@ -69,7 +69,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_nickname' => array('type'=>'varchar(32)'),
 	    'usr_authhash' => array('type'=>'varchar(32)'),
 	    'usr_stripe_customer_id' => array('type'=>'varchar(32)'),
-	    'usr_mailchimp_user_id' => array('type'=>'varchar(64)'),
+	    'usr_mailing_list_provider_id' => array('type'=>'varchar(64)'),
 	    'usr_signup_ip' => array('type'=>'varchar(64)'),
 	    'usr_contact_preference_last_changed' => array('type'=>'timestamp(6)'),
 	    'usr_organization_name' => array('type'=>'varchar(32)'),
