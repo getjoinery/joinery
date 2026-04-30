@@ -10,24 +10,20 @@ Identify and decouple tightly-coupled external service integrations so that swap
 
 ### 1. Scheduling/Appointments (Acuity Scheduling)
 
-**Current state:** Direct Acuity API calls with no abstraction. Dead Calendly code also exists (disabled).
+**Current state:** Direct Acuity API calls with no abstraction. The bookings plugin's data model still carries Calendly-shaped column names from a prior integration (the dead Calendly code itself has been removed in a separate cleanup).
 
-**Why this matters:** Scheduling is a category where people genuinely switch providers — Cal.com, Calendly, Square Appointments, and others are viable alternatives. The bookings plugin already has Calendly-specific column names (`bkn_calendly_event_uri`, `bkt_calendly_event_type_uri`) baked into its schema, making this coupling visible at the database level.
+**Why this matters:** Scheduling is a category where people genuinely switch providers — Cal.com, Calendly, Square Appointments, and others are viable alternatives. The bookings plugin already has Calendly-specific column names (`bkn_calendly_event_uri`, `bkt_calendly_event_type_uri`, `usr_calendly_uri`) baked into its schema, making this coupling visible at the database level.
 
 **Files involved:**
 - `includes/AcuityScheduling.php` — 175-line API client (cURL-based, basic auth)
 - `includes/AcuitySchedulingOAuth.php` — 81-line OAuth2 extension
 - `logic/get_appointments_logic.php` — directly instantiates `AcuityScheduling`, calls `/appointments` endpoint
-- `adm/admin_settings.php` (~lines 748-790) — Acuity API key/user ID fields, API validation panel
+- `adm/admin_settings.php` (~lines 781-786) — Acuity API key/user ID fields, API validation panel
 - `plugins/bookings/data/bookings_class.php` — `bkn_calendly_event_uri` column, `GetByCalendlyUri()` method
 - `plugins/bookings/data/booking_types_class.php` — `bkt_calendly_event_type_uri` column, `GetByCalendlyUri()` method
-- `plugins/bookings/admin/admin_booking_types.php` — hardcoded "Sync with Calendly" link
-- `plugins/bookings/admin/admin_bookings.php` — hardcoded "Sync with Calendly" link
 - `plugins/bookings/admin/admin_booking.php` — calls `GetByCalendlyUri()`
-- `ajax/calendly_webhook.php` — disabled Calendly webhook handler
-- `ajax/calendly_init.php` — disabled Calendly init
-- `utils/calendly_synchronize.php` — disabled Calendly sync utility
-- Settings: `acuity_user_id`, `acuity_api_key`, `calendly_organization_uri`, `calendly_organization_name`, `calendly_api_key`, `calendly_api_token`
+- `data/users_class.php` — `usr_calendly_uri` column, `User::GetByCalendlyUri()` method
+- Settings: `acuity_user_id`, `acuity_api_key`
 
 ### 2. Mailing List Provider (MailChimp)
 
@@ -264,26 +260,19 @@ Replace the hardcoded Acuity fields and validation in `adm/admin_settings.php` w
 
 Add migration to insert `scheduling_provider` setting with default value `'acuity'` for existing installs.
 
-**1f. Clean up dead Calendly code**
+**1f. Rename Calendly-specific columns to generic provider columns**
 
-Remove disabled files that are not part of the provider abstraction:
-- `ajax/calendly_init.php`
-- `ajax/calendly_webhook.php`
-- `utils/calendly_synchronize.php`
-- `tests/integration/calendly_test.php`
-
-Remove Calendly settings from `adm/admin_settings.php`: `calendly_organization_uri`, `calendly_organization_name`, `calendly_api_key`, `calendly_api_token`.
-
-**1g. Rename bookings plugin Calendly-specific columns**
-
-The bookings plugin has provider-specific column names that should be generic:
-- `bkn_calendly_event_uri` → `bkn_provider_event_id` 
+The bookings plugin and user table have provider-specific column names that should be generic:
+- `bkn_calendly_event_uri` → `bkn_provider_event_id`
 - `bkt_calendly_event_type_uri` → `bkt_provider_event_type_id`
-- `GetByCalendlyUri()` → `GetByProviderEventId()` (on both Booking and BookingType)
+- `usr_calendly_uri` → `usr_provider_user_id`
+- `Booking::GetByCalendlyUri()` → `GetByProviderEventId()`
+- `BookingType::GetByCalendlyUri()` → `GetByProviderEventTypeId()`
+- `User::GetByCalendlyUri()` → `GetByProviderUserId()`
 - Update the corresponding Multi class option keys
-- Update `admin_booking.php` and any other references
+- Update `admin_booking.php` and any other live callers
 
-These are data class field renames — the `update_database` system handles column changes automatically.
+Use `ALTER TABLE ... RENAME COLUMN` migrations coordinated with the `$field_specifications` change in the same release; `update_database` does not rename columns automatically.
 
 ### Phase 2: Mailing List Provider Abstraction
 
@@ -443,13 +432,8 @@ Stripe and PayPal cover the entire realistic market for this platform. The alter
 | `adm/admin_settings.php` | **Modify** — dynamic scheduling provider UI |
 | `plugins/bookings/data/bookings_class.php` | **Modify** — rename column + method |
 | `plugins/bookings/data/booking_types_class.php` | **Modify** — rename column + method |
-| `plugins/bookings/admin/admin_booking_types.php` | **Modify** — generic sync link |
-| `plugins/bookings/admin/admin_bookings.php` | **Modify** — generic sync link |
 | `plugins/bookings/admin/admin_booking.php` | **Modify** — use renamed method |
-| `ajax/calendly_init.php` | **Delete** — dead code |
-| `ajax/calendly_webhook.php` | **Delete** — dead code |
-| `utils/calendly_synchronize.php` | **Delete** — dead code |
-| `tests/integration/calendly_test.php` | **Delete** — dead code |
+| `data/users_class.php` | **Modify** — rename column + method |
 | **Phase 2: Mailing List** | |
 | `includes/mailing_list_providers/MailingListProvider.php` | **New** — interface |
 | `includes/mailing_list_providers/MailChimpProvider.php` | **New** — extracted from mailing_lists_class |
@@ -484,7 +468,8 @@ Stripe and PayPal cover the entire realistic market for this platform. The alter
 - Verify admin settings page renders scheduling provider fields dynamically
 - Verify API validation still works from admin settings
 - Verify bookings plugin admin pages work with renamed columns
-- Verify no references to deleted Calendly files remain (grep for `calendly_init`, `calendly_webhook`, `calendly_synchronize`)
+- Verify renamed methods (`GetByProviderEventId`, `GetByProviderEventTypeId`, `GetByProviderUserId`) are used everywhere their predecessors were
+- Verify the bookings plugin's tracking-passthrough correlation pattern (documented in the `Booking` class header) is honored by any new provider
 
 ### Phase 2 Testing
 

@@ -4,6 +4,21 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 	
 class BookingException extends SystemBaseException {}
 
+/**
+ * Booking
+ *
+ * Integration correlation pattern (preserved from prior Calendly integration):
+ * When redirecting a user to an external scheduling provider, pass the local
+ * booking primary key through the provider's tracking/UTM passthrough field
+ * (Calendly uses tracking.salesforce_uuid; other providers offer similar
+ * arbitrary-string passthrough). The provider echoes that value back in
+ * webhook payloads, which lets the inbound webhook locate the local Booking
+ * row without depending on the provider's own ID. This is how the system
+ * correlates "the user just booked X" back to a pre-existing local record.
+ *
+ * Future provider integrations should reuse this approach. Name the field
+ * honestly (e.g. joinery_booking_id) rather than abusing a vendor-named slot.
+ */
 class Booking extends SystemBase {
 	
 	public static $prefix = 'bkn';
