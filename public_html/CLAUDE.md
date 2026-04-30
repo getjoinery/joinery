@@ -19,6 +19,10 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **CRITICAL:** NEVER commit to git unless explicitly directed to by the user. File changes are allowed, but git commits require explicit user permission.
 
+## Multi-Item Discussion Rule
+
+**CRITICAL:** When the user asks for a list of concerns, decisions, points of discussion, design questions, or any similar enumerated set, AND the list contains more than three items, ALWAYS walk through them one at a time. Present a high-level summary if useful, then take the first item, wait for the user's response, and only move to the next item once that one is resolved. Do NOT batch-decide multiple items in a single response. The user prefers serial discussion for any list over three.
+
 ## Secret Handling Rules
 
 **CRITICAL:** NEVER echo, print, log, or otherwise surface passwords, API keys, tokens, or other credentials into the chat transcript when it can be avoided. This includes:
