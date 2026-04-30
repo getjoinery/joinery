@@ -1378,3 +1378,33 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// =============================================================================
+	// MAILING LIST PROVIDER ABSTRACTION — rename provider-specific columns to
+	// provider-neutral names. Coordinated with $field_specifications changes in
+	// the same release.
+	// =============================================================================
+
+	// ========== Rename mlt_mailchimp_list_id → mlt_provider_list_id (v122) ==========
+	$migration = array();
+	$migration['database_version'] = '122';
+	$migration['test'] = "SELECT count(1) as count FROM information_schema.columns WHERE table_name = 'mlt_mailing_lists' AND column_name = 'mlt_provider_list_id'";
+	$migration['migration_sql'] = "ALTER TABLE mlt_mailing_lists RENAME COLUMN mlt_mailchimp_list_id TO mlt_provider_list_id";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Rename ctt_mailchimp_list_id → ctt_provider_list_id (v123) ==========
+	$migration = array();
+	$migration['database_version'] = '123';
+	$migration['test'] = "SELECT count(1) as count FROM information_schema.columns WHERE table_name = 'ctt_contact_types' AND column_name = 'ctt_provider_list_id'";
+	$migration['migration_sql'] = "ALTER TABLE ctt_contact_types RENAME COLUMN ctt_mailchimp_list_id TO ctt_provider_list_id";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Rename usr_mailchimp_user_id → usr_mailing_list_provider_id (v124) ==========
+	$migration = array();
+	$migration['database_version'] = '124';
+	$migration['test'] = "SELECT count(1) as count FROM information_schema.columns WHERE table_name = 'usr_users' AND column_name = 'usr_mailing_list_provider_id'";
+	$migration['migration_sql'] = "ALTER TABLE usr_users RENAME COLUMN usr_mailchimp_user_id TO usr_mailing_list_provider_id";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

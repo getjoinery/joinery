@@ -46,11 +46,11 @@
 		echo 'Status: Active'.'<br />';
 	}
 
-	if($contact_type->get('ctt_mailchimp_list_id')){
-		echo 'Mailchimp integration active.  Mailchimp ID: '.htmlspecialchars($contact_type->get('ctt_mailchimp_list_id')).'<br />';
+	if($contact_type->get('ctt_provider_list_id')){
+		echo 'Mailing list integration active.  Remote List ID: '.htmlspecialchars($contact_type->get('ctt_provider_list_id')).'<br />';
 	}
 	else{
-		echo 'Mailchimp integration inactive.';
+		echo 'Mailing list integration inactive.';
 	}
 	echo '<br><br>';
 	?><p><?php echo $contact_type->get('ctt_description'); ?></p>

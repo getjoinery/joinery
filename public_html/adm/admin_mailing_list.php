@@ -117,19 +117,19 @@
 							</tr>
 							<?php endif; ?>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Mailchimp Integration</td>
+								<td class="p-1 text-800 fw-semi-bold">Mailing List Integration</td>
 								<td class="p-1">
-									<?php if($mailing_list->get('mlt_mailchimp_list_id')): ?>
+									<?php if($mailing_list->get('mlt_provider_list_id')): ?>
 										<span class="badge badge-subtle-success">Active</span>
 									<?php else: ?>
 										<span class="badge badge-subtle-secondary">Inactive</span>
 									<?php endif; ?>
 								</td>
 							</tr>
-							<?php if($mailing_list->get('mlt_mailchimp_list_id')): ?>
+							<?php if($mailing_list->get('mlt_provider_list_id')): ?>
 							<tr>
-								<td class="p-1 text-800 fw-semi-bold">Mailchimp List ID</td>
-								<td class="p-1 text-600"><code><?php echo htmlspecialchars($mailing_list->get('mlt_mailchimp_list_id')); ?></code></td>
+								<td class="p-1 text-800 fw-semi-bold">Remote List ID</td>
+								<td class="p-1 text-600"><code><?php echo htmlspecialchars($mailing_list->get('mlt_provider_list_id')); ?></code></td>
 							</tr>
 							<?php endif; ?>
 							<?php if($mailing_list->get('mlt_cot_contact_type_id')): ?>

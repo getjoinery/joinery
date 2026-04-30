@@ -697,6 +697,73 @@ function my_plugin_uninstall() {
 
 **Do not** include `DROP TABLE`, `DELETE FROM stg_settings`, or `DELETE FROM amu_admin_menus` in the hook — those are the system's job now. A hook that duplicates them isn't harmful (drops are `IF EXISTS`, deletes match exact keys the system already cleared), but the extra code rots.
 
+## Provider Abstractions
+
+The system has two pluggable provider abstractions for external services. Each follows the same shape: an interface, a service manager that auto-discovers concrete classes, and one provider class per third-party service. Adding a new provider is a single-file change — drop a class into the providers directory and the rest of the system picks it up.
+
+### Email providers (`EmailServiceProvider`)
+
+- Interface: `includes/EmailServiceProvider.php`
+- Manager: `EmailSender` (`includes/EmailSender.php`) — `EmailSender::getAvailableServices()`, `EmailSender::validateService()`
+- Implementations: `includes/email_providers/*Provider.php` (Mailgun, SMTP, …)
+
+### Mailing list providers (`MailingListProvider`)
+
+- Interface: `includes/mailing_list_providers/MailingListProvider.php`
+- Abstract base: `includes/mailing_list_providers/AbstractMailingListProvider.php` — concrete providers extend this rather than implementing the interface directly
+- Typed exception: `includes/mailing_list_providers/MailingListProviderException.php` — `isRetryable()` distinguishes transient (rate limit, 5xx, network) from permanent (list missing, credentials revoked) failures
+- Manager: `MailingListService` (`includes/MailingListService.php`) — `MailingListService::getProvider()`, `getAvailableServices()`, `getProviderSettings($key)`
+- Implementations: `includes/mailing_list_providers/*Provider.php` (MailChimp, …)
+
+**Required methods on the interface:**
+| Method | Purpose |
+|---|---|
+| `getKey()` / `getLabel()` | Identity for the `mailing_list_provider` setting and admin dropdown |
+| `getSettingsFields()` | Setting field definitions rendered dynamically by the admin UI |
+| `validateConfiguration()` | Cheap, no-network check that required settings are non-empty |
+| `validateApiConnection()` | Live API ping for the admin "Connection OK?" panel |
+| `subscribe()` / `unsubscribe()` | Idempotent operations on a remote list. Email is normalized to lowercase; throw `MailingListProviderException` on provider-side failures, `\InvalidArgumentException` on bad input |
+| `getSubscribers()` | Opaque-cursor pagination — caller passes `null` first, then echoes back `next_cursor` until it is `null`. Returns the canonical four-value `status` enum (`subscribed`, `unsubscribed`, `bounced`, `pending`) |
+
+**Non-universal methods** (e.g. `getLists()`) live on `AbstractMailingListProvider` with a default body that throws `\BadMethodCallException`. Providers override them when their API supports the operation; consumers wrap calls in `try/catch \BadMethodCallException`. Future non-universal additions (sequences, broadcasts, list stats) follow the same pattern, keeping additions non-breaking for existing provider classes.
+
+**Adding a new provider:**
+
+1. Create `includes/mailing_list_providers/MyServiceProvider.php`:
+   ```php
+   require_once(PathHelper::getComposerAutoloadPath());
+   require_once(PathHelper::getIncludePath('includes/mailing_list_providers/AbstractMailingListProvider.php'));
+
+   class MyServiceProvider extends AbstractMailingListProvider {
+       public static function getKey(): string { return 'myservice'; }
+       public static function getLabel(): string { return 'My Service'; }
+       // … implement the remaining required methods
+   }
+   ```
+2. Add any provider-specific settings to `settings.json` (factory defaults seed automatically).
+3. Pick the provider in admin settings (`/admin/admin_settings_email` → Mailing List Provider section) — the dropdown auto-populates from your new class.
+
+No other files need to change. The model layer (`MailingList::sync_subscribe()` / `sync_unsubscribe()`) and the sync utility (`utils/mailing_list_synchronize.php`) call the configured provider through `MailingListService::getProvider()`.
+
+**Canonical subscriber status enum.** `getSubscribers()` returns one of four `status` values regardless of provider. Each provider class maps its native vocabulary into this set:
+
+| Canonical | Meaning | MailChimp | ConvertKit | Listmonk |
+|---|---|---|---|---|
+| `subscribed` | Actively receives mail | `subscribed` | `active` | `enabled` |
+| `unsubscribed` | Opted out (incl. spam-complained) | `unsubscribed` | `cancelled`, `inactive`, `complained` | `disabled` |
+| `bounced` | Email invalid; provider stopped sending | `cleaned` | `bounced` | `blocklisted` |
+| `pending` | Double opt-in not yet confirmed | `pending` | (n/a) | (n/a) |
+
+`complained` (spam-marked) collapses into `unsubscribed` — for the platform's purposes the action taken on the local row is the same. Mapping is typically ~5 lines of `switch` per provider.
+
+**Out of scope (deliberate deferrals).** Three categories of methods are intentionally NOT on the interface today; they will be added when a concrete second provider needs them:
+
+- **Webhooks.** Real-time event notifications (`registerWebhook`, `verifyWebhookSignature`) are not part of the contract. When added they go on the required interface — every modern provider supports them.
+- **OAuth flows.** Some providers (HubSpot, Klaviyo) use OAuth2 instead of API keys. The current `getSettingsFields()` shape can't express an OAuth flow. When a provider needing OAuth is added, that provider class implements an additional method (e.g. `getOAuthAuthorizationUrl()`) outside the formal interface; the admin UI checks for its presence via `method_exists`.
+- **Programmatic list creation.** `createList()` is not on the interface. Current workflow: admins create lists in the provider's UI and enter the ID locally. Add programmatically only when a concrete use case appears.
+
+Non-universal future methods (sequences, broadcasts, list stats) get default throwing bodies on `AbstractMailingListProvider` so additions stay non-breaking for existing provider classes.
+
 ## Theme Development
 
 ### Theme Structure with Plugin Integration

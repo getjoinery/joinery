@@ -19,7 +19,7 @@ function admin_contact_type_edit_logic($get_vars, $post_vars) {
 
 	if($post_vars){
 
-		$editable_fields = array('ctt_description', 'ctt_mailchimp_list_id', 'ctt_name');
+		$editable_fields = array('ctt_description', 'ctt_provider_list_id', 'ctt_name');
 
 		foreach($editable_fields as $field) {
 			$contact_type->set($field, $post_vars[$field]);
