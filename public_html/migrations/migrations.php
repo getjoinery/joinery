@@ -1367,3 +1367,14 @@
 		$version_counter++;
 	}
 
+	// ========== Remove orphan Calendly settings (v121) ==========
+	// Calendly integration was removed (dead utility files and disabled callers).
+	// These four settings have no remaining UI or consumer; drop the orphan rows.
+	// No test condition — relies on hash-based one-shot protection.
+	$migration = array();
+	$migration['database_version'] = '121';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name IN ('calendly_organization_uri','calendly_organization_name','calendly_api_key','calendly_api_token')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
