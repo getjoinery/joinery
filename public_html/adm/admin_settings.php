@@ -53,27 +53,6 @@
 		?>
 		<script type="text/javascript">
 
-		function set_booking_choices(){
-			const bookingsActive = document.getElementById('bookings_active');
-			const value = bookingsActive ? bookingsActive.value : '';
-
-			const containers = [
-				'calendly_organization_uri_container',
-				'calendly_organization_name_container',
-				'calendly_api_key_container',
-				'calendly_api_token_container'
-			];
-
-			const display = (value == 0 || value == '') ? 'none' : 'block';
-
-			containers.forEach(function(containerId) {
-				const container = document.getElementById(containerId);
-				if (container) {
-					container.style.display = display;
-				}
-			});
-		}
-
 		function set_blog_choices(){
 			const blogActive = document.getElementById('blog_active');
 			const value = blogActive ? blogActive.value : '';
@@ -201,17 +180,11 @@
 
 		document.addEventListener('DOMContentLoaded', function() {
 
-			set_booking_choices();
 			set_blog_choices();
 			check_social_content(); // Check content before setting visibility
 			set_social_choices();
 			set_tracking_choices();
 			set_plugin_theme_choices();
-
-			const bookingsActive = document.getElementById('bookings_active');
-			if (bookingsActive) {
-				bookingsActive.addEventListener('change', set_booking_choices);
-			}
 
 			const blogActive = document.getElementById('blog_active');
 			if (blogActive) {
@@ -1077,22 +1050,6 @@
 	$formwriter->dropinput('bookings_active', 'Booking module active', [
 		'options' => $yes_no_options,
 		'value' => $settings->get_setting('bookings_active')
-	]);
-
-	$formwriter->textinput('calendly_organization_uri', 'Calendly Organization URI (Example: https://api.calendly.com/organizations/EHDBUSLIPJFCKXAE)', [
-		'value' => $settings->get_setting('calendly_organization_uri')
-	]);
-	$formwriter->textinput('calendly_organization_name', 'Calendly Organization Name (Example: test-organization)', [
-		'value' => $settings->get_setting('calendly_organization_name')
-	]);
-	$formwriter->textinput('calendly_api_key', 'Calendly API Key (Example: INEEMNBGGN53553SDFGBESNICRDW74)', [
-		'value' => $settings->get_setting('calendly_api_key')
-	]);
-	$formwriter->textbox('calendly_api_token', 'Calendly API Token (Example: eyJraWQiOiIxY2UxZT...ZWJjY)', [
-		'value' => $settings->get_setting('calendly_api_token'),
-		'rows' => 10,
-		'cols' => 80,
-		'htmlmode' => 'no'
 	]);
 
  	echo '<h3>Events Settings</h3>';

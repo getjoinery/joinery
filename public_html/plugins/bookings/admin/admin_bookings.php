@@ -46,11 +46,9 @@
 	);	
 
 	$headers = array("Booking", "Booking Time", "Status");
-	$altlinks = array('Sync with Calendly'=>'/utils/calendly_synchronize');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
-		'altlinks' => $altlinks,
 		'title' => 'Bookings',
 		//'search_on' => TRUE
 	);
