@@ -18,7 +18,7 @@ function admin_mailing_list_edit_logic($get_vars, $post_vars) {
 
 	if($post_vars){
 
-		$editable_fields = array('mlt_name', 'mlt_description', 'mlt_is_active', 'mlt_visibility', 'mlt_mailchimp_list_id', 'mlt_ctt_contact_type_id', 'mlt_emt_email_template_id', 'mlt_fil_file_id');
+		$editable_fields = array('mlt_name', 'mlt_description', 'mlt_is_active', 'mlt_visibility', 'mlt_provider_list_id', 'mlt_ctt_contact_type_id', 'mlt_emt_email_template_id', 'mlt_fil_file_id');
 		$integer_fields = array('mlt_ctt_contact_type_id', 'mlt_emt_email_template_id', 'mlt_fil_file_id');
 
 		foreach($editable_fields as $field) {

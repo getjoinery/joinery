@@ -176,76 +176,78 @@
 			'value' => $settings->get_setting('defaultemailname')
 		]);
 
-		// Mailchimp section with two-column layout and API validation
+		// Mailing List Provider section — dynamically rendered from MailingListService.
+		// Adding a new provider class auto-populates this block.
+		require_once(PathHelper::getIncludePath('includes/MailingListService.php'));
+		$mailing_list_services = MailingListService::getAvailableServices();
+		$current_mailing_list_provider = $settings->get_setting('mailing_list_provider');
+
 		echo '<div class="row">';
 		echo '<div class="col-md-6">';
-		echo '<h5>Mailchimp Settings</h5>';
-		$formwriter->textinput('mailchimp_api_key', 'Mailchimp API Key', [
-			'value' => $settings->get_setting('mailchimp_api_key')
+		echo '<h5>Mailing List Provider</h5>';
+		$formwriter->dropinput('mailing_list_provider', 'Provider', [
+			'options' => $mailing_list_services,
+			'value' => $current_mailing_list_provider,
+			'helptext' => 'Service used for syncing mailing list subscriptions',
+			'empty_option' => true,
 		]);
-		echo '</div>';
-		echo '<div class="col-md-6">';
-		echo '<h5>API Status</h5>';
-		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
-		
-		if ($run_validation) {
-			$mailchimp_api_key = $settings->get_setting('mailchimp_api_key');
-			if ($mailchimp_api_key && !empty(trim($mailchimp_api_key))) {
-			// Test Mailchimp API connection
-			$autoload_path = PathHelper::getComposerAutoloadPath();
-			if (file_exists($autoload_path)) {
-				try {
-					require_once($autoload_path);
-					
-					// Test the API key by getting lists (this validates the connection)
-					$mailchimp = new MailchimpAPI\Mailchimp($mailchimp_api_key);
-					$lists_response = $mailchimp->lists()->get(['count' => 10]);
-					$lists_data = $lists_response->deserialize();
-					
-					if (isset($lists_data->lists)) {
-						echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ API Key Valid</strong></div>';
-						
-						// Show lists
-						if (count($lists_data->lists) > 0) {
-							echo '<div style="font-size: 11px; color: #666; margin-bottom: 8px;"><strong>Available Lists:</strong></div>';
-							foreach ($lists_data->lists as $list) {
-								echo '<div style="font-size: 10px; color: #007bff; margin-bottom: 1px; padding: 1px 3px; background: white; border-radius: 2px;">';
-								echo htmlspecialchars($list->name) . ' <span style="color: #666;">(' . $list->stats->member_count . ' members)</span>';
-								echo '</div>';
-							}
-						} else {
-							echo '<div style="color: #ffc107; font-size: 10px; margin-top: 10px;">No lists found in account</div>';
-						}
-						
-						// Show total stats if available
-						if (isset($lists_data->total_items)) {
-							echo '<div style="font-size: 10px; color: #666; margin-top: 8px; padding-top: 5px; border-top: 1px solid #ddd;">Total lists: ' . $lists_data->total_items . '</div>';
-						}
-						
-					} else {
-						echo '<div style="color: #dc3545;"><strong>✗ Invalid API Response</strong></div>';
-						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">API key may be invalid or expired</div>';
-					}
-					
-				} catch (Exception $e) {
-					echo '<div style="color: #dc3545;"><strong>✗ API Connection Failed</strong></div>';
-					echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Error: ' . htmlspecialchars($e->getMessage()) . '</div>';
+
+		// Render the configured provider's setting fields
+		if ($current_mailing_list_provider) {
+			$provider_fields = MailingListService::getProviderSettings($current_mailing_list_provider);
+			foreach ($provider_fields as $field) {
+				$opts = ['value' => $settings->get_setting($field['key'])];
+				if (!empty($field['helptext'])) {
+					$opts['helptext'] = $field['helptext'];
 				}
-			} else {
-				echo '<div style="color: #ffc107;"><strong>⚠ Composer Not Configured</strong></div>';
-				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Configure Composer path first to test API</div>';
+				$type = $field['type'] ?? 'text';
+				if ($type === 'password') {
+					$formwriter->passwordinput($field['key'], $field['label'], $opts);
+				} else if ($type === 'textarea') {
+					$formwriter->textarea($field['key'], $field['label'], $opts);
+				} else {
+					$formwriter->textinput($field['key'], $field['label'], $opts);
+				}
 			}
+		}
+		echo '</div>';
+
+		echo '<div class="col-md-6">';
+		echo '<h5>Connection Status</h5>';
+		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
+
+		if ($run_validation) {
+			$provider_instance = $current_mailing_list_provider
+				? MailingListService::getProvider($current_mailing_list_provider)
+				: null;
+			if (!$provider_instance) {
+				echo '<div style="color: #666; text-align: center; padding: 40px 10px;">No mailing list provider selected</div>';
 			} else {
-				echo '<div style="color: #666; text-align: center; padding: 40px 10px;">Enter API key to validate connection</div>';
+				$result = $provider_instance->validateApiConnection();
+				if (!empty($result['success'])) {
+					echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>&#10003; ' . htmlspecialchars($result['label']) . '</strong></div>';
+					if (!empty($result['details']) && is_array($result['details'])) {
+						echo '<div style="font-size: 11px; color: #666; margin-bottom: 8px;"><strong>Details:</strong></div>';
+						foreach ($result['details'] as $key => $value) {
+							echo '<div style="font-size: 10px; color: #007bff; margin-bottom: 1px; padding: 1px 3px; background: white; border-radius: 2px;">';
+							echo htmlspecialchars((string)$key) . ': <span style="color: #666;">' . htmlspecialchars((string)$value) . '</span>';
+							echo '</div>';
+						}
+					}
+				} else {
+					echo '<div style="color: #dc3545;"><strong>&#10007; ' . htmlspecialchars($result['label'] ?? 'Connection Failed') . '</strong></div>';
+					if (!empty($result['error'])) {
+						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">' . htmlspecialchars($result['error']) . '</div>';
+					}
+				}
 			}
 		} else {
-			// Show placeholder with "Run Validation" button
 			echo '<div style="text-align: center; padding: 40px;">';
 			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
 			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
 			echo '</div>';
 		}
-		
+
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';

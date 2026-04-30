@@ -13,12 +13,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-
-$autoload_path = PathHelper::getComposerAutoloadPath();
-if (file_exists($autoload_path)) {
-    require_once($autoload_path);
-}
-use MailchimpAPI\Mailchimp;
+require_once(PathHelper::getIncludePath('includes/MailingListService.php'));
 
 class MailingListException extends SystemBaseException {}
 class DisplayableMailingListException extends MailingListException implements DisplayableErrorMessage {}
@@ -57,7 +52,7 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	    'mlt_mailing_list_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'mlt_name' => array('type'=>'varchar(255)', 'required'=>true),
 	    'mlt_description' => array('type'=>'varchar(255)'),
-	    'mlt_mailchimp_list_id' => array('type'=>'varchar(255)'),
+	    'mlt_provider_list_id' => array('type'=>'varchar(255)'),
 	    'mlt_visibility' => array('type'=>'int2', 'default'=>0),
 	    'mlt_is_active' => array('type'=>'bool'),
 	    'mlt_link' => array('type'=>'varchar(255)', 'required'=>true),
@@ -137,10 +132,7 @@ function get_subscribed_users($return='object'){
 				$registrant->save();
 				$registrant->load();
 
-				$status = true;
-				if($this->get('mlt_mailchimp_list_id')){
-					$status = $this->subscribe_to_mailchimp_list($usr_user_id);
-				}				
+				$status = $this->sync_subscribe($usr_user_id);
 			}
 			else{
 				//IF USER IS ALREADY REGISTERED
@@ -172,14 +164,11 @@ function get_subscribed_users($return='object'){
 				);
 			}
 			
-			$status = true;
-			if($this->get('mlt_mailchimp_list_id')){
-				$status = $this->subscribe_to_mailchimp_list($usr_user_id);
-			}
+			$status = $this->sync_subscribe($usr_user_id);
 		}
-		return $status;			
+		return $status;
 	}
-	
+
 	function remove_registrant($usr_user_id){
 	
 		if(!$registrant = $this->is_user_in_list($usr_user_id)){
@@ -197,100 +186,70 @@ function get_subscribed_users($return='object'){
 			$registrant->set('mlr_change_time', 'now()');
 			$registrant->save();
 			$registrant->soft_delete();
-			$status = true;
-			if($this->get('mlt_mailchimp_list_id')){
-				$status = $this->unsubscribe_from_mailchimp_list($usr_user_id);
-			}
-			
-			return $status;	
+			$status = $this->sync_unsubscribe($usr_user_id);
+
+			return $status;
 		}
-	}	
+	}
 	
-	function subscribe_to_mailchimp_list($user_id) {
-		$user = new User($user_id, TRUE);
-		
-		if(!$this->get('mlt_mailchimp_list_id')){
-			throw new SystemDisplayableError('There is no mailchimp list id for this list:'. $this->get('mlt_name'));
-			exit;
+	/**
+	 * Push a local subscribe to the configured remote provider.
+	 * No-op (returns true) if no provider is configured or the list has no
+	 * remote ID. Provider exceptions are logged and turned into a bool so
+	 * existing callers (add_registrant) keep their contract.
+	 */
+	function sync_subscribe($usr_user_id) {
+		$provider = MailingListService::getProvider();
+		if (!$provider || !$this->get('mlt_provider_list_id')) {
+			return true;
 		}
-
-		//NOW ADD THE USER TO MAILCHIMP
+		$user = new User($usr_user_id, TRUE);
 		try {
-		$settings = Globalvars::get_instance();
-			if($settings->get_setting('mailchimp_api_key')){
-				$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
-				
-				//IF WE HAVE A MAILCHIMP ID STORED, THEN LOOK THE USER UP, DON'T ADD HIM
-				$user_to_update = NULL;
-				if($user->get('usr_mailchimp_user_id')){
-					$user_to_update = md5($user->get('usr_email'));
-				}
-
-				$merge_values = [
-					"FNAME" => $user->get('usr_first_name'),
-					"LNAME" => $user->get('usr_last_name'),
-					"MMERGE3" => 'Yes',
-				];
-
-				$post_params = [
-					"email_address" => $user->get('usr_email'),
-					"status" => "subscribed", 
-					"email_type" => "html", 
-					"merge_fields" => $merge_values,
-				];
-		
-				$return = $mailchimp 
-					->lists($this->get('mlt_mailchimp_list_id'))
-					->members($user_to_update)
-					->post($post_params);
-
-				$status = $return->deserialize();
-				
-				$mailchimp_user_id = $status->id;
-				$user->set('usr_mailchimp_user_id', $mailchimp_user_id);
-				$user->save();
-				
-				return $status;
-			}
-		} 
-		catch (Exception $e) {
-			return FALSE;
+			$subscriber_id = $provider->subscribe(
+				$this->get('mlt_provider_list_id'),
+				$user->get('usr_email'),
+				$user->get('usr_first_name'),
+				$user->get('usr_last_name')
+			);
+			$user->set('usr_mailing_list_provider_id', $subscriber_id);
+			$user->save();
+			return true;
+		} catch (MailingListProviderException $e) {
+			error_log('Mailing list subscribe failed (retryable=' .
+				($e->isRetryable() ? 'yes' : 'no') . '): ' . $e->getMessage());
+			return false;
+		} catch (\InvalidArgumentException $e) {
+			error_log('Mailing list subscribe rejected bad input: ' . $e->getMessage());
+			return false;
 		}
-		return TRUE;
+	}
 
-	}	
-
-	function unsubscribe_from_mailchimp_list($user_id) {
-		
-		$user = new User($user_id, TRUE);
-		
-		if(!$this->get('mlt_mailchimp_list_id')){
-			throw new SystemDisplayableError('There is no mailchimp list id for this list:'. $this->get('mlt_name'));
-			exit;
+	/**
+	 * Push a local unsubscribe to the configured remote provider.
+	 * No-op (returns true) if no provider is configured or the list has no
+	 * remote ID.
+	 */
+	function sync_unsubscribe($usr_user_id) {
+		$provider = MailingListService::getProvider();
+		if (!$provider || !$this->get('mlt_provider_list_id')) {
+			return true;
 		}
-
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting('mailchimp_api_key')){
-			$mailchimp = new Mailchimp($settings->get_setting('mailchimp_api_key'));
-
-			$post_params = [
-				"status" => "unsubscribed", 
-			];
-
-			try {
-				$return = $mailchimp 
-					->lists($this->get('mlt_mailchimp_list_id'))
-					->members(md5($user->get('usr_email')))
-					->patch($post_params);
-			} catch (Exception $e) {
-				throw new SystemDisplayablePermanentError(
-				'There was an error and we were unable to update your list unsubscribe.');
-				exit();	
-			}			
-
-			return TRUE;
+		$user = new User($usr_user_id, TRUE);
+		try {
+			$provider->unsubscribe(
+				$this->get('mlt_provider_list_id'),
+				$user->get('usr_email')
+			);
+			return true;
+		} catch (MailingListProviderException $e) {
+			error_log('Mailing list unsubscribe failed (retryable=' .
+				($e->isRetryable() ? 'yes' : 'no') . '): ' . $e->getMessage());
+			return false;
+		} catch (\InvalidArgumentException $e) {
+			error_log('Mailing list unsubscribe rejected bad input: ' . $e->getMessage());
+			return false;
 		}
-	}	
+	}
 	
 	function prepare() {
 		if ($this->data === NULL) {

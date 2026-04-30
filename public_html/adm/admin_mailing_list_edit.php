@@ -90,7 +90,9 @@
 		'empty_option' => 'No file included'
 	]);
 
-	$formwriter->textinput('mlt_mailchimp_list_id', 'Mailchimp List ID');
+	$formwriter->textinput('mlt_provider_list_id', 'Remote List ID', [
+		'helptext' => 'Identifier in your mailing list provider (e.g., MailChimp audience ID).'
+	]);
 
 	// Tier Gating
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
