@@ -87,6 +87,16 @@
 		$response['required_themes'] = get_system_required_themes($live_directory . '/theme');
 		$response['required_plugins'] = get_system_required_plugins($live_directory . '/plugins');
 
+		// Stock manifest: every stock plugin/theme this source has published as a
+		// tar.gz. Prod uses this list as the source of truth for which archives to
+		// download — independent of prod's current state — so renames and additions
+		// flow through cleanly. See specs/upgrade_pipeline_rename_gap.md.
+		// publish_upgrade.php writes archives to {site_dir}/static_files/
+		// (sibling of public_html, not under it).
+		$static_files_dir = $full_site_dir . '/static_files';
+		$response['stock_plugins'] = get_published_stock_archives($static_files_dir . '/plugins', 'plugins');
+		$response['stock_themes']  = get_published_stock_archives($static_files_dir . '/themes',  'themes');
+
 		header("Content-Type: application/json");
 		http_response_code(200);
 
@@ -437,9 +447,32 @@
 			}
 		}
 
-		// Determine which themes/plugins to download based on what's installed
-		$themes_to_download = get_installed_stock_themes($live_directory . '/theme');
-		$plugins_to_download = get_installed_plugins();
+		// Determine which themes/plugins to download.
+		//
+		// Source-of-truth is the source's stock manifest (stock_themes /
+		// stock_plugins in the ?serve-upgrade response) — see
+		// specs/upgrade_pipeline_rename_gap.md. Each entry has its own URL,
+		// so a rename or addition on the source side flows through cleanly.
+		//
+		// If the source predates the manifest (older Joinery), fall back to
+		// the legacy "ask source for whatever prod has installed" behavior.
+		$source_stock_themes  = is_array($decode_response['stock_themes']  ?? null) ? $decode_response['stock_themes']  : null;
+		$source_stock_plugins = is_array($decode_response['stock_plugins'] ?? null) ? $decode_response['stock_plugins'] : null;
+
+		if ($source_stock_themes !== null && $source_stock_plugins !== null) {
+			// Manifest-driven: download exactly what source advertises.
+			$themes_to_download  = array_column($source_stock_themes,  'name');
+			$plugins_to_download = array_column($source_stock_plugins, 'name');
+			// Map name → archive URL for the download loop.
+			$theme_url_by_name  = array_column($source_stock_themes,  'url', 'name');
+			$plugin_url_by_name = array_column($source_stock_plugins, 'url', 'name');
+		} else {
+			// Legacy fallback: pre-manifest source server.
+			$themes_to_download  = get_installed_stock_themes($live_directory . '/theme');
+			$plugins_to_download = get_installed_plugins();
+			$theme_url_by_name  = [];
+			$plugin_url_by_name = [];
+		}
 
 		// Get detailed info for status display
 		$all_themes_info = get_all_themes_info($live_directory . '/theme');
@@ -770,9 +803,10 @@
 			$skipped_items = [];
 			$downloaded_count = 0;
 
-			// Download themes
+			// Download themes — prefer manifest URL, fall back to theme_endpoint
 			foreach ($themes_to_download as $theme_name) {
-				$theme_url = $theme_endpoint . '?download=' . urlencode($theme_name);
+				$theme_url = $theme_url_by_name[$theme_name]
+					?? ($theme_endpoint . '?download=' . urlencode($theme_name));
 				upgrade_echo("Downloading theme: {$theme_name}...");
 				flush();
 
@@ -786,9 +820,10 @@
 				}
 			}
 
-			// Download plugins
+			// Download plugins — prefer manifest URL, fall back to theme_endpoint
 			foreach ($plugins_to_download as $plugin_name) {
-				$plugin_url = $theme_endpoint . '?download=' . urlencode($plugin_name) . '&type=plugin';
+				$plugin_url = $plugin_url_by_name[$plugin_name]
+					?? ($theme_endpoint . '?download=' . urlencode($plugin_name) . '&type=plugin');
 				upgrade_echo("Downloading plugin: {$plugin_name}...");
 				flush();
 
@@ -1307,6 +1342,56 @@
 				echo 'To retry: run update_database from the admin utilities page.<br>';
 				echo '</div>';
 			}
+
+			// Stale reconciliation — see specs/upgrade_pipeline_rename_gap.md.
+			// Stock plugins/themes that prod has but the source manifest no longer
+			// advertises are flagged stale (preserved on disk and in DB; admin can
+			// review). Skipped if source predates the manifest.
+			if ($source_stock_plugins !== null && $source_stock_themes !== null) {
+				try {
+					$source_plugin_names = array_flip(array_column($source_stock_plugins, 'name'));
+					$source_theme_names  = array_flip(array_column($source_stock_themes,  'name'));
+					$plugin_marked = 0;
+					$theme_marked  = 0;
+
+					$q = $dblink->prepare(
+						"UPDATE plg_plugins
+						 SET plg_status = 'stale'
+						 WHERE plg_is_stock = true
+						   AND plg_name <> ALL(?)
+						   AND plg_status <> 'stale'"
+					);
+					// Pass a Postgres array literal ({a,b,c}) so the <> ALL filter works.
+					$plugin_array_literal = '{' . implode(',', array_map(function($n){
+						return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
+					}, array_keys($source_plugin_names))) . '}';
+					$q->execute([$plugin_array_literal]);
+					$plugin_marked = $q->rowCount();
+
+					$q = $dblink->prepare(
+						"UPDATE thm_themes
+						 SET thm_status = 'stale'
+						 WHERE thm_is_stock = true
+						   AND thm_name <> ALL(?)
+						   AND thm_status <> 'stale'"
+					);
+					$theme_array_literal = '{' . implode(',', array_map(function($n){
+						return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
+					}, array_keys($source_theme_names))) . '}';
+					$q->execute([$theme_array_literal]);
+					$theme_marked = $q->rowCount();
+
+					if ($plugin_marked > 0 || $theme_marked > 0) {
+						upgrade_echo("⚠ Stale: {$plugin_marked} plugin(s), {$theme_marked} theme(s) no longer in source manifest — preserved and flagged for admin review<br>");
+					} else if ($verbose) {
+						upgrade_echo("✓ No stale plugins/themes detected<br>");
+					}
+				} catch (\Throwable $e) {
+					echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
+					echo '<strong>⚠ Warning:</strong> Stale reconciliation failed (non-fatal): ' . htmlspecialchars($e->getMessage()) . '<br>';
+					echo '</div>';
+				}
+			}
 		}
 
 		if($dry_run){
@@ -1328,6 +1413,19 @@
 			echo '</div>';
 		}
 		else{
+			// Flush static page cache so new code's renders aren't masked by
+			// pre-deploy cached pages. See specs/upgrade_pipeline_rename_gap.md.
+			$cache_dir = $full_site_dir . '/cache/static_pages';
+			if (is_dir($cache_dir)) {
+				$cleared = 0;
+				exec('find ' . escapeshellarg($cache_dir) . ' -mindepth 1 -delete 2>&1', $cache_out, $cache_exit);
+				if ($cache_exit === 0) {
+					if ($verbose) upgrade_echo("✓ Static page cache flushed<br>");
+				} else {
+					upgrade_echo("⚠ Static page cache flush failed (non-fatal)<br>");
+				}
+			}
+
 			upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
 			upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 		}
@@ -1564,10 +1662,48 @@
 	}
 
 	/**
+	 * Enumerate published stock-archive tarballs for a kind ('plugins'|'themes').
+	 * Reads $archives_dir for files matching {name}-{version}.tar.gz and returns
+	 * one entry per archive: ['name' => ..., 'version' => ..., 'url' => ...].
+	 *
+	 * Used by the ?serve-upgrade response to advertise which stock plugins/themes
+	 * the source has published, so prod can download the full set without first
+	 * consulting its own state. See specs/upgrade_pipeline_rename_gap.md.
+	 */
+	function get_published_stock_archives($archives_dir, $url_subpath) {
+		$out = [];
+		if (!is_dir($archives_dir)) return $out;
+
+		foreach (glob($archives_dir . '/*.tar.gz') ?: [] as $path) {
+			$basename = basename($path, '.tar.gz');
+			// Filename pattern is {name}-{version}; version may contain dots.
+			// Split on the LAST hyphen so multi-word names (e.g. dns_filtering)
+			// keep their underscores and version captures everything after the
+			// final hyphen.
+			$pos = strrpos($basename, '-');
+			if ($pos === false) continue;
+			$name    = substr($basename, 0, $pos);
+			$version = substr($basename, $pos + 1);
+			if ($name === '' || $version === '') continue;
+
+			$out[] = [
+				'name'    => $name,
+				'version' => $version,
+				'url'     => LibraryFunctions::get_absolute_url('/static_files/' . $url_subpath . '/' . basename($path)),
+			];
+		}
+		return $out;
+	}
+
+	/**
 	 * Get list of plugins to attempt to refresh during upgrade — every plugin
 	 * with a plg_plugins row, regardless of stock/custom. The download loop
 	 * tries each one; stock plugins succeed via the upgrade endpoint, custom
 	 * plugins 404 and are skipped via the existing warning path.
+	 *
+	 * NOTE: Superseded by source-side stock manifest (stock_plugins in the
+	 * ?serve-upgrade response). Kept for backward compatibility when prod
+	 * upgrades against a source server that predates the manifest.
 	 */
 	function get_installed_plugins() {
 		try {
