@@ -1,0 +1,32 @@
+{
+    "name": "DNS Filtering",
+    "version": "1.0.0",
+    "description": "Self-hosted DNS filtering service with per-device filtering profiles",
+    "author": "System Developer",
+    "is_stock": true,
+    "requires": {
+        "php": ">=8.0",
+        "extensions": []
+    },
+    "settings": [
+        { "name": "dns_filtering_dns_host", "default": "" },
+        { "name": "dns_filtering_dns_internal_url", "default": "" },
+        { "name": "dns_filtering_dns_api_key", "default": "" },
+        { "name": "dns_filtering_dns_server_ip", "default": "" },
+        { "name": "dns_filtering_dns_secondary_internal_url", "default": "" },
+        { "name": "dns_filtering_dns_secondary_api_key", "default": "" },
+        { "name": "dns_filtering_dns_secondary_server_ip", "default": "" },
+        { "name": "dns_filtering_blocklist_version", "default": "" }
+    ],
+    "profileMenu": [
+        {
+            "slug": "dns-filtering",
+            "title": "Filtering",
+            "url": "/profile/dns_filtering",
+            "icon": "shield",
+            "visibility": "in",
+            "permission": 1,
+            "order": 75
+        }
+    ]
+}
