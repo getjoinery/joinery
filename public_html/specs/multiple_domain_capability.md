@@ -1,316 +1,370 @@
-# Specification: Multiple Domain Capability
+# Specification: Multiple Domain Capability — Sister Brand Deployment
 
 ## Overview
-Joinery is currently a single-branded, single-domain platform: one deployment serves one brand on one domain, with one theme. This spec makes the platform natively multi-brand — one deployment can serve many domains, each with its own theme, copy, and pricing, while sharing a single database, single user pool, and single billing pipeline.
 
-**Guiding principle:** this is platform infrastructure, not a scrolldaddy feature. The brand abstraction is generic. ScrollDaddy becomes the first brand (`brand_id=1`); any future product is another brand.
+Joinery is currently a single-branded, single-domain platform: one deployment serves one brand on one domain. To launch a second brand (NetworkSentry: a B2B-flavored DNS-filtering product, working name; domain TBD) under a different visual identity, copy, email voice, and pricing — without forking the codebase or running a copy-paste plugin — this spec defines the deployment pattern and the supporting refactor work.
 
-## Why now
-Three separate pressures converge:
-1. **Product:** ScrollDaddy's underlying service has multiple distinct markets (consumer digital-addiction, schools, law firms) that need different brands, pricing, and marketing angles.
-2. **Architecture:** Doing it later means retrofitting brand-context plumbing into every cross-cutting system. Doing the groundwork now is much cheaper.
-3. **Platform:** Joinery should support multi-site natively — other future clients on docker-prod may want the same capability.
+**The pattern:** stand up the second brand as a **parallel Joinery deployment**, sharing only the DNS resolver. Each brand is a complete, independent Joinery instance — its own DB, sessions, users, devices, admin, email — running the same codebase.
 
-## Core architectural decision
-**Option B from the multi-brand analysis: domain-dispatching multi-tenant Joinery.** One deployment, one DB, many domains. Rejected alternatives:
+**Guiding principle:** the shared concern is the DNS resolver (the actual filtering service that answers queries from devices). Everything else is independent. Optional sharing (Stripe account with brand metadata) is opt-in convenience, not architectural coupling.
 
-- **Option A (thin marketing fronts + shared backend API):** faster to ship for one extra brand, but duplicates infrastructure for each additional brand and doesn't generalize into a platform capability.
-- **Option C (separate deployments + Postgres replication):** pushes complexity into the infrastructure layer, fragments admin and analytics, and doesn't help other Joinery clients.
+## Why this approach
 
-Option B is more work upfront but is the only option that produces a reusable platform capability.
+A "domain-dispatching multi-tenant Joinery" — one deployment, one DB, many domains — was designed in detail and rejected late in the scoping pass. The honest reason: the unification benefits (single user pool, cross-brand admin, one Stripe customer per human) are theoretical for two brands with disjoint audiences. ScrollDaddy users and NetworkSentry users overlap by approximately zero. Paying the cost of multi-brand abstractions (BrandContext propagation, brand-scoped queries on every table, brand-aware settings, brand-aware email lookup, scheduled-task brand modes, admin brand-awareness) for benefits nobody uses is a bad trade. The "How we got here" note at the bottom captures the rejected design and why it was rejected; it's there in case the trade-off ever inverts (a real B2B brand with shared customers, or 5+ brands sharing real data).
 
----
+Separate deployments are also the path your operations already use — `empoweredhealthtn` is deployed exactly this way. Pattern is established. NetworkSentry is the second instance of an existing pattern, not a new architecture.
 
-## Product decisions
+## What's shared vs. separate
 
-| # | Question | Answer |
+| Concern | Shared | Separate per brand |
 |---|---|---|
-| 1 | Users scoped per brand or unified? | **Unified.** Email uniqueness stays global; one user record represents one human regardless of how many brands they touch. `usr_brd_brand_id` records the user's signup source / primary brand affiliation — informational, not a partition key. Brand isolation lives in the brand-scoped data tables (devices, subscriptions, blocks, etc.), not in the user table. |
-| 2 | Admin staff cross-brand? | Admin permission is global, exactly as today. The active brand context per request comes from `HTTP_HOST`; admins manage whichever brand they're looking at. Per-brand admin restrictions can layer on later if needed; not required for launch. |
-| 3 | Billing | **One Stripe account** across all brands. Stripe customer objects carry `brand` metadata. Invoice branding (logo, from-address, customer portal URL) varies per brand. |
-| 4 | Org-level / B2B accounts | **Out of scope for this spec.** A future B2B brand (schools, law firms) needing shared billing and an internal admin role will get its own org-layer spec when there's an actual B2B sales pipeline. Until then, every user is an individual account, even on "B2B-flavored" brand variants. |
-| 5 | Feature divergence between brands | **Same features in v1.** Divergence mechanism: per-brand plugin activation + per-brand settings overrides. No feature-flag engine. |
+| DNS resolver service (the actual filtering daemons) | ✓ | |
+| Block-list source / category data the resolver uses | ✓ | |
+| Codebase (same git repo, same tag) | ✓ | |
+| Stripe account (with brand metadata on customers/subs) | ✓ (optional, recommended) | |
+| Database (resolver reads from each, see "Resolver coordination") | | ✓ |
+| `usr_users` table | | ✓ |
+| Sessions / cookies / login | | ✓ |
+| Admin (`/adm/`) | | ✓ |
+| Devices, blocks, scheduled blocks, query logs | | ✓ |
+| Subscriptions, orders, coupons | | ✓ |
+| Mailgun sender domain (DKIM/SPF) | | ✓ |
+| Email templates | | ✓ |
+| Marketing pages, theme, copy | | ✓ |
+| Apache vhost, SSL cert | | ✓ |
+| Container | | ✓ |
+
+The only platform-level shared thing is the DNS resolver, which is already a separate service called via API.
 
 ---
 
-## Open decisions (resolve before implementation)
+## Prerequisite refactor: plugin / theme decoupling
 
-### Email handling across brands
+The current `plugins/scrolldaddy/` plugin bundles two unrelated concerns into one directory: the DNS-filtering product (functional code) and the ScrollDaddy brand presentation (theme files). This entanglement is the source of the "deploy a second brand looks like copy the entire plugin" problem. It must be unwound before a sister brand can stand up cleanly.
 
-Two independent questions, either or both of which may need to be answered "yes":
+This refactor stands on its own merit even single-brand — it produces correctly-shaped plugin and theme directories — and is a **prerequisite** for sister-brand deployment.
 
-**Decision A — Is email *identity* brand-scoped?**
-- *Unified (current spec):* email uniqueness is global. One human → one user row, regardless of how many brands. Sign-in works on any brand. Friction case: a user signing up on brand 2 with an email they already used on brand 1 sees an "account already exists" message and may not realize why.
-- *Brand-scoped:* email uniqueness is `(brand_id, email)`. Same person on two brands gets two user rows, possibly two passwords. Cleaner per-brand isolation; some users would prefer it; introduces a constraint change that **must** land before public launch (it's a breaking change otherwise).
+### What stays in the plugin (functional, brand-neutral, shared)
 
-**Decision B — Is email *content/delivery* brand-aware beyond settings?**
-- *Settings-level (current spec):* per-brand from-address, logo URL, support address, etc., live in `brd_config`. Templates and delivery config (Mailgun domain, SPF/DKIM, inbound routing) are global.
-- *Full per-brand:* per-brand email templates, per-brand sender domains with their own DKIM/SPF, per-brand inbound email routing, possibly per-brand Mailgun configurations. Significant additional surface area; only needed if brands have meaningfully different voice/copy or deliverability needs.
+- `data/` — `devices_class.php`, `scheduled_blocks_class.php`, etc.
+- `logic/` — `devices_logic.php`, `scheduled_block_edit_logic.php`, etc.
+- `ajax/` — `block_rule_add.php`, `scan_url.php`, `purge_querylog.php`, etc.
+- `tasks/`, `migrations/`, `includes/`
+- `settings_form.php`
+- `views/profile/*.php` — the **default** versions of the dashboard views (devices, querylog, device_edit, scheduled_block_edit, activation, mobileconfig, etc.). These resolve through the theme chain, so any active theme can override them.
+- Plugin-functional JS (any JS that talks to the plugin's AJAX endpoints).
 
-The spec as written assumes "unified identity, settings-level content branding" (the lower-cost combination). If either decision flips, the corresponding sections need revision before Phase 0 starts:
-- Flipping A: restore the email uniqueness constraint change to Phase 0; add cross-brand login UX to Phase 1; add the `usr_brd_brand_id` to relevant unique indexes.
-- Flipping B: pull "per-brand email template engine" out of Out-of-Scope and design the template/delivery layer; likely a Phase 2.5 or its own spec.
+### What moves out to a theme (presentation, brand-specific)
+
+- `theme.json` (the existing one) → moves to `theme/scrolldaddy/theme.json`. Drop `provides_theme: true` from `plugin.json`.
+- `assets/css/scrolldaddy-plugin.css`, `assets/css/style.css`, `assets/js/scrolldaddy-plugin.js`, all branded `assets/img/*` (hero, brand, testimonial, project, blog, portfolio, etc.) → `theme/scrolldaddy/assets/`.
+- Marketing & site-chrome views: `views/index.php`, `views/pricing.php`, `views/login.php`, `views/cart.php`, `views/cart_confirm.php`, `views/page.php`, `views/items.php`, `views/product.php`, `views/logout.php`, `views/forms_example.php` → `theme/scrolldaddy/views/`.
+- `tier_features.json` (brand copy for tier descriptions) → moves to the theme, or to per-deployment `stg_settings`. Final location TBD during refactor; key point is it stops living in the plugin.
+
+### Brand-neutralizing the default profile views
+
+The 14 profile views currently in `plugins/scrolldaddy/views/profile/` render with ScrollDaddy-flavored copy. They become **brand-neutral defaults**: generic functional language ("Your devices", "Filtering schedule"), no "ScrollDaddy" strings. Each brand's theme then overrides any view it wants to stylize for brand voice.
+
+### Hard-coded brand strings audit
+
+Part of the decoupling work is a sweep for hard-coded brand strings:
+- Literal `"scrolldaddy"`, `"ScrollDaddy"`, `"scrolldaddy.app"` in views, CSS, JS, email templates, copy
+- Hard-coded asset paths starting with `/plugins/scrolldaddy/assets/`
+- Site-name / company-name strings in HTML titles, meta tags, footer
+- Email signatures, support-address strings
+
+Each must either move to `theme/scrolldaddy/` (if it's brand-specific copy) or come from a per-deployment setting (if the same string would differ per brand). A grep audit on the plugin and any cross-cutting code is part of this phase.
+
+### Plugin rename (just do it now)
+
+`plugins/scrolldaddy/` → `plugins/dns_filtering/`. Matches the platform-generality principle and stops new contributors from assuming the plugin is brand-coupled. With no production users yet, there are no bookmarks to redirect from, so this is a flat rename:
+- Directory rename
+- `plugin.json` `name` field
+- Profile menu URL slugs: `/profile/scrolldaddy` → `/profile/dns_filtering`
+- All `require_once(PathHelper::getIncludePath('plugins/scrolldaddy/...'))` references
+- Plugin activation rows on the existing deployment (one UPDATE)
+- Update any settings in `stg_settings` that reference the plugin path
+
+No redirects required. The pre-launch window is the right time to do this.
+
+### Verification gate
+
+After the refactor, ScrollDaddy must render byte-identically to its pre-refactor state. The refactor is purely a relocation of files; it should not be a UI change. Visual regression on the marketing pages and the profile dashboard is the gate.
 
 ---
 
-## Data model
+## User and device collision handling
 
-### New tables
+**Pre-launch context:** there are no production users yet. ScrollDaddy is pre-launch, and NetworkSentry will stand up before either brand has signed-up customers. This relaxes constraints throughout the runbook — the spec does not need to preserve any existing UID, user, or session state.
 
-**`brd_brands`** — the central brand/domain record
-- `brd_brand_id` — int4 serial PK
-- `brd_code` — varchar(32), unique (stable machine identifier, e.g., `scrolldaddy`, `schoolfilter`)
-- `brd_display_name` — varchar(128) (e.g., "ScrollDaddy", "SchoolFilter")
-- `brd_primary_domain` — varchar(255), unique (e.g., `scrolldaddy.app`)
-- `brd_domain_aliases` — json (array of additional domains that resolve to this brand)
-- `brd_theme` — varchar(64) (theme slug — overrides global `theme_template`)
-- `brd_config` — json (per-brand settings overrides: email sender, logo URL, ToS URL, stripe price IDs, etc.)
-- `brd_status` — varchar(16) — `active` | `inactive` | `archived`
-- `brd_created_time`, `brd_modified_time`, `brd_delete_time`
+Because each brand is a separate deployment with a separate database, **user-table collisions don't exist** at the platform level. The same human signing up on both brands (post-launch, once they have customers) creates two `usr_users` rows in two different databases. They have separate passwords, separate profiles, separate session cookies. This is acceptable; user overlap is expected to be approximately zero.
 
-### Modifications to existing tables
+### Device UID collisions
 
-- `usr_users` → add `usr_brd_brand_id` (int4, **nullable** — records signup source / primary brand). Email uniqueness stays global; this column is informational, not part of any unique constraint.
-- `stg_settings` → add `stg_brd_brand_id` (int4, nullable). Null = global default; non-null = brand override. Lookup resolves brand-first, global-fallback.
-- `abe_experiments` (from marketing infra spec) → `abe_brd_brand_id` nullable. Already specified.
-- `vse_visitor_events` → add `vse_brd_brand_id` (int4, nullable). Set from `BrandContext` at write time.
-- `ccd_coupon_codes` → add `ccd_brd_brand_id` (int4, nullable). Null = global coupon; non-null = brand-scoped.
-- `sdd_devices` → add `sdd_brd_brand_id` (int4, nullable). Stamped from `BrandContext` at create time. Determines which brand "owns" the device for admin and billing display.
-- `plg_plugins` → per-brand activation deferred until divergence work begins. `plg_status` stays global.
+Device resolver UIDs are generated as `bin2hex(random_bytes(16))` (`plugins/scrolldaddy/data/devices_class.php:67`) — 32 hex chars, 128 bits of entropy. The column is `varchar(32)`. Collision probability across two deployments is effectively zero for any realistic device count.
 
-### Brand-scoped data, generally
-Tables that hold per-brand data (devices, subscriptions, blocks, settings overrides, etc.) gain their own `*_brd_brand_id` column, stamped from `BrandContext` at write time. Multi queries on those tables filter by the table's own brand column, not via user. The user table is global; brand isolation is enforced at the data tables.
+**Pre-launch convention** (taking advantage of no production devices yet): namespace UIDs from day one on **both** deployments. Format: `<prefix>-<30 hex chars>` = 32 chars total. Fits the existing column width with no schema change.
+- ScrollDaddy: `s-` + 30 hex chars
+- NetworkSentry: `n-` + 30 hex chars
+- Future brand 3: its own letter prefix
 
-### DNS resolver impact: **zero**
-The resolver queries devices by `sdd_resolver_uid` (device-scoped, globally unique) and reads block rules tied to the device. Brand never enters the query. Brand is a presentation-layer concept, not a resolver concept.
+The resolver doesn't care about the format — UIDs are looked up by exact match — but the prefix gives operational visibility ("which deployment owns this UID?") and prevents accidental DB cross-imports from silently mixing devices. The plugin's UID generator reads its prefix from a per-deployment setting (`device_uid_prefix`) and falls back to no-prefix only as a safety default.
+
+Any existing test-data UIDs in the current ScrollDaddy DB can be backfilled in place (one update query) since no production users exist yet. After NetworkSentry stand-up, all new UIDs on both deployments carry their respective prefix.
+
+### Other ID spaces
+
+Most other IDs (user, order, device, subscription) are auto-incrementing integers per-database. There's no cross-deployment lookup that would require global uniqueness. The only IDs the resolver sees are `sdd_resolver_uid` (just covered) and Stripe customer IDs (unique by definition).
 
 ---
 
-## Request dispatch
+## Resolver coordination (the one shared thing)
 
-### `BrandContext` singleton
+The DNS resolver is the only piece both deployments share. Understanding the **current** integration model is essential to designing the multi-deployment one.
 
-New class `includes/BrandContext.php`, populated once per request from `HTTP_HOST`:
+### Current model: resolver pulls via direct PostgreSQL
 
-```php
-class BrandContext {
-    public static function get_instance(): self;
-    public function get_brand_id(): ?int;       // null if no brand resolved (e.g., CLI, cron)
-    public function get_brand(): ?Brand;        // lazy-loaded Brand object
-    public function get_theme(): string;
-    public function get_config(string $key, $default = null);  // brand_config, fallback to global
-}
+Today the Go DNS resolver (`/home/user1/scrolldaddy-dns/`) connects directly to Joinery's PostgreSQL database (`internal/db/db.go`) and reads `sdd_devices`, `sdd_scheduled_blocks`, the filter tables, etc. via SQL. It is the active reader; Joinery is passive on the data side.
+
+The only direction Joinery → resolver communication runs is two thin RPCs (`plugins/scrolldaddy/includes/ScrollDaddyApiClient.php`):
+- `GET /device/{uid}/seen` — Joinery asks the resolver if a device has been seen (UI display only, not config sync).
+- `POST /reload` — Joinery nudges the resolver to reload caches after blocklist downloads.
+
+Neither RPC carries device or block configuration. **All device/block state moves resolver-ward via the resolver's SQL reads.**
+
+### Multi-deployment design: resolver reads multiple Joinery DBs
+
+A second Joinery deployment writes to its **own** PostgreSQL database. The resolver — currently configured for a single DB — must learn to read both.
+
+Extend the resolver's config to accept a list of Joinery database URLs. Resolver opens one connection pool per DB and queries each on its existing schedule, unioning the results in memory.
+
+```
+JOINERY_DB_URLS=postgres://user@scrolldaddy-db/joinery,postgres://user@networksentry-db/joinery
 ```
 
-### Hook in `serve.php`
+Per-DB schema validation runs at startup (the existing `ValidateSchema` pattern). UIDs are globally unique (128-bit entropy + optional `s-`/`n-` namespacing), so the union is collision-free. Tier-to-category mappings are read out of each DB's settings; the resolver applies whichever tier/category set the device's owning DB declared.
 
-Early, before routing:
+**Cost:** a small Go change in `internal/db/db.go` and `internal/config/config.go` — a loop where there's currently a single DB connection. The resolver's hot path doesn't change. Each Joinery exposes its DB to the resolver IPs (already done today for ScrollDaddy).
 
-```php
-BrandContext::get_instance();  // resolves HTTP_HOST, stashes brand
-```
+Two alternatives were considered and rejected:
+- **Sync layer** materializing both DBs into a shared resolver-read DB. Avoids resolver code change but introduces a new component, sync latency, and a class of "fell behind" failure modes. Not worth it.
+- **Flip resolver to push-based** with Joinery deployments POSTing device CRUD. Cleanest separation in theory, but a significant rewrite of both sides — resolver gains write APIs, persistence, reconciliation semantics, missed-delete handling. Not justified for two deployments.
 
-Zero overhead for requests (one table lookup, cached in session after first resolution).
+### What this means for the runbook
 
-### Theme resolution
+Phase H (resolver setup) becomes:
+- Add NetworkSentry's database URL to the resolver's config (`scrolldaddy.env` on each DNS server)
+- Restart resolver; it picks up the second DB
+- Smoke-test: NetworkSentry device appears in DNS resolution within the resolver's poll interval
 
-`ThemeHelper::getInstance()` today reads `$settings->get_setting('theme_template')` globally. Changes to:
+No new API key on the resolver is needed for the data path (the resolver is still reading SQL, not receiving pushes). The existing `/device/{uid}/seen` and `/reload` RPCs that Joinery uses still need an API key per deployment, but that's a separate, smaller concern (each deployment carries its own key in plugin settings).
 
-```php
-$theme = BrandContext::get_instance()->get_theme()
-    ?? $settings->get_setting('theme_template');  // backward compat fallback
-```
+### Network access
 
-### Settings resolution
+Each Joinery's PostgreSQL must be reachable from the resolver IPs (`45.56.103.84`, `97.107.131.227`). ScrollDaddy already exposes its DB this way; NetworkSentry's DB needs the same firewall/auth setup.
 
-`Globalvars::get_setting($name)` grows a brand-aware overload. Resolution order:
+### Block-list source
 
-1. Brand-scoped setting (`stg_settings WHERE stg_name=? AND stg_brd_brand_id=?`)
-2. Global setting (`stg_settings WHERE stg_name=? AND stg_brd_brand_id IS NULL`)
-3. Provided default
+Block-list categories (porn, gambling, malware, ads, etc.) are resolver-owned configuration data, not Joinery-owned. Both Joinery DBs reference the same category keys; the resolver enforces. No coordination needed beyond keeping the category catalog stable.
 
-An explicit `$settings->get_global_setting($name)` stays for code that genuinely wants the global (e.g., infrastructure settings like `composerAutoLoad`).
+### Tier-to-categories mapping
 
-### Query scoping
-
-Brand-scoped data tables (each has its own `*_brd_brand_id` column) filter by `BrandContext::get_brand_id()` automatically. The user table is *not* brand-scoped — it's global.
-
-Approach: extend `SystemMultiBase::_get_resultsv2()` to apply an implicit brand filter when the class declares `$brand_scoped = true`. The filter targets the table's own brand column. Classes that hold cross-brand or system data (`plg_plugins`, `brd_brands`, `usr_users`, themes, etc.) leave the flag off. Individual call sites can pass `['is_cross_brand' => true]` to opt out for cross-brand admin tooling.
-
-### The null-brand rule
-`BrandContext::get_brand_id()` returns `null` for:
-- CLI scripts (no `HTTP_HOST`)
-- Cron / scheduled tasks
-- Requests to unrecognized hosts
-
-In those contexts, brand-scoped Multi queries skip the filter only when the caller declares cross-brand intent; otherwise they return no rows. This makes "I forgot to set brand context" a loud failure mode rather than silent cross-brand data exposure.
+Each Joinery deployment has its own subscription tiers and its own tier-to-categories mapping in its DB. NetworkSentry's mapping (B2B emphasis on malware/ads) differs from ScrollDaddy's (consumer emphasis on addictive-content categories). Resolver applies whichever mapping the device's owning DB declares. Per-deployment configuration; not a resolver concern.
 
 ---
 
-## Billing details
+## Stripe (shared account, brand metadata)
 
-One Stripe account, one set of products. Per-brand:
-- Different **price IDs** (brands can have different prices for the same underlying product; the price ID catalog lives in `brd_config`).
-- Different **branding** on receipts: logo, from-address, customer portal URL configured on the Stripe customer or session object, sourced from `brd_config`.
-- Metadata on every Stripe customer/subscription/payment: `brand=<code>` for downstream reporting.
+One Stripe account serves both deployments. Each deployment uses the same `STRIPE_SECRET_KEY` but creates its own products and prices.
 
-Webhooks from Stripe route to existing handlers; the handlers look up the Stripe customer metadata to determine brand context (since the request doesn't have `HTTP_HOST` set to a brand domain).
+### Customer/subscription tagging
 
----
+Every Stripe customer, subscription, payment, and invoice carries metadata `brand=<code>` (e.g., `brand=scrolldaddy`, `brand=networksentry`) at creation time. Helpers around `customers->create()`, `subscriptions->create()`, etc. set this metadata from a per-deployment setting (`stripe_brand_metadata` or similar — value `scrolldaddy` on ScrollDaddy's deployment, `networksentry` on NetworkSentry's).
 
-## Admin UI
+### Webhook handling
 
-### Brand dimension on list pages
-Every admin list page that lists brand-scoped data gains a brand filter (dropdown, default = current brand context, "All Brands" option for cross-brand views).
+Both deployments register their own webhook endpoints with Stripe (`scrolldaddy.app/ajax/stripe_webhook`, `networksentry.com/ajax/stripe_webhook`). Stripe delivers all events to both endpoints.
 
-### New admin pages
-- `/adm/admin_brands` — CRUD for `brd_brands` rows.
-- Existing `/adm/admin_users` — gains a brand column (the user's signup source) and an optional brand filter.
+Each deployment's webhook handler ignores events for customers it doesn't recognize: if `customers.retrieve(event.customer).metadata.brand` doesn't match this deployment's brand setting, the handler returns 200 OK without acting. Slightly chatty (each event hits both endpoints) but bulletproof and stateless.
 
-### Permission
-Admin permission stays global as today. The brand a request operates on comes from `HTTP_HOST`, not from the admin user's record. Per-brand admin restrictions can layer on top of the existing permission model later if a real need emerges.
+### Customer portal
 
----
+Stripe's customer-portal session URL can be configured per session. Each deployment passes a brand-appropriate `return_url` and (where Stripe supports) per-brand portal branding configuration. Existing helper `create_billing_portal_session()` accepts `$return_url`; the deployment's brand affects which URL is sent.
 
-## Feature divergence strategy
+### Different prices per brand
 
-**v1 position: same features across all brands.** Copy, pricing, and emphasis vary via theme/settings, not via code.
-
-**Divergence mechanism when it's eventually needed:**
-
-1. **Plugin activation per brand.** A plugin becomes the unit of divergence. Schools-specific features live in a `schools` plugin, activated only for brands where `brd_code = 'schoolfilter'`. Law-firm features live in a `compliance` plugin. Consumer brands activate neither. (The `pla_plugin_activations` table is built when this is actually needed.)
-2. **Settings-driven UI variants.** Within a shared plugin, per-brand settings toggle UI elements (e.g., `show_family_mode = true` on consumer; `show_device_groups = true` on B2B). Cheap, no new engine.
-3. **NOT** building: a feature-flag framework, per-brand code forks, a brand-specific route dispatcher, a per-brand view-override layer beyond what themes already provide.
-
-The firm line: **brand is configuration, not code.** If a feature can't be built by combining (theme × plugin activation × settings), that's a signal the platform needs a new extension point, not a per-brand fork.
+Each deployment's tier-to-Stripe-price-ID mapping lives in that deployment's `stg_settings`. Two deployments can sell the same tier at different prices by referencing different price IDs.
 
 ---
 
-## Migration / rollout
+## Email (separate Mailgun domains)
 
-The existing scrolldaddy deployment becomes `brand_id=1` with `brd_code='scrolldaddy'`. Backfill strategy:
+Each brand has its own Mailgun sending domain — `mail.scrolldaddy.app`, `mail.networksentry.com`. Each domain has its own DKIM, SPF, return-path, and Mailgun API credentials.
 
-1. Create `brd_brands` table, insert one row for scrolldaddy with current settings.
-2. Add `usr_brd_brand_id` column, backfill all existing users to `1`.
-3. Add `stg_brd_brand_id` column (stays null — existing settings become global defaults).
-4. Add `*_brd_brand_id` columns to brand-scoped data tables (`sdd_devices`, `vse_visitor_events`, `ccd_coupon_codes`); backfill existing rows to `1`.
-5. Ship `BrandContext` + `HTTP_HOST` dispatch — for single-domain deployments, the resolved brand is just `brand_id=1` and nothing visible changes.
-6. Roll out the second brand domain pointed at the same deployment.
-7. Iterate.
+### Per-deployment email config
 
-**No data migration is destructive.** Every change is additive. A rollback is: revert the serve.php hook; everything keeps working against `brand_id=1`.
+Email config (`mailgun_domain`, `mailgun_api_key`, `from_address`, `reply_to_address`, `support_address`) lives in each deployment's `stg_settings`. No abstraction needed — each Joinery is single-brand.
 
----
+### Email templates
 
-## Pre-launch priorities
+Each deployment carries the templates appropriate to its voice. NetworkSentry's templates are written for B2B language; ScrollDaddy's for recovery-coded language. Templates are deployment-local; no cross-brand fallback machinery is needed.
 
-Not all of this work has the same urgency relative to public launch. The list below distinguishes changes that produce breaking changes if deferred from changes that are genuinely additive and can ship after launch.
+If a template change needs to land on both deployments (rare), it's two PRs or one PR that touches both deployments' template directories. Same as any other deployment-specific config.
 
-### Must land before public launch — breaking changes if retrofitted
+### URLs in emails
 
-1. **`BrandContext` singleton + `serve.php` HTTP_HOST dispatch** — the chokepoint that makes everything else clean. Without it, code accumulates implicit "the one brand" assumptions across hundreds of files. Even resolving to `brand_id=1` always, every future call site is already brand-aware.
-2. **Brand-aware `SystemMultiBase` scoping mechanism** — the `$brand_scoped = true` class-level flag and the `_get_resultsv2()` filter hook. Not every Multi class needs to be flagged on day one, but the mechanism must exist so new code is born brand-scoped. Retrofitting after launch is the worst case: every existing query becomes a potential cross-brand data leak.
-3. **Brand-aware `Globalvars::get_setting()`** — resolution order brand-scoped → global → default, plus explicit `get_global_setting()` for infrastructure reads. Settings reads are scattered everywhere; if the lookup isn't brand-aware from launch, every site becomes a future audit candidate.
-4. **`usr_brd_brand_id` column on users (nullable)** — stamping every user with a primary brand from day one is trivial; backfilling later is a migration with assumptions baked in.
+Each deployment composes URLs from its own `$_SERVER['HTTP_HOST']` (or its configured site URL setting). NetworkSentry emails have NetworkSentry URLs; ScrollDaddy emails have ScrollDaddy URLs. No special logic required.
 
-### Strongly recommended pre-launch — cheap now, painful to backfill
+### Inbound email
 
-5. **Brand-stamping columns on event/log tables** — `vse_brd_brand_id` on visitor events, `ccd_brd_brand_id` on coupons, `sdd_brd_brand_id` on devices, `stg_brd_brand_id` on settings. All nullable. Past data without a brand stamp is forever "brand unknown" — a permanent data-quality cost, not a migration cost.
-6. **Stripe customer metadata convention** — `brand=<code>` on every Stripe customer/subscription/payment from day one. Existing customers without it become a webhook special case otherwise.
-7. **`brd_brands` table + seeded scrolldaddy row** — the anchor. Without it the rest has nowhere to point.
-
-### Safely deferable — genuinely additive
-
-- `pla_plugin_activations` table and per-brand plugin gating (defer the table; don't write code that assumes globally-active plugins when divergence work begins)
-- Admin brand selector UI, `/adm/admin_brands` CRUD, per-brand settings override UI
-- Theme override from `BrandContext` (wire the read path; the second theme itself can wait)
-- Org / B2B layer (separate future spec when a real B2B brand needs it)
-
-### Principle
-
-The minimum viable "platform-shaped" launch is: **one deployment, one brand, but every code path already flows through `BrandContext` and brand-scoped lookups.** When `brand_id` resolves to 1 always, behavior is identical to today. When brand 2 is added later, no audit, no backfill, no broken queries. Items 1–4 buy that property; items 5–7 prevent secondary cleanup; everything else is genuinely additive.
-
-This corresponds to Phases 0, 1, and 2 in the implementation plan below. Phases 3 and 4 are deferable past public launch.
+Each deployment's inbound flow is configured for its own domain (`*@inbox.networksentry.com` → NetworkSentry deployment's webhook). Independent.
 
 ---
 
-## Implementation phases
+## Deployment runbook (NetworkSentry, concrete)
 
-### Phase 0 — Data model groundwork
-- [ ] Create `brd_brands` data class
-- [ ] Run `update_database` to materialize the table
-- [ ] Seed `brd_brands` with a `scrolldaddy` row (the first brand)
-- [ ] Add nullable `usr_brd_brand_id` column to `usr_users`; backfill existing users to scrolldaddy
-- [ ] Add nullable `stg_brd_brand_id` to `stg_settings`
-- [ ] Add nullable `vse_brd_brand_id` to `vse_visitor_events`
-- [ ] Add nullable `ccd_brd_brand_id` to `ccd_coupon_codes`
-- [ ] Add nullable `sdd_brd_brand_id` to `sdd_devices`; backfill existing rows to scrolldaddy
+This is the actionable checklist for standing up the second brand.
 
-### Phase 1 — BrandContext + domain dispatch
-- [ ] Create `includes/BrandContext.php` singleton
-- [ ] Wire `BrandContext::get_instance()` into `serve.php` after session init
-- [ ] Implement `HTTP_HOST` → brand resolution (primary domain + aliases)
-- [ ] Cache resolution on session to avoid per-request DB lookup
-- [ ] Add null-brand fallback for CLI / cron / unrecognized hosts
+### Phase A — Refactor (prerequisite, on the existing ScrollDaddy deployment)
+- [ ] Plugin renamed to `dns_filtering` (flat rename — no redirects needed pre-launch)
+- [ ] Plugin / theme decoupling complete (see above section)
+- [ ] Hard-coded brand strings audit complete
+- [ ] Brand-neutral default profile views verified
+- [ ] `device_uid_prefix` setting added; existing test UIDs backfilled with `s-` prefix
+- [ ] ScrollDaddy renders byte-identically to pre-refactor (visual regression on marketing pages and profile dashboard)
 
-### Phase 2 — Scope the platform
-- [ ] Update `ThemeHelper::getInstance()` to prefer `BrandContext::get_theme()`
-- [ ] Update `Globalvars::get_setting()` to do brand-scoped-first resolution; add `get_global_setting()` for global reads
-- [ ] Extend `SystemMultiBase::_get_resultsv2()` to implicitly brand-scope queries when the class declares `$brand_scoped = true`
-- [ ] Audit existing data classes and flag which are brand-scoped (devices, subscriptions, etc.) vs cross-brand (users, plugins, brands, themes)
-- [ ] Stamp `vse_brd_brand_id` on new visitor events from BrandContext
-- [ ] Stamp `ccd_brd_brand_id` on brand-scoped coupons created via admin UI
-- [ ] Stamp `sdd_brd_brand_id` on new devices from BrandContext
+### Phase B — Domain & DNS
+- [ ] Register `networksentry.com` (or chosen domain)
+- [ ] Point apex + `www` at the docker-prod IP (`23.239.11.53`) via A records
+- [ ] Configure DNS for Mailgun sender domain (`mail.networksentry.com`) — MX, TXT (SPF), TXT (DKIM), CNAME (return-path)
+- [ ] Configure DNS for inbound (if scoped) — `inbox.networksentry.com` → Mailgun
 
-### Phase 3 — Admin brand-awareness
-- [ ] Add brand selector to admin nav for cross-brand views
-- [ ] Brand filter on admin list pages over brand-scoped data
-- [ ] `/adm/admin_brands` CRUD
-- [ ] Per-brand settings override UI (extension of existing `/adm/admin_settings`)
+### Phase C — Container & infrastructure
+- [ ] Provision new Docker container on docker-prod following the established pattern (model on `empoweredhealthtn` setup)
+- [ ] Provision new PostgreSQL database for NetworkSentry
+- [ ] Apache vhost for `networksentry.com` (and `www.networksentry.com` redirect)
+- [ ] Let's Encrypt SSL cert
+- [ ] Deploy current Joinery release tag into the container
+- [ ] Run `update_database` on first boot to materialize schema
+- [ ] Seed admin user (claude superuser pattern)
+- [ ] Register NetworkSentry as a node in Server Manager (existing `mgn_managed_nodes` infrastructure) so the publish/upgrade pipeline includes it
+- [ ] Configure backups (`backup_database.sh` / `backup_project.sh` patterns from `maintenance_scripts/sysadmin_tools/`) for the new container and DB
+- [ ] Add log rotation (`logrotate_joinerytest.conf` template) for the new deployment's log files
+- [ ] Add NetworkSentry to whatever uptime / error-log monitoring covers ScrollDaddy
 
-### Phase 4 — First new brand
-- [ ] Stand up a second domain pointed at the existing deployment
-- [ ] Create second `brd_brands` row
-- [ ] Create a theme for the second brand
-- [ ] Ship marketing pages
-- [ ] Verify: signup, billing, DNS flow, admin isolation all work end-to-end
+### Phase D — Mailgun
+- [ ] Add `mail.networksentry.com` to Mailgun account
+- [ ] Verify DNS records (DKIM, SPF, return-path) — wait for propagation
+- [ ] Mailgun warmup (low send volume for first 7 days; ramp gradually)
+- [ ] Configure inbound route (if needed) — `match_recipient .*@inbox.networksentry.com` → webhook URL on NetworkSentry deployment
+- [ ] Set NetworkSentry deployment's `stg_settings`: `mailgun_domain`, `mailgun_api_key`, `from_address`, `reply_to_address`, `support_address`
+
+### Phase E — Stripe
+- [ ] Add NetworkSentry products and prices to the existing Stripe account
+- [ ] Set NetworkSentry deployment's tier-to-price-ID mapping in `stg_settings`
+- [ ] Set `stripe_brand_metadata=networksentry` (or equivalent setting) so customer/subscription/payment helpers tag every Stripe object
+- [ ] Confirm shared `STRIPE_SECRET_KEY` is set in NetworkSentry deployment's `Globalvars_site.php`
+- [ ] Register webhook endpoint `https://networksentry.com/ajax/stripe_webhook` in the Stripe dashboard, listening for the same events ScrollDaddy listens for
+- [ ] Verify webhook handler ignores events for customers it doesn't recognize (smoke-test with a ScrollDaddy event)
+
+### Phase F — Theme & content
+- [ ] Build `theme/networksentry/` — its own marketing pages (`index.php`, `pricing.php`, etc.), CSS, brand assets, logo, favicon
+- [ ] Profile-view overrides only where ScrollDaddy's neutral defaults need brand voice
+- [ ] Set NetworkSentry deployment's `theme_template` setting to `networksentry`
+- [ ] SEO/OG defaults: `og:site_name`, `og:image`, `twitter:site`, title template — all in NetworkSentry deployment's `stg_settings`
+- [ ] `robots.txt`, `sitemap.xml` — render under NetworkSentry's brand context (no special mechanism — each deployment serves its own)
+- [ ] Per-brand keys: Google Analytics ID, captcha keys, CSP fragments — `stg_settings`
+- [ ] Email templates: clone ScrollDaddy's template directory and rewrite for B2B voice. Operational task; not a platform feature.
+
+### Phase G — Plugin activation
+- [ ] Activate `dns_filtering` plugin (formerly `scrolldaddy`) on NetworkSentry deployment
+- [ ] Configure plugin settings: resolver host, resolver API key (separate from ScrollDaddy's), tier-to-category mapping
+- [ ] If using UID namespacing, set deployment's UID prefix setting (`s-` for ScrollDaddy, `n-` for NetworkSentry) — plugin's UID generator reads this
+
+### Phase H — Resolver
+- [ ] Open firewall / pg_hba on NetworkSentry's PostgreSQL to accept connections from the resolver IPs (`45.56.103.84`, `97.107.131.227`)
+- [ ] Add NetworkSentry's DB URL to `JOINERY_DB_URLS` (or equivalent) in `/etc/scrolldaddy/scrolldaddy.env` on each DNS server
+- [ ] Roll out the resolver build that supports multiple Joinery DB sources (Go change to `internal/db/db.go` and config wiring); follow the existing release process (`make release VERSION=…`, run installer on each DNS host)
+- [ ] Mint NetworkSentry API key on the resolver for the thin Joinery → resolver RPCs (`/seen`, `/reload`); store on the NetworkSentry deployment
+- [ ] Smoke-test: create a NetworkSentry test device; verify DNS resolution applies expected blocks within the resolver's poll interval
+- [ ] Smoke-test: verify ScrollDaddy device behavior is unaffected
+
+### Phase I — End-to-end verification
+- [ ] Sign up a test user on `networksentry.com`
+- [ ] Receive welcome email from `noreply@mail.networksentry.com` with NetworkSentry URLs
+- [ ] Purchase a subscription; receive Stripe receipt with `brand=networksentry` metadata
+- [ ] Activate a device; verify it appears on the resolver and filters traffic
+- [ ] Confirm ScrollDaddy is unaffected throughout
+- [ ] Confirm admin on each deployment shows only that deployment's data
 
 ---
 
-## Firm lines (what we are not building)
+## Drift prevention
 
-These are design boundaries, stated explicitly so future work doesn't drift past them.
+Two deployments running the same codebase will drift if not actively prevented.
 
-1. **Brand is configuration, not code.** No per-brand forks of view files, no brand-specific route dispatchers, no `if ($brand === 'schoolfilter')` branches in business logic. Divergence lives in themes and plugin activation.
-2. **One DB, one deployment.** No Postgres federation, no read replicas per brand, no data partitioning.
-3. **Unified user pool.** Email uniqueness stays global. One human, one user record, regardless of brand affiliation. `usr_brd_brand_id` is informational (signup source), not a partition key.
-4. **No feature-flag engine.** If a feature needs to vary per brand, it goes in a plugin that's activated per brand, or it's a settings flag. Nothing more elaborate.
-5. **No per-brand migrations.** Schema lives in one place; brand-aware data evolves via standard `update_database` + migrations.
-6. **No brand-scoped admin codebase.** One `/adm/` directory serves all brands. Branding on admin pages is minimal.
-7. **No org / B2B layer in this spec.** Shared billing, internal admin roles, and team-account features are a separate future spec, justified by an actual B2B brand launch.
+- **Same git tag.** Both deployments deploy from the same Joinery release. Don't cherry-pick fixes onto one without the other.
+- **Same `update_database` invocation.** Schema changes from migrations apply to both (run sequentially, not simultaneously). Use the existing publish-upgrade flow with both nodes registered in Server Manager.
+- **Per-deployment settings only.** All divergence is in `stg_settings` and theme files — never in code. If you find yourself wanting an `if ($deployment === 'networksentry')` branch, stop; it's a settings or plugin-activation question.
+- **Smoke-test on both** before declaring a release complete.
 
 ---
 
-## Dependencies & sequencing
+## Out of scope (this spec)
 
-- **Independent of marketing infra spec.** The two specs touch different surfaces. Either can ship first.
-- **Recommended sequence:** Marketing infra ships first (smaller, proves Phase 1-2 mechanics in production). Multi-domain ships second (bigger, restructures the platform).
-- **Marketing infra forward-compat:** the two hooks noted in that spec (settings-driven OG site name, nullable `abe_brd_brand_id` on experiments) mean the marketing work doesn't need to be revisited when multi-domain ships.
-
----
-
-## Out of scope
-
-- Org / B2B layer (shared billing, internal admin role, team accounts) — separate future spec
-- Cross-brand reporting dashboards (build when there's a second brand in production)
-- Per-brand email template engine (current system works; add if needed)
-- Multi-region / multi-DB deployments (a separate platform concern)
-- Tenant-isolated file storage (shared filesystem with brand-prefixed paths is sufficient)
-- White-label / reseller model where a third party creates brands (not a product need)
+- **Cross-brand user identity** — separate user pools by design; no SSO, no shared passwords across brands. If a future brand has meaningful audience overlap and unification becomes valuable, see "How we got here" below for the rejected alternative.
+- **Cross-brand admin reporting** — querying across deployments requires either ad-hoc dual-DB queries or a future reporting layer. Not built; build when there's a real need.
+- **Org / B2B layer** — see [`FUTURE_organizations.md`](FUTURE_organizations.md). Org accounts are a per-deployment feature; the brand abstraction (or lack thereof) doesn't affect that spec.
+- **Per-deployment automated provisioning** — standing up a new sister brand is a manual runbook (above), not a self-service feature. If we ever sell Joinery-as-SaaS to clients who want to spin up brands, that's a separate platform-tooling spec.
+- **Replication or shared state between deployments** — explicitly rejected. The only shared state is the resolver, which is already a separate service.
 
 ---
 
-## Documentation Updates
-- Add `docs/multi_brand_architecture.md` documenting: `BrandContext` usage, brand-scoped vs global settings resolution, how brand-scoped data tables stamp from `BrandContext`, the unified-user-pool model, and the firm-line list above.
-- Update `docs/plugin_developer_guide.md` with how plugins should detect brand context.
-- Update `CLAUDE.md` with `BrandContext` as a pre-loaded core file.
+## How we got here
+
+This section preserves the design path so future work has the context for *why* we chose separate deployments — and the breadcrumbs to revisit the decision if the trade-off ever inverts.
+
+### The original framing
+
+The first version of this spec proposed **domain-dispatching multi-tenant Joinery** — one deployment, one DB, many domains. The plan was a `brd_brands` table mapping `HTTP_HOST` to a brand record (theme, settings overrides, sender domain, Stripe price IDs); a `BrandContext` singleton populated per request; brand-stamping (`*_brd_brand_id`) on every brand-relevant table; brand-aware settings resolution (`stg_settings` with brand-first → global fallback); brand-aware `SystemMultiBase` query scoping; brand-aware email template lookup with fallback; brand-aware admin filters; and a push/pop `BrandContext` mechanism for cron, CLI, and background email generation (because `HTTP_HOST` doesn't exist there).
+
+That design was internally consistent and would have worked. It was rejected because:
+
+1. **The benefits are theoretical for two disjoint-audience brands.** ScrollDaddy (consumer recovery) and NetworkSentry (B2B network filtering) have approximately zero user overlap. The "unified user pool" gives nothing real; the "cross-brand admin" is a manual annoyance for an operator running two brands, but it's the operator's annoyance, not the user's. Single Stripe customer per human across brands sounded clean, but the same human almost never has both accounts.
+
+2. **The cost compounds forever.** Brand-aware settings, brand-scoped queries, brand-context propagation in background jobs, plugin/brand activation matrices — every cross-cutting feature picks up a brand dimension forever, including features added years from now by future contributors. The cost isn't a one-time refactor; it's an ongoing tax on the platform.
+
+3. **Standing up a separate Joinery deployment is an established pattern.** `empoweredhealthtn` is already deployed this way. NetworkSentry is the second instance, not a new architecture.
+
+4. **Future Joinery clients shouldn't pay for it.** If someone deploys Joinery for their own purposes (the marketing pitch on `getjoinery.com`), they shouldn't inherit complexity that exists only because the original ScrollDaddy operator wanted two brands.
+
+### What was kept from the unified design
+
+- **Plugin / theme decoupling refactor.** Stands on its own merit even single-brand. Required for sister-brand deployment regardless of approach.
+- **Hard-coded brand strings audit.** Same.
+- **Stripe metadata convention** (`brand=<code>` on customers/subs). Cheap, useful for cross-deployment reporting if you ever consolidate views.
+
+### When to revisit
+
+The unified design is the correct answer if any of the following becomes true:
+- A real B2B brand with meaningful user overlap with ScrollDaddy launches (e.g., a "ScrollDaddy for Schools" where parent users naturally bridge)
+- The operator stands up 5+ brands and the per-deployment overhead (5 DBs, 5 Mailgun domains, 5 deploy steps per release) becomes painful
+- A cross-brand product feature emerges that requires shared identity or shared data (cross-brand referrals with shared rewards, cross-brand single-checkout, etc.)
+
+If the trade-off inverts, the unified design (recoverable from this file's git history) is a sound starting point. None of the work done under this spec precludes the unified path: plugin/theme decoupling, brand-neutral defaults, Stripe metadata, and `dns_filtering` plugin renaming all carry forward unchanged.
+
+### Org/B2B layer interaction
+
+The org spec ([`FUTURE_organizations.md`](FUTURE_organizations.md)) was written assuming a single Joinery deployment. With separate-deployment branding, that spec describes a per-deployment feature: each Joinery instance can independently grow an org layer. The architecture audit there (no current blockers to adding orgs) is unchanged.
+
+---
+
+## Documentation updates
+
+When this spec is implemented, update:
+- `docs/deploy_and_upgrade.md` — add a section on running multiple sister deployments off the same release tag, and the "register every deployment in Server Manager" pattern for the upgrade pipeline.
+- `docs/scrolldaddy_plugin.md` (rename to `dns_filtering_plugin.md` if the plugin is renamed) — note that the plugin is brand-neutral and the resolver pulls device state from each Joinery DB.
+- `docs/server_manager.md` — note that one Server Manager instance can manage multiple sister-brand deployments.
+- `/home/user1/scrolldaddy-dns/README.md` and the resolver's ops guide — document the multi-DB configuration (`JOINERY_DB_URLS`) and the operational expectation that each Joinery exposes its DB to the resolver IPs.
+- `CLAUDE.md` — add NetworkSentry's container/DB info to the "Docker Production Server" section once it's stood up.
+- New `docs/sister_brand_runbook.md` — extract the deployment runbook from this spec into a living doc that future brand stand-ups can follow without re-reading the design rationale.
