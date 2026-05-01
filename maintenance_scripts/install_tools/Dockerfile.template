@@ -1,4 +1,11 @@
 # Joinery Docker Template
+# VERSION 3.6 - Self-heal ownership on every container start. COPY at build time
+#               leaves public_html and maintenance_scripts owned by root, and
+#               _site_init.sh's chown only runs on first boot (gated by absence
+#               of Globalvars_site.php). On image rebuilds the config volume
+#               survives, so _site_init.sh skips, leaving root-owned trees that
+#               break upgrade.php's ownership pre-flight. Now we chown to
+#               www-data:www-data unconditionally before apache starts.
 # VERSION 3.5 - Enable mod_remoteip and switch access-log %h -> %a so PHP and
 #               access logs see the real client IP from the host's X-Forwarded-For
 #               header instead of the docker bridge gateway (172.17.0.1).
@@ -109,6 +116,9 @@ CMD set +H && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
+    chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" && \
+    find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \
+    find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_stock_assets.sh" || true && \
     echo "*/15 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
