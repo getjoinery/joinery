@@ -52,9 +52,12 @@ class SdScheduledBlock extends SystemBase {
 	 * Each filter can be: not present (no change), action=0 (block), action=1 (allow).
 	 *
 	 * @param array $newvalues POST data with keys like 'rule_filter_key' => '0'|'1'|''
+	 * @param array $skip_keys Filter keys to leave untouched (preserves rows for tier-gated keys
+	 *                        when the current user lacks the feature; matches them by exclusion
+	 *                        from the iteration so neither updates nor deletes happen)
 	 * @return int Number of changes made
 	 */
-	function update_filters($newvalues) {
+	function update_filters($newvalues, $skip_keys = array()) {
 		$numchanges = 0;
 		$all_filters = ScrollDaddyHelper::$filters;
 
@@ -69,6 +72,9 @@ class SdScheduledBlock extends SystemBase {
 		}
 
 		foreach ($all_filters as $filter_key => $filter_desc) {
+			if (in_array($filter_key, $skip_keys, true)) {
+				continue;
+			}
 			$post_key = 'rule_' . $filter_key;
 			$has_value = isset($newvalues[$post_key]) && $newvalues[$post_key] !== '';
 
@@ -105,9 +111,10 @@ class SdScheduledBlock extends SystemBase {
 	 * Update service rules for this scheduled block.
 	 *
 	 * @param array $newvalues POST data with keys like 'rule_servicename' => '0'|'1'|''
+	 * @param array $skip_keys Service keys to leave untouched (see update_filters() docs)
 	 * @return int Number of changes made
 	 */
-	function update_services($newvalues) {
+	function update_services($newvalues, $skip_keys = array()) {
 		$numchanges = 0;
 
 		$all_services = [];
@@ -126,6 +133,9 @@ class SdScheduledBlock extends SystemBase {
 		}
 
 		foreach ($all_services as $service_key => $service_desc) {
+			if (in_array($service_key, $skip_keys, true)) {
+				continue;
+			}
 			$post_key = 'rule_' . $service_key;
 			$has_value = isset($newvalues[$post_key]) && $newvalues[$post_key] !== '';
 

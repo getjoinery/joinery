@@ -231,6 +231,18 @@ Create `/plugins/{yourplugin}/tier_features.json`:
 
 Features are automatically prefixed with plugin name to prevent collisions.
 
+### Rolling Out a New Feature to Existing Tiers
+
+Adding a tier-gated feature is **three** steps. Skipping any of them silently breaks the feature for the wrong audience.
+
+1. **Schema** — declare the key in `tier_features.json` (or core `settings.json`-equivalent).
+2. **Code** — gate the UI/logic via `$tier->getFeature('feature_key', $default)` or `SubscriptionTier::getUserFeature(...)`.
+3. **Per-tier values** — explicitly set the flag on every existing tier row in `sbt_subscription_tiers.sbt_features` via the admin Subscription Tiers UI (`/admin/admin_subscription_tier_edit?id=N`).
+
+The `default` in the schema is **not** a per-tier default — it's a fallback used when a tier row has no entry for the key. So if you ship a `boolean` feature with `default: false` and forget step 3, *every paying tier silently gets `false`* until an admin manually toggles it on. The feature looks broken from the user's side, but the only "bug" is missing per-tier values.
+
+For brand-new tiers, the same rule applies — when creating a tier, set every relevant feature explicitly rather than relying on schema defaults.
+
 ### Important: MultiGroup Filter Keys
 
 When querying for groups, use the correct option keys:
@@ -285,6 +297,10 @@ The system automatically:
 - Always provide default value in `getUserFeature()`
 - Verify feature key matches JSON definition
 - Check user has a tier assigned
+
+**Feature returning the schema default (e.g. `false`) for paying customers:**
+- The per-tier value was never set on `sbt_subscription_tiers.sbt_features` for that tier — the schema `default` is filling in.
+- Open `/admin/admin_subscription_tier_edit?id=N` for each affected tier and toggle the feature on. See "Rolling Out a New Feature to Existing Tiers" above.
 
 ---
 

@@ -2,7 +2,7 @@
  * ScrollDaddy Plugin Styles
  * Additional styles specific to ScrollDaddy plugin functionality
  * These styles work with any theme's CSS framework
- * v13
+ * v14
  */
 
 /* Fix blue bar under logo: inline <img> leaves a baseline gap that the mask-icon fills with theme color */
@@ -245,6 +245,127 @@ input[type="checkbox"]:checked ~ label:before {
 
 .sd-table .sd-add-row .form-group {
     margin-bottom: 0;
+}
+
+/* ===== Block editor: segmented Block | Allow control ===== */
+.sd-segmented {
+    display: inline-flex;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--th-border-color);
+    background: #ffffff;
+    user-select: none;
+}
+.sd-segmented input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+.sd-segmented label {
+    margin: 0;
+    padding: 6px 18px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--title-color);
+    background: #ffffff;
+    border-right: 1px solid var(--th-border-color);
+    transition: background 0.15s ease, color 0.15s ease;
+    line-height: 1.4;
+}
+.sd-segmented label:last-of-type {
+    border-right: none;
+}
+.sd-segmented label:hover {
+    background: var(--smoke-color4, #F9F8FF);
+}
+.sd-segmented input[type="radio"]:checked + label {
+    background: var(--theme-color);
+    color: #ffffff;
+}
+.sd-segmented input[type="radio"]:disabled + label {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+.sd-segmented input[type="radio"]:focus-visible + label {
+    outline: 2px solid var(--theme-color);
+    outline-offset: 2px;
+}
+
+/* ===== Block editor: rule rows (always-on baseline + scheduled overrides) ===== */
+.sd-rule-section {
+    margin: 0 0 1.2em;
+    border: 1px solid var(--th-border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #ffffff;
+}
+.sd-rule-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--th-border-color);
+}
+.sd-rule-row:last-child {
+    border-bottom: none;
+}
+.sd-rule-row:nth-child(even) {
+    background-color: var(--smoke-color4, #F9F8FF);
+}
+.sd-rule-label {
+    font-size: 15px;
+    color: var(--title-color);
+    flex: 1 1 auto;
+}
+.sd-rule-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+}
+.btn-remove-override {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--error-color, #dc3545);
+    background: transparent;
+    border: 1px solid var(--error-color, #dc3545);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.btn-remove-override:hover {
+    background-color: var(--error-color, #dc3545);
+    color: #ffffff;
+}
+
+/* Add-override picker row, mirrors the custom-domain-rules add row */
+.sd-add-override {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 0 0 1.5em;
+    flex-wrap: wrap;
+}
+.sd-add-override select {
+    padding: 6px 10px;
+    border: 1px solid var(--th-border-color);
+    border-radius: 4px;
+    font-size: 14px;
+    background: #ffffff;
+    color: var(--title-color);
+}
+.sd-add-override #sd-add-category {
+    flex: 1 1 240px;
 }
 
 /* Mobile header and hero spacing */
