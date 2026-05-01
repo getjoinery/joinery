@@ -226,12 +226,26 @@ Each deployment's inbound flow is configured for its own domain (`*@inbox.networ
 This is the actionable checklist for standing up the second brand.
 
 ### Phase A — Refactor (prerequisite, on the existing ScrollDaddy deployment)
-- [ ] Plugin renamed to `dns_filtering` (flat rename — no redirects needed pre-launch)
-- [ ] Plugin / theme decoupling complete (see above section)
-- [ ] Hard-coded brand strings audit complete
-- [ ] Brand-neutral default profile views verified
-- [ ] `device_uid_prefix` setting added; existing test UIDs backfilled with `s-` prefix
-- [ ] ScrollDaddy renders byte-identically to pre-refactor (visual regression on marketing pages and profile dashboard)
+
+**Status (2026-05-01):** Core refactor shipped to scrolldaddy.app prod via v0.8.30. Plugin renamed, theme split, settings renamed for compliance with plugin-naming rules. Brand-neutralization of display copy / class names / tier-feature keys, plus the device UID prefix work, are intentionally deferred — none are blockers for sister-brand deployment, and the user opted to skip them until clearly needed.
+
+**Done**
+- [x] Plugin renamed `scrolldaddy` → `dns_filtering` (flat rename — directory, plugin.json, profile menu URL slugs, all `require_once(PathHelper::getIncludePath('plugins/scrolldaddy/...'))` references, `getThemeFilePath(... 'scrolldaddy')` plugin-name args, `/profile/scrolldaddy/...` URL refs)
+- [x] Plugin / theme decoupling complete: `theme.json`, `tier_features.json`, `includes/PublicPage.php`, `includes/FormWriter.php`, `assets/`, and the marketing views (`index`, `pricing`, `login`, `cart`, `cart_confirm`, `page`, `items`, `product`, `logout`, `forms_example`) moved from `plugins/scrolldaddy/` to a new `theme/scrolldaddy/`. `provides_theme: true` dropped from `plugin.json`. Theme registered in `thm_themes`.
+- [x] **Settings renamed `scrolldaddy_*` → `dns_filtering_*`** (added to original Phase A scope mid-flight). Required for plugin-rule compliance: PluginManager rejects declared settings whose names don't start with the plugin directory name. 8 settings, ~30 code references, plus a SQL migration. Without this, every future `PluginManager::sync()` would skip re-seeding defaults and log a warning.
+- [x] DB migrations v125 + v126 carry the rename atomically across `plg_plugins.plg_name`, `sct_scheduled_tasks.sct_plugin_name`, `active_theme_plugin` setting, and the 8 `stg_settings` row names. Idempotent.
+- [x] ScrollDaddy.app post-deploy verification: HTTP smoke (`/`, `/pricing`, `/login`, theme assets) all 200; `/profile/dns_filtering/devices` redirects correctly; `/profile/scrolldaddy/devices` returns 404 as expected. Formal byte-identical visual regression not done — informal smoke tests pass.
+
+**Deferred (not blocking sister-brand deployment)**
+- [ ] Hard-coded brand strings audit (literal `"ScrollDaddy"` / `scrolldaddy.app` in display copy, email templates, settings_form labels). The setting **names** are renamed; the **labels** still say "ScrollDaddy DNS Host" etc. — admin-only impact.
+- [ ] Brand-neutralize default profile views (the 14 views in `plugins/dns_filtering/views/profile/` still carry ScrollDaddy-flavored copy; they currently look correct because scrolldaddy.app uses the matching theme's overrides).
+- [ ] Class names: `ScrollDaddyApiClient`, `ScrollDaddyHelper`, `SdDevice` / `MultiSdDevice` / `Sd*` model classes, `sdd_*` / `sbf_*` / etc. table prefixes — these aren't covered by any plugin rule and stay as brand-residue. Visible only to developers reading the codebase.
+- [ ] Tier feature keys: `scrolldaddy_max_devices`, `scrolldaddy_advanced_filters`, `scrolldaddy_custom_rules`, `scrolldaddy_query_logging`, `scrolldaddy_max_scheduled_blocks` in `sbt_subscription_tiers.sbt_features` JSON — code reads them by exact key, no plugin rule binding. Brand-residue.
+- [ ] `device_uid_prefix` setting and `s-`/`n-` prefix backfill — only matters once both deployments are live; currently a single deployment so no collision risk.
+
+**Pipeline gap surfaced and fixed mid-flight (not part of original Phase A scope)**
+
+The first attempt to deploy this refactor exposed a pre-existing bug in `utils/upgrade.php`: the pipeline asks the source for plugins/themes by *prod-side state*, so a renamed plugin's old name returned 404 from source and the new name was never asked for. Recovered via manual tar-pipe of the new directories to scrolldaddy.app, then fixed the pipeline. See [`specs/implemented/upgrade_pipeline_rename_gap.md`](implemented/upgrade_pipeline_rename_gap.md). Deployed in v0.8.30. Future renames will flow through cleanly without manual intervention. As a bonus, the deploy correctly flagged 1 stale plugin (`controld`) and 11 stale themes (legacy tailwind variants superseded by their `-html5` counterparts) on scrolldaddy.app — these can be reviewed and uninstalled at the operator's convenience.
 
 ### Phase B — Domain & DNS
 - [ ] Register `networksentry.com` (or chosen domain)
