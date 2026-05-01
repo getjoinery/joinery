@@ -59,7 +59,7 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 			$max_blocks = SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_max_scheduled_blocks', 1);
 			$existing_blocks = new MultiSdScheduledBlock(['device_id' => $device->key, 'is_always_on' => false]);
 			if($existing_blocks->count_all() >= $max_blocks){
-				return LogicResult::error("Your plan allows {$max_blocks} scheduled block(s) per device. Upgrade to add more.");
+				return LogicResult::error("Your plan allows {$max_blocks} scheduled filter(s) per device. Upgrade to add more.");
 			}
 
 			$block = new SdScheduledBlock(NULL);
