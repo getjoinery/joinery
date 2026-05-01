@@ -125,87 +125,213 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 		echo '</p>';
 	}
 
-	// CATEGORY RULES — three-state per category: —/Block/Allow
-	$rule_options = ['' => '—', '0' => 'Block', '1' => 'Allow'];
-
+	// CATEGORY RULES — split rendering by always-on vs scheduled.
+	// Always-on uses a binary Block | Allow segmented radio per category. "Allow" submits
+	// the empty string so update_filters() / update_services() delete any existing row —
+	// this matters because the resolver merge unions all AllowKeys across active blocks
+	// to delete categories from effectiveCategories, so an explicit allow row on the
+	// always-on baseline would silently erase any "Block" override on a scheduled block.
+	// Scheduled blocks are an overrides list — only the rows the user has chosen to
+	// override against the always-on baseline are shown; "Add override" appends new rows.
 	$can_edit_main = $device->are_filters_editable();
+	$has_advanced = SubscriptionTier::getUserFeature($session->get_user_id(), 'scrolldaddy_advanced_filters', false);
 
-	if($can_edit_main){
-		echo '<h5>Social Media</h5>';
-		$social_services = ['facebook'=>'Facebook', 'youtube'=>'YouTube', 'instagram'=>'Instagram',
-			'tiktok'=>'TikTok', 'snapchat'=>'Snapchat', 'wechat'=>'WeChat', 'x'=>'Twitter/X',
-			'linkedin'=>'LinkedIn', 'pinterest'=>'Pinterest', 'reddit'=>'Reddit'];
-		foreach($social_services as $key => $label){
-			$val = isset($service_rules[$key]) ? (string)$service_rules[$key] : '';
-			$formwriter->dropinput('rule_'.$key, $label, ['options' => $rule_options, 'value' => $val]);
+	// Curated category metadata. Each entry: 'type' => 'filter'|'service' tells us which
+	// rules table the key belongs to (drives lookup in $filter_rules vs $service_rules).
+	// 'advanced' marks tier-gated entries (ScrollDaddyHelper::getRestrictedFilters()).
+	$lifestyle_groups = [
+		'General' => [
+			'porn' => ['label' => 'Adult content', 'type' => 'filter'],
+			'drugs' => ['label' => 'Illegal drugs', 'type' => 'filter'],
+			'gambling' => ['label' => 'Gambling sites', 'type' => 'filter'],
+			'cryptominers' => ['label' => 'Cryptocurrency', 'type' => 'filter'],
+			'dating' => ['label' => 'Dating sites', 'type' => 'filter'],
+			'games' => ['label' => 'Games', 'type' => 'filter'],
+		],
+		'Search Safety' => [
+			'safesearch' => ['label' => 'SafeSearch (Google / Bing / DuckDuckGo)', 'type' => 'filter'],
+			'safeyoutube' => ['label' => 'YouTube Restricted Mode', 'type' => 'filter'],
+		],
+		'Social Media' => [
+			'facebook' => ['label' => 'Facebook', 'type' => 'service'],
+			'instagram' => ['label' => 'Instagram', 'type' => 'service'],
+			'linkedin' => ['label' => 'LinkedIn', 'type' => 'service'],
+			'pinterest' => ['label' => 'Pinterest', 'type' => 'service'],
+			'reddit' => ['label' => 'Reddit', 'type' => 'service'],
+			'snapchat' => ['label' => 'Snapchat', 'type' => 'service'],
+			'tiktok' => ['label' => 'TikTok', 'type' => 'service'],
+			'twitter' => ['label' => 'Twitter / X', 'type' => 'service'],
+			'wechat' => ['label' => 'WeChat', 'type' => 'service'],
+			'youtube' => ['label' => 'YouTube', 'type' => 'service'],
+		],
+		'Messaging' => [
+			'discord' => ['label' => 'Discord', 'type' => 'service'],
+			'messenger' => ['label' => 'Messenger', 'type' => 'service'],
+			'telegram' => ['label' => 'Telegram', 'type' => 'service'],
+			'whatsapp' => ['label' => 'WhatsApp', 'type' => 'service'],
+		],
+	];
+	$advanced_groups = [
+		'Ads & Trackers' => [
+			'ads_small' => ['label' => 'Ads & Trackers (Light)', 'type' => 'filter'],
+			'ads_medium' => ['label' => 'Ads & Trackers (Balanced)', 'type' => 'filter'],
+			'ads' => ['label' => 'Ads & Trackers (Strict)', 'type' => 'filter'],
+		],
+		'Malware & Phishing' => [
+			'malware' => ['label' => 'Malware (Light)', 'type' => 'filter'],
+			'ip_malware' => ['label' => 'Malware (Balanced)', 'type' => 'filter'],
+			'ai_malware' => ['label' => 'Malware (Strict)', 'type' => 'filter'],
+			'typo' => ['label' => 'Phishing domains', 'type' => 'filter'],
+			'fakenews' => ['label' => 'Hoaxes and disinformation', 'type' => 'filter'],
+		],
+	];
+	$advanced_keys = ScrollDaddyHelper::getRestrictedFilters();
+
+	// Flatten metadata for quick lookup by key
+	$category_meta = [];
+	foreach($lifestyle_groups as $gname => $items){
+		foreach($items as $k => $v){ $category_meta[$k] = $v + ['advanced' => false, 'group' => $gname]; }
+	}
+	foreach($advanced_groups as $gname => $items){
+		foreach($items as $k => $v){ $category_meta[$k] = $v + ['advanced' => true, 'group' => $gname]; }
+	}
+
+	$lookup_action = function($key, $type) use ($filter_rules, $service_rules) {
+		if($type === 'filter'){ return isset($filter_rules[$key]) ? (string)$filter_rules[$key] : null; }
+		return isset($service_rules[$key]) ? (string)$service_rules[$key] : null;
+	};
+
+	// Renders a Block | Allow segmented radio. $allow_submit_value differs by mode:
+	//   always-on -> '' (so submitting "Allow" deletes the row, see resolver-merge note above)
+	//   scheduled -> '1' (explicit allow row, intentionally overrides always-on Block)
+	$render_segmented = function($key, $current_action, $allow_submit_value, $disabled = false) {
+		$name = 'rule_' . $key;
+		$id_block = $name . '_block';
+		$id_allow = $name . '_allow';
+		$is_block = ((string)$current_action === '0');
+		$is_allow = !$is_block && $current_action !== null;
+		// No existing row -> default Allow (no row in DB == not blocked at the resolver)
+		if(!$is_block && !$is_allow){ $is_allow = true; }
+		$dis = $disabled ? ' disabled' : '';
+		$h  = '<div class="sd-segmented" role="radiogroup">';
+		$h .= '<input type="radio" name="'.htmlspecialchars($name).'" id="'.htmlspecialchars($id_block).'" value="0"'.($is_block?' checked':'').$dis.'>';
+		$h .= '<label for="'.htmlspecialchars($id_block).'">Block</label>';
+		$h .= '<input type="radio" name="'.htmlspecialchars($name).'" id="'.htmlspecialchars($id_allow).'" value="'.htmlspecialchars((string)$allow_submit_value).'"'.($is_allow?' checked':'').$dis.'>';
+		$h .= '<label for="'.htmlspecialchars($id_allow).'">Allow</label>';
+		$h .= '</div>';
+		return $h;
+	};
+
+	if($is_always_on){
+		// ===== ALWAYS-ON: BASELINE EDITOR (binary Block | Allow per category) =====
+		if($can_edit_main){
+			foreach($lifestyle_groups as $group_name => $items){
+				echo '<h5>'.htmlspecialchars($group_name).'</h5>';
+				echo '<div class="sd-rule-section">';
+				foreach($items as $key => $meta){
+					$cur = $lookup_action($key, $meta['type']);
+					echo '<div class="sd-rule-row">';
+					echo '<span class="sd-rule-label">'.htmlspecialchars($meta['label']).'</span>';
+					echo $render_segmented($key, $cur, '');
+					echo '</div>';
+				}
+				echo '</div>';
+			}
+		}
+		else{
+			echo '<div class="alert alert-warning" role="alert">
+			  Since you have chosen to allow edits only on Sunday. Edits are disabled, except for ad and malware blocking.
+			</div>';
 		}
 
-		echo '<h5>Messaging</h5>';
-		$msg_services = ['whatsapp'=>'WhatsApp', 'telegram'=>'Telegram', 'discord'=>'Discord', 'messenger'=>'Messenger'];
-		foreach($msg_services as $key => $label){
-			$val = isset($service_rules[$key]) ? (string)$service_rules[$key] : '';
-			$formwriter->dropinput('rule_'.$key, $label, ['options' => $rule_options, 'value' => $val]);
+		if($has_advanced){
+			foreach($advanced_groups as $group_name => $items){
+				echo '<h5>'.htmlspecialchars($group_name).'</h5>';
+				echo '<div class="sd-rule-section">';
+				foreach($items as $key => $meta){
+					$cur = $lookup_action($key, $meta['type']);
+					echo '<div class="sd-rule-row">';
+					echo '<span class="sd-rule-label">'.htmlspecialchars($meta['label']).'</span>';
+					echo $render_segmented($key, $cur, '');
+					echo '</div>';
+				}
+				echo '</div>';
+			}
 		}
-
-		echo '<h5>Gambling and Crypto</h5>';
-		$val = isset($filter_rules['gambling']) ? (string)$filter_rules['gambling'] : '';
-		$formwriter->dropinput('rule_gambling', 'All Gambling sites', ['options' => $rule_options, 'value' => $val]);
-		$val = isset($filter_rules['cryptominers']) ? (string)$filter_rules['cryptominers'] : '';
-		$formwriter->dropinput('rule_cryptominers', 'All Crypto sites', ['options' => $rule_options, 'value' => $val]);
-
-		echo '<h5>Gaming</h5>';
-		$val = isset($filter_rules['games']) ? (string)$filter_rules['games'] : '';
-		$formwriter->dropinput('rule_games', 'All Gaming sites', ['options' => $rule_options, 'value' => $val]);
-
-		echo '<h5>Adult Content</h5>';
-		$val = isset($filter_rules['porn']) ? (string)$filter_rules['porn'] : '';
-		$formwriter->dropinput('rule_porn', 'All Adult sites', ['options' => $rule_options, 'value' => $val]);
-		$val = isset($filter_rules['drugs']) ? (string)$filter_rules['drugs'] : '';
-		$formwriter->dropinput('rule_drugs', 'All Drug sites', ['options' => $rule_options, 'value' => $val]);
-
-		echo '<h5>News and Shopping</h5>';
-		$val = isset($filter_rules['news']) ? (string)$filter_rules['news'] : '';
-		$formwriter->dropinput('rule_news', 'All News sites', ['options' => $rule_options, 'value' => $val]);
-		$val = isset($filter_rules['shop']) ? (string)$filter_rules['shop'] : '';
-		$formwriter->dropinput('rule_shop', 'All Shopping sites', ['options' => $rule_options, 'value' => $val]);
-
-		echo '<h5>Online Dating</h5>';
-		$val = isset($filter_rules['dating']) ? (string)$filter_rules['dating'] : '';
-		$formwriter->dropinput('rule_dating', 'All Dating sites', ['options' => $rule_options, 'value' => $val]);
-
-		echo '<h5>Search Safety</h5>';
-		$val = isset($filter_rules['safesearch']) ? (string)$filter_rules['safesearch'] : '';
-		$formwriter->dropinput('rule_safesearch', ScrollDaddyHelper::$filters['safesearch'], ['options' => $rule_options, 'value' => $val]);
-		$val = isset($filter_rules['safeyoutube']) ? (string)$filter_rules['safeyoutube'] : '';
-		$formwriter->dropinput('rule_safeyoutube', ScrollDaddyHelper::$filters['safeyoutube'], ['options' => $rule_options, 'value' => $val]);
 	}
 	else{
-		echo '<div class="alert alert-warning" role="alert">
-		  Since you have chosen to allow edits only on Sunday. Edits are disabled, except for ad and malware blocking.
-		</div>';
-	}
+		// ===== SCHEDULED: OVERRIDES LIST =====
+		echo '<h5>Overrides</h5>';
+		echo '<p class="text-muted">During this block\'s schedule, these settings differ from your always-on rules.</p>';
 
-	// Ad and malware — gated by scrolldaddy_advanced_filters
-	if(SubscriptionTier::getUserFeature($session->get_user_id(), 'scrolldaddy_advanced_filters', false)){
-		echo '<h5>Ad and Malware</h5>';
-
-		$ad_filters = ['ads_small'=>'Ads (Light)', 'ads_medium'=>'Ads (Medium)', 'ads'=>'Ads (Aggressive)'];
-		foreach($ad_filters as $key => $label){
-			$val = isset($filter_rules[$key]) ? (string)$filter_rules[$key] : '';
-			$formwriter->dropinput('rule_'.$key, $label, ['options' => $rule_options, 'value' => $val]);
+		// Build the list of currently-overridden categories from the loaded rules.
+		$overrides = [];
+		foreach($filter_rules as $k => $action){
+			if(isset($category_meta[$k]) && $category_meta[$k]['type'] === 'filter'){
+				$overrides[$k] = (string)$action;
+			}
+		}
+		foreach($service_rules as $k => $action){
+			if(isset($category_meta[$k]) && $category_meta[$k]['type'] === 'service'){
+				$overrides[$k] = (string)$action;
+			}
 		}
 
-		$malware_filters = ['malware'=>'Malware (Light)', 'ip_malware'=>'Malware (Medium)', 'ai_malware'=>'Malware (Aggressive)'];
-		foreach($malware_filters as $key => $label){
-			$val = isset($filter_rules[$key]) ? (string)$filter_rules[$key] : '';
-			$formwriter->dropinput('rule_'.$key, $label, ['options' => $rule_options, 'value' => $val]);
+		echo '<div id="sd-overrides-list" class="sd-rule-section">';
+		if(empty($overrides)){
+			echo '<p id="sd-overrides-empty" class="text-muted"><em>No overrides — this schedule uses your always-on rules.</em></p>';
 		}
+		foreach($overrides as $key => $action){
+			$meta = $category_meta[$key];
+			$is_advanced = !empty($meta['advanced']);
+			// Editable when: $can_edit_main allows lifestyle edits, OR (advanced editing is gated only by tier)
+			$editable = $is_advanced ? $has_advanced : $can_edit_main;
+			echo '<div class="sd-rule-row sd-override-row" data-key="'.htmlspecialchars($key).'" data-advanced="'.($is_advanced?'1':'0').'">';
+			echo '<span class="sd-rule-label">'.htmlspecialchars($meta['label']).'</span>';
+			echo '<div class="sd-rule-controls">';
+			echo $render_segmented($key, $action, '1', !$editable);
+			if($editable || ($is_advanced && !$has_advanced)){
+				// Allow remove for editable rows always; for downgraded users, remove on
+				// advanced is the option-C escape hatch (visible + removable, not editable).
+				echo '<button type="button" class="btn-remove-override" aria-label="Remove override">&times;</button>';
+			}
+			echo '</div>';
+			echo '</div>';
+		}
+		echo '</div>';
 
-		$val = isset($filter_rules['fakenews']) ? (string)$filter_rules['fakenews'] : '';
-		$formwriter->dropinput('rule_fakenews', 'Clickbait and disinformation', ['options' => $rule_options, 'value' => $val]);
-
-		$val = isset($filter_rules['typo']) ? (string)$filter_rules['typo'] : '';
-		$formwriter->dropinput('rule_typo', 'Phishing sites', ['options' => $rule_options, 'value' => $val]);
+		// Add picker — categories already overridden are filtered out client-side.
+		if($can_edit_main || $has_advanced){
+			echo '<div id="sd-add-override" class="sd-add-override">';
+			echo '<select id="sd-add-category" aria-label="Category to override">';
+			echo '<option value="">Select a category…</option>';
+			$render_optgroup = function($groups, $is_advanced_group) use ($overrides, $can_edit_main, $has_advanced){
+				foreach($groups as $group_name => $items){
+					$g_html = '';
+					foreach($items as $k => $meta){
+						if(isset($overrides[$k])) continue; // already in list
+						if(!$is_advanced_group && !$can_edit_main) continue; // lifestyle locked
+						if($is_advanced_group && !$has_advanced) continue; // advanced gated
+						$g_html .= '<option value="'.htmlspecialchars($k).'" data-type="'.htmlspecialchars($meta['type']).'" data-advanced="'.($is_advanced_group?'1':'0').'">'.htmlspecialchars($meta['label']).'</option>';
+					}
+					if($g_html !== ''){
+						echo '<optgroup label="'.htmlspecialchars($group_name).'">'.$g_html.'</optgroup>';
+					}
+				}
+			};
+			$render_optgroup($lifestyle_groups, false);
+			$render_optgroup($advanced_groups, true);
+			echo '</select>';
+			echo '<select id="sd-add-action" aria-label="Override action">';
+			echo '<option value="0">Block</option>';
+			echo '<option value="1">Allow</option>';
+			echo '</select>';
+			echo '<button type="button" class="th-btn" id="sd-add-override-btn">Add override</button>';
+			echo '</div>';
+		}
+		else{
+			echo '<p class="text-muted"><em>Adding new overrides is locked while accountability mode is active.</em></p>';
+		}
 	}
 
 	$formwriter->submitbutton('btn_submit', $save_label, ['class' => 'btn btn-primary']);
@@ -366,5 +492,136 @@ function selectDays(days) {
 		cb.checked = days.indexOf(cb.value) !== -1;
 	});
 }
+
+// Override list management
+(function(){
+	var list = document.getElementById('sd-overrides-list');
+	if(!list){ return; }
+	var addBtn = document.getElementById('sd-add-override-btn');
+	var addCat = document.getElementById('sd-add-category');
+	var addAct = document.getElementById('sd-add-action');
+	var form = list.closest('form');
+
+	function escapeHtml(s){
+		return String(s).replace(/[&<>"']/g, function(c){
+			return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+		});
+	}
+
+	function clearEmptyMessage(){
+		var empty = document.getElementById('sd-overrides-empty');
+		if(empty){ empty.remove(); }
+	}
+
+	function showEmptyMessageIfNeeded(){
+		if(list.querySelectorAll('.sd-override-row').length === 0 && !document.getElementById('sd-overrides-empty')){
+			var p = document.createElement('p');
+			p.id = 'sd-overrides-empty';
+			p.className = 'text-muted';
+			p.innerHTML = '<em>No overrides — this schedule uses your always-on rules.</em>';
+			list.appendChild(p);
+		}
+	}
+
+	function buildRow(key, label, action, isAdvanced){
+		var row = document.createElement('div');
+		row.className = 'sd-rule-row sd-override-row';
+		row.setAttribute('data-key', key);
+		row.setAttribute('data-advanced', isAdvanced ? '1' : '0');
+		var nameAttr = 'rule_' + key;
+		var idBlock = nameAttr + '_block';
+		var idAllow = nameAttr + '_allow';
+		var blockChecked = action === '0' ? ' checked' : '';
+		var allowChecked = action === '1' ? ' checked' : '';
+		row.innerHTML =
+			'<span class="sd-rule-label">' + escapeHtml(label) + '</span>' +
+			'<div class="sd-rule-controls">' +
+				'<div class="sd-segmented" role="radiogroup">' +
+					'<input type="radio" name="' + escapeHtml(nameAttr) + '" id="' + escapeHtml(idBlock) + '" value="0"' + blockChecked + '>' +
+					'<label for="' + escapeHtml(idBlock) + '">Block</label>' +
+					'<input type="radio" name="' + escapeHtml(nameAttr) + '" id="' + escapeHtml(idAllow) + '" value="1"' + allowChecked + '>' +
+					'<label for="' + escapeHtml(idAllow) + '">Allow</label>' +
+				'</div>' +
+				'<button type="button" class="btn-remove-override" aria-label="Remove override">&times;</button>' +
+			'</div>';
+		return row;
+	}
+
+	if(addBtn){
+		addBtn.addEventListener('click', function(){
+			if(!addCat || !addCat.value){ return; }
+			var opt = addCat.options[addCat.selectedIndex];
+			var key = addCat.value;
+			var label = opt.textContent;
+			var isAdvanced = opt.getAttribute('data-advanced') === '1';
+			var action = addAct.value;
+
+			clearEmptyMessage();
+			var row = buildRow(key, label, action, isAdvanced);
+			list.appendChild(row);
+
+			// Remove the chosen option from the picker so the user can't add a duplicate.
+			opt.remove();
+			// If the optgroup is now empty, remove it for cleanliness.
+			addCat.querySelectorAll('optgroup').forEach(function(og){
+				if(og.children.length === 0){ og.remove(); }
+			});
+			addCat.selectedIndex = 0;
+		});
+	}
+
+	list.addEventListener('click', function(e){
+		var btn = e.target.closest('.btn-remove-override');
+		if(!btn){ return; }
+		var row = btn.closest('.sd-override-row');
+		if(!row){ return; }
+		var key = row.getAttribute('data-key');
+		var isAdvanced = row.getAttribute('data-advanced') === '1';
+
+		// If this is an advanced override and the user lacks the feature, the radio
+		// inputs are disabled and won't submit anything — so update_filters() with
+		// $skip_keys would preserve the row. Fall back to the explicit-delete path.
+		var radio = row.querySelector('input[type="radio"]');
+		if(isAdvanced && radio && radio.disabled){
+			var hidden = document.createElement('input');
+			hidden.type = 'hidden';
+			hidden.name = 'remove_advanced_keys[]';
+			hidden.value = key;
+			form.appendChild(hidden);
+		}
+
+		row.remove();
+		showEmptyMessageIfNeeded();
+
+		// Restore the option to the picker (only if user can edit this category).
+		if(addCat){
+			var meta = window.SD_CATEGORY_META && window.SD_CATEGORY_META[key];
+			if(meta){
+				var canRestore = isAdvanced ? window.SD_HAS_ADVANCED : window.SD_CAN_EDIT_MAIN;
+				if(canRestore){
+					var groupName = meta.group;
+					var og = addCat.querySelector('optgroup[label="' + CSS.escape(groupName) + '"]');
+					if(!og){
+						og = document.createElement('optgroup');
+						og.setAttribute('label', groupName);
+						addCat.appendChild(og);
+					}
+					var newOpt = document.createElement('option');
+					newOpt.value = key;
+					newOpt.textContent = meta.label;
+					newOpt.setAttribute('data-type', meta.type);
+					newOpt.setAttribute('data-advanced', isAdvanced ? '1' : '0');
+					og.appendChild(newOpt);
+				}
+			}
+		}
+	});
+})();
+</script>
+<script>
+// Category metadata + tier flags exported to JS for override list re-population.
+window.SD_CATEGORY_META = <?php echo json_encode($category_meta); ?>;
+window.SD_CAN_EDIT_MAIN = <?php echo $can_edit_main ? 'true' : 'false'; ?>;
+window.SD_HAS_ADVANCED = <?php echo $has_advanced ? 'true' : 'false'; ?>;
 </script>
 <?php endif; ?>

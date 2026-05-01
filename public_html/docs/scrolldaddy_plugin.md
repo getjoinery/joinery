@@ -45,7 +45,13 @@ Content-category filtering on the always-on block is intentionally ungated. Scro
 
 ## Editor UI
 
-A single editor (`views/profile/scheduled_block_edit.php`) serves both always-on and scheduled blocks. In always-on mode, the page title reads "Always-On Rules", the name is fixed, and the schedule controls are hidden. Category rules use consistent 3-state dropdowns (`— / Block / Allow`) everywhere; "—" means the block takes no stance, so the setting is inherited from whatever default applies when no block has an opinion.
+A single editor (`views/profile/scheduled_block_edit.php`) serves both always-on and scheduled blocks, with two render modes branching on `sdb_is_always_on`.
+
+**Always-on mode** — the baseline policy. Page title reads "Always-On Rules", name is fixed, schedule controls are hidden. Each category renders as a binary `Block | Allow` segmented radio. The form submits `'0'` for Block (writes/keeps an `action=0` row) and the empty string for Allow (deletes any existing row). **Critical:** "Allow" must mean "no row," not an explicit `action=1` row, because the resolver merge (`resolver.go:183-239`) unions `AllowKeys` from every active block to delete categories from the effective block set — an explicit allow row on always-on would silently erase a `Block` override on a scheduled block. The resolver default (no row → not blocked) gives free Allow on the baseline.
+
+**Scheduled mode** — an overrides list against the always-on baseline. Existing overrides render as one row each (category label + `Block | Allow` segmented radio + Remove button). Adding an override uses an inline `<select>`-into-list picker at the bottom (a category dropdown with `<optgroup>`s mirroring the always-on grouping, plus a `Block | Allow` action dropdown and an "Add override" button). Categories already overridden are filtered out of the picker. Empty list shows a muted "No overrides — this schedule uses your always-on rules" placeholder.
+
+**Tier downgrade behavior** (option C): when a user with existing advanced-filter overrides (ads, malware, fakenews, typo — see `ScrollDaddyHelper::getRestrictedFilters()`) loses `scrolldaddy_advanced_filters`, the rows render in the override list with a **disabled** segmented radio (cannot edit action) but a **working** Remove button. Remove appends `<input name="remove_advanced_keys[]">` to the form so `scheduled_block_edit_logic.php` can explicitly delete the row even though `update_filters()` is called with `$skip_keys` to preserve untouched advanced rows. The picker excludes advanced filters for downgraded users, so they can't add new ones.
 
 Custom domain rules render at the bottom of the editor with inline AJAX add/delete (via `plugins/scrolldaddy/ajax/block_rule_add.php` and `block_rule_delete.php`), decoupled from the main save button — adding rules is iterative, while category toggles are set-and-forget.
 
