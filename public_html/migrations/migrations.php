@@ -1408,3 +1408,17 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Rename scrolldaddy plugin → dns_filtering (v125) ==========
+	$migration = array();
+	$migration['database_version'] = '125';
+	$migration['migration_file'] = 'rename_scrolldaddy_to_dns_filtering.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Rename plugin settings: scrolldaddy_* → dns_filtering_* (v126) ==========
+	$migration = array();
+	$migration['database_version'] = '126';
+	$migration['migration_file'] = 'rename_scrolldaddy_settings.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

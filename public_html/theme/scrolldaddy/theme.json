@@ -1,0 +1,20 @@
+{
+    "name": "scrolldaddy",
+    "display_name": "ScrollDaddy Theme",
+    "description": "ScrollDaddy self-hosted DNS filtering service theme",
+    "version": "1.0.0",
+    "author": "System Developer",
+    "is_stock": false,
+    "cssFramework": "html5",
+    "formWriterBase": "FormWriterV2HTML5",
+    "publicPageBase": "PublicPageBase",
+    "asset_fallback_theme": "default",
+    "assets": {
+        "css": [
+            "/theme/scrolldaddy/assets/css/scrolldaddy-plugin.css"
+        ],
+        "js": [
+            "/theme/scrolldaddy/assets/js/scrolldaddy-plugin.js"
+        ]
+    }
+}
