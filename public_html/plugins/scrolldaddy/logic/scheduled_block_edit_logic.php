@@ -94,17 +94,36 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 
 		$block->save();
 
-		// Strip restricted filters for users without advanced_filters
+		// Skip restricted filters for users without advanced_filters: their existing
+		// advanced rows are preserved as-is on save (the form doesn't render an editable
+		// widget for them, so a stripped POST would otherwise delete those rows).
+		// Explicit removal flows through the remove_advanced_keys[] path below.
+		require_once(PathHelper::getIncludePath('plugins/scrolldaddy/includes/ScrollDaddyHelper.php'));
+		$skip_keys = array();
 		if(!SubscriptionTier::getUserFeature($user->key, 'scrolldaddy_advanced_filters', false)){
-			require_once(PathHelper::getIncludePath('plugins/scrolldaddy/includes/ScrollDaddyHelper.php'));
-			foreach(ScrollDaddyHelper::getRestrictedFilters() as $restricted_key){
-				unset($post_vars['rule_'.$restricted_key]);
+			$skip_keys = ScrollDaddyHelper::getRestrictedFilters();
+
+			// Allow the user to delete an existing advanced override even without the
+			// feature — the override row UI surfaces a working Remove button.
+			if(isset($post_vars['remove_advanced_keys']) && is_array($post_vars['remove_advanced_keys'])){
+				require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/scheduled_block_filters_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/scrolldaddy/data/scheduled_block_services_class.php'));
+				foreach($post_vars['remove_advanced_keys'] as $key){
+					if(!in_array($key, ScrollDaddyHelper::getRestrictedFilters(), true)){
+						continue; // only restricted keys may flow through this path
+					}
+					$existing = new MultiSdScheduledBlockFilter(['block_id' => $block->key, 'filter_key' => $key]);
+					$existing->load();
+					foreach($existing as $row){
+						$row->permanent_delete();
+					}
+				}
 			}
 		}
 
 		// Update filter and service rules
-		$block->update_filters($post_vars);
-		$block->update_services($post_vars);
+		$block->update_filters($post_vars, $skip_keys);
+		$block->update_services($post_vars, $skip_keys);
 
 		return LogicResult::redirect('/profile/scrolldaddy/devices');
 	}
