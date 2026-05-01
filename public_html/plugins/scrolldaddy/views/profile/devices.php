@@ -158,7 +158,7 @@ else{
 									</div>
 									<div style="display:flex; gap:6px;">
 										<a class="th-btn style5" href="/profile/scrolldaddy/scheduled_block_edit?device_id='.$device->key.'&block_id='.$sblock->key.'">Edit</a>
-										<form method="POST" action="/profile/scrolldaddy/scheduled_block_edit" style="display:inline;" onsubmit="return confirm(\'Delete this scheduled block?\')">
+										<form method="POST" action="/profile/scrolldaddy/scheduled_block_edit" style="display:inline;" onsubmit="return confirm(\'Delete this scheduled filter?\')">
 											<input type="hidden" name="action" value="delete">
 											<input type="hidden" name="block_id" value="'.$sblock->key.'">
 											<button type="submit" class="th-btn style5" style="background:#dc3545;border-color:#dc3545;">Delete</button>

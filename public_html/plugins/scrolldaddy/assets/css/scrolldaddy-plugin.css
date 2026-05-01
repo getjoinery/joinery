@@ -2,7 +2,7 @@
  * ScrollDaddy Plugin Styles
  * Additional styles specific to ScrollDaddy plugin functionality
  * These styles work with any theme's CSS framework
- * v14
+ * v18
  */
 
 /* Fix blue bar under logo: inline <img> leaves a baseline gap that the mask-icon fills with theme color */
@@ -266,6 +266,8 @@ input[type="checkbox"]:checked ~ label:before {
 .sd-segmented label {
     margin: 0;
     padding: 6px 18px;
+    padding-left: 18px;
+    position: static;
     cursor: pointer;
     font-size: 14px;
     font-weight: 500;
@@ -274,6 +276,10 @@ input[type="checkbox"]:checked ~ label:before {
     border-right: 1px solid var(--th-border-color);
     transition: background 0.15s ease, color 0.15s ease;
     line-height: 1.4;
+}
+.sd-segmented input[type="radio"] ~ label::before,
+.sd-segmented input[type="radio"]:checked ~ label::before {
+    content: none;
 }
 .sd-segmented label:last-of-type {
     border-right: none;
@@ -316,6 +322,22 @@ input[type="checkbox"]:checked ~ label:before {
 .sd-rule-row:nth-child(even) {
     background-color: var(--smoke-color4, #F9F8FF);
 }
+
+/* Auto-save feedback for the always-on editor — transient row tint after a change */
+.sd-rule-row.sd-auto-save {
+    transition: box-shadow 0.25s ease, background-color 0.25s ease;
+}
+.sd-rule-row.sd-saving {
+    box-shadow: inset 3px 0 0 #adb5bd;
+}
+.sd-rule-row.sd-saved {
+    box-shadow: inset 3px 0 0 #28a745;
+    background-color: rgba(40, 167, 69, 0.06);
+}
+.sd-rule-row.sd-save-error {
+    box-shadow: inset 3px 0 0 #dc3545;
+    background-color: rgba(220, 53, 69, 0.08);
+}
 .sd-rule-label {
     font-size: 15px;
     color: var(--title-color);
@@ -348,7 +370,7 @@ input[type="checkbox"]:checked ~ label:before {
     color: #ffffff;
 }
 
-/* Add-override picker row, mirrors the custom-domain-rules add row */
+/* Add-filter picker — single category select, auto-adds on change */
 .sd-add-override {
     display: flex;
     gap: 8px;
@@ -357,7 +379,7 @@ input[type="checkbox"]:checked ~ label:before {
     flex-wrap: wrap;
 }
 .sd-add-override select {
-    padding: 6px 10px;
+    padding: 8px 12px;
     border: 1px solid var(--th-border-color);
     border-radius: 4px;
     font-size: 14px;
@@ -366,6 +388,18 @@ input[type="checkbox"]:checked ~ label:before {
 }
 .sd-add-override #sd-add-category {
     flex: 1 1 240px;
+}
+
+/* Empty-state placeholder for the filter list — sits inside .sd-rule-section
+   so it shouldn't read as another rule row. Spacious, centered, muted. */
+.sd-empty-state {
+    padding: 28px 18px;
+    text-align: center;
+    color: #8a8a8a;
+    font-style: italic;
+    font-size: 14px;
+    line-height: 1.5;
+    background: transparent;
 }
 
 /* Mobile header and hero spacing */

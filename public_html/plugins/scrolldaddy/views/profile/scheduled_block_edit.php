@@ -27,8 +27,8 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 		$save_label = 'Save Always-On Rules';
 	}
 	else{
-		$page_title = ($is_edit ? 'Edit' : 'Add') . ' Scheduled Block';
-		$save_label = 'Save Scheduled Block';
+		$page_title = ($is_edit ? 'Edit' : 'Add') . ' Scheduled Filter';
+		$save_label = 'Save';
 	}
 
 	$page = new PublicPage();
@@ -68,10 +68,9 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 		$formwriter->hiddeninput('block_id', '', ['value' => $block->key]);
 	}
 
-	// BLOCK NAME — only for scheduled blocks. Always-on block name is fixed.
+	// LABEL — only for scheduled filters. Always-on filter name is fixed.
 	if(!$is_always_on){
-		echo '<h5>Block Name</h5>';
-		$formwriter->textinput('sdb_name', 'Name', [
+		$formwriter->textinput('sdb_name', 'Label', [
 			'value' => $block->get('sdb_name') ?: '',
 			'placeholder' => 'e.g. Bedtime, School Hours, Weekend Fun',
 			'maxlength' => 64
@@ -230,7 +229,7 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 				echo '<div class="sd-rule-section">';
 				foreach($items as $key => $meta){
 					$cur = $lookup_action($key, $meta['type']);
-					echo '<div class="sd-rule-row">';
+					echo '<div class="sd-rule-row sd-auto-save" data-key="'.htmlspecialchars($key).'" data-type="'.htmlspecialchars($meta['type']).'">';
 					echo '<span class="sd-rule-label">'.htmlspecialchars($meta['label']).'</span>';
 					echo $render_segmented($key, $cur, '');
 					echo '</div>';
@@ -250,7 +249,7 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 				echo '<div class="sd-rule-section">';
 				foreach($items as $key => $meta){
 					$cur = $lookup_action($key, $meta['type']);
-					echo '<div class="sd-rule-row">';
+					echo '<div class="sd-rule-row sd-auto-save" data-key="'.htmlspecialchars($key).'" data-type="'.htmlspecialchars($meta['type']).'">';
 					echo '<span class="sd-rule-label">'.htmlspecialchars($meta['label']).'</span>';
 					echo $render_segmented($key, $cur, '');
 					echo '</div>';
@@ -260,9 +259,8 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 		}
 	}
 	else{
-		// ===== SCHEDULED: OVERRIDES LIST =====
-		echo '<h5>Overrides</h5>';
-		echo '<p class="text-muted">During this block\'s schedule, these settings differ from your always-on rules.</p>';
+		// ===== SCHEDULED: FILTERS LIST =====
+		echo '<h5>Filters</h5>';
 
 		// Build the list of currently-overridden categories from the loaded rules.
 		$overrides = [];
@@ -279,7 +277,7 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 
 		echo '<div id="sd-overrides-list" class="sd-rule-section">';
 		if(empty($overrides)){
-			echo '<p id="sd-overrides-empty" class="text-muted"><em>No overrides — this schedule uses your always-on rules.</em></p>';
+			echo '<div id="sd-overrides-empty" class="sd-empty-state">No filters yet — this schedule uses your always-on rules.</div>';
 		}
 		foreach($overrides as $key => $action){
 			$meta = $category_meta[$key];
@@ -293,18 +291,19 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 			if($editable || ($is_advanced && !$has_advanced)){
 				// Allow remove for editable rows always; for downgraded users, remove on
 				// advanced is the option-C escape hatch (visible + removable, not editable).
-				echo '<button type="button" class="btn-remove-override" aria-label="Remove override">&times;</button>';
+				echo '<button type="button" class="btn-remove-override" aria-label="Remove filter">&times;</button>';
 			}
 			echo '</div>';
 			echo '</div>';
 		}
 		echo '</div>';
 
-		// Add picker — categories already overridden are filtered out client-side.
+		// Add picker — selecting a category auto-adds it (default action: Block).
+		// Categories already in the list are filtered out client-side.
 		if($can_edit_main || $has_advanced){
 			echo '<div id="sd-add-override" class="sd-add-override">';
-			echo '<select id="sd-add-category" aria-label="Category to override">';
-			echo '<option value="">Select a category…</option>';
+			echo '<select id="sd-add-category" aria-label="Add a filter">';
+			echo '<option value="">Add a filter…</option>';
 			$render_optgroup = function($groups, $is_advanced_group) use ($overrides, $can_edit_main, $has_advanced){
 				foreach($groups as $group_name => $items){
 					$g_html = '';
@@ -322,19 +321,17 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 			$render_optgroup($lifestyle_groups, false);
 			$render_optgroup($advanced_groups, true);
 			echo '</select>';
-			echo '<select id="sd-add-action" aria-label="Override action">';
-			echo '<option value="0">Block</option>';
-			echo '<option value="1">Allow</option>';
-			echo '</select>';
-			echo '<button type="button" class="th-btn" id="sd-add-override-btn">Add override</button>';
 			echo '</div>';
 		}
 		else{
-			echo '<p class="text-muted"><em>Adding new overrides is locked while accountability mode is active.</em></p>';
+			echo '<p class="text-muted"><em>Adding new filters is locked while accountability mode is active.</em></p>';
 		}
 	}
 
-	$formwriter->submitbutton('btn_submit', $save_label, ['class' => 'btn btn-primary']);
+	// Always-on edits save-on-change via AJAX, so the explicit submit button is unnecessary.
+	if(!$is_always_on){
+		$formwriter->submitbutton('btn_submit', $save_label, ['class' => 'btn btn-primary']);
+	}
 	$formwriter->end_form();
 
 	// CUSTOM DOMAIN RULES — rendered outside the main form; uses inline AJAX for add/delete
@@ -466,6 +463,55 @@ $page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>
 
+<?php if($is_always_on): ?>
+<script>
+// Always-on save-on-change: each segmented Block|Allow change posts to the
+// per-rule AJAX endpoint immediately, so users don't scroll for a Save button.
+(function(){
+	var rows = document.querySelectorAll('.sd-rule-row.sd-auto-save');
+	if(!rows.length){ return; }
+	var blockId = <?php echo (int)$block->key; ?>;
+	if(!blockId){ return; }
+
+	function flash(row, cls){
+		row.classList.remove('sd-saving','sd-saved','sd-save-error');
+		row.classList.add(cls);
+		if(cls === 'sd-saved'){
+			setTimeout(function(){ row.classList.remove('sd-saved'); }, 1200);
+		}
+	}
+
+	rows.forEach(function(row){
+		var key = row.getAttribute('data-key');
+		var type = row.getAttribute('data-type');
+		row.querySelectorAll('input[type="radio"]').forEach(function(r){
+			r.addEventListener('change', function(){
+				if(!r.checked){ return; }
+				flash(row, 'sd-saving');
+				var fd = new FormData();
+				fd.append('block_id', blockId);
+				fd.append('type', type);
+				fd.append('key', key);
+				fd.append('action', r.value);
+				fetch('/ajax/block_filter_set', {
+					method: 'POST', body: fd, credentials: 'same-origin'
+				})
+				.then(function(res){ return res.json(); })
+				.then(function(j){
+					flash(row, j.success ? 'sd-saved' : 'sd-save-error');
+					if(!j.success && j.error){ console.error('Save failed:', j.error); }
+				})
+				.catch(function(e){
+					flash(row, 'sd-save-error');
+					console.error('Save failed:', e);
+				});
+			});
+		});
+	});
+})();
+</script>
+<?php endif; ?>
+
 <?php if(!$is_always_on): ?>
 <script>
 // Overnight hint — only relevant to scheduled blocks
@@ -497,9 +543,7 @@ function selectDays(days) {
 (function(){
 	var list = document.getElementById('sd-overrides-list');
 	if(!list){ return; }
-	var addBtn = document.getElementById('sd-add-override-btn');
 	var addCat = document.getElementById('sd-add-category');
-	var addAct = document.getElementById('sd-add-action');
 	var form = list.closest('form');
 
 	function escapeHtml(s){
@@ -515,11 +559,11 @@ function selectDays(days) {
 
 	function showEmptyMessageIfNeeded(){
 		if(list.querySelectorAll('.sd-override-row').length === 0 && !document.getElementById('sd-overrides-empty')){
-			var p = document.createElement('p');
-			p.id = 'sd-overrides-empty';
-			p.className = 'text-muted';
-			p.innerHTML = '<em>No overrides — this schedule uses your always-on rules.</em>';
-			list.appendChild(p);
+			var d = document.createElement('div');
+			d.id = 'sd-overrides-empty';
+			d.className = 'sd-empty-state';
+			d.textContent = 'No filters yet — this schedule uses your always-on rules.';
+			list.appendChild(d);
 		}
 	}
 
@@ -542,22 +586,22 @@ function selectDays(days) {
 					'<input type="radio" name="' + escapeHtml(nameAttr) + '" id="' + escapeHtml(idAllow) + '" value="1"' + allowChecked + '>' +
 					'<label for="' + escapeHtml(idAllow) + '">Allow</label>' +
 				'</div>' +
-				'<button type="button" class="btn-remove-override" aria-label="Remove override">&times;</button>' +
+				'<button type="button" class="btn-remove-override" aria-label="Remove filter">&times;</button>' +
 			'</div>';
 		return row;
 	}
 
-	if(addBtn){
-		addBtn.addEventListener('click', function(){
-			if(!addCat || !addCat.value){ return; }
+	if(addCat){
+		addCat.addEventListener('change', function(){
+			if(!addCat.value){ return; }
 			var opt = addCat.options[addCat.selectedIndex];
 			var key = addCat.value;
 			var label = opt.textContent;
 			var isAdvanced = opt.getAttribute('data-advanced') === '1';
-			var action = addAct.value;
 
 			clearEmptyMessage();
-			var row = buildRow(key, label, action, isAdvanced);
+			// New filters default to Block; user can flip via the segmented control on the row.
+			var row = buildRow(key, label, '0', isAdvanced);
 			list.appendChild(row);
 
 			// Remove the chosen option from the picker so the user can't add a duplicate.
