@@ -101,8 +101,10 @@ private function _check_for_duplicate_setting() {
 				ON CONFLICT (stg_name) DO NOTHING";
 		$stmt = $dblink->prepare($sql);
 
-		foreach ($declarations as $d) {
-			if (empty($d['name'])) continue;
+		foreach ($declarations as $i => $d) {
+			if (!is_array($d) || !array_key_exists('name', $d) || !is_string($d['name']) || $d['name'] === '') {
+				throw new InvalidArgumentException("Setting::seed_declared: declaration[$i] missing or invalid 'name' field");
+			}
 			$stmt->execute([$d['name'], $d['default'] ?? '']);
 		}
 	}
@@ -120,8 +122,11 @@ private function _check_for_duplicate_setting() {
 		if (empty($declarations)) return;
 
 		$names = [];
-		foreach ($declarations as $d) {
-			if (!empty($d['name'])) $names[] = $d['name'];
+		foreach ($declarations as $i => $d) {
+			if (!is_array($d) || !array_key_exists('name', $d) || !is_string($d['name']) || $d['name'] === '') {
+				throw new InvalidArgumentException("Setting::unseed_declared: declaration[$i] missing or invalid 'name' field");
+			}
+			$names[] = $d['name'];
 		}
 		if (empty($names)) return;
 
