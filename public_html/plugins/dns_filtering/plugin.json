@@ -3,7 +3,8 @@
     "version": "1.0.0",
     "description": "Self-hosted DNS filtering service with per-device filtering profiles",
     "author": "System Developer",
-    "is_stock": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "requires": {
         "php": ">=8.0",
         "extensions": []

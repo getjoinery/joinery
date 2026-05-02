@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "Custom theme for Devon and Jerry",
   "author": "Joinery Team",
-  "is_stock": true,
+  "receives_upgrades": true,
+  "included_in_publish": true,
   "deprecated": true,
   "superseded_by": "devonandjerry-html5",
   "requires": {

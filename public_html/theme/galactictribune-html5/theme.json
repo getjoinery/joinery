@@ -4,7 +4,8 @@
   "version": "1.0.1",
   "description": "Zero-dependency HTML5 version of the Galactic Tribune theme",
   "author": "Joinery Team",
-  "is_stock": true,
+  "receives_upgrades": true,
+  "included_in_publish": true,
   "cssFramework": "html5",
   "formWriterBase": "FormWriterHTML5",
   "publicPageBase": "PublicPageBase"

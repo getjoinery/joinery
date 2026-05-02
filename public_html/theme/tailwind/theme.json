@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "Legacy Tailwind CSS theme - original core view files",
   "author": "Joinery",
-  "is_stock": true,
+  "receives_upgrades": true,
+  "included_in_publish": true,
   "requires": {
     "php": ">=7.4"
   },

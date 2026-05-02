@@ -467,9 +467,9 @@ class DeploymentHelper {
      * Key behavior:
      * - Only processes themes/plugins that are ALREADY in public_html
      * - Never adds new themes/plugins from staging
-     * - Stock themes (is_stock=true) are updated from staging
-     * - Custom themes (is_stock=false) are preserved
-     * - Themes not in repo (custom uploads) are preserved
+     * - Themes with receives_upgrades=true are updated from staging
+     * - Themes with receives_upgrades=false are preserved
+     * - Themes not in repo (uploaded directly) are preserved
      *
      * @param string $stage_dir Staging directory with new themes/plugins
      * @param string $public_html_dir Current public_html directory
@@ -508,29 +508,29 @@ class DeploymentHelper {
 
                 // Check if theme exists in staging (repository)
                 if (is_dir($staged_path)) {
-                    // Read installed theme's manifest to determine stock status
+                    // Read installed theme's manifest to determine receives_upgrades flag
                     $manifest_path = $installed_path . '/theme.json';
-                    $is_stock = true;
+                    $receives_upgrades = true;
 
                     if (file_exists($manifest_path)) {
                         $manifest = json_decode(file_get_contents($manifest_path), true);
-                        $is_stock = $manifest['is_stock'] ?? true;
+                        $receives_upgrades = $manifest['receives_upgrades'] ?? true;
                     }
 
-                    if ($is_stock) {
+                    if ($receives_upgrades) {
                         // Update from staging
                         exec("rm -rf " . escapeshellarg($installed_path));
                         exec("cp -r " . escapeshellarg($staged_path) . " " . escapeshellarg($installed_themes_dir . '/'));
                         $result['themes_updated']++;
 
-                        if ($verbose) echo "  Updated stock theme: $theme_name\n";
+                        if ($verbose) echo "  Updated theme: $theme_name\n";
                     } else {
-                        // Preserve custom theme
+                        // Preserve theme (receives_upgrades=false)
                         $result['themes_preserved']++;
-                        if ($verbose) echo "  Preserved custom theme: $theme_name\n";
+                        if ($verbose) echo "  Preserved theme (receives_upgrades=false): $theme_name\n";
                     }
                 } else {
-                    // Theme not in repo (custom upload) - preserve it
+                    // Theme not in repo (uploaded directly) - preserve it
                     $result['themes_preserved']++;
                     if ($verbose) echo "  Preserved uploaded theme: $theme_name (not in repo)\n";
                 }
@@ -552,29 +552,29 @@ class DeploymentHelper {
 
                 // Check if plugin exists in staging (repository)
                 if (is_dir($staged_path)) {
-                    // Read installed plugin's manifest to determine stock status
+                    // Read installed plugin's manifest to determine receives_upgrades flag
                     $manifest_path = $installed_path . '/plugin.json';
-                    $is_stock = true;
+                    $receives_upgrades = true;
 
                     if (file_exists($manifest_path)) {
                         $manifest = json_decode(file_get_contents($manifest_path), true);
-                        $is_stock = $manifest['is_stock'] ?? true;
+                        $receives_upgrades = $manifest['receives_upgrades'] ?? true;
                     }
 
-                    if ($is_stock) {
+                    if ($receives_upgrades) {
                         // Update from staging
                         exec("rm -rf " . escapeshellarg($installed_path));
                         exec("cp -r " . escapeshellarg($staged_path) . " " . escapeshellarg($installed_plugins_dir . '/'));
                         $result['plugins_updated']++;
 
-                        if ($verbose) echo "  Updated stock plugin: $plugin_name\n";
+                        if ($verbose) echo "  Updated plugin: $plugin_name\n";
                     } else {
-                        // Preserve custom plugin
+                        // Preserve plugin (receives_upgrades=false)
                         $result['plugins_preserved']++;
-                        if ($verbose) echo "  Preserved custom plugin: $plugin_name\n";
+                        if ($verbose) echo "  Preserved plugin (receives_upgrades=false): $plugin_name\n";
                     }
                 } else {
-                    // Plugin not in repo (custom upload) - preserve it
+                    // Plugin not in repo (uploaded directly) - preserve it
                     $result['plugins_preserved']++;
                     if ($verbose) echo "  Preserved uploaded plugin: $plugin_name (not in repo)\n";
                 }
@@ -591,7 +591,7 @@ class DeploymentHelper {
     }
 
     /**
-     * Preserve custom themes/plugins based on is_stock flag
+     * Preserve extensions across a deploy swap based on the receives_upgrades flag.
      * @deprecated Use updateInstalledThemesOnly() instead for the new sparse-fetch model
      * @param string $stage_dir Staging directory with new themes/plugins
      * @param string $backup_dir Backup directory with existing themes/plugins
@@ -601,7 +601,7 @@ class DeploymentHelper {
      *                'plugins_preserved' => int, 'plugins_updated' => int, 'plugins_added' => int,
      *                'errors' => array]
      */
-    public static function preserveCustomThemesPlugins($stage_dir, $backup_dir, $verbose = false) {
+    public static function preserveExtensionsAcrossDeploy($stage_dir, $backup_dir, $verbose = false) {
         $result = [
             'success' => true,
             'themes_preserved' => 0,
@@ -614,7 +614,7 @@ class DeploymentHelper {
         ];
 
         if ($verbose) {
-            echo "Preserving custom themes and plugins...\n";
+            echo "Preserving extensions across deploy (receives_upgrades=false)...\n";
         }
 
         // Process themes
@@ -688,41 +688,41 @@ class DeploymentHelper {
 
         // Check if this theme/plugin exists in previous deployment
         if (is_dir($existing_path)) {
-            // It existed before - check if it's custom
+            // It existed before - check the receives_upgrades flag
             if (file_exists($existing_manifest)) {
                 $manifest_data = json_decode(file_get_contents($existing_manifest), true);
-                $is_stock = $manifest_data['is_stock'] ?? true;
+                $receives_upgrades = $manifest_data['receives_upgrades'] ?? true;
 
-                if ($is_stock === false) {
-                    // Preserve custom theme/plugin by copying over staged version
+                if ($receives_upgrades === false) {
+                    // Preserve preserved-on-deploy extension by copying over staged version
                     if ($verbose) {
-                        echo "  Preserving custom $type: $name\n";
+                        echo "  Preserving $type (receives_upgrades=false): $name\n";
                     }
 
                     // Remove staged version
                     exec("rm -rf " . escapeshellarg($staging_path));
 
-                    // Copy existing custom version to staging
+                    // Copy existing preserved version to staging
                     $copy_result = 0;
                     exec("cp -r " . escapeshellarg($existing_path) . " " . escapeshellarg($staging_path), $output, $copy_result);
 
                     if ($copy_result !== 0) {
                         if ($verbose) {
-                            echo "    ERROR: Failed to copy custom $type\n";
+                            echo "    ERROR: Failed to copy preserved $type\n";
                         }
                         return 'error';
                     }
 
                     return 'preserved';
                 } else {
-                    // Stock theme/plugin - update it
+                    // receives_upgrades=true - update from staging
                     if ($verbose) {
-                        echo "  Updating stock $type: $name\n";
+                        echo "  Updating $type: $name\n";
                     }
                     return 'updated';
                 }
             } else {
-                // No manifest in existing - assume stock and update
+                // No manifest in existing - assume receives_upgrades=true and update
                 if ($verbose) {
                     echo "  Updating $type (no manifest): $name\n";
                 }
@@ -745,7 +745,8 @@ class DeploymentHelper {
             'name' => $name,
             'version' => '1.0.0',
             'description' => "Auto-generated manifest for $name $type",
-            'is_stock' => true
+            'receives_upgrades' => true,
+            'included_in_publish' => true
         ];
 
         file_put_contents($path, json_encode($manifest, JSON_PRETTY_PRINT));
@@ -1017,11 +1018,11 @@ class DeploymentHelper {
     // ============================================
 
     /**
-     * Copy custom themes and plugins from live to staging before deployment.
+     * Copy preserved-on-deploy extensions from live to staging before deployment.
      *
-     * This ensures custom themes/plugins are included when staging is moved to live.
-     * A theme/plugin is considered "custom" if:
-     * - It has is_stock=false in its manifest (theme.json/plugin.json)
+     * This ensures preserved themes/plugins are carried into staging before the swap.
+     * A theme/plugin is considered "preserved" if:
+     * - It has receives_upgrades=false in its manifest (theme.json/plugin.json)
      * - It exists in live but not in staging (uploaded directly, not from repo)
      *
      * @param string $live_dir Current live public_html directory
@@ -1032,7 +1033,7 @@ class DeploymentHelper {
      *                'plugins_copied' => int, 'plugins_skipped' => int,
      *                'errors' => array]
      */
-    public static function copyCustomToStaging($live_dir, $stage_dir, $verbose = false) {
+    public static function copyPreservedToStaging($live_dir, $stage_dir, $verbose = false) {
         $result = [
             'success' => true,
             'themes_copied' => 0,
@@ -1043,7 +1044,7 @@ class DeploymentHelper {
         ];
 
         if ($verbose) {
-            echo "Copying custom themes/plugins from live to staging...\n";
+            echo "Copying preserved themes/plugins from live to staging...\n";
         }
 
         // Process themes
@@ -1069,17 +1070,17 @@ class DeploymentHelper {
                 $reason = '';
 
                 if (!is_dir($stage_path)) {
-                    // Theme not in staging (custom upload, not from repo)
+                    // Theme not in staging (uploaded directly, not from repo)
                     $should_copy = true;
                     $reason = 'not in staging';
                 } else {
-                    // Theme exists in both - check if live version is custom
+                    // Theme exists in both - check the live version's receives_upgrades flag
                     $manifest_path = $live_path . '/theme.json';
                     if (file_exists($manifest_path)) {
                         $manifest = json_decode(file_get_contents($manifest_path), true);
-                        if (isset($manifest['is_stock']) && $manifest['is_stock'] === false) {
+                        if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
                             $should_copy = true;
-                            $reason = 'is_stock=false';
+                            $reason = 'receives_upgrades=false';
                         }
                     }
                 }
@@ -1099,11 +1100,11 @@ class DeploymentHelper {
                         if ($verbose) echo "  ERROR: Failed to copy theme: $theme_name\n";
                     } else {
                         $result['themes_copied']++;
-                        if ($verbose) echo "  Copied custom theme: $theme_name ($reason)\n";
+                        if ($verbose) echo "  Copied preserved theme: $theme_name ($reason)\n";
                     }
                 } else {
                     $result['themes_skipped']++;
-                    if ($verbose) echo "  Skipped stock theme: $theme_name (will be updated from staging)\n";
+                    if ($verbose) echo "  Skipped theme: $theme_name (will be updated from staging)\n";
                 }
             }
         }
@@ -1131,17 +1132,17 @@ class DeploymentHelper {
                 $reason = '';
 
                 if (!is_dir($stage_path)) {
-                    // Plugin not in staging (custom upload, not from repo)
+                    // Plugin not in staging (uploaded directly, not from repo)
                     $should_copy = true;
                     $reason = 'not in staging';
                 } else {
-                    // Plugin exists in both - check if live version is custom
+                    // Plugin exists in both - check the live version's receives_upgrades flag
                     $manifest_path = $live_path . '/plugin.json';
                     if (file_exists($manifest_path)) {
                         $manifest = json_decode(file_get_contents($manifest_path), true);
-                        if (isset($manifest['is_stock']) && $manifest['is_stock'] === false) {
+                        if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
                             $should_copy = true;
-                            $reason = 'is_stock=false';
+                            $reason = 'receives_upgrades=false';
                         }
                     }
                 }
@@ -1161,17 +1162,17 @@ class DeploymentHelper {
                         if ($verbose) echo "  ERROR: Failed to copy plugin: $plugin_name\n";
                     } else {
                         $result['plugins_copied']++;
-                        if ($verbose) echo "  Copied custom plugin: $plugin_name ($reason)\n";
+                        if ($verbose) echo "  Copied preserved plugin: $plugin_name ($reason)\n";
                     }
                 } else {
                     $result['plugins_skipped']++;
-                    if ($verbose) echo "  Skipped stock plugin: $plugin_name (will be updated from staging)\n";
+                    if ($verbose) echo "  Skipped plugin: $plugin_name (will be updated from staging)\n";
                 }
             }
         }
 
         if ($verbose) {
-            echo "Custom themes/plugins copy complete:\n";
+            echo "Preserved themes/plugins copy complete:\n";
             echo "  Themes: {$result['themes_copied']} copied, {$result['themes_skipped']} skipped\n";
             echo "  Plugins: {$result['plugins_copied']} copied, {$result['plugins_skipped']} skipped\n";
         }

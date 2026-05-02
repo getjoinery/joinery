@@ -4,7 +4,8 @@
     "version": "1.0.0",
     "description": "Zero-dependency HTML5 version of the Devon and Jerry Tailwind theme",
     "author": "Joinery Team",
-    "is_stock": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "cssFramework": "html5",
     "formWriterBase": "FormWriterHTML5",
     "publicPageBase": "PublicPageBase"

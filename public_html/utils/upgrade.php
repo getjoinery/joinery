@@ -87,15 +87,16 @@
 		$response['required_themes'] = get_system_required_themes($live_directory . '/theme');
 		$response['required_plugins'] = get_system_required_plugins($live_directory . '/plugins');
 
-		// Stock manifest: every stock plugin/theme this source has published as a
-		// tar.gz. Prod uses this list as the source of truth for which archives to
-		// download — independent of prod's current state — so renames and additions
-		// flow through cleanly. See specs/upgrade_pipeline_rename_gap.md.
+		// Published archives manifest: every plugin/theme this source has published
+		// as a tar.gz (i.e., manifest had included_in_publish=true at publish time).
+		// Prod uses this list as the source of truth for which archives to download
+		// — independent of prod's current state — so renames and additions flow
+		// through cleanly. See specs/upgrade_pipeline_rename_gap.md.
 		// publish_upgrade.php writes archives to {site_dir}/static_files/
 		// (sibling of public_html, not under it).
 		$static_files_dir = $full_site_dir . '/static_files';
-		$response['stock_plugins'] = get_published_stock_archives($static_files_dir . '/plugins', 'plugins');
-		$response['stock_themes']  = get_published_stock_archives($static_files_dir . '/themes',  'themes');
+		$response['published_plugins'] = get_published_archives($static_files_dir . '/plugins', 'plugins');
+		$response['published_themes']  = get_published_archives($static_files_dir . '/themes',  'themes');
 
 		header("Content-Type: application/json");
 		http_response_code(200);
@@ -449,26 +450,26 @@
 
 		// Determine which themes/plugins to download.
 		//
-		// Source-of-truth is the source's stock manifest (stock_themes /
-		// stock_plugins in the ?serve-upgrade response) — see
-		// specs/upgrade_pipeline_rename_gap.md. Each entry has its own URL,
+		// Source-of-truth is the source's published-archives manifest
+		// (published_themes / published_plugins in the ?serve-upgrade response)
+		// — see specs/upgrade_pipeline_rename_gap.md. Each entry has its own URL,
 		// so a rename or addition on the source side flows through cleanly.
 		//
 		// If the source predates the manifest (older Joinery), fall back to
 		// the legacy "ask source for whatever prod has installed" behavior.
-		$source_stock_themes  = is_array($decode_response['stock_themes']  ?? null) ? $decode_response['stock_themes']  : null;
-		$source_stock_plugins = is_array($decode_response['stock_plugins'] ?? null) ? $decode_response['stock_plugins'] : null;
+		$source_published_themes  = is_array($decode_response['published_themes']  ?? null) ? $decode_response['published_themes']  : null;
+		$source_published_plugins = is_array($decode_response['published_plugins'] ?? null) ? $decode_response['published_plugins'] : null;
 
-		if ($source_stock_themes !== null && $source_stock_plugins !== null) {
+		if ($source_published_themes !== null && $source_published_plugins !== null) {
 			// Manifest-driven: download exactly what source advertises.
-			$themes_to_download  = array_column($source_stock_themes,  'name');
-			$plugins_to_download = array_column($source_stock_plugins, 'name');
+			$themes_to_download  = array_column($source_published_themes,  'name');
+			$plugins_to_download = array_column($source_published_plugins, 'name');
 			// Map name → archive URL for the download loop.
-			$theme_url_by_name  = array_column($source_stock_themes,  'url', 'name');
-			$plugin_url_by_name = array_column($source_stock_plugins, 'url', 'name');
+			$theme_url_by_name  = array_column($source_published_themes,  'url', 'name');
+			$plugin_url_by_name = array_column($source_published_plugins, 'url', 'name');
 		} else {
 			// Legacy fallback: pre-manifest source server.
-			$themes_to_download  = get_installed_stock_themes($live_directory . '/theme');
+			$themes_to_download  = get_themes_to_upgrade($live_directory . '/theme');
 			$plugins_to_download = get_installed_plugins();
 			$theme_url_by_name  = [];
 			$plugin_url_by_name = [];
@@ -500,14 +501,14 @@
 
 		// Summary
 		$total_themes = count($all_themes_info);
-		$stock_themes = count($themes_to_download);
+		$themes_to_upgrade_count = count($themes_to_download);
 		$total_plugins = count($all_plugins_info);
-		$stock_plugins = count($plugins_to_download);
+		$plugins_to_upgrade_count = count($plugins_to_download);
 
 		if ($is_cli) {
-			echo "Summary: {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded\n\n";
+			echo "Summary: {$themes_to_upgrade_count}/{$total_themes} themes and {$plugins_to_upgrade_count}/{$total_plugins} plugins will be upgraded\n\n";
 		} else {
-			upgrade_echo("<p><strong>Summary:</strong> {$stock_themes}/{$total_themes} themes and {$stock_plugins}/{$total_plugins} plugins will be upgraded</p>");
+			upgrade_echo("<p><strong>Summary:</strong> {$themes_to_upgrade_count}/{$total_themes} themes and {$plugins_to_upgrade_count}/{$total_plugins} plugins will be upgraded</p>");
 		}
 
 		upgrade_echo('Downloading core archive: ' . htmlspecialchars($sourceFile) . '<br>');
@@ -890,18 +891,18 @@
 			$live_theme_path = $live_directory . '/theme/' . $active_theme;
 
 			if (!is_dir($staged_theme_path)) {
-				// Theme not in staging - check if it's a custom theme in live that will be preserved
+				// Theme not in staging - check if it's preserved-on-deploy in live
 				$theme_will_be_preserved = false;
 				$preservation_reason = '';
 
 				if (is_dir($live_theme_path)) {
-					// Theme exists in live - check if it's custom
+					// Theme exists in live - check the receives_upgrades flag
 					$manifest_path = $live_theme_path . '/theme.json';
 					if (file_exists($manifest_path)) {
 						$manifest = json_decode(file_get_contents($manifest_path), true);
-						if (isset($manifest['is_stock']) && $manifest['is_stock'] === false) {
+						if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
 							$theme_will_be_preserved = true;
-							$preservation_reason = 'marked as custom (is_stock=false)';
+							$preservation_reason = 'marked preserved-on-deploy (receives_upgrades=false)';
 						}
 					}
 				}
@@ -920,7 +921,7 @@
 					echo '<ul>';
 					echo '<li>Republish the upgrade with the "' . htmlspecialchars($active_theme) . '" theme selected, OR</li>';
 					echo '<li>Switch to a different theme before upgrading, OR</li>';
-					echo '<li>Mark the theme as custom by adding <code>"is_stock": false</code> to its theme.json</li>';
+					echo '<li>Mark the theme as preserved by adding <code>"receives_upgrades": false</code> to its theme.json</li>';
 					echo '</ul>';
 					echo '</div>';
 
@@ -977,25 +978,25 @@
 			echo "✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")<br>";
 		}
 
-		upgrade_echo('<br><h3>Preserving Custom Themes/Plugins</h3>');
+		upgrade_echo('<br><h3>Preserving Themes/Plugins</h3>');
 
-		// Copy custom themes/plugins from live into staging BEFORE the mv
-		// This ensures custom themes are included when staging moves to live
-		// - Themes/plugins with is_stock=false are copied
+		// Copy preserved-on-deploy themes/plugins from live into staging BEFORE the mv
+		// This ensures preserved extensions are carried into staging before the swap
+		// - Themes/plugins with receives_upgrades=false are copied
 		// - Themes/plugins not in staging (uploaded directly) are copied
-		// - Stock themes/plugins are left alone (will be updated from staging)
-		$result = DeploymentHelper::copyCustomToStaging($live_directory, $stage_directory, $verbose);
+		// - Themes/plugins with receives_upgrades=true are left alone (will be updated from staging)
+		$result = DeploymentHelper::copyPreservedToStaging($live_directory, $stage_directory, $verbose);
 		if ($result['success']) {
-			echo "✓ Themes: {$result['themes_copied']} custom preserved, {$result['themes_skipped']} stock (will update)<br>";
-			echo "✓ Plugins: {$result['plugins_copied']} custom preserved, {$result['plugins_skipped']} stock (will update)<br>";
+			echo "✓ Themes: {$result['themes_copied']} preserved, {$result['themes_skipped']} will update from staging<br>";
+			echo "✓ Plugins: {$result['plugins_copied']} preserved, {$result['plugins_skipped']} will update from staging<br>";
 		} else {
 			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
 			echo '<strong>❌ Theme/Plugin Preservation Failed:</strong><br>';
 			foreach ($result['errors'] as $error) {
 				echo "  • " . htmlspecialchars($error) . "<br>";
 			}
-			echo '<br>Custom themes/plugins could not be preserved. Deploying without them would cause data loss.<br>';
-			echo 'Aborting upgrade to protect your custom themes and plugins.<br>';
+			echo '<br>Preserved themes/plugins could not be carried over. Deploying without them would cause data loss.<br>';
+			echo 'Aborting upgrade to protect your preserved themes and plugins.<br>';
 			echo '</div>';
 			// Clean up staging
 			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
@@ -1344,20 +1345,21 @@
 			}
 
 			// Stale reconciliation — see specs/upgrade_pipeline_rename_gap.md.
-			// Stock plugins/themes that prod has but the source manifest no longer
-			// advertises are flagged stale (preserved on disk and in DB; admin can
-			// review). Skipped if source predates the manifest.
-			if ($source_stock_plugins !== null && $source_stock_themes !== null) {
+			// Plugins/themes this site is set to receive upgrades for, but that the
+			// source's published-archive manifest no longer advertises, are flagged
+			// stale (preserved on disk and in DB; admin can review). Skipped if
+			// source predates the manifest.
+			if ($source_published_plugins !== null && $source_published_themes !== null) {
 				try {
-					$source_plugin_names = array_flip(array_column($source_stock_plugins, 'name'));
-					$source_theme_names  = array_flip(array_column($source_stock_themes,  'name'));
+					$source_plugin_names = array_flip(array_column($source_published_plugins, 'name'));
+					$source_theme_names  = array_flip(array_column($source_published_themes,  'name'));
 					$plugin_marked = 0;
 					$theme_marked  = 0;
 
 					$q = $dblink->prepare(
 						"UPDATE plg_plugins
 						 SET plg_status = 'stale'
-						 WHERE plg_is_stock = true
+						 WHERE plg_receives_upgrades = true
 						   AND plg_name <> ALL(?)
 						   AND plg_status <> 'stale'"
 					);
@@ -1371,7 +1373,7 @@
 					$q = $dblink->prepare(
 						"UPDATE thm_themes
 						 SET thm_status = 'stale'
-						 WHERE thm_is_stock = true
+						 WHERE thm_receives_upgrades = true
 						   AND thm_name <> ALL(?)
 						   AND thm_status <> 'stale'"
 					);
@@ -1608,15 +1610,16 @@
 	}
 
 	/**
-	 * Get list of installed stock themes (those with is_stock=true in theme.json)
+	 * Get list of themes to upgrade (those with receives_upgrades=true in theme.json).
+	 * Used by the legacy fallback path when the source predates the published-archives manifest.
 	 */
-	function get_installed_stock_themes($theme_dir) {
+	function get_themes_to_upgrade($theme_dir) {
 		$themes = [];
 		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
 			$theme_data = json_decode(file_get_contents($json_file), true);
 			if ($theme_data) {
-				$is_stock = $theme_data['is_stock'] ?? false;
-				if ($is_stock) {
+				$receives_upgrades = $theme_data['receives_upgrades'] ?? false;
+				if ($receives_upgrades) {
 					$themes[] = basename(dirname($json_file));
 				}
 			}
@@ -1625,17 +1628,18 @@
 	}
 
 	/**
-	 * Get list of stock themes marked as system-required (system=true in theme.json)
-	 * These themes must be present on every site for core functionality to work.
+	 * Get list of themes marked as system-required (is_system=true in theme.json).
+	 * These themes must be present on every site for core functionality to work and
+	 * are downloaded even if not currently installed. They must also receive upgrades.
 	 */
 	function get_system_required_themes($theme_dir) {
 		$themes = [];
 		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
 			$theme_data = json_decode(file_get_contents($json_file), true);
 			if ($theme_data) {
-				$is_stock = $theme_data['is_stock'] ?? false;
-				$is_system = $theme_data['system'] ?? false;
-				if ($is_stock && $is_system) {
+				$receives_upgrades = $theme_data['receives_upgrades'] ?? false;
+				$is_system = $theme_data['is_system'] ?? false;
+				if ($receives_upgrades && $is_system) {
 					$themes[] = basename(dirname($json_file));
 				}
 			}
@@ -1644,16 +1648,16 @@
 	}
 
 	/**
-	 * Get list of stock plugins marked as system-required (system=true in plugin.json)
+	 * Get list of plugins marked as system-required (is_system=true in plugin.json).
 	 */
 	function get_system_required_plugins($plugin_dir) {
 		$plugins = [];
 		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
 			$plugin_data = json_decode(file_get_contents($json_file), true);
 			if ($plugin_data) {
-				$is_stock = $plugin_data['is_stock'] ?? false;
-				$is_system = $plugin_data['system'] ?? false;
-				if ($is_stock && $is_system) {
+				$receives_upgrades = $plugin_data['receives_upgrades'] ?? false;
+				$is_system = $plugin_data['is_system'] ?? false;
+				if ($receives_upgrades && $is_system) {
 					$plugins[] = basename(dirname($json_file));
 				}
 			}
@@ -1662,15 +1666,16 @@
 	}
 
 	/**
-	 * Enumerate published stock-archive tarballs for a kind ('plugins'|'themes').
+	 * Enumerate published archive tarballs for a kind ('plugins'|'themes').
 	 * Reads $archives_dir for files matching {name}-{version}.tar.gz and returns
 	 * one entry per archive: ['name' => ..., 'version' => ..., 'url' => ...].
 	 *
-	 * Used by the ?serve-upgrade response to advertise which stock plugins/themes
-	 * the source has published, so prod can download the full set without first
-	 * consulting its own state. See specs/upgrade_pipeline_rename_gap.md.
+	 * Used by the ?serve-upgrade response to advertise which plugins/themes the
+	 * source has published (had included_in_publish=true at publish time), so prod
+	 * can download the full set without first consulting its own state. See
+	 * specs/upgrade_pipeline_rename_gap.md.
 	 */
-	function get_published_stock_archives($archives_dir, $url_subpath) {
+	function get_published_archives($archives_dir, $url_subpath) {
 		$out = [];
 		if (!is_dir($archives_dir)) return $out;
 
@@ -1697,13 +1702,14 @@
 
 	/**
 	 * Get list of plugins to attempt to refresh during upgrade — every plugin
-	 * with a plg_plugins row, regardless of stock/custom. The download loop
-	 * tries each one; stock plugins succeed via the upgrade endpoint, custom
-	 * plugins 404 and are skipped via the existing warning path.
+	 * with a plg_plugins row, regardless of receives_upgrades/included_in_publish.
+	 * The download loop tries each one; published plugins succeed via the upgrade
+	 * endpoint; plugins not in the catalog 404 and are skipped via the existing
+	 * warning path.
 	 *
-	 * NOTE: Superseded by source-side stock manifest (stock_plugins in the
-	 * ?serve-upgrade response). Kept for backward compatibility when prod
-	 * upgrades against a source server that predates the manifest.
+	 * NOTE: Superseded by source-side published-archives manifest
+	 * (published_plugins in the ?serve-upgrade response). Kept for backward
+	 * compatibility when prod upgrades against a source that predates the manifest.
 	 */
 	function get_installed_plugins() {
 		try {
@@ -1731,12 +1737,13 @@
 		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
 			$theme_data = json_decode(file_get_contents($json_file), true);
 			$theme_name = basename(dirname($json_file));
+			$receives_upgrades = $theme_data['receives_upgrades'] ?? false;
 			$themes[$theme_name] = [
 				'name' => $theme_name,
 				'display_name' => $theme_data['display_name'] ?? $theme_name,
 				'version' => $theme_data['version'] ?? 'unknown',
-				'is_stock' => $theme_data['is_stock'] ?? false,
-				'will_upgrade' => ($theme_data['is_stock'] ?? false) === true
+				'receives_upgrades' => $receives_upgrades,
+				'will_upgrade' => $receives_upgrades === true
 			];
 		}
 		ksort($themes);
@@ -1747,9 +1754,9 @@
 	 * Get detailed info about all plugins present on disk, annotated with
 	 * whether they are installed (have a plg_plugins row). Upgrade attempts
 	 * each installed plugin; on-disk-only plugins are shown for context but
-	 * not refreshed. is_stock is surfaced here for display; upgrade no longer
-	 * filters by it, but the publish / deploy-swap / container-reconcile
-	 * paths still consult it, so it's not vestigial.
+	 * not refreshed. receives_upgrades is surfaced for display; the upgrade
+	 * download loop no longer filters by it, but the deploy-swap and the
+	 * container-reconcile paths still consult it.
 	 */
 	function get_all_plugins_info($plugin_dir) {
 		$installed = array_flip(get_installed_plugins());
@@ -1763,7 +1770,7 @@
 				'name' => $plugin_name,
 				'display_name' => $plugin_data['display_name'] ?? $plugin_name,
 				'version' => $plugin_data['version'] ?? 'unknown',
-				'is_stock' => $plugin_data['is_stock'] ?? false,
+				'receives_upgrades' => $plugin_data['receives_upgrades'] ?? false,
 				'is_installed' => $is_installed,
 				'will_upgrade' => $is_installed,
 			];
@@ -1787,9 +1794,9 @@
 
 		// 'will_upgrade' means: this component will be refreshed during upgrade.
 		// For plugins, that's "installed" (has a plg_plugins row). For themes,
-		// it's still "is_stock" until/if the theme upgrade path is reworked.
+		// it tracks the on-disk receives_upgrades flag.
 		if ($is_cli) {
-			echo str_pad("Name", 25) . str_pad("Version", 12) . str_pad("Stock", 8) . "Status\n";
+			echo str_pad("Name", 25) . str_pad("Version", 12) . str_pad("Upgrades", 10) . "Status\n";
 			echo str_repeat("-", 60) . "\n";
 			foreach ($components as $info) {
 				if ($info['will_upgrade']) {
@@ -1797,8 +1804,8 @@
 				} else {
 					$status = '⊘ Skipped';
 				}
-				$stock = $info['is_stock'] ? 'Yes' : 'No';
-				echo str_pad($info['name'], 25) . str_pad($info['version'], 12) . str_pad($stock, 8) . $status . "\n";
+				$upgrades = $info['receives_upgrades'] ? 'Yes' : 'No';
+				echo str_pad($info['name'], 25) . str_pad($info['version'], 12) . str_pad($upgrades, 10) . $status . "\n";
 			}
 			echo "\n";
 		} else {
@@ -1806,7 +1813,7 @@
 			echo '<tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">';
 			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Name</th>';
 			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Version</th>';
-			echo '<th style="padding: 8px; text-align: center; border: 1px solid #dee2e6;">Stock</th>';
+			echo '<th style="padding: 8px; text-align: center; border: 1px solid #dee2e6;">Upgrades</th>';
 			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Status</th>';
 			echo '</tr>';
 			foreach ($components as $info) {
@@ -1817,13 +1824,13 @@
 					$row_style = 'background-color: #fff3cd;';
 					$status = '<span style="color: #856404;">⊘ Skipped</span>';
 				}
-				$stock = $info['is_stock']
+				$upgrades = $info['receives_upgrades']
 					? '<span style="color: #155724;">Yes</span>'
 					: '<span style="color: #6c757d;">No</span>';
 				echo '<tr style="' . $row_style . '">';
 				echo '<td style="padding: 8px; border: 1px solid #dee2e6;">' . htmlspecialchars($info['name']) . '</td>';
 				echo '<td style="padding: 8px; border: 1px solid #dee2e6;">' . htmlspecialchars($info['version']) . '</td>';
-				echo '<td style="padding: 8px; text-align: center; border: 1px solid #dee2e6;">' . $stock . '</td>';
+				echo '<td style="padding: 8px; text-align: center; border: 1px solid #dee2e6;">' . $upgrades . '</td>';
 				echo '<td style="padding: 8px; border: 1px solid #dee2e6;">' . $status . '</td>';
 				echo '</tr>';
 			}

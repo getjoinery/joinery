@@ -317,11 +317,11 @@ abstract class AbstractExtensionManager {
                 $manifest_path = $target_path . '/' . $this->manifest_filename;
                 if (file_exists($manifest_path)) {
                     $local_manifest = json_decode(file_get_contents($manifest_path), true);
-                    if (is_array($local_manifest) && isset($local_manifest['is_stock']) && !$local_manifest['is_stock']) {
-                        throw new Exception("Cannot replace custom {$this->extension_type} '$extension_name'. It is marked is_stock: false.");
+                    if (is_array($local_manifest) && isset($local_manifest['receives_upgrades']) && !$local_manifest['receives_upgrades']) {
+                        throw new Exception("Cannot replace {$this->extension_type} '$extension_name': it is marked receives_upgrades: false (preserved on deploy).");
                     }
                 }
-                // Stock or no manifest — safe to delete and replace
+                // receives_upgrades=true or no manifest — safe to delete and replace
                 $this->cleanup($target_path);
             }
 

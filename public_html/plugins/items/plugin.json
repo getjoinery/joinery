@@ -3,5 +3,6 @@
     "version": "1.0.0",
     "description": "Item tracking and relationship management system",
     "author": "System Developer",
-    "is_stock": true
+    "receives_upgrades": true,
+    "included_in_publish": true
 }
