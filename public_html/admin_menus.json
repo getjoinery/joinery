@@ -1,0 +1,581 @@
+{
+    "_comment": "Core admin and profile menu items. Seeded on every update_database run with overwrite=false, prune=false. Plugin menus are declared in plugin.json and synced by PluginManager with overwrite=true, prune=true. This file is a source of *initial values* for fresh installs - admin customizations to existing rows are preserved.",
+    "adminMenu": [
+        {
+            "slug": "users",
+            "title": "Users",
+            "url": "",
+            "order": 1,
+            "permission": 5,
+            "icon": "users"
+        },
+        {
+            "slug": "events",
+            "title": "Events",
+            "url": "",
+            "order": 5,
+            "permission": 8,
+            "icon": "calendar",
+            "settingActivate": "events_active"
+        },
+        {
+            "slug": "videos",
+            "title": "Videos",
+            "url": "admin_videos",
+            "order": 6,
+            "permission": 8,
+            "icon": "video",
+            "settingActivate": "videos_active"
+        },
+        {
+            "slug": "orders",
+            "title": "Orders",
+            "url": "",
+            "order": 4,
+            "permission": 5,
+            "icon": "shopping-cart",
+            "settingActivate": "products_active"
+        },
+        {
+            "slug": "products",
+            "title": "Products",
+            "url": "",
+            "order": 3,
+            "permission": 8,
+            "icon": "box",
+            "settingActivate": "products_active"
+        },
+        {
+            "slug": "product-groups",
+            "title": "Product Groups",
+            "url": "admin_product_groups",
+            "order": 2,
+            "permission": 9,
+            "settingActivate": "products_active",
+            "parent": "products"
+        },
+        {
+            "slug": "stripe-payments",
+            "title": "Stripe Payments",
+            "url": "admin_stripe_orders",
+            "order": 2,
+            "permission": 5,
+            "settingActivate": "products_active",
+            "parent": "orders"
+        },
+        {
+            "slug": "shadow-sessions",
+            "title": "Shadow Sessions",
+            "url": "admin_shadow_sessions",
+            "order": 15,
+            "permission": 5,
+            "settingActivate": "products_active",
+            "parent": "orders"
+        },
+        {
+            "slug": "files-parent",
+            "title": "Files",
+            "url": "admin_files",
+            "order": 5,
+            "permission": 5,
+            "icon": "file-pdf",
+            "settingActivate": "files_active"
+        },
+        {
+            "slug": "groups",
+            "title": "Groups",
+            "url": "admin_groups",
+            "order": 2,
+            "permission": 5,
+            "parent": "users"
+        },
+        {
+            "slug": "emails",
+            "title": "Emails",
+            "url": "",
+            "order": 2,
+            "permission": 10,
+            "icon": "envelope",
+            "settingActivate": "emails_active"
+        },
+        {
+            "slug": "statistics",
+            "title": "Statistics",
+            "url": "",
+            "order": 15,
+            "permission": 5,
+            "icon": "chart-bar"
+        },
+        {
+            "slug": "web-statistics",
+            "title": "Web Statistics",
+            "url": "admin_analytics_stats",
+            "order": 1,
+            "permission": 5,
+            "parent": "statistics"
+        },
+        {
+            "slug": "errors",
+            "title": "Errors",
+            "url": "admin_errors",
+            "order": 77,
+            "permission": 10,
+            "parent": "statistics"
+        },
+        {
+            "slug": "users-list",
+            "title": "Users list",
+            "url": "admin_users",
+            "order": 1,
+            "permission": 5,
+            "parent": "users"
+        },
+        {
+            "slug": "products-list",
+            "title": "Products list",
+            "url": "admin_products",
+            "order": 1,
+            "permission": 8,
+            "settingActivate": "products_active",
+            "parent": "products"
+        },
+        {
+            "slug": "orders-list",
+            "title": "Orders list",
+            "url": "admin_orders",
+            "order": 1,
+            "permission": 5,
+            "settingActivate": "products_active",
+            "parent": "orders"
+        },
+        {
+            "slug": "emails-list",
+            "title": "Emails list",
+            "url": "admin_emails",
+            "order": 1,
+            "permission": 10,
+            "settingActivate": "emails_active",
+            "parent": "emails"
+        },
+        {
+            "slug": "events-list",
+            "title": "Events List",
+            "url": "admin_events",
+            "order": 1,
+            "permission": 5,
+            "settingActivate": "events_active",
+            "parent": "events"
+        },
+        {
+            "slug": "pages",
+            "title": "Pages",
+            "url": "",
+            "order": 8,
+            "permission": 5,
+            "icon": "file-alt",
+            "settingActivate": "page_contents_active"
+        },
+        {
+            "slug": "blog",
+            "title": "Blog",
+            "url": "admin_posts",
+            "order": 9,
+            "permission": 10,
+            "icon": "copy",
+            "settingActivate": "blog_active"
+        },
+        {
+            "slug": "blog-posts",
+            "title": "Blog Posts",
+            "url": "admin_posts",
+            "order": 1,
+            "permission": 10,
+            "settingActivate": "blog_active",
+            "parent": "blog"
+        },
+        {
+            "slug": "email-templates",
+            "title": "Email Templates",
+            "url": "admin_email_templates",
+            "order": 5,
+            "permission": 10,
+            "settingActivate": "emails_active",
+            "parent": "emails"
+        },
+        {
+            "slug": "signups-by-date",
+            "title": "Signups by Date",
+            "url": "admin_analytics_activitybydate",
+            "order": 10,
+            "permission": 5,
+            "parent": "statistics"
+        },
+        {
+            "slug": "email-deliverability",
+            "title": "Email Deliverability",
+            "url": "admin_analytics_users",
+            "order": 15,
+            "permission": 5,
+            "parent": "statistics"
+        },
+        {
+            "slug": "urls",
+            "title": "Urls",
+            "url": "admin_urls",
+            "order": 20,
+            "permission": 10,
+            "icon": "link",
+            "settingActivate": "urls_active"
+        },
+        {
+            "slug": "comments",
+            "title": "Comments",
+            "url": "admin_comments",
+            "order": 10,
+            "permission": 5,
+            "settingActivate": "blog_active",
+            "parent": "blog"
+        },
+        {
+            "slug": "event-bundles",
+            "title": "Event Bundles",
+            "url": "admin_event_bundles",
+            "order": 10,
+            "permission": 8,
+            "settingActivate": "events_active",
+            "parent": "events"
+        },
+        {
+            "slug": "email-debug-logs",
+            "title": "Email debug logs",
+            "url": "admin_debug_email_logs",
+            "order": 10,
+            "permission": 10,
+            "parent": "statistics"
+        },
+        {
+            "slug": "coupon-codes",
+            "title": "Coupon codes",
+            "url": "admin_coupon_codes",
+            "order": 10,
+            "permission": 5,
+            "settingActivate": "products_active",
+            "parent": "products"
+        },
+        {
+            "slug": "surveys-parent",
+            "title": "Surveys",
+            "url": "",
+            "order": 7,
+            "permission": 5,
+            "icon": "list",
+            "settingActivate": "surveys_active"
+        },
+        {
+            "slug": "survey-questions",
+            "title": "Survey questions",
+            "url": "admin_questions",
+            "order": 2,
+            "permission": 5,
+            "settingActivate": "surveys_active",
+            "parent": "surveys-parent"
+        },
+        {
+            "slug": "surveys",
+            "title": "Surveys",
+            "url": "admin_surveys",
+            "order": 1,
+            "permission": 5,
+            "settingActivate": "surveys_active",
+            "parent": "surveys-parent"
+        },
+        {
+            "slug": "mailing-lists",
+            "title": "Mailing Lists",
+            "url": "admin_mailing_lists",
+            "order": 7,
+            "permission": 8,
+            "parent": "emails"
+        },
+        {
+            "slug": "email-statistics",
+            "title": "Email Statistics",
+            "url": "admin_analytics_email_stats",
+            "order": 2,
+            "permission": 5,
+            "parent": "statistics"
+        },
+        {
+            "slug": "locations",
+            "title": "Locations",
+            "url": "admin_locations",
+            "order": 5,
+            "permission": 5,
+            "settingActivate": "events_active",
+            "parent": "events"
+        },
+        {
+            "slug": "funnels",
+            "title": "Funnels",
+            "url": "admin_analytics_funnels",
+            "order": 5,
+            "permission": 5,
+            "parent": "statistics"
+        },
+        {
+            "slug": "system",
+            "title": "System",
+            "url": "",
+            "order": 80,
+            "permission": 9,
+            "icon": "cog"
+        },
+        {
+            "slug": "system-plugins",
+            "title": "Plugins",
+            "url": "admin_plugins",
+            "order": 1,
+            "permission": 9,
+            "parent": "system"
+        },
+        {
+            "slug": "system-themes",
+            "title": "Themes",
+            "url": "admin_themes",
+            "order": 2,
+            "permission": 9,
+            "parent": "system"
+        },
+        {
+            "slug": "system-cache",
+            "title": "Static Cache",
+            "url": "admin_static_cache",
+            "order": 3,
+            "permission": 9,
+            "parent": "system"
+        },
+        {
+            "slug": "subscription-tiers",
+            "title": "Subscription Tiers",
+            "url": "admin_subscription_tiers",
+            "order": 10,
+            "permission": 5,
+            "settingActivate": "subscriptions_active",
+            "parent": "products"
+        },
+        {
+            "slug": "contact-types",
+            "title": "Contact Types",
+            "url": "admin_contact_types",
+            "order": 3,
+            "permission": 8,
+            "parent": "emails"
+        },
+        {
+            "slug": "api_keys",
+            "title": "API Keys",
+            "url": "admin_api_keys",
+            "order": 4,
+            "permission": 8,
+            "parent": "system"
+        },
+        {
+            "slug": "system-specs",
+            "title": "Specifications",
+            "url": "/admin/admin_specs",
+            "order": 5,
+            "permission": 10,
+            "icon": "file-alt",
+            "parent": "system"
+        },
+        {
+            "slug": "test-database",
+            "title": "Test Database",
+            "url": "admin_test_database",
+            "order": 5,
+            "permission": 10,
+            "parent": "system"
+        },
+        {
+            "slug": "pages-list",
+            "title": "Pages list",
+            "url": "admin_pages",
+            "order": 1,
+            "permission": 5,
+            "settingActivate": "page_contents_active",
+            "parent": "pages"
+        },
+        {
+            "slug": "page-components",
+            "title": "Page Components",
+            "url": "admin_components",
+            "order": 2,
+            "permission": 5,
+            "settingActivate": "page_contents_active",
+            "parent": "pages"
+        },
+        {
+            "slug": "system-components",
+            "title": "Components",
+            "url": "admin_component_types",
+            "order": 6,
+            "permission": 9,
+            "icon": "puzzle-piece",
+            "parent": "system"
+        },
+        {
+            "slug": "component-types",
+            "title": "Component Types",
+            "url": "admin_component_types",
+            "order": 3,
+            "permission": 5,
+            "settingActivate": "page_contents_active",
+            "parent": "pages"
+        },
+        {
+            "slug": "event-types",
+            "title": "Event Types",
+            "url": "admin_event_types",
+            "order": 5,
+            "permission": 8,
+            "settingActivate": "events_active",
+            "parent": "events"
+        },
+        {
+            "slug": "scheduled-tasks",
+            "title": "Scheduled Tasks",
+            "url": "admin_scheduled_tasks",
+            "order": 7,
+            "permission": 10,
+            "icon": "clock",
+            "parent": "system"
+        },
+        {
+            "slug": "attribution",
+            "title": "Attribution",
+            "url": "admin_analytics_attribution",
+            "order": 6,
+            "permission": 5,
+            "parent": "statistics"
+        }
+    ],
+    "profileMenu": [
+        {
+            "slug": "core-home",
+            "title": "Home",
+            "url": "/",
+            "order": 10,
+            "permission": 0,
+            "icon": "home",
+            "visibility": "both"
+        },
+        {
+            "slug": "core-signin",
+            "title": "Sign in",
+            "url": "/login",
+            "order": 20,
+            "permission": 0,
+            "icon": "sign-in",
+            "visibility": "out"
+        },
+        {
+            "slug": "core-forgot-password",
+            "title": "Forgot Password",
+            "url": "/password-reset-1",
+            "order": 30,
+            "permission": 0,
+            "icon": "key",
+            "visibility": "out"
+        },
+        {
+            "slug": "core-signup",
+            "title": "Sign up",
+            "url": "/register",
+            "order": 40,
+            "permission": 0,
+            "icon": "user-plus",
+            "settingActivate": "register_active",
+            "visibility": "out"
+        },
+        {
+            "slug": "core-profile",
+            "title": "My Profile",
+            "url": "/profile",
+            "order": 50,
+            "permission": 1,
+            "icon": "user"
+        },
+        {
+            "slug": "core-orders",
+            "title": "Orders",
+            "url": "/profile#orders",
+            "order": 60,
+            "permission": 1,
+            "icon": "shopping-bag"
+        },
+        {
+            "slug": "core-subscriptions",
+            "title": "Subscriptions",
+            "url": "/profile/subscriptions",
+            "order": 70,
+            "permission": 1,
+            "icon": "refresh"
+        },
+        {
+            "slug": "core-events",
+            "title": "My Events",
+            "url": "/profile#events",
+            "order": 80,
+            "permission": 1,
+            "icon": "calendar"
+        },
+        {
+            "slug": "core-event-sessions",
+            "title": "Event Sessions",
+            "url": "/profile/event_sessions",
+            "order": 90,
+            "permission": 1,
+            "icon": "clock"
+        },
+        {
+            "slug": "core-admin-dashboard",
+            "title": "Admin Dashboard",
+            "url": "/admin/admin_users",
+            "order": 100,
+            "permission": 5,
+            "icon": "dashboard"
+        },
+        {
+            "slug": "core-admin-help",
+            "title": "Admin Help",
+            "url": "/admin/admin_help",
+            "order": 110,
+            "permission": 5,
+            "icon": "question-circle"
+        },
+        {
+            "slug": "core-admin-settings",
+            "title": "Admin Settings",
+            "url": "/admin/admin_settings",
+            "order": 120,
+            "permission": 6,
+            "icon": "wrench"
+        },
+        {
+            "slug": "core-admin-utilities",
+            "title": "Admin Utilities",
+            "url": "/admin/admin_utilities",
+            "order": 130,
+            "permission": 6,
+            "icon": "tools"
+        },
+        {
+            "slug": "core-signout",
+            "title": "Sign out",
+            "url": "/logout",
+            "order": 200,
+            "permission": 1,
+            "icon": "sign-out"
+        }
+    ]
+}

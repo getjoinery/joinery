@@ -1248,33 +1248,44 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Sync a plugin's menus (admin sidebar + user dropdown) from its plugin.json
-     * adminMenu and profileMenu declarations.
+     * Sync menus (admin sidebar + user dropdown) from a declared source —
+     * either a plugin's plugin.json or the core admin_menus.json.
      *
      * Handles creation, update, and removal. Pass ['admin' => [], 'profile' => []]
-     * to remove all the plugin's menus (deactivate/uninstall).
+     * to remove all menus owned by the source (plugin deactivate/uninstall).
      *
-     * Refuses to write rows whose slug starts with 'core-' (reserved for core
-     * menu items) — logs a warning and skips.
-     *
-     * @param string $plugin_name Plugin directory name
-     * @param array|null $declared When null, reads from plugin.json. When an array,
+     * @param string $source_name Plugin directory name, or 'core' for core menus.
+     * @param array|null $declared When null, reads from plugin.json (plugins only;
+     *                             throws for source_name='core'). When an array,
      *                             must use shape ['admin' => [...], 'profile' => [...]].
      *                             Missing keys are treated as empty arrays.
+     * @param array $options ['overwrite' => bool, 'prune' => bool]. Defaults:
+     *                       overwrite=true, prune=true (preserves plugin behavior).
+     *                       Core caller passes overwrite=false, prune=false to
+     *                       preserve admin customizations to existing rows.
      */
-    public function syncMenus(string $plugin_name, ?array $declared = null): void {
+    public function syncMenus(string $source_name, ?array $declared = null, array $options = []): void {
         require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 
-        // Read declared menus from plugin.json if not explicitly provided
+        $overwrite = $options['overwrite'] ?? true;
+        $prune     = $options['prune']     ?? true;
+
+        // Read declared menus from plugin.json if not explicitly provided.
+        // Core has no plugin.json — caller must always pass $declared.
         if ($declared === null) {
+            if ($source_name === 'core') {
+                throw new InvalidArgumentException(
+                    "syncMenus('core'): \$declared is required for source_name='core' (no plugin.json to read from)."
+                );
+            }
             try {
-                $helper = PluginHelper::getInstance($plugin_name);
+                $helper = PluginHelper::getInstance($source_name);
                 $declared = [
                     'admin'   => $helper->getAdminMenuItems(),
                     'profile' => $helper->getProfileMenuItems(),
                 ];
             } catch (Exception $e) {
-                error_log("syncMenus: could not read plugin.json for '$plugin_name': " . $e->getMessage());
+                error_log("syncMenus: could not read plugin.json for '$source_name': " . $e->getMessage());
                 $declared = ['admin' => [], 'profile' => []];
             }
         }
@@ -1282,12 +1293,69 @@ class PluginManager extends AbstractExtensionManager {
         $admin_items   = $declared['admin']   ?? [];
         $profile_items = $declared['profile'] ?? [];
 
-        $dblink = DbConnector::get_instance()->get_db_link();
+        // === Strict per-entry validation up front (before any DB work). ===
+        // Required fields per entry: slug, title, order, permission.
+        // Nested children may inherit 'permission' from their parent.
+        $validate = function (array $entry, string $kind, string $idx_path, bool $allow_permission_missing) use ($source_name) {
+            foreach (['slug', 'title', 'order'] as $field) {
+                if (!array_key_exists($field, $entry)) {
+                    throw new InvalidArgumentException(
+                        "syncMenus('$source_name'): {$kind}[$idx_path] missing required field '$field'"
+                    );
+                }
+            }
+            if (!$allow_permission_missing && !array_key_exists('permission', $entry)) {
+                throw new InvalidArgumentException(
+                    "syncMenus('$source_name'): {$kind}[$idx_path] missing required field 'permission'"
+                );
+            }
+            if (!is_string($entry['slug']) || $entry['slug'] === '') {
+                throw new InvalidArgumentException(
+                    "syncMenus('$source_name'): {$kind}[$idx_path] field 'slug' must be a non-empty string"
+                );
+            }
+            if (!is_string($entry['title']) || $entry['title'] === '') {
+                throw new InvalidArgumentException(
+                    "syncMenus('$source_name'): {$kind}[$idx_path] (slug='{$entry['slug']}') field 'title' must be a non-empty string"
+                );
+            }
+            if (!is_int($entry['order'])) {
+                throw new InvalidArgumentException(
+                    "syncMenus('$source_name'): {$kind}[$idx_path] (slug='{$entry['slug']}') field 'order' must be an integer"
+                );
+            }
+            if (array_key_exists('permission', $entry) && !is_int($entry['permission'])) {
+                throw new InvalidArgumentException(
+                    "syncMenus('$source_name'): {$kind}[$idx_path] (slug='{$entry['slug']}') field 'permission' must be an integer"
+                );
+            }
+        };
 
-        // Build flat entry list with location tag
-        $flat_entries = [];
+        // Reserved-slug gate: only 'core' may declare core-* slugs.
+        $reserved_check = function (array $entry, string $kind, string $idx_path) use ($source_name) {
+            if ($source_name !== 'core' && strpos($entry['slug'], 'core-') === 0) {
+                throw new InvalidArgumentException(
+                    "syncMenus('$source_name'): {$kind}[$idx_path] (slug='{$entry['slug']}') reserved slug 'core-*' is for core only"
+                );
+            }
+        };
 
-        // Admin items: support parent/children nesting
+        foreach ($admin_items as $idx => $item) {
+            $validate($item, 'adminMenu', (string)$idx, false);
+            $reserved_check($item, 'adminMenu', (string)$idx);
+            if (!empty($item['items']) && is_array($item['items'])) {
+                foreach ($item['items'] as $cidx => $child) {
+                    $validate($child, 'adminMenu', "$idx.items.$cidx", true);
+                    $reserved_check($child, 'adminMenu', "$idx.items.$cidx");
+                }
+            }
+        }
+        foreach ($profile_items as $idx => $item) {
+            $validate($item, 'profileMenu', (string)$idx, false);
+            $reserved_check($item, 'profileMenu', (string)$idx);
+        }
+
+        // === Build flat entry list ===
         $admin_parents  = [];
         $admin_children = [];
         foreach ($admin_items as $item) {
@@ -1296,7 +1364,7 @@ class PluginManager extends AbstractExtensionManager {
                 'title' => $item['title'],
                 'url' => $item['url'] ?? '',
                 'order' => $item['order'],
-                'permission' => $item['permission'] ?? 10,
+                'permission' => $item['permission'],
                 'icon' => $item['icon'] ?? null,
                 'settingActivate' => $item['settingActivate'] ?? null,
                 'disabled' => $item['disabled'] ?? false,
@@ -1307,14 +1375,13 @@ class PluginManager extends AbstractExtensionManager {
 
             if (!empty($item['items']) && is_array($item['items'])) {
                 $admin_parents[] = $entry;
-                $parent_permission = $item['permission'] ?? 10;
                 foreach ($item['items'] as $child) {
                     $admin_children[] = [
                         'slug' => $child['slug'],
                         'title' => $child['title'],
                         'url' => $child['url'] ?? '',
                         'order' => $child['order'],
-                        'permission' => $child['permission'] ?? $parent_permission,
+                        'permission' => $child['permission'] ?? $item['permission'],
                         'icon' => $child['icon'] ?? null,
                         'settingActivate' => $child['settingActivate'] ?? null,
                         'disabled' => $child['disabled'] ?? false,
@@ -1330,7 +1397,6 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
 
-        // Profile items: flat only
         $profile_entries = [];
         foreach ($profile_items as $item) {
             $profile_entries[] = [
@@ -1338,7 +1404,7 @@ class PluginManager extends AbstractExtensionManager {
                 'title' => $item['title'],
                 'url' => $item['url'] ?? '',
                 'order' => $item['order'],
-                'permission' => $item['permission'] ?? 0,
+                'permission' => $item['permission'],
                 'icon' => $item['icon'] ?? null,
                 'settingActivate' => $item['settingActivate'] ?? null,
                 'disabled' => $item['disabled'] ?? false,
@@ -1349,34 +1415,27 @@ class PluginManager extends AbstractExtensionManager {
         }
 
         $flat_entries = array_merge($admin_parents, $admin_children, $profile_entries);
-
-        // Filter out core-* slugs (defense in depth — validator should have caught these)
-        $flat_entries = array_filter($flat_entries, function ($entry) use ($plugin_name) {
-            if (strpos($entry['slug'], 'core-') === 0) {
-                error_log("syncMenus: plugin '$plugin_name' attempted to declare reserved slug '{$entry['slug']}' — skipped.");
-                return false;
-            }
-            return true;
-        });
-
         $declared_slugs = array_column($flat_entries, 'slug');
 
-        // Get previously synced slugs from plg_metadata
-        $previous_slugs = $this->getMenuSlugsFromMetadata($plugin_name);
+        $dblink = DbConnector::get_instance()->get_db_link();
 
-        // Upsert
+        // Previous slugs only meaningful for plugins (core has no plg_plugins row).
+        $previous_slugs = ($source_name === 'core') ? [] : $this->getMenuSlugsFromMetadata($source_name);
+
+        // === Upsert ===
         foreach ($flat_entries as $entry) {
             $parent_menu_id = null;
 
-            // Resolve parent slug to ID (admin items only)
+            // Resolve parent slug to ID (admin items only). Throw on missing parent.
             if (!empty($entry['parent_slug'])) {
                 $q = $dblink->prepare("SELECT amu_admin_menu_id FROM amu_admin_menus WHERE amu_slug = ?");
                 $q->execute([$entry['parent_slug']]);
                 $parent_menu_id = $q->fetchColumn();
 
                 if ($parent_menu_id === false) {
-                    error_log("syncMenus: plugin '$plugin_name' references parent slug '{$entry['parent_slug']}' which does not exist. Skipping menu '{$entry['slug']}'.");
-                    continue;
+                    throw new InvalidArgumentException(
+                        "syncMenus('$source_name'): entry (slug='{$entry['slug']}') references parent slug '{$entry['parent_slug']}' which does not exist"
+                    );
                 }
             }
 
@@ -1392,6 +1451,7 @@ class PluginManager extends AbstractExtensionManager {
             $disabled = (!empty($entry['disabled'])) ? 1 : 0;
 
             if ($existing_id !== false) {
+                if (!$overwrite) continue;
                 $q = $dblink->prepare(
                     "UPDATE amu_admin_menus SET
                         amu_menudisplay = ?,
@@ -1441,25 +1501,28 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
 
-        // Prune: delete slugs that were previously synced but are no longer declared
-        $slugs_to_remove = array_diff($previous_slugs, $declared_slugs);
-        if (!empty($slugs_to_remove)) {
-            // Delete children first (rows that have a parent), then parents
-            $placeholders = implode(',', array_fill(0, count($slugs_to_remove), '?'));
-            $q = $dblink->prepare(
-                "DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})
-                 AND amu_parent_menu_id IS NOT NULL"
-            );
-            $q->execute(array_values($slugs_to_remove));
+        // === Prune (gated) ===
+        if ($prune) {
+            $slugs_to_remove = array_diff($previous_slugs, $declared_slugs);
+            if (!empty($slugs_to_remove)) {
+                $placeholders = implode(',', array_fill(0, count($slugs_to_remove), '?'));
+                $q = $dblink->prepare(
+                    "DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})
+                     AND amu_parent_menu_id IS NOT NULL"
+                );
+                $q->execute(array_values($slugs_to_remove));
 
-            $q = $dblink->prepare(
-                "DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})"
-            );
-            $q->execute(array_values($slugs_to_remove));
+                $q = $dblink->prepare(
+                    "DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})"
+                );
+                $q->execute(array_values($slugs_to_remove));
+            }
         }
 
-        // Cache current declared slugs in plg_metadata for next sync
-        $this->saveMenuSlugsToMetadata($plugin_name, $declared_slugs);
+        // Plugins track their declared slugs in plg_metadata; core has no row to write.
+        if ($source_name !== 'core') {
+            $this->saveMenuSlugsToMetadata($source_name, $declared_slugs);
+        }
     }
 
     /**
