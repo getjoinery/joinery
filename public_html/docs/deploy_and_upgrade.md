@@ -342,10 +342,12 @@ Each migration has an optional `test` SQL query that returns a row with a `count
 This works naturally for INSERT-style migrations — test whether the row already exists:
 
 ```php
-// Insert a settings row — skip if it already exists
-$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'my_setting'";
-$migration['migration_sql'] = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('my_setting', 'default')";
+// Insert a row — skip if it already exists
+$migration['test'] = "SELECT count(1) as count FROM emt_email_templates WHERE emt_name = 'my_template'";
+$migration['migration_sql'] = "INSERT INTO emt_email_templates (emt_name, emt_body) VALUES ('my_template', '...')";
 ```
+
+> **Note: do not use migrations to seed `stg_settings` rows.** Setting names and defaults are declarative — see "Declarative Settings (no migration)" below.
 
 **Drop-table migrations require inverted logic.** If you test for the table's presence the same way, the migration is skipped *while the table still exists* — the opposite of what you want. Use a `CASE` expression to flip the sense:
 
@@ -358,6 +360,18 @@ $migration['migration_sql'] = 'DROP TABLE IF EXISTS public.old_table CASCADE;';
 ```
 
 The `CASE` returns 0 while the table exists (→ run) and 1 once it has been dropped (→ skip). The `DROP TABLE IF EXISTS` makes the migration idempotent — safe to run even if the table is already gone.
+
+### Declarative Settings (no migration)
+
+Setting names and defaults are declared, not migrated. Every `update_database` run reseeds them via `Setting::seed_declared()`, which uses `INSERT ... ON CONFLICT (stg_name) DO NOTHING` — existing rows are never overwritten, only missing ones are filled in.
+
+- **New core setting** → add an entry to `public_html/settings.json` with a sensible default. Reseeded automatically on existing sites; included in `joinery-install.sql` for fresh installs.
+- **New plugin-owned setting** → add an entry to the plugin's `plugin.json` under `settings`. Seeded by `PluginManager::syncSettings()` when the plugin is activated.
+- **Changing the default value of an existing setting** → edit `settings.json` (or `plugin.json`). Existing sites keep whatever value they have (ON CONFLICT DO NOTHING). If you also need to *correct* a wrong value on existing sites, add an UPDATE migration with a tight WHERE clause (e.g. `WHERE stg_value = '<old default>'` so admin overrides aren't trampled).
+
+**INSERT-into-`stg_settings` migrations are deprecated.** They duplicate what `seed_declared` already does, drift from the declarative source, and clutter migration history. UPDATE/DELETE migrations against `stg_settings` remain a valid tool — only INSERT-only seed migrations are off-limits.
+
+The same principle applies to core admin/profile menu rows (declared in `public_html/admin_menus.json`) and plugin menu rows (declared in `plugin.json` under `adminMenu` / `profileMenu`).
 
 ### Plugin Tables Excluded
 
