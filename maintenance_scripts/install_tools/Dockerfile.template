@@ -1,4 +1,6 @@
 # Joinery Docker Template
+# VERSION 3.8 - Extend chown to cover cache/ so static_pages subdirectory created by
+#               _site_init.sh is owned by www-data (was root, disabling static page cache).
 # VERSION 3.7 - Rename _reconcile_stock_assets.sh -> _reconcile_upgradable_assets.sh
 #               as part of the is_stock -> receives_upgrades terminology cleanup.
 # VERSION 3.6 - Self-heal ownership on every container start. COPY at build time
@@ -118,7 +120,7 @@ CMD set +H && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
-    chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" && \
+    chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" "/var/www/html/${SITENAME}/cache" && \
     find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \
     find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
