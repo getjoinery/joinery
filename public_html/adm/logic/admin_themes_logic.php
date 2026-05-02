@@ -62,32 +62,27 @@ function admin_themes_logic($get, $post) {
 						}
 						break;
 
-					case 'mark_stock':
+					case 'mark_upgradable':
 						$theme_name = $post['theme_name'];
 						$theme = Theme::get_by_theme_name($theme_name);
 						if ($theme) {
-							$theme->set('thm_is_stock', true);
+							$theme->set('thm_receives_upgrades', true);
 							$theme->save();
 							// Write back to manifest to keep in sync
-							$theme_manager->writeManifestStockStatus($theme_name, true);
-							$message = "Theme '$theme_name' marked as stock. It will receive updates during deployments.";
+							$theme_manager->writeManifestReceivesUpgrades($theme_name, true);
+							$message = "Theme '$theme_name' will be replaced from the upgrade payload during deploy.";
 						}
 						break;
 
-					case 'mark_custom':
+					case 'mark_preserved':
 						$theme_name = $post['theme_name'];
 						$theme = Theme::get_by_theme_name($theme_name);
 						if ($theme) {
-							// Block marking system themes as custom
-							if ($theme->get('thm_is_system')) {
-								$error = "Cannot mark system theme '$theme_name' as custom. System themes must always receive updates.";
-								break;
-							}
-							$theme->set('thm_is_stock', false);
+							$theme->set('thm_receives_upgrades', false);
 							$theme->save();
 							// Write back to manifest to keep in sync
-							$theme_manager->writeManifestStockStatus($theme_name, false);
-							$message = "Theme '$theme_name' marked as custom. It will be preserved during deployments.";
+							$theme_manager->writeManifestReceivesUpgrades($theme_name, false);
+							$message = "Theme '$theme_name' will be preserved on deploy (receives_upgrades=false).";
 						}
 						break;
 

@@ -218,7 +218,8 @@ Create `theme/$THEME_NAME/theme.json` with minimal, accurate configuration:
     "version": "1.0.0",
     "description": "Clean HTML5 theme based on [source] design, zero dependencies",
     "author": "Joinery Team",
-    "is_stock": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "cssFramework": "html5",
     "formWriterBase": "FormWriterV2HTML5",
     "publicPageBase": "PublicPageBase"
@@ -1578,7 +1579,8 @@ Follow the same 10-step process from the main guide above, with these specific d
     "version": "1.0.0",
     "description": "Clean HTML5 theme based on [source] design, zero dependencies",
     "author": "Joinery Team",
-    "is_stock": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "cssFramework": "html5",
     "formWriterBase": "FormWriterV2HTML5",
     "publicPageBase": "PublicPageBase"

@@ -1190,7 +1190,7 @@
 	$migration = array();
 	$migration['database_version'] = '87';
 	$migration['test'] = "SELECT count(1) as count FROM thm_themes WHERE thm_name = 'joinery-system'";
-	$migration['migration_sql'] = "INSERT INTO thm_themes (thm_name, thm_display_name, thm_description, thm_version, thm_author, thm_is_active, thm_is_stock, thm_is_system, thm_create_time, thm_update_time) VALUES ('joinery-system', 'Joinery System', 'Vanilla HTML5+CSS admin theme for the Joinery system', '1.0.0', 'Joinery Team', false, true, true, now(), now())";
+	$migration['migration_sql'] = "INSERT INTO thm_themes (thm_name, thm_display_name, thm_description, thm_version, thm_author, thm_is_active, thm_receives_upgrades, thm_is_system, thm_create_time, thm_update_time) VALUES ('joinery-system', 'Joinery System', 'Vanilla HTML5+CSS admin theme for the Joinery system', '1.0.0', 'Joinery Team', false, true, true, now(), now())";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
@@ -1420,5 +1420,18 @@
 	$migration['database_version'] = '126';
 	$migration['migration_file'] = 'rename_scrolldaddy_settings.php';
 	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Extension flag split: is_stock → receives_upgrades (v127) ==========
+	// Copy data from the old plg_is_stock / thm_is_stock columns into the new
+	// plg_receives_upgrades / thm_receives_upgrades columns (auto-created from
+	// $field_specifications by Step 1 of update_database, which runs before this
+	// migration), then drop the legacy columns. Spec:
+	// specs/extension_flag_split_receives_upgrades_included_in_publish.md
+	$migration = array();
+	$migration['database_version'] = '127';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='thm_themes' AND column_name='thm_is_stock') THEN 0 ELSE 1 END as count";
+	$migration['migration_sql'] = "DO \$\$ BEGIN UPDATE thm_themes SET thm_receives_upgrades = thm_is_stock; UPDATE plg_plugins SET plg_receives_upgrades = plg_is_stock; ALTER TABLE thm_themes DROP COLUMN thm_is_stock; ALTER TABLE plg_plugins DROP COLUMN plg_is_stock; END \$\$;";
+	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 

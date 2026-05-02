@@ -4,7 +4,8 @@
   "version": "1.0.1",
   "description": "Clean HTML5 theme based on Typology design, zero dependencies",
   "author": "Joinery Team",
-  "is_stock": true,
+  "receives_upgrades": true,
+  "included_in_publish": true,
   "requires": {
     "php": ">=7.4"
   },

@@ -242,7 +242,8 @@ Plugins (and themes) support two optional deprecation fields:
 {
     "name": "Old Plugin",
     "version": "1.0.0",
-    "is_stock": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "deprecated": true,
     "superseded_by": "new-plugin"
 }
@@ -529,7 +530,7 @@ Discovery → Install → Activate ↔ Deactivate → Uninstall
 ```
 
 **Install** (`PluginManager::install($name)`)
-1. Fetches a fresh archive from the upgrade endpoint and extracts over `plugins/{name}/`, so stock plugins get current code on every install. Custom plugins 404 silently and install proceeds with on-disk files.
+1. Fetches a fresh archive from the upgrade endpoint and extracts over `plugins/{name}/`, so plugins with `included_in_publish: true` on the upgrade server get current code on every install; plugins not in the publisher's catalog 404 silently and install proceeds with on-disk files.
 2. Validates plugin structure and dependencies
 3. Creates/updates database tables from data class `$field_specifications` (via `DatabaseUpdater::runPluginTablesOnly()`)
 4. Runs pending `.sql` migration files in `plugins/{name}/migrations/`
@@ -574,7 +575,7 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 
 **Hook failure is fatal.** If step 6 throws or returns false, steps 7 and 8 do NOT run — tables and the row remain intact. Steps 1–5 are idempotent, so the operator fixes the hook and re-runs uninstall. Use this to guard external work: if you can't revoke an API key, don't let the plugin's local state be destroyed.
 
-**After uninstall,** the plugin appears in the admin UI as "Inactive" with an **Install** action (no DB row, files still on disk). Reinstall goes through the normal install path — on install the upgrade-endpoint refresh pulls fresh stock code, so stale on-disk files don't linger.
+**After uninstall,** the plugin appears in the admin UI as "Inactive" with an **Install** action (no DB row, files still on disk). Reinstall goes through the normal install path — on install the upgrade-endpoint refresh pulls fresh published code, so stale on-disk files don't linger.
 
 **Important:** The core `update_database.php` script excludes plugins from its main pipeline (`include_plugins => false`) because plugin tables have independent lifecycles. However, `update_database` runs a plugin/theme sync as its final step, so plugin schema changes are still applied when you run it.
 
@@ -960,7 +961,26 @@ if ($theme_config === 'bootstrap') {
 
 ### Theme Metadata (theme.json)
 
-All themes should include a `theme.json` file for proper system integration:
+All themes should include a `theme.json` file for proper system integration.
+
+#### Distribution Flags
+
+Two boolean flags control how a theme moves between the publisher and customer
+sites. Both default to `true` if missing, but should be declared explicitly:
+
+- **`receives_upgrades`** — *customer-side, deploy preservation.* If `true`, the
+  on-disk copy is replaced from the upgrade payload during a deploy swap and
+  the container reconciler will re-download it on boot if it goes missing.
+  Set to `false` to keep a hand-edited copy across deploys. Mirrored to the
+  database (`thm_receives_upgrades`); the admin Themes page can toggle it.
+- **`included_in_publish`** — *publisher-side, packaging filter.* If `true`,
+  `publish_upgrade.php` packages this theme into the upgrade archive and the
+  marketplace catalog advertises it. If `false`, it is skipped. Manifest-only
+  (no DB column, no admin UI).
+
+For a freshly authored site theme that should stay on its origin site and not
+ship downstream, set both flags to `false`. For a theme published via the
+upgrade pipeline, set both to `true`. The same pair applies to `plugin.json`.
 
 **Basic theme.json:**
 ```json
@@ -970,7 +990,8 @@ All themes should include a `theme.json` file for proper system integration:
   "version": "1.0.0",
   "description": "A custom theme for my site",
   "author": "Your Name",
-  "is_stock": false,
+  "receives_upgrades": false,
+  "included_in_publish": false,
   "requires": {
     "php": ">=7.4",
     "joinery": ">=1.0.0"
@@ -989,7 +1010,8 @@ All themes should include a `theme.json` file for proper system integration:
   "version": "2.1.0",
   "description": "Theme with full plugin integration",
   "author": "Developer Team",
-  "is_stock": false,
+  "receives_upgrades": false,
+  "included_in_publish": false,
   "requires": {
     "php": ">=8.0",
     "joinery": ">=1.0.0"
@@ -1014,7 +1036,8 @@ All themes should include a `theme.json` file for proper system integration:
   "version": "1.0.0",
   "description": "Framework-agnostic theme with custom styling",
   "author": "Developer",
-  "is_stock": false,
+  "receives_upgrades": false,
+  "included_in_publish": false,
   "requires": {
     "php": ">=7.4",
     "joinery": ">=1.0.0"

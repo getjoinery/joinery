@@ -3,7 +3,8 @@
     "version": "1.1.0",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
-    "is_stock": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "adminMenu": [
         {
             "slug": "server-manager",

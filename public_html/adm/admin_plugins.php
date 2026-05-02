@@ -152,13 +152,10 @@ $page->begin_box(array('altlinks' => $altlinks));
                 // Status column
                 $status_cell = $plugin['status_badge'];
 
-                // Add stock/custom badge
+                // Add Preserved-on-deploy badge only when receives_upgrades=false
                 if ($plugin['plugin']) {
-                    $is_stock = $plugin['plugin']->is_stock();
-                    if ($is_stock) {
-                        $status_cell .= ' <span class="badge bg-info">Stock</span>';
-                    } else {
-                        $status_cell .= ' <span class="badge bg-warning">Custom</span>';
+                    if (!$plugin['plugin']->receives_upgrades()) {
+                        $status_cell .= ' <span class="badge bg-warning">Preserved on deploy</span>';
                     }
 
                     // Check if this is the active theme provider

@@ -52,7 +52,7 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
     
         'thm_is_active' => array('type'=>'bool', 'default'=>false),
     
-        'thm_is_stock' => array('type'=>'bool', 'default'=>true),
+        'thm_receives_upgrades' => array('type'=>'bool', 'default'=>true),
 
         'thm_is_system' => array('type'=>'bool', 'default'=>false),
 
@@ -201,11 +201,11 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
     }
 
     /**
-     * Check if this is a stock theme (auto-updated)
-     * @return bool True if stock theme
+     * Whether this theme accepts upgrade-payload replacement on deploy.
+     * @return bool True if the on-disk copy will be replaced from the upgrade payload
      */
-    public function is_stock() {
-        return (bool)$this->get('thm_is_stock');
+    public function receives_upgrades() {
+        return (bool)$this->get('thm_receives_upgrades');
     }
 
     /**
@@ -289,8 +289,8 @@ class MultiTheme extends SystemMultiBase {
             $filters['thm_is_active'] = [$this->options['thm_is_active'], PDO::PARAM_BOOL];
         }
         
-        if (isset($this->options['thm_is_stock'])) {
-            $filters['thm_is_stock'] = [$this->options['thm_is_stock'], PDO::PARAM_BOOL];
+        if (isset($this->options['thm_receives_upgrades'])) {
+            $filters['thm_receives_upgrades'] = [$this->options['thm_receives_upgrades'], PDO::PARAM_BOOL];
         }
 
         if (isset($this->options['thm_is_system'])) {
