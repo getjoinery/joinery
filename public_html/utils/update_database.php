@@ -616,6 +616,39 @@
 			// Non-fatal — individual settings will still get added via admin settings save
 		}
 
+		// Step: Seed core menus from public_html/admin_menus.json
+		// Runs after settings seed so settingActivate references resolve. Uses
+		// overwrite=false, prune=false so admin customizations to existing rows survive.
+		echo "<br>\n<strong>Core Menu Seed</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+			$core_menus_path = PathHelper::getIncludePath('admin_menus.json');
+			if (file_exists($core_menus_path)) {
+				$core_menus_raw = file_get_contents($core_menus_path);
+				$core_menus_data = json_decode($core_menus_raw, true);
+				if (!is_array($core_menus_data)) {
+					echo "⚠️  admin_menus.json is not valid JSON.<br>\n";
+				} else {
+					$plugin_manager = new PluginManager();
+					$plugin_manager->syncMenus(
+						'core',
+						[
+							'admin'   => $core_menus_data['adminMenu']   ?? [],
+							'profile' => $core_menus_data['profileMenu'] ?? [],
+						],
+						['overwrite' => false, 'prune' => false]
+					);
+					$admin_count   = count($core_menus_data['adminMenu']   ?? []);
+					$profile_count = count($core_menus_data['profileMenu'] ?? []);
+					echo "✓ Core menus seeded ({$admin_count} admin, {$profile_count} profile)<br>\n";
+				}
+			} else {
+				echo "⚠️  admin_menus.json not found at public_html root; skipping core menu seed.<br>\n";
+			}
+		} catch (Exception $e) {
+			echo "⚠️  Core menu seed failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Step: Sync plugins and themes
 		// Runs after core DB is fully up to date so plugin tables are created against current schema
 		echo "<br>\n<strong>Plugin &amp; Theme Sync</strong><br>\n";
