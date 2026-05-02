@@ -1428,6 +1428,16 @@
 				}
 			}
 
+			// Remove the rollback backup — upgrade succeeded, no longer needed.
+			if (is_dir($backup_directory)) {
+				exec('rm -rf ' . escapeshellarg($backup_directory) . ' 2>&1', $rm_out, $rm_exit);
+				if ($rm_exit === 0) {
+					if ($verbose) upgrade_echo("✓ Removed rollback backup (public_html_last)<br>");
+				} else {
+					upgrade_echo("⚠ Could not remove rollback backup (non-fatal): " . htmlspecialchars(implode(' ', $rm_out)) . "<br>");
+				}
+			}
+
 			upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
 			upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 		}
