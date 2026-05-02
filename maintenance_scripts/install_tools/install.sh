@@ -1121,6 +1121,24 @@ EOF
         print_success "No orphaned build directories found"
     fi
 
+    # --- Swap ---
+    print_step "Configuring swap..."
+    local SWAP_SIZE="2G"
+    local SWAPFILE="/swapfile"
+    if swapon --show | grep -q "$SWAPFILE"; then
+        print_info "Swapfile already active at $SWAPFILE — skipping"
+    else
+        swapoff -a 2>/dev/null || true
+        fallocate -l "$SWAP_SIZE" "$SWAPFILE"
+        chmod 600 "$SWAPFILE"
+        mkswap "$SWAPFILE"
+        swapon "$SWAPFILE"
+        # Replace any existing swap entries with the swapfile
+        sed -i '/[[:space:]]swap[[:space:]]/d' /etc/fstab
+        echo "$SWAPFILE none swap sw 0 0" >> /etc/fstab
+        print_success "Swap: ${SWAP_SIZE} swapfile created and active"
+    fi
+
     # --- Truncate btmp ---
     print_step "Truncating failed-login logs..."
     truncate -s 0 /var/log/btmp 2>/dev/null || true
@@ -1132,6 +1150,7 @@ EOF
     echo -e "${GREEN}✓${NC} fail2ban active (SSH jail)"
     echo -e "${GREEN}✓${NC} journald capped at 200M"
     echo -e "${GREEN}✓${NC} Docker BuildKit GC configured"
+    echo -e "${GREEN}✓${NC} Swap: 2G swapfile"
     echo -e "${GREEN}✓${NC} btmp logs cleared"
     echo ""
 }
