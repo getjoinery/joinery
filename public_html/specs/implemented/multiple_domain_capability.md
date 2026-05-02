@@ -139,7 +139,7 @@ A second Joinery deployment writes to its **own** PostgreSQL database. The resol
 Extend the resolver's config to accept a list of Joinery database URLs. Resolver opens one connection pool per DB and queries each on its existing schedule, unioning the results in memory.
 
 ```
-JOINERY_DB_URLS=postgres://user@scrolldaddy-db/joinery,postgres://user@networksentry-db/joinery
+SCD_JOINERY_DB_URLS=host=scrolldaddy-db dbname=joinery user=scd password=xxx sslmode=disable,host=networksentry-db dbname=joinery user=scd password=xxx sslmode=disable
 ```
 
 Per-DB schema validation runs at startup (the existing `ValidateSchema` pattern). UIDs are globally unique (128-bit entropy + optional `s-`/`n-` namespacing), so the union is collision-free. Tier-to-category mappings are read out of each DB's settings; the resolver applies whichever tier/category set the device's owning DB declared.
@@ -297,8 +297,9 @@ The first attempt to deploy this refactor exposed a pre-existing bug in `utils/u
 
 ### Phase H — Resolver
 - [ ] Open firewall / pg_hba on NetworkSentry's PostgreSQL to accept connections from the resolver IPs (`45.56.103.84`, `97.107.131.227`)
-- [ ] Add NetworkSentry's DB URL to `JOINERY_DB_URLS` (or equivalent) in `/etc/scrolldaddy/scrolldaddy.env` on each DNS server
-- [ ] Roll out the resolver build that supports multiple Joinery DB sources (Go change to `internal/db/db.go` and config wiring); follow the existing release process (`make release VERSION=…`, run installer on each DNS host)
+- [ ] Add NetworkSentry's DB URL to `SCD_JOINERY_DB_URLS` in `/etc/scrolldaddy/scrolldaddy.env` on each DNS server (comma-separated list; existing `SCD_DB_*` vars still work for single-deployment compat)
+- [x] **DONE** Roll out the resolver build that supports multiple Joinery DB sources: `internal/config/config.go` (`SCD_JOINERY_DB_URLS`), `internal/db/db.go` (`ConnectURL`, fixed `dns_filtering_blocklist_version` setting key), `internal/cache/cache.go` (per-DB device load + union, multi-DB blocklist merge), `cmd/dns/main.go` (connect loop, reload loops). Build clean, tests pass.
+- [ ] Deploy the updated resolver binary: `make release VERSION=…` locally, run installer on each DNS host
 - [ ] Mint NetworkSentry API key on the resolver for the thin Joinery → resolver RPCs (`/seen`, `/reload`); store on the NetworkSentry deployment
 - [ ] Smoke-test: create a NetworkSentry test device; verify DNS resolution applies expected blocks within the resolver's poll interval
 - [ ] Smoke-test: verify ScrollDaddy device behavior is unaffected

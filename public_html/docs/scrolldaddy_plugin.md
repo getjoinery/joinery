@@ -2,7 +2,7 @@
 
 ScrollDaddy is a DNS filtering service. Devices (phone, laptop, etc.) query ScrollDaddy's DNS resolver instead of their ISP's, and the resolver decides block / allow / rewrite for every lookup based on the user's policy.
 
-This plugin (`public_html/plugins/scrolldaddy/`) provides the admin UI and data model. The actual DNS resolver is a separate Go service at `/home/user1/scrolldaddy-dns/` that reads the same PostgreSQL database.
+This plugin (`public_html/plugins/dns_filtering/`) provides the admin UI and data model. The actual DNS resolver is a separate Go service at `/home/user1/scrolldaddy-dns/` that reads PostgreSQL databases from one or more Joinery deployments — see "Resolver Configuration" below.
 
 ## Block Model
 
@@ -53,7 +53,7 @@ A single editor (`views/profile/scheduled_block_edit.php`) serves both always-on
 
 **Tier downgrade behavior** (option C): when a user with existing advanced-filter overrides (ads, malware, fakenews, typo — see `ScrollDaddyHelper::getRestrictedFilters()`) loses `scrolldaddy_advanced_filters`, the rows render in the override list with a **disabled** segmented radio (cannot edit action) but a **working** Remove button. Remove appends `<input name="remove_advanced_keys[]">` to the form so `scheduled_block_edit_logic.php` can explicitly delete the row even though `update_filters()` is called with `$skip_keys` to preserve untouched advanced rows. The picker excludes advanced filters for downgraded users, so they can't add new ones.
 
-Custom domain rules render at the bottom of the editor with inline AJAX add/delete (via `plugins/scrolldaddy/ajax/block_rule_add.php` and `block_rule_delete.php`), decoupled from the main save button — adding rules is iterative, while category toggles are set-and-forget.
+Custom domain rules render at the bottom of the editor with inline AJAX add/delete (via `plugins/dns_filtering/ajax/block_rule_add.php` and `block_rule_delete.php`), decoupled from the main save button — adding rules is iterative, while category toggles are set-and-forget.
 
 ## Device Creation
 
@@ -70,15 +70,29 @@ The Go resolver (`/home/user1/scrolldaddy-dns/`) reads all block data from Postg
 
 Implementation: `resolver.go:Resolve()` handles the merge. `cache.go:LightReload()` handles the 60s refresh. `db.go:LoadScheduledBlocks()` is the single source query.
 
+### Resolver Configuration
+
+The resolver is brand-neutral and can serve multiple Joinery deployments simultaneously. Each deployment has its own database; the resolver unions all of them in memory. Device resolver UIDs are 128-bit random values and are globally unique across deployments, so the union is collision-free.
+
+**Single deployment (current ScrollDaddy setup):** the legacy `SCD_DB_*` env vars still work.
+
+**Multiple deployments:** set `SCD_JOINERY_DB_URLS` to a comma-separated list of PostgreSQL DSNs:
+```
+SCD_JOINERY_DB_URLS=host=scrolldaddy-db dbname=joinery user=scd password=xxx sslmode=disable,host=networksentry-db dbname=joinery user=scd password=xxx sslmode=disable
+```
+Or URL form: `postgres://user:password@host/dbname,...`
+
+Each DB must be reachable from the resolver IPs (`45.56.103.84`, `97.107.131.227`). The resolver validates the schema of every configured DB at startup and retries if any fail. Blocklist domains are unioned from all DBs (both deployments share the same blocklist source, so this is typically a no-op).
+
 See the resolver's `README.md` and `/etc/scrolldaddy/OPS_GUIDE.md` for ops details.
 
 ## Key Files
 
-- **Data model:** `plugins/scrolldaddy/data/scheduled_blocks_class.php`, `scheduled_block_filters_class.php`, `scheduled_block_services_class.php`, `scheduled_block_rules_class.php`, `devices_class.php`, `profiles_class.php`
-- **UI:** `plugins/scrolldaddy/views/profile/scheduled_block_edit.php`, `devices.php`
-- **Business logic:** `plugins/scrolldaddy/logic/scheduled_block_edit_logic.php`, `devices_logic.php`
-- **AJAX:** `plugins/scrolldaddy/ajax/block_rule_add.php`, `block_rule_delete.php`
-- **Category list:** `plugins/scrolldaddy/includes/ScrollDaddyHelper.php` (`$filters`, `$services`)
+- **Data model:** `plugins/dns_filtering/data/scheduled_blocks_class.php`, `scheduled_block_filters_class.php`, `scheduled_block_services_class.php`, `scheduled_block_rules_class.php`, `devices_class.php`, `profiles_class.php`
+- **UI:** `plugins/dns_filtering/views/profile/scheduled_block_edit.php`, `devices.php`
+- **Business logic:** `plugins/dns_filtering/logic/scheduled_block_edit_logic.php`, `devices_logic.php`
+- **AJAX:** `plugins/dns_filtering/ajax/block_rule_add.php`, `block_rule_delete.php`
+- **Category list:** `plugins/dns_filtering/includes/ScrollDaddyHelper.php` (`$filters`, `$services`)
 - **DNS resolver source:** `/home/user1/scrolldaddy-dns/` (Go)
 
 ## Marketing Infrastructure
