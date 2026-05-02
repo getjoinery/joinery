@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.19 - Fix domain argument parsing: when no password is given and DOMAIN_NAME is already
+#               set, a port-like arg (all digits) now correctly goes to PORT instead of
+#               overwriting DOMAIN_NAME (bug: ./install.sh -y site foo 1.2.3.4 8080 set webDir=8080).
 #VERSION 2.18 - Right-size Apache MPM prefork (ServerLimit/MaxRequestWorkers 50, MaxConnectionsPerChild 2000)
 #               and Postgres shared_buffers (128MB -> 64MB) for low-traffic container sites.
 #VERSION 2.17 - Rebuild safety: preflight-stop the target container before the port check
@@ -1826,8 +1829,12 @@ do_site_create() {
                     # Domain: contains a dot (example.com, localhost.local)
                     # Port: all digits
                     if [[ "$1" =~ \. ]] || [[ "$1" =~ ^[0-9]+$ ]]; then
-                        # Looks like domain or port - skip password, go to domain
-                        DOMAIN_NAME="$1"
+                        # Looks like domain or port - skip password slot
+                        if [ -z "$DOMAIN_NAME" ]; then
+                            DOMAIN_NAME="$1"
+                        else
+                            PORT="$1"
+                        fi
                     else
                         POSTGRES_PASSWORD="$1"
                     fi
