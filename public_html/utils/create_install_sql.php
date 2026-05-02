@@ -212,8 +212,9 @@ echo "[6/10] Exporting essential table data...\n";
 // List of essential tables to export (from spec)
 // Note: stg_settings is NOT included here - we use explicit INSERTs for settings
 // to avoid exporting site-specific values (API keys, paths, etc.)
+// Note: amu_admin_menus is NOT included here - core menu rows are generated
+// from admin_menus.json (see step 8.8); plugin menu rows seed at activation time.
 $essential_tables = [
-    'amu_admin_menus',    // Admin menu structure
     'cco_country_codes',  // Country reference data
     'zone',               // Timezone names (IANA)
     'emt_email_templates', // Email templates
@@ -544,117 +545,33 @@ echo "   Generated baseline for $migration_count migrations\n";
 // This avoids exporting site-specific values (API keys, paths, credentials).
 // ============================================================================
 
-echo "[8.7/10] Generating default settings...\n";
+echo "[8.7/10] Generating default settings from settings.json...\n";
 
 fwrite($output_handle, "\n-- ============================================================================\n");
 fwrite($output_handle, "-- DEFAULT SETTINGS\n");
-fwrite($output_handle, "-- Curated list of settings for a fresh Joinery installation.\n");
-fwrite($output_handle, "-- Site-specific settings (paths, API keys, etc.) are intentionally omitted.\n");
+fwrite($output_handle, "-- Read directly from public_html/settings.json (single source of truth).\n");
+fwrite($output_handle, "-- Plugin-owned settings are seeded by PluginManager on plugin activate.\n");
 fwrite($output_handle, "-- ============================================================================\n\n");
 
-// Define all settings for a fresh install: name => value
-// Only include settings that are needed for the system to function
-$default_settings = [
-    // Feature Flags (enable/disable features)
-    'blog_active' => '1',
-    'events_active' => '1',
-    'products_active' => '1',
-    'bookings_active' => '1',
-    'surveys_active' => '1',
-    'files_active' => '1',
-    'videos_active' => '1',
-    'urls_active' => '1',
-    'emails_active' => '1',
-    'page_contents_active' => '1',
-    'subscriptions_active' => '1',
-    'coupons_active' => '1',
-    'comments_active' => '1',
-    'newsletter_active' => '1',
-    'mailing_lists_active' => '1',
-    'register_active' => '1',
-    'products_list_events_active' => '1',
-    'products_list_items_active' => '1',
-    'social_settings_active' => '0',
+$settings_json_path = PathHelper::getIncludePath('settings.json');
+if (!file_exists($settings_json_path)) {
+    die("ERROR: settings.json not found at $settings_json_path\n");
+}
+$settings_json = json_decode(file_get_contents($settings_json_path), true);
+if (!is_array($settings_json) || !isset($settings_json['settings']) || !is_array($settings_json['settings'])) {
+    die("ERROR: settings.json is missing the 'settings' array or is not valid JSON\n");
+}
 
-    // Comment Settings
-    'comments_unregistered_users' => '0',
-    'default_comment_status' => 'Approved',
-    'show_comments' => '1',
-
-    // Security/Spam Settings
-    'use_captcha' => '1',
-    'use_honeypot' => '1',
-    'use_captcha_comments' => '1',
-    'activation_required_login' => '1',
-
-    // System Defaults
-    'default_timezone' => 'America/New_York',
-    'site_currency' => 'US Dollar',
-    'checkout_type' => 'stripe_regular',
-    'protocol_mode' => 'auto',
-    'tracking' => 'Use built in tracking',
-    'cookie_consent_mode' => 'auto',
-    'standard_error' => 'Sorry, that operation caused an error.',
-    'composerAutoLoad' => '../vendor/',
-    'theme_template' => 'default',
-    'upload_web_dir' => 'uploads',
-    'allowed_upload_extensions' => 'gif,jpeg,jpg,png,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a',
-    'max_subscriptions_per_user' => '10',
-    'use_blog_as_homepage' => '0',
-    'force_https' => '0',
-
-    // Email Template References
-    'event_email_inner_template' => 'blank_template',
-    'event_email_outer_template' => 'default_outer_template',
-    'event_email_footer_template' => 'event_bulk_footer',
-    'group_email_inner_template' => 'blank_template',
-    'group_email_outer_template' => 'default_outer_template',
-    'group_email_footer_template' => 'event_bulk_footer',
-    'individual_email_inner_template' => 'blank_template',
-    'bulk_footer' => 'default_footer',
-    'bulk_outer_template' => 'default_outer_template',
-    'default_email_template' => 'default_outer_template',
-    'default_mailing_list' => '1',
-
-    // Email Service Defaults
-    'email_service' => 'smtp',
-    'email_fallback_service' => 'smtp',
-    'smtp_port' => '465',
-    'smtp_auth' => '1',
-    'email_test_mode' => '0',
-    'email_dry_run' => '0',
-    'email_debug_mode' => '0',
-
-    // Subscription Settings
-    'subscription_downgrades_enabled' => '1',
-    'subscription_downgrade_timing' => 'Immediate',
-    'subscription_cancellation_enabled' => '1',
-    'subscription_cancellation_timing' => 'Immediate',
-    'subscription_reactivation_enabled' => '1',
-    'subscription_downgrade_prorate' => '1',
-    'subscription_upgrade_prorate' => '1',
-    'subscription_cancellation_prorate' => '1',
-
-    // Payment Defaults
-    'use_paypal_checkout' => '0',
-
-    // Debug/Development (off for production)
-    'debug' => '0',
-    'debug_css' => '0',
-    'show_errors' => '0',
-
-    // Upgrade Settings
-    'upgrade_server_active' => '0',
-    'upgrade_source' => 'https://joinerytest.site',
-];
-
-// Generate INSERT statements for each setting
-// Use public. prefix since pg_dump sets search_path to empty
 $setting_id = 1;
-foreach ($default_settings as $setting_name => $setting_value) {
-    $escaped_value = str_replace("'", "''", $setting_value);
+foreach ($settings_json['settings'] as $idx => $setting) {
+    if (empty($setting['name'])) {
+        die("ERROR: settings.json entry at index $idx is missing 'name'\n");
+    }
+    $name = $setting['name'];
+    $value = $setting['default'] ?? '';
+    $escaped_value = str_replace("'", "''", $value);
     fwrite($output_handle, "INSERT INTO public.stg_settings (stg_setting_id, stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_group_name) ");
-    fwrite($output_handle, "VALUES ($setting_id, '$setting_name', '$escaped_value', 1, CURRENT_TIMESTAMP, 'general');\n");
+    fwrite($output_handle, "VALUES ($setting_id, '$name', '$escaped_value', 1, CURRENT_TIMESTAMP, 'general');\n");
     $setting_id++;
 }
 
@@ -662,7 +579,100 @@ foreach ($default_settings as $setting_name => $setting_value) {
 fwrite($output_handle, "\n-- Reset stg_settings sequence\n");
 fwrite($output_handle, "SELECT pg_catalog.setval('public.stg_settings_stg_setting_id_seq', $setting_id, true);\n\n");
 
-echo "   Generated " . count($default_settings) . " default settings\n";
+echo "   Generated " . count($settings_json['settings']) . " default settings from settings.json\n";
+
+// ============================================================================
+// CORE ADMIN/PROFILE MENUS
+// Read from public_html/admin_menus.json. Plugin-owned menu rows are NOT
+// included here - they are seeded by PluginManager on plugin activate.
+// ============================================================================
+
+echo "[8.8/10] Generating core menus from admin_menus.json...\n";
+
+fwrite($output_handle, "\n-- ============================================================================\n");
+fwrite($output_handle, "-- CORE ADMIN/PROFILE MENUS\n");
+fwrite($output_handle, "-- Read directly from public_html/admin_menus.json (single source of truth).\n");
+fwrite($output_handle, "-- Plugin-owned menu rows seed at plugin activation via PluginManager::syncMenus().\n");
+fwrite($output_handle, "-- Children resolve their parent via subquery on amu_slug (unique).\n");
+fwrite($output_handle, "-- ============================================================================\n\n");
+
+$menus_json_path = PathHelper::getIncludePath('admin_menus.json');
+if (!file_exists($menus_json_path)) {
+    die("ERROR: admin_menus.json not found at $menus_json_path\n");
+}
+$menus_data = json_decode(file_get_contents($menus_json_path), true);
+if (!is_array($menus_data)) {
+    die("ERROR: admin_menus.json is not valid JSON\n");
+}
+
+$pg_escape = function($v) {
+    return str_replace("'", "''", $v);
+};
+
+/**
+ * Emit one INSERT row for amu_admin_menus. The PK column is omitted so the
+ * sequence assigns the id; if $parent_slug is non-null, the parent_menu_id is
+ * resolved via subquery on amu_slug (guaranteed unique by Phase 2).
+ */
+$write_menu_insert = function($handle, $entry, $location, $visibility) use ($pg_escape) {
+    foreach (['slug', 'title', 'order', 'permission'] as $f) {
+        if (!isset($entry[$f]) && $f !== 'permission') {
+            die("ERROR: admin_menus.json entry missing required field '$f' (slug=" . ($entry['slug'] ?? '?') . ")\n");
+        }
+    }
+    $slug = $entry['slug'];
+    $title = $pg_escape($entry['title']);
+    $url = $pg_escape($entry['url'] ?? '');
+    $order = (int)$entry['order'];
+    $permission = (int)$entry['permission'];
+    $icon = isset($entry['icon']) ? "'" . $pg_escape($entry['icon']) . "'" : 'NULL';
+    $setting_activate = isset($entry['settingActivate']) ? "'" . $pg_escape($entry['settingActivate']) . "'" : 'NULL';
+    $parent_expr = !empty($entry['parent'])
+        ? "(SELECT amu_admin_menu_id FROM public.amu_admin_menus WHERE amu_slug = '" . $pg_escape($entry['parent']) . "')"
+        : 'NULL';
+
+    $sql = "INSERT INTO public.amu_admin_menus "
+         . "(amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_setting_activate, amu_disable, amu_location, amu_visibility) "
+         . "VALUES ('$title', '" . $pg_escape($slug) . "', '$url', $parent_expr, $order, $permission, $icon, $setting_activate, 0, '" . $pg_escape($location) . "', '" . $pg_escape($visibility) . "');\n";
+    fwrite($handle, $sql);
+};
+
+// adminMenu: parents first, then children (children reference parent via subquery on amu_slug).
+$admin_items = $menus_data['adminMenu'] ?? [];
+$admin_parents = [];
+$admin_children = [];
+foreach ($admin_items as $item) {
+    if (!empty($item['parent'])) {
+        $admin_children[] = $item;
+    } else {
+        $admin_parents[] = $item;
+    }
+}
+
+fwrite($output_handle, "-- adminMenu parents\n");
+foreach ($admin_parents as $item) {
+    $write_menu_insert($output_handle, $item, 'admin_sidebar', 'in');
+}
+fwrite($output_handle, "\n-- adminMenu children\n");
+foreach ($admin_children as $item) {
+    $write_menu_insert($output_handle, $item, 'admin_sidebar', 'in');
+}
+
+// profileMenu: location user_dropdown, visibility from row (default 'in').
+$profile_items = $menus_data['profileMenu'] ?? [];
+fwrite($output_handle, "\n-- profileMenu (user_dropdown)\n");
+foreach ($profile_items as $item) {
+    $visibility = $item['visibility'] ?? 'in';
+    $write_menu_insert($output_handle, $item, 'user_dropdown', $visibility);
+}
+
+// Reset amu_admin_menus sequence to the row count we just inserted.
+$menu_total = count($admin_items) + count($profile_items);
+fwrite($output_handle, "\n-- Reset amu_admin_menus sequence\n");
+fwrite($output_handle, "SELECT pg_catalog.setval('public.amu_admin_menus_amu_admin_menu_id_seq', "
+    . "(SELECT COALESCE(MAX(amu_admin_menu_id), $menu_total) FROM public.amu_admin_menus), true);\n\n");
+
+echo "   Generated " . count($admin_items) . " adminMenu rows + " . count($profile_items) . " profileMenu rows\n";
 
 // Write footer
 $footer = <<<SQL
