@@ -435,12 +435,12 @@
 			$theme_dir = dirname($theme_json);
 			$theme_name = basename($theme_dir);
 
-			// Read theme.json for version, is_stock, and deprecated
+			// Read theme.json for version, included_in_publish, and deprecated
 			$theme_data = json_decode(file_get_contents($theme_json), true);
-			$is_stock = $theme_data['is_stock'] ?? true;
+			$published = $theme_data['included_in_publish'] ?? true;
 
-			if (!$is_stock) {
-				publish_output("- Skipping {$theme_name} (not stock)");
+			if (!$published) {
+				publish_output("- Skipping {$theme_name} (included_in_publish=false)");
 				continue;
 			}
 
@@ -492,12 +492,12 @@
 			$plugin_dir = dirname($plugin_json);
 			$plugin_name = basename($plugin_dir);
 
-			// Read plugin.json for version, is_stock, and deprecated
+			// Read plugin.json for version, included_in_publish, and deprecated
 			$plugin_data = json_decode(file_get_contents($plugin_json), true);
-			$is_stock = $plugin_data['is_stock'] ?? true;
+			$published = $plugin_data['included_in_publish'] ?? true;
 
-			if (!$is_stock) {
-				publish_output("- Skipping {$plugin_name} (not stock)");
+			if (!$published) {
+				publish_output("- Skipping {$plugin_name} (included_in_publish=false)");
 				continue;
 			}
 
@@ -635,7 +635,7 @@
 			'validation' => ['required' => true]
 		]);
 
-		echo '<p class="text-muted">Publishing creates: core archive + individual theme/plugin archives for all stock items.</p>';
+		echo '<p class="text-muted">Publishing creates: core archive + individual theme/plugin archives for every theme/plugin with included_in_publish=true.</p>';
 
 		echo $formwriter->submitbutton('submit_button', 'Publish Upgrade');
 
@@ -990,10 +990,10 @@
 			$theme_name = basename($theme_dir);
 
 			$theme_data = json_decode(file_get_contents($theme_json), true);
-			$is_stock = $theme_data['is_stock'] ?? true;
+			$published = $theme_data['included_in_publish'] ?? true;
 
-			if (!$is_stock) {
-				continue; // Skip non-stock themes
+			if (!$published) {
+				continue; // Skip themes with included_in_publish=false
 			}
 
 			$theme_version = $theme_data['version'] ?? '1.0.0';
@@ -1028,10 +1028,10 @@
 			$plugin_name = basename($plugin_dir);
 
 			$plugin_data = json_decode(file_get_contents($plugin_json), true);
-			$is_stock = $plugin_data['is_stock'] ?? true;
+			$published = $plugin_data['included_in_publish'] ?? true;
 
-			if (!$is_stock) {
-				continue; // Skip non-stock plugins
+			if (!$published) {
+				continue; // Skip plugins with included_in_publish=false
 			}
 
 			$plugin_version = $plugin_data['version'] ?? '1.0.0';

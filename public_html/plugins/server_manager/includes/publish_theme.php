@@ -3,13 +3,13 @@
  * Theme and Plugin Distribution Endpoint
  *
  * Handles:
- *   ?list=themes       - List available stock themes with metadata
- *   ?list=plugins      - List available stock plugins with metadata
+ *   ?list=themes       - List available themes (included_in_publish=true) with metadata
+ *   ?list=plugins      - List available plugins (included_in_publish=true) with metadata
  *   ?download=name     - Download a theme archive
  *   ?download=name&type=plugin - Download a plugin archive
  *   ?core              - Redirect to core archive download
  *
- * Version: 1.1.0
+ * Version: 1.2.0
  */
 
 // When loaded via route, core classes are pre-loaded.
@@ -35,10 +35,10 @@ if (isset($_GET['list']) && $_GET['list'] === 'themes') {
     foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
         $theme_data = json_decode(file_get_contents($json_file), true);
         if ($theme_data) {
-            // Only include stock, non-deprecated themes
-            $is_stock = $theme_data['is_stock'] ?? true;
+            // Only include themes with included_in_publish=true and not deprecated
+            $included = $theme_data['included_in_publish'] ?? true;
             $is_deprecated = !empty($theme_data['deprecated']);
-            if ($is_stock && !$is_deprecated) {
+            if ($included && !$is_deprecated) {
                 $themes[] = [
                     'name' => $theme_data['name'] ?? basename(dirname($json_file)),
                     'directory_name' => basename(dirname($json_file)),
@@ -46,8 +46,8 @@ if (isset($_GET['list']) && $_GET['list'] === 'themes') {
                     'version' => $theme_data['version'] ?? '1.0.0',
                     'description' => $theme_data['description'] ?? '',
                     'author' => $theme_data['author'] ?? '',
-                    'is_system' => $theme_data['is_system'] ?? $theme_data['system'] ?? false,
-                    'is_stock' => true,
+                    'is_system' => $theme_data['is_system'] ?? false,
+                    'included_in_publish' => true,
                 ];
             }
         }
@@ -67,10 +67,10 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
     foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
         $plugin_data = json_decode(file_get_contents($json_file), true);
         if ($plugin_data) {
-            // Only include stock, non-deprecated plugins
-            $is_stock = $plugin_data['is_stock'] ?? true;
+            // Only include plugins with included_in_publish=true and not deprecated
+            $included = $plugin_data['included_in_publish'] ?? true;
             $is_deprecated = !empty($plugin_data['deprecated']);
-            if ($is_stock && !$is_deprecated) {
+            if ($included && !$is_deprecated) {
                 $plugins[] = [
                     'name' => basename(dirname($json_file)),
                     'directory_name' => basename(dirname($json_file)),
@@ -78,8 +78,8 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
                     'version' => $plugin_data['version'] ?? '1.0.0',
                     'description' => $plugin_data['description'] ?? '',
                     'author' => $plugin_data['author'] ?? '',
-                    'is_system' => $plugin_data['is_system'] ?? $plugin_data['system'] ?? false,
-                    'is_stock' => true,
+                    'is_system' => $plugin_data['is_system'] ?? false,
+                    'included_in_publish' => true,
                 ];
             }
         }

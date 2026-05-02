@@ -120,10 +120,10 @@ class ThemeManager extends AbstractExtensionManager {
         // Sync themes with database
         $this->sync();
         
-        // Mark as custom (not stock) since it was uploaded
+        // Mark as preserved-on-deploy since it was uploaded
         $theme = Theme::get_by_theme_name($name);
         if ($theme) {
-            $theme->set('thm_is_stock', false);
+            $theme->set('thm_receives_upgrades', false);
             $theme->save();
         }
     }
@@ -144,8 +144,8 @@ class ThemeManager extends AbstractExtensionManager {
         $model->set('thm_description', $metadata['description'] ?? '');
         $model->set('thm_version', $metadata['version'] ?? '1.0.0');
         $model->set('thm_author', $metadata['author'] ?? 'Unknown');
-        $model->set('thm_is_stock', $metadata['is_stock'] ?? true);
-        $model->set('thm_is_system', $metadata['system'] ?? false);
+        $model->set('thm_receives_upgrades', $metadata['receives_upgrades'] ?? true);
+        $model->set('thm_is_system', $metadata['is_system'] ?? false);
     }
 
     /**
@@ -217,20 +217,32 @@ class ThemeManager extends AbstractExtensionManager {
     protected function updateExistingMetadata($model, $name) {
         $manifest_path = $this->getExtensionPath($name) . '/theme.json';
         if (!file_exists($manifest_path)) return false;
-        
+
         $metadata = json_decode(file_get_contents($manifest_path), true);
-        if (json_last_error() === JSON_ERROR_NONE && $metadata && isset($metadata['is_stock'])) {
-            // Only update stock status if it's explicitly defined in manifest
-            $current_stock = $model->get('thm_is_stock');
-            $manifest_stock = $metadata['is_stock'];
-            
-            if ($current_stock != $manifest_stock) {
-                $model->set('thm_is_stock', $manifest_stock);
-                $model->save();
-                return true; // Was updated
+        if (json_last_error() !== JSON_ERROR_NONE || !$metadata) return false;
+
+        $changed = false;
+        if (isset($metadata['receives_upgrades'])) {
+            $current = $model->get('thm_receives_upgrades');
+            $desired = $metadata['receives_upgrades'];
+            if ($current != $desired) {
+                $model->set('thm_receives_upgrades', $desired);
+                $changed = true;
             }
         }
-        return false; // No update needed
+        if (isset($metadata['is_system'])) {
+            $current_sys = $model->get('thm_is_system');
+            $desired_sys = $metadata['is_system'];
+            if ($current_sys != $desired_sys) {
+                $model->set('thm_is_system', $desired_sys);
+                $changed = true;
+            }
+        }
+        if ($changed) {
+            $model->save();
+            return true;
+        }
+        return false;
     }
     
     // Theme-specific public methods
@@ -551,28 +563,31 @@ class ThemeManager extends AbstractExtensionManager {
     }
 
     /**
-     * Write is_stock value back to theme manifest
-     * This ensures the manifest stays in sync with database changes
+     * Write the receives_upgrades value back to a theme manifest.
+     * Keeps theme.json in sync with database changes from the admin UI.
      * @param string $theme_name Theme name
-     * @param bool $is_stock Whether theme should be marked as stock
+     * @param bool $receives_upgrades True to allow upgrade replacement, false to preserve on deploy
      * @return int|false Number of bytes written or false on failure
      */
-    public function writeManifestStockStatus($theme_name, $is_stock) {
+    public function writeManifestReceivesUpgrades($theme_name, $receives_upgrades) {
         $manifest_path = $this->getExtensionPath($theme_name) . '/theme.json';
 
         if (!file_exists($manifest_path)) {
-            // Create new manifest if it doesn't exist
+            // Create new manifest if it doesn't exist. Auto-generated stubs
+            // default both flags true: this only triggers for an existing
+            // on-disk theme that the operator chose to keep.
             $manifest = array(
                 'name' => $theme_name,
                 'version' => '1.0.0',
-                'is_stock' => $is_stock
+                'receives_upgrades' => $receives_upgrades,
+                'included_in_publish' => true
             );
         } else {
             $manifest = json_decode(file_get_contents($manifest_path), true);
             if (json_last_error() !== JSON_ERROR_NONE) {
                 return false;
             }
-            $manifest['is_stock'] = $is_stock;
+            $manifest['receives_upgrades'] = $receives_upgrades;
         }
 
         return file_put_contents($manifest_path, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));

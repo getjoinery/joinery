@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "description": "The Joinery system admin theme. Vanilla HTML5+CSS \u2014 no Bootstrap, FontAwesome, jQuery, Simplebar, or Popper. ~98% smaller payload.",
   "author": "Joinery Team",
-  "is_stock": true,
-  "system": true,
+  "receives_upgrades": true,
+  "included_in_publish": true,
+  "is_system": true,
   "requires": {
     "php": ">=7.4"
   },

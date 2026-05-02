@@ -82,7 +82,7 @@ This allows:
 
 **Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/install.sh`
 
-Universal installer for Docker and bare-metal deployments. Supports `--themes` flag to download stock themes/plugins from the upgrade server after site creation.
+Universal installer for Docker and bare-metal deployments. Supports `--themes` flag to download published themes/plugins from the upgrade server after site creation (extensions whose manifests have `included_in_publish: true`).
 
 **Full documentation:** [Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)
 
@@ -112,7 +112,7 @@ Universal installer for Docker and bare-metal deployments. Supports `--themes` f
 - Git-based deployment from repository
 - Pre-deployment validation (PHP syntax, plugin loading, bootstrap tests)
 - Automatic rollback on failure (trap-based)
-- Preserves custom themes/plugins (is_stock: false)
+- Preserves extensions marked `receives_upgrades: false`
 - Composer integration and database migrations
 
 ---
@@ -152,14 +152,14 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --refresh-archives -
 - Downloads packages from upgrade server (configured via `upgrade_source` setting)
 - Downloads core, themes, and plugins as separate archives
 - Pre-deployment validation via DeploymentHelper
-- Preserves custom themes/plugins (is_stock: false)
+- Preserves extensions marked `receives_upgrades: false`
 - Enhanced rollback (preserves failed deployments with timestamps)
 - Database migrations and composer integration
 - **Graceful handling of missing archives** — if a theme or plugin archive returns 404, the upgrade warns and skips it instead of aborting. The core upgrade and all other themes/plugins proceed normally. A summary of skipped items is shown at the end.
 
-**Plugin refresh scope:** the upgrade download loop iterates **plugins that are installed** (rows in `plg_plugins`) and attempts an archive fetch for each. Stock plugins succeed; custom plugins 404 at the upgrade endpoint (they were never packaged — see [Stock vs. Custom](#stock-vs-custom-themesplugins) below) and are skipped via the warning path above. Uninstalling a plugin removes its row, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks. Conversely, a new upstream stock plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.
+**Plugin refresh scope:** the upgrade download loop iterates **plugins that are installed** (rows in `plg_plugins`) and attempts an archive fetch for each. Plugins published by the source succeed; plugins not in the source's catalog 404 at the upgrade endpoint (they were never packaged because they have `included_in_publish: false` — see [Extension Distribution Flags](#extension-distribution-flags) below) and are skipped via the warning path above. Uninstalling a plugin removes its row, so an uninstalled plugin is not re-downloaded on subsequent upgrades — the operator's removal sticks. Conversely, a new upstream plugin won't auto-appear on existing sites; the operator gets it via the admin Plugins page (install a plugin already on disk) or a plugin upload.
 
-The `is_stock` flag on the plugin's manifest still governs the distribution pipeline (what `publish_upgrade.php` packages, what `DeploymentHelper` preserves across a deploy swap, what `_reconcile_stock_assets.sh` re-downloads on container boot). What changed: the upgrade-time refresh loop no longer *filters* by `is_stock` — it just tries everything installed and lets the endpoint's response be the source of truth for whether a given plugin is first-party.
+The two distribution flags on the plugin's manifest govern the distribution pipeline: `included_in_publish` controls what `publish_upgrade.php` packages (publisher-side), while `receives_upgrades` controls what `DeploymentHelper` preserves across a deploy swap and what `_reconcile_upgradable_assets.sh` re-downloads on container boot (customer-side). The upgrade-time refresh loop itself no longer *filters* by either flag — it just tries everything installed and lets the endpoint's response be the source of truth for whether a given plugin is in the publisher's catalog.
 
 **`--refresh-archives` flag:**
 
@@ -168,7 +168,7 @@ For small fixes that don't warrant a version bump, `--refresh-archives` tells `u
 **Download Flow:**
 1. Fetches available upgrade info from upgrade server
 2. Downloads core archive (`joinery-core-X.XX.upg.zip`)
-3. Downloads each stock theme archive (`theme-THEMENAME-X.XX.upg.zip`)
+3. Downloads each published theme archive (`theme-THEMENAME-X.XX.upg.zip`) — themes the source published with `included_in_publish: true`
 4. Downloads an archive (`plugin-PLUGINNAME-X.XX.upg.zip`) for each plugin with a row in `plg_plugins`
 5. If any theme/plugin archive is unavailable (404), logs a warning and continues
 6. Extracts and validates all archives
@@ -201,7 +201,7 @@ php plugins/server_manager/includes/publish_upgrade.php "release notes here"
 **Features:**
 - Creates separate archives for core, themes, and plugins
 - Core archive excludes theme/ and plugins/ directories
-- Each stock theme/plugin gets its own versioned archive
+- Each theme/plugin with `included_in_publish: true` gets its own versioned archive
 - Prevents overwriting existing versions
 - Automatic cleanup on failure
 - Registers upgrade in stg_upgrades table
@@ -256,7 +256,7 @@ https://yoursite.com/admin/server_manager/publish_theme?list=themes
    - PHP syntax on all files
    - Plugin class loading
    - Bootstrap/core components
-3. DeploymentHelper preserves custom themes/plugins (is_stock: false)
+3. DeploymentHelper preserves extensions marked `receives_upgrades: false`
 4. Backup current installation to public_html_last/
 5. Deploy staged files to public_html/
 6. Run database migrations (update_database.php)
@@ -288,9 +288,11 @@ If ANY step fails → Automatic rollback
 
 ---
 
-## Theme/Plugin Preservation
+## Extension Distribution Flags
 
-Custom themes/plugins are automatically preserved during upgrades using manifest files:
+Themes and plugins carry two independent boolean flags in their manifests
+(`theme.json` / `plugin.json`) that control distribution. Both default to `true`
+when missing, and they govern different sides of the pipeline:
 
 **Example manifest (theme.json or plugin.json):**
 ```json
@@ -298,14 +300,25 @@ Custom themes/plugins are automatically preserved during upgrades using manifest
     "name": "controld",
     "version": "2.1.0",
     "description": "ControlD DNS management plugin",
-    "is_stock": true
+    "receives_upgrades": true,
+    "included_in_publish": true
 }
 ```
 
-- **is_stock: true** - Updated during upgrades (stock code)
-- **is_stock: false** - Preserved during upgrades (custom code)
+- **`receives_upgrades`** — *customer-side, deploy preservation.* If `true`, the
+  on-disk copy is replaced from the upgrade payload during a deploy swap. If
+  `false`, the live copy is preserved across the swap and `_reconcile_upgradable_assets.sh`
+  will not re-download it. Mirrored to the database column
+  `thm_receives_upgrades` / `plg_receives_upgrades` so the admin UI can
+  toggle it; uploaded extensions are auto-set to `false` so a deploy doesn't
+  wipe them.
+- **`included_in_publish`** — *publisher-side, packaging filter.* If `true`,
+  `publish_upgrade.php` packages this extension into the upgrade archive and
+  `publish_theme.php`'s catalog endpoint advertises it. If `false`, it is
+  skipped. Manifest-only — there is no DB column and no admin UI for this
+  flag, since it has no meaning on a customer site.
 
-If manifest is missing, it's auto-generated with `is_stock: true`.
+If a manifest is missing, it's auto-generated with both flags `true`.
 
 ---
 
@@ -363,7 +376,7 @@ DeploymentHelper::testBootstrap($stage_dir, $verbose)
 
 **Theme/Plugin Preservation:**
 ```php
-DeploymentHelper::preserveCustomThemesPlugins($stage_dir, $backup_dir, $verbose)
+DeploymentHelper::preserveExtensionsAcrossDeploy($stage_dir, $backup_dir, $verbose)
 ```
 
 **Rollback:**
@@ -388,8 +401,8 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 - Inspect for syntax errors or missing dependencies
 - Fix and redeploy
 
-**Custom Theme Overwritten:**
-- Check manifest has `"is_stock": false`
+**Preserved Theme Overwritten:**
+- Check manifest has `"receives_upgrades": false`
 - Restore from public_html_last/ if needed
 
 **Rollback Failed:**
@@ -439,15 +452,15 @@ The marketplace admin page lets superadmins browse themes and plugins available 
 
 ### Overwrite Protection
 
-- **Stock extensions** (or those without a manifest) can be reinstalled/replaced from the marketplace
-- **Custom extensions** (`is_stock: false` in manifest) are protected — the marketplace refuses to overwrite them
+- **Extensions with `receives_upgrades: true`** (or those without a manifest) can be reinstalled/replaced from the marketplace
+- **Extensions with `receives_upgrades: false`** are protected — the marketplace refuses to overwrite them
 
 ### Catalog Endpoint Fields
 
 The `publish_theme.php` catalog endpoints (`?list=themes`, `?list=plugins`) include:
 - `name` — display name (unchanged for backward compatibility)
 - `directory_name` — filesystem directory name (used for matching and downloads)
-- `display_name`, `version`, `description`, `author`, `is_system`, `is_stock`
+- `display_name`, `version`, `description`, `author`, `is_system`, `included_in_publish`
 
 ---
 

@@ -1,4 +1,6 @@
 # Joinery Docker Template
+# VERSION 3.7 - Rename _reconcile_stock_assets.sh -> _reconcile_upgradable_assets.sh
+#               as part of the is_stock -> receives_upgrades terminology cleanup.
 # VERSION 3.6 - Self-heal ownership on every container start. COPY at build time
 #               leaves public_html and maintenance_scripts owned by root, and
 #               _site_init.sh's chown only runs on first boot (gated by absence
@@ -12,7 +14,7 @@
 # VERSION 3.4 - Add default to ARG BASE_IMAGE_VERSION so BuildKit can statically
 #               evaluate FROM without --build-arg (silences InvalidDefaultArgInFrom warning).
 # VERSION 3.3 - Write logrotate config on every container start (was first-run-only via _site_init.sh);
-#               rename _sync_stock_assets.sh -> _reconcile_stock_assets.sh to reflect its narrow purpose
+#               rename _sync_stock_assets.sh -> (now _reconcile_upgradable_assets.sh) to reflect its narrow purpose
 #
 # Usage:
 #   docker build \
@@ -120,7 +122,7 @@ CMD set +H && \
     find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \
     find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
-    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_stock_assets.sh" || true && \
+    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_upgradable_assets.sh" || true && \
     echo "*/15 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
     chmod 644 /etc/cron.d/scheduled-tasks && \
     echo "" >> /etc/cron.d/scheduled-tasks && \

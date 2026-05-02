@@ -138,10 +138,10 @@ class PluginManager extends AbstractExtensionManager {
         // Sync with database
         $this->sync();
         
-        // Mark as custom (not stock) since it was uploaded
+        // Mark as preserved-on-deploy since it was uploaded
         $plugin = Plugin::get_by_plugin_name($name);
         if ($plugin) {
-            $plugin->set('plg_is_stock', false);
+            $plugin->set('plg_receives_upgrades', false);
             $plugin->save();
         }
 
@@ -169,7 +169,8 @@ class PluginManager extends AbstractExtensionManager {
         if ($metadata === false) return; // Error already set by parent
 
         $model->set('plg_metadata', json_encode($metadata));
-        $model->set('plg_is_stock', $metadata['is_stock'] ?? true);
+        $model->set('plg_receives_upgrades', $metadata['receives_upgrades'] ?? true);
+        $model->set('plg_is_system', $metadata['is_system'] ?? false);
         $model->set('plg_installed_time', date('Y-m-d H:i:s'));
     }
 
@@ -186,7 +187,11 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $name Plugin name
      */
     protected function updateExistingMetadata($model, $name) {
-        $model->load_stock_status();
+        $model->load_receives_upgrades();
+        $metadata = $model->get_plugin_metadata();
+        if ($metadata) {
+            $model->set('plg_is_system', $metadata['is_system'] ?? false);
+        }
         $model->save();
     }
     
@@ -762,13 +767,13 @@ class PluginManager extends AbstractExtensionManager {
     /**
      * Fetch a fresh plugin archive from the upgrade endpoint and extract it over
      * plugins/{name}/. The upgrade endpoint is the authoritative source of truth
-     * for stock plugin files; this runs at install time so stale on-disk code
+     * for published plugin files; this runs at install time so stale on-disk code
      * (e.g. after an uninstall/reinstall cycle) gets replaced with upstream.
      *
      * Does not read the on-disk plugin.json to decide — the endpoint's response
      * is what determines whether this plugin is upstream-published. A 404 means
-     * the plugin is custom (not a stock catalog member); any other failure means
-     * the endpoint is unreachable or the transfer failed.
+     * the plugin is not in the publisher's catalog (included_in_publish=false);
+     * any other failure means the endpoint is unreachable or the transfer failed.
      *
      * Failure modes are non-fatal: install falls through to on-disk files.
      *
@@ -857,8 +862,9 @@ class PluginManager extends AbstractExtensionManager {
         }
 
         // Before any DB work, attempt to refresh the plugin's files from the
-        // upgrade endpoint. Stock plugins get fresh code on every install;
-        // custom plugins 404 silently and install proceeds with on-disk files.
+        // upgrade endpoint. Plugins with included_in_publish=true on the upgrade
+        // server get fresh code on every install; plugins not in the catalog 404
+        // silently and install proceeds with on-disk files.
         $this->refreshFromUpstream($name);
 
         $plugin_path = $this->getExtensionPath($name);

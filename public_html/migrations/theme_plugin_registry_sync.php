@@ -35,46 +35,46 @@ function theme_plugin_registry_sync() {
         if (file_exists($manifest_path)) {
             $manifest = json_decode(file_get_contents($manifest_path), true);
             if (json_last_error() === JSON_ERROR_NONE) {
-                $manifest_is_system = $manifest['system'] ?? false;
+                $manifest_is_system = $manifest['is_system'] ?? false;
                 $db_is_system = $theme->get('thm_is_system');
 
                 if ($manifest_is_system !== $db_is_system) {
                     $theme->set('thm_is_system', $manifest_is_system);
                     $theme->save();
                     $system_updated++;
-                    echo "  Updated system flag for theme: $theme_name (system=" . ($manifest_is_system ? 'true' : 'false') . ")\n";
+                    echo "  Updated is_system flag for theme: $theme_name (is_system=" . ($manifest_is_system ? 'true' : 'false') . ")\n";
                 }
             }
         }
     }
 
     if ($system_updated > 0) {
-        echo "Updated system flag for $system_updated themes.\n";
+        echo "Updated is_system flag for $system_updated themes.\n";
     }
 
-    echo "Syncing plugins with stock/custom status...\n";
+    echo "Syncing plugins with receives_upgrades status...\n";
     $plugin_manager = new PluginManager();
     $synced_plugins = $plugin_manager->sync();
     echo "Synced " . count($synced_plugins) . " new plugins.\n";
 
-    // Update existing plugins with stock/custom status
+    // Update existing plugins with receives_upgrades status
     $existing_plugins = new MultiPlugin();
     $existing_plugins->load();
     $updated_count = 0;
 
     foreach ($existing_plugins as $plugin) {
-        $old_stock_status = $plugin->get('plg_is_stock');
-        $plugin->load_stock_status();
-        $new_stock_status = $plugin->get('plg_is_stock');
+        $old_status = $plugin->get('plg_receives_upgrades');
+        $plugin->load_receives_upgrades();
+        $new_status = $plugin->get('plg_receives_upgrades');
 
-        if ($old_stock_status != $new_stock_status) {
+        if ($old_status != $new_status) {
             $plugin->save();
             $updated_count++;
-            echo "Updated stock status for plugin: " . $plugin->get('plg_name') . "\n";
+            echo "Updated receives_upgrades for plugin: " . $plugin->get('plg_name') . "\n";
         }
     }
 
-    echo "Updated stock/custom status for $updated_count existing plugins.\n";
+    echo "Updated receives_upgrades for $updated_count existing plugins.\n";
 
     // Set current theme as active in database
     require_once(PathHelper::getIncludePath('includes/Globalvars.php'));

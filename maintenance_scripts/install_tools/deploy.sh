@@ -271,23 +271,23 @@ update_installed_themes_plugins() {
 
                 # Check if theme exists in staging (repository)
                 if [[ -d "$staged_theme" ]]; then
-                    # Read installed theme's manifest to determine stock status
-                    local is_stock="true"
+                    # Read installed theme's manifest to determine receives_upgrades flag
+                    local receives_upgrades="true"
                     if [[ -f "$manifest_file" ]]; then
-                        is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
+                        receives_upgrades=$(get_json_value "$manifest_file" "receives_upgrades" "true")
                     fi
 
-                    if [[ "$is_stock" == "true" ]]; then
-                        verbose_echo "  Updating stock theme: $theme_name"
+                    if [[ "$receives_upgrades" == "true" ]]; then
+                        verbose_echo "  Updating theme: $theme_name"
                         rm -rf "$theme_dir"
                         cp -r "$staged_theme" "$public_html_dir/theme/"
                         ((themes_updated++))
                     else
-                        verbose_echo "  Preserved custom theme: $theme_name"
+                        verbose_echo "  Preserved theme (receives_upgrades=false): $theme_name"
                         ((themes_preserved++))
                     fi
                 else
-                    # Theme not in repo (custom upload) - preserve it
+                    # Theme not in repo (uploaded directly) - preserve it
                     verbose_echo "  Preserved uploaded theme: $theme_name (not in repo)"
                     ((themes_preserved++))
                 fi
@@ -305,23 +305,23 @@ update_installed_themes_plugins() {
 
                 # Check if plugin exists in staging (repository)
                 if [[ -d "$staged_plugin" ]]; then
-                    # Read installed plugin's manifest to determine stock status
-                    local is_stock="true"
+                    # Read installed plugin's manifest to determine receives_upgrades flag
+                    local receives_upgrades="true"
                     if [[ -f "$manifest_file" ]]; then
-                        is_stock=$(get_json_value "$manifest_file" "is_stock" "true")
+                        receives_upgrades=$(get_json_value "$manifest_file" "receives_upgrades" "true")
                     fi
 
-                    if [[ "$is_stock" == "true" ]]; then
-                        verbose_echo "  Updating stock plugin: $plugin_name"
+                    if [[ "$receives_upgrades" == "true" ]]; then
+                        verbose_echo "  Updating plugin: $plugin_name"
                         rm -rf "$plugin_dir"
                         cp -r "$staged_plugin" "$public_html_dir/plugins/"
                         ((plugins_updated++))
                     else
-                        verbose_echo "  Preserved custom plugin: $plugin_name"
+                        verbose_echo "  Preserved plugin (receives_upgrades=false): $plugin_name"
                         ((plugins_preserved++))
                     fi
                 else
-                    # Plugin not in repo (custom upload) - preserve it
+                    # Plugin not in repo (uploaded directly) - preserve it
                     verbose_echo "  Preserved uploaded plugin: $plugin_name (not in repo)"
                     ((plugins_preserved++))
                 fi

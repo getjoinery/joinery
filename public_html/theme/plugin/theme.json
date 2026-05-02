@@ -4,6 +4,8 @@
     "description": "Delegates all theme functionality to a selected plugin",
     "author": "System",
     "version": "1.0.0",
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "framework": "none",
     "is_plugin_theme": true,
     "supports": {

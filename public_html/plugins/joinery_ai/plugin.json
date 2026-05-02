@@ -3,7 +3,8 @@
     "version": "0.1.0",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
-    "is_stock": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
     "adminMenu": [
         {
             "slug": "joinery-ai",

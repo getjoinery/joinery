@@ -38,7 +38,8 @@ class Plugin extends SystemBase {	public static $prefix = 'plg';
 	    'plg_status' => array('type'=>'varchar(20)'),
 	    'plg_install_error' => array('type'=>'text'),
 	    'plg_metadata' => array('type'=>'text'),
-	    'plg_is_stock' => array('type'=>'bool', 'default'=>true),
+	    'plg_receives_upgrades' => array('type'=>'bool', 'default'=>true),
+	    'plg_is_system' => array('type'=>'bool', 'default'=>false),
 	    'plg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'plg_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
@@ -223,20 +224,20 @@ function authenticate_write($data) {
 	}
 
 	/**
-	 * Check if plugin is stock (auto-updated)
-	 * @return bool True if stock plugin
+	 * Whether this plugin accepts upgrade-payload replacement on deploy.
+	 * @return bool True if the on-disk copy will be replaced from the upgrade payload
 	 */
-	public function is_stock() {
-		return (bool)$this->get('plg_is_stock');
+	public function receives_upgrades() {
+		return (bool)$this->get('plg_receives_upgrades');
 	}
 
 	/**
-	 * Load stock status from plugin.json metadata
+	 * Load receives_upgrades from plugin.json metadata
 	 */
-	public function load_stock_status() {
+	public function load_receives_upgrades() {
 		$metadata = $this->get_plugin_metadata();
-		if ($metadata && isset($metadata['is_stock'])) {
-			$this->set('plg_is_stock', $metadata['is_stock']);
+		if ($metadata && isset($metadata['receives_upgrades'])) {
+			$this->set('plg_receives_upgrades', $metadata['receives_upgrades']);
 		}
 	}
 }

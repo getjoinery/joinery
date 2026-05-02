@@ -98,7 +98,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 $version = $theme_data['version'] ?: '1.0.0';
                                 $author = $theme_data['author'] ?: 'Unknown';
                                 $is_active = $theme_data['is_active'] ?? false;
-                                $is_stock = $theme ? (bool)$theme->get('thm_is_stock') : true;
+                                $receives_upgrades = $theme ? (bool)$theme->get('thm_receives_upgrades') : true;
                                 $is_system = $theme ? (bool)$theme->get('thm_is_system') : false;
                                 $is_deprecated = !empty($theme_data['deprecated']);
                                 $superseded_by = $theme_data['superseded_by'] ?? null;
@@ -113,14 +113,15 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     $status_badge = '<span class="badge bg-secondary">Inactive</span>';
                                 }
 
-                                // Get type badge - system themes get special badge
+                                // Get type badge - System and Preserved-on-deploy can co-appear.
+                                $badges = array();
                                 if ($is_system) {
-                                    $type_badge = '<span class="badge bg-primary"><i class="fas fa-lock me-1"></i>System</span>';
-                                } elseif ($is_stock) {
-                                    $type_badge = '<span class="badge bg-info">Stock</span>';
-                                } else {
-                                    $type_badge = '<span class="badge bg-warning">Custom</span>';
+                                    $badges[] = '<span class="badge bg-primary"><i class="fas fa-lock me-1"></i>System</span>';
                                 }
+                                if (!$receives_upgrades) {
+                                    $badges[] = '<span class="badge bg-warning">Preserved on deploy</span>';
+                                }
+                                $type_badge = implode(' ', $badges);
 
                                 if ($is_deprecated) {
                                     $type_badge .= ' <span class="badge bg-dark">Deprecated</span>';
@@ -164,19 +165,17 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                                 // Actions below require a DB record
                                 if ($theme) {
-                                    // System themes cannot be marked as custom or deleted
-                                    if (!$is_system) {
-                                        if ($is_stock) {
-                                            $actions['Mark as Custom'] = "javascript:submitAction('mark_custom', '$theme_name')";
-                                        } else {
-                                            $actions['Mark as Stock'] = "javascript:submitAction('mark_stock', '$theme_name')";
-                                        }
+                                    // System themes cannot be deleted, but receives_upgrades is independent.
+                                    if ($receives_upgrades) {
+                                        $actions['Preserve on deploy'] = "javascript:submitAction('mark_preserved', '$theme_name')";
+                                    } else {
+                                        $actions['Allow upgrade replacement'] = "javascript:submitAction('mark_upgradable', '$theme_name')";
+                                    }
 
-                                        // Add delete option for themes with missing files or inactive themes
-                                        if (!$files_exist || !$is_active) {
-                                            $is_stock_theme = $is_stock ? 'true' : 'false';
-                                            $actions['Permanently Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "', $is_stock_theme)";
-                                        }
+                                    // Add delete option for non-system themes with missing files or inactive themes
+                                    if (!$is_system && (!$files_exist || !$is_active)) {
+                                        $receives_upgrades_theme = $receives_upgrades ? 'true' : 'false';
+                                        $actions['Permanently Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "', $receives_upgrades_theme)";
                                     }
                                 }
 
@@ -211,9 +210,9 @@ $page->begin_box(array('altlinks' => $altlinks));
             <strong>Notes:</strong>
         </p>
         <ul class="text-muted small">
-            <li><strong>System themes</strong> (lock icon) are protected and cannot be deleted or marked as custom. They always receive updates during deployment.</li>
-            <li><strong>Stock themes</strong> are automatically updated during deployments.</li>
-            <li><strong>Custom themes</strong> are preserved during deployments and will not receive automatic updates.</li>
+            <li><strong>System themes</strong> (lock icon) are required for the platform and cannot be deleted.</li>
+            <li><strong>receives_upgrades=true</strong> (default) — the theme is replaced from the upgrade payload during deploy.</li>
+            <li><strong>receives_upgrades=false</strong> ("Preserved on deploy" badge) — the on-disk copy is kept across deploys; the upgrade system will not overwrite it.</li>
             <li>Deleting a theme permanently removes both the theme files and database record. The theme will not return on deployment.</li>
         </ul>
     </div>
@@ -283,11 +282,11 @@ $page->begin_box(array('altlinks' => $altlinks));
                 <li>Remove all theme files from the server</li>
                 <li>Delete the theme's database record</li>
             </ul>
-            <div id="stockThemeWarning" class="alert alert-info" style="display:none;">
-                This is a <strong>stock theme</strong>. It can be re-downloaded later via the upgrade system.
+            <div id="upgradableThemeWarning" class="alert alert-info" style="display:none;">
+                This theme has <strong>receives_upgrades=true</strong>. If it is published by the upgrade server, it can be re-downloaded later.
             </div>
-            <div id="customThemeWarning" class="alert alert-danger" style="display:none;">
-                <strong>WARNING:</strong> This is a <strong>custom theme</strong>. Custom themes cannot be recovered once deleted!
+            <div id="preservedThemeWarning" class="alert alert-danger" style="display:none;">
+                <strong>WARNING:</strong> This theme is <strong>preserved on deploy</strong> (receives_upgrades=false). Deleting it removes a copy that the upgrade system will not re-download.
             </div>
             <p style="color:var(--danger);"><strong>This action cannot be undone.</strong></p>
         </div>
@@ -301,16 +300,16 @@ $page->begin_box(array('altlinks' => $altlinks));
 <script>
 var themeToDelete = '';
 
-function showDeleteModal(themeName, displayName, isStock) {
+function showDeleteModal(themeName, displayName, receivesUpgrades) {
     themeToDelete = themeName;
     document.getElementById('deleteThemeName').textContent = displayName;
 
-    if (isStock) {
-        document.getElementById('stockThemeWarning').style.display = 'block';
-        document.getElementById('customThemeWarning').style.display = 'none';
+    if (receivesUpgrades) {
+        document.getElementById('upgradableThemeWarning').style.display = 'block';
+        document.getElementById('preservedThemeWarning').style.display = 'none';
     } else {
-        document.getElementById('stockThemeWarning').style.display = 'none';
-        document.getElementById('customThemeWarning').style.display = 'block';
+        document.getElementById('upgradableThemeWarning').style.display = 'none';
+        document.getElementById('preservedThemeWarning').style.display = 'block';
     }
 
     document.getElementById('deleteThemeModal').classList.add('active');
