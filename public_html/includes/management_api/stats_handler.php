@@ -79,6 +79,13 @@ function stats_handler($request) {
 		$result['joinery_version'] = $version;
 	}
 
+	// Cron health — last time process_scheduled_tasks.php fired
+	$settings = Globalvars::get_instance();
+	$cron_last_run = $settings->get_setting('scheduled_tasks_last_cron_run');
+	if ($cron_last_run) {
+		$result['cron_last_run'] = $cron_last_run;
+	}
+
 	// PostgreSQL liveness + current DB name + accessible DB list.
 	// Use the already-open PDO connection rather than shelling out to pg_isready.
 	try {

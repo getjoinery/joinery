@@ -3,7 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.4
+ * @version 1.5
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -58,6 +58,11 @@ $recent_jobs->load();
 // Agent heartbeat
 $agent = AgentHeartbeat::getLatest();
 
+// Cron health: active if ran within 20 minutes
+$settings        = Globalvars::get_instance();
+$last_cron_run   = $settings->get_setting('scheduled_tasks_last_cron_run');
+$cron_is_active  = $last_cron_run && (time() - strtotime($last_cron_run)) < 1200;
+
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager',
@@ -96,7 +101,16 @@ $agent_label  = $agent_online ? 'Online'  : 'Offline';
 				<span class="text-muted ms-2">No agent has connected yet</span>
 			<?php endif; ?>
 		</div>
-		<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
+		<div class="d-flex align-items-center gap-3">
+			<div>
+				<strong>Cron:</strong>
+				<span class="badge bg-<?php echo $cron_is_active ? 'success' : 'danger'; ?> ms-1"><?php echo $cron_is_active ? 'Active' : 'Not detected'; ?></span>
+				<?php if ($last_cron_run): ?>
+					<span class="text-muted ms-2">Last run: <?php echo LibraryFunctions::time_ago_or_time($last_cron_run, 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?></span>
+				<?php endif; ?>
+			</div>
+			<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
+		</div>
 	</div>
 	<?php if (!$agent_online): ?>
 		<div class="card-footer">
