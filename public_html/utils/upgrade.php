@@ -1,4 +1,22 @@
 <?php
+	/**
+	 * EXTENSION FLAG MODEL (themes and plugins)
+	 *
+	 *   receives_upgrades   — operator on the *target* site says: replace this on
+	 *                         upgrade. Default true. Set false to keep a local fork.
+	 *                         Lives in the on-disk manifest (theme.json/plugin.json)
+	 *                         and is mirrored to the DB column (thm_/plg_receives_upgrades).
+	 *                         The admin "Mark Preserved/Upgradable" buttons write both.
+	 *
+	 *   included_in_publish — operator on the *source* site says: include this in the
+	 *                         published archives. Default true. Set false for dev-only
+	 *                         or deprecated extensions.
+	 *
+	 *   is_system           — flagged in theme.json/plugin.json as "must always be
+	 *                         present on every site" (e.g. the admin theme). Always
+	 *                         pulled fresh on upgrade regardless of receives_upgrades.
+	 */
+
 	// Detect CLI mode early to avoid loading unnecessary UI components
 	$is_cli = (php_sapi_name() === 'cli');
 
@@ -105,10 +123,7 @@
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
 	$live_directory = $full_site_dir. '/public_html';
 	$backup_directory = $full_site_dir. '/public_html_last';
-	$live_directory_contents = $live_directory.'/*';
-	$backup_directory_contents = $backup_directory.'/';
 	$stage_directory = $stage_location. 'public_html';
-	$stage_directory_contents = $stage_directory.'/*';
 
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
 	$is_upgrade_server = $settings->get_setting('upgrade_server_active') || PluginHelper::isPluginActive('server_manager');
@@ -130,8 +145,8 @@
 
 		// Required system themes/plugins — these must be downloaded even if
 		// the target site doesn't have them installed yet
-		$response['required_themes'] = get_system_required_themes($live_directory . '/theme');
-		$response['required_plugins'] = get_system_required_plugins($live_directory . '/plugins');
+		$response['required_themes']  = get_system_required_extensions($live_directory . '/theme',   'theme');
+		$response['required_plugins'] = get_system_required_extensions($live_directory . '/plugins', 'plugin');
 
 		// Published archives manifest: every plugin/theme this source has published
 		// as a tar.gz (i.e., manifest had included_in_publish=true at publish time).
@@ -385,23 +400,21 @@
 		// Manifest-driven: only upgrade themes/plugins that are locally installed
 		// AND marked receives_upgrades=true. System themes are added separately
 		// via required_themes below. Nothing is auto-installed.
-		$source_theme_manifest  = array_column($source_published_themes,  null, 'name');
-		$source_plugin_manifest = array_column($source_published_plugins, null, 'name');
 		$themes_to_download  = array_values(array_intersect(
-			get_upgradable_themes($live_directory . '/theme'),
-			array_keys($source_theme_manifest)
+			get_upgradable_extensions($live_directory . '/theme',   'theme'),
+			array_column($source_published_themes, 'name')
 		));
 		$plugins_to_download = array_values(array_intersect(
-			get_upgradable_plugins(),
-			array_keys($source_plugin_manifest)
+			get_upgradable_extensions($live_directory . '/plugins', 'plugin'),
+			array_column($source_published_plugins, 'name')
 		));
 		// Map name → archive URL for the download loop.
 		$theme_url_by_name  = array_column($source_published_themes,  'url', 'name');
 		$plugin_url_by_name = array_column($source_published_plugins, 'url', 'name');
 
 		// Get detailed info for status display
-		$all_themes_info = get_all_themes_info($live_directory . '/theme');
-		$all_plugins_info = get_all_plugins_info($live_directory . '/plugins');
+		$all_themes_info  = get_installed_extension_info($live_directory . '/theme',   'theme');
+		$all_plugins_info = get_installed_extension_info($live_directory . '/plugins', 'plugin');
 
 		if (!$resuming_after_self_update) {
 
@@ -467,30 +480,94 @@
 		$core_size_mb = round(filesize($file_download_location) / 1024 / 1024, 2);
 		upgrade_echo("✓ Core archive downloaded ({$core_size_mb} MB)<br>");
 
-		//CLEAR OLD STAGED FILES
+		// =====================================================
+		// EARLY SELF-UPDATE — refresh upgrade.php first
+		// =====================================================
+		// Extract just utils/upgrade.php from the tarball and self-update
+		// BEFORE any failure-prone step (staging-clear, extract, sync, etc).
+		// This guarantees that any bug in upgrade.php is one upgrade attempt
+		// away from being fixed automatically — no manual intervention needed.
+		//
+		// Cost: one extra tarball download per upgrade-with-self-update (the
+		// re-run will download again, since staging is still empty). Worth it
+		// to keep the pipeline self-healing.
+		//
+		// The post-extract self-update block below still handles the other
+		// deployment files (DatabaseUpdater, DeploymentHelper, update_database).
+		$early_su_tmp = sys_get_temp_dir() . '/joinery_su_' . getmypid();
+		@mkdir($early_su_tmp, 0770, true);
+		exec(sprintf(
+			'tar -xzf %s -C %s utils/upgrade.php 2>&1',
+			escapeshellarg($file_download_location),
+			escapeshellarg($early_su_tmp)
+		), $early_su_out, $early_su_exit);
+
+		$early_su_staged = $early_su_tmp . '/utils/upgrade.php';
+		$live_upgrade_php = $live_directory . '/utils/upgrade.php';
+
+		if ($early_su_exit === 0
+			&& file_exists($early_su_staged)
+			&& file_exists($live_upgrade_php)
+			&& md5_file($early_su_staged) !== md5_file($live_upgrade_php)
+		) {
+			if (@copy($early_su_staged, $live_upgrade_php)) {
+				if (function_exists('opcache_invalidate')) {
+					opcache_invalidate($live_upgrade_php, true);
+				}
+				@unlink($early_su_staged);
+				@rmdir($early_su_tmp . '/utils');
+				@rmdir($early_su_tmp);
+
+				if ($is_cli) {
+					echo "\n════════════════════════════════════════════════════════════\n";
+					echo "  UPGRADE PIPELINE REFRESHED — PLEASE RE-RUN THE UPGRADE\n";
+					echo "════════════════════════════════════════════════════════════\n\n";
+					echo "  utils/upgrade.php has been refreshed from the source.\n";
+					echo "  Re-run the same command to continue with the new orchestrator.\n\n";
+				} else {
+					out_step('Upgrade Pipeline Refreshed');
+					echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
+					echo '<h2 style="margin-top: 0; color: #0066cc;">Upgrade Pipeline Refreshed</h2>';
+					echo '<p>utils/upgrade.php has been refreshed from the source.</p>';
+					echo '<p><strong>Please click the button below to continue with the new orchestrator.</strong></p>';
+					echo '<form method="POST" action="/utils/upgrade">';
+					echo '<input type="hidden" name="confirm" value="1">';
+					if ($force_upgrade) echo '<input type="hidden" name="force-upgrade" value="1">';
+					if ($verbose) echo '<input type="hidden" name="verbose" value="1">';
+					echo '<button type="submit" style="background-color: #0066cc; color: white; padding: 12px 24px; font-size: 16px; border: none; cursor: pointer; border-radius: 4px;">Continue Upgrade</button>';
+					echo '</form>';
+					echo '</div>';
+				}
+				exit(0);
+			} else {
+				error_log('Early self-update: copy of upgrade.php failed — proceeding with live version');
+			}
+		}
+		// Cleanup tmp regardless
+		@unlink($early_su_staged);
+		@rmdir($early_su_tmp . '/utils');
+		@rmdir($early_su_tmp);
+
+		//CLEAR OLD STAGED FILES — bulletproof: nuke the directory entirely
+		//and recreate empty. Robust against dotfiles, restrictive perms,
+		//weird ownership, anything short of an immutable bit on the parent.
 		if($verbose) upgrade_echo('Clearing staging area: '.$stage_location.'<br>');
 		if(file_exists($stage_location)){
-			exec("chmod -R 770 $stage_location");
-			exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
-			exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
-			exec ("rm -rf $stage_location".'/*');
-			if(!is_dir_empty($stage_location)){
+			exec('rm -rf ' . escapeshellarg($stage_location) . ' 2>&1', $clear_out, $clear_exit);
+			if (file_exists($stage_location)) {
 				echo 'Failed to clear staging location:'.$stage_location.'...aborting.<br>';
 				echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
+				if (!empty($clear_out)) {
+					echo 'rm output: ' . htmlspecialchars(implode(' | ', $clear_out)) . '<br>';
+				}
 				exit;
 			}
-			else{
-				if($verbose) upgrade_echo('Staging area cleared<br>');
-			}
 		}
-		else{
-			// Create staging directory if it doesn't exist
-			if(!mkdir($stage_location, 0770, true)){
-				echo 'Failed to create staging location: '.$stage_location.'...aborting.<br>';
-				exit;
-			}
-			upgrade_echo('Staging area created<br>');
+		if(!mkdir($stage_location, 0770, true)){
+			echo 'Failed to create staging location: '.$stage_location.'...aborting.<br>';
+			exit;
 		}
+		if($verbose) upgrade_echo('Staging area cleared<br>');
 
 		// EXTRACT THE ARCHIVE (supports both tar.gz and legacy zip)
 		$file_ext = pathinfo($file_download_location, PATHINFO_EXTENSION);
@@ -690,47 +767,8 @@
 			out_step('Downloading Individual Themes and Plugins');
 
 			$skipped_items = [];
-			$downloaded_count = 0;
-
-			// Download themes from the source's published-archives manifest
-			foreach ($themes_to_download as $theme_name) {
-				$theme_url = $theme_url_by_name[$theme_name] ?? null;
-				if (!$theme_url) {
-					$skipped_items[] = "Theme: {$theme_name} — no URL in source manifest";
-					continue;
-				}
-				upgrade_echo("Downloading theme: {$theme_name}...");
-				flush();
-
-				$result = download_and_extract($theme_url, $stage_directory . '/theme/');
-				if ($result['success']) {
-					upgrade_echo(" ✓<br>");
-					$downloaded_count++;
-				} else {
-					upgrade_echo(" ⚠ skipped (" . htmlspecialchars($result['error']) . ")<br>");
-					$skipped_items[] = "Theme: {$theme_name} — " . $result['error'];
-				}
-			}
-
-			// Download plugins from the source's published-archives manifest
-			foreach ($plugins_to_download as $plugin_name) {
-				$plugin_url = $plugin_url_by_name[$plugin_name] ?? null;
-				if (!$plugin_url) {
-					$skipped_items[] = "Plugin: {$plugin_name} — no URL in source manifest";
-					continue;
-				}
-				upgrade_echo("Downloading plugin: {$plugin_name}...");
-				flush();
-
-				$result = download_and_extract($plugin_url, $stage_directory . '/plugins/');
-				if ($result['success']) {
-					upgrade_echo(" ✓<br>");
-					$downloaded_count++;
-				} else {
-					upgrade_echo(" ⚠ skipped (" . htmlspecialchars($result['error']) . ")<br>");
-					$skipped_items[] = "Plugin: {$plugin_name} — " . $result['error'];
-				}
-			}
+			$downloaded_count  = download_extension_set($themes_to_download,  $theme_url_by_name,  'theme',  'theme',   $stage_directory, $skipped_items);
+			$downloaded_count += download_extension_set($plugins_to_download, $plugin_url_by_name, 'plugin', 'plugins', $stage_directory, $skipped_items);
 
 			upgrade_echo("✓ Downloaded {$downloaded_count} theme/plugin archives<br>");
 
@@ -763,7 +801,7 @@
 		}
 
 		// Check that active theme is available
-		$active_theme = $settings->get_setting('theme');
+		$active_theme = $settings->get_setting('theme_template');
 		if ($active_theme) {
 			$staged_theme_path = $stage_directory . '/theme/' . $active_theme;
 			$live_theme_path = $live_directory . '/theme/' . $active_theme;
@@ -897,21 +935,40 @@
 			if($verbose) echo 'Moving '.$live_directory. ' to '. $backup_directory.'<br>';
 			if($verbose) echo 'Moving '.$stage_directory. ' to '. $live_directory.'<br>';
 
-			// Move live to backup
+			// Move CONTENTS of live → backup. Use find rather than a `mv glob`
+			// so dotfiles (.htaccess, .well-known, etc.) come along, and so
+			// the bind-mounted directory itself stays in place. mv handles
+			// cross-device fallback (copy+unlink) per file automatically.
 			$mv_output = [];
 			$mv_exit = 0;
-			exec("mv $live_directory_contents $backup_directory 2>&1", $mv_output, $mv_exit);
+			exec(sprintf(
+				'find %s -mindepth 1 -maxdepth 1 -exec mv -t %s {} + 2>&1',
+				escapeshellarg($live_directory),
+				escapeshellarg($backup_directory)
+			), $mv_output, $mv_exit);
 			if ($mv_exit !== 0) {
 				upgrade_abort('Backup Failed', 'Could not move live files to backup. Error: ' . htmlspecialchars(implode(' ', $mv_output)), false);
 			}
 
-			// Move staged to live
+			// Move CONTENTS of stage → live (same approach).
 			$mv_output = [];
 			$mv_exit = 0;
-			exec("mv $stage_directory_contents $live_directory 2>&1", $mv_output, $mv_exit);
+			exec(sprintf(
+				'find %s -mindepth 1 -maxdepth 1 -exec mv -t %s {} + 2>&1',
+				escapeshellarg($stage_directory),
+				escapeshellarg($live_directory)
+			), $mv_output, $mv_exit);
 			if ($mv_exit !== 0) {
-				// Attempt to restore from backup before aborting
-				exec("mv $backup_directory_contents $live_directory 2>&1");
+				// Attempt to restore from backup before aborting. Same find
+				// approach so dotfiles come back too. (The outer rollback path
+				// below also calls performRollback() if the deploy is judged
+				// failed; this inline restore is a fast in-place repair when
+				// only the second mv failed.)
+				exec(sprintf(
+					'find %s -mindepth 1 -maxdepth 1 -exec mv -t %s {} + 2>&1',
+					escapeshellarg($backup_directory),
+					escapeshellarg($live_directory)
+				));
 				upgrade_abort('Deployment Failed', 'Could not move staged files to live. Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '. Rollback attempted.', false);
 			}
 
@@ -951,19 +1008,17 @@
 				exit(1);
 			}
 
-		//CLEAR OLD STAGED FILES
+		//CLEAR OLD STAGED FILES — same bulletproof rm -rf + recreate as
+		//the pre-deploy clear above. Non-fatal here (deploy already succeeded).
 		if($verbose) echo 'Clearing staging area: '.$stage_location.'...<br>';
-			exec("chmod -R 770 $stage_location");
 			if(file_exists($stage_location)){
-				exec ("rm -rf $stage_location".'/*');
-				exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
-				exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
-				if(!is_dir_empty($stage_location)){
+				exec('rm -rf ' . escapeshellarg($stage_location) . ' 2>&1');
+				if (file_exists($stage_location)) {
 					out_alert('warning', 'Failed to clear staging location: ' . htmlspecialchars($stage_location),
 						'Permissions: ' . substr(sprintf('%o', fileperms($stage_location)), -4) . '<br>'
 						. 'Continuing with upgrade — staging cleanup can be done manually later.');
-				}
-				else{
+				} else {
+					@mkdir($stage_location, 0770, true);
 					if($verbose) echo 'Staging area cleared<br>';
 				}
 			}
@@ -1084,9 +1139,12 @@
 				require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
 				require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 
-				// Sync themes
+				// Sync themes — pass source_manifest so the manager can mark
+				// any receives_upgrades=true theme no longer in the source as 'stale'.
 				$theme_manager = ThemeManager::getInstance();
-				$theme_result = $theme_manager->sync();
+				$theme_result = $theme_manager->sync([
+					'source_manifest' => array_column($source_published_themes, 'name'),
+				]);
 				$theme_parts = array();
 				if (!empty($theme_result['added'])) {
 					$theme_parts[] = count($theme_result['added']) . " added";
@@ -1100,9 +1158,12 @@
 					upgrade_echo("✓ Themes synced: " . implode(", ", $theme_parts) . "<br>");
 				}
 
-				// Sync plugins
+				// Sync plugins — pass source_manifest so the manager can mark
+				// any receives_upgrades=true plugin no longer in the source as 'stale'.
 				$plugin_manager = PluginManager::getInstance();
-				$plugin_result = $plugin_manager->sync();
+				$plugin_result = $plugin_manager->sync([
+					'source_manifest' => array_column($source_published_plugins, 'name'),
+				]);
 				$plugin_parts = array();
 				if (!empty($plugin_result['added'])) {
 					$plugin_parts[] = count($plugin_result['added']) . " added";
@@ -1131,58 +1192,23 @@
 						upgrade_echo("  Migration: " . htmlspecialchars($mm) . "<br>");
 					}
 				}
-			} catch (\Throwable $e) {
-				// Sync is a post-deployment step — deployment and DB migration already succeeded.
-				// Do not roll back; just warn. Re-run update_database to retry sync.
-				out_alert('warning', 'Theme/Plugin sync failed (non-fatal — deployment and DB updates succeeded)',
-					'Error: ' . htmlspecialchars($e->getMessage()) . '<br>'
-					. 'To retry: run update_database from the admin utilities page.');
-			}
-
-			// Stale reconciliation — see specs/upgrade_pipeline_rename_gap.md.
-			// Plugins/themes this site is set to receive upgrades for, but that the
-			// source's published-archive manifest no longer advertises, are flagged
-			// stale (preserved on disk and in DB; admin can review).
-			try {
-				$source_plugin_names = array_flip(array_column($source_published_plugins, 'name'));
-				$source_theme_names  = array_flip(array_column($source_published_themes,  'name'));
-				$plugin_marked = 0;
-				$theme_marked  = 0;
-
-				$q = $dblink->prepare(
-					"UPDATE plg_plugins
-					 SET plg_status = 'stale'
-					 WHERE plg_receives_upgrades = true
-					   AND plg_name <> ALL(?)
-					   AND plg_status <> 'stale'"
-				);
-				// Pass a Postgres array literal ({a,b,c}) so the <> ALL filter works.
-				$plugin_array_literal = '{' . implode(',', array_map(function($n){
-					return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
-				}, array_keys($source_plugin_names))) . '}';
-				$q->execute([$plugin_array_literal]);
-				$plugin_marked = $q->rowCount();
-
-				$q = $dblink->prepare(
-					"UPDATE thm_themes
-					 SET thm_status = 'stale'
-					 WHERE thm_receives_upgrades = true
-					   AND thm_name <> ALL(?)
-					   AND thm_status <> 'stale'"
-				);
-				$theme_array_literal = '{' . implode(',', array_map(function($n){
-					return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
-				}, array_keys($source_theme_names))) . '}';
-				$q->execute([$theme_array_literal]);
-				$theme_marked = $q->rowCount();
-
+				// Stale reconciliation — see specs/upgrade_pipeline_rename_gap.md.
+				// Plugins/themes this site is set to receive upgrades for, but
+				// that the source's published-archive manifest no longer advertises
+				// were flagged 'stale' inside sync() above. Surface the totals.
+				$plugin_marked = (int)($plugin_result['stale_marked'] ?? 0);
+				$theme_marked  = (int)($theme_result['stale_marked']  ?? 0);
 				if ($plugin_marked > 0 || $theme_marked > 0) {
 					upgrade_echo("⚠ Stale: {$plugin_marked} plugin(s), {$theme_marked} theme(s) no longer in source manifest — preserved and flagged for admin review<br>");
 				} else if ($verbose) {
 					upgrade_echo("✓ No stale plugins/themes detected<br>");
 				}
 			} catch (\Throwable $e) {
-				out_alert('warning', 'Stale reconciliation failed (non-fatal): ' . htmlspecialchars($e->getMessage()));
+				// Sync is a post-deployment step — deployment and DB migration already succeeded.
+				// Do not roll back; just warn. Re-run update_database to retry sync.
+				out_alert('warning', 'Theme/Plugin sync failed (non-fatal — deployment and DB updates succeeded)',
+					'Error: ' . htmlspecialchars($e->getMessage()) . '<br>'
+					. 'To retry: run update_database from the admin utilities page.');
 			}
 
 		// Flush static page cache so new code's renders aren't masked by
@@ -1321,59 +1347,38 @@
 	}
 
 	/**
-	 * Get list of themes the local site is willing to receive upgrades for
-	 * (those with receives_upgrades=true in theme.json).
+	 * Get extensions of a given type ('theme' or 'plugin') the local site is
+	 * willing to receive upgrades for (those with receives_upgrades=true in
+	 * the on-disk manifest). The manifest is the source of truth — the admin
+	 * UI for marking preserved/upgradable writes both manifest and DB row in
+	 * lockstep, and PluginManager/ThemeManager::sync() reconciles them.
 	 */
-	function get_upgradable_themes($theme_dir) {
-		$themes = [];
-		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
-			$theme_data = json_decode(file_get_contents($json_file), true);
-			if ($theme_data) {
-				$receives_upgrades = $theme_data['receives_upgrades'] ?? false;
-				if ($receives_upgrades) {
-					$themes[] = basename(dirname($json_file));
-				}
+	function get_upgradable_extensions($extension_dir, $type) {
+		$names = [];
+		foreach (glob($extension_dir . '/*/' . $type . '.json') as $json_file) {
+			$data = json_decode(file_get_contents($json_file), true);
+			if (($data['receives_upgrades'] ?? false) === true) {
+				$names[] = basename(dirname($json_file));
 			}
 		}
-		return $themes;
+		return $names;
 	}
 
 	/**
-	 * Get list of themes marked as system-required (is_system=true in theme.json).
-	 * These themes must be present on every site for core functionality to work and
-	 * are downloaded even if not currently installed. They must also receive upgrades.
+	 * Get extensions of a given type ('theme' or 'plugin') marked is_system=true
+	 * in their manifest. These must be present on every site for core functionality
+	 * to work and are downloaded even if not currently installed, regardless of
+	 * the local site's receives_upgrades setting.
 	 */
-	function get_system_required_themes($theme_dir) {
-		$themes = [];
-		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
-			$theme_data = json_decode(file_get_contents($json_file), true);
-			if ($theme_data) {
-				$receives_upgrades = $theme_data['receives_upgrades'] ?? false;
-				$is_system = $theme_data['is_system'] ?? false;
-				if ($receives_upgrades && $is_system) {
-					$themes[] = basename(dirname($json_file));
-				}
+	function get_system_required_extensions($extension_dir, $type) {
+		$names = [];
+		foreach (glob($extension_dir . '/*/' . $type . '.json') as $json_file) {
+			$data = json_decode(file_get_contents($json_file), true);
+			if (!empty($data['is_system'])) {
+				$names[] = basename(dirname($json_file));
 			}
 		}
-		return $themes;
-	}
-
-	/**
-	 * Get list of plugins marked as system-required (is_system=true in plugin.json).
-	 */
-	function get_system_required_plugins($plugin_dir) {
-		$plugins = [];
-		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
-			$plugin_data = json_decode(file_get_contents($json_file), true);
-			if ($plugin_data) {
-				$receives_upgrades = $plugin_data['receives_upgrades'] ?? false;
-				$is_system = $plugin_data['is_system'] ?? false;
-				if ($receives_upgrades && $is_system) {
-					$plugins[] = basename(dirname($json_file));
-				}
-			}
-		}
-		return $plugins;
+		return $names;
 	}
 
 	/**
@@ -1411,65 +1416,63 @@
 		return $out;
 	}
 
-	function get_upgradable_plugins() {
-		try {
-			require_once(PathHelper::getIncludePath('data/plugins_class.php'));
-			$all_plugins = new MultiPlugin(['plg_receives_upgrades' => true]);
-			$all_plugins->load();
-			$names = [];
-			foreach ($all_plugins as $plugin) {
-				$names[] = $plugin->get('plg_name');
-			}
-			return $names;
-		} catch (Exception $e) {
-			error_log("get_upgradable_plugins: failed to query plg_plugins: " . $e->getMessage());
-			return [];
-		}
-	}
-
 	/**
-	 * Get detailed info about all installed themes
-	 * Returns array with theme name as key and metadata as value
+	 * Get detailed info about all installed extensions of a given type.
+	 * $type is 'theme' or 'plugin'. Returns name-keyed metadata; `will_upgrade`
+	 * reflects only the on-disk receives_upgrades flag — the upgrade-time filter
+	 * also intersects with the source's published-archives manifest.
 	 */
-	function get_all_themes_info($theme_dir) {
-		$themes = [];
-		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
-			$theme_data = json_decode(file_get_contents($json_file), true);
-			$theme_name = basename(dirname($json_file));
-			$receives_upgrades = $theme_data['receives_upgrades'] ?? false;
-			$themes[$theme_name] = [
-				'name' => $theme_name,
-				'display_name' => $theme_data['display_name'] ?? $theme_name,
-				'version' => $theme_data['version'] ?? 'unknown',
-				'receives_upgrades' => $receives_upgrades,
-				'will_upgrade' => $receives_upgrades === true
-			];
-		}
-		ksort($themes);
-		return $themes;
-	}
-
-	/**
-	 * Get detailed info about all plugins present on disk. `will_upgrade` is
-	 * driven by the on-disk receives_upgrades flag; the actual upgrade-time
-	 * filter also intersects with the source's published-archives manifest.
-	 */
-	function get_all_plugins_info($plugin_dir) {
-		$plugins = [];
-		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
-			$plugin_data = json_decode(file_get_contents($json_file), true);
-			$plugin_name = basename(dirname($json_file));
-			$receives_upgrades = $plugin_data['receives_upgrades'] ?? false;
-			$plugins[$plugin_name] = [
-				'name' => $plugin_name,
-				'display_name' => $plugin_data['display_name'] ?? $plugin_name,
-				'version' => $plugin_data['version'] ?? 'unknown',
+	function get_installed_extension_info($extension_dir, $type) {
+		$info = [];
+		foreach (glob($extension_dir . '/*/' . $type . '.json') as $json_file) {
+			$data = json_decode(file_get_contents($json_file), true) ?: [];
+			$name = basename(dirname($json_file));
+			$receives_upgrades = $data['receives_upgrades'] ?? false;
+			$info[$name] = [
+				'name' => $name,
+				'display_name' => $data['display_name'] ?? $name,
+				'version' => $data['version'] ?? 'unknown',
 				'receives_upgrades' => $receives_upgrades,
 				'will_upgrade' => $receives_upgrades === true,
 			];
 		}
-		ksort($plugins);
-		return $plugins;
+		ksort($info);
+		return $info;
+	}
+
+	/**
+	 * Download a set of extension archives into the stage directory.
+	 * Returns the count successfully downloaded; appends per-item failures
+	 * to $skipped_items by reference.
+	 *
+	 * @param string[]    $names           extension names to download
+	 * @param array       $url_lookup      name => archive URL (from source's published_* manifest)
+	 * @param string      $type            'theme' or 'plugin' (used in user-facing messages)
+	 * @param string      $target_subdir   subdir under $stage_directory ('theme' or 'plugins')
+	 * @param string      $stage_directory stage root
+	 * @param string[]   &$skipped_items   ref-appended skip messages
+	 */
+	function download_extension_set($names, $url_lookup, $type, $target_subdir, $stage_directory, &$skipped_items) {
+		$type_label = ucfirst($type);
+		$count = 0;
+		foreach ($names as $name) {
+			$url = $url_lookup[$name] ?? null;
+			if (!$url) {
+				$skipped_items[] = "{$type_label}: {$name} — no URL in source manifest";
+				continue;
+			}
+			upgrade_echo("Downloading {$type}: {$name}...");
+			flush();
+			$result = download_and_extract($url, $stage_directory . '/' . $target_subdir . '/');
+			if ($result['success']) {
+				upgrade_echo(" ✓<br>");
+				$count++;
+			} else {
+				upgrade_echo(" ⚠ skipped (" . htmlspecialchars($result['error']) . ")<br>");
+				$skipped_items[] = "{$type_label}: {$name} — " . $result['error'];
+			}
+		}
+		return $count;
 	}
 
 	/**

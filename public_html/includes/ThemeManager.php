@@ -292,8 +292,8 @@ class ThemeManager extends AbstractExtensionManager {
      * Override sync to include component type discovery and active status sync
      * @return array Result with theme and component sync counts
      */
-    public function sync() {
-        $result = parent::sync();
+    public function sync(array $options = array()) {
+        $result = parent::sync($options);
 
         // Sync active status based on theme_template setting
         $this->syncActiveStatus();

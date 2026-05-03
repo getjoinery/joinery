@@ -773,7 +773,8 @@ class DeploymentHelper {
             'failed_dir' => null,
             'backup_restored' => false,
             'permissions_fixed' => false,
-            'error' => null
+            'error' => null,
+            'warnings' => [],
         ];
 
         if ($verbose) {
@@ -783,7 +784,8 @@ class DeploymentHelper {
         $public_html = "/var/www/html/$target_site/public_html";
         $backup_dir = "/var/www/html/$target_site/public_html_last";
 
-        // Check if backup exists
+        // Hard requirement: backup must exist. Without it nothing meaningful
+        // can be rolled back to.
         if (!is_dir($backup_dir)) {
             $result['error'] = "Backup directory does not exist: $backup_dir";
             if ($verbose) {
@@ -792,53 +794,75 @@ class DeploymentHelper {
             return $result;
         }
 
-        // Preserve failed deployment if requested
+        // Step 1 — best-effort preserve the failed contents for diagnosis.
+        // NEVER let this step block the critical restore step below: a broken
+        // deployment left in place is worse than losing diagnostic info.
+        // Note we operate on CONTENTS (via cp -a), not on the public_html
+        // directory itself, because public_html is commonly a Docker bind
+        // mount and rename()/mv across filesystems would fail.
         if ($preserve_failed && is_dir($public_html)) {
             $failed_dir = "/var/www/html/$target_site/public_html_failed_" . date('Ymd_His');
-
             if ($verbose) {
                 echo "  Preserving failed deployment to: $failed_dir\n";
             }
-
-            $rename_result = rename($public_html, $failed_dir);
-
-            if (!$rename_result) {
-                $result['error'] = "Failed to preserve failed deployment";
-                if ($verbose) {
-                    echo "  ERROR: " . $result['error'] . "\n";
+            if (@mkdir($failed_dir, 0770, true)) {
+                // cp -a preserves perms, ownership, symlinks, and dotfiles.
+                // The trailing /. on the source means "contents of, including
+                // dotfiles". Cross-device safe.
+                $cp_cmd = sprintf(
+                    'cp -a %s/. %s/ 2>&1',
+                    escapeshellarg($public_html),
+                    escapeshellarg($failed_dir)
+                );
+                $cp_out = [];
+                $cp_exit = 0;
+                exec($cp_cmd, $cp_out, $cp_exit);
+                if ($cp_exit === 0) {
+                    @file_put_contents(
+                        "$failed_dir/.htaccess",
+                        "Order Deny,Allow\nDeny from all\n<RequireAll>\nRequire all denied\n</RequireAll>\n"
+                    );
+                    $result['failed_dir'] = $failed_dir;
+                    if ($verbose) {
+                        echo "  Failed deployment preserved\n";
+                    }
+                } else {
+                    $msg = "Could not copy failed deployment to $failed_dir (exit $cp_exit): " . implode(' ', $cp_out);
+                    $result['warnings'][] = $msg;
+                    if ($verbose) echo "  WARNING: $msg — proceeding with restore\n";
+                    @rmdir($failed_dir);
                 }
-                return $result;
-            }
-
-            $result['failed_dir'] = $failed_dir;
-
-            // Block web access to failed deployment
-            $htaccess_content = "Order Deny,Allow\nDeny from all\n<RequireAll>\nRequire all denied\n</RequireAll>";
-            file_put_contents("$failed_dir/.htaccess", $htaccess_content);
-
-            if ($verbose) {
-                echo "  Created .htaccess to block web access to failed deployment\n";
-            }
-        } else {
-            // Just remove the failed deployment
-            if (is_dir($public_html)) {
-                exec("rm -rf " . escapeshellarg($public_html));
+            } else {
+                $msg = "Could not create $failed_dir; failed deployment will not be preserved";
+                $result['warnings'][] = $msg;
+                if ($verbose) echo "  WARNING: $msg — proceeding with restore\n";
             }
         }
 
-        // Restore from backup
+        // Step 2 — critical restore. rsync -a --delete makes public_html
+        // contents EXACTLY match the backup, regardless of leftover files
+        // from the failed deployment. Works across filesystems and leaves
+        // the public_html directory itself in place (preserving any Docker
+        // bind-mount).
         if ($verbose) {
             echo "  Restoring from backup: $backup_dir\n";
         }
 
-        mkdir($public_html);
-        $copy_result = 0;
-        $escaped_backup = escapeshellarg($backup_dir);
-        $escaped_public = escapeshellarg($public_html);
-        exec("cp -r ${escaped_backup}/. ${escaped_public}/", $output, $copy_result);
+        if (!is_dir($public_html)) {
+            @mkdir($public_html, 0770, true);
+        }
 
-        if ($copy_result !== 0) {
-            $result['error'] = "Failed to restore from backup";
+        $rsync_cmd = sprintf(
+            'rsync -a --delete %s/ %s/ 2>&1',
+            escapeshellarg($backup_dir),
+            escapeshellarg($public_html)
+        );
+        $rsync_out = [];
+        $rsync_exit = 0;
+        exec($rsync_cmd, $rsync_out, $rsync_exit);
+
+        if ($rsync_exit !== 0) {
+            $result['error'] = "Failed to restore backup via rsync (exit $rsync_exit): " . implode(' ', $rsync_out);
             if ($verbose) {
                 echo "  ERROR: " . $result['error'] . "\n";
             }
@@ -846,6 +870,9 @@ class DeploymentHelper {
         }
 
         $result['backup_restored'] = true;
+        if ($verbose) {
+            echo "  Backup restored to $public_html\n";
+        }
 
         // Fix permissions
         $perm_result = self::fixPermissions($public_html);
