@@ -5,7 +5,7 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class JobCommandBuilder {
@@ -1074,6 +1074,41 @@ class JobCommandBuilder {
 		     . "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extract}) && "
 		     . "psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -c \"UPDATE mgn_managed_nodes SET mgn_ssh_user = {$new_user_esc} WHERE mgn_id = {$node_id}\" && "
 		     . "echo SSH_USER_UPDATED_TO_{$new_user}";
+	}
+
+	/**
+	 * Run certbot on the node's host to provision a TLS certificate.
+	 *
+	 * For Docker nodes certbot runs on the host (where Apache reverse-proxy lives);
+	 * for bare-metal it runs on the node itself. Called by ProvisionPendingSsl once
+	 * DNS resolves to the host IP.
+	 *
+	 * $params:
+	 *   domain      - FQDN to certify (required)
+	 *   admin_email - Let's Encrypt notification address (uses --register-unsafely-without-email if absent)
+	 */
+	public static function build_provision_ssl($node, $params) {
+		$domain = $params['domain'] ?? '';
+		$email  = $params['admin_email'] ?? '';
+
+		if (!$domain) {
+			throw new Exception("provision_ssl requires a domain.");
+		}
+
+		$domain_esc = escapeshellarg($domain);
+		$email_arg  = $email
+			? ' -m ' . escapeshellarg($email)
+			: ' --register-unsafely-without-email';
+		$is_docker  = (bool)$node->get('mgn_container_name');
+
+		return [
+			['type' => 'ssh', 'label' => 'Run certbot', 'on_host' => $is_docker,
+			 'cmd' => "certbot --apache -d {$domain_esc} --non-interactive --agree-tos{$email_arg}",
+			 'timeout' => 300],
+			['type' => 'ssh', 'label' => 'Verify certificate', 'on_host' => $is_docker,
+			 'cmd' => "test -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem && echo SSL_CERT_VERIFIED",
+			 'continue_on_error' => true],
+		];
 	}
 
 	/**

@@ -5,7 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -327,6 +327,27 @@ class JobResultProcessor {
 <p>— The Get Joinery Team</p>
 </body></html>
 HTML;
+	}
+
+	/**
+	 * On provision_ssl success, flip mgn_ssl_state to active.
+	 * Failure tracking and the 16h give-up logic live in ProvisionPendingSsl.
+	 */
+	private static function process_provision_ssl($job) {
+		$node_id = $job->get('mjb_mgn_node_id');
+		if (!$node_id) return;
+
+		try {
+			$node = new ManagedNode($node_id, TRUE);
+		} catch (Exception $e) { return; }
+
+		if ($job->get('mjb_status') === 'completed') {
+			$node->set('mgn_ssl_state', 'active');
+			$node->save();
+		}
+
+		$job->set('mjb_result', json_encode(['ssl_state' => $node->get('mgn_ssl_state')]));
+		$job->save();
 	}
 
 	/**
