@@ -177,15 +177,13 @@ if ($_POST && isset($_POST['action'])) {
 
 	// Update actions
 	if ($action === 'apply_update') {
-		$params = ['dry_run' => !empty($_POST['dry_run'])];
-		$steps = JobCommandBuilder::build_apply_update($node, $params);
-		$job = ManagementJob::createJob($node->key, 'apply_update', $steps, $params, $session->get_user_id());
+		$steps = JobCommandBuilder::build_apply_update($node);
+		$job = ManagementJob::createJob($node->key, 'apply_update', $steps, [], $session->get_user_id());
 		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 		exit;
 	}
 
 	if ($action === 'apply_update_all_on_host') {
-		$params = ['dry_run' => !empty($_POST['dry_run'])];
 
 		$siblings = new MultiManagedNode(
 			['host' => $node->get('mgn_host'), 'enabled' => true, 'deleted' => false],
@@ -205,9 +203,9 @@ if ($_POST && isset($_POST['action'])) {
 		$queued = 0;
 		foreach ($siblings as $sibling) {
 			try {
-				$steps = JobCommandBuilder::build_apply_update($sibling, $params);
+				$steps = JobCommandBuilder::build_apply_update($sibling);
 				ManagementJob::createJob(
-					$sibling->key, 'apply_update', $steps, $params, $session->get_user_id()
+					$sibling->key, 'apply_update', $steps, [], $session->get_user_id()
 				);
 				$queued++;
 			} catch (Exception $e) {
@@ -230,13 +228,6 @@ if ($_POST && isset($_POST['action'])) {
 			DisplayMessage::MESSAGE_SUCCESS, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 		header('Location: /admin/server_manager?tab=jobs');
-		exit;
-	}
-
-	if ($action === 'refresh_archives') {
-		$steps = JobCommandBuilder::build_refresh_archives($node);
-		$job = ManagementJob::createJob($node->key, 'refresh_archives', $steps, null, $session->get_user_id());
-		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 		exit;
 	}
 
@@ -1340,15 +1331,6 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 			<input type="hidden" name="action" value="apply_update">
 			<button type="submit" class="btn btn-sm btn-outline-primary" onclick="return confirm('Apply update to <?php echo $node_name; ?>?')">Apply Update</button>
 		</form>
-		<form method="post" style="display:inline">
-			<input type="hidden" name="action" value="apply_update">
-			<input type="hidden" name="dry_run" value="1">
-			<button type="submit" class="btn btn-sm btn-outline-secondary">Dry Run</button>
-		</form>
-		<form method="post" style="display:inline">
-			<input type="hidden" name="action" value="refresh_archives">
-			<button type="submit" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Refresh archives and apply to <?php echo $node_name; ?>?')">Refresh &amp; Apply</button>
-		</form>
 	</div>
 	<hr>
 	<div class="mt-3">
@@ -1407,7 +1389,7 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 					<label class="form-label">Type</label>
 					<select name="job_type" class="form-select form-select-sm">
 						<option value="">All</option>
-						<?php foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update', 'refresh_archives'] as $t): ?>
+						<?php foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update'] as $t): ?>
 							<option value="<?php echo $t; ?>" <?php echo (isset($_GET['job_type']) && $_GET['job_type'] === $t) ? 'selected' : ''; ?>><?php echo str_replace('_', ' ', $t); ?></option>
 						<?php endforeach; ?>
 					</select>

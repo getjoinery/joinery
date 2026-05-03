@@ -793,24 +793,10 @@ class JobCommandBuilder {
 	 */
 	public static function build_apply_update($node, $params = []) {
 		$web_root = $node->get('mgn_web_root');
-		$dry_run = !empty($params['dry_run']) ? ' --dry-run' : '';
 
 		return [
 			['type' => 'ssh', 'label' => 'Apply Joinery update',
-			 'cmd' => "cd {$web_root} && php utils/upgrade.php --verbose{$dry_run}",
-			 'timeout' => 3600],
-		];
-	}
-
-	/**
-	 * Refresh upgrade archives and apply on target.
-	 */
-	public static function build_refresh_archives($node, $params = []) {
-		$web_root = $node->get('mgn_web_root');
-
-		return [
-			['type' => 'ssh', 'label' => 'Refresh archives and apply update',
-			 'cmd' => "cd {$web_root} && php utils/upgrade.php --refresh-archives --verbose",
+			 'cmd' => "cd {$web_root} && php utils/upgrade.php --verbose",
 			 'timeout' => 3600],
 		];
 	}

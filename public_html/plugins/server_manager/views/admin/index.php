@@ -26,7 +26,7 @@ $q = $db->query(
 	"SELECT j.mjb_id FROM mjb_management_jobs j " .
 	"JOIN mgn_managed_nodes n ON n.mgn_id = j.mjb_mgn_node_id " .
 	"WHERE j.mjb_status IN ('completed','failed') " .
-	"  AND j.mjb_job_type IN ('check_status','install_node','apply_update','refresh_archives') " .
+	"  AND j.mjb_job_type IN ('check_status','install_node','apply_update') " .
 	"  AND j.mjb_result IS NULL " .
 	"  AND j.mjb_delete_time IS NULL " .
 	"  AND n.mgn_delete_time IS NULL"

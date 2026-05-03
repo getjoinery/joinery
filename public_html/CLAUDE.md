@@ -491,11 +491,6 @@ Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 
 **CLI fallback:** Publish: `php plugins/server_manager/includes/publish_upgrade.php "release notes"` (auto-detects next version). Apply on the remote site: `php utils/upgrade.php --verbose`.
 
-**Small fixes (no version bump):** On the remote server, `--refresh-archives` tells `upgrade.php` to first ask the source server to rebuild its archives from the current files, then apply them:
-```bash
-php utils/upgrade.php --refresh-archives --verbose
-```
-
 ## Development Workflow
 
 ### Adding New Features

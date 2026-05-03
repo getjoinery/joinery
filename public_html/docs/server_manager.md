@@ -149,7 +149,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node |
 | **Backups** | Target indicator, run database/project backup, fetch backup file, backup file browser with scan and delete, restore full project from a `.tar.gz` archive |
 | **Database** | Copy database from another node to this one, restore from backup file |
-| **Updates** | Version comparison (node vs control plane), apply update / dry run / refresh & apply |
+| **Updates** | Version comparison (node vs control plane), apply update |
 | **Jobs** | Job history filtered to this node, with status and type filters |
 
 ### Dashboard Features
@@ -180,8 +180,7 @@ Health dot colors reflect actual server health, not check recency:
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
 | `restore_project` | Restore a full project `.tar.gz` (files + DB + Apache config) in place on an existing node. Runs `restore_project.sh --force`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*` | **Yes** |
-| `apply_update` | Run `upgrade.php` on target (supports `--dry-run`) | **Yes** |
-| `refresh_archives` | Run `upgrade.php --refresh-archives` on target | **Yes** |
+| `apply_update` | Run `upgrade.php` on target | **Yes** |
 | `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |

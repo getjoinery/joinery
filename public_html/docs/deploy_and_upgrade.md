@@ -128,9 +128,6 @@ https://yoursite.com/utils/upgrade?serve-upgrade=1
 
 # Perform upgrade (verbose)
 https://yoursite.com/utils/upgrade?verbose=1
-
-# Dry run (test without deploying)
-https://yoursite.com/utils/upgrade?dry-run=1
 ```
 
 **CLI Usage:**
@@ -140,12 +137,6 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php
 
 # Verbose mode
 php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
-
-# Dry run
-php /var/www/html/joinerytest/public_html/utils/upgrade.php --dry-run
-
-# Refresh archives from source, then apply (no version bump needed)
-php /var/www/html/joinerytest/public_html/utils/upgrade.php --refresh-archives --verbose
 ```
 
 **Features:**
@@ -161,10 +152,6 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --refresh-archives -
 
 The two distribution flags on the plugin's manifest govern the distribution pipeline: `included_in_publish` controls what `publish_upgrade.php` packages (publisher-side), while `receives_upgrades` controls what `DeploymentHelper` preserves across a deploy swap and what `_reconcile_upgradable_assets.sh` re-downloads on container boot (customer-side). The upgrade-time refresh loop itself no longer *filters* by either flag — it just tries everything installed and lets the endpoint's response be the source of truth for whether a given plugin is in the publisher's catalog.
 
-**`--refresh-archives` flag:**
-
-For small fixes that don't warrant a version bump, `--refresh-archives` tells `upgrade.php` to first call back to the upgrade server and ask it to rebuild its archives from the current source files, then download and apply them. This avoids the need to run `publish_upgrade` manually.
-
 **Download Flow:**
 1. Fetches available upgrade info from upgrade server
 2. Downloads core archive (`joinery-core-X.XX.upg.zip`)
@@ -178,7 +165,7 @@ For small fixes that don't warrant a version bump, `--refresh-archives` tells `u
 
 On any node detail page (`/admin/server_manager/node_detail?mgn_id=N`), the **Updates** tab exposes:
 
-- **Apply Update** / **Dry Run** / **Refresh & Apply** — single-site actions, queue one `apply_update` (or `refresh_archives`) job for that node.
+- **Apply Update** — single-site action, queues one `apply_update` job for that node.
 - **Upgrade All Sites on This Host** — fans out to every enabled, non-deleted node sharing the same `mgn_host`. Queues one independent `apply_update` job per sibling (so a per-site failure doesn't affect the others), then redirects to the Jobs page. To skip a specific site in the bulk run, disable it (`mgn_enabled = false`) via its node detail page first.
 
 ---
