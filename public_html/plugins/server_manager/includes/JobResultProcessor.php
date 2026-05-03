@@ -214,6 +214,8 @@ class JobResultProcessor {
 
 	/**
 	 * Post-process install_node: mark the node online on success or install_failed on failure.
+	 * For auto-provisioned nodes (mjb_external_order_item_id is set): also sets ssl_state=pending
+	 * and sends the welcome email via getjoinery's QueuedEmail API.
 	 * Runs for both 'completed' and 'failed' terminal states.
 	 */
 	private static function process_install_node($job) {
@@ -229,15 +231,102 @@ class JobResultProcessor {
 
 		if ($status === 'completed' && strpos($output, 'INSTALL_SUCCESS') !== false) {
 			$node->set('mgn_install_state', null);
+			// Auto-provisioned nodes: mark SSL pending so ProvisionPendingSsl picks them up
+			if ($job->get('mjb_external_order_item_id') && $node->get('mgn_ssl_state') !== 'active') {
+				$node->set('mgn_ssl_state', 'pending');
+			}
+			$node->save();
+			// Send welcome email for auto-provisioned orders
+			if ($job->get('mjb_external_order_item_id')) {
+				self::send_provisioning_welcome_email($job, $node);
+			}
 		} else {
 			$node->set('mgn_install_state', 'install_failed');
+			$node->save();
 		}
-		$node->save();
 
 		$job->set('mjb_result', json_encode([
 			'install_state' => $node->get('mgn_install_state'),
+			'ssl_state'     => $node->get('mgn_ssl_state'),
 		]));
 		$job->save();
+	}
+
+	/**
+	 * Send the post-provisioning welcome email to the customer via getjoinery's
+	 * QueuedEmail API. Reads credentials from Server Manager plugin settings.
+	 * Silently returns on any failure — email delivery is best-effort.
+	 */
+	private static function send_provisioning_welcome_email($job, $node) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/GetJoineryApiClient.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_host_class.php'));
+
+		$settings   = Globalvars::get_instance();
+		$api_url    = $settings->get_setting('server_manager_getjoinery_api_url');
+		$pub_key    = $settings->get_setting('server_manager_getjoinery_api_public_key');
+		$sec_key    = $settings->get_setting('server_manager_getjoinery_api_secret_key');
+		$from_email = $settings->get_setting('server_manager_provisioning_welcome_from_email') ?: 'support@getjoinery.com';
+		$from_name  = $settings->get_setting('server_manager_provisioning_welcome_from_name')  ?: 'Get Joinery Support';
+
+		if (!$api_url || !$pub_key || !$sec_key) return;
+
+		$params = $job->get('mjb_parameters');
+		$params = is_string($params) ? json_decode($params, true) : $params;
+		$params = is_array($params) ? $params : [];
+
+		$domain      = $params['domain'] ?? '';
+		$admin_email = $params['admin_email'] ?? '';
+		$user_name   = $params['user_name'] ?? 'Customer';
+
+		if (!$admin_email || !$domain) return;
+
+		// Resolve host IP for the DNS A-record instruction
+		$host_ip = '';
+		$host_id = $node->get('mgn_mgh_host_id');
+		if ($host_id) {
+			try {
+				$host    = new ManagedHost($host_id, true);
+				$host_ip = $host->get('mgh_host');
+			} catch (Exception $e) {}
+		}
+
+		$client = new GetJoineryApiClient($api_url, $pub_key, $sec_key);
+		$client->post('QueuedEmail', [
+			'equ_from'      => $from_email,
+			'equ_from_name' => $from_name,
+			'equ_to'        => $admin_email,
+			'equ_to_name'   => $user_name,
+			'equ_subject'   => 'Your site is ready: ' . $domain,
+			'equ_body'      => self::build_welcome_email_body($domain, $host_ip, $user_name),
+			'equ_status'    => 2, // READY_TO_SEND
+		]);
+	}
+
+	private static function build_welcome_email_body($domain, $host_ip, $user_name) {
+		$name      = htmlspecialchars($user_name);
+		$dom       = htmlspecialchars($domain);
+		$ip        = htmlspecialchars($host_ip);
+		$login_url = htmlspecialchars('https://' . $domain . '/admin');
+
+		return <<<HTML
+<html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">
+<h2 style="color:#1a1a1a">Your site is ready!</h2>
+<p>Hi {$name},</p>
+<p>Your Joinery site for <strong>{$dom}</strong> has been installed successfully.</p>
+
+<h3>Next step: point your DNS</h3>
+<p>Add an <strong>A record</strong> for <code>{$dom}</code> pointing to:</p>
+<p style="font-size:1.5em;text-align:center;font-weight:bold;letter-spacing:.05em;background:#f4f4f4;padding:12px;border-radius:4px">{$ip}</p>
+<p>DNS changes typically propagate in a few minutes to a few hours. Once your domain resolves to that IP, HTTPS will be provisioned automatically — no action needed on your part.</p>
+
+<h3>Log in</h3>
+<p>After DNS resolves, your admin panel is at:<br>
+<a href="{$login_url}">{$login_url}</a></p>
+
+<p style="color:#666;font-size:.9em">Questions? Reply to this email or contact support@getjoinery.com.</p>
+<p>— The Get Joinery Team</p>
+</body></html>
+HTML;
 	}
 
 	/**

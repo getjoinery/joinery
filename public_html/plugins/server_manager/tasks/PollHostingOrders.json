@@ -1,0 +1,6 @@
+{
+    "name": "Poll Hosting Orders",
+    "description": "Polls getjoinery for new paid hosting orders and provisions new Joinery sites on managed Docker hosts. Runs every cron tick (~15 min). Configure credentials under Server Manager plugin settings.",
+    "default_frequency": "every_run",
+    "config_fields": {}
+}
