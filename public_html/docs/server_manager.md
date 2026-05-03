@@ -184,6 +184,7 @@ Health dot colors reflect actual server health, not check recency:
 | `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
+| `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
 
@@ -204,6 +205,40 @@ The `mgn_install_state` column tracks the lifecycle: `installing` → `NULL` (su
 - The reverse proxy step (`manage_domain.sh`) is skipped when the domain is a bare IP address — a routable hostname is required for Apache `ServerName`-based virtual hosting. With an IP domain, the site is accessible directly on its mapped port.
 - `backup_project.sh` requires `rsync`. The bare-metal and Docker install scripts install rsync as part of the essential packages (`install.sh` line ~948). Sites installed before this was added can install it manually with `apt install rsync`.
 - After a Docker install, `mgn_container_name` is automatically recorded in the control plane DB so future jobs correctly use `docker exec` to reach the site.
+
+## SSL Management
+
+### SSL State
+
+Each node tracks its TLS certificate state in `mgn_ssl_state`:
+
+| Value | Meaning |
+|-------|---------|
+| `null` | Unknown or not configured |
+| `pending` | Waiting for DNS propagation; certbot has not run yet |
+| `active` | A valid Let's Encrypt cert is installed |
+| `failed` | Provisioning failed after repeated retries |
+
+### Automatic Detection
+
+`check_status` jobs include an SSH step that checks for a Let's Encrypt cert under `/etc/letsencrypt/live/{domain}/`. `JobResultProcessor` updates `mgn_ssl_state` and stores `ssl_domain`, `ssl_expiry_raw`, and `ssl_expiry_ts` in `mgn_last_status_data`. State transitions:
+
+- `CERT_FOUND` → sets state to `active` (from any prior state)
+- `CERT_MISSING` → clears state to `null` only if currently `null` or `active`; never overwrites `pending` or `failed`
+
+### Manual Provisioning
+
+The **Overview** tab shows an **SSL Setup card** when `mgn_ssl_state` is not `active` and the node has a domain in its site URL. The card:
+
+1. Resolves the domain via DNS and shows whether it points to the node's host IP
+2. Enables the **Provision SSL** button when DNS is ready (or when the host IP is not configured)
+3. On submit: creates a `provision_ssl` job, sets `mgn_ssl_state = 'pending'`, redirects to job detail
+
+The `provision_ssl` job runs `certbot --apache -d DOMAIN` on the node's host (for Docker nodes, certbot runs on the reverse-proxy host, not inside the container). On success, `mgn_ssl_state` is set to `active` by `JobResultProcessor`.
+
+### Automated Provisioning (installs only)
+
+For nodes installed via **Install New Node**, `ProvisionPendingSsl` (scheduled hourly) watches for nodes with `mgn_ssl_state = 'pending'`, checks DNS, and kicks off `provision_ssl` jobs automatically. After ~16 hours of DNS check failures it flips state to `failed`. Manual provisioning via the Setup card is the fallback.
 
 ## Backup Targets
 
