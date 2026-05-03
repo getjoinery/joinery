@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.2 - SSL detection tile, SSL Setup card, manual provision_ssl trigger
+ * @version 1.3 - Show SSL detection method in tile; HTTPS probe fallback for Cloudflare/edge SSL
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -673,12 +673,27 @@ if ($tab === 'overview') {
 					$ssl_badge = 'secondary'; $ssl_label = 'not configured';
 			}
 			$ssl_sub = '';
-			if ($ssl_tile_state === 'active' && !empty($status_data['ssl_expiry_ts'])) {
-				$days_left  = (int)(($status_data['ssl_expiry_ts'] - time()) / 86400);
-				$expiry_str = date('M j, Y', $status_data['ssl_expiry_ts']);
-				$ssl_sub = $days_left < 30
-					? '<span class="badge bg-warning">Expires ' . htmlspecialchars($expiry_str) . '</span>'
-					: '<span class="text-muted small">Expires ' . htmlspecialchars($expiry_str) . '</span>';
+			if ($ssl_tile_state === 'active') {
+				$ssl_method = $status_data['ssl_detection_method'] ?? null;
+				// Explicit booleans from updated detection code; fall back to inferring from method for legacy data
+				$le_val    = $status_data['ssl_le_cert']    ?? ($ssl_method === 'letsencrypt' ? true : null);
+				$probe_val = $status_data['ssl_https_probe'] ?? ($ssl_method === 'https_probe' ? true : null);
+				$ok   = '<span class="text-success">✓</span>';
+				$fail = '<span class="text-danger">✗</span>';
+				$dash = '<span class="text-muted">—</span>';
+				$le_icon    = $le_val    === true ? $ok : ($le_val    === false ? $fail : $dash);
+				$probe_icon = $probe_val === true ? $ok : ($probe_val === false ? $fail : $dash);
+				$ssl_sub = '<div class="mt-2 small">'
+					. '<div class="d-flex justify-content-between gap-3"><span class="text-muted">Let\'s Encrypt cert</span>' . $le_icon . '</div>'
+					. '<div class="d-flex justify-content-between gap-3 mt-1"><span class="text-muted">HTTPS probe</span>' . $probe_icon . '</div>';
+				if (!empty($status_data['ssl_expiry_ts'])) {
+					$days_left  = (int)(($status_data['ssl_expiry_ts'] - time()) / 86400);
+					$expiry_str = date('M j, Y', $status_data['ssl_expiry_ts']);
+					$ssl_sub .= '<div class="mt-1">' . ($days_left < 30
+						? '<span class="badge bg-warning">Expires ' . htmlspecialchars($expiry_str) . '</span>'
+						: '<span class="text-muted">Expires ' . htmlspecialchars($expiry_str) . '</span>') . '</div>';
+				}
+				$ssl_sub .= '</div>';
 			} elseif ($ssl_tile_state === 'pending') {
 				$ssl_sub = '<span class="text-muted small">Waiting for DNS / certbot</span>';
 			} elseif ($ssl_tile_state === 'failed') {
@@ -688,7 +703,7 @@ if ($tab === 'overview') {
 			echo '<div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase">SSL</div>';
 			echo '<div class="mt-1"><span class="badge bg-' . $ssl_badge . '">' . $ssl_label . '</span></div>';
-			if ($ssl_sub) echo '<div class="mt-2">' . $ssl_sub . '</div>';
+			if ($ssl_sub) echo $ssl_sub;
 			echo '</div></div>';
 		}
 
@@ -1190,6 +1205,17 @@ if ($tab === 'overview') {
 var backupNodeId = <?php echo $node->key; ?>;
 var backupLastScanAge = <?php echo $last_scan ? (time() - strtotime($last_scan)) : 99999; ?>;
 var BACKUP_STALE_SECONDS = 60;
+<?php
+// Suppress auto-refresh if the most recent list_backups attempt (any status) failed.
+// Without this guard, every page load triggers a new scan that also fails, creating
+// an infinite loop of failed jobs whenever the remote endpoint is unavailable.
+$db_bk = DbConnector::get_instance()->get_db_link();
+$bk_q = $db_bk->prepare("SELECT mjb_status FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'list_backups' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+$bk_q->execute([$node->key]);
+$bk_last = $bk_q->fetch(PDO::FETCH_ASSOC);
+$backup_last_attempt_failed = ($bk_last && $bk_last['mjb_status'] === 'failed');
+?>
+var backupLastAttemptFailed = <?php echo $backup_last_attempt_failed ? 'true' : 'false'; ?>;
 
 function refreshBackupList() {
 	var btn = document.getElementById('refreshBackupsBtn');
@@ -1217,8 +1243,9 @@ function refreshBackupList() {
 		});
 }
 
-// Auto-refresh local listing on page load if stale. Cloud listing is already live.
-if (backupLastScanAge > BACKUP_STALE_SECONDS) {
+// Auto-refresh local listing on page load if stale — but not if the last attempt
+// failed, to avoid an infinite loop of failing jobs on every page load.
+if (backupLastScanAge > BACKUP_STALE_SECONDS && !backupLastAttemptFailed) {
 	window.addEventListener('DOMContentLoaded', refreshBackupList);
 }
 
