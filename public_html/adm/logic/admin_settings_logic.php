@@ -126,6 +126,18 @@ function admin_settings_logic($get, $post) {
 			}
 		}
 
+		// Invalidate homepage cache if homepage-routing settings changed
+		if (isset($post['alternate_homepage']) || isset($post['alternate_loggedin_homepage'])) {
+			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+			StaticPageCache::invalidateUrl('/');
+		}
+
+		// Flush entire cache if active theme changed
+		if (isset($post['active_theme'])) {
+			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+			StaticPageCache::clearAll();
+		}
+
 		return LogicResult::redirect('/admin/admin_settings');
 	}
 

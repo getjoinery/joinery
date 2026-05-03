@@ -183,6 +183,39 @@ Redirects to login if not authenticated, shows 403 if insufficient permission.
   - Right: `<a href="/admin/admin_users?id=1">`
 - Query parameters (`?key=value`) pass through routing unchanged and are available in `$_GET`.
 
+## Static Page Cache
+
+Anonymous GET requests are served from a static HTML cache stored in `cache/static_pages/`.
+The cache is managed by `includes/StaticPageCache.php` and checked inside `RouteHelper::processRoutes()`.
+
+**How it works:**
+- On a cache miss, PHP renders the page normally and the output is written to a `.html` file.
+- On a cache hit, the file is served directly with `readfile()` — PHP does almost no work.
+- 1% of cache hits are randomly invalidated so pages stay fresh without a TTL.
+- Pages that cannot be cached (login-required, POST responses, error pages) are marked `nostatic`
+  in the index and skipped on future checks.
+
+**Cache location:** `{site_root}/cache/static_pages/`
+- `index.json` — maps URL keys to `{status, url, time, extension}` entries
+- `index.html` — cached homepage
+- `about_us.html` — cached `/about-us`, etc.
+
+**Diagnosing stale cache:**
+On cache hits, three signals are available (after `specs/static_cache_diagnostics.md` is
+implemented):
+- HTTP header `X-Cache: HIT` — present on every cache hit
+- HTTP header `X-Cache-Created: <ISO 8601>` — when the cached file was written
+- HTTP header `X-Cache-Age: <seconds>` — age of the cached file
+- HTML source comment `<!-- Cached: / | Created: 2026-05-03T01:29:07+00:00 -->`
+
+**Clearing the cache:**
+Go to Admin → Static Cache (`/admin/admin_static_cache`) and click "Clear All Cache". Automatic
+invalidation covers the common cases (see below), so manual clearing should rarely be needed.
+
+**Automatic invalidation:**
+- `alternate_homepage` or `alternate_loggedin_homepage` settings saved → `/` invalidated
+- `active_theme` setting saved → entire cache flushed
+
 ## Debugging
 
 Add `?debug_routes=1` to any URL to see route matching details in HTML comments. Requires superadmin login.
