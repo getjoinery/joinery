@@ -1411,14 +1411,17 @@ abstract class SystemBase {
 		// --- END: SQL generation and execution ---
 
 		// AUTO CACHE INVALIDATION - Simple approach
-		// Only invalidate the model's own URL if it has one
-		if (class_exists('StaticPageCache')) {
-			if (method_exists($this, 'get_url')) {
-				$url = $this->get_url();
-				if ($url) {
-					require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
-					StaticPageCache::invalidateUrl($url);
-				}
+		// Only invalidate the model's own URL if it has one. Check for
+		// $url_namespace (the thing get_url() actually needs), not
+		// method_exists() — every SystemBase inherits get_url(), so the old
+		// check let through models that legitimately have no public URL
+		// (Component, Plugin, etc.) and triggered get_url()'s "namespace
+		// not set" error_log on every save.
+		if (class_exists('StaticPageCache') && isset(static::$url_namespace)) {
+			$url = $this->get_url();
+			if ($url) {
+				require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+				StaticPageCache::invalidateUrl($url);
 			}
 		}
 

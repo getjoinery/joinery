@@ -397,16 +397,34 @@ class DatabaseUpdater {
                     $null_q->execute();
                     $null_result = $null_q->fetch(PDO::FETCH_ASSOC);
                     $null_count = $null_result['null_count'];
-                    
+
                     if ($null_count > 0) {
-                        $results['warnings'][] = "Cannot add NOT NULL constraint to {$table_name}.{$field_name}: column contains {$null_count} NULL values";
-                        return; // Skip this constraint modification
+                        // Try to backfill from the declared default (already an SQL
+                        // fragment in the spec, e.g. "'local'" or "0"). Only attempt
+                        // the backfill if a default is declared — otherwise we have
+                        // no safe value to write.
+                        $declared_default = $field_specs['default'] ?? null;
+                        if ($declared_default !== null && $declared_default !== '') {
+                            $backfill_sql = "UPDATE {$table_name} SET {$field_name} = {$declared_default} WHERE {$field_name} IS NULL";
+                            try {
+                                $backfill_q = $dblink->prepare($backfill_sql);
+                                $backfill_q->execute();
+                                $backfilled = $backfill_q->rowCount();
+                                $results['messages'][] = "Backfilled {$backfilled} NULL row(s) in {$table_name}.{$field_name} with default {$declared_default} before adding NOT NULL constraint";
+                            } catch (PDOException $e) {
+                                $results['warnings'][] = "Cannot add NOT NULL constraint to {$table_name}.{$field_name}: column contains {$null_count} NULL values; backfill from declared default failed: " . $e->getMessage();
+                                return;
+                            }
+                        } else {
+                            $results['warnings'][] = "Cannot add NOT NULL constraint to {$table_name}.{$field_name}: column contains {$null_count} NULL values and no default is declared in field_specifications";
+                            return;
+                        }
                     }
                 } catch (PDOException $e) {
                     $results['warnings'][] = "Could not check for NULL values in {$table_name}.{$field_name}: " . $e->getMessage();
-                    return; // Skip this constraint modification  
+                    return; // Skip this constraint modification
                 }
-                
+
                 $sql = "ALTER TABLE {$table_name} ALTER COLUMN {$field_name} SET NOT NULL";
             }
             
@@ -552,7 +570,7 @@ class DatabaseUpdater {
                     $this->addMissingColumn($table_name, $field_name, $field_specs, $dblink, $results);
                 } else {
                     // Validate existing column
-                    $this->validateExistingColumn($table_name, $field_name, $field_specs, $live_column_info[$field_name], $results);
+                    $this->validateExistingColumn($table_name, $field_name, $field_specs, $live_column_info[$field_name], $results, $dblink);
                 }
                 
                 // Handle sequence creation for serial fields
@@ -597,7 +615,7 @@ class DatabaseUpdater {
     /**
      * Validate an existing column against specifications
      */
-    private function validateExistingColumn($table_name, $field_name, $field_specs, $live_column_info, &$results) {
+    private function validateExistingColumn($table_name, $field_name, $field_specs, $live_column_info, &$results, $dblink = null) {
         $field_type = $field_specs['type'];
         
         // Extract base type and length for comparison
@@ -637,11 +655,18 @@ class DatabaseUpdater {
             $results['warnings'][] = "Database has length limit {$live_column_info['character_maximum_length']} but model specifies no length limit on {$table_name}.{$field_name}";
         }
         
-        // Check nullable constraint
+        // Check nullable constraint. Primary keys must be NOT NULL by definition,
+        // so any spec saying otherwise is a spec defect, not a real drift — and
+        // serial=true implies a PK that the live DB will keep NOT NULL. Skip both
+        // here so we don't emit false-positive warnings (matches the modify path).
         $spec_nullable = !isset($field_specs['is_nullable']) || $field_specs['is_nullable'];
         $live_nullable = ($live_column_info['is_nullable'] == 'YES');
-        
-        if ($spec_nullable != $live_nullable) {
+        $is_serial = !empty($field_specs['serial']);
+
+        if ($spec_nullable != $live_nullable
+            && !$is_serial
+            && !($dblink && $this->isPrimaryKeyColumn($table_name, $field_name, $dblink))
+        ) {
             if ($spec_nullable) {
                 $results['warnings'][] = "Column {$table_name}.{$field_name} should allow NULL but currently has NOT NULL constraint";
             } else {
@@ -869,30 +894,32 @@ class DatabaseUpdater {
         ];
         
         try {
-            // Build the GROUP BY and SELECT clauses for multiple columns
-            // Use COALESCE to handle NULLs consistently
-            $select_columns = [];
+            // Build GROUP BY / SELECT for multiple columns. Exclude rows where
+            // any unique-constraint column is NULL — Postgres's default UNIQUE
+            // constraint treats NULLs as distinct (multiple NULL rows are legal),
+            // so flagging them as duplicates here is a false positive that blocks
+            // constraint creation Postgres would have accepted.
             $group_columns = [];
-            
+            $not_null_clauses = [];
             foreach ($columns as $column) {
-                $select_columns[] = "COALESCE(CAST({$column} AS TEXT), '<NULL>') as {$column}_str";
-                $group_columns[] = "COALESCE(CAST({$column} AS TEXT), '<NULL>')";
+                $group_columns[] = $column;
+                $not_null_clauses[] = "{$column} IS NOT NULL";
             }
-            
-            $select_clause = implode(', ', $select_columns);
             $group_clause = implode(', ', $group_columns);
-            
-            // Create a concatenated representation for display
+            $where_clause = implode(' AND ', $not_null_clauses);
+
+            // Concatenated representation for display
             $concat_columns = [];
             foreach ($columns as $column) {
-                $concat_columns[] = "COALESCE(CAST({$column} AS TEXT), '<NULL>')";
+                $concat_columns[] = "CAST({$column} AS TEXT)";
             }
             $concat_clause = implode(" || '|' || ", $concat_columns);
-            
-            $sql = "SELECT {$concat_clause} as combined_value, COUNT(*) as count 
-                    FROM {$table_name} 
+
+            $sql = "SELECT {$concat_clause} as combined_value, COUNT(*) as count
+                    FROM {$table_name}
+                    WHERE {$where_clause}
                     GROUP BY {$group_clause}
-                    HAVING COUNT(*) > 1 
+                    HAVING COUNT(*) > 1
                     ORDER BY COUNT(*) DESC";
             
             if ($this->verbose) {
@@ -966,7 +993,7 @@ class DatabaseUpdater {
                 echo "<br>";
                 echo "Action: Unique constraint creation skipped<br>";
                 echo "Resolution: Deduplicate the rows above, then re-run update_database to create the constraint.<br>";
-                echo "Impact: Code paths that use ON CONFLICT on these columns (e.g. upgrade.php re-confirming system_version) will fail until resolved.<br>";
+                echo "Impact: ON CONFLICT (...) DO UPDATE on these columns will fail until the constraint exists.<br>";
                 echo "═══════════════════════════════════════════════════════════════════════════════<br>";
                 echo "<br>";
 
@@ -1038,7 +1065,8 @@ class DatabaseUpdater {
             ['bool', 'boolean'],
             ['timestamp', 'timestamp without time zone'],
             ['timestamptz', 'timestamp with time zone'],
-            ['json', 'jsonb']  // json and jsonb are considered equivalent for our purposes
+            ['json', 'jsonb'],  // json and jsonb are considered equivalent for our purposes
+            ['decimal', 'numeric'],  // decimal is a Postgres alias for numeric
         ];
         
         // Check if both types belong to the same equivalence group
