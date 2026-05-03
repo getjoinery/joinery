@@ -685,7 +685,7 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 3. **Method Existence Validation**: ALWAYS run validate_php_file.php on created/modified PHP files and investigate any flagged issues before completion
 4. **Method Verification**: NEVER assume available functions - always check class definitions first
 5. **Security**: Always validate and sanitize user input
-6. **FormWriter**: Always use FormWriter class for forms
+6. **FormWriter**: NEVER write hand-rolled HTML forms. Always use FormWriter for every form in the platform — it handles validation styling, CSRF, `novalidate`/`is-invalid` integration, and consistent UX automatically. See **📖 [FormWriter Documentation](docs/formwriter.md)**. The only exception is single-button action forms (a `<form>` with only hidden inputs and a submit button) that trigger a server action with no user-entered fields.
 7. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
 8. **Version Numbers**: ALWAYS look for version numbers in files when making changes and increment them appropriately
 

@@ -53,8 +53,13 @@ $page->admin_header([
 ```
 
 ### Form Structure with FormWriter
+
+Every admin form must be wrapped in `begin_box()`/`end_box()`. Without the wrapper the form renders with no card-header or card-body, losing the standard padding and visual container.
+
 ```php
 <?php
+$page->begin_box(['title' => 'Edit Item']);
+
 // Get FormWriter V2 instance from the page object
 $formwriter = $page->getFormWriter('form_name', 'v2', [
     'model' => $object  // Auto-fills values and applies validation from model
@@ -71,6 +76,8 @@ $formwriter->textinput('field_name', 'Label', [
 
 $formwriter->submitbutton('submit', 'Submit Text');
 $formwriter->end_form();
+
+$page->end_box();
 ?>
 ```
 

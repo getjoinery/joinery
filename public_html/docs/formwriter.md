@@ -535,6 +535,20 @@ $formwriter->hiddeninput('field_name', '', ['value' => $value]);
 $formwriter->hiddeninput('field_name', ['value' => $value]);
 ```
 
+**Warning — duplicate IDs when multiple forms share a field name:** FormWriter generates an `id` attribute for every field using the field name as the default. When two or more FormWriter forms are rendered on the same page and both declare a field with the same name (most commonly `hiddeninput('action', ...)`), the page ends up with duplicate `id` attributes, which is invalid HTML.
+
+Fix: pass an explicit `'id'` option to any shared-name hidden inputs so each gets a unique ID:
+
+```php
+// ✅ CORRECT — unique IDs across forms on the same page
+$form_a->hiddeninput('action', '', ['value' => 'save',   'id' => 'save_action']);
+$form_b->hiddeninput('action', '', ['value' => 'delete', 'id' => 'delete_action']);
+
+// ❌ PROBLEM — both produce id="action" in the DOM
+$form_a->hiddeninput('action', '', ['value' => 'save']);
+$form_b->hiddeninput('action', '', ['value' => 'delete']);
+```
+
 ### Repeater Fields
 
 Repeater fields allow users to add multiple sets of related fields dynamically. Used primarily by the Page Component System for configurable content blocks.
@@ -1232,6 +1246,43 @@ try {
 2. **Avoid complex logic in custom_script**
    - Keep event handlers simple
    - Use form-level scripts for complex interactions
+
+### Labels and Option Values Are Always HTML-Escaped
+
+FormWriter passes every label and every select/radio option value through `htmlspecialchars()`. HTML tags inside labels — `<strong>`, `<em>`, `<code>`, `<span>`, etc. — will render as literal escaped text, not as markup. Use plain text only in labels and option arrays.
+
+```php
+// ✅ CORRECT — plain text
+$formwriter->radioinput('install_mode', 'Install Type', [
+    'options' => [
+        'fresh'       => 'Fresh install — empty site with default schema',
+        'from_backup' => 'Install from backup — clone an existing node',
+    ]
+]);
+
+// ❌ WRONG — renders as "&lt;strong&gt;Fresh install&lt;/strong&gt; — ..."
+$formwriter->radioinput('install_mode', 'Install Type', [
+    'options' => [
+        'fresh' => '<strong>Fresh install</strong> — empty site',
+    ]
+]);
+```
+
+### Section Dividers Within a Form
+
+To visually group related fields inside a long form, output a `<label>` element as a section heading. Do not use `<p>` tags (wrong spacing in Bootstrap form context) or `<h*>` tags (wrong semantic weight).
+
+```php
+echo '<label class="form-label fw-semibold d-block mt-4">Server Settings</label>';
+$formwriter->textinput('mgn_hostname', 'Hostname');
+$formwriter->numberinput('mgn_port', 'Port');
+
+echo '<label class="form-label fw-semibold d-block mt-4">Credentials</label>';
+$formwriter->textinput('mgn_user', 'Username');
+$formwriter->passwordinput('mgn_pass', 'Password');
+```
+
+The first section heading omits `mt-4` if it appears at the very top of the form (no preceding fields to separate from).
 
 ### Maintainability
 

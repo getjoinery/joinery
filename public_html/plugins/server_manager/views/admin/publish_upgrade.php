@@ -6,7 +6,7 @@
  * Lists published upgrade archives (with delete), and provides the
  * Publish New Upgrade form with optional version override.
  *
- * @version 1.2
+ * @version 1.3
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -181,29 +181,34 @@ $pageoptions = ['title' => 'Publish New Upgrade'];
 $page->begin_box($pageoptions);
 ?>
 <p class="text-muted">Build upgrade archives from the current control plane source code. The version numbers default to the auto-detected next patch; override if you need a specific version.</p>
-<form method="post">
-	<input type="hidden" name="action" value="publish_upgrade">
-	<div class="row">
-		<div class="col-auto">
-			<label class="form-label">Major</label>
-			<input type="number" name="version_major" class="form-control" value="<?php echo $next_major; ?>" min="0" required>
-		</div>
-		<div class="col-auto">
-			<label class="form-label">Minor</label>
-			<input type="number" name="version_minor" class="form-control" value="<?php echo $next_minor; ?>" min="0" required>
-		</div>
-		<div class="col-auto">
-			<label class="form-label">Patch</label>
-			<input type="number" name="version_patch" class="form-control" value="<?php echo $next_patch; ?>" min="0" required>
-		</div>
-	</div>
-	<div class="mb-3 mt-3">
-		<label class="form-label">Release notes</label>
-		<textarea name="release_notes" class="form-control" rows="4" placeholder="Describe what changed in this release..." required></textarea>
-	</div>
-	<button type="submit" class="btn btn-primary">Publish Upgrade</button>
-	<a href="/admin/server_manager" class="btn btn-link">Cancel</a>
-</form>
+<?php
+$formwriter = $page->getFormWriter('publish_form');
+$formwriter->begin_form();
+$formwriter->hiddeninput('action', '', ['value' => 'publish_upgrade']);
+$formwriter->numberinput('version_major', 'Major', [
+	'required' => true,
+	'value'    => $next_major,
+	'min'      => 0,
+]);
+$formwriter->numberinput('version_minor', 'Minor', [
+	'required' => true,
+	'value'    => $next_minor,
+	'min'      => 0,
+]);
+$formwriter->numberinput('version_patch', 'Patch', [
+	'required' => true,
+	'value'    => $next_patch,
+	'min'      => 0,
+]);
+$formwriter->textarea('release_notes', 'Release notes', [
+	'required'    => true,
+	'rows'        => 4,
+	'placeholder' => 'Describe what changed in this release...',
+]);
+$formwriter->submitbutton('btn_submit', 'Publish Upgrade');
+$formwriter->end_form();
+?>
+<a href="/admin/server_manager" class="btn btn-link">Cancel</a>
 <?php
 $page->end_box();
 $page->admin_footer();
