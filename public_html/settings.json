@@ -2,7 +2,6 @@
   "_comment": "Core settings seeded on every update_database run. Plugin-owned settings live in the plugin's plugin.json. See specs/declarative_plugin_settings.md for the scope principle. Values are always strings (use '0'/'1' for booleans, '42' for numbers).",
   "settings": [
     { "name": "activation_required_login", "default": "1" },
-    { "name": "allow_remote_archive_refresh", "default": "0" },
     { "name": "api_require_https", "default": "1" },
     { "name": "blog_active", "default": "1" },
     { "name": "comments_active", "default": "1" },
@@ -101,7 +100,6 @@
     { "name": "alternate_homepage", "default": "" },
     { "name": "alternate_loggedin_homepage", "default": "" },
     { "name": "api_allowed_origins", "default": "" },
-    { "name": "archive_refresh_allowed_ips", "default": "[]" },
     { "name": "blog_footer_text", "default": "" },
     { "name": "blog_subdirectory", "default": "" },
     { "name": "captcha_private", "default": "" },

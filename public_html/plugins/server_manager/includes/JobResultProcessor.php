@@ -205,14 +205,6 @@ class JobResultProcessor {
 	}
 
 	/**
-	 * Refresh archives includes an embedded apply_update on the target — same
-	 * follow-up semantics.
-	 */
-	private static function process_refresh_archives($job) {
-		self::process_apply_update($job);
-	}
-
-	/**
 	 * Post-process install_node: mark the node online on success or install_failed on failure.
 	 * For auto-provisioned nodes (mjb_external_order_item_id is set): also sets ssl_state=pending
 	 * and sends the welcome email via getjoinery's QueuedEmail API.
