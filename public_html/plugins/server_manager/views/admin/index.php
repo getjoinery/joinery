@@ -300,27 +300,7 @@ function render_node_row($node, $db, $session) {
 	}
 
 	$install_state = $node->get('mgn_install_state');
-	if ($install_state === 'installing') {
-		$status_color = 'info';
-	} elseif ($install_state === 'install_failed') {
-		$status_color = 'danger';
-	} elseif ($last_job_failed) {
-		$status_color = 'danger';
-	} elseif (!$last_check || !$status_data) {
-		$status_color = 'secondary';
-	} elseif (
-		(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
-		(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')
-	) {
-		$status_color = 'danger';
-	} elseif (
-		(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
-		(isset($status_data['load_1m']) && $status_data['load_1m'] > 5)
-	) {
-		$status_color = 'warning';
-	} else {
-		$status_color = 'success';
-	}
+	$status_color = JobCommandBuilder::status_color_for_node($node, $status_data, $last_job_failed);
 
 	$node_version = $node->get('mgn_joinery_version');
 	$version_cmp  = null;

@@ -52,6 +52,17 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$node->save();
 		$node->load();
 
+		// Assign to the matching ManagedHost so the node appears under the correct
+		// host accordion on the dashboard instead of "Ungrouped Sites".
+		$db_na = DbConnector::get_instance()->get_db_link();
+		$hq_na = $db_na->prepare("SELECT mgh_id FROM mgh_managed_hosts WHERE mgh_host = ? AND mgh_delete_time IS NULL LIMIT 1");
+		$hq_na->execute([$node->get('mgn_host')]);
+		$host_row_na = $hq_na->fetch(PDO::FETCH_ASSOC);
+		if ($host_row_na) {
+			$node->set('mgn_mgh_host_id', $host_row_na['mgh_id']);
+			$node->save();
+		}
+
 		$page_regex = '/\/admin\/server_manager/';
 		$session->save_message(new DisplayMessage(
 			'Node added successfully.',

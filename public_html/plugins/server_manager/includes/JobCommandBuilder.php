@@ -252,10 +252,23 @@ class JobCommandBuilder {
 		$data = $decoded['data'];
 
 		$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
-		$node->set('mgn_last_status_data', json_encode($data));
 		if (!empty($data['joinery_version'])) {
 			$node->set('mgn_joinery_version', $data['joinery_version']);
 		}
+
+		// Successful HTTPS API call proves SSL is working — mark active
+		$api_domain = parse_url($site_url, PHP_URL_HOST) ?: '';
+		if (!$node->get('mgn_tls_insecure') && strpos($site_url, 'https://') === 0
+				&& $api_domain && !filter_var($api_domain, FILTER_VALIDATE_IP)
+				&& $api_domain !== 'localhost') {
+			$node->set('mgn_ssl_state', 'active');
+			$data['ssl_state']            = 'active';
+			$data['ssl_domain']           = $api_domain;
+			$data['ssl_detection_method'] = 'https_probe';
+			$data['ssl_https_probe']      = true;
+		}
+
+		$node->set('mgn_last_status_data', json_encode($data));
 		$node->save();
 
 		return ['ok' => true, 'elapsed_ms' => $elapsed_ms, 'data' => $data,
@@ -263,18 +276,63 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Derive the dashboard badge color from a parsed status_data array.
-	 * Pure function — same thresholds as the inline logic in the dashboard view.
-	 * Caller layers install_state / last_job_failed on top if relevant.
+	 * Quick HTTPS probe: HEAD request to https://$domain/ with full cert verification.
+	 * Returns ['ok' => true] when a valid SSL connection is made.
+	 * Used as a fallback SSL detection method for Cloudflare and other edge SSL.
 	 */
-	public static function status_color_from_data($status_data) {
-		if (!is_array($status_data) || empty($status_data)) return 'secondary';
+	public static function probe_https($domain, $timeout = 4) {
+		if (!$domain || filter_var($domain, FILTER_VALIDATE_IP) || $domain === 'localhost') {
+			return ['ok' => false];
+		}
+		$ch = curl_init('https://' . $domain . '/');
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_NOBODY         => true,
+			CURLOPT_CONNECTTIMEOUT => $timeout,
+			CURLOPT_TIMEOUT        => $timeout,
+			CURLOPT_SSL_VERIFYPEER => true,
+			CURLOPT_SSL_VERIFYHOST => 2,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_MAXREDIRS      => 3,
+		]);
+		curl_exec($ch);
+		$errno  = curl_errno($ch);
+		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+		return ['ok' => ($errno === 0 && $status > 0)];
+	}
+
+	/**
+	 * Derive the dashboard badge color for a node. Single source of truth used by
+	 * both the dashboard page render and the AJAX refresh endpoint.
+	 *
+	 * $status_data - parsed mgn_last_status_data array (or fresh API response)
+	 * $last_job_failed - true if the most recent check_status job failed (page-render path)
+	 */
+	public static function status_color_for_node($node, $status_data = null, $last_job_failed = false) {
+		$install_state = $node->get('mgn_install_state');
+		if ($install_state === 'installing')    return 'info';
+		if ($install_state === 'install_failed') return 'danger';
+		if ($last_job_failed) return 'danger';
+
+		$last_check = $node->get('mgn_last_status_check');
+		if (!$last_check || !is_array($status_data) || empty($status_data)) return 'secondary';
+
 		if ((isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
 			(isset($status_data['postgres_status']) && $status_data['postgres_status'] !== 'accepting connections')) {
 			return 'danger';
 		}
+
+		// SSL absence: FQDN domain with SSL not active → warning
+		$ssl_domain = $node->get('mgn_site_url') ? parse_url($node->get('mgn_site_url'), PHP_URL_HOST) : null;
+		$ssl_warn = $ssl_domain
+			&& !filter_var($ssl_domain, FILTER_VALIDATE_IP)
+			&& $ssl_domain !== 'localhost'
+			&& $node->get('mgn_ssl_state') !== 'active';
+
 		if ((isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
-			(isset($status_data['load_1m']) && $status_data['load_1m'] > 5)) {
+			(isset($status_data['load_1m']) && $status_data['load_1m'] > 5) ||
+			$ssl_warn) {
 			return 'warning';
 		}
 		return 'success';
