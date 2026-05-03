@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.1 - Forms converted to FormWriter
+ * @version 1.2 - SSL detection tile, SSL Setup card, manual provision_ssl trigger
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -263,6 +263,37 @@ if ($_POST && isset($_POST['action'])) {
 			header('Location: ' . $base_url);
 			exit;
 		}
+	}
+
+	if ($action === 'provision_ssl') {
+		$domain = parse_url($node->get('mgn_site_url'), PHP_URL_HOST);
+		if (!$domain) {
+			$session->save_message(new DisplayMessage(
+				'Cannot provision SSL: node has no site URL with a domain.',
+				'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url . '&tab=overview');
+			exit;
+		}
+		if (!JobCommandBuilder::has_ssh($node)) {
+			$session->save_message(new DisplayMessage(
+				'Cannot provision SSL: SSH is not configured for this node.',
+				'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+			header('Location: ' . $base_url . '&tab=overview');
+			exit;
+		}
+		$settings = Globalvars::get_instance();
+		$alert_email = $settings->get_setting('server_manager_provisioning_admin_alert_email') ?: '';
+		$job_params = ['domain' => $domain, 'admin_email' => $alert_email];
+		$steps = JobCommandBuilder::build_provision_ssl($node, $job_params);
+		$job = ManagementJob::createJob($node->key, 'provision_ssl', $steps, $job_params, $session->get_user_id());
+		$node->set('mgn_ssl_state', 'pending');
+		$node->save();
+		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
+		exit;
 	}
 
 	// Save/clear API credential (Overview tab panel)
@@ -628,11 +659,132 @@ if ($tab === 'overview') {
 			echo '</div></div>';
 		}
 
+		// SSL
+		$ssl_tile_state = $node->get('mgn_ssl_state');
+		if ($ssl_tile_state !== null || (is_array($status_data) && array_key_exists('ssl_state', $status_data))) {
+			switch ($ssl_tile_state) {
+				case 'active':
+					$ssl_badge = 'success'; $ssl_label = 'active'; break;
+				case 'pending':
+					$ssl_badge = 'warning'; $ssl_label = 'pending'; break;
+				case 'failed':
+					$ssl_badge = 'danger';  $ssl_label = 'failed';  break;
+				default:
+					$ssl_badge = 'secondary'; $ssl_label = 'not configured';
+			}
+			$ssl_sub = '';
+			if ($ssl_tile_state === 'active' && !empty($status_data['ssl_expiry_ts'])) {
+				$days_left  = (int)(($status_data['ssl_expiry_ts'] - time()) / 86400);
+				$expiry_str = date('M j, Y', $status_data['ssl_expiry_ts']);
+				$ssl_sub = $days_left < 30
+					? '<span class="badge bg-warning">Expires ' . htmlspecialchars($expiry_str) . '</span>'
+					: '<span class="text-muted small">Expires ' . htmlspecialchars($expiry_str) . '</span>';
+			} elseif ($ssl_tile_state === 'pending') {
+				$ssl_sub = '<span class="text-muted small">Waiting for DNS / certbot</span>';
+			} elseif ($ssl_tile_state === 'failed') {
+				$ssl_sub = '<span class="text-muted small">See SSL Setup below</span>';
+			}
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">SSL</div>';
+			echo '<div class="mt-1"><span class="badge bg-' . $ssl_badge . '">' . $ssl_label . '</span></div>';
+			if ($ssl_sub) echo '<div class="mt-2">' . $ssl_sub . '</div>';
+			echo '</div></div>';
+		}
+
 		echo '</div>'; // end .row
 
 		// Secondary info that doesn't warrant its own tile.
 		if (!empty($status_data['db_list']) && count($status_data['db_list']) > 1) {
 			echo '<div class="text-muted small mt-3"><strong>All databases:</strong> ' . htmlspecialchars(implode(', ', $status_data['db_list'])) . '</div>';
+		}
+
+		$page->end_box();
+	}
+
+	// ── SSL Setup card ──
+	$ssl_card_state  = $node->get('mgn_ssl_state');
+	$ssl_card_domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST);
+	$is_fqdn = $ssl_card_domain
+		&& !filter_var($ssl_card_domain, FILTER_VALIDATE_IP)
+		&& $ssl_card_domain !== 'localhost';
+
+	if ($is_fqdn && $ssl_card_state !== 'active' && $install_state !== 'installing') {
+		$host_ip     = $node->get('mgn_host');
+		$resolved_ip = gethostbyname($ssl_card_domain);
+		$dns_resolves    = ($resolved_ip && $resolved_ip !== $ssl_card_domain);
+		$dns_matches     = $dns_resolves && (!$host_ip || $resolved_ip === $host_ip);
+		$no_host_ip      = !$host_ip;
+		$can_provision   = ($dns_matches || $no_host_ip) && $ssl_card_state !== 'pending';
+
+		$pageoptions = ['title' => 'SSL Setup'];
+		$page->begin_box($pageoptions);
+
+		// Failed alert with link to last provision_ssl job
+		if ($ssl_card_state === 'failed') {
+			$db = DbConnector::get_instance()->get_db_link();
+			$q  = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'provision_ssl' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+			$q->execute([$node->key]);
+			$ssl_job_row = $q->fetch(PDO::FETCH_ASSOC);
+			echo '<div class="alert alert-danger mb-3">A previous SSL provisioning attempt failed.';
+			if ($ssl_job_row) {
+				echo ' <a href="/admin/server_manager/job_detail?job_id=' . $ssl_job_row['mjb_id'] . '" class="alert-link">Review the job output →</a>';
+			}
+			echo '</div>';
+		}
+
+		if ($ssl_card_state === 'pending') {
+			echo '<p class="mb-3">SSL provisioning is in progress for <strong>' . htmlspecialchars($ssl_card_domain) . '</strong>.</p>';
+			$db = DbConnector::get_instance()->get_db_link();
+			$q  = $db->prepare("SELECT mjb_id FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'provision_ssl' AND mjb_delete_time IS NULL ORDER BY mjb_id DESC LIMIT 1");
+			$q->execute([$node->key]);
+			$ssl_pend_row = $q->fetch(PDO::FETCH_ASSOC);
+			if ($ssl_pend_row) {
+				echo '<p><a href="/admin/server_manager/job_detail?job_id=' . $ssl_pend_row['mjb_id'] . '" class="btn btn-sm btn-outline-secondary">View provision SSL job #' . $ssl_pend_row['mjb_id'] . '</a></p>';
+			}
+		} else {
+			echo '<p class="mb-3">No SSL certificate is configured for <strong>' . htmlspecialchars($ssl_card_domain) . '</strong>.</p>';
+
+			// DNS check table
+			echo '<div class="border rounded p-3 mb-3">';
+			echo '<div class="text-muted small text-uppercase mb-2">DNS Check</div>';
+			echo '<table class="table table-sm mb-0">';
+			echo '<tr><th style="width:100px" class="fw-normal text-muted">Domain</th><td><code>' . htmlspecialchars($ssl_card_domain) . '</code></td></tr>';
+			if ($host_ip) {
+				echo '<tr><th class="fw-normal text-muted">Expected</th><td><code>' . htmlspecialchars($host_ip) . '</code></td></tr>';
+			}
+			if ($dns_resolves) {
+				$dns_icon = $dns_matches ? '<span class="text-success">✓ DNS is ready</span>' : '<span class="text-danger">✗ Doesn\'t match node host</span>';
+				echo '<tr><th class="fw-normal text-muted">Resolved</th><td><code>' . htmlspecialchars($resolved_ip) . '</code> ' . $dns_icon . '</td></tr>';
+			} else {
+				echo '<tr><th class="fw-normal text-muted">Resolved</th><td><span class="text-danger">✗ DNS not resolving</span></td></tr>';
+			}
+			echo '</table>';
+			if ($no_host_ip) {
+				echo '<p class="text-muted small mt-2 mb-0">Node host IP is not configured — cannot verify DNS. Provision SSL anyway at your own risk.</p>';
+			} elseif (!$dns_matches) {
+				$hint = $dns_resolves
+					? 'DNS has not propagated yet.'
+					: 'This domain is not resolving.';
+				echo '<p class="text-muted small mt-2 mb-0">' . $hint . ' Point your domain\'s A record to <code>' . htmlspecialchars($host_ip) . '</code> and wait for it to resolve here before provisioning SSL.</p>';
+			}
+			echo '</div>';
+
+			// Action buttons
+			echo '<div class="d-flex gap-2 align-items-center">';
+			if ($can_provision) {
+				echo '<form method="post" action="' . $base_url . '">';
+				echo '<input type="hidden" name="action" value="provision_ssl">';
+				echo '<button type="submit" class="btn btn-primary btn-sm">Provision SSL</button>';
+				echo '</form>';
+			} else {
+				echo '<button class="btn btn-primary btn-sm" disabled title="DNS must resolve to the node host before provisioning SSL">Provision SSL</button>';
+			}
+			echo '<a href="' . $base_url . '&tab=overview" class="btn btn-outline-secondary btn-sm">Re-check DNS</a>';
+			echo '</div>';
+			if ($can_provision) {
+				echo '<p class="text-muted small mt-2 mb-0">Certbot will run on the node\'s host and configure Apache to serve HTTPS for this domain.</p>';
+			}
 		}
 
 		$page->end_box();
