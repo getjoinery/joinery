@@ -2,7 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -28,6 +28,7 @@ class ManagementJob extends SystemBase {
 		'mjb_current_step'      => array('type'=>'int4', 'default'=>'0'),
 		'mjb_total_steps'       => array('type'=>'int4'),
 		'mjb_error_message'     => array('type'=>'text'),
+		'mjb_external_order_item_id' => array('type'=>'int8'),
 		'mjb_created_by'        => array('type'=>'int8'),
 		'mjb_started_time'      => array('type'=>'timestamp(6)'),
 		'mjb_completed_time'    => array('type'=>'timestamp(6)'),
@@ -82,6 +83,10 @@ class MultiManagementJob extends SystemMultiBase {
 
 		if (isset($this->options['status'])) {
 			$filters['mjb_status'] = [$this->options['status'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['external_order_item_id'])) {
+			$filters['mjb_external_order_item_id'] = [$this->options['external_order_item_id'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['created_by'])) {

@@ -1,6 +1,6 @@
 {
     "name": "Server Manager",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Remote server management for Joinery instances",
     "author": "Joinery",
     "receives_upgrades": true,
@@ -28,5 +28,14 @@
             "parent": "server-manager",
             "order": 4
         }
+    ],
+    "settings": [
+        { "name": "server_manager_getjoinery_api_url",              "default": "" },
+        { "name": "server_manager_getjoinery_api_public_key",       "default": "" },
+        { "name": "server_manager_getjoinery_api_secret_key",       "default": "" },
+        { "name": "server_manager_provisioning_admin_alert_email",  "default": "" },
+        { "name": "server_manager_provisioning_welcome_from_email", "default": "" },
+        { "name": "server_manager_provisioning_welcome_from_name",  "default": "" },
+        { "name": "server_manager_provisioning_domain_question_id", "default": "" }
     ]
 }
