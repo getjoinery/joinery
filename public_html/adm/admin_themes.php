@@ -119,7 +119,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     $badges[] = '<span class="badge bg-primary"><i class="fas fa-lock me-1"></i>System</span>';
                                 }
                                 if (!$receives_upgrades) {
-                                    $badges[] = '<span class="badge bg-warning">Preserved on deploy</span>';
+                                    $badges[] = '<span class="badge bg-warning">Upgrades disabled</span>';
                                 }
                                 $type_badge = implode(' ', $badges);
 
@@ -167,9 +167,9 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 if ($theme) {
                                     // System themes cannot be deleted, but receives_upgrades is independent.
                                     if ($receives_upgrades) {
-                                        $actions['Preserve on deploy'] = "javascript:submitAction('mark_preserved', '$theme_name')";
+                                        $actions['Disable upgrade'] = "javascript:submitAction('mark_preserved', '$theme_name')";
                                     } else {
-                                        $actions['Allow upgrade replacement'] = "javascript:submitAction('mark_upgradable', '$theme_name')";
+                                        $actions['Allow upgrade'] = "javascript:submitAction('mark_upgradable', '$theme_name')";
                                     }
 
                                     // Add delete option for non-system themes with missing files or inactive themes
@@ -205,17 +205,6 @@ $page->begin_box(array('altlinks' => $altlinks));
         </div>
     </div>
     
-    <div class="mt-3">
-        <p class="text-muted">
-            <strong>Notes:</strong>
-        </p>
-        <ul class="text-muted small">
-            <li><strong>System themes</strong> (lock icon) are required for the platform and cannot be deleted.</li>
-            <li><strong>receives_upgrades=true</strong> (default) — the theme is replaced from the upgrade payload during deploy.</li>
-            <li><strong>receives_upgrades=false</strong> ("Preserved on deploy" badge) — the on-disk copy is kept across deploys; the upgrade system will not overwrite it.</li>
-            <li>Deleting a theme permanently removes both the theme files and database record. The theme will not return on deployment.</li>
-        </ul>
-    </div>
 </div>
 
 <!-- Delete Confirmation Modal -->
@@ -286,7 +275,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                 This theme has <strong>receives_upgrades=true</strong>. If it is published by the upgrade server, it can be re-downloaded later.
             </div>
             <div id="preservedThemeWarning" class="alert alert-danger" style="display:none;">
-                <strong>WARNING:</strong> This theme is <strong>preserved on deploy</strong> (receives_upgrades=false). Deleting it removes a copy that the upgrade system will not re-download.
+                <strong>WARNING:</strong> This theme has upgrades disabled (receives_upgrades=false). Deleting it removes a copy that the upgrade system will not re-download.
             </div>
             <p style="color:var(--danger);"><strong>This action cannot be undone.</strong></p>
         </div>
