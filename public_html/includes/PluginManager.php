@@ -1083,8 +1083,8 @@ class PluginManager extends AbstractExtensionManager {
      *
      * @return array Sync result with keys: added, updated, total, table_messages, migration_messages
      */
-    public function sync() {
-        $result = parent::sync();
+    public function sync(array $options = array()) {
+        $result = parent::sync($options);
 
         // Update database tables and run migrations for all active plugins
         require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));

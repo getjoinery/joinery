@@ -390,13 +390,22 @@ abstract class AbstractExtensionManager {
      * Creates DB records for new filesystem extensions, updates metadata for existing ones.
      * Auto-deactivates ghost extensions (active in DB but directory missing).
      *
-     * @return array Result with counts: ['added' => array, 'updated' => array, 'total' => int]
+     * Optional $options:
+     *   'source_manifest' => string[]   Names of extensions advertised by the upgrade
+     *                                   source. Any DB row marked receives_upgrades=true
+     *                                   whose name is NOT in this list is flagged 'stale'.
+     *                                   Used by upgrade.php; the admin "Sync with
+     *                                   Filesystem" button calls sync() without it.
+     *
+     * @param array $options
+     * @return array Result with counts: ['added' => array, 'updated' => array,
+     *                                    'total' => int, 'stale_marked' => int]
      */
-    public function sync() {
+    public function sync(array $options = array()) {
         $extension_dir = PathHelper::getAbsolutePath($this->extension_dir);
         if (!is_dir($extension_dir)) {
             mkdir($extension_dir, 0775, true);
-            return array('added' => array(), 'updated' => array(), 'total' => 0);
+            return array('added' => array(), 'updated' => array(), 'total' => 0, 'stale_marked' => 0);
         }
 
         $added = array();
@@ -454,11 +463,49 @@ abstract class AbstractExtensionManager {
             }
         }
 
+        $stale_marked = 0;
+        if (isset($options['source_manifest']) && is_array($options['source_manifest'])) {
+            $stale_marked = $this->markStaleAgainstManifest($options['source_manifest']);
+        }
+
         return array(
             'added' => $added,
             'updated' => $updated,
-            'total' => count($added) + count($updated)
+            'total' => count($added) + count($updated),
+            'stale_marked' => $stale_marked,
         );
+    }
+
+    /**
+     * Flag DB rows as 'stale' when receives_upgrades=true but the extension is
+     * no longer advertised by the upgrade source's published-archive manifest.
+     * Rows already marked stale are left alone.
+     *
+     * @param string[] $source_names Extension names present in the source manifest
+     * @return int Number of rows newly marked stale
+     */
+    protected function markStaleAgainstManifest(array $source_names) {
+        $model_class = $this->model_class;
+        $table = $model_class::$tablename;
+        $prefix = $this->table_prefix;
+        $sql = "UPDATE {$table}
+                   SET {$prefix}_status = 'stale'
+                 WHERE {$prefix}_receives_upgrades = true
+                   AND {$prefix}_name <> ALL(?)
+                   AND {$prefix}_status <> 'stale'";
+
+        // Pass a Postgres array literal ({a,b,c}) so the <> ALL filter works,
+        // including when the manifest is empty (the literal becomes '{}' and
+        // every receives_upgrades=true row becomes stale, which is correct —
+        // the source is shipping nothing).
+        $literal = '{' . implode(',', array_map(function ($n) {
+            return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], (string)$n) . '"';
+        }, $source_names)) . '}';
+
+        $dblink = DbConnector::get_instance()->get_db_link();
+        $q = $dblink->prepare($sql);
+        $q->execute([$literal]);
+        return $q->rowCount();
     }
 
     /**
