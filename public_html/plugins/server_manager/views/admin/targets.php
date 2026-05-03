@@ -5,7 +5,7 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
- * @version 2.0
+ * @version 2.1
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -100,19 +100,19 @@ if ($_POST && isset($_POST['bkt_name'])) {
 			'endpoint' => $b2_endpoint,
 		];
 	} elseif ($provider === 's3') {
-		$region = trim($_POST['cred_region'] ?? 'us-east-1');
+		$region = trim($_POST['cred_s3_region'] ?? 'us-east-1');
 		$creds = [
-			'access_key' => trim($_POST['cred_access_key'] ?? ''),
-			'secret_key' => trim($_POST['cred_secret_key'] ?? ''),
+			'access_key' => trim($_POST['cred_s3_access_key'] ?? ''),
+			'secret_key' => trim($_POST['cred_s3_secret_key'] ?? ''),
 			'region' => $region,
 			'endpoint' => 'https://s3.' . $region . '.amazonaws.com',
 		];
 	} elseif ($provider === 'linode') {
 		$creds = [
-			'access_key' => trim($_POST['cred_access_key'] ?? ''),
-			'secret_key' => trim($_POST['cred_secret_key'] ?? ''),
-			'region' => trim($_POST['cred_region'] ?? 'us-east-1'),
-			'endpoint' => trim($_POST['cred_endpoint'] ?? ''),
+			'access_key' => trim($_POST['cred_linode_access_key'] ?? ''),
+			'secret_key' => trim($_POST['cred_linode_secret_key'] ?? ''),
+			'region' => trim($_POST['cred_linode_region'] ?? ''),
+			'endpoint' => trim($_POST['cred_linode_endpoint'] ?? ''),
 		];
 	}
 	$target->set('bkt_credentials', json_encode($creds));
@@ -223,123 +223,88 @@ if ($target !== null) {
 	$form_title = $is_edit ? 'Edit Target: ' . htmlspecialchars($target->get('bkt_name')) : 'Add Target';
 	$pageoptions = ['title' => $form_title];
 	$page->begin_box($pageoptions);
-?>
-	<form method="post">
-		<?php if ($is_edit): ?>
-			<input type="hidden" name="edit_primary_key_value" value="<?php echo $target->key; ?>">
-		<?php endif; ?>
 
-		<div class="row mb-3">
-			<div class="col-md-6">
-				<label class="form-label">Name *</label>
-				<input type="text" name="bkt_name" class="form-control" value="<?php echo htmlspecialchars($target->get('bkt_name') ?: ''); ?>" required placeholder="e.g., Production B2">
-			</div>
-			<div class="col-md-6">
-				<label class="form-label">Provider *</label>
-				<select name="bkt_provider" id="providerSelect" class="form-select" onchange="toggleProviderFields()">
-					<?php foreach ($provider_labels as $key => $label): ?>
-						<option value="<?php echo $key; ?>" <?php echo $current_provider === $key ? 'selected' : ''; ?>><?php echo $label; ?></option>
-					<?php endforeach; ?>
-				</select>
-			</div>
-		</div>
+	$formwriter = $page->getFormWriter('target_form', [
+		'values' => [
+			'bkt_name'               => $target->get('bkt_name') ?: '',
+			'bkt_provider'           => $current_provider,
+			'bkt_bucket'             => $target->get('bkt_bucket') ?: '',
+			'bkt_path_prefix'        => $target->get('bkt_path_prefix') ?: 'joinery-backups',
+			'cred_key_id'            => $creds['access_key'] ?? '',
+			'cred_app_key'           => $creds['secret_key'] ?? '',
+			'cred_s3_access_key'     => $current_provider === 's3' ? ($creds['access_key'] ?? '') : '',
+			'cred_s3_region'         => $current_provider === 's3' ? ($creds['region'] ?? 'us-east-1') : 'us-east-1',
+			'cred_linode_access_key' => $current_provider === 'linode' ? ($creds['access_key'] ?? '') : '',
+			'cred_linode_region'     => $current_provider === 'linode' ? ($creds['region'] ?? '') : '',
+			'cred_linode_endpoint'   => $current_provider === 'linode' ? ($creds['endpoint'] ?? '') : '',
+		],
+	]);
 
-		<div id="cloudFields">
-			<div class="row mb-3">
-				<div class="col-md-6">
-					<label class="form-label">Bucket Name *</label>
-					<input type="text" name="bkt_bucket" class="form-control" value="<?php echo htmlspecialchars($target->get('bkt_bucket') ?: ''); ?>" placeholder="my-backup-bucket">
-				</div>
-				<div class="col-md-6">
-					<label class="form-label">Path Prefix</label>
-					<input type="text" name="bkt_path_prefix" class="form-control" value="<?php echo htmlspecialchars($target->get('bkt_path_prefix') ?: 'joinery-backups'); ?>" placeholder="joinery-backups">
-					<small class="text-muted">Files stored at: bucket/prefix/node-slug/filename</small>
-				</div>
-			</div>
-
-			<!-- B2 Credentials -->
-			<div id="b2Fields" style="<?php echo $current_provider === 'b2' ? '' : 'display:none'; ?>">
-				<h6 class="text-muted mb-3">Backblaze B2 Credentials</h6>
-				<div class="row mb-3">
-					<div class="col-md-6">
-						<label class="form-label">Application Key ID</label>
-						<input type="text" name="cred_key_id" class="form-control" value="<?php echo htmlspecialchars($creds['access_key'] ?? ''); ?>">
-						<small class="text-muted">Create via Backblaze → Account → Application Keys. Must be a scoped key — the master account key will not work with the S3-compatible API.</small>
-					</div>
-					<div class="col-md-6">
-						<label class="form-label">Application Key</label>
-						<input type="password" name="cred_app_key" class="form-control" value="<?php echo htmlspecialchars($creds['secret_key'] ?? ''); ?>">
-						<small class="text-muted">Region is auto-detected on save.</small>
-					</div>
-				</div>
-			</div>
-
-			<!-- S3 Credentials -->
-			<div id="s3Fields" style="<?php echo $current_provider === 's3' ? '' : 'display:none'; ?>">
-				<h6 class="text-muted mb-3">Amazon S3 Credentials</h6>
-				<div class="row mb-3">
-					<div class="col-md-4">
-						<label class="form-label">Access Key</label>
-						<input type="text" name="cred_access_key" class="form-control" value="<?php echo htmlspecialchars($creds['access_key'] ?? ''); ?>">
-					</div>
-					<div class="col-md-4">
-						<label class="form-label">Secret Key</label>
-						<input type="password" name="cred_secret_key" class="form-control" value="<?php echo htmlspecialchars($creds['secret_key'] ?? ''); ?>">
-					</div>
-					<div class="col-md-4">
-						<label class="form-label">Region</label>
-						<input type="text" name="cred_region" class="form-control" value="<?php echo htmlspecialchars($creds['region'] ?? 'us-east-1'); ?>" placeholder="us-east-1">
-					</div>
-				</div>
-			</div>
-
-			<!-- Linode Credentials -->
-			<div id="linodeFields" style="<?php echo $current_provider === 'linode' ? '' : 'display:none'; ?>">
-				<h6 class="text-muted mb-3">Linode Object Storage Credentials</h6>
-				<div class="row mb-3">
-					<div class="col-md-3">
-						<label class="form-label">Access Key</label>
-						<input type="text" name="cred_access_key" class="form-control" value="<?php echo htmlspecialchars($creds['access_key'] ?? ''); ?>">
-					</div>
-					<div class="col-md-3">
-						<label class="form-label">Secret Key</label>
-						<input type="password" name="cred_secret_key" class="form-control" value="<?php echo htmlspecialchars($creds['secret_key'] ?? ''); ?>">
-					</div>
-					<div class="col-md-3">
-						<label class="form-label">Region</label>
-						<input type="text" name="cred_region" class="form-control" value="<?php echo htmlspecialchars($creds['region'] ?? ''); ?>" placeholder="us-east-1">
-					</div>
-					<div class="col-md-3">
-						<label class="form-label">Endpoint URL</label>
-						<input type="text" name="cred_endpoint" class="form-control" value="<?php echo htmlspecialchars($creds['endpoint'] ?? ''); ?>" placeholder="https://us-east-1.linodeobjects.com">
-					</div>
-				</div>
-			</div>
-		</div>
-
-		<div class="mb-3 form-check">
-			<input type="checkbox" name="bkt_enabled" class="form-check-input" id="targetEnabled" value="1" <?php echo ($target->key ? $target->get('bkt_enabled') : true) ? 'checked' : ''; ?>>
-			<label class="form-check-label" for="targetEnabled">Enabled</label>
-		</div>
-
-		<button type="submit" class="btn btn-primary"><?php echo $is_edit ? 'Save Changes' : 'Add Target'; ?></button>
-		<a href="/admin/server_manager/targets" class="btn btn-outline-secondary ms-2">Cancel</a>
-
-		<?php if ($is_edit): ?>
-			<a href="/admin/server_manager/targets?bkt_id=<?php echo $target->key; ?>&action=delete" class="btn btn-outline-danger ms-2" onclick="return confirm('Delete this target?')">Delete</a>
-		<?php endif; ?>
-	</form>
-
-	<script>
-	function toggleProviderFields() {
-		var provider = document.getElementById('providerSelect').value;
-		document.getElementById('b2Fields').style.display = provider === 'b2' ? '' : 'none';
-		document.getElementById('s3Fields').style.display = provider === 's3' ? '' : 'none';
-		document.getElementById('linodeFields').style.display = provider === 'linode' ? '' : 'none';
+	$formwriter->begin_form();
+	if ($is_edit) {
+		$formwriter->hiddeninput('edit_primary_key_value', '', ['value' => $target->key]);
 	}
-	</script>
 
-<?php
+	$formwriter->textinput('bkt_name', 'Name', [
+		'required'    => true,
+		'placeholder' => 'e.g., Production B2',
+	]);
+	$formwriter->dropinput('bkt_provider', 'Provider', [
+		'options'       => $provider_labels,
+		'custom_script' => "
+			var p = this.value;
+			document.getElementById('b2Fields').style.display     = p === 'b2'     ? '' : 'none';
+			document.getElementById('s3Fields').style.display     = p === 's3'     ? '' : 'none';
+			document.getElementById('linodeFields').style.display = p === 'linode' ? '' : 'none';
+		",
+	]);
+	$formwriter->textinput('bkt_bucket', 'Bucket Name', [
+		'placeholder' => 'my-backup-bucket',
+	]);
+	$formwriter->textinput('bkt_path_prefix', 'Path Prefix', [
+		'placeholder' => 'joinery-backups',
+		'helptext'    => 'Files stored at: bucket/prefix/node-slug/filename',
+	]);
+
+	// ── B2 Credentials ──
+	echo '<div id="b2Fields" style="' . ($current_provider === 'b2' ? '' : 'display:none') . '">';
+	echo '<p class="fw-semibold text-muted mt-2 mb-1">Backblaze B2 Credentials</p>';
+	$formwriter->textinput('cred_key_id', 'Application Key ID', [
+		'helptext' => 'Create via Backblaze → Account → Application Keys. Must be a scoped key — the master account key will not work with the S3-compatible API.',
+	]);
+	$formwriter->passwordinput('cred_app_key', 'Application Key', [
+		'helptext' => 'Region is auto-detected on save.',
+	]);
+	echo '</div>';
+
+	// ── S3 Credentials ──
+	echo '<div id="s3Fields" style="' . ($current_provider === 's3' ? '' : 'display:none') . '">';
+	echo '<p class="fw-semibold text-muted mt-2 mb-1">Amazon S3 Credentials</p>';
+	$formwriter->textinput('cred_s3_access_key', 'Access Key');
+	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key');
+	$formwriter->textinput('cred_s3_region', 'Region', ['placeholder' => 'us-east-1']);
+	echo '</div>';
+
+	// ── Linode Credentials ──
+	echo '<div id="linodeFields" style="' . ($current_provider === 'linode' ? '' : 'display:none') . '">';
+	echo '<p class="fw-semibold text-muted mt-2 mb-1">Linode Object Storage Credentials</p>';
+	$formwriter->textinput('cred_linode_access_key', 'Access Key');
+	$formwriter->passwordinput('cred_linode_secret_key', 'Secret Key');
+	$formwriter->textinput('cred_linode_region', 'Region', ['placeholder' => 'us-east-1']);
+	$formwriter->textinput('cred_linode_endpoint', 'Endpoint URL', ['placeholder' => 'https://us-east-1.linodeobjects.com']);
+	echo '</div>';
+
+	$formwriter->checkboxinput('bkt_enabled', 'Enabled', [
+		'checked' => (bool)($target->key ? $target->get('bkt_enabled') : true),
+	]);
+	$formwriter->submitbutton('btn_submit', $is_edit ? 'Save Changes' : 'Add Target');
+	$formwriter->end_form();
+
+	echo '<a href="/admin/server_manager/targets" class="btn btn-outline-secondary ms-2">Cancel</a>';
+	if ($is_edit) {
+		echo '<a href="/admin/server_manager/targets?bkt_id=' . $target->key . '&action=delete" class="btn btn-outline-danger ms-2" onclick="return confirm(\'Delete this target?\')">Delete</a>';
+	}
+
 	$page->end_box();
 }
 

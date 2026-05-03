@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.0
+ * @version 1.1 - Forms converted to FormWriter
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -864,39 +864,39 @@ if ($tab === 'overview') {
 	$pageoptions = ['title' => 'Run Backup'];
 	$page->begin_box($pageoptions);
 	$require_encryption = ($target_provider === 'b2');
-?>
+	?>
 	<div class="row">
 		<div class="col-md-6">
 			<h6>Database Backup</h6>
-			<form method="post">
-				<input type="hidden" name="action" value="backup_database">
-				<?php if ($require_encryption): ?>
-					<input type="hidden" name="encryption" value="1">
-					<div class="mb-2"><small class="text-muted">Encryption required for Backblaze B2 targets</small></div>
-				<?php else: ?>
-					<div class="mb-2 form-check">
-						<input type="checkbox" name="encryption" class="form-check-input" id="db_encrypt" checked>
-						<label class="form-check-label" for="db_encrypt">Encrypt backup</label>
-					</div>
-				<?php endif; ?>
-				<button type="submit" class="btn btn-sm btn-primary">Run Database Backup</button>
-			</form>
+			<?php
+			$fw_db = $page->getFormWriter('backup_db_form');
+			$fw_db->begin_form();
+			$fw_db->hiddeninput('action', '', ['id' => 'db_backup_action', 'value' => 'backup_database']);
+			if ($require_encryption) {
+				$fw_db->hiddeninput('encryption', '', ['value' => '1']);
+				echo '<p class="text-muted small">Encryption required for Backblaze B2 targets</p>';
+			} else {
+				$fw_db->checkboxinput('encryption', 'Encrypt backup', ['checked' => true, 'id' => 'db_encrypt']);
+			}
+			$fw_db->submitbutton('btn_db_backup', 'Run Database Backup', ['class' => 'btn btn-sm btn-primary']);
+			$fw_db->end_form();
+			?>
 		</div>
 		<div class="col-md-6">
 			<h6>Full Project Backup</h6>
-			<form method="post">
-				<input type="hidden" name="action" value="backup_project">
-				<?php if ($require_encryption): ?>
-					<input type="hidden" name="encryption" value="1">
-					<div class="mb-2"><small class="text-muted">Encryption required for Backblaze B2 targets</small></div>
-				<?php else: ?>
-					<div class="mb-2 form-check">
-						<input type="checkbox" name="encryption" class="form-check-input" id="proj_encrypt" checked>
-						<label class="form-check-label" for="proj_encrypt">Encrypt backup</label>
-					</div>
-				<?php endif; ?>
-				<button type="submit" class="btn btn-sm btn-primary">Run Project Backup</button>
-			</form>
+			<?php
+			$fw_proj = $page->getFormWriter('backup_proj_form');
+			$fw_proj->begin_form();
+			$fw_proj->hiddeninput('action', '', ['id' => 'proj_backup_action', 'value' => 'backup_project']);
+			if ($require_encryption) {
+				$fw_proj->hiddeninput('encryption', '', ['value' => '1']);
+				echo '<p class="text-muted small">Encryption required for Backblaze B2 targets</p>';
+			} else {
+				$fw_proj->checkboxinput('encryption', 'Encrypt backup', ['checked' => true, 'id' => 'proj_encrypt']);
+			}
+			$fw_proj->submitbutton('btn_proj_backup', 'Run Project Backup', ['class' => 'btn btn-sm btn-primary']);
+			$fw_proj->end_form();
+			?>
 		</div>
 	</div>
 <?php
@@ -997,40 +997,40 @@ if ($tab === 'overview') {
 ?>
 	<div id="restoreModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.5);" onclick="if(event.target===this) closeRestoreModal();">
 		<div style="max-width:500px; margin:10vh auto; background:white; border-radius:.5rem; box-shadow:0 .5rem 1rem rgba(0,0,0,.2);">
-			<form method="post" id="restoreForm">
-				<input type="hidden" name="action" id="rm_action" value="">
-				<input type="hidden" name="backup_filename" id="rm_filename" value="">
-				<input type="hidden" name="backup_local_path" id="rm_local_path" value="">
-				<input type="hidden" name="backup_cloud_path" id="rm_cloud_path" value="">
-				<div style="padding:1rem 1.25rem; border-bottom:1px solid #dee2e6; display:flex; justify-content:space-between; align-items:center;">
-					<h5 style="margin:0">Restore from <code id="rm_title"></code></h5>
-					<button type="button" class="btn-close" aria-label="Close" onclick="closeRestoreModal();" style="background:none;border:none;font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
-				</div>
-				<div style="padding:1.25rem;">
-					<p class="text-muted small">
-						A pre-restore snapshot of the current database and project files is written to
-						<code>/backups/auto_pre_project_restore_*</code> before the restore runs.
-					</p>
-					<label class="form-label">What to restore</label>
-					<div class="form-check" id="rm_files_wrap">
-						<input type="checkbox" class="form-check-input restore-component" id="rm_files" name="restore_files" checked>
-						<label class="form-check-label" for="rm_files">Project files (<code><?php echo htmlspecialchars($node->get('mgn_web_root')); ?></code>)</label>
-					</div>
-					<div class="form-check" id="rm_database_wrap">
-						<input type="checkbox" class="form-check-input restore-component" id="rm_database" name="restore_database" checked>
-						<label class="form-check-label" for="rm_database">Database</label>
-					</div>
-					<div class="form-check" id="rm_apache_wrap">
-						<input type="checkbox" class="form-check-input restore-component" id="rm_apache" name="restore_apache" checked>
-						<label class="form-check-label" for="rm_apache">Apache config</label>
-					</div>
-					<div id="rm_component_error" class="text-danger small mt-2" style="display:none">Select at least one component.</div>
-				</div>
-				<div style="padding:.75rem 1.25rem; border-top:1px solid #dee2e6; text-align:right;">
-					<button type="button" class="btn btn-secondary" onclick="closeRestoreModal();">Cancel</button>
-					<button type="submit" class="btn btn-danger" onclick="return submitRestoreModal();">Restore</button>
-				</div>
-			</form>
+			<?php
+			$fw_restore = $page->getFormWriter('restoreForm');
+			$fw_restore->begin_form();
+			$fw_restore->hiddeninput('action', '', ['id' => 'rm_action', 'value' => '']);
+			$fw_restore->hiddeninput('backup_filename', '', ['id' => 'rm_filename', 'value' => '']);
+			$fw_restore->hiddeninput('backup_local_path', '', ['id' => 'rm_local_path', 'value' => '']);
+			$fw_restore->hiddeninput('backup_cloud_path', '', ['id' => 'rm_cloud_path', 'value' => '']);
+			?>
+			<div style="padding:1rem 1.25rem; border-bottom:1px solid #dee2e6; display:flex; justify-content:space-between; align-items:center;">
+				<h5 style="margin:0">Restore from <code id="rm_title"></code></h5>
+				<button type="button" class="btn-close" aria-label="Close" onclick="closeRestoreModal();" style="background:none;border:none;font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
+			</div>
+			<div style="padding:1.25rem;">
+				<p class="text-muted small">
+					A pre-restore snapshot of the current database and project files is written to
+					<code>/backups/auto_pre_project_restore_*</code> before the restore runs.
+				</p>
+				<label class="form-label">What to restore</label>
+				<?php
+				echo '<div id="rm_files_wrap">';
+				$fw_restore->checkboxinput('restore_files', 'Project files (<code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code>)', ['checked' => true, 'id' => 'rm_files']);
+				echo '</div>';
+				$fw_restore->checkboxinput('restore_database', 'Database', ['checked' => true, 'id' => 'rm_database']);
+				echo '<div id="rm_apache_wrap">';
+				$fw_restore->checkboxinput('restore_apache', 'Apache config', ['checked' => true, 'id' => 'rm_apache']);
+				echo '</div>';
+				?>
+				<div id="rm_component_error" class="text-danger small mt-2" style="display:none">Select at least one component.</div>
+			</div>
+			<div style="padding:.75rem 1.25rem; border-top:1px solid #dee2e6; text-align:right;">
+				<button type="button" class="btn btn-secondary" onclick="closeRestoreModal();">Cancel</button>
+				<button type="submit" class="btn btn-danger" onclick="return submitRestoreModal();">Restore</button>
+			</div>
+			<?php $fw_restore->end_form(); ?>
 		</div>
 	</div>
 
@@ -1123,7 +1123,7 @@ function submitRestoreModal() {
 	var fn = document.getElementById('rm_filename').value || 'the selected backup';
 
 	if (action === 'restore_project') {
-		var boxes = document.querySelectorAll('#restoreForm .restore-component:checked');
+		var boxes = document.querySelectorAll('#restoreForm input[type=checkbox]:checked');
 		var err = document.getElementById('rm_component_error');
 		if (boxes.length === 0) {
 			err.style.display = 'block';
@@ -1187,32 +1187,28 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 
 	$pageoptions = ['title' => 'Copy Database to ' . $node_name];
 	$page->begin_box($pageoptions);
-?>
-	<form method="post">
-		<input type="hidden" name="action" value="copy_database">
-		<div class="row mb-3">
-			<div class="col-md-5">
-				<label class="form-label"><strong>Source Site</strong></label>
-				<select name="source_node_id" class="form-select" required>
-					<option value="">Select source...</option>
-					<?php foreach ($other_nodes as $n): ?>
-						<?php if ($n->key != $node->key): ?>
-							<option value="<?php echo $n->key; ?>"><?php echo htmlspecialchars($n->get('mgn_name')); ?> (<?php echo htmlspecialchars($n->get('mgn_slug')); ?>)</option>
-						<?php endif; ?>
-					<?php endforeach; ?>
-				</select>
-			</div>
-			<div class="col-md-2 text-center align-self-end">
-				<p class="mb-2"><strong>&rarr;</strong></p>
-			</div>
-			<div class="col-md-5">
-				<label class="form-label"><strong>Target</strong> (this node)</label>
-				<input type="text" class="form-control" value="<?php echo $node_name; ?> (<?php echo htmlspecialchars($node->get('mgn_slug')); ?>)" disabled>
-			</div>
-		</div>
-		<button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will overwrite the database on <?php echo $node_name; ?>.')">Copy Database</button>
-	</form>
-<?php
+
+	// Build source node options (exclude current node)
+	$copy_source_options = ['' => 'Select source...'];
+	foreach ($other_nodes as $n) {
+		if ($n->key != $node->key) {
+			$copy_source_options[$n->key] = $n->get('mgn_name') . ' (' . $n->get('mgn_slug') . ')';
+		}
+	}
+	$fw_copy = $page->getFormWriter('copy_db_form');
+	$fw_copy->begin_form();
+	$fw_copy->hiddeninput('action', '', ['id' => 'copy_db_action', 'value' => 'copy_database']);
+	$fw_copy->dropinput('source_node_id', 'Source Site', [
+		'required'     => true,
+		'options'      => $copy_source_options,
+		'empty_option' => false,
+		'helptext'     => 'Copies into: ' . htmlspecialchars($node_name) . ' (' . htmlspecialchars($node->get('mgn_slug')) . ')',
+	]);
+	$fw_copy->submitbutton('btn_copy_db', 'Copy Database', [
+		'class'   => 'btn btn-danger',
+		'onclick' => 'return confirm(\'Are you sure? This will overwrite the database on ' . addslashes($node_name) . '.\')',
+	]);
+	$fw_copy->end_form();
 	$page->end_box();
 
 	$pageoptions = ['title' => 'Internal Copy'];
@@ -1226,30 +1222,26 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 		<p class="text-muted">Run <strong>Check Status</strong> from the Overview tab to discover databases on this server.</p>
 	<?php elseif (empty($other_dbs)): ?>
 		<p class="text-muted">No other databases found on this server<?php echo $current_db ? " (current: <strong>" . htmlspecialchars($current_db) . "</strong>)" : ''; ?>.</p>
-	<?php else: ?>
-		<form method="post">
-			<input type="hidden" name="action" value="copy_database_local">
-			<div class="row mb-3">
-				<div class="col-md-5">
-					<label class="form-label"><strong>Source Database</strong></label>
-					<select name="source_db_name" class="form-select" required>
-						<option value="">Select source...</option>
-						<?php foreach ($other_dbs as $db): ?>
-							<option value="<?php echo htmlspecialchars($db); ?>"><?php echo htmlspecialchars($db); ?></option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<div class="col-md-2 text-center align-self-end">
-					<p class="mb-2"><strong>&rarr;</strong></p>
-				</div>
-				<div class="col-md-5">
-					<label class="form-label"><strong>Target</strong> (this node)</label>
-					<input type="text" class="form-control" value="<?php echo $current_db ? htmlspecialchars($current_db) : $node_name; ?>" disabled>
-				</div>
-			</div>
-			<button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure? This will overwrite the database on <?php echo $node_name; ?>.')">Copy Database</button>
-		</form>
-	<?php endif; ?>
+	<?php else:
+		$internal_db_options = ['' => 'Select source...'];
+		foreach ($other_dbs as $db) {
+			$internal_db_options[$db] = $db;
+		}
+		$fw_icopy = $page->getFormWriter('internal_copy_form');
+		$fw_icopy->begin_form();
+		$fw_icopy->hiddeninput('action', '', ['id' => 'icopy_db_action', 'value' => 'copy_database_local']);
+		$fw_icopy->dropinput('source_db_name', 'Source Database', [
+			'required'     => true,
+			'options'      => $internal_db_options,
+			'empty_option' => false,
+			'helptext'     => 'Copies into: ' . htmlspecialchars($current_db ?: $node_name),
+		]);
+		$fw_icopy->submitbutton('btn_icopy_db', 'Copy Database', [
+			'class'   => 'btn btn-danger',
+			'onclick' => 'return confirm(\'Are you sure? This will overwrite the database on ' . addslashes($node_name) . '.\')',
+		]);
+		$fw_icopy->end_form();
+	endif; ?>
 <?php
 	$page->end_box();
 
@@ -1373,35 +1365,34 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 ?>
 	<div class="card mb-3">
 		<div class="card-body">
-			<form method="get" class="row g-2 align-items-end">
-				<input type="hidden" name="mgn_id" value="<?php echo $node->key; ?>">
-				<input type="hidden" name="tab" value="jobs">
-				<div class="col-auto">
-					<label class="form-label">Status</label>
-					<select name="status" class="form-select form-select-sm">
-						<option value="">All</option>
-						<?php foreach (['pending', 'running', 'completed', 'failed', 'cancelled'] as $s): ?>
-							<option value="<?php echo $s; ?>" <?php echo (isset($_GET['status']) && $_GET['status'] === $s) ? 'selected' : ''; ?>><?php echo ucfirst($s); ?></option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<div class="col-auto">
-					<label class="form-label">Type</label>
-					<select name="job_type" class="form-select form-select-sm">
-						<option value="">All</option>
-						<?php foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update'] as $t): ?>
-							<option value="<?php echo $t; ?>" <?php echo (isset($_GET['job_type']) && $_GET['job_type'] === $t) ? 'selected' : ''; ?>><?php echo str_replace('_', ' ', $t); ?></option>
-						<?php endforeach; ?>
-					</select>
-				</div>
-				<div class="col-auto">
-					<button type="submit" class="btn btn-sm btn-primary">Filter</button>
-					<a href="<?php echo $base_url; ?>&tab=jobs" class="btn btn-sm btn-outline-secondary">Clear</a>
-				</div>
-				<div class="col-auto ms-auto">
-					<a href="/admin/server_manager/jobs" class="btn btn-sm btn-outline-secondary">View All Jobs</a>
-				</div>
-			</form>
+			<?php
+			$status_options = ['' => 'All'];
+			foreach (['pending', 'running', 'completed', 'failed', 'cancelled'] as $s) {
+				$status_options[$s] = ucfirst($s);
+			}
+			$type_options = ['' => 'All'];
+			foreach (['check_status', 'backup_database', 'backup_project', 'fetch_backup', 'copy_database', 'copy_database_local', 'restore_database', 'restore_project', 'apply_update'] as $t) {
+				$type_options[$t] = str_replace('_', ' ', $t);
+			}
+			$fw_filter = $page->getFormWriter('jobs_filter_form', ['method' => 'GET']);
+			$fw_filter->begin_form();
+			$fw_filter->hiddeninput('mgn_id', '', ['value' => $node->key]);
+			$fw_filter->hiddeninput('tab', '', ['value' => 'jobs']);
+			$fw_filter->dropinput('status', 'Status', [
+				'options'      => $status_options,
+				'value'        => $_GET['status'] ?? '',
+				'empty_option' => false,
+			]);
+			$fw_filter->dropinput('job_type', 'Type', [
+				'options'      => $type_options,
+				'value'        => $_GET['job_type'] ?? '',
+				'empty_option' => false,
+			]);
+			$fw_filter->submitbutton('btn_filter', 'Filter', ['class' => 'btn btn-sm btn-primary']);
+			$fw_filter->end_form();
+			?>
+			<a href="<?php echo $base_url; ?>&tab=jobs" class="btn btn-sm btn-outline-secondary">Clear</a>
+			<a href="/admin/server_manager/jobs" class="btn btn-sm btn-outline-secondary ms-2">View All Jobs</a>
 		</div>
 	</div>
 <?php
@@ -1468,38 +1459,37 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 		echo '<div class="mb-2"><span class="badge bg-secondary">Not configured</span> <span class="text-muted small ms-2">Jobs route via SSH.</span></div>';
 	}
 
-	echo '<form method="post">';
-	echo '<input type="hidden" name="action" value="save_api_credential">';
-	echo '<div class="mb-2">';
-	echo '<label class="form-label small text-muted">Public key</label>';
-	echo '<input type="text" name="mgn_api_public_key" class="form-control form-control-sm" '
-	   . 'value="' . htmlspecialchars($node->get('mgn_api_public_key') ?? '') . '" '
-	   . 'placeholder="paste public_key here">';
-	echo '</div>';
-	echo '<div class="mb-2">';
-	echo '<label class="form-label small text-muted">Secret key</label>';
-	echo '<input type="password" name="mgn_api_secret_key" class="form-control form-control-sm" '
-	   . 'placeholder="' . ($has_api_sec ? '(leave blank to keep current secret)' : 'paste secret_key here') . '">';
-	echo '</div>';
-	echo '<div class="mb-3 form-check">';
-	echo '<input type="checkbox" name="mgn_tls_insecure" class="form-check-input" id="mgn_tls_insecure"' . ($api_tls_insecure ? ' checked' : '') . '>';
-	echo '<label class="form-check-label small" for="mgn_tls_insecure">Skip TLS certificate verification ';
-	echo '<span class="text-muted">(only for dev/local instances without a cert from a trusted CA)</span></label>';
-	echo '</div>';
+	$fw_api = $page->getFormWriter('api_keys_form', [
+		'values' => [
+			'mgn_api_public_key' => $node->get('mgn_api_public_key') ?? '',
+		],
+	]);
+	$fw_api->begin_form();
+	$fw_api->hiddeninput('action', '', ['id' => 'api_save_action', 'value' => 'save_api_credential']);
+	$fw_api->textinput('mgn_api_public_key', 'Public key', [
+		'placeholder' => 'paste public_key here',
+	]);
+	$fw_api->passwordinput('mgn_api_secret_key', 'Secret key', [
+		'placeholder' => $has_api_sec ? '(leave blank to keep current secret)' : 'paste secret_key here',
+	]);
+	$fw_api->checkboxinput('mgn_tls_insecure', 'Skip TLS certificate verification (only for dev/local instances without a trusted CA cert)', [
+		'checked' => (bool)$api_tls_insecure,
+	]);
 	if ($api_tls_insecure) {
 		echo '<div class="alert alert-warning py-2 small"><strong>TLS verification disabled.</strong> Do not use for nodes reachable from the public internet.</div>';
 	}
-	echo '<button type="submit" class="btn btn-sm btn-primary">Save</button>';
+	$fw_api->submitbutton('btn_api_save', 'Save', ['class' => 'btn btn-sm btn-primary']);
+	$fw_api->end_form();
 	if ($has_api_pub) {
-		echo ' <button type="submit" form="clearApiCredential" class="btn btn-sm btn-outline-danger" '
+		echo ' <button type="submit" form="api_keys_clear_form" class="btn btn-sm btn-outline-danger" '
 		   . 'onclick="return confirm(\'Clear API credentials? Jobs will fall back to SSH.\')">Clear</button>';
 	}
-	echo '</form>';
 
 	if ($has_api_pub) {
-		echo '<form method="post" id="clearApiCredential" style="display:none">';
-		echo '<input type="hidden" name="action" value="clear_api_credential">';
-		echo '</form>';
+		$fw_api_clear = $page->getFormWriter('api_keys_clear_form');
+		$fw_api_clear->begin_form();
+		$fw_api_clear->hiddeninput('action', '', ['id' => 'api_clear_action', 'value' => 'clear_api_credential']);
+		$fw_api_clear->end_form();
 	}
 	$page->end_box();
 
