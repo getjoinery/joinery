@@ -6,7 +6,7 @@
  * One-click node provisioning: creates a ManagedNode, queues an install_node job,
  * redirects to the job detail page.
  *
- * @version 1.0
+ * @version 1.1 - Host dropdown pre-fills SSH fields from existing nodes; raw fields moved to Advanced
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -25,7 +25,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		$mode = $_POST['install_mode'] ?? 'fresh';
 		$sitename = trim($_POST['sitename'] ?? '');
 		$docker_mode = $_POST['docker_mode'] ?? '';
-		$port = intval($_POST['port'] ?? 0) ?: 8080;
 
 		if (!$sitename) {
 			throw new Exception('Site name is required.');
@@ -37,31 +36,37 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			throw new Exception('Choose Docker or Bare-metal.');
 		}
 
-		// Determine domain
+		// Determine domain — always required regardless of mode
+		$domain = trim($_POST['domain'] ?? '');
+		if (!$domain) {
+			throw new Exception('Domain is required.');
+		}
+
 		if ($mode === 'fresh') {
-			$domain = trim($_POST['domain'] ?? '');
-			if (!$domain) {
-				throw new Exception('Domain is required for fresh install.');
-			}
 			$source_node_id = 0;
 		} else {
 			$source_node_id = intval($_POST['source_node_id'] ?? 0);
 			if (!$source_node_id) {
 				throw new Exception('Source node is required for from-backup install.');
 			}
-			$source_node = new ManagedNode($source_node_id, TRUE);
-			// Source site_url like https://example.com -> example.com
-			$source_url = $source_node->get('mgn_site_url');
-			$domain = parse_url($source_url, PHP_URL_HOST);
-			if (!$domain) {
-				throw new Exception("Source node has no site URL configured; cannot derive domain.");
-			}
+		}
+
+		// Generate slug from display name; append counter if collision
+		$base_slug = strtolower(trim($_POST['mgn_name']));
+		$base_slug = preg_replace('/[^a-z0-9]+/', '-', $base_slug);
+		$base_slug = trim($base_slug, '-') ?: 'node';
+		$slug = $base_slug;
+		$counter = 2;
+		$existing_check = new MultiManagedNode(['slug' => $slug, 'deleted' => false]);
+		while ($existing_check->count_all() > 0) {
+			$slug = $base_slug . '-' . $counter++;
+			$existing_check = new MultiManagedNode(['slug' => $slug, 'deleted' => false]);
 		}
 
 		// Create the node record
 		$node = new ManagedNode(NULL);
 		$node->set('mgn_name', trim($_POST['mgn_name']));
-		$node->set('mgn_slug', trim($_POST['mgn_slug']));
+		$node->set('mgn_slug', $slug);
 		$node->set('mgn_host', trim($_POST['mgn_host']));
 		$node->set('mgn_ssh_user', trim($_POST['mgn_ssh_user']) ?: 'root');
 		$node->set('mgn_ssh_key_path', trim($_POST['mgn_ssh_key_path']));
@@ -83,7 +88,6 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			'sitename' => $sitename,
 			'domain' => $domain,
 			'docker_mode' => $docker_mode,
-			'port' => $port,
 		];
 		if ($mode === 'from_backup') {
 			$params['source_node_id'] = $source_node_id;
@@ -109,7 +113,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	}
 }
 
-// Existing nodes — used as source options for from-backup mode
+// Existing nodes — used as source options for from-backup mode and host dropdown
 $existing_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
 $existing_nodes->load();
 
@@ -120,6 +124,28 @@ foreach ($existing_nodes as $en) {
 	$bl = BackupListHelper::get_for_node($en);
 	$backup_lists[$en->key] = $bl['files'];
 }
+
+// Build known hosts from existing nodes, grouped by SSH host IP
+$known_hosts_map = [];
+foreach ($existing_nodes as $en) {
+	$host = $en->get('mgn_host');
+	if (!$host) continue;
+	if (!isset($known_hosts_map[$host])) {
+		$known_hosts_map[$host] = [
+			'host'         => $host,
+			'ssh_user'     => $en->get('mgn_ssh_user') ?: 'root',
+			'ssh_key_path' => $en->get('mgn_ssh_key_path') ?: $default_ssh_key,
+			'ssh_port'     => intval($en->get('mgn_ssh_port') ?: 22),
+			'slugs'        => [],
+			'is_docker'    => false,
+		];
+	}
+	$known_hosts_map[$host]['slugs'][] = $en->get('mgn_slug');
+	if ($en->get('mgn_container_name')) {
+		$known_hosts_map[$host]['is_docker'] = true;
+	}
+}
+$known_hosts = array_values($known_hosts_map);
 
 $page = new AdminPage();
 $page->admin_header([
@@ -138,42 +164,66 @@ if ($error) {
 }
 ?>
 
-<p class="text-muted">Provision a fresh Joinery site on a remote SSH-accessible server. The target must be reachable via SSH with passwordless sudo or root access.</p>
+<form method="post" class="p-3">
 
-<form method="post" class="card p-3">
-
-	<h6 class="text-muted mb-3">SSH Connection</h6>
+	<label class="form-label fw-semibold d-block">New Site Info</label>
 
 	<div class="row g-3 mb-3">
 		<div class="col-md-6">
 			<label class="form-label">Display Name *</label>
-			<input type="text" name="mgn_name" class="form-control" required maxlength="100" placeholder="e.g., Staging Box">
-		</div>
-		<div class="col-md-6">
-			<label class="form-label">Slug *</label>
-			<input type="text" name="mgn_slug" class="form-control" required maxlength="50" placeholder="e.g., staging">
-		</div>
-		<div class="col-md-5">
-			<label class="form-label">SSH Host *</label>
-			<input type="text" name="mgn_host" class="form-control" required placeholder="23.239.11.53 or server.example.com">
-		</div>
-		<div class="col-md-3">
-			<label class="form-label">SSH User</label>
-			<input type="text" name="mgn_ssh_user" class="form-control" value="root">
-		</div>
-		<div class="col-md-3">
-			<label class="form-label">SSH Key Path *</label>
-			<input type="text" name="mgn_ssh_key_path" class="form-control" required value="<?php echo htmlspecialchars($default_ssh_key); ?>">
-		</div>
-		<div class="col-md-1">
-			<label class="form-label">Port</label>
-			<input type="number" name="mgn_ssh_port" class="form-control" value="22" min="1" max="65535">
+			<input type="text" name="mgn_name" class="form-control" required maxlength="100"
+				value="<?php echo htmlspecialchars($_POST['mgn_name'] ?? ''); ?>"
+				placeholder="e.g., Getjoinery Orgs">
 		</div>
 	</div>
 
-	<h6 class="text-muted mt-3 mb-3">Site Settings</h6>
+	<label class="form-label fw-semibold d-block mt-4">Target Host</label>
 
-	<div class="row g-3 mb-3">
+	<?php if (!empty($known_hosts)): ?>
+	<div class="mb-3">
+		<select id="host_dropdown" class="form-select" onchange="applyHostPreset()">
+			<option value="">-- Select a known host --</option>
+			<?php foreach ($known_hosts as $kh):
+				$preview = implode(', ', array_slice($kh['slugs'], 0, 3));
+				if (count($kh['slugs']) > 3) $preview .= ', +' . (count($kh['slugs']) - 3) . ' more';
+				$selected = (($_POST['mgn_host'] ?? '') === $kh['host']) ? 'selected' : '';
+			?>
+				<option value="<?php echo htmlspecialchars($kh['host']); ?>" <?php echo $selected; ?>>
+					<?php echo htmlspecialchars($kh['host']); ?> — <?php echo htmlspecialchars($preview); ?>
+				</option>
+			<?php endforeach; ?>
+			<option value="__custom__" <?php echo (!empty($_POST['mgn_host']) && !isset($known_hosts_map[$_POST['mgn_host']])) ? 'selected' : ''; ?>>Other (enter manually)</option>
+		</select>
+	</div>
+	<?php endif; ?>
+
+	<div id="ssh_fields" style="display:<?php echo (!empty($known_hosts) && empty($_POST)) ? 'none' : 'block'; ?>">
+		<div class="row g-3 mb-3">
+				<div class="col-md-5">
+					<label class="form-label">SSH Host *</label>
+					<input type="text" id="mgn_host" name="mgn_host" class="form-control" required
+						value="<?php echo htmlspecialchars($_POST['mgn_host'] ?? ''); ?>"
+						placeholder="23.239.11.53 or server.example.com">
+				</div>
+				<div class="col-md-3">
+					<label class="form-label">SSH User</label>
+					<input type="text" id="mgn_ssh_user" name="mgn_ssh_user" class="form-control"
+						value="<?php echo htmlspecialchars($_POST['mgn_ssh_user'] ?? 'root'); ?>">
+				</div>
+				<div class="col-md-3">
+					<label class="form-label">SSH Key Path *</label>
+					<input type="text" id="mgn_ssh_key_path" name="mgn_ssh_key_path" class="form-control" required
+						value="<?php echo htmlspecialchars($_POST['mgn_ssh_key_path'] ?? $default_ssh_key); ?>">
+				</div>
+				<div class="col-md-1">
+					<label class="form-label">Port</label>
+					<input type="number" id="mgn_ssh_port" name="mgn_ssh_port" class="form-control"
+						value="<?php echo intval($_POST['mgn_ssh_port'] ?? 22); ?>" min="1" max="65535">
+				</div>
+		</div>
+	</div>
+
+	<div class="row g-3 mt-4 mb-3">
 		<div class="col-md-6">
 			<label class="form-label">Site Name *</label>
 			<input type="text" name="sitename" class="form-control" required pattern="[a-z0-9_]+" placeholder="e.g., mysite">
@@ -182,25 +232,18 @@ if ($error) {
 		<div class="col-md-6">
 			<label class="form-label">Deployment Mode *</label>
 			<div class="form-check">
-				<input class="form-check-input" type="radio" name="docker_mode" id="dm_docker" value="docker" onchange="togglePort()" required>
+				<input class="form-check-input" type="radio" name="docker_mode" id="dm_docker" value="docker" required>
 				<label class="form-check-label" for="dm_docker"><strong>Docker</strong> — each site in its own container (<code>install.sh docker</code> bootstraps Docker if missing)</label>
 			</div>
 			<div class="form-check">
-				<input class="form-check-input" type="radio" name="docker_mode" id="dm_bare" value="bare-metal" onchange="togglePort()">
+				<input class="form-check-input" type="radio" name="docker_mode" id="dm_bare" value="bare-metal">
 				<label class="form-check-label" for="dm_bare"><strong>Bare-metal</strong> — Apache + PostgreSQL + PHP directly on host (<code>install.sh server</code> installs prereqs if missing)</label>
 			</div>
 		</div>
 	</div>
 
-	<div id="port_row" class="row g-3 mb-3" style="display:none">
-		<div class="col-md-3">
-			<label class="form-label">Docker Port</label>
-			<input type="number" name="port" class="form-control" value="8080" min="1024" max="65535">
-			<small class="text-muted">Host port mapped to the container's Apache. DB port = PORT + 1000.</small>
-		</div>
-	</div>
 
-	<h6 class="text-muted mt-3 mb-3">Install Type</h6>
+<label class="form-label fw-semibold d-block mt-4">Install Type</label>
 
 	<div class="mb-3">
 		<div class="form-check">
@@ -213,21 +256,24 @@ if ($error) {
 		</div>
 	</div>
 
-	<div id="panel_fresh" class="mb-3">
-		<label class="form-label">Primary Domain *</label>
-		<input type="text" name="domain" class="form-control" placeholder="e.g., mysite.example.com">
-		<small class="text-muted">Docker mode: an HTTP reverse proxy on port 80 is configured automatically so the site is reachable at <code>http://DOMAIN/</code> once DNS points here. Bare-metal: Apache vhost binds directly. SSL is not set up at install time — after DNS cutover, run <code>sudo certbot --apache -d DOMAIN</code> on the target to add it.</small>
+	<div class="mb-3">
+		<label class="form-label">Domain *</label>
+		<input type="text" name="domain" class="form-control" required
+			value="<?php echo htmlspecialchars($_POST['domain'] ?? ''); ?>"
+			placeholder="e.g., orgs.getjoinery.com">
+		<small class="text-muted">SSL is not configured at install time — run certbot after DNS cutover.</small>
 	</div>
+
+	<div id="panel_fresh" class="mb-3" style="display:none"></div>
 
 	<div id="panel_backup" class="mb-3" style="display:none">
 		<label class="form-label">Source Node *</label>
-		<select name="source_node_id" class="form-select mb-2" onchange="updateBackupOptions()">
+		<select name="source_node_id" class="form-select mb-2" required onchange="updateBackupOptions()">
 			<option value="">-- Select source node --</option>
 			<?php foreach ($existing_nodes as $en): ?>
 				<option value="<?php echo $en->key; ?>"><?php echo htmlspecialchars($en->get('mgn_name')); ?> (<?php echo htmlspecialchars(parse_url($en->get('mgn_site_url'), PHP_URL_HOST) ?: $en->get('mgn_host')); ?>)</option>
 			<?php endforeach; ?>
 		</select>
-		<small class="text-muted d-block mb-3">Target will be provisioned with the source's domain. Admin must cut over DNS to the new server after install.</small>
 
 		<div class="form-check">
 			<input class="form-check-input" type="radio" name="backup_source" id="bkp_new" value="new" checked onchange="toggleBackupSourcePanel()">
@@ -259,16 +305,54 @@ if ($error) {
 
 <script>
 var BACKUP_LISTS = <?php echo json_encode($backup_lists); ?>;
+var KNOWN_HOSTS  = <?php echo json_encode(array_values($known_hosts_map)); ?>;
 
-function togglePort() {
-	var isDocker = document.getElementById('dm_docker').checked;
-	document.getElementById('port_row').style.display = isDocker ? 'flex' : 'none';
+function applyHostPreset() {
+	var sel    = document.getElementById('host_dropdown');
+	var val    = sel ? sel.value : '';
+	var fields = document.getElementById('ssh_fields');
+	var dmDocker = document.getElementById('dm_docker');
+	var dmBare   = document.getElementById('dm_bare');
+
+	if (!val || val === '__custom__') {
+		if (fields) fields.style.display = 'block';
+		dmBare.disabled = false;
+		dmBare.closest('.form-check').style.opacity = '1';
+		return;
+	}
+
+	var preset = KNOWN_HOSTS.find(function(h) { return h.host === val; });
+	if (!preset) return;
+
+	document.getElementById('mgn_host').value         = preset.host;
+	document.getElementById('mgn_ssh_user').value     = preset.ssh_user;
+	document.getElementById('mgn_ssh_key_path').value = preset.ssh_key_path;
+	document.getElementById('mgn_ssh_port').value     = preset.ssh_port;
+
+	if (fields) fields.style.display = 'none';
+
+	if (preset.is_docker) {
+		dmDocker.checked = true;
+		dmBare.checked   = false;
+		dmBare.disabled  = true;
+		dmBare.closest('.form-check').style.opacity = '0.4';
+	} else {
+		dmBare.disabled = false;
+		dmBare.closest('.form-check').style.opacity = '1';
+	}
 }
+
+document.addEventListener('DOMContentLoaded', function() {
+	var sel = document.getElementById('host_dropdown');
+	if (sel && sel.value && sel.value !== '__custom__') applyHostPreset();
+});
 
 function toggleModePanel() {
 	var fresh = document.getElementById('mode_fresh').checked;
 	document.getElementById('panel_fresh').style.display  = fresh ? 'block' : 'none';
 	document.getElementById('panel_backup').style.display = fresh ? 'none'  : 'block';
+	var srcSelect = document.querySelector('select[name=source_node_id]');
+	if (srcSelect) srcSelect.required = !fresh;
 }
 
 function toggleBackupSourcePanel() {

@@ -1109,7 +1109,6 @@ class JobCommandBuilder {
 	 *   sitename       - site directory name (e.g. 'mysite' → /var/www/html/mysite)
 	 *   domain         - primary domain (fresh) or source domain (from-backup)
 	 *   docker_mode    - 'docker' or 'bare-metal' (required; no auto-detect)
-	 *   port           - (docker only) host port, default 8080
 	 *   source_node_id - (from-backup only) source node ID
 	 *   backup_source  - (from-backup only) 'new' or 'existing'
 	 *   db_backup_path / project_backup_path - (existing backup) remote paths on source
@@ -1119,8 +1118,6 @@ class JobCommandBuilder {
 		$sitename  = $params['sitename'] ?? $node->get('mgn_slug');
 		$domain    = $params['domain'] ?? '';
 		$docker    = $params['docker_mode'] ?? '';
-		$port      = intval($params['port'] ?? 8080) ?: 8080;
-
 		if ($docker !== 'docker' && $docker !== 'bare-metal') {
 			throw new Exception("install_node requires docker_mode = 'docker' or 'bare-metal' (got: " . var_export($docker, true) . ")");
 		}
@@ -1139,7 +1136,7 @@ class JobCommandBuilder {
 		$sitename_esc = escapeshellarg($sitename);
 		$domain_esc = escapeshellarg($domain);
 		$mode_flag = ($docker === 'docker') ? ' --docker' : ' --bare-metal';
-		$port_arg = ($docker === 'docker') ? ' ' . intval($port) : '';
+		$port_arg = '';
 
 		$steps = [];
 
@@ -1412,7 +1409,7 @@ class JobCommandBuilder {
 				'timeout' => 3600, 'continue_on_error' => true]);
 
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Fix permissions',
-				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh /var/www/html/{$sitename}",
+				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh {$sitename}",
 				'continue_on_error' => true]);
 
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
