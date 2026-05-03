@@ -441,6 +441,13 @@ class JobCommandBuilder {
 		}
 
 		if (!$skip_joinery) {
+			$creds = self::get_db_credentials_script($node);
+			$steps[] = ['type' => 'ssh', 'label' => 'Check cron health',
+				'cmd' => "{$creds} && psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -tAc \"SELECT 'CRON_LAST_RUN=' || stg_value FROM stg_settings WHERE stg_name = 'scheduled_tasks_last_cron_run'\"",
+				'continue_on_error' => true];
+		}
+
+		if (!$skip_joinery) {
 			// List databases in this node's PostgreSQL instance for the Internal Copy dropdown.
 			// For Docker this runs inside the container; for bare-metal on the host. Either way,
 			// it returns the databases accessible to the node's DB user.

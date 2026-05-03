@@ -119,7 +119,7 @@ if (!empty($dry_run_preview_html)) {
 // =====================================================
 // ACTIVE TASKS
 // =====================================================
-$pageoptions = array('title' => 'Active Tasks');
+$pageoptions = array('title' => 'Configured Tasks');
 $page->begin_box($pageoptions);
 
 if (empty($active_tasks)) {
@@ -127,7 +127,7 @@ if (empty($active_tasks)) {
 } else {
 	echo '<table class="table table-striped">';
 	echo '<thead><tr>';
-	echo '<th>Name</th><th>Schedule</th><th>Last Run</th><th>Next Run</th><th>Status</th><th>Active</th><th>Actions</th>';
+	echo '<th>Name</th><th>Schedule</th><th>Last Run</th><th>Next Run</th><th>Last Result</th><th>Status</th><th>Actions</th>';
 	echo '</tr></thead>';
 	echo '<tbody>';
 
@@ -208,13 +208,19 @@ if (empty($active_tasks)) {
 			$status_display .= '<br><small class="text-muted">' . htmlspecialchars($run_message) . '</small>';
 		}
 
-		// Active toggle
+		// Status display
 		$active_display = $is_active
 			? '<span style="color: #28a745; font-weight: bold;">Active</span>'
-			: '<span style="color: #dc3545;">Inactive</span>';
+			: '<span style="color: #e6a817; font-weight: bold;">Paused</span>';
 
 		echo '<tr>';
-		echo '<td><strong>' . htmlspecialchars($task->get('sct_name')) . '</strong><br><small class="text-muted">' . htmlspecialchars($task_class) . '</small></td>';
+		$description = $discovered_tasks[$task_class]['json']['description'] ?? '';
+		$source      = $discovered_tasks[$task_class]['source'] ?? '';
+		echo '<td><strong>' . htmlspecialchars($task->get('sct_name')) . '</strong><br><small class="text-muted">' . htmlspecialchars($task_class) . ($source ? ' &middot; ' . htmlspecialchars($source) : '') . '</small>';
+		if ($description) {
+			echo '<br><small class="text-muted">' . htmlspecialchars($description) . '</small>';
+		}
+		echo '</td>';
 		echo '<td>' . $schedule_display . '</td>';
 		echo '<td>' . $last_run_display . '</td>';
 		echo '<td>' . $next_run_display . '</td>';
@@ -223,35 +229,41 @@ if (empty($active_tasks)) {
 		echo '<td>';
 
 		// Edit button
-		echo '<a href="/admin/admin_scheduled_tasks?edit=' . $task->key . '" class="btn btn-sm btn-outline-primary" style="margin-right: 4px;">Edit</a>';
+		echo '<a href="/admin/admin_scheduled_tasks?edit=' . $task->key . '" class="btn btn-sm btn-outline-secondary me-1">Edit</a>';
 
 		// Run Now button
 		echo AdminPage::action_button('Run Now', '/admin/admin_scheduled_tasks', [
 			'hidden' => ['action' => 'run_now', 'sct_scheduled_task_id' => $task->key],
-			'class'  => 'btn btn-sm btn-soft me-1',
+			'class'  => 'btn btn-sm btn-outline-secondary me-1',
 		]);
 
 		// Dry Run button (only if task implements ScheduledTaskDryRunnable)
 		if (!empty($dry_run_supported[$task->key])) {
 			echo AdminPage::action_button('Dry Run', '/admin/admin_scheduled_tasks', [
 				'hidden' => ['action' => 'dry_run', 'sct_scheduled_task_id' => $task->key],
-				'class'  => 'btn btn-sm btn-outline-info me-1',
+				'class'  => 'btn btn-sm btn-outline-secondary me-1',
 			]);
 		}
 
-		// Deactivate/Reactivate button
+		// Pause/Resume buttons
 		if ($is_active) {
-			echo AdminPage::action_button('Deactivate', '/admin/admin_scheduled_tasks', [
-				'hidden'  => ['action' => 'deactivate', 'sct_scheduled_task_id' => $task->key],
-				'confirm' => 'Deactivate this scheduled task?',
-				'class'   => 'btn btn-sm btn-warning',
+			echo AdminPage::action_button('Pause', '/admin/admin_scheduled_tasks', [
+				'hidden' => ['action' => 'pause', 'sct_scheduled_task_id' => $task->key],
+				'class'  => 'btn btn-sm btn-outline-secondary me-1',
 			]);
 		} else {
-			echo AdminPage::action_button('Reactivate', '/admin/admin_scheduled_tasks', [
-				'hidden' => ['action' => 'reactivate', 'sct_scheduled_task_id' => $task->key],
-				'class'  => 'btn btn-sm btn-success',
+			echo AdminPage::action_button('Resume', '/admin/admin_scheduled_tasks', [
+				'hidden' => ['action' => 'resume', 'sct_scheduled_task_id' => $task->key],
+				'class'  => 'btn btn-sm btn-outline-secondary me-1',
 			]);
 		}
+
+		// Deactivate button
+		echo AdminPage::action_button('Deactivate', '/admin/admin_scheduled_tasks', [
+			'hidden'  => ['action' => 'deactivate', 'sct_scheduled_task_id' => $task->key],
+			'confirm' => 'Deactivate and remove this task? Config and run history will be lost.',
+			'class'   => 'btn btn-sm btn-outline-secondary',
+		]);
 
 		echo '</td>';
 		echo '</tr>';
