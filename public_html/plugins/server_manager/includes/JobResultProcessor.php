@@ -5,7 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -45,6 +45,18 @@ class JobResultProcessor {
 		}
 		$version = $result['joinery_version'] ?? null;
 
+		// SSL certificate detection (SSH path only — API output contains no SSL tokens)
+		$ssl = self::parse_ssl_tokens($output);
+		if ($ssl !== null) {
+			$result['ssl_state']  = $ssl['found'] ? 'active' : null;
+			$result['ssl_domain'] = $ssl['domain'];
+			if ($ssl['found'] && !empty($ssl['expiry_raw'])) {
+				$result['ssl_expiry_raw'] = $ssl['expiry_raw'];
+				$ts = strtotime($ssl['expiry_raw']);
+				if ($ts) $result['ssl_expiry_ts'] = $ts;
+			}
+		}
+
 		// Update the node record
 		$node_id = $job->get('mjb_mgn_node_id');
 		if ($node_id) {
@@ -53,6 +65,16 @@ class JobResultProcessor {
 			$node->set('mgn_last_status_data', json_encode($result));
 			if ($version) {
 				$node->set('mgn_joinery_version', $version);
+			}
+			if ($ssl !== null) {
+				$current = $node->get('mgn_ssl_state');
+				if ($ssl['found']) {
+					$node->set('mgn_ssl_state', 'active');
+				} elseif ($current === 'active') {
+					// Cert disappeared from a previously-active node — flag loudly
+					$node->set('mgn_ssl_state', 'failed');
+				}
+				// CERT_MISSING on null/pending/failed → no change
 			}
 			$node->save();
 		}
@@ -138,6 +160,21 @@ class JobResultProcessor {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Scan raw job output for SSL_CERT_FOUND / SSL_CERT_MISSING tokens emitted by
+	 * the check_status SSL step. Returns an array with 'found', 'domain', and
+	 * (when found) 'expiry_raw', or null if no token is present.
+	 */
+	private static function parse_ssl_tokens($output) {
+		if (preg_match('/SSL_CERT_FOUND domain=(\S+) expiry=(.+)$/m', $output, $m)) {
+			return ['found' => true, 'domain' => $m[1], 'expiry_raw' => trim($m[2])];
+		}
+		if (preg_match('/SSL_CERT_MISSING domain=(\S+)/m', $output, $m)) {
+			return ['found' => false, 'domain' => $m[1]];
+		}
+		return null;
 	}
 
 	/**

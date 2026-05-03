@@ -392,6 +392,24 @@ class JobCommandBuilder {
 				'continue_on_error' => true];
 		}
 
+		// SSL certificate check. For Docker nodes the cert lives on the host (where the
+		// reverse-proxy Apache and certbot run), not inside the container — hence on_host.
+		$domain = parse_url($node->get('mgn_site_url'), PHP_URL_HOST) ?: '';
+		if ($domain) {
+			$is_docker  = (bool)$node->get('mgn_container_name');
+			$domain_esc = escapeshellarg($domain);
+			$steps[] = [
+				'type'             => 'ssh',
+				'label'            => 'Check SSL certificate',
+				'on_host'          => $is_docker,
+				'cmd'              => "if [ -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem ]; then"
+				                   . " EXPIRY=\$(openssl x509 -enddate -noout -in /etc/letsencrypt/live/{$domain_esc}/fullchain.pem | cut -d= -f2);"
+				                   . " echo \"SSL_CERT_FOUND domain={$domain} expiry=\$EXPIRY\";"
+				                   . " else echo \"SSL_CERT_MISSING domain={$domain}\"; fi",
+				'continue_on_error' => true,
+			];
+		}
+
 		return $steps;
 	}
 
