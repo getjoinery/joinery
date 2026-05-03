@@ -134,6 +134,10 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 		$cron_is_active = $diff_seconds < 1800; // 30 minutes
 	}
 
+	// Detect Docker vs bare-metal so the warning shows the right cron setup instructions
+	$is_docker = file_exists('/.dockerenv')
+		|| (is_readable('/proc/1/cgroup') && strpos(@file_get_contents('/proc/1/cgroup'), 'docker') !== false);
+
 	// Load mailing lists for config field dropdowns
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	$mailing_lists = new MultiMailingList(array('deleted' => false), array('mlt_name' => 'ASC'));
@@ -179,6 +183,7 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 		'discovered_tasks' => $discovered_tasks,
 		'cron_is_active' => $cron_is_active,
 		'last_cron_run' => $last_cron_run,
+		'is_docker' => $is_docker,
 		'mailing_lists' => $mailing_lists,
 		'site_timezone' => $site_timezone,
 		'display_messages' => $display_messages,
