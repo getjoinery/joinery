@@ -58,8 +58,10 @@ $frequency_labels = array(
 if (!$cron_is_active) {
 	$settings = Globalvars::get_instance();
 	$site_template = $settings->get_setting('site_template');
-	$cron_line = '*/15 * * * * php /var/www/html/' . htmlspecialchars($site_template) . '/public_html/utils/process_scheduled_tasks.php &gt;&gt; /var/www/html/' . htmlspecialchars($site_template) . '/logs/cron_scheduled_tasks.log 2&gt;&amp;1';
-	$cron_line_with_user = '*/15 * * * * www-data php /var/www/html/' . htmlspecialchars($site_template) . '/public_html/utils/process_scheduled_tasks.php &gt;&gt; /var/www/html/' . htmlspecialchars($site_template) . '/logs/cron_scheduled_tasks.log 2&gt;&amp;1';
+	$tasks_script  = '/var/www/html/' . $site_template . '/public_html/utils/process_scheduled_tasks.php';
+	$tasks_log     = '/var/www/html/' . $site_template . '/logs/cron_scheduled_tasks.log';
+	$cron_d_file   = '/etc/cron.d/joinery-' . $site_template;
+	$cron_line_with_user = htmlspecialchars('*/15 * * * * www-data php ' . $tasks_script . ' >> ' . $tasks_log . ' 2>&1');
 
 	echo '<div style="border: 2px solid #856404; padding: 15px; margin-bottom: 20px; background-color: #fff3cd; color: #856404; border-radius: 4px;">';
 	echo '<strong>Cron Not Detected</strong> — ';
@@ -70,11 +72,15 @@ if (!$cron_is_active) {
 	}
 	echo 'A cron job must run every 15 minutes to process scheduled tasks.';
 
-	echo '<p style="margin-top: 12px; margin-bottom: 4px;"><strong>Standard server:</strong> Add to the <strong>www-data</strong> user\'s crontab (<code>sudo crontab -e -u www-data</code>):</p>';
-	echo '<pre style="background-color: #f8f0d4; padding: 10px; border-radius: 4px; overflow-x: auto;">' . $cron_line . '</pre>';
-
-	echo '<p style="margin-top: 12px; margin-bottom: 4px;"><strong>Docker container:</strong> Ensure the <code>cron</code> package is installed and running, then create <code>/etc/cron.d/scheduled-tasks</code> with:</p>';
-	echo '<pre style="background-color: #f8f0d4; padding: 10px; border-radius: 4px; overflow-x: auto;">' . $cron_line_with_user . '</pre>';
+	if ($is_docker) {
+		echo '<p style="margin-top: 12px; margin-bottom: 4px;">This server appears to be running in a <strong>Docker container</strong>. Ensure the <code>cron</code> package is installed and the daemon is running, then create <code>' . htmlspecialchars($cron_d_file) . '</code> with:</p>';
+		echo '<pre style="background-color: #f8f0d4; padding: 10px; border-radius: 4px; overflow-x: auto;">' . $cron_line_with_user . '</pre>';
+		echo '<p style="margin-top: 8px; margin-bottom: 0; font-size: 0.9em;">Quick install: <code>apt-get install -y cron &amp;&amp; service cron start &amp;&amp; echo \'' . $cron_line_with_user . '\' &gt; ' . htmlspecialchars($cron_d_file) . ' &amp;&amp; chmod 644 ' . htmlspecialchars($cron_d_file) . '</code></p>';
+	} else {
+		echo '<p style="margin-top: 12px; margin-bottom: 4px;">Create <code>' . htmlspecialchars($cron_d_file) . '</code> with the following content (file must be owned by root and mode 644):</p>';
+		echo '<pre style="background-color: #f8f0d4; padding: 10px; border-radius: 4px; overflow-x: auto;">' . $cron_line_with_user . '</pre>';
+		echo '<p style="margin-top: 8px; margin-bottom: 0; font-size: 0.9em;">Quick install: <code>echo \'' . $cron_line_with_user . '\' | sudo tee ' . htmlspecialchars($cron_d_file) . ' &amp;&amp; sudo chmod 644 ' . htmlspecialchars($cron_d_file) . '</code></p>';
+	}
 
 	echo '</div>';
 }
