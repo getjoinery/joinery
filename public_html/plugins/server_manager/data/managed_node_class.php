@@ -2,7 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -111,6 +111,19 @@ class MultiManagedNode extends SystemMultiBase {
 
 		if (isset($this->options['deleted'])) {
 			$filters['mgn_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		// Use array_key_exists so null values (→ IS NULL) are handled correctly
+		if (array_key_exists('ssl_state', $this->options)) {
+			$filters['mgn_ssl_state'] = $this->options['ssl_state'] === null
+				? "IS NULL"
+				: [$this->options['ssl_state'], PDO::PARAM_STR];
+		}
+
+		if (array_key_exists('install_state', $this->options)) {
+			$filters['mgn_install_state'] = $this->options['install_state'] === null
+				? "IS NULL"
+				: [$this->options['install_state'], PDO::PARAM_STR];
 		}
 
 		return $this->_get_resultsv2('mgn_managed_nodes', $filters, $this->order_by, $only_count, $debug);

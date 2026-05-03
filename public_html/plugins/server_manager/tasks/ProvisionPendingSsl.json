@@ -1,0 +1,6 @@
+{
+    "name": "Provision Pending SSL",
+    "description": "Checks DNS for managed nodes awaiting SSL certificates, then runs certbot when a domain resolves to the correct host IP. Runs every cron tick (~15 min). Auto-retries hourly on failure; marks a node as ssl_failed after ~16 hours.",
+    "default_frequency": "every_run",
+    "config_fields": {}
+}
