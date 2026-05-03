@@ -2302,6 +2302,12 @@ abstract class FormWriterV2Base {
             }
         }
 
+        // Propagate required option into validation rules so JoineryValidator
+        // gets instantiated (which also sets novalidate on the form).
+        if (!empty($options['required'])) {
+            $options['validation']['required'] = true;
+        }
+
         // Store field configuration for validation
         $this->fields[$name] = [
             'name' => $name,
