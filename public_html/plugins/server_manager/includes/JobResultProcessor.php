@@ -30,51 +30,92 @@ class JobResultProcessor {
 	 * Handles both transports:
 	 *   - API path: output is a JSON envelope {api_version,data:{...}} — extract data.
 	 *   - SSH path: output is concatenated command output — parse with regexes.
+	 *
+	 * SSL detection uses two paths:
+	 *   1. SSH cert token: Let's Encrypt cert file found on disk → 'letsencrypt'
+	 *   2. HTTPS probe fallback: curl HEAD to https://domain/ — catches Cloudflare/edge SSL
+	 * The API path implicitly proves HTTPS works (no separate probe needed; handled in
+	 * fetch_status_via_api). For job-based API output, we probe explicitly here.
 	 */
 	private static function process_check_status($job) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+
 		$output = $job->get('mjb_output') ?: '';
 
-		// API path: look for the JSON envelope from /api/v1/management/stats.
-		// The envelope lives inside step-header wrappers, so extract by finding
-		// the first "{" through the matching "}".
 		$api_data = self::extract_api_envelope_data($output);
 		if (is_array($api_data) && !empty($api_data)) {
 			$result = $api_data;
 		} else {
 			$result = self::parse_check_status_ssh_output($output);
 		}
-		$version = $result['joinery_version'] ?? null;
+		$version     = $result['joinery_version'] ?? null;
+		$is_api_path = ($api_data !== null);
 
-		// SSL certificate detection (SSH path only — API output contains no SSL tokens)
-		$ssl = self::parse_ssl_tokens($output);
-		if ($ssl !== null) {
-			$result['ssl_state']  = $ssl['found'] ? 'active' : null;
-			$result['ssl_domain'] = $ssl['domain'];
-			if ($ssl['found'] && !empty($ssl['expiry_raw'])) {
-				$result['ssl_expiry_raw'] = $ssl['expiry_raw'];
-				$ts = strtotime($ssl['expiry_raw']);
-				if ($ts) $result['ssl_expiry_ts'] = $ts;
+		// Load node early — needed for HTTPS probe (mgn_site_url, mgn_tls_insecure)
+		$node_id = $job->get('mjb_mgn_node_id');
+		$node    = null;
+		if ($node_id) {
+			try { $node = new ManagedNode($node_id, TRUE); } catch (Exception $e) {}
+		}
+
+		// SSL detection
+		$ssl_token     = self::parse_ssl_tokens($output);
+		$ssl_new_state = null;  // null = no explicit state change from detection
+
+		if ($ssl_token !== null) {
+			// SSH path: explicit cert check result from the job steps
+			$result['ssl_domain']   = $ssl_token['domain'];
+			$result['ssl_le_cert']  = $ssl_token['found'];
+			if ($ssl_token['found']) {
+				$result['ssl_state']            = 'active';
+				$result['ssl_detection_method'] = 'letsencrypt';
+				$ssl_new_state = 'active';
+				if (!empty($ssl_token['expiry_raw'])) {
+					$result['ssl_expiry_raw'] = $ssl_token['expiry_raw'];
+					$ts = strtotime($ssl_token['expiry_raw']);
+					if ($ts) $result['ssl_expiry_ts'] = $ts;
+				}
+			} else {
+				// No LE cert on disk — probe HTTPS to catch Cloudflare / other edge SSL
+				$probe = JobCommandBuilder::probe_https($ssl_token['domain']);
+				$result['ssl_https_probe'] = $probe['ok'];
+				if ($probe['ok']) {
+					$result['ssl_state']            = 'active';
+					$result['ssl_detection_method'] = 'https_probe';
+					$ssl_new_state = 'active';
+				} else {
+					$result['ssl_state'] = null;
+				}
+			}
+		} elseif ($is_api_path && $node) {
+			// API path: the Go agent called the API via HTTPS; probe to confirm valid cert
+			$domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '';
+			if ($domain && !filter_var($domain, FILTER_VALIDATE_IP)
+					&& $domain !== 'localhost' && !$node->get('mgn_tls_insecure')) {
+				$probe = JobCommandBuilder::probe_https($domain);
+				$result['ssl_https_probe'] = $probe['ok'];
+				if ($probe['ok']) {
+					$result['ssl_state']            = 'active';
+					$result['ssl_domain']           = $domain;
+					$result['ssl_detection_method'] = 'https_probe';
+					$ssl_new_state = 'active';
+				}
 			}
 		}
 
-		// Update the node record
-		$node_id = $job->get('mjb_mgn_node_id');
-		if ($node_id) {
-			$node = new ManagedNode($node_id, TRUE);
+		if ($node) {
 			$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
 			$node->set('mgn_last_status_data', json_encode($result));
 			if ($version) {
 				$node->set('mgn_joinery_version', $version);
 			}
-			if ($ssl !== null) {
-				$current = $node->get('mgn_ssl_state');
-				if ($ssl['found']) {
-					$node->set('mgn_ssl_state', 'active');
-				} elseif ($current === 'active') {
-					// Cert disappeared from a previously-active node — flag loudly
+			if ($ssl_new_state !== null) {
+				$node->set('mgn_ssl_state', $ssl_new_state);
+			} elseif ($ssl_token !== null && !$ssl_token['found']) {
+				// SSH cert missing AND HTTPS probe failed — cert disappeared from active node
+				if ($node->get('mgn_ssl_state') === 'active') {
 					$node->set('mgn_ssl_state', 'failed');
 				}
-				// CERT_MISSING on null/pending/failed → no change
 			}
 			$node->save();
 		}

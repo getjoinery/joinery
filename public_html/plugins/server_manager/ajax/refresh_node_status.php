@@ -57,7 +57,7 @@ $response = [
 
 if ($result['ok']) {
 	$data = $result['data'];
-	$response['status_color'] = JobCommandBuilder::status_color_from_data($data);
+	$response['status_color'] = JobCommandBuilder::status_color_for_node($node, $data);
 	$response['version']      = $data['joinery_version'] ?? null;
 	$response['last_check']   = LibraryFunctions::time_ago_or_time(
 		$node->get('mgn_last_status_check'), 'UTC', $session->get_timezone(), 'M j, g:i A'
