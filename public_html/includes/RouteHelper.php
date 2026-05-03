@@ -1107,6 +1107,11 @@ class RouteHelper {
                     header('Content-Type: text/html; charset=utf-8');
                     header('Content-Length: ' . filesize($cache_result));
                     header('X-Cache: HIT');
+                    $cache_meta = StaticPageCache::getCacheMetadata($request_path, $cache_params);
+                    if ($cache_meta) {
+                        header('X-Cache-Created: ' . gmdate('c', $cache_meta['time']));
+                        header('X-Cache-Age: ' . (time() - $cache_meta['time']));
+                    }
                     readfile($cache_result);
                     exit();
                 }

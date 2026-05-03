@@ -240,7 +240,7 @@ class StaticPageCache {
             $content = ltrim($content);
 
             // Insert comment after <head> tag for best compatibility
-            $comment = "\n    <!-- Cached: {$url_with_params} -->";
+            $comment = "\n    <!-- Cached: {$url_with_params} | Created: " . gmdate('c') . " -->";
 
             // Try to insert after <head> tag
             if (preg_match('/(<head[^>]*>)/i', $content, $matches, PREG_OFFSET_CAPTURE)) {
@@ -757,6 +757,19 @@ class StaticPageCache {
         self::saveIndex();
 
         return true;
+    }
+
+    /**
+     * Return index metadata for a cached URL, or null if not cached
+     */
+    public static function getCacheMetadata($url, $params = []) {
+        self::init();
+        if (self::$cache_dir === null) return null;
+        $index = self::loadIndex();
+        $hash = self::generateCacheKey($url, $params);
+        $entry = $index[$hash] ?? null;
+        if ($entry && $entry['status'] === 'cached') return $entry;
+        return null;
     }
 
     /**
