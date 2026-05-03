@@ -193,6 +193,10 @@ class JobResultProcessor {
 			$result['joinery_version'] = trim($m[1]);
 		}
 
+		if (preg_match('/^CRON_LAST_RUN=(.+)$/m', $output, $m)) {
+			$result['cron_last_run'] = trim($m[1]);
+		}
+
 		if (preg_match('/^CURRENT_DB=(\S+)$/m', $output, $m)) {
 			$result['current_db'] = trim($m[1]);
 		}
@@ -284,8 +288,8 @@ class JobResultProcessor {
 
 	/**
 	 * Post-process install_node: mark the node online on success or install_failed on failure.
-	 * For auto-provisioned nodes (mjb_external_order_item_id is set): also sets ssl_state=pending
-	 * and sends the welcome email via getjoinery's QueuedEmail API.
+	 * All fresh installs get ssl_state=pending so ProvisionPendingSsl picks them up automatically.
+	 * Also sends the welcome email for auto-provisioned orders (mjb_external_order_item_id set).
 	 * Runs for both 'completed' and 'failed' terminal states.
 	 */
 	private static function process_install_node($job) {
@@ -301,8 +305,7 @@ class JobResultProcessor {
 
 		if ($status === 'completed' && strpos($output, 'INSTALL_SUCCESS') !== false) {
 			$node->set('mgn_install_state', null);
-			// Auto-provisioned nodes: mark SSL pending so ProvisionPendingSsl picks them up
-			if ($job->get('mjb_external_order_item_id') && $node->get('mgn_ssl_state') !== 'active') {
+			if ($node->get('mgn_ssl_state') !== 'active') {
 				$node->set('mgn_ssl_state', 'pending');
 			}
 			$node->save();

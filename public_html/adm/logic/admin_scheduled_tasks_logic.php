@@ -30,17 +30,23 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 			$message = $result['message'] ?? null;
 			$error = $result['error'] ?? null;
 		}
-		elseif ($action === 'deactivate' && isset($post_vars['sct_scheduled_task_id'])) {
+		elseif ($action === 'pause' && isset($post_vars['sct_scheduled_task_id'])) {
 			$task = new ScheduledTask($post_vars['sct_scheduled_task_id'], true);
 			$task->set('sct_is_active', false);
 			$task->save();
-			$message = 'Task "' . $task->get('sct_name') . '" deactivated.';
+			$message = 'Task "' . $task->get('sct_name') . '" paused.';
 		}
-		elseif ($action === 'reactivate' && isset($post_vars['sct_scheduled_task_id'])) {
+		elseif ($action === 'resume' && isset($post_vars['sct_scheduled_task_id'])) {
 			$task = new ScheduledTask($post_vars['sct_scheduled_task_id'], true);
 			$task->set('sct_is_active', true);
 			$task->save();
-			$message = 'Task "' . $task->get('sct_name') . '" reactivated.';
+			$message = 'Task "' . $task->get('sct_name') . '" resumed.';
+		}
+		elseif ($action === 'deactivate' && isset($post_vars['sct_scheduled_task_id'])) {
+			$task = new ScheduledTask($post_vars['sct_scheduled_task_id'], true);
+			$name = $task->get('sct_name');
+			$task->soft_delete();
+			$message = 'Task "' . $name . '" deactivated and removed. It can be re-activated from Available Tasks.';
 		}
 		elseif ($action === 'run_now' && isset($post_vars['sct_scheduled_task_id'])) {
 			$result = _handle_run_now($post_vars['sct_scheduled_task_id']);
@@ -94,14 +100,14 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 	// Discover available tasks
 	$discovered_tasks = _discover_tasks();
 
-	// Load active tasks from DB
+	// Load all non-deleted tasks from DB (active and inactive)
 	$active_tasks_multi = new MultiScheduledTask(
 		array('deleted' => false),
 		array('sct_name' => 'ASC')
 	);
 	$active_tasks_multi->load();
 
-	// Build list of active task classes for cross-referencing
+	// Build list of task classes for cross-referencing
 	$active_task_classes = array();
 	$active_tasks = array();
 	foreach ($active_tasks_multi as $task) {

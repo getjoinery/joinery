@@ -638,6 +638,20 @@ if ($tab === 'overview') {
 			echo '</div></div>';
 		}
 
+		// Cron health
+		if (!empty($status_data['cron_last_run'])) {
+			$cron_ts = strtotime($status_data['cron_last_run']);
+			$cron_ok = $cron_ts && (time() - $cron_ts) < 1200;
+			$cron_badge = $cron_ok ? 'success' : 'warning';
+			$cron_label = $cron_ok ? 'Active' : 'Stale';
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Cron</div>';
+			echo '<div class="mt-1"><span class="badge bg-' . $cron_badge . '">' . $cron_label . '</span></div>';
+			echo '<div class="text-muted small mt-2">Last run: ' . htmlspecialchars(LibraryFunctions::time_ago_or_time($status_data['cron_last_run'], 'UTC', $session->get_timezone(), 'M j, g:i A')) . '</div>';
+			echo '</div></div>';
+		}
+
 		// Joinery version
 		if ($node_version) {
 			$badge = '';
