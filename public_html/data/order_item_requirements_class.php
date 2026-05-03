@@ -78,6 +78,10 @@ class MultiOrderItemRequirement extends SystemMultiBase {
 			$filters['oir_odi_order_item_id'] = [$this->options['order_item_id'], PDO::PARAM_INT];
 		}
 
+		if (isset($this->options['oir_qst_question_id'])) {
+			$filters['oir_qst_question_id'] = [$this->options['oir_qst_question_id'], PDO::PARAM_INT];
+		}
+
 		return $this->_get_resultsv2('oir_order_item_requirements', $filters, $this->order_by, $only_count, $debug);
 	}
 

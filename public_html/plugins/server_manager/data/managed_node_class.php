@@ -2,7 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -15,6 +15,10 @@ class ManagedNode extends SystemBase {
 	public static $pkey_column = 'mgn_id';
 
 	public static $json_vars = array('mgn_last_status_data');
+
+	protected static $foreign_key_actions = [
+		'mgn_mgh_host_id' => ['table' => 'mgh_managed_hosts', 'column' => 'mgh_id', 'action' => 'set_null'],
+	];
 
 	public static $field_specifications = array(
 		'mgn_id'                  => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -38,6 +42,9 @@ class ManagedNode extends SystemBase {
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
 		'mgn_skip_joinery_checks' => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'mgn_mgh_host_id'         => array('type'=>'int8'),
+		'mgn_ssl_state'           => array('type'=>'varchar(20)'),
+		'mgn_port'                => array('type'=>'int4'),
 		'mgn_install_state'       => array('type'=>'varchar(20)'),
 		'mgn_notes'               => array('type'=>'text'),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -88,6 +95,14 @@ class MultiManagedNode extends SystemMultiBase {
 
 		if (isset($this->options['host'])) {
 			$filters['mgn_host'] = [$this->options['host'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['host_id'])) {
+			if ($this->options['host_id'] === null) {
+				$filters['mgn_mgh_host_id'] = "IS NULL";
+			} else {
+				$filters['mgn_mgh_host_id'] = [$this->options['host_id'], PDO::PARAM_INT];
+			}
 		}
 
 		if (isset($this->options['enabled'])) {
