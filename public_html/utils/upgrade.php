@@ -28,20 +28,17 @@
 	$verbose = false;
 	$force_upgrade = false;
 	$confirm_downgrade_cli = false;
-	$dry_run = false;
 
 	if ($is_cli) {
 		// Parse command line arguments
-		$options = getopt("", ["verbose", "force-upgrade", "confirm-downgrade", "dry-run", "refresh-archives"]);
+		$options = getopt("", ["verbose", "force-upgrade", "confirm-downgrade"]);
 		$verbose = isset($options['verbose']);
 		$force_upgrade = isset($options['force-upgrade']);
 		$confirm_downgrade_cli = isset($options['confirm-downgrade']);
-		$dry_run = isset($options['dry-run']);
 	} else {
 		// Use existing $_GET/$_POST parsing
 		$verbose = isset($_REQUEST['verbose']);
 		$force_upgrade = isset($_REQUEST['force-upgrade']);
-		$dry_run = isset($_REQUEST['dry-run']);
 	}
 
 	// Helper function to output and flush immediately
@@ -51,6 +48,58 @@
 			ob_flush();
 		}
 		flush();
+	}
+
+	// Section header: emits as plain heading on CLI, as <h3> for web.
+	function out_step($title) {
+		global $is_cli;
+		if ($is_cli) {
+			echo "\n=== " . strtoupper($title) . " ===\n";
+		} else {
+			echo '<br><h3>' . htmlspecialchars($title) . '</h3>';
+		}
+	}
+
+	// Non-fatal styled message: warning, info, or success. Emits as plain prefix on CLI.
+	// $body may contain raw HTML (caller is responsible for any escaping it needs).
+	function out_alert($level, $title, $body = '') {
+		global $is_cli;
+		$prefix = ['warning' => '[WARN] ', 'info' => '[INFO] ', 'success' => '[OK] '];
+		if ($is_cli) {
+			echo ($prefix[$level] ?? '') . $title . "\n";
+			if ($body !== '') echo "  " . strip_tags(str_replace('<br>', "\n  ", $body)) . "\n";
+			return;
+		}
+		$styles = [
+			'warning' => 'border:2px solid #856404;background:#fff3cd;color:#856404',
+			'info'    => 'border:2px solid #0c5460;background:#d1ecf1;color:#0c5460',
+			'success' => 'border:2px solid #155724;background:#d4edda;color:#155724',
+		];
+		$style = $styles[$level] ?? $styles['info'];
+		echo '<div style="padding:10px;margin:10px 0;' . $style . '">';
+		echo '<strong>' . htmlspecialchars($title) . '</strong>';
+		if ($body !== '') echo '<br>' . $body;
+		echo '</div>';
+	}
+
+	// Abort the upgrade with a styled error message; clears staging unless told not to.
+	// Use for pre-deployment failures (validation, missing prerequisites, bad downloads).
+	// Post-deployment failures should use DeploymentHelper::performRollback() instead.
+	function upgrade_abort($title, $detail = '', $clear_staging = true) {
+		global $is_cli, $stage_location;
+		if ($is_cli) {
+			echo "ERROR: $title\n";
+			if ($detail !== '') echo "  $detail\n";
+		} else {
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
+			echo '<strong>' . htmlspecialchars($title) . '</strong>';
+			if ($detail !== '') echo '<br>' . $detail;
+			echo '</div>';
+		}
+		if ($clear_staging && !empty($stage_location) && is_dir($stage_location)) {
+			exec('rm -rf ' . escapeshellarg($stage_location) . '/*');
+		}
+		exit(1);
 	}
 
 	$stage_location = $full_site_dir.'/uploads/upgrades/';
@@ -79,9 +128,6 @@
 		// Core archive location (upg_name now stores core filename)
 		$response['core_location'] = LibraryFunctions::get_absolute_url('/static_files/' . $upgrade->get('upg_name'));
 
-		// Theme/plugin download endpoint
-		$response['theme_endpoint'] = LibraryFunctions::get_absolute_url('/admin/server_manager/publish_theme');
-
 		// Required system themes/plugins — these must be downloaded even if
 		// the target site doesn't have them installed yet
 		$response['required_themes'] = get_system_required_themes($live_directory . '/theme');
@@ -108,59 +154,19 @@
 
 	//CHECK FOR EXISTENCE OF ALL NEEDED DIRECTORIES
 	if(!file_exists($live_directory)){
-		echo $live_directory. ' (live_directory) does not exist or is not readable by www-data.';
+		echo $live_directory. ' (live_directory) does not exist or is not readable by the current process.';
 		exit;
 	}
 
-	$perms = fileperms($live_directory);
-	$user_read = (($perms & 0x0100) ? 'r' : '-');
-	$user_write = (($perms & 0x0080) ? 'w' : '-');
-	$user_ex = (($perms & 0x0040) ?
-				(($perms & 0x0800) ? 's' : 'x' ) :
-				(($perms & 0x0800) ? 'S' : '-'));
-
-	// Group
-	$group_read = (($perms & 0x0020) ? 'r' : '-');
-	$group_write = (($perms & 0x0010) ? 'w' : '-');
-	$group_ex = (($perms & 0x0008) ?
-				(($perms & 0x0400) ? 's' : 'x' ) :
-				(($perms & 0x0400) ? 'S' : '-'));
-
-	// World
-	$world_read = (($perms & 0x0004) ? 'r' : '-');
-	$world_write = (($perms & 0x0002) ? 'w' : '-');
-	$world_ex = (($perms & 0x0001) ?
-				(($perms & 0x0200) ? 't' : 'x' ) :
-				(($perms & 0x0200) ? 'T' : '-'));
-	if(!($user_read && $user_write)){
-		echo $live_directory . ' (live_directory) must be writable by user1.  Aborting upgrade.<br>';
-		echo 'Instead, it is owned by '.posix_getpwuid(fileowner($live_directory))['name'].' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
+	if (!is_writable($live_directory)) {
+		echo $live_directory . ' (live_directory) is not writable by the current process. Aborting upgrade.<br>';
+		echo 'Owner: ' . posix_getpwuid(fileowner($live_directory))['name'] . '; permissions: ' . substr(sprintf('%o', fileperms($live_directory)), -3) . '<br>';
 		exit;
 	}
 
 	$session = SessionControl::get_instance();
 	if (!$is_cli) {
 		$session->check_permission(8);
-	}
-
-	// Handle refresh archives request (web POST or CLI --refresh-archives)
-	$do_refresh = (!$is_cli && isset($_POST['refresh_archives']) && $_POST['refresh_archives'] == '1')
-	           || ($is_cli && isset($options['refresh-archives']));
-
-	if ($do_refresh) {
-		if (!$is_cli) header('Content-Type: application/json');
-		$result = request_archive_refresh();
-		if ($is_cli) {
-			if ($result['success']) {
-				upgrade_echo("Archives refreshed successfully. Proceeding with upgrade...\n");
-			} else {
-				upgrade_echo("Archive refresh failed: " . ($result['error'] ?? 'Unknown error') . "\n");
-				exit(1);
-			}
-		} else {
-			echo json_encode($result);
-			exit;
-		}
 	}
 
 	$dbhelper = DbConnector::get_instance();
@@ -218,41 +224,6 @@
 		if ($upgrade_server_error) {
 			echo '<div class="alert alert-danger"><strong>Connection Error:</strong> ' . $upgrade_server_error . '</div>';
 			exit(1);
-		}
-
-		// Check ownership (relaxed for test/debug environments)
-		$current_owner = posix_getpwuid(fileowner($live_directory))['name'];
-		$is_debug = $settings->get_setting('debug');
-
-		if($current_owner != 'www-data' && !$is_debug){
-			echo $live_directory . ' (live_directory) must be owned by www-data.  Aborting upgrade.<br>';
-			echo 'Instead, it is owned by '.$current_owner.' and has permissions '.substr(sprintf('%o', fileperms($live_directory)), -3).'<br>';
-			exit;
-		}
-		else if($current_owner != 'www-data' && $is_debug){
-			echo '<div style="border: 2px solid #856404; padding: 15px; margin: 20px 0; background-color: #fff3cd; color: #856404;">';
-			echo '<strong>⚠️ TEST ENVIRONMENT:</strong> Files owned by '.$current_owner.' instead of www-data (allowed in debug mode)<br>';
-			echo '</div>';
-		}
-
-		// Display dry-run banner if enabled
-		if($dry_run){
-			if($is_cli){
-				echo "\n";
-				echo "╔═══════════════════════════════════════════════════════════╗\n";
-				echo "║                      DRY RUN MODE                         ║\n";
-				echo "║  No changes will be made to files or database            ║\n";
-				echo "║  This is a simulation of the upgrade process             ║\n";
-				echo "╚═══════════════════════════════════════════════════════════╝\n";
-				echo "\n";
-			}
-			else{
-				echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
-				echo '<h2 style="margin-top: 0; color: #0066cc;">🔍 DRY RUN MODE</h2>';
-				echo '<p><strong>No changes will be made to files or database.</strong></p>';
-				echo '<p>This is a simulation of the upgrade process to show what would happen.</p>';
-				echo '</div>';
-			}
 		}
 
 		if($decode_response['system_version']){
@@ -342,23 +313,15 @@
 						echo "⚠️  DOWNGRADE IN PROGRESS: " . $current_version . " → " . $server_version . "\n";
 					}
 					else{
-						echo '<div style="border: 2px solid #856404; padding: 15px; margin: 20px 0; background-color: #fff3cd; color: #856404;">';
-						echo '<strong>⚠️ DOWNGRADE IN PROGRESS:</strong> '. htmlspecialchars($current_version) . ' → ' . htmlspecialchars($server_version) . '<br>';
-						echo '</div>';
+						out_alert('warning', 'DOWNGRADE IN PROGRESS', htmlspecialchars($current_version) . ' → ' . htmlspecialchars($server_version));
 					}
 				}
 			}
 			else if($version_compare == 0){
-				// Same version
-				echo '<div style="border: 2px solid #0c5460; padding: 15px; margin: 20px 0; background-color: #d1ecf1; color: #0c5460;">';
-				echo '<strong>ℹ️ SAME VERSION:</strong> Current version (' . htmlspecialchars($current_version) . ') is the same as server version.<br>';
-				echo '</div>';
+				out_alert('info', 'SAME VERSION', 'Current version (' . htmlspecialchars($current_version) . ') is the same as server version.');
 			}
 			else{
-				// Normal upgrade
-				echo '<div style="border: 2px solid #155724; padding: 15px; margin: 20px 0; background-color: #d4edda; color: #155724;">';
-				echo '<strong>✓ UPGRADE:</strong> '. htmlspecialchars($current_version) . ' → ' . htmlspecialchars($server_version) . '<br>';
-				echo '</div>';
+				out_alert('success', 'UPGRADE', htmlspecialchars($current_version) . ' → ' . htmlspecialchars($server_version));
 			}
 		}
 		else{
@@ -386,7 +349,6 @@
 
 		// Download core + individual themes/plugins
 		$sourceFile = $decode_response['core_location'] ?? null;
-		$theme_endpoint = $decode_response['theme_endpoint'] ?? null;
 
 		if (!$sourceFile) {
 			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
@@ -398,53 +360,16 @@
 		// =====================================================
 		// SELF-UPDATE RESUME DETECTION
 		// =====================================================
-		// If a previous run self-updated deployment files and asked for a re-run,
-		// detect the marker and skip download/extraction (staging already has files).
-		$self_update_marker = $stage_location . '.self_update_ready';
+		// If staging already has the target version's tarball extracted, a previous
+		// run must have self-updated deployment files and asked for a re-run.
+		// Skip download/extraction; pick up from the self-update check below.
 		$resuming_after_self_update = false;
-
-		if (file_exists($self_update_marker)) {
-			$marker_data = json_decode(file_get_contents($self_update_marker), true);
-
-			if ($marker_data && json_last_error() === JSON_ERROR_NONE) {
-				$marker_age = time() - strtotime($marker_data['created_time']);
-				$max_age = 86400; // 24 hours
-				$versions_match = ($marker_data['target_version'] === $decode_response['system_version']);
-				$staging_has_files = is_dir($stage_directory) && !is_dir_empty($stage_directory);
-
-				if ($marker_age <= $max_age && $versions_match && $staging_has_files) {
-					$resuming_after_self_update = true;
-
-					if ($is_cli) {
-						echo "\n✓ Resuming upgrade after self-update.\n";
-						echo "  Updated files: " . implode(', ', $marker_data['files_updated']) . "\n\n";
-					} else {
-						echo '<div style="border: 2px solid #0c5460; padding: 15px; margin: 20px 0; background-color: #d1ecf1; color: #0c5460;">';
-						echo '<strong>✓ Resuming upgrade after self-update.</strong> ';
-						echo 'Updated files: ' . htmlspecialchars(implode(', ', $marker_data['files_updated']));
-						echo '</div>';
-					}
-
-					// Clean up marker now that we've consumed it
-					@unlink($self_update_marker);
-				} else {
-					// Stale or mismatched marker — clean up and do fresh download
-					if ($verbose) {
-						$reason_parts = [];
-						if ($marker_age > $max_age) $reason_parts[] = 'expired (' . round($marker_age/3600, 1) . 'h old)';
-						if (!$versions_match) $reason_parts[] = 'version mismatch';
-						if (!$staging_has_files) $reason_parts[] = 'staging empty';
-						upgrade_echo('Found stale self-update marker (' . implode(', ', $reason_parts) . '). Starting fresh download.<br>');
-					}
-					@unlink($self_update_marker);
-					if (file_exists($stage_location)) {
-						exec("chmod -R 770 " . escapeshellarg($stage_location));
-						exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-					}
-				}
-			} else {
-				// Corrupt marker
-				@unlink($self_update_marker);
+		$staged_version_file = $stage_directory . '/VERSION';
+		if (file_exists($staged_version_file) && is_dir($stage_directory) && !is_dir_empty($stage_directory)) {
+			$staged_version = trim(file_get_contents($staged_version_file));
+			if ($staged_version !== '' && $staged_version === ($decode_response['system_version'] ?? '')) {
+				$resuming_after_self_update = true;
+				out_alert('info', 'Resuming upgrade after self-update', 'Staging already contains version ' . htmlspecialchars($staged_version) . '.');
 			}
 		}
 
@@ -454,26 +379,25 @@
 		// (published_themes / published_plugins in the ?serve-upgrade response)
 		// — see specs/upgrade_pipeline_rename_gap.md. Each entry has its own URL,
 		// so a rename or addition on the source side flows through cleanly.
-		//
-		// If the source predates the manifest (older Joinery), fall back to
-		// the legacy "ask source for whatever prod has installed" behavior.
-		$source_published_themes  = is_array($decode_response['published_themes']  ?? null) ? $decode_response['published_themes']  : null;
-		$source_published_plugins = is_array($decode_response['published_plugins'] ?? null) ? $decode_response['published_plugins'] : null;
+		$source_published_themes  = $decode_response['published_themes']  ?? [];
+		$source_published_plugins = $decode_response['published_plugins'] ?? [];
 
-		if ($source_published_themes !== null && $source_published_plugins !== null) {
-			// Manifest-driven: download exactly what source advertises.
-			$themes_to_download  = array_column($source_published_themes,  'name');
-			$plugins_to_download = array_column($source_published_plugins, 'name');
-			// Map name → archive URL for the download loop.
-			$theme_url_by_name  = array_column($source_published_themes,  'url', 'name');
-			$plugin_url_by_name = array_column($source_published_plugins, 'url', 'name');
-		} else {
-			// Legacy fallback: pre-manifest source server.
-			$themes_to_download  = get_themes_to_upgrade($live_directory . '/theme');
-			$plugins_to_download = get_installed_plugins();
-			$theme_url_by_name  = [];
-			$plugin_url_by_name = [];
-		}
+		// Manifest-driven: only upgrade themes/plugins that are locally installed
+		// AND marked receives_upgrades=true. System themes are added separately
+		// via required_themes below. Nothing is auto-installed.
+		$source_theme_manifest  = array_column($source_published_themes,  null, 'name');
+		$source_plugin_manifest = array_column($source_published_plugins, null, 'name');
+		$themes_to_download  = array_values(array_intersect(
+			get_upgradable_themes($live_directory . '/theme'),
+			array_keys($source_theme_manifest)
+		));
+		$plugins_to_download = array_values(array_intersect(
+			get_upgradable_plugins(),
+			array_keys($source_plugin_manifest)
+		));
+		// Map name → archive URL for the download loop.
+		$theme_url_by_name  = array_column($source_published_themes,  'url', 'name');
+		$plugin_url_by_name = array_column($source_published_plugins, 'url', 'name');
 
 		// Get detailed info for status display
 		$all_themes_info = get_all_themes_info($live_directory . '/theme');
@@ -481,7 +405,7 @@
 
 		if (!$resuming_after_self_update) {
 
-		upgrade_echo('<h3>Downloading Upgrade Components</h3>');
+		out_step('Downloading Upgrade Components');
 
 		// Display theme status
 		if ($is_cli) {
@@ -519,10 +443,7 @@
 		// Download core archive
 		$new_file = fopen($file_download_location, "w");
 		if (!$new_file) {
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ File Error:</strong> Cannot create download file at ' . htmlspecialchars($file_download_location) . '<br>';
-			echo '</div>';
-			exit(1);
+			upgrade_abort('File Error', 'Cannot create download file at ' . htmlspecialchars($file_download_location), false);
 		}
 
 		$cd = curl_init();
@@ -540,10 +461,7 @@
 
 		if ($curl_errno !== 0 || $status["http_code"] != 200) {
 			@unlink($file_download_location);
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Core Download Failed:</strong> ' . htmlspecialchars($curl_error ?: "HTTP " . $status["http_code"]) . '<br>';
-			echo '</div>';
-			exit(1);
+			upgrade_abort('Core Download Failed', htmlspecialchars($curl_error ?: 'HTTP ' . $status['http_code']), false);
 		}
 
 		$core_size_mb = round(filesize($file_download_location) / 1024 / 1024, 2);
@@ -640,29 +558,15 @@
 		];
 
 		$files_needing_update = [];
-		$files_skipped_older = [];
 		foreach ($self_update_files as $rel_path) {
 			$staged_file = $stage_directory . '/' . $rel_path;
 			$live_file = $live_directory . '/' . $rel_path;
 
 			if (file_exists($staged_file)) {
-				if (!file_exists($live_file)) {
+				if (!file_exists($live_file) || md5_file($staged_file) !== md5_file($live_file)) {
 					$files_needing_update[] = $rel_path;
-				} elseif (md5_file($staged_file) !== md5_file($live_file)) {
-					// Only overwrite if the staged file is strictly newer than the live file.
-					// Guards against stale distribution archives (built before recent local edits
-					// or hotfixes) silently downgrading deployment tooling on re-run.
-					if (filemtime($staged_file) > filemtime($live_file)) {
-						$files_needing_update[] = $rel_path;
-					} else {
-						$files_skipped_older[] = $rel_path;
-					}
 				}
 			}
-		}
-
-		if (!empty($files_skipped_older) && $verbose) {
-			upgrade_echo('Self-update: skipping ' . count($files_skipped_older) . ' file(s) whose staged copy is not newer than the live file (likely stale distribution archive): ' . implode(', ', $files_skipped_older) . '.<br>');
 		}
 
 		if (!empty($files_needing_update)) {
@@ -670,86 +574,70 @@
 				echo "\n=== SELF-UPDATE REQUIRED ===\n";
 				echo "The following deployment files have changed in the new version:\n";
 			} else {
-				upgrade_echo('<br><h3>Self-Update Required</h3>');
+				out_step('Self-Update Required');
 				echo 'The following deployment files have changed in the new version:<br>';
 			}
 			foreach ($files_needing_update as $f) {
 				echo ($is_cli ? '  - ' : '  &bull; ') . htmlspecialchars($f) . ($is_cli ? "\n" : '<br>');
 			}
 
-			if (!$dry_run) {
-				// Copy new versions over live files
-				$copy_errors = [];
-				foreach ($files_needing_update as $rel_path) {
-					$staged_file = $stage_directory . '/' . $rel_path;
-					$live_file = $live_directory . '/' . $rel_path;
+			// Copy new versions over live files
+			$copy_errors = [];
+			foreach ($files_needing_update as $rel_path) {
+				$staged_file = $stage_directory . '/' . $rel_path;
+				$live_file = $live_directory . '/' . $rel_path;
 
-					$target_dir = dirname($live_file);
-					if (!is_dir($target_dir)) {
-						mkdir($target_dir, 0770, true);
-					}
-
-					if (copy($staged_file, $live_file)) {
-						// Invalidate opcache for the updated file so the re-run loads fresh bytecode
-						if (function_exists('opcache_invalidate')) {
-							opcache_invalidate($live_file, true);
-						}
-					} else {
-						$copy_errors[] = $rel_path;
-					}
+				$target_dir = dirname($live_file);
+				if (!is_dir($target_dir)) {
+					mkdir($target_dir, 0770, true);
 				}
 
-				if (!empty($copy_errors)) {
-					echo ($is_cli ? "\n" : '<div style="border: 2px solid #856404; padding: 15px; margin: 20px 0; background-color: #fff3cd; color: #856404;">');
-					echo 'Warning: Failed to copy some files: ' . implode(', ', $copy_errors) . '. Continuing with current versions.';
-					echo ($is_cli ? "\n" : '</div>');
-					// Don't abort — proceed with old code, which is better than failing entirely
+				if (copy($staged_file, $live_file)) {
+					// Invalidate opcache for the updated file so the re-run loads fresh bytecode
+					if (function_exists('opcache_invalidate')) {
+						opcache_invalidate($live_file, true);
+					}
 				} else {
-					// Write marker file so re-run skips download/extraction
-					$marker_data = [
-						'created_time' => gmdate('c'),
-						'source_version' => $settings->get_setting('system_version'),
-						'target_version' => $decode_response['system_version'],
-						'files_updated' => $files_needing_update,
-					];
-
-					file_put_contents($self_update_marker, json_encode($marker_data, JSON_PRETTY_PRINT));
-
-					// Ask user to re-run
-					if ($is_cli) {
-						echo "\n";
-						echo "════════════════════════════════════════════════════════════\n";
-						echo "  SELF-UPDATE COMPLETE — PLEASE RE-RUN THE UPGRADE\n";
-						echo "════════════════════════════════════════════════════════════\n";
-						echo "\n";
-						echo "  Deployment tools have been updated. The upgrade will\n";
-						echo "  resume automatically from where it left off.\n";
-						echo "\n";
-						echo "  Re-run with the same command to continue.\n";
-						echo "\n";
-					} else {
-						echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
-						echo '<h2 style="margin-top: 0; color: #0066cc;">Self-Update Complete</h2>';
-						echo '<p>Deployment infrastructure has been updated to the latest version.</p>';
-						echo '<p><strong>Please click the button below to continue the upgrade.</strong> ';
-						echo 'The download step will be skipped automatically.</p>';
-						echo '<form method="POST" action="/utils/upgrade">';
-						echo '<input type="hidden" name="confirm" value="1">';
-						if ($force_upgrade) echo '<input type="hidden" name="force-upgrade" value="1">';
-						if ($verbose) echo '<input type="hidden" name="verbose" value="1">';
-						if ($dry_run) echo '<input type="hidden" name="dry-run" value="1">';
-						echo '<button type="submit" style="background-color: #0066cc; color: white; padding: 12px 24px; font-size: 16px; border: none; cursor: pointer; border-radius: 4px;">Continue Upgrade</button>';
-						echo '</form>';
-						echo '</div>';
-					}
-
-					exit(0);
+					$copy_errors[] = $rel_path;
 				}
+			}
+
+			if (!empty($copy_errors)) {
+				out_alert('warning', 'Failed to copy some files: ' . implode(', ', $copy_errors),
+					'Continuing with current versions.');
+				// Don't abort — proceed with old code, which is better than failing entirely
 			} else {
-				// Dry run — just report what would happen
-				echo ($is_cli ? "\n" : '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">');
-				echo ($is_cli ? '' : '<strong>') . 'DRY RUN:' . ($is_cli ? '' : '</strong>') . ' These files would be self-updated and the upgrade would require a re-run.';
-				echo ($is_cli ? "\n\n" : '</div>');
+				// Resume detection on re-run finds the staged VERSION file matching the
+				// target system_version and skips the download step. No marker needed.
+
+				// Ask user to re-run
+				if ($is_cli) {
+					echo "\n";
+					echo "════════════════════════════════════════════════════════════\n";
+					echo "  SELF-UPDATE COMPLETE — PLEASE RE-RUN THE UPGRADE\n";
+					echo "════════════════════════════════════════════════════════════\n";
+					echo "\n";
+					echo "  Deployment tools have been updated. The upgrade will\n";
+					echo "  resume automatically from where it left off.\n";
+					echo "\n";
+					echo "  Re-run with the same command to continue.\n";
+					echo "\n";
+				} else {
+					echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
+					echo '<h2 style="margin-top: 0; color: #0066cc;">Self-Update Complete</h2>';
+					echo '<p>Deployment infrastructure has been updated to the latest version.</p>';
+					echo '<p><strong>Please click the button below to continue the upgrade.</strong> ';
+					echo 'The download step will be skipped automatically.</p>';
+					echo '<form method="POST" action="/utils/upgrade">';
+					echo '<input type="hidden" name="confirm" value="1">';
+					if ($force_upgrade) echo '<input type="hidden" name="force-upgrade" value="1">';
+					if ($verbose) echo '<input type="hidden" name="verbose" value="1">';
+					echo '<button type="submit" style="background-color: #0066cc; color: white; padding: 12px 24px; font-size: 16px; border: none; cursor: pointer; border-radius: 4px;">Continue Upgrade</button>';
+					echo '</form>';
+					echo '</div>';
+				}
+
+				exit(0);
 			}
 		} else {
 			if ($verbose) {
@@ -799,15 +687,18 @@
 		// DOWNLOAD INDIVIDUAL THEMES AND PLUGINS (new method only)
 		// =====================================================
 		if (!empty($themes_to_download) || !empty($plugins_to_download)) {
-			upgrade_echo('<br><h3>Downloading Individual Themes and Plugins</h3>');
+			out_step('Downloading Individual Themes and Plugins');
 
 			$skipped_items = [];
 			$downloaded_count = 0;
 
-			// Download themes — prefer manifest URL, fall back to theme_endpoint
+			// Download themes from the source's published-archives manifest
 			foreach ($themes_to_download as $theme_name) {
-				$theme_url = $theme_url_by_name[$theme_name]
-					?? ($theme_endpoint . '?download=' . urlencode($theme_name));
+				$theme_url = $theme_url_by_name[$theme_name] ?? null;
+				if (!$theme_url) {
+					$skipped_items[] = "Theme: {$theme_name} — no URL in source manifest";
+					continue;
+				}
 				upgrade_echo("Downloading theme: {$theme_name}...");
 				flush();
 
@@ -821,10 +712,13 @@
 				}
 			}
 
-			// Download plugins — prefer manifest URL, fall back to theme_endpoint
+			// Download plugins from the source's published-archives manifest
 			foreach ($plugins_to_download as $plugin_name) {
-				$plugin_url = $plugin_url_by_name[$plugin_name]
-					?? ($theme_endpoint . '?download=' . urlencode($plugin_name) . '&type=plugin');
+				$plugin_url = $plugin_url_by_name[$plugin_name] ?? null;
+				if (!$plugin_url) {
+					$skipped_items[] = "Plugin: {$plugin_name} — no URL in source manifest";
+					continue;
+				}
 				upgrade_echo("Downloading plugin: {$plugin_name}...");
 				flush();
 
@@ -841,47 +735,31 @@
 			upgrade_echo("✓ Downloaded {$downloaded_count} theme/plugin archives<br>");
 
 			if (!empty($skipped_items)) {
-				echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
-				echo '<strong>⚠️ ' . count($skipped_items) . ' item(s) skipped</strong> (not available from upgrade server):<br>';
-				echo '<ul style="margin-bottom: 0;">';
+				$body = '(not available from upgrade server)<br><ul style="margin-bottom: 0;">';
 				foreach ($skipped_items as $item) {
-					echo '<li>' . htmlspecialchars($item) . '</li>';
+					$body .= '<li>' . htmlspecialchars($item) . '</li>';
 				}
-				echo '</ul>';
-				echo '<br><small>These items were not updated. If they are deprecated, consider removing them.</small>';
-				echo '</div>';
+				$body .= '</ul><br><small>These items were not updated. If they are deprecated, consider removing them.</small>';
+				out_alert('warning', count($skipped_items) . ' item(s) skipped', $body);
 			}
 		}
 
 		// ============================================
 		// PRE-DEPLOYMENT VALIDATION
 		// ============================================
-		upgrade_echo('<br><h3>Pre-deployment Validation</h3>');
+		out_step('Pre-deployment Validation');
 
 		// Validate tarball structure (heuristic check for obvious issues)
 		$result = DeploymentHelper::validateTarballStructure($stage_directory, $verbose);
 		if (!$result['success']) {
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Tarball Validation Failed:</strong> The upgrade package does not have the expected structure.<br>';
-			echo '<ul>';
-			foreach ($result['errors'] as $error) {
-				echo '<li>' . htmlspecialchars($error) . '</li>';
-			}
-			echo '</ul>';
-			echo 'This may indicate a corrupted download or wrong file.<br>';
-			echo '</div>';
-			// Clean up staging
-			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-			exit(1);
+			$detail = 'The upgrade package does not have the expected structure (likely corrupted download or wrong file):<br>'
+				. '<ul>' . implode('', array_map(function($e){ return '<li>' . htmlspecialchars($e) . '</li>'; }, $result['errors'])) . '</ul>';
+			upgrade_abort('Tarball Validation Failed', $detail);
 		}
 		echo "✓ Tarball structure validation passed<br>";
 		if (!empty($result['warnings'])) {
-			echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
-			echo '<strong>⚠️ Warnings:</strong><br>';
-			foreach ($result['warnings'] as $warning) {
-				echo '• ' . htmlspecialchars($warning) . '<br>';
-			}
-			echo '</div>';
+			$body = implode('<br>', array_map(function($w){ return '• ' . htmlspecialchars($w); }, $result['warnings']));
+			out_alert('warning', 'Warnings', $body);
 		}
 
 		// Check that active theme is available
@@ -908,27 +786,14 @@
 				}
 
 				if ($theme_will_be_preserved) {
-					echo '<div style="border: 2px solid #856404; padding: 15px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
-					echo "<strong>⚠️ NOTE:</strong> Active theme '<strong>" . htmlspecialchars($active_theme) . "</strong>' is not in the upgrade package.<br>";
-					echo "However, it will be preserved because it is " . $preservation_reason . ".<br>";
-					echo '</div>';
+					out_alert('warning', "Active theme '$active_theme' is not in the upgrade package",
+						'However, it will be preserved because it is ' . $preservation_reason . '.');
 				} else {
-					echo '<div style="border: 2px solid #dc3545; padding: 20px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
-					echo '<h3 style="margin-top: 0; color: #721c24;">❌ UPGRADE BLOCKED: Active Theme Missing</h3>';
-					echo "<p>The currently active theme '<strong>" . htmlspecialchars($active_theme) . "</strong>' is not included in this upgrade package.</p>";
-					echo '<p>If the upgrade proceeds, your site would lose its theme and may become unusable.</p>';
-					echo '<p><strong>To fix this:</strong></p>';
-					echo '<ul>';
-					echo '<li>Republish the upgrade with the "' . htmlspecialchars($active_theme) . '" theme selected, OR</li>';
-					echo '<li>Switch to a different theme before upgrading, OR</li>';
-					echo '<li>Mark the theme as preserved by adding <code>"receives_upgrades": false</code> to its theme.json</li>';
-					echo '</ul>';
-					echo '</div>';
-
-					// Clean up staging
-					echo 'Cleaning up staging area...<br>';
-					exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-					exit(1);
+					$detail = "The currently active theme '<strong>" . htmlspecialchars($active_theme) . "</strong>' is not included in this upgrade package. "
+						. "If the upgrade proceeds, your site would lose its theme.<br><br>"
+						. "To fix: republish the upgrade with the theme selected, switch to a different theme first, "
+						. "or mark the theme preserved with <code>\"receives_upgrades\": false</code> in its theme.json.";
+					upgrade_abort('UPGRADE BLOCKED: Active Theme Missing', $detail);
 				}
 			} else {
 				echo "✓ Active theme '" . htmlspecialchars($active_theme) . "' found in upgrade package<br>";
@@ -938,15 +803,11 @@
 		// Validate PHP syntax
 		$result = DeploymentHelper::validatePHPSyntax($stage_directory, $verbose);
 		if (!$result['success']) {
-			echo "<strong>PHP syntax validation FAILED</strong> - {$result['files_checked']} files checked<br>";
-			echo count($result['errors']) . " errors found:<br>";
+			$lines = [];
 			foreach ($result['errors'] as $error) {
-				echo "  • " . htmlspecialchars($error['file']) .
-					 " (line {$error['line']}): " . htmlspecialchars($error['message']) . "<br>";
+				$lines[] = '• ' . htmlspecialchars($error['file']) . ' (line ' . $error['line'] . '): ' . htmlspecialchars($error['message']);
 			}
-			echo '<br><strong>Aborting upgrade (pre-deployment — no rollback needed).</strong><br>';
-			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-			exit(1);
+			upgrade_abort('PHP Syntax Validation FAILED (' . $result['files_checked'] . ' files checked, ' . count($result['errors']) . ' errors)', implode('<br>', $lines));
 		} else {
 			echo "✓ PHP syntax validation passed ({$result['files_checked']} files)<br>";
 		}
@@ -954,15 +815,12 @@
 		// Test plugin loading
 		$result = DeploymentHelper::testPluginLoading($stage_directory, $verbose);
 		if (!$result['success']) {
-			echo "<strong>Plugin loading tests FAILED</strong><br>";
+			$lines = [];
 			foreach ($result['errors'] as $error) {
 				$type_label = ($error['type'] === 'syntax') ? 'SYNTAX' : strtoupper($error['type']);
-				echo "  • [$type_label] " . htmlspecialchars($error['file']) . ": " .
-					 htmlspecialchars($error['message']) . "<br>";
+				$lines[] = "• [$type_label] " . htmlspecialchars($error['file']) . ': ' . htmlspecialchars($error['message']);
 			}
-			echo '<br><strong>Aborting upgrade (pre-deployment — no rollback needed).</strong><br>';
-			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-			exit(1);
+			upgrade_abort('Plugin Loading Tests FAILED', implode('<br>', $lines));
 		} else {
 			echo "✓ Plugin loading tests passed ({$result['files_checked']} plugins)<br>";
 		}
@@ -970,15 +828,12 @@
 		// Test bootstrap
 		$result = DeploymentHelper::testBootstrap($stage_directory, $verbose);
 		if (!$result['success']) {
-			echo "<strong>Bootstrap test FAILED:</strong> " . htmlspecialchars($result['error']) . "<br>";
-			echo '<br><strong>Aborting upgrade (pre-deployment — no rollback needed).</strong><br>';
-			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-			exit(1);
+			upgrade_abort('Bootstrap Test FAILED', htmlspecialchars($result['error']));
 		} else {
 			echo "✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")<br>";
 		}
 
-		upgrade_echo('<br><h3>Preserving Themes/Plugins</h3>');
+		out_step('Preserving Themes/Plugins');
 
 		// Copy preserved-on-deploy themes/plugins from live into staging BEFORE the mv
 		// This ensures preserved extensions are carried into staging before the swap
@@ -990,38 +845,25 @@
 			echo "✓ Themes: {$result['themes_copied']} preserved, {$result['themes_skipped']} will update from staging<br>";
 			echo "✓ Plugins: {$result['plugins_copied']} preserved, {$result['plugins_skipped']} will update from staging<br>";
 		} else {
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
-			echo '<strong>❌ Theme/Plugin Preservation Failed:</strong><br>';
+			$lines = [];
 			foreach ($result['errors'] as $error) {
-				echo "  • " . htmlspecialchars($error) . "<br>";
+				$lines[] = '• ' . htmlspecialchars($error);
 			}
-			echo '<br>Preserved themes/plugins could not be carried over. Deploying without them would cause data loss.<br>';
-			echo 'Aborting upgrade to protect your preserved themes and plugins.<br>';
-			echo '</div>';
-			// Clean up staging
-			exec("rm -rf " . escapeshellarg($stage_location) . "/*");
-			exit(1);
+			$lines[] = '';
+			$lines[] = 'Preserved themes/plugins could not be carried over. Deploying without them would cause data loss.';
+			upgrade_abort('Theme/Plugin Preservation Failed', implode('<br>', $lines));
 		}
 
 		// ============================================
 		// DEPLOYMENT
 		// ============================================
-		upgrade_echo('<br><h3>Deploying Upgrade</h3>');
+		out_step('Deploying Upgrade');
 
-		if($dry_run){
-			echo '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">';
-			echo '<strong>🔍 DRY RUN:</strong> Skipping file deployment (files remain in staging area)<br>';
-			echo '</div>';
-		}
-		else{
-			//CLEAR OR CREATE BACKUP AREA
-			if($verbose) echo 'Clearing backup area: '.$backup_directory.'<br>';
+		//CLEAR OR CREATE BACKUP AREA
+		if($verbose) echo 'Clearing backup area: '.$backup_directory.'<br>';
 			if (!is_dir($backup_directory)) {
 				if (!mkdir($backup_directory, 0770, true)) {
-					echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 10px 0; background-color: #f8d7da; color: #721c24;">';
-					echo '<strong>❌ Error:</strong> Could not create backup directory: ' . htmlspecialchars($backup_directory) . '<br>';
-					echo '</div>';
-					exit(1);
+					upgrade_abort('Could not create backup directory', htmlspecialchars($backup_directory), false);
 				}
 				if($verbose) echo 'Backup area created<br>';
 			} else {
@@ -1060,11 +902,7 @@
 			$mv_exit = 0;
 			exec("mv $live_directory_contents $backup_directory 2>&1", $mv_output, $mv_exit);
 			if ($mv_exit !== 0) {
-				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-				echo '<strong>❌ Backup Failed:</strong> Could not move live files to backup.<br>';
-				echo 'Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '<br>';
-				echo '</div>';
-				exit(1);
+				upgrade_abort('Backup Failed', 'Could not move live files to backup. Error: ' . htmlspecialchars(implode(' ', $mv_output)), false);
 			}
 
 			// Move staged to live
@@ -1072,14 +910,9 @@
 			$mv_exit = 0;
 			exec("mv $stage_directory_contents $live_directory 2>&1", $mv_output, $mv_exit);
 			if ($mv_exit !== 0) {
-				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-				echo '<strong>❌ Deployment Failed:</strong> Could not move staged files to live.<br>';
-				echo 'Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '<br>';
-				echo 'Attempting rollback...<br>';
-				echo '</div>';
-				// Attempt to restore from backup
+				// Attempt to restore from backup before aborting
 				exec("mv $backup_directory_contents $live_directory 2>&1");
-				exit(1);
+				upgrade_abort('Deployment Failed', 'Could not move staged files to live. Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '. Rollback attempted.', false);
 			}
 
 			// Fix permissions using centralized script (production mode)
@@ -1117,28 +950,18 @@
 				}
 				exit(1);
 			}
-		}
 
 		//CLEAR OLD STAGED FILES
-		if($dry_run){
-			echo '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">';
-			echo '<strong>🔍 DRY RUN:</strong> Keeping staging files at: ' . htmlspecialchars($stage_location) . '<br>';
-			echo 'You can inspect the extracted upgrade before running a real upgrade.<br>';
-			echo '</div>';
-		}
-		else{
-			if($verbose) echo 'Clearing staging area: '.$stage_location.'...<br>';
+		if($verbose) echo 'Clearing staging area: '.$stage_location.'...<br>';
 			exec("chmod -R 770 $stage_location");
 			if(file_exists($stage_location)){
 				exec ("rm -rf $stage_location".'/*');
 				exec ("rm -rf $stage_location".'/.git');  //REMOVE LATENT GIT FILES
 				exec ("rm -rf $stage_location".'/.gitignore');  //REMOVE LATENT GIT FILES
 				if(!is_dir_empty($stage_location)){
-					echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
-					echo '<strong>⚠️ Warning:</strong> Failed to clear staging location: ' . htmlspecialchars($stage_location) . '<br>';
-					echo 'Permissions: '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
-					echo 'Continuing with upgrade — staging cleanup can be done manually later.<br>';
-					echo '</div>';
+					out_alert('warning', 'Failed to clear staging location: ' . htmlspecialchars($stage_location),
+						'Permissions: ' . substr(sprintf('%o', fileperms($stage_location)), -4) . '<br>'
+						. 'Continuing with upgrade — staging cleanup can be done manually later.');
 				}
 				else{
 					if($verbose) echo 'Staging area cleared<br>';
@@ -1153,44 +976,36 @@
 					if ($verbose) upgrade_echo('Removed downloaded core archive: ' . basename($file_download_location) . '<br>');
 				}
 			}
-		}
 
 		// ============================================
 		// COMPOSER VALIDATION
 		// ============================================
-		upgrade_echo('<br><h3>Validating Composer Dependencies</h3>');
+		out_step('Validating Composer Dependencies');
 
-		if($dry_run){
-			echo '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">';
-			echo '<strong>🔍 DRY RUN:</strong> Skipping composer installation<br>';
-			echo '</div>';
-		}
-		else{
-			$composer_script = $live_directory . '/utils/composer_install_if_needed.php';
-			if (file_exists($composer_script)) {
-				$composer_output = [];
-				$composer_return = 0;
-				exec("php " . escapeshellarg($composer_script) . " 2>&1", $composer_output, $composer_return);
+		$composer_script = $live_directory . '/utils/composer_install_if_needed.php';
+		if (file_exists($composer_script)) {
+			$composer_output = [];
+			$composer_return = 0;
+			exec("php " . escapeshellarg($composer_script) . " 2>&1", $composer_output, $composer_return);
 
-				// Note: composer_install_if_needed.php uses CORRECT exit codes (0 = success, 1 = failure)
-				if ($composer_return !== 0) {
-					echo "<strong>ERROR: Composer dependency setup failed.</strong><br>";
-					echo implode('<br>', $composer_output) . "<br>";
-					echo '<br><strong>Rolling back deployment...</strong><br>';
-					$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
-					if ($rollback['success']) {
-						echo "✓ Rollback completed successfully<br>";
-					}
-					exit(1);
-				} else {
-					echo "✓ Composer dependencies validated<br>";
-					if ($verbose) {
-						echo implode('<br>', $composer_output) . "<br>";
-					}
+			// Note: composer_install_if_needed.php uses CORRECT exit codes (0 = success, 1 = failure)
+			if ($composer_return !== 0) {
+				echo "<strong>ERROR: Composer dependency setup failed.</strong><br>";
+				echo implode('<br>', $composer_output) . "<br>";
+				echo '<br><strong>Rolling back deployment...</strong><br>';
+				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
+				if ($rollback['success']) {
+					echo "✓ Rollback completed successfully<br>";
 				}
+				exit(1);
 			} else {
-				echo "⚠ Composer validation script not found (skipping)<br>";
+				echo "✓ Composer dependencies validated<br>";
+				if ($verbose) {
+					echo implode('<br>', $composer_output) . "<br>";
+				}
 			}
+		} else {
+			echo "⚠ Composer validation script not found (skipping)<br>";
 		}
 
 		// ============================================
@@ -1198,32 +1013,18 @@
 		// ============================================
 		// After file swap, clear opcache so the subprocess (update_database.php) loads
 		// fresh bytecode from the new files. Also needed for any subsequent page loads.
-		if (!$dry_run) {
-			if (function_exists('opcache_reset')) {
-				opcache_reset();
-			}
-			clearstatcache(true);
-			if($verbose) upgrade_echo('Cleared PHP opcache and stat cache after file deployment<br>');
+		if (function_exists('opcache_reset')) {
+			opcache_reset();
 		}
+		clearstatcache(true);
+		if($verbose) upgrade_echo('Cleared PHP opcache and stat cache after file deployment<br>');
 
 		// ============================================
 		// DATABASE MIGRATION
 		// ============================================
-		upgrade_echo('<br><h3>Running Database Migrations</h3>');
+		out_step('Running Database Migrations');
 
-		if($dry_run){
-			echo '<div style="border: 2px solid #0066cc; padding: 15px; margin: 10px 0; background-color: #e7f3ff; color: #004085;">';
-			echo '<strong>🔍 DRY RUN:</strong> Skipping database migrations<br>';
-			echo '<p>In a real upgrade, the following would happen:</p>';
-			echo '<ul>';
-			echo '<li>Run update_database.php with --upgrade flag</li>';
-			echo '<li>Apply any pending migrations</li>';
-			echo '<li>Update system version to ' . htmlspecialchars($decode_response['system_version']) . '</li>';
-			echo '</ul>';
-			echo '</div>';
-		}
-		else{
-			// Run update_database.php as a SUBPROCESS to ensure a clean PHP process.
+		// Run update_database.php as a SUBPROCESS to ensure a clean PHP process.
 			// This is critical because upgrade.php pre-loads data model classes (via
 			// AdminPage → SessionControl → ShoppingCart → products_class.php → etc.)
 			// BEFORE the file swap. Those stale class definitions are locked in memory
@@ -1270,18 +1071,14 @@
 			catch(PDOException $e){
 				// Log the error but don't roll back — deployment and DB updates already succeeded.
 				// system_version was already set correctly by update_database above.
-				echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
-				echo '<strong>⚠ Warning:</strong> Could not re-confirm system version after upgrade (non-fatal — update_database already set it).<br>';
-				echo 'Error: ' . htmlspecialchars($e->getMessage()) . '<br>';
-				echo '</div>';
+				out_alert('warning', 'Could not re-confirm system version after upgrade (non-fatal — update_database already set it)',
+					'Error: ' . htmlspecialchars($e->getMessage()));
 			}
-		}
 
 		// ============================================
 		// THEME AND PLUGIN SYNC
 		// ============================================
-		if(!$dry_run){
-			upgrade_echo('<br><h3>Syncing Themes and Plugins</h3>');
+		out_step('Syncing Themes and Plugins');
 
 			try {
 				require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
@@ -1337,110 +1134,82 @@
 			} catch (\Throwable $e) {
 				// Sync is a post-deployment step — deployment and DB migration already succeeded.
 				// Do not roll back; just warn. Re-run update_database to retry sync.
-				echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
-				echo '<strong>⚠ Warning:</strong> Theme/Plugin sync failed (non-fatal — deployment and DB updates succeeded).<br>';
-				echo 'Error: ' . htmlspecialchars($e->getMessage()) . '<br>';
-				echo 'To retry: run update_database from the admin utilities page.<br>';
-				echo '</div>';
+				out_alert('warning', 'Theme/Plugin sync failed (non-fatal — deployment and DB updates succeeded)',
+					'Error: ' . htmlspecialchars($e->getMessage()) . '<br>'
+					. 'To retry: run update_database from the admin utilities page.');
 			}
 
 			// Stale reconciliation — see specs/upgrade_pipeline_rename_gap.md.
 			// Plugins/themes this site is set to receive upgrades for, but that the
 			// source's published-archive manifest no longer advertises, are flagged
-			// stale (preserved on disk and in DB; admin can review). Skipped if
-			// source predates the manifest.
-			if ($source_published_plugins !== null && $source_published_themes !== null) {
-				try {
-					$source_plugin_names = array_flip(array_column($source_published_plugins, 'name'));
-					$source_theme_names  = array_flip(array_column($source_published_themes,  'name'));
-					$plugin_marked = 0;
-					$theme_marked  = 0;
+			// stale (preserved on disk and in DB; admin can review).
+			try {
+				$source_plugin_names = array_flip(array_column($source_published_plugins, 'name'));
+				$source_theme_names  = array_flip(array_column($source_published_themes,  'name'));
+				$plugin_marked = 0;
+				$theme_marked  = 0;
 
-					$q = $dblink->prepare(
-						"UPDATE plg_plugins
-						 SET plg_status = 'stale'
-						 WHERE plg_receives_upgrades = true
-						   AND plg_name <> ALL(?)
-						   AND plg_status <> 'stale'"
-					);
-					// Pass a Postgres array literal ({a,b,c}) so the <> ALL filter works.
-					$plugin_array_literal = '{' . implode(',', array_map(function($n){
-						return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
-					}, array_keys($source_plugin_names))) . '}';
-					$q->execute([$plugin_array_literal]);
-					$plugin_marked = $q->rowCount();
+				$q = $dblink->prepare(
+					"UPDATE plg_plugins
+					 SET plg_status = 'stale'
+					 WHERE plg_receives_upgrades = true
+					   AND plg_name <> ALL(?)
+					   AND plg_status <> 'stale'"
+				);
+				// Pass a Postgres array literal ({a,b,c}) so the <> ALL filter works.
+				$plugin_array_literal = '{' . implode(',', array_map(function($n){
+					return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
+				}, array_keys($source_plugin_names))) . '}';
+				$q->execute([$plugin_array_literal]);
+				$plugin_marked = $q->rowCount();
 
-					$q = $dblink->prepare(
-						"UPDATE thm_themes
-						 SET thm_status = 'stale'
-						 WHERE thm_receives_upgrades = true
-						   AND thm_name <> ALL(?)
-						   AND thm_status <> 'stale'"
-					);
-					$theme_array_literal = '{' . implode(',', array_map(function($n){
-						return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
-					}, array_keys($source_theme_names))) . '}';
-					$q->execute([$theme_array_literal]);
-					$theme_marked = $q->rowCount();
+				$q = $dblink->prepare(
+					"UPDATE thm_themes
+					 SET thm_status = 'stale'
+					 WHERE thm_receives_upgrades = true
+					   AND thm_name <> ALL(?)
+					   AND thm_status <> 'stale'"
+				);
+				$theme_array_literal = '{' . implode(',', array_map(function($n){
+					return '"' . str_replace(['\\','"'], ['\\\\','\\"'], $n) . '"';
+				}, array_keys($source_theme_names))) . '}';
+				$q->execute([$theme_array_literal]);
+				$theme_marked = $q->rowCount();
 
-					if ($plugin_marked > 0 || $theme_marked > 0) {
-						upgrade_echo("⚠ Stale: {$plugin_marked} plugin(s), {$theme_marked} theme(s) no longer in source manifest — preserved and flagged for admin review<br>");
-					} else if ($verbose) {
-						upgrade_echo("✓ No stale plugins/themes detected<br>");
-					}
-				} catch (\Throwable $e) {
-					echo '<div style="border: 2px solid #856404; padding: 10px; margin: 10px 0; background-color: #fff3cd; color: #856404;">';
-					echo '<strong>⚠ Warning:</strong> Stale reconciliation failed (non-fatal): ' . htmlspecialchars($e->getMessage()) . '<br>';
-					echo '</div>';
+				if ($plugin_marked > 0 || $theme_marked > 0) {
+					upgrade_echo("⚠ Stale: {$plugin_marked} plugin(s), {$theme_marked} theme(s) no longer in source manifest — preserved and flagged for admin review<br>");
+				} else if ($verbose) {
+					upgrade_echo("✓ No stale plugins/themes detected<br>");
 				}
+			} catch (\Throwable $e) {
+				out_alert('warning', 'Stale reconciliation failed (non-fatal): ' . htmlspecialchars($e->getMessage()));
+			}
+
+		// Flush static page cache so new code's renders aren't masked by
+		// pre-deploy cached pages. See specs/upgrade_pipeline_rename_gap.md.
+		$cache_dir = $full_site_dir . '/cache/static_pages';
+		if (is_dir($cache_dir)) {
+			$cleared = 0;
+			exec('find ' . escapeshellarg($cache_dir) . ' -mindepth 1 -delete 2>&1', $cache_out, $cache_exit);
+			if ($cache_exit === 0) {
+				if ($verbose) upgrade_echo("✓ Static page cache flushed<br>");
+			} else {
+				upgrade_echo("⚠ Static page cache flush failed (non-fatal)<br>");
 			}
 		}
 
-		if($dry_run){
-			echo '<br><div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
-			echo '<h2 style="margin-top: 0; color: #0066cc;">✓ Dry Run Complete!</h2>';
-			echo '<p><strong>The upgrade was simulated successfully.</strong></p>';
-			echo '<p>No changes were made to your production system.</p>';
-			echo '<p>Validation results:</p>';
-			echo '<ul>';
-			echo '<li>✓ Upgrade downloaded and extracted to staging</li>';
-			echo '<li>✓ PHP syntax validated</li>';
-			echo '<li>✓ Plugin loading tested</li>';
-			echo '<li>✓ Bootstrap tested</li>';
-			echo '<li>✓ Custom themes/plugins would be preserved</li>';
-			echo '</ul>';
-			echo '<p><strong>Target version:</strong> ' . htmlspecialchars($decode_response['system_version']) . '</p>';
-			echo '<p><strong>Staging location:</strong> ' . htmlspecialchars($stage_location) . '</p>';
-			echo '<p>To perform the actual upgrade, run without the --dry-run flag.</p>';
-			echo '</div>';
-		}
-		else{
-			// Flush static page cache so new code's renders aren't masked by
-			// pre-deploy cached pages. See specs/upgrade_pipeline_rename_gap.md.
-			$cache_dir = $full_site_dir . '/cache/static_pages';
-			if (is_dir($cache_dir)) {
-				$cleared = 0;
-				exec('find ' . escapeshellarg($cache_dir) . ' -mindepth 1 -delete 2>&1', $cache_out, $cache_exit);
-				if ($cache_exit === 0) {
-					if ($verbose) upgrade_echo("✓ Static page cache flushed<br>");
-				} else {
-					upgrade_echo("⚠ Static page cache flush failed (non-fatal)<br>");
-				}
+		// Remove the rollback backup — upgrade succeeded, no longer needed.
+		if (is_dir($backup_directory)) {
+			exec('rm -rf ' . escapeshellarg($backup_directory) . ' 2>&1', $rm_out, $rm_exit);
+			if ($rm_exit === 0) {
+				if ($verbose) upgrade_echo("✓ Removed rollback backup (public_html_last)<br>");
+			} else {
+				upgrade_echo("⚠ Could not remove rollback backup (non-fatal): " . htmlspecialchars(implode(' ', $rm_out)) . "<br>");
 			}
-
-			// Remove the rollback backup — upgrade succeeded, no longer needed.
-			if (is_dir($backup_directory)) {
-				exec('rm -rf ' . escapeshellarg($backup_directory) . ' 2>&1', $rm_out, $rm_exit);
-				if ($rm_exit === 0) {
-					if ($verbose) upgrade_echo("✓ Removed rollback backup (public_html_last)<br>");
-				} else {
-					upgrade_echo("⚠ Could not remove rollback backup (non-fatal): " . htmlspecialchars(implode(' ', $rm_out)) . "<br>");
-				}
-			}
-
-			upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
-			upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 		}
+
+		upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
+		upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 	}
 	else{
 
@@ -1485,14 +1254,6 @@
 				echo '<div class="alert alert-info"><strong>Upgrade available:</strong> '. htmlspecialchars($decode_response['system_version']) . ' ('.htmlspecialchars($decode_response['upgrade_name']).') released on '. $friendly_date .' — '.htmlspecialchars($decode_response['release_notes']).'</div>';
 				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
 
-				echo '<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;">';
-				echo '<label style="display: flex; align-items: center; cursor: pointer;">';
-				echo '<input type="checkbox" name="dry-run" value="1" style="margin-right: 10px; width: 18px; height: 18px;">';
-				echo '<span><strong>Dry Run Mode</strong> - Download and validate the upgrade without making any changes to production</span>';
-				echo '</label>';
-				echo '<p style="margin: 10px 0 0 28px; color: #6c757d; font-size: 0.9em;">Files will be downloaded and validated, but not deployed. Database migrations will be skipped.</p>';
-				echo '</div>';
-
 				$formwriter->submitbutton('btn_submit', 'Submit');
 
 			}
@@ -1501,14 +1262,6 @@
 				echo '<div class="alert alert-success"><strong>Up to date.</strong> Version '. htmlspecialchars($settings->get_setting('system_version')). ' is the latest version.</div>';
 				echo '<p>Latest release: '. htmlspecialchars($decode_response['system_version']) . ' ('.htmlspecialchars($decode_response['upgrade_name']).') released on '. $friendly_date .' — '.htmlspecialchars($decode_response['release_notes']).'</p>';
 				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
-
-				echo '<div style="margin: 20px 0; padding: 15px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;">';
-				echo '<label style="display: flex; align-items: center; cursor: pointer;">';
-				echo '<input type="checkbox" name="dry-run" value="1" style="margin-right: 10px; width: 18px; height: 18px;">';
-				echo '<span><strong>Dry Run Mode</strong> - Download and validate the upgrade without making any changes to production</span>';
-				echo '</label>';
-				echo '<p style="margin: 10px 0 0 28px; color: #6c757d; font-size: 0.9em;">Files will be downloaded and validated, but not deployed. Database migrations will be skipped.</p>';
-				echo '</div>';
 
 				$formwriter->submitbutton('btn_submit', 'Upgrade anyway');
 
@@ -1520,17 +1273,6 @@
 			echo '</div>';
 		echo '</fieldset>';
 		echo $formwriter->end_form();
-
-		// Refresh Server Archives section
-		echo '<fieldset style="margin-top: 30px;"><h4>Server Archive Management</h4>';
-		echo '<div class="fields full">';
-		echo '<p>If you\'ve made changes to themes or plugins on the upgrade server, you can request the server to regenerate its archives.</p>';
-		echo '<div id="refresh-result"></div>';
-		echo '<button type="button" id="refresh-archives-btn" class="btn btn-secondary" onclick="refreshServerArchives()">';
-		echo '<i class="fas fa-sync-alt"></i> Refresh Server Archives';
-		echo '</button>';
-		echo '</div>';
-		echo '</fieldset>';
 
 		// Add JavaScript to disable submit button after click to prevent double submission
 		echo '<script>
@@ -1553,47 +1295,6 @@
 				});
 			}
 		});
-
-		function refreshServerArchives() {
-			var btn = document.getElementById("refresh-archives-btn");
-			var resultDiv = document.getElementById("refresh-result");
-
-			// Disable button and show loading state
-			btn.disabled = true;
-			btn.innerHTML = "<i class=\"fas fa-spinner fa-spin\"></i> Refreshing...";
-			resultDiv.innerHTML = "";
-
-			fetch("/utils/upgrade", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded",
-				},
-				body: "refresh_archives=1"
-			})
-			.then(response => response.json())
-			.then(data => {
-				btn.disabled = false;
-				btn.innerHTML = "<i class=\"fas fa-sync-alt\"></i> Refresh Server Archives";
-
-				if (data.success) {
-					resultDiv.innerHTML = "<div style=\"padding: 15px; margin: 10px 0; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;\">" +
-						"<strong>✓ Success:</strong> " + data.message +
-						(data.version ? " (Version: " + data.version + ")" : "") +
-						"</div>";
-				} else {
-					resultDiv.innerHTML = "<div style=\"padding: 15px; margin: 10px 0; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;\">" +
-						"<strong>❌ Error:</strong> " + (data.error || "Unknown error") +
-						"</div>";
-				}
-			})
-			.catch(error => {
-				btn.disabled = false;
-				btn.innerHTML = "<i class=\"fas fa-sync-alt\"></i> Refresh Server Archives";
-				resultDiv.innerHTML = "<div style=\"padding: 15px; margin: 10px 0; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;\">" +
-					"<strong>❌ Error:</strong> " + error.message +
-					"</div>";
-			});
-		}
 		</script>';
 
 		$page->end_box();
@@ -1620,10 +1321,10 @@
 	}
 
 	/**
-	 * Get list of themes to upgrade (those with receives_upgrades=true in theme.json).
-	 * Used by the legacy fallback path when the source predates the published-archives manifest.
+	 * Get list of themes the local site is willing to receive upgrades for
+	 * (those with receives_upgrades=true in theme.json).
 	 */
-	function get_themes_to_upgrade($theme_dir) {
+	function get_upgradable_themes($theme_dir) {
 		$themes = [];
 		foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
 			$theme_data = json_decode(file_get_contents($json_file), true);
@@ -1710,21 +1411,10 @@
 		return $out;
 	}
 
-	/**
-	 * Get list of plugins to attempt to refresh during upgrade — every plugin
-	 * with a plg_plugins row, regardless of receives_upgrades/included_in_publish.
-	 * The download loop tries each one; published plugins succeed via the upgrade
-	 * endpoint; plugins not in the catalog 404 and are skipped via the existing
-	 * warning path.
-	 *
-	 * NOTE: Superseded by source-side published-archives manifest
-	 * (published_plugins in the ?serve-upgrade response). Kept for backward
-	 * compatibility when prod upgrades against a source that predates the manifest.
-	 */
-	function get_installed_plugins() {
+	function get_upgradable_plugins() {
 		try {
 			require_once(PathHelper::getIncludePath('data/plugins_class.php'));
-			$all_plugins = new MultiPlugin();
+			$all_plugins = new MultiPlugin(['plg_receives_upgrades' => true]);
 			$all_plugins->load();
 			$names = [];
 			foreach ($all_plugins as $plugin) {
@@ -1732,8 +1422,7 @@
 			}
 			return $names;
 		} catch (Exception $e) {
-			// DB unreachable — skip plugin refresh rather than crash the upgrade
-			error_log("get_installed_plugins: failed to query plg_plugins: " . $e->getMessage());
+			error_log("get_upgradable_plugins: failed to query plg_plugins: " . $e->getMessage());
 			return [];
 		}
 	}
@@ -1761,28 +1450,22 @@
 	}
 
 	/**
-	 * Get detailed info about all plugins present on disk, annotated with
-	 * whether they are installed (have a plg_plugins row). Upgrade attempts
-	 * each installed plugin; on-disk-only plugins are shown for context but
-	 * not refreshed. receives_upgrades is surfaced for display; the upgrade
-	 * download loop no longer filters by it, but the deploy-swap and the
-	 * container-reconcile paths still consult it.
+	 * Get detailed info about all plugins present on disk. `will_upgrade` is
+	 * driven by the on-disk receives_upgrades flag; the actual upgrade-time
+	 * filter also intersects with the source's published-archives manifest.
 	 */
 	function get_all_plugins_info($plugin_dir) {
-		$installed = array_flip(get_installed_plugins());
-
 		$plugins = [];
 		foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
 			$plugin_data = json_decode(file_get_contents($json_file), true);
 			$plugin_name = basename(dirname($json_file));
-			$is_installed = isset($installed[$plugin_name]);
+			$receives_upgrades = $plugin_data['receives_upgrades'] ?? false;
 			$plugins[$plugin_name] = [
 				'name' => $plugin_name,
 				'display_name' => $plugin_data['display_name'] ?? $plugin_name,
 				'version' => $plugin_data['version'] ?? 'unknown',
-				'receives_upgrades' => $plugin_data['receives_upgrades'] ?? false,
-				'is_installed' => $is_installed,
-				'will_upgrade' => $is_installed,
+				'receives_upgrades' => $receives_upgrades,
+				'will_upgrade' => $receives_upgrades === true,
 			];
 		}
 		ksort($plugins);
@@ -1905,55 +1588,6 @@
 		}
 
 		return ['success' => true];
-	}
-
-	/**
-	 * Request the upgrade server to refresh its archives
-	 * This triggers regeneration of all archives for the current version
-	 *
-	 * @return array Response with 'success', 'message' or 'error', and optionally 'version'
-	 */
-	function request_archive_refresh() {
-		$settings = Globalvars::get_instance();
-
-		$upgrade_source = $settings->get_setting('upgrade_source');
-
-		if (empty($upgrade_source)) {
-			return ['success' => false, 'error' => 'Upgrade source not configured'];
-		}
-
-		$url = rtrim($upgrade_source, '/') . '/admin/server_manager/publish?refresh-archives=1';
-
-		$ch = curl_init($url);
-		curl_setopt_array($ch, [
-			CURLOPT_POST => true,
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_TIMEOUT => 120, // Archive refresh may take time
-			CURLOPT_CONNECTTIMEOUT => 30,
-			CURLOPT_FOLLOWLOCATION => true,
-			CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4, // Force IPv4 for consistent IP whitelisting
-		]);
-
-		$response = curl_exec($ch);
-		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		$curl_error = curl_error($ch);
-		curl_close($ch);
-
-		if ($curl_error) {
-			return ['success' => false, 'error' => 'Connection failed: ' . $curl_error];
-		}
-
-		if ($http_code !== 200) {
-			$error = json_decode($response, true);
-			return ['success' => false, 'error' => $error['error'] ?? 'Unknown error (HTTP ' . $http_code . ')'];
-		}
-
-		$result = json_decode($response, true);
-		if (json_last_error() !== JSON_ERROR_NONE) {
-			return ['success' => false, 'error' => 'Invalid response from server'];
-		}
-
-		return $result;
 	}
 
 ?>
