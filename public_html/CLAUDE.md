@@ -19,10 +19,6 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **CRITICAL:** NEVER commit to git unless explicitly directed to by the user. File changes are allowed, but git commits require explicit user permission.
 
-## Multi-Item Discussion Rule
-
-**CRITICAL:** When the user asks for a list of concerns, decisions, points of discussion, design questions, or any similar enumerated set, AND the list contains more than three items, ALWAYS walk through them one at a time. Present a high-level summary if useful, then take the first item, wait for the user's response, and only move to the next item once that one is resolved. Do NOT batch-decide multiple items in a single response. The user prefers serial discussion for any list over three.
-
 ## Secret Handling Rules
 
 **CRITICAL:** NEVER echo, print, log, or otherwise surface passwords, API keys, tokens, or other credentials into the chat transcript when it can be avoided. This includes:
@@ -169,6 +165,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
 - [Photo System](docs/photo_system.md) - Photo management and uploads
 - [Plugin Developer Guide](docs/plugin_developer_guide.md) - Plugin development, routing, themes
+- [Product Requirements](docs/product_requirements.md) - Collecting data from buyers at checkout (built-in and custom requirement types)
 - [Routing](docs/routing.md) - URL routing, view fallback, route configuration
 - [Product Purchase Hooks](docs/product_purchase_hooks.md) - Purchase event hooks
 - [Publish/Upgrade System Analysis](docs/publish_upgrade_system_analysis.md) - Publishing workflow
@@ -181,6 +178,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Social Features](docs/social_features.md) - Like/favorite system, block system, report system, messaging/conversations
 - [Subscription Tiers](docs/subscription_tiers.md) - Subscription and tier system
 - [Theme Integration Instructions](docs/theme_integration_instructions.md) - Theme setup and integration
+- [Questions & Surveys](docs/questions_surveys.md) - Built-in questionnaire system: question types, surveys, answer storage
 - [Validation](docs/validation.md) - Input validation patterns
 
 ## Database & Configuration
@@ -559,33 +557,10 @@ This is the live test server where changes can be verified in a browser.
 **Log In As Another User:**
 Navigate to `/admin/admin_user_login_as?usr_user_id={id}` while logged in as a permission-10 admin. This switches the session to that user and redirects to `/`. To find a user's ID, go to `/admin/admin_users` and click the user — the URL will show `?usr_user_id=N`.
 
-### Docker Production Server (docker-prod)
-**IP:** `23.239.11.53`
-**SSH Key:** `~/.ssh/id_ed25519_claude` (no passphrase)
+### Production Servers
+For the full list of managed nodes (IPs, containers, SSH details), see the Server Manager dashboard at `/admin/server_manager`. All node connection info is stored there.
 
-Production Docker server hosting multiple client sites. Each site runs in its own container.
-
-**Claude superuser** (permission 10, exists on all containers): See Claude memory for credentials.
-
-**Containers:**
-- `empoweredhealthtn` - Empowered Health (empoweredhealthtn.com)
-- `scrolldaddy` - ScrollDaddy web app (port 8087); DB exposed on port 9087
-
-### ScrollDaddy DNS Servers
-**Source code:** `/home/user1/scrolldaddy-dns/` (Go project — this is the authoritative repo, NOT `/tmp/scrolldaddy-dns/` on the DNS server)
-**Primary:** `45.56.103.84` | **Secondary:** `97.107.131.227` | **SSH Key:** `~/.ssh/id_ed25519_claude`
-**Ops guide:** `/etc/scrolldaddy/OPS_GUIDE.md` on each server — full config, file locations, deploy steps, and troubleshooting
-
-**Deploy (build installer locally, copy to server, run):**
-```bash
-cd /home/user1/scrolldaddy-dns
-make release VERSION=1.x.x
-scp scrolldaddy-dns-installer.sh root@45.56.103.84:/tmp/
-ssh root@45.56.103.84 bash /tmp/scrolldaddy-dns-installer.sh --verbose
-scp scrolldaddy-dns-installer.sh root@97.107.131.227:/tmp/
-ssh root@97.107.131.227 bash /tmp/scrolldaddy-dns-installer.sh --verbose
-```
-The installer auto-detects install vs upgrade. On fresh install it prompts to edit `/etc/scrolldaddy/scrolldaddy.env` before starting. On upgrade it stops, swaps binary, restarts, and auto-rolls back on failure.
+For ScrollDaddy DNS server IPs, deploy procedure, and ops guide location, see Claude memory (`reference_scrolldaddy_infra.md`).
 
 ### Browser Testing (MCP)
 A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
@@ -660,9 +635,6 @@ sudo systemctl status apache2
 sudo systemctl restart apache2
 ```
 
-### Theme Reference Files
-Commercial theme source files (HTML demos, docs) are stored at `/home/user1/theme-sources/` and symlinked into the web root at `public_html/theme-sources/` (gitignored). Browse them at `https://joinerytest.site/theme-sources/`. Currently available: Canvas 7.
-
 ### Test Server Monitoring
 **Usage Pattern:**
 1. Make code changes
@@ -686,7 +658,8 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 4. **Method Verification**: NEVER assume available functions - always check class definitions first
 5. **Security**: Always validate and sanitize user input
 6. **FormWriter**: NEVER write hand-rolled HTML forms. Always use FormWriter for every form in the platform — it handles validation styling, CSRF, `novalidate`/`is-invalid` integration, and consistent UX automatically. See **📖 [FormWriter Documentation](docs/formwriter.md)**. The only exception is single-button action forms (a `<form>` with only hidden inputs and a submit button) that trigger a server action with no user-entered fields.
-7. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
+7. **Data Collection**: NEVER write custom scripts or ad-hoc forms to collect data from users. Use **Questions/Surveys** (`/admin/admin_questions`, `/admin/admin_surveys`) for standalone questionnaires, and **Product Requirements** (attached to products via the admin product edit page) for data collected at purchase time. See **📖 [Questions & Surveys](docs/questions_surveys.md)** and **📖 [Product Requirements](docs/product_requirements.md)**. Only reach for custom code if these systems genuinely cannot accommodate the use case.
+8. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
 8. **Version Numbers**: ALWAYS look for version numbers in files when making changes and increment them appropriately
 
 ## Security Notes
