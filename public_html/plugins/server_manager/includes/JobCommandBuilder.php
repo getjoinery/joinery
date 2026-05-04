@@ -1157,18 +1157,37 @@ class JobCommandBuilder {
 	 *   admin_email - Let's Encrypt notification address (uses --register-unsafely-without-email if absent)
 	 */
 	public static function build_provision_ssl($node, $params) {
-		$domain = $params['domain'] ?? '';
-		$email  = $params['admin_email'] ?? '';
+		$domain   = $params['domain'] ?? '';
+		$email    = $params['admin_email'] ?? '';
+		$sitename = $node->get('mgn_container_name') ?: $node->get('mgn_slug');
 
 		if (!$domain) {
 			throw new Exception("provision_ssl requires a domain.");
 		}
 
-		$domain_esc = escapeshellarg($domain);
-		$email_arg  = $email
+		$domain_esc   = escapeshellarg($domain);
+		$sitename_esc = escapeshellarg($sitename);
+		$email_arg    = $email
 			? ' -m ' . escapeshellarg($email)
 			: ' --register-unsafely-without-email';
-		$is_docker  = (bool)$node->get('mgn_container_name');
+		$is_docker    = (bool)$node->get('mgn_container_name');
+
+		if (self::is_cloudflare_domain($domain)) {
+			// Cloudflare proxied: certbot not needed (Cloudflare provides edge SSL).
+			// Just ensure the HTTP proxy passes X-Forwarded-Proto "https" to the backend.
+			return [
+				['type' => 'ssh', 'label' => 'Cloudflare detected — skip certbot, patch proxy config', 'on_host' => $is_docker,
+				 'cmd' => "CONF=\"/etc/apache2/sites-enabled/{$sitename_esc}-proxy.conf\"; " .
+				          "[ -f \"\$CONF\" ] && sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/' \"\$CONF\" && systemctl reload apache2; " .
+				          "echo 'SSL_SKIPPED_CLOUDFLARE'",
+				 'timeout' => 30],
+			];
+		}
+
+		// certbot's Apache plugin copies X-Forwarded-Proto "http" from the HTTP VHost into
+		// the SSL VHost it generates — always patch it to "https" after certbot runs.
+		$ssl_patch_cmd = "SSL_CONF=\"/etc/apache2/sites-enabled/{$sitename_esc}-proxy-le-ssl.conf\"; " .
+		                 "[ -f \"\$SSL_CONF\" ] && sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/' \"\$SSL_CONF\" && systemctl reload apache2 || true";
 
 		return [
 			['type' => 'ssh', 'label' => 'Ensure certbot is installed', 'on_host' => $is_docker,
@@ -1177,9 +1196,52 @@ class JobCommandBuilder {
 			['type' => 'ssh', 'label' => 'Run certbot', 'on_host' => $is_docker,
 			 'cmd' => "certbot --apache -d {$domain_esc} --non-interactive --agree-tos{$email_arg}",
 			 'timeout' => 300],
+			['type' => 'ssh', 'label' => 'Fix X-Forwarded-Proto in SSL VHost', 'on_host' => $is_docker,
+			 'cmd' => $ssl_patch_cmd,
+			 'timeout' => 30],
 			['type' => 'ssh', 'label' => 'Verify certificate', 'on_host' => $is_docker,
 			 'cmd' => "test -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem && echo SSL_CERT_VERIFIED",
 			 'continue_on_error' => true],
+		];
+	}
+
+	private static function is_cloudflare_domain($domain) {
+		$ip = gethostbyname($domain);
+		if ($ip === $domain) {
+			return false; // DNS resolution failed
+		}
+		$ip_long = ip2long($ip);
+		if ($ip_long === false) {
+			return false;
+		}
+		foreach (self::get_cloudflare_ip_ranges() as $cidr) {
+			[$subnet, $bits] = explode('/', $cidr);
+			$mask = -1 << (32 - (int)$bits);
+			if (($ip_long & $mask) === (ip2long($subnet) & $mask)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static function get_cloudflare_ip_ranges() {
+		static $ranges = null;
+		if ($ranges !== null) {
+			return $ranges;
+		}
+		$fetched = @file_get_contents('https://www.cloudflare.com/ips-v4');
+		if ($fetched !== false) {
+			$parsed = array_filter(array_map('trim', explode("\n", $fetched)));
+			if (!empty($parsed)) {
+				return $ranges = array_values($parsed);
+			}
+		}
+		return $ranges = [
+			'173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22',
+			'103.31.4.0/22',   '141.101.64.0/18', '108.162.192.0/18',
+			'190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22',
+			'198.41.128.0/17', '162.158.0.0/15',  '104.16.0.0/13',
+			'104.24.0.0/14',   '172.64.0.0/13',   '131.0.72.0/22',
 		];
 	}
 
@@ -1497,6 +1559,31 @@ class JobCommandBuilder {
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Fix permissions',
 				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh {$sitename}",
 				'continue_on_error' => true]);
+
+			// Post-restore domain fixup: the source site's domain was set during install.sh
+			// and in the restored DB. Update both to the target node's domain.
+			$target_domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '';
+			if ($target_domain) {
+				$target_domain_esc = escapeshellarg($target_domain);
+				$source_domain_esc = escapeshellarg($domain); // $domain = source domain in from_backup mode
+
+				$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Update webDir in database',
+					'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c \"UPDATE stg_settings SET stg_value = {$target_domain_esc} WHERE stg_name = 'webDir'\"",
+					'continue_on_error' => true]);
+
+				$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Update webDir in config file',
+					'cmd' => "sed -i \"s|settings\['webDir'\] = '[^']*'|settings['webDir'] = '{$target_domain}'|\" /var/www/html/{$sitename}/config/Globalvars_site.php",
+					'continue_on_error' => true]);
+
+				$apache_conf = "/etc/apache2/sites-available/{$sitename}.conf";
+				$apache_reload = $is_docker_install ? 'apache2ctl graceful' : 'systemctl reload apache2';
+				$steps[] = array_merge(
+					$is_docker_install ? $step_base : ['on_host' => true],
+					['type' => 'ssh', 'label' => 'Update Apache ServerName',
+					 'cmd' => "[ -f {$apache_conf} ] && sed -i \"s/ServerName {$domain}/ServerName {$target_domain}/\" {$apache_conf} && {$apache_reload} || true",
+					 'continue_on_error' => true]
+				);
+			}
 
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',
 				'cmd' => "rm -f {$remote_db_dump} {$remote_project_tar}",
