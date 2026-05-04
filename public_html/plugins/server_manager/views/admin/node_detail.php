@@ -354,9 +354,9 @@ if ($_POST && isset($_POST['action'])) {
 			'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 			'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
-			'mgn_delete_local_after_upload',
+			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 		];
-		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload'];
+		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks'];
 		foreach ($editable_fields as $field) {
 			if (in_array($field, $bool_fields, true)) {
 				$node->set($field, !empty($_POST[$field]));
@@ -695,6 +695,12 @@ if ($tab === 'overview') {
 				$ok   = '<span class="text-success">✓</span>';
 				$fail = '<span class="text-danger">✗</span>';
 				$dash = '<span class="text-muted">—</span>';
+				// When no method confirmed SSL (e.g. edge/CDN like Cloudflare), show — rather
+				// than ✗ — "undetectable by this method" is not the same as "SSL broken"
+				if ($ssl_method === null) {
+					if ($le_val    === false) $le_val    = null;
+					if ($probe_val === false) $probe_val = null;
+				}
 				$le_icon    = $le_val    === true ? $ok : ($le_val    === false ? $fail : $dash);
 				$probe_icon = $probe_val === true ? $ok : ($probe_val === false ? $fail : $dash);
 				$ssl_sub = '<div class="mt-2 small">'
@@ -1002,6 +1008,11 @@ if ($tab === 'overview') {
 	$formwriter->checkboxinput('mgn_delete_local_after_upload', 'Delete local backup after upload', [
 		'checked' => $node->get('mgn_delete_local_after_upload'),
 		'helptext' => 'Removes the local copy on this node after a successful cloud upload. Saves disk but leaves only the cloud copy.',
+	]);
+
+	$formwriter->checkboxinput('mgn_skip_joinery_checks', 'Skip Joinery-specific checks (for non-Joinery servers)', [
+		'checked' => $node->get('mgn_skip_joinery_checks'),
+		'helptext' => 'Hides Joinery-only tabs (Backups, Database, Updates). Use for servers not running the Joinery platform.',
 	]);
 
 	$formwriter->checkboxinput('mgn_enabled', 'Enabled', [
