@@ -1171,6 +1171,9 @@ class JobCommandBuilder {
 		$is_docker  = (bool)$node->get('mgn_container_name');
 
 		return [
+			['type' => 'ssh', 'label' => 'Ensure certbot is installed', 'on_host' => $is_docker,
+			 'cmd' => "command -v certbot >/dev/null 2>&1 || apt-get install -y -qq certbot python3-certbot-apache",
+			 'timeout' => 120],
 			['type' => 'ssh', 'label' => 'Run certbot', 'on_host' => $is_docker,
 			 'cmd' => "certbot --apache -d {$domain_esc} --non-interactive --agree-tos{$email_arg}",
 			 'timeout' => 300],
