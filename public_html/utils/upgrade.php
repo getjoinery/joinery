@@ -397,24 +397,29 @@
 		$source_published_themes  = $decode_response['published_themes']  ?? [];
 		$source_published_plugins = $decode_response['published_plugins'] ?? [];
 
-		// Manifest-driven: only upgrade themes/plugins that are locally installed
-		// AND marked receives_upgrades=true. System themes are added separately
-		// via required_themes below. Nothing is auto-installed.
+		// Download all locally-installed extensions that the source has published.
+		// The receives_upgrades flag is NOT consulted here — the staged manifest
+		// decides preservation in copyPreservedToStaging(). Filtering by the live
+		// flag here would create a bootstrapping deadlock where a theme could never
+		// receive a receives_upgrades change via an upgrade package.
+		$source_published_theme_names  = array_column($source_published_themes,  'name');
+		$source_published_plugin_names = array_column($source_published_plugins, 'name');
 		$themes_to_download  = array_values(array_intersect(
-			get_upgradable_extensions($live_directory . '/theme',   'theme'),
-			array_column($source_published_themes, 'name')
+			get_installed_extension_names($live_directory . '/theme',   'theme'),
+			$source_published_theme_names
 		));
 		$plugins_to_download = array_values(array_intersect(
-			get_upgradable_extensions($live_directory . '/plugins', 'plugin'),
-			array_column($source_published_plugins, 'name')
+			get_installed_extension_names($live_directory . '/plugins', 'plugin'),
+			$source_published_plugin_names
 		));
 		// Map name → archive URL for the download loop.
 		$theme_url_by_name  = array_column($source_published_themes,  'url', 'name');
 		$plugin_url_by_name = array_column($source_published_plugins, 'url', 'name');
 
-		// Get detailed info for status display
-		$all_themes_info  = get_installed_extension_info($live_directory . '/theme',   'theme');
-		$all_plugins_info = get_installed_extension_info($live_directory . '/plugins', 'plugin');
+		// Get detailed info for status display.
+		// Pass published names so will_upgrade reflects the package, not the live flag.
+		$all_themes_info  = get_installed_extension_info($live_directory . '/theme',   'theme', $source_published_theme_names);
+		$all_plugins_info = get_installed_extension_info($live_directory . '/plugins', 'plugin', $source_published_plugin_names);
 
 		if (!$resuming_after_self_update) {
 
@@ -1347,11 +1352,26 @@
 	}
 
 	/**
-	 * Get extensions of a given type ('theme' or 'plugin') the local site is
-	 * willing to receive upgrades for (those with receives_upgrades=true in
-	 * the on-disk manifest). The manifest is the source of truth — the admin
-	 * UI for marking preserved/upgradable writes both manifest and DB row in
-	 * lockstep, and PluginManager/ThemeManager::sync() reconciles them.
+	 * Get all installed extension names of a given type ('theme' or 'plugin'),
+	 * regardless of their receives_upgrades flag.
+	 *
+	 * Used to build the download list: any locally-installed extension that the
+	 * source has published will be downloaded. The staged manifest then decides
+	 * whether to preserve or upgrade (copyPreservedToStaging). Reading the live
+	 * manifest here would create a bootstrapping deadlock where a theme can never
+	 * receive a receives_upgrades flag change via an upgrade package.
+	 */
+	function get_installed_extension_names($extension_dir, $type) {
+		$names = [];
+		foreach (glob($extension_dir . '/*/' . $type . '.json') as $json_file) {
+			$names[] = basename(dirname($json_file));
+		}
+		return $names;
+	}
+
+	/**
+	 * @deprecated Use get_installed_extension_names() for the download list.
+	 * Kept for callers that genuinely need to know the live receives_upgrades flag.
 	 */
 	function get_upgradable_extensions($extension_dir, $type) {
 		$names = [];
@@ -1418,22 +1438,29 @@
 
 	/**
 	 * Get detailed info about all installed extensions of a given type.
-	 * $type is 'theme' or 'plugin'. Returns name-keyed metadata; `will_upgrade`
-	 * reflects only the on-disk receives_upgrades flag — the upgrade-time filter
-	 * also intersects with the source's published-archives manifest.
+	 * $type is 'theme' or 'plugin'. Returns name-keyed metadata.
+	 *
+	 * `will_upgrade` is true when the source has published the extension (it will
+	 * be downloaded; the staged manifest then decides preservation). Pass
+	 * $published_names as the list from the source's published-archives manifest.
+	 * If omitted, falls back to the live receives_upgrades flag (legacy behaviour).
 	 */
-	function get_installed_extension_info($extension_dir, $type) {
+	function get_installed_extension_info($extension_dir, $type, $published_names = null) {
+		$published_set = ($published_names !== null) ? array_flip($published_names) : null;
 		$info = [];
 		foreach (glob($extension_dir . '/*/' . $type . '.json') as $json_file) {
 			$data = json_decode(file_get_contents($json_file), true) ?: [];
 			$name = basename(dirname($json_file));
 			$receives_upgrades = $data['receives_upgrades'] ?? false;
+			$will_upgrade = ($published_set !== null)
+				? isset($published_set[$name])
+				: ($receives_upgrades === true);
 			$info[$name] = [
 				'name' => $name,
 				'display_name' => $data['display_name'] ?? $name,
 				'version' => $data['version'] ?? 'unknown',
 				'receives_upgrades' => $receives_upgrades,
-				'will_upgrade' => $receives_upgrades === true,
+				'will_upgrade' => $will_upgrade,
 			];
 		}
 		ksort($info);
