@@ -48,8 +48,13 @@
 		array_push($rowvalues, LibraryFunctions::convert_time($page->get('pag_create_time'), 'UTC', $session->get_timezone()));
 		array_push($rowvalues, LibraryFunctions::convert_time($page->get('pag_published_time'), 'UTC', $session->get_timezone()));
 
-		$user = new User($page->get('pag_usr_user_id'), TRUE);
-		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
+		$user_id = $page->get('pag_usr_user_id');
+		if ($user_id) {
+			$user = new User($user_id, TRUE);
+			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
+		} else {
+			array_push($rowvalues, '—');
+		}
 
 		if($page->get('pag_delete_time')) {
 			$status = 'Deleted';

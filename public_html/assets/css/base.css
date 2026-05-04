@@ -371,6 +371,9 @@ img { max-width: 100%; height: auto; }
 .content-wrap { position: relative; padding: 3rem 0; }
 .content-wrap.py-0 { padding: 0; }
 
+/* Generic page content body — used by views/page.php; themes can override */
+.page-content-body { max-width: 860px; }
+
 /* Page title / hero */
 .page-title { padding: 2rem 0; border-bottom: 1px solid var(--base-border); margin-bottom: 2rem; }
 .page-title-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
