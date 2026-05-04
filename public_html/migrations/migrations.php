@@ -766,3 +766,14 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// Clear com_css_framework for base components converted to HTML5.
+	// cta_banner, feature_grid, hero_static, page_title were Bootstrap-only;
+	// they are now framework-agnostic HTML5. custom_html was also Bootstrap-wrapped
+	// and is now a raw HTML passthrough — its framework field was already NULL.
+	$migration = array();
+	$migration['database_version'] = '128';
+	$migration['test'] = "SELECT count(1) as count FROM com_components WHERE com_type_key = 'cta_banner' AND com_css_framework IS NULL";
+	$migration['migration_sql'] = "UPDATE com_components SET com_css_framework = NULL WHERE com_type_key IN ('cta_banner', 'feature_grid', 'hero_static', 'page_title')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
