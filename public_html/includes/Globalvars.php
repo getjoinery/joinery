@@ -9,7 +9,7 @@ class Globalvars {
 		require_once(dirname(__DIR__, 2).'/config/Globalvars_site.php');
 		if (!empty($this->settings['webDir']) &&
 			(str_starts_with($this->settings['webDir'], 'http://') || str_starts_with($this->settings['webDir'], 'https://'))) {
-			error_log("CONFIG: webDir contains protocol prefix ('" . $this->settings['webDir'] . "') — should be domain only, e.g. 'example.com'");
+			$this->settings['webDir'] = preg_replace('#^https?://#', '', $this->settings['webDir']);
 		}
 	}
 

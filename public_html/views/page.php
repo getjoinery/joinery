@@ -64,31 +64,27 @@
 		<div class="content-wrap">
 			<div class="jy-container">
 
-				<div class="row gx-5">
-					<div class="col-lg-12">
-						<div class="bg-white rounded-4 shadow-sm p-4">
-							<?php
-							require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
-							echo ComponentRenderer::render(null, 'image_gallery', [
-								'photos' => $page->get_photos(),
-								'primary_file_id' => $page->get('pag_fil_file_id'),
-								'alt_text' => $page->get('pag_title'),
-							]);
-							?>
-							<div class="entry-content">
-								<?php
-								$session = SessionControl::get_instance();
-								$page_tier_access = $page->authenticate_tier($session);
-								if ($page_tier_access['allowed']) {
-									echo $page->get_filled_content();
-								} else {
-									require_once(PathHelper::getIncludePath('includes/tier_gate_prompt.php'));
-									$preview_html = get_tier_gate_preview_html($page->get_filled_content());
-									render_tier_gate_prompt($page_tier_access, ['preview_html' => $preview_html]);
-								}
-								?>
-							</div>
-						</div>
+				<div class="page-content-body">
+					<?php
+					require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
+					echo ComponentRenderer::render(null, 'image_gallery', [
+						'photos' => $page->get_photos(),
+						'primary_file_id' => $page->get('pag_fil_file_id'),
+						'alt_text' => $page->get('pag_title'),
+					]);
+					?>
+					<div class="entry-content">
+						<?php
+						$session = SessionControl::get_instance();
+						$page_tier_access = $page->authenticate_tier($session);
+						if ($page_tier_access['allowed']) {
+							echo $page->get_filled_content();
+						} else {
+							require_once(PathHelper::getIncludePath('includes/tier_gate_prompt.php'));
+							$preview_html = get_tier_gate_preview_html($page->get_filled_content());
+							render_tier_gate_prompt($page_tier_access, ['preview_html' => $preview_html]);
+						}
+						?>
 					</div>
 				</div>
 
