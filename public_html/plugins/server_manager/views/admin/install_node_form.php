@@ -36,7 +36,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			$field_errors['docker_mode'] = 'Choose Docker or Bare-metal.';
 		}
 
-		$domain = trim($_POST['domain'] ?? '');
+		$domain = rtrim(preg_replace('#^https?://#i', '', trim($_POST['domain'] ?? '')), '/');
 		if (!$domain) {
 			$field_errors['domain'] = 'Domain is required.';
 		}
@@ -275,7 +275,9 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 $formwriter->textinput('domain', 'Domain', [
 	'required'    => true,
 	'placeholder' => 'e.g., orgs.getjoinery.com',
-	'helptext'    => 'SSL is not configured at install time — run certbot after DNS cutover.',
+	'helptext'    => 'Domain only — no http:// or https://. SSL is configured separately after DNS cutover.',
+	'pattern'     => '^(?!https?://).+',
+	'title'       => 'Enter the domain only, without http:// or https://',
 ]);
 
 // Fresh install panel (empty placeholder — nothing extra needed)

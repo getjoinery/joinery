@@ -6,7 +6,11 @@ class Globalvars {
 	private $settings;
 
 	private function __construct() {
-		require_once(dirname(__DIR__, 2).'/config/Globalvars_site.php');		
+		require_once(dirname(__DIR__, 2).'/config/Globalvars_site.php');
+		if (!empty($this->settings['webDir']) &&
+			(str_starts_with($this->settings['webDir'], 'http://') || str_starts_with($this->settings['webDir'], 'https://'))) {
+			error_log("CONFIG: webDir contains protocol prefix ('" . $this->settings['webDir'] . "') — should be domain only, e.g. 'example.com'");
+		}
 	}
 
 	public static function get_instance(){

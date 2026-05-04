@@ -89,7 +89,11 @@ function admin_settings_logic($get, $post) {
 
 		foreach($user_settings as $user_setting) {
 			if(isset($post[$user_setting->get('stg_name')])){
-				$user_setting->set('stg_value', $post[$user_setting->get('stg_name')]);
+				$value = $post[$user_setting->get('stg_name')];
+				if ($user_setting->get('stg_name') === 'webDir') {
+					$value = rtrim(preg_replace('#^https?://#i', '', $value), '/');
+				}
+				$user_setting->set('stg_value', $value);
 				$user_setting->set('stg_update_time', 'NOW()');
 				$user_setting->set('stg_usr_user_id', $session->get_user_id());
 				$user_setting->prepare();
