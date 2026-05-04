@@ -1101,8 +1101,14 @@ class DeploymentHelper {
                     $should_copy = true;
                     $reason = 'not in staging';
                 } else {
-                    // Theme exists in both - check the live version's receives_upgrades flag
-                    $manifest_path = $live_path . '/theme.json';
+                    // Theme exists in both - the staged manifest is authoritative.
+                    // Reading from live would create a bootstrapping deadlock: a theme
+                    // whose live flag is false could never self-update to true via an
+                    // upgrade package.
+                    $staged_manifest_path = $stage_path . '/theme.json';
+                    $manifest_path = file_exists($staged_manifest_path)
+                        ? $staged_manifest_path
+                        : $live_path . '/theme.json'; // fallback: corrupt/missing staged manifest
                     if (file_exists($manifest_path)) {
                         $manifest = json_decode(file_get_contents($manifest_path), true);
                         if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
@@ -1163,8 +1169,11 @@ class DeploymentHelper {
                     $should_copy = true;
                     $reason = 'not in staging';
                 } else {
-                    // Plugin exists in both - check the live version's receives_upgrades flag
-                    $manifest_path = $live_path . '/plugin.json';
+                    // Plugin exists in both - the staged manifest is authoritative.
+                    $staged_manifest_path = $stage_path . '/plugin.json';
+                    $manifest_path = file_exists($staged_manifest_path)
+                        ? $staged_manifest_path
+                        : $live_path . '/plugin.json'; // fallback: corrupt/missing staged manifest
                     if (file_exists($manifest_path)) {
                         $manifest = json_decode(file_get_contents($manifest_path), true);
                         if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
