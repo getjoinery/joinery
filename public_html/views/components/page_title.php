@@ -3,6 +3,7 @@
  * Page Title Component
  *
  * Page title with optional subtitle and breadcrumb navigation.
+ * Pure HTML5, no framework dependencies.
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -10,34 +11,28 @@
  *   $component - PageContent object (the instance)
  *   $component_type_record - Component object (the type definition)
  *   $component_slug - The component's slug
- *
- * @see /specs/page_component_system.md
  */
 
-$title = $component_config['title'] ?? '';
-$subtitle = $component_config['subtitle'] ?? '';
+$title           = $component_config['title'] ?? '';
+$subtitle        = $component_config['subtitle'] ?? '';
 $show_breadcrumbs = $component_config['show_breadcrumbs'] ?? false;
-$breadcrumbs = $component_config['breadcrumbs'] ?? [];
-$background_color = $component_config['background_color'] ?? '#f8f9fa';
-$text_color = $component_config['text_color'] ?? '#212529';
-$alignment = $component_config['alignment'] ?? 'left';
+$breadcrumbs     = $component_config['breadcrumbs'] ?? [];
+$bg_color        = $component_config['background_color'] ?? '#f8f9fa';
+$text_color      = $component_config['text_color'] ?? '#212529';
+$alignment       = $component_config['alignment'] ?? 'left';
 
-// Alignment class
-$align_class = '';
-if ($alignment === 'center') {
-	$align_class = 'text-center';
-} elseif ($alignment === 'right') {
-	$align_class = 'text-end';
+$allowed_alignments = ['left', 'center', 'right'];
+if (!in_array($alignment, $allowed_alignments)) {
+	$alignment = 'left';
 }
 
-$bg_style = "background-color: " . htmlspecialchars($background_color) . "; color: " . htmlspecialchars($text_color) . ";";
+$section_style = 'background-color: ' . htmlspecialchars($bg_color) . '; color: ' . htmlspecialchars($text_color) . '; padding: 1.5rem 1rem;';
 ?>
-
-<section class="page-title-section py-4" style="<?php echo $bg_style; ?>">
-	<div class="jy-container">
+<section style="<?php echo $section_style; ?>">
+	<div style="max-width: 1100px; margin: 0 auto; text-align: <?php echo htmlspecialchars($alignment); ?>;">
 		<?php if ($show_breadcrumbs && !empty($breadcrumbs)): ?>
-			<nav aria-label="breadcrumb" class="mb-2">
-				<ol class="breadcrumb mb-0">
+			<nav aria-label="Breadcrumb" style="margin-bottom: 0.75rem;">
+				<ol style="display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; list-style: none; margin: 0; padding: 0; font-size: 0.875rem; color: #6c757d;">
 					<?php
 					$total = count($breadcrumbs);
 					$i = 0;
@@ -45,9 +40,10 @@ $bg_style = "background-color: " . htmlspecialchars($background_color) . "; colo
 						$i++;
 						$is_last = ($i === $total);
 					?>
-						<li class="breadcrumb-item<?php echo $is_last ? ' active' : ''; ?>" <?php echo $is_last ? 'aria-current="page"' : ''; ?>>
+						<li<?php if ($is_last): ?> aria-current="page"<?php endif; ?>>
 							<?php if (!$is_last && !empty($crumb['link'])): ?>
-								<a href="<?php echo htmlspecialchars($crumb['link']); ?>"><?php echo htmlspecialchars($crumb['text']); ?></a>
+								<a href="<?php echo htmlspecialchars($crumb['link']); ?>" style="color: inherit;"><?php echo htmlspecialchars($crumb['text']); ?></a>
+								<span aria-hidden="true" style="margin-left: 0.5rem;">/</span>
 							<?php else: ?>
 								<?php echo htmlspecialchars($crumb['text']); ?>
 							<?php endif; ?>
@@ -57,14 +53,12 @@ $bg_style = "background-color: " . htmlspecialchars($background_color) . "; colo
 			</nav>
 		<?php endif; ?>
 
-		<div class="<?php echo $align_class; ?>">
-			<?php if ($title): ?>
-				<h1 class="mb-1"><?php echo htmlspecialchars($title); ?></h1>
-			<?php endif; ?>
+		<?php if ($title): ?>
+			<h1 style="margin: 0 0 0.25rem 0;"><?php echo htmlspecialchars($title); ?></h1>
+		<?php endif; ?>
 
-			<?php if ($subtitle): ?>
-				<p class="lead mb-0 text-muted"><?php echo htmlspecialchars($subtitle); ?></p>
-			<?php endif; ?>
-		</div>
+		<?php if ($subtitle): ?>
+			<p style="margin: 0; color: #6c757d; font-size: 1.05rem;"><?php echo htmlspecialchars($subtitle); ?></p>
+		<?php endif; ?>
 	</div>
 </section>

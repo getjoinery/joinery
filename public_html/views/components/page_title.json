@@ -2,7 +2,6 @@
     "title": "Page Title",
     "description": "Page title with optional subtitle and breadcrumb navigation",
     "category": "layout",
-    "css_framework": "bootstrap",
     "config_schema": {
         "fields": [
             {

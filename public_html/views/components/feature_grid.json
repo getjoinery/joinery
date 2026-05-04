@@ -2,7 +2,6 @@
     "title": "Feature Grid",
     "description": "Grid of icon + title + description items",
     "category": "features",
-    "css_framework": "bootstrap",
     "config_schema": {
         "fields": [
             {
@@ -63,7 +62,7 @@
                 "options": {
                     "centered": "Centered (icon above)",
                     "left": "Left Aligned (icon left)",
-                    "card": "Cards with Shadow"
+                    "card": "Cards (bordered)"
                 }
             },
             {
