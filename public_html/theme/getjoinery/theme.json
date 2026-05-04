@@ -4,7 +4,7 @@
     "version": "1.0.0",
     "description": "Marketing website theme for getjoinery.com — warm stone palette with amber accents",
     "author": "Joinery Team",
-    "receives_upgrades": false,
+    "receives_upgrades": true,
     "included_in_publish": true,
     "cssFramework": "html5",
     "formWriterBase": "FormWriterV2HTML5",
