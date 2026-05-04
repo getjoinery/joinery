@@ -2,7 +2,6 @@
     "title": "CTA Banner",
     "description": "Full-width call-to-action banner",
     "category": "conversion",
-    "css_framework": "bootstrap",
     "config_schema": {
         "fields": [
             {

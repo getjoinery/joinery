@@ -3,6 +3,7 @@
  * Feature Grid Component
  *
  * Grid of icon + title + description items.
+ * Pure HTML5, no framework dependencies. Uses CSS Grid for layout.
  *
  * Available variables:
  *   $component_config - Configuration array from pac_config
@@ -10,89 +11,129 @@
  *   $component - PageContent object (the instance)
  *   $component_type_record - Component object (the type definition)
  *   $component_slug - The component's slug
- *
- * @see /specs/page_component_system.md
  */
 
-$heading = $component_config['heading'] ?? '';
-$subheading = $component_config['subheading'] ?? '';
-$columns = $component_config['columns'] ?? 4;
-$features = $component_config['features'] ?? [];
-$style = $component_config['style'] ?? 'centered';
-$icon_style = $component_config['icon_style'] ?? 'plain';
-$icon_color = $component_config['icon_color'] ?? '#007bff';
-$background_color = $component_config['background_color'] ?? '#ffffff';
+$heading      = $component_config['heading'] ?? '';
+$subheading   = $component_config['subheading'] ?? '';
+$columns      = max(1, min(6, (int)($component_config['columns'] ?? 3)));
+$features     = $component_config['features'] ?? [];
+$style        = $component_config['style'] ?? 'centered';
+$icon_style   = $component_config['icon_style'] ?? 'plain';
+$icon_color   = $component_config['icon_color'] ?? '#333333';
+$bg_color     = $component_config['background_color'] ?? '';
 
-// Column class based on count
-$col_classes = [
-	2 => 'col-md-6',
-	3 => 'col-md-4',
-	4 => 'col-md-6 col-lg-3',
-	6 => 'col-md-4 col-lg-2'
-];
-$col_class = $col_classes[$columns] ?? 'col-md-6 col-lg-3';
+$uid        = 'fg-' . htmlspecialchars($component_slug ?? uniqid());
+$text_align = ($style === 'centered') ? 'center' : 'left';
+$cols_mobile = min(2, $columns);
 
-// Text alignment based on style
-$text_class = ($style === 'centered') ? 'text-center' : '';
+$icon_wrap_style = '';
+if ($icon_style === 'circle') {
+	$icon_wrap_style = 'display: inline-flex; width: 64px; height: 64px; border-radius: 50%; align-items: center; justify-content: center; background-color: ' . htmlspecialchars($icon_color) . '20;';
+} elseif ($icon_style === 'square') {
+	$icon_wrap_style = 'display: inline-flex; width: 64px; height: 64px; border-radius: 8px; align-items: center; justify-content: center; background-color: ' . htmlspecialchars($icon_color) . '20;';
+}
 ?>
-
-<section class="feature-grid py-5" style="background-color: <?php echo htmlspecialchars($background_color); ?>;">
-	<div class="jy-container">
+<style>
+.<?php echo $uid; ?> {
+	padding: 3rem 1rem;
+	<?php if ($bg_color): ?>background-color: <?php echo htmlspecialchars($bg_color); ?>;<?php endif; ?>
+}
+.<?php echo $uid; ?>-inner {
+	max-width: 1100px;
+	margin: 0 auto;
+}
+.<?php echo $uid; ?>-header {
+	text-align: center;
+	margin-bottom: 2.5rem;
+}
+.<?php echo $uid; ?>-header h2 {
+	margin: 0 0 0.5rem 0;
+}
+.<?php echo $uid; ?>-header p {
+	margin: 0;
+	color: #666;
+}
+.<?php echo $uid; ?>-grid {
+	display: grid;
+	grid-template-columns: repeat(<?php echo $columns; ?>, 1fr);
+	gap: 2rem;
+}
+.<?php echo $uid; ?>-item {
+	text-align: <?php echo $text_align; ?>;
+	position: relative;
+}
+.<?php echo $uid; ?>-icon {
+	margin-bottom: 0.75rem;
+	<?php if ($text_align === 'center'): ?>display: flex; justify-content: center;<?php endif; ?>
+}
+.<?php echo $uid; ?>-icon i {
+	font-size: 2rem;
+	color: <?php echo htmlspecialchars($icon_color); ?>;
+}
+.<?php echo $uid; ?>-item h3 {
+	margin: 0 0 0.5rem 0;
+	font-size: 1.1rem;
+}
+.<?php echo $uid; ?>-item p {
+	margin: 0;
+	color: #555;
+	font-size: 0.95rem;
+	line-height: 1.6;
+}
+.<?php echo $uid; ?>-item a.item-link {
+	position: absolute;
+	inset: 0;
+}
+@media (max-width: 768px) {
+	.<?php echo $uid; ?>-grid {
+		grid-template-columns: repeat(<?php echo $cols_mobile; ?>, 1fr);
+		gap: 1.5rem;
+	}
+}
+@media (max-width: 480px) {
+	.<?php echo $uid; ?>-grid {
+		grid-template-columns: 1fr;
+	}
+}
+</style>
+<section class="<?php echo $uid; ?>">
+	<div class="<?php echo $uid; ?>-inner">
 		<?php if ($heading || $subheading): ?>
-			<div class="row mb-5">
-				<div class="col-lg-8 mx-auto text-center">
-					<?php if ($heading): ?>
-						<h2 class="mb-3"><?php echo htmlspecialchars($heading); ?></h2>
-					<?php endif; ?>
-					<?php if ($subheading): ?>
-						<p class="lead text-muted"><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
-					<?php endif; ?>
-				</div>
+			<div class="<?php echo $uid; ?>-header">
+				<?php if ($heading): ?>
+					<h2><?php echo htmlspecialchars($heading); ?></h2>
+				<?php endif; ?>
+				<?php if ($subheading): ?>
+					<p><?php echo nl2br(htmlspecialchars($subheading)); ?></p>
+				<?php endif; ?>
 			</div>
 		<?php endif; ?>
 
-		<div class="row g-4">
+		<div class="<?php echo $uid; ?>-grid">
 			<?php foreach ($features as $feature): ?>
-				<div class="<?php echo $col_class; ?>">
-					<?php if ($style === 'card'): ?>
-						<div class="card h-100 shadow-sm">
-							<div class="card-body <?php echo $text_class; ?>">
-					<?php else: ?>
-						<div class="<?php echo $text_class; ?>">
+				<div class="<?php echo $uid; ?>-item">
+					<?php if (!empty($feature['icon'])): ?>
+						<div class="<?php echo $uid; ?>-icon">
+							<?php if ($icon_wrap_style): ?>
+								<div style="<?php echo $icon_wrap_style; ?>">
+									<i class="<?php echo htmlspecialchars($feature['icon']); ?>"></i>
+								</div>
+							<?php else: ?>
+								<i class="<?php echo htmlspecialchars($feature['icon']); ?>"></i>
+							<?php endif; ?>
+						</div>
 					<?php endif; ?>
 
-						<?php
-						$icon = $feature['icon'] ?? '';
-						if ($icon):
-							$icon_wrapper_style = '';
-							if ($icon_style === 'circle') {
-								$icon_wrapper_style = 'display: inline-flex; width: 64px; height: 64px; border-radius: 50%; align-items: center; justify-content: center; background-color: ' . htmlspecialchars($icon_color) . '20;';
-							} elseif ($icon_style === 'square') {
-								$icon_wrapper_style = 'display: inline-flex; width: 64px; height: 64px; border-radius: 8px; align-items: center; justify-content: center; background-color: ' . htmlspecialchars($icon_color) . '20;';
-							}
-						?>
-							<div class="feature-icon mb-3" style="<?php echo $icon_wrapper_style; ?>">
-								<i class="<?php echo htmlspecialchars($icon); ?>" style="font-size: 2rem; color: <?php echo htmlspecialchars($icon_color); ?>;"></i>
-							</div>
-						<?php endif; ?>
+					<?php if (!empty($feature['title'])): ?>
+						<h3><?php echo htmlspecialchars($feature['title']); ?></h3>
+					<?php endif; ?>
 
-						<?php if (!empty($feature['title'])): ?>
-							<h5 class="mb-2"><?php echo htmlspecialchars($feature['title']); ?></h5>
-						<?php endif; ?>
+					<?php if (!empty($feature['description'])): ?>
+						<p><?php echo nl2br(htmlspecialchars($feature['description'])); ?></p>
+					<?php endif; ?>
 
-						<?php if (!empty($feature['description'])): ?>
-							<p class="text-muted mb-0"><?php echo nl2br(htmlspecialchars($feature['description'])); ?></p>
-						<?php endif; ?>
-
-						<?php if (!empty($feature['link'])): ?>
-							<a href="<?php echo htmlspecialchars($feature['link']); ?>" class="stretched-link"></a>
-						<?php endif; ?>
-
-					<?php if ($style === 'card'): ?>
-							</div>
-						</div>
-					<?php else: ?>
-						</div>
+					<?php if (!empty($feature['link'])): ?>
+						<a href="<?php echo htmlspecialchars($feature['link']); ?>" class="item-link" aria-label="<?php echo htmlspecialchars($feature['title'] ?? ''); ?>"></a>
 					<?php endif; ?>
 				</div>
 			<?php endforeach; ?>

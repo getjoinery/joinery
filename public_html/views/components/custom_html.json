@@ -9,12 +9,8 @@
                 "label": "HTML Content",
                 "type": "richtext",
                 "help": "Enter your content using the rich text editor.",
-                "default": "<div class=\"alert alert-info\">\n  <h4>Custom Content Block</h4>\n  <p>Replace this with your own content.</p>\n</div>"
+                "default": "<section style=\"padding: 3rem 1rem;\">\n  <div style=\"max-width: 1100px; margin: 0 auto;\">\n    <h2>Section Heading</h2>\n    <p>Replace this with your content.</p>\n  </div>\n</section>"
             }
         ]
-    },
-    "layout_defaults": {
-        "container_width": "standard",
-        "max_height": "default"
     }
 }

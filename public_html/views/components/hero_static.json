@@ -2,7 +2,6 @@
     "title": "Hero Static",
     "description": "Single hero section with heading, subheading, background, and CTA",
     "category": "hero",
-    "css_framework": "bootstrap",
     "config_schema": {
         "fields": [
             {
@@ -81,8 +80,7 @@
                 "options": {
                     "primary": "Primary",
                     "secondary": "Secondary",
-                    "outline-primary": "Outline",
-                    "light": "Light"
+                    "outline": "Outline"
                 }
             }
         ]
