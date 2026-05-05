@@ -206,6 +206,48 @@ Content here
 {end}
 ```
 
+### Iteration Syntax
+
+Loop over an array with `{loop array_path as item_name} ... {end}`:
+
+```
+{loop line_items as line}
+- *line->product_name* x*line->quantity*
+{end}
+```
+
+The `array_path` follows the same dot/arrow resolution as variables (e.g.
+`order->items` reaches `$values['order']['items']`). Inside the loop body
+the loop variable is in scope as a regular value: `*item_name*`,
+`*item_name->property*`, and conditionals like `{item_name->is_gift}` all
+work.
+
+**Nesting:** loops nest with each other and with conditionals in any order.
+Each iteration runs the full `loops -> conditionals -> variables` pipeline
+on its body, so an inner loop sees the outer loop's iteration variable,
+and a conditional inside a loop sees the loop variable.
+
+```
+{loop groups as group}
+*group->name*:
+{loop group->members as m}
+- *m->name* {m->is_admin}(admin){end}
+{end}
+{end}
+```
+
+**Edge cases (lenient):** missing keys, non-array values, and empty arrays
+all render the loop body zero times with no error.
+
+**Caveats**
+
+- `_expand_loops` runs *before* conditionals, so a loop cannot reference
+  a variable set inside a `[var="..."]` operation block — by the time
+  conditionals execute, the loop has already expanded.
+- The `{loop ... }` directive must not contain `}` inside it.
+- Templates without any `{loop ` marker bypass the loop pre-pass entirely;
+  rendering behaviour is unchanged from pre-2026 templates.
+
 ### Subject Processing
 
 Three ways to set subject (priority order):
