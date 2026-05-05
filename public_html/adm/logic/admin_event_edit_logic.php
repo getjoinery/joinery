@@ -109,10 +109,6 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 			$event->set('evt_usr_user_id_leader', NULL);
 		}
 
-		if($post_vars['evt_after_purchase_message']){
-			$event->set('evt_after_purchase_message', $post_vars['evt_after_purchase_message']);
-		}
-
 		if($post_vars['evt_max_signups'] == '' || $post_vars['evt_max_signups'] == 0 || $post_vars['evt_max_signups'] == NULL){
 			$event->set('evt_max_signups', NULL);
 		}

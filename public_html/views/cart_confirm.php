@@ -54,6 +54,9 @@ $page->public_header([
                                 <td style="padding: 0.875rem 1.5rem;">
                                     <strong><?php echo $receipt['pname']; ?></strong><br>
                                     <small style="color: var(--jy-color-text-muted);"><?php echo $receipt['name']; ?></small>
+                                    <?php if (!empty($receipt['after_purchase_message'])): ?>
+                                    <div style="margin-top: 0.5rem; color: var(--jy-color-text);"><?php echo $receipt['after_purchase_message']; ?></div>
+                                    <?php endif; ?>
                                 </td>
                                 <td style="padding: 0.875rem 1.5rem; text-align: right; font-weight: 600;">
                                     $<?php echo number_format($receipt['price'], 2, '.', ','); ?>

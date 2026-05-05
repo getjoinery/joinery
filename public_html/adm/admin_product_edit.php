@@ -172,6 +172,23 @@ $formwriter->textinput('pro_digital_link', 'Digital item link', [
 	'validation' => ['maxlength' => 255]
 ]);
 
+// Receipt template override (optional). Falls back to purchase_receipt_product_default.
+$receipt_template_options = ['' => '-- Use system default --'];
+foreach ($receipt_templates as $rt) {
+	if ($rt->get('emt_delete_time')) continue;
+	$receipt_template_options[$rt->key] = $rt->get('emt_name');
+}
+$formwriter->dropinput('pro_emt_receipt_template_id', 'Receipt template (override)', [
+	'options' => $receipt_template_options,
+	'helptext' => 'Optional. When set, the per-product receipt email uses this template. Leave empty for the system default.',
+]);
+
+$formwriter->textbox('pro_after_purchase_message', 'After-purchase message', [
+	'rows' => 4,
+	'htmlmode' => 'yes',
+	'helptext' => 'Shown on the confirmation page; also triggers a separate per-product email after purchase.',
+]);
+
 // Question requirements (Tier 1)
 if (!empty($grouped_requirements['questions'])) {
 	$formwriter->checkboxList('question_requirements', 'Questions to ask before purchase', [
