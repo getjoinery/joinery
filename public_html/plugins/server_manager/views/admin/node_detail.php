@@ -225,7 +225,7 @@ if ($_POST && isset($_POST['action'])) {
 		$session->save_message(new DisplayMessage(
 			"Queued {$queued} upgrade " . ($queued === 1 ? 'job' : 'jobs') . " for sites on this host.",
 			'Success', $page_regex,
-			DisplayMessage::MESSAGE_SUCCESS, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 		header('Location: /admin/server_manager?tab=jobs');
 		exit;
