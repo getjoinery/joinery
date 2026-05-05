@@ -235,7 +235,7 @@ function billing_logic($get, $post) {
                         'Your billing cycle has been updated to ' . $new_version->get('prv_version_name') . '.',
                         'Billing Updated',
                         null,
-                        DisplayMessage::MESSAGE_SUCCESS
+                        DisplayMessage::MESSAGE_ANNOUNCEMENT
                     ));
                     return LogicResult::redirect('/profile/billing');
             }

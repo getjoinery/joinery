@@ -63,10 +63,10 @@ The old hosted SaaS pricing ($29/$59/$99/mo tiers) is being removed entirely.
 - No recurring charges, no ongoing relationship unless they want it
 - List price $299 shown struck through on pricing page; coupon "INSTALL" publicly shown bringing it to $99
 
-**Option 3: Business License — "Email us"**
+**Option 3: Business License — $499 one-time**
 - For commercial self-hosting (running Joinery on their infrastructure for a commercial product)
-- Email hello@getjoinery.com
-- No public price listed — handled case by case
+- Perpetual license — pay once, use forever
+- Email hello@getjoinery.com to purchase
 
 ### Products to Create in the System
 - Create a product in Joinery e-commerce: "White Glove Install"
@@ -248,11 +248,11 @@ New framing: "Event registration is already built. Routes, views, data models, a
 - CTA: "Get Installed" → product purchase page
 
 **Business License**
-- Custom pricing
+- $499 one-time
 - For commercial products built on Joinery
 - Includes rights to run on your own infrastructure for a commercial app
 - Perpetual license
-- CTA: "Email Us" → mailto:hello@getjoinery.com?subject=Business+License
+- CTA: "Get a License" → mailto:hello@getjoinery.com?subject=Business+License
 
 #### FAQ Section (below pricing cards)
 Answer the common questions upfront:
@@ -834,15 +834,16 @@ Most frameworks give you security tools and expect you to remember to use them. 
 
 **Card 3: Business License**
 
-**Price:** Custom  
-**Label:** For commercial products
+**Price:** $499  
+**Label:** One-time, perpetual license
 
+- Elastic License 2.0 (ELv2)
 - Run Joinery commercially on your own infrastructure
-- Perpetual license — pay once
+- Perpetual license — pay once, use forever
 - All current features included
-- Email to discuss
+- Email to purchase
 
-**CTA:** Email Us → `mailto:hello@getjoinery.com?subject=Business+License`
+**CTA:** Get a License → `mailto:hello@getjoinery.com?subject=Business+License`
 
 ---
 
@@ -861,7 +862,7 @@ Apache2, PHP 8.x, PostgreSQL, a fully configured Joinery site with its own datab
 Community support is available via GitHub for all users. Paid support and upgrade assistance is available — email hello@getjoinery.com.
 
 **Q: What's the business license for?**  
-If you're building a commercial product on Joinery — a SaaS app, a paid service, a client project that generates revenue — you need a business license. Email us and we'll work it out.
+If you're building a commercial product on Joinery — a SaaS app, a paid service, a client project that generates revenue — you need a business license. It's a one-time $499 perpetual license under the Elastic License 2.0 (ELv2). Email hello@getjoinery.com to purchase.
 
 **Q: What license do my plugins and themes need to be under?**  
 Any license you want. The PolyForm Noncommercial license covers the Joinery core. Plugins and themes you write are your own code — you can release them under MIT, keep them proprietary, sell them commercially, or do whatever you like. Your code is yours.

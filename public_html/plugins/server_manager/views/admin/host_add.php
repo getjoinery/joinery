@@ -79,7 +79,8 @@ if ($error) {
 $pageoptions = ['title' => $page_title];
 $page->begin_box($pageoptions);
 
-$formwriter = $page->getFormWriter('host_form', ['model' => $host]);
+$form_action = $is_edit ? '/admin/server_manager/host_add?mgh_id=' . $host->key : '';
+$formwriter = $page->getFormWriter('host_form', ['model' => $host, 'action' => $form_action]);
 echo $formwriter->begin_form();
 
 echo '<h6 class="text-muted mt-2 mb-3">Identity</h6>';

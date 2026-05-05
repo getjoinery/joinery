@@ -110,7 +110,7 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 			$product->set('pro_product_scripts', implode(',', $post_vars['product_scripts']));
 		}
 
-		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_receipt_body', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description');
+		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description');
 
 		foreach($editable_fields as $field) {
 			$product->set($field, $post_vars[$field]);
