@@ -883,7 +883,7 @@
 	]);
 
 	$formwriter->dropinput('site_currency', 'Site Currency', [
-		'options' => ["US Dollar"=>'usd', 'Euro' => 'eur'],
+		'options' => ['usd' => 'US Dollar', 'eur' => 'Euro'],
 		'value' => $settings->get_setting('site_currency')
 	]);
 

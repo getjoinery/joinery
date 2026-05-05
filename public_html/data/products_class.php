@@ -31,6 +31,7 @@ class Product extends SystemBase {
 	protected static $foreign_key_actions = [
 		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist'],
 		'pro_fil_file_id' => ['action' => 'null'],
+		'pro_emt_receipt_template_id' => ['action' => 'null'],
 	];
 
 	public static $currency_symbols = array(
@@ -87,6 +88,7 @@ class Product extends SystemBase {
 	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),
 	    'pro_tier_min_level' => array('type'=>'int4', 'is_nullable'=>true),
 	    'pro_fil_file_id' => array('type'=>'int4'),
+	    'pro_emt_receipt_template_id' => array('type'=>'int4', 'is_nullable'=>true),
 	);
 
 public function get_requirement_info($output='text') {

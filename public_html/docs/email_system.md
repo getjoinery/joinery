@@ -502,6 +502,33 @@ The system automatically provides:
 
 **Don't pass these manually** - they're provided automatically.
 
+### Receipt Templates
+
+The receipt system (specs/receipts_refactor.md) uses two database-stored templates:
+
+| Template name | Purpose | Recipient |
+|---|---|---|
+| `purchase_receipt_default` | Default order receipt + per-registrant activation. One template, two render modes via `{is_billing}`. | Billing user always; per-registrant for event/bundle gift recipients. |
+| `purchase_receipt_product_default` | Per-product opt-in email. Sent at most once per (product, order). Falls back here when a product has `pro_after_purchase_message` or `pro_emt_receipt_template_id` set. | Billing user. |
+
+A product can override `purchase_receipt_product_default` with any other template by setting `pro_emt_receipt_template_id`. If the override points at a missing or soft-deleted template the helper `_resolve_receipt_template()` falls back to the default — never crashes.
+
+**Variables passed to `purchase_receipt_default`:**
+
+| Variable | Notes |
+|---|---|
+| `recipient` | Recipient's user data (billing user or registrant) |
+| `is_billing` | True when sending to billing user; drives the price column and totals block |
+| `order` | Order data |
+| `order_total` | Used only when `is_billing` |
+| `currency_symbol` | |
+| `line_items` | Array — one entry per relevant line. Iterated via `{loop line_items as line}` |
+| `coupon_codes_used` | Only when `is_billing` and at least one coupon applied |
+
+Each `line_items` entry: `product_name`, `quantity`, `outcome` (`event`/`bundle`/`subscription`/`digital`/`plain`), `is_gift_to` (set on gift lines for billing user), plus outcome-specific fields (`event_name`, `event_list`, `digital_link`, `act_code`, `event_registrant_id`, `subscription_active`). Gift lines for the billing user deliberately omit `act_code` and `event_registrant_id` so the activation token doesn't leak to the buyer.
+
+**Variables passed to `purchase_receipt_product_default`:** `recipient` (billing user), `product_name`, `after_purchase_message` (HTML, may be empty), `order_item`, `order`. There is no `is_gift` variable — per-product custom email always targets the billing user, so admins author one voice.
+
 ### Service Selection
 
 - Default from/sender addresses are used automatically

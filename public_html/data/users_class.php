@@ -320,7 +320,9 @@ private static function UcName($string) {
 					$temp_password_hashed = User::GeneratePassword($password);
 			}
 			else{
-					$temp_password = substr(md5(time()), 0, 5);
+					// Must be >= 8 chars to satisfy GeneratePassword's minimum-length check.
+					// Not surfaced to the user — they reset via the forgot-password flow.
+					$temp_password = bin2hex(random_bytes(8));
 					$temp_password_hashed = User::GeneratePassword($temp_password);
 					$email_fill = array(
 					'password_temporary' => true,

@@ -110,7 +110,7 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 			$product->set('pro_product_scripts', implode(',', $post_vars['product_scripts']));
 		}
 
-		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description');
+		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description', 'pro_emt_receipt_template_id');
 
 		foreach($editable_fields as $field) {
 			$product->set($field, $post_vars[$field]);
@@ -224,6 +224,16 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	$subscription_tiers = MultiSubscriptionTier::GetAllActive();
 
+	// Load email templates for the receipt-template override dropdown
+	$receipt_templates = new MultiEmailTemplateStore(
+		array(),
+		array('emt_name' => 'ASC'),
+		NULL,
+		NULL);
+	if ($receipt_templates->count_all()) {
+		$receipt_templates->load();
+	}
+
 	// Load product groups
 	$pgs = new MultiProductGroup(
 		array(),
@@ -271,6 +281,7 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 		'instances' => $instances,
 		'grouped_requirements' => $grouped_requirements,
 		'product_scripts_optionvals' => $product_scripts_optionvals,
+		'receipt_templates' => $receipt_templates,
 		'session' => $session,
 		'settings' => $settings,
 	));

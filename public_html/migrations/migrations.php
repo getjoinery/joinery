@@ -777,3 +777,27 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Unify receipt templates (v129) ==========
+	// Phase 2 of specs/receipts_refactor.md. Inserts purchase_receipt_default
+	// and purchase_receipt_product_default; soft-deletes six legacy/orphan
+	// templates that no code calls anymore.
+	$migration = array();
+	$migration['database_version'] = '129';
+	$migration['test'] = "SELECT count(1) as count FROM emt_email_templates WHERE emt_name = 'purchase_receipt_default'";
+	$migration['migration_file'] = 'migration_receipt_templates_unify.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// ========== Fix reversed site_currency dropdown values (v130) ==========
+	// admin_settings.php had the dropdown options array keys/values reversed
+	// (display name as key, code as value) so any save through that page wrote
+	// the display name into stg_settings. Stripe and code that indexes
+	// Product::$currency_symbols both expect the ISO code. Convert any rows
+	// that hold a display name back to its code; leave correct values alone.
+	$migration = array();
+	$migration['database_version'] = '130';
+	$migration['test'] = "SELECT count(1) as count FROM stg_settings WHERE stg_name = 'site_currency' AND stg_value IN ('usd','eur','')";
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = CASE stg_value WHEN 'US Dollar' THEN 'usd' WHEN 'Euro' THEN 'eur' ELSE stg_value END WHERE stg_name = 'site_currency' AND stg_value IN ('US Dollar','Euro')";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
