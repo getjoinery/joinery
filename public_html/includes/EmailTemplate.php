@@ -188,80 +188,33 @@ class EmailTemplate {
             $this->utm_content = $values['utm_content'];
         }
         $this->template_values['email_vars'] = $this->_generate_email_vars();
-        
+
         // Merge values
         $values = array_merge($values, $this->template_values);
         $set_values = array();
-        
-        // Process conditionals
-        list($email_body, $set_values) = $this->_process_conditionals($values, $this->inner_template);
+
+        // Inner template: expand loops, then process conditionals
+        $inner_after_loops = $this->_expand_loops($this->inner_template, $values);
+        list($email_body, $set_values) = $this->_process_conditionals($values, $inner_after_loops);
         $values = array_merge($values, $set_values);
-        
-        // Add footer if exists
+
+        // Footer: expand loops, then process conditionals (with inner's set_values in scope)
         if ($this->footer) {
-            list($footer_string, $footer_set_values) = $this->_process_conditionals($values, $this->footer);
+            $footer_after_loops = $this->_expand_loops($this->footer, $values);
+            list($footer_string, $footer_set_values) = $this->_process_conditionals($values, $footer_after_loops);
             $email_body .= $footer_string;
             $set_values = array_merge($set_values, $footer_set_values);
         }
-        
+
         // Check for content
         if (!trim($email_body)) {
             return;
         }
-        
-        // Process template variables
-        $split_template = preg_split(
-            '/\*([^\*\| ]+(?:\|[^\*]+)?)\*/', $email_body, null,
-            PREG_SPLIT_DELIM_CAPTURE
-        );
-        
+
+        // Substitute variables on combined inner+footer body
         $all_values = array_merge($values, $set_values);
-        
-        $split_template_size = count($split_template);
-        for ($i = 0; $i < $split_template_size; $i++) {
-            if ($i % 2) {
-                $pipe_search = explode('|', $split_template[$i]);
-                
-                $pipe_values = null;
-                if (count($pipe_search) >= 2) {
-                    $pipe_values = array_slice($pipe_search, 1);
-                }
-                
-                $template_placeholder = $pipe_search[0];
-                $value = $this->_process_value($template_placeholder, $all_values);
-                
-                if ($value instanceof DateTime) {
-                    if ($pipe_values) {
-                        if (count($pipe_values) == 1) {
-                            $split_template[$i] = $value->format($pipe_values[0]);
-                        } else if (count($pipe_values) == 2) {
-                            $value->setTimeZone(new DateTimeZone($this->_process_value($pipe_values[1], $all_values)));
-                            $split_template[$i] = $value->format($pipe_values[0]);
-                        }
-                    } else {
-                        $split_template[$i] = $value->format(DATE_ATOM);
-                    }
-                } elseif (is_string($value)) {
-                    if ($pipe_values) {
-                        foreach ($pipe_values as $pipe_value) {
-                            switch ($pipe_value) {
-                                case 'nl2br':
-                                    $value = nl2br($value);
-                                    break;
-                                default:
-                                    break;
-                            }
-                        }
-                    }
-                    $split_template[$i] = $value;
-                } else {
-                    $split_template[$i] = $value;
-                }
-            }
-        }
-        
-        $html = trim(implode('', $split_template));
-        
+        $html = trim($this->_substitute_variables($email_body, $all_values));
+
         // Merge with outer template
         $html = str_replace('*!**mail_body**!*', $html, $this->outer_template);
         
@@ -414,6 +367,172 @@ class EmailTemplate {
         return $current_array_level;
     }
     
+    /**
+     * Render a template string through the full pipeline:
+     * loop expansion -> conditional processing -> variable substitution.
+     *
+     * Used by _expand_loops() to render each loop iteration body. Each call
+     * is self-contained: set_values produced by inner conditionals are visible
+     * to the inner variable substitution but do not leak back to the caller.
+     */
+    protected function _render_string($template_string, $values) {
+        $template_string = $this->_expand_loops($template_string, $values);
+        list($template_string, $set_values) = $this->_process_conditionals($values, $template_string);
+        $values = array_merge($values, $set_values);
+        return $this->_substitute_variables($template_string, $values);
+    }
+
+    /**
+     * Substitute *var* placeholders in a string from $values.
+     *
+     * Pipe modifiers ('nl2br', date format strings, timezone) are applied
+     * after value resolution. Missing keys substitute null.
+     */
+    protected function _substitute_variables($string, $values) {
+        $split_template = preg_split(
+            '/\*([^\*\| ]+(?:\|[^\*]+)?)\*/', $string, null,
+            PREG_SPLIT_DELIM_CAPTURE
+        );
+
+        $split_template_size = count($split_template);
+        for ($i = 0; $i < $split_template_size; $i++) {
+            if ($i % 2) {
+                $pipe_search = explode('|', $split_template[$i]);
+
+                $pipe_values = null;
+                if (count($pipe_search) >= 2) {
+                    $pipe_values = array_slice($pipe_search, 1);
+                }
+
+                $template_placeholder = $pipe_search[0];
+                $value = $this->_process_value($template_placeholder, $values);
+
+                if ($value instanceof DateTime) {
+                    if ($pipe_values) {
+                        if (count($pipe_values) == 1) {
+                            $split_template[$i] = $value->format($pipe_values[0]);
+                        } else if (count($pipe_values) == 2) {
+                            $value->setTimeZone(new DateTimeZone($this->_process_value($pipe_values[1], $values)));
+                            $split_template[$i] = $value->format($pipe_values[0]);
+                        }
+                    } else {
+                        $split_template[$i] = $value->format(DATE_ATOM);
+                    }
+                } elseif (is_string($value)) {
+                    if ($pipe_values) {
+                        foreach ($pipe_values as $pipe_value) {
+                            switch ($pipe_value) {
+                                case 'nl2br':
+                                    $value = nl2br($value);
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                    }
+                    $split_template[$i] = $value;
+                } else {
+                    $split_template[$i] = $value;
+                }
+            }
+        }
+
+        return implode('', $split_template);
+    }
+
+    /**
+     * Expand {loop array_path as item_name}...{end} blocks.
+     *
+     * Pre-pass that runs before _process_conditionals. Only acts on
+     * outer-level loop blocks; nested loops and inner conditionals are
+     * rendered via recursive _render_string calls per iteration. No-op for
+     * templates without any "{loop " marker.
+     *
+     * Lenient on bad input: missing array key, non-array value, and empty
+     * array all render to empty string (matching engine-wide leniency).
+     */
+    protected function _expand_loops($template_string, $values) {
+        if (strpos($template_string, '{loop ') === false) {
+            return $template_string;
+        }
+
+        $parts = preg_split(
+            '/(?<!\\\\){([^\}]+)}/', $template_string, NULL,
+            PREG_SPLIT_DELIM_CAPTURE);
+        $n = count($parts);
+
+        // Pair each opening directive with its matching {end} so we can find
+        // the close of any outer-level loop block. Loops and conditionals share
+        // the same {end} closer and stack-based pairing rule.
+        $pairs = array();
+        $stack = array();
+        for ($i = 0; $i < $n; $i++) {
+            if ($i % 2 === 0) {
+                continue;
+            }
+            if (strpos($parts[$i], 'end') === 0) {
+                if (!$stack) {
+                    throw new EmailTemplateError(
+                        'Unmatched {end} when expanding loops in template');
+                }
+                $open_idx = array_pop($stack);
+                $pairs[$open_idx] = $i;
+            } else {
+                $stack[] = $i;
+            }
+        }
+        if ($stack) {
+            throw new EmailTemplateError(
+                'Unclosed {loop ...} or conditional when expanding loops in template');
+        }
+
+        $output = '';
+        $i = 0;
+        while ($i < $n) {
+            if ($i % 2 === 0) {
+                $output .= $parts[$i];
+                $i++;
+                continue;
+            }
+
+            $directive = $parts[$i];
+            if (preg_match('/^loop\s+(\S+)\s+as\s+(\S+)$/', $directive, $m)) {
+                $array_path = $m[1];
+                $var_name = $m[2];
+                $end_idx = $pairs[$i];
+
+                // Reconstruct the body verbatim from parts between the loop
+                // directive and its {end}, preserving inner directives.
+                $body = '';
+                for ($k = $i + 1; $k < $end_idx; $k++) {
+                    if ($k % 2 === 0) {
+                        $body .= $parts[$k];
+                    } else {
+                        $body .= '{' . $parts[$k] . '}';
+                    }
+                }
+
+                $array_value = $this->_process_value($array_path, $values);
+                $rendered = '';
+                if (is_array($array_value)) {
+                    foreach ($array_value as $element) {
+                        $iter_values = array_merge($values, array($var_name => $element));
+                        $rendered .= $this->_render_string($body, $iter_values);
+                    }
+                }
+
+                $output .= $rendered;
+                $i = $end_idx + 1; // skip past the {end}
+            } else {
+                // Not a loop -- preserve the directive verbatim for later passes.
+                $output .= '{' . $parts[$i] . '}';
+                $i++;
+            }
+        }
+
+        return $output;
+    }
+
     protected function _process_conditionals($values, $template_string) {
         $set_values = array();
 
