@@ -82,4 +82,17 @@ function phone_numbers_edit_logic_api() {
         'description' => 'Update phone numbers',
     ];
 }
+
+function phone_numbers_edit_logic_descriptor(): array {
+	return [
+		'description'      => 'Create or update the current user\'s phone number.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'edit_primary_key_value' => ['type' => 'int', 'required' => false, 'label' => 'Phone number ID (omit to create)'],
+			'phn_cco_country_code_id' => ['type' => 'string', 'required' => false, 'label' => 'Country code'],
+			'phn_phone_number' => ['type' => 'string', 'required' => true, 'label' => 'Phone number'],
+		],
+	];
+}
 ?>

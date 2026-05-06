@@ -75,4 +75,15 @@ function password_reset_1_logic_api() {
         'description' => 'Request password reset email',
     ];
 }
+
+function password_reset_1_logic_descriptor(): array {
+	return [
+		'description'      => 'Send a password reset email to the given address.',
+		'requires_session' => false,
+		'mutates'          => true,
+		'input'            => [
+			'email' => ['type' => 'email', 'required' => true, 'label' => 'Email address'],
+		],
+	];
+}
 ?>

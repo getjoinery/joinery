@@ -28,4 +28,14 @@ function cart_clear_logic_api() {
         'description' => 'Clear cart',
     ];
 }
+
+function cart_clear_logic_descriptor(): array {
+	return [
+		'description'      => 'Clear all items from the current user\'s cart.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+		],
+	];
+}
 ?>

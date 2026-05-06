@@ -105,4 +105,15 @@ function verify_totp_logic_api() {
         'description' => 'Verify TOTP code during login',
     ];
 }
+
+function verify_totp_logic_descriptor(): array {
+	return [
+		'description'      => 'Verify a TOTP or backup code to complete two-factor login.',
+		'requires_session' => false,
+		'mutates'          => true,
+		'input'            => [
+			'totp_code' => ['type' => 'string', 'required' => true, 'label' => 'Authenticator code or backup code'],
+		],
+	];
+}
 ?>

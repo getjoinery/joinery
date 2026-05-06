@@ -75,4 +75,17 @@ function password_edit_logic_api() {
         'description' => 'Change password (logged in)',
     ];
 }
+
+function password_edit_logic_descriptor(): array {
+	return [
+		'description'      => 'Change the current user\'s password.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'usr_old_password' => ['type' => 'password', 'required' => false, 'label' => 'Current password'],
+			'usr_password' => ['type' => 'password', 'required' => true, 'label' => 'New password'],
+			'usr_password_again' => ['type' => 'password', 'required' => true, 'label' => 'Confirm new password'],
+		],
+	];
+}
 ?>

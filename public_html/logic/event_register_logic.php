@@ -25,4 +25,16 @@ function event_register_logic_api() {
 		'description' => 'Register for an event',
 	];
 }
+
+function event_register_logic_descriptor(): array {
+	return [
+		'description'      => 'Register the current user for an event.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'evt_event_id' => ['type' => 'int', 'required' => true, 'label' => 'Event ID'],
+			'instance_date' => ['type' => 'date', 'required' => false, 'label' => 'Instance date (recurring events)'],
+		],
+	];
+}
 ?>

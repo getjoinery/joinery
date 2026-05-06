@@ -199,4 +199,17 @@ function security_logic_api() {
         'description' => 'Manage two-factor authentication settings',
     ];
 }
+
+function security_logic_descriptor(): array {
+	return [
+		'description'      => 'Manage two-factor authentication settings. action=start_enable begins TOTP setup; confirm_enable confirms it; cancel_enable aborts pending setup; regenerate_backup_codes issues new codes; disable turns off TOTP.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'action' => ['type' => 'select', 'required' => true, 'label' => 'Action', 'options' => ['start_enable', 'confirm_enable', 'cancel_enable', 'regenerate_backup_codes', 'disable']],
+			'totp_code' => ['type' => 'string', 'required' => false, 'label' => 'TOTP code (confirm_enable and disable)'],
+			'confirm_code' => ['type' => 'string', 'required' => false, 'label' => 'Backup code (disable)'],
+		],
+	];
+}
 ?>

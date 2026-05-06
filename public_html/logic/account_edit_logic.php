@@ -115,4 +115,18 @@ function account_edit_logic_api() {
         'description' => 'Update profile fields',
     ];
 }
+
+function account_edit_logic_descriptor(): array {
+	return [
+		'description'      => 'Update the current user\'s profile fields.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'usr_first_name' => ['type' => 'string', 'required' => true, 'label' => 'First name'],
+			'usr_last_name' => ['type' => 'string', 'required' => true, 'label' => 'Last name'],
+			'usr_timezone' => ['type' => 'string', 'required' => true, 'label' => 'Timezone'],
+			'usr_email_new' => ['type' => 'email', 'required' => false, 'label' => 'New email address'],
+		],
+	];
+}
 ?>

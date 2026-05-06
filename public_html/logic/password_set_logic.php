@@ -54,4 +54,16 @@ function password_set_logic_api() {
         'description' => 'Set password on first login',
     ];
 }
+
+function password_set_logic_descriptor(): array {
+	return [
+		'description'      => 'Set an initial password for an account that has none.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'usr_password' => ['type' => 'password', 'required' => true, 'label' => 'Password'],
+			'usr_password_again' => ['type' => 'password', 'required' => true, 'label' => 'Confirm password'],
+		],
+	];
+}
 ?>
