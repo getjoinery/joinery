@@ -38,7 +38,7 @@ function migration_receipt_templates_unify() {
 <p>You have access to the following items from a recent order:</p>
 {end}
 
-<table style="width:100%;border-collapse:collapse;margin:1rem 0;">
+<table style="width:600px;border-collapse:collapse;margin:1rem 0;">
 {loop line_items as line}
 <tr style="border-bottom:1px solid #eee;">
   <td style="padding:0.5rem 0;vertical-align:top;">

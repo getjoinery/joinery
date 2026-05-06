@@ -616,34 +616,38 @@ class StripeHelper {
 
 	public function get_customer($user, $return_type='object') {
 		$stripe_customer = $this->stripe->customers->all(["email" => $user->get('usr_email')]);
-		if($return_type == 'object'){
-			if($this->test_mode){
-				$user->set('usr_stripe_customer_id_test', $stripe_customer['data'][0]['id']);
+
+		// No matching customer in Stripe — caller (e.g. get_or_create_stripe_customer)
+		// is responsible for creating one. Return-type-appropriate "not found" sentinel.
+		if(empty($stripe_customer['data'])){
+			if($return_type == 'id'){
+				return false;
+			}
+			else if($return_type == 'object'){
+				return null;
 			}
 			else{
-				$user->set('usr_stripe_customer_id', $stripe_customer['data'][0]['id']);
-			}		 
-			$user->save();
+				throw new SystemDisplayablePermanentError("Invalid return type.");
+			}
+		}
+
+		$customer_id = $stripe_customer['data'][0]['id'];
+		if($this->test_mode){
+			$user->set('usr_stripe_customer_id_test', $customer_id);
+		}
+		else{
+			$user->set('usr_stripe_customer_id', $customer_id);
+		}
+		$user->save();
+
+		if($return_type == 'object'){
 			return $stripe_customer['data'][0];
 		}
 		else if($return_type == 'id'){
-			if($stripe_customer['data'][0]['id']){
-				if($this->test_mode){
-					$user->set('usr_stripe_customer_id_test', $stripe_customer['data'][0]['id']);
-				}
-				else{
-					$user->set('usr_stripe_customer_id', $stripe_customer['data'][0]['id']);
-				}		 
-				$user->save();
-				return $stripe_customer['data'][0]['id'];
-			}
-			else{
-				return false;
-			}
+			return $customer_id;
 		}
 		else{
 			throw new SystemDisplayablePermanentError("Invalid return type.");
-			exit();			
 		}
 	}
 	

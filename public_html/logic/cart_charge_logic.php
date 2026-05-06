@@ -117,7 +117,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			'usr_email' => $cart->billing_user['billing_email'],		
 		);
 		
-		if($_POST['password']){
+		if(!empty($_POST['password'])){
 			$user_data['password'] = $_POST['password'];
 		}
 		$billing_user = User::CreateCompleteNew($user_data, true, true, false);
@@ -171,14 +171,52 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	foreach($cart->coupon_codes as $coupon_code_name){
 		$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim($coupon_code_name));
 		if(!$coupon_code_test->is_valid()){
-			return _checkout_error("One of your coupon codes is no longer valid. Please remove it and try again.");				
+			return _checkout_error("One of your coupon codes is no longer valid. Please remove it and try again.");
 		}
-		
+
 	}
-	
+
+	//PHASE 1 of cart_charge_atomicity: pre-charge user resolution.
+	//Resolve every per-line recipient user *before* the charge so any user-
+	//creation validation error surfaces to /cart without touching the customer's
+	//card. send_emails=false here defers the activation email to pass 1 of the
+	//post-charge work, gated on $is_newly_created — this prevents declined or
+	//abandoned checkouts from emailing the recipient.
+	$resolved_users = array();
+	$is_newly_created = array();
+	foreach($cart->items as $key => $cart_item) {
+		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+		if(!empty($data['email'])){
+			$existing_user = User::GetByEmail($data['email']);
+			if($existing_user){
+				$resolved_users[$key] = $existing_user;
+				$is_newly_created[$key] = false;
+			}
+			else {
+				try {
+					$user_data = array(
+						'usr_first_name' => $data['full_name_first'],
+						'usr_last_name' => $data['full_name_last'],
+						'usr_email' => $data['email'],
+					);
+					$resolved_users[$key] = User::CreateCompleteNew($user_data, false, false, false);
+					$is_newly_created[$key] = true;
+				}
+				catch (Exception $e) {
+					error_log("Pre-charge user resolution failed for cart line {$key} ({$data['email']}): " . $e->getMessage());
+					return _checkout_error("We couldn't create an account for " . $data['email'] . ". Please check the recipient details and try again.");
+				}
+			}
+		}
+		else {
+			$resolved_users[$key] = $billing_user;
+			$is_newly_created[$key] = false;
+		}
+	}
+
 	$payment_service = '';
 	if($charge_total > 0){
-		if(($settings->get_setting('use_paypal_checkout') && $_GET['id']) || ($settings->get_setting('use_paypal_checkout') && $_GET['subscription'])){
+		if($settings->get_setting('use_paypal_checkout') && (!empty($_GET['id']) || !empty($_GET['subscription']))){
 			$payment_id=$_GET['id'];
 			$paypal=new PaypalHelper();
 			$payment=$paypal->validatePayment($payment_id);
@@ -311,489 +349,566 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				return _checkout_error("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".");
 			}
 
-			//STORE THE CHARGE ID
+			//STORE THE CHARGE ID AND MARK PAID
+			//Phase 2 of cart_charge_atomicity: mark PAID immediately upon successful
+			//charge to eliminate the UNPAID-with-charge-id contradiction. PayPal,
+			//Stripe checkout, and free paths already mark PAID earlier in payment-
+			//path branching; this completes the invariant for stripe_regular.
 			$order->set('ord_stripe_charge_id', $charge_result->id);
-			$order->save();	
-		}	
-	}	
-	
-	
-	
-	
-	
-	
-	foreach($cart->items as $key => $cart_item) {
-		$email_fill = array();
-		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
-		$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
-		$email_fill['purchase_amount'] = $price - $discount;
-
-
-		//GET OR CREATE THE USER, OR USE THE BILLING USER
-		if($data['email']){
-			$user = User::GetByEmail($data['email']);
-			if(!$user){
-				$user_data = array(
-					'usr_first_name' => $data['full_name_first'],
-					'usr_last_name' => $data['full_name_last'],
-					'usr_email' => $data['email'],	
-				);
-				$user = User::CreateCompleteNew($user_data, true, false, false);
-			}
+			$order->set('ord_status', Order::STATUS_PAID);
+			$order->save();
 		}
-		else{
-			$user = $billing_user;
-		}
-		$default_fill = array(
-			'user_id' => $user->key,
-		);
-
-		//CREATE THE ORDER ITEM
-		$order_item = new OrderItem(NULL);
-		$order_item->set('odi_ord_order_id', $order->key);
-		$order_item->set('odi_pro_product_id', $product->key);
-		$order_item->set('odi_usr_user_id', $user->key);
-		$order_item->set('odi_product_info', base64_encode(serialize($data)));
-		$order_item->set('odi_price', $price - $discount);
-		$order_item->set('odi_prv_product_version_id', $product_version->key);
-		
-		if($product_version->is_subscription()){
-			$order_item->set('odi_is_subscription', true);
-		}
-		else{
-			$order_item->set('odi_is_subscription', false);	
-		}
-		
-		//STORE COMMENT IF ENTERED (legacy — now handled via QuestionRequirement)
-		if(isset($data['comment']) && !is_array($data['comment'])){
-			$order_item->set('odi_comment', $data['comment']);
-		}
-
-		$order_item->set('odi_prv_product_version_id', $product_version->key);	
-		$order_item->set('odi_status', OrderItem::STATUS_UNPAID);
-		$order_item->set('odi_status_change_time', 'now()');
-		
-		$order_item->save();	
-		$order_item->load();
-
-		//SAVE THE EXTRA INFO THE USER ENTERED.  IT'S CURRENTLY SITTING IN THE CART
-		$order_item->save_cart_data($data);
-
-
-		//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
-		foreach($cart->coupon_codes as $coupon_code_name){
-
-			if($valid_coupons = $product->get_valid_coupons($product_version)){
-				foreach($valid_coupons as $valid_coupon){
-					if($coupon_code_name == $valid_coupon->get('ccd_code')){
-						$coupon_code_use = new CouponCodeUse(NULL);
-						$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
-						$coupon_code_use->set('ccu_ccd_coupon_code_id', $valid_coupon->key);
-						$coupon_code_use->set('ccu_amount_discount', $valid_coupon->get('ccd_amount_discount'));
-						$coupon_code_use->set('ccu_percent_discount', $valid_coupon->get('ccd_percent_discount'));
-						$coupon_code_use->prepare();
-						$coupon_code_use->save();
-						$applied_coupon_codes[$valid_coupon->get('ccd_code')] = true;
-					}
-				}
-			}
-		}
-
-
-
-
-		//HANDLE SUBSCRIPTIONS
-		if($product_version->is_subscription()){
-
-			if($payment_service == 'stripe_regular'){
-				//CREATE A PRICE AND RUN THE SUBSCRIPTION
-				$final_price = $price - $discount;
-				
-				$stripe_price = $stripe_helper->get_or_create_price($product_version, $final_price);		
-				$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($stripe_price, $order_item, $billing_user, $stripe_customer_id);	
-				//REFRESH THE ORDER ITEM
-				$order_item->set('odi_subscription_status', $subscription_result['status']);
-				$order_item->set('odi_status', OrderItem::STATUS_PAID);
-				$order_item->save();	
-				
-			}
-			else if($payment_service == 'stripe_checkout'){
-				$order_item->set('odi_status', OrderItem::STATUS_PAID);
-				//MOVE THE SUBSCRIPTION ID FROM THE ORDER TO THE ORDER ITEM AND REMOVE IT FROM THE ORDER
-				$order_item->set('odi_stripe_subscription_id', $order->get('ord_stripe_subscription_id_temp'));
-				$order_item->save();
-				$order->set('ord_stripe_subscription_id_temp', NULL);
-				$order->save();
-
-			}
-			else if($payment_service == 'paypal' && isset($_GET['paypal_subscription_id']) && $_GET['paypal_subscription_id']){
-				$order_item->set('odi_status', OrderItem::STATUS_PAID);
-				$order_item->set('odi_paypal_subscription_id', $_GET['paypal_subscription_id']);
-				$order_item->set('odi_subscription_status', 'active');
-				$order_item->save();
-			}
-					
-			
-			//SEND NOTIFICATION
-			if($settings->get_setting('subscription_notification_emails')){
-				$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
-				foreach($notify_emails as $notify_email){
-					$notify_email = trim($notify_email);
-					if(!$notify_email) continue;
-
-					try {
-						$notify_user = User::GetByEmail($notify_email);
-						if(!$notify_user) {
-							// Skip if user doesn't exist
-							continue;
-						}
-						$body = 'Subscription '.$subscription_result['id'].' (Order '. $order->key .') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
-						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						EmailSender::sendTemplate($email_inner_template,
-							$notify_user->get('usr_email'),
-							[
-								'subject' => 'New Subscription',
-								'body' => $body,
-								'recipient' => $notify_user->export_as_array()
-							]
-						);
-					}
-					catch (Exception $e) {
-						//DO NOTHING
-						$error = "";
-					}
-				}
-			}
-
-			// In-app notification: subscription confirmed
-			try {
-				Notification::create_notification(
-					$user->key,
-					'subscription',
-					'Your ' . $product->get('pro_name') . ' subscription is active',
-					'Order #' . $order->key,
-					'/profile#orders',
-					null
-				);
-			} catch (Exception $e) { /* notification system not available */ }
-		}
-		else{
-			//IT WAS PAID ABOVE
-			$order_item->set('odi_status', OrderItem::STATUS_PAID);
-			$order_item->save();
-
-			//SEND NOTIFICATION
-			if($settings->get_setting('single_purchase_notification_emails')){
-				$notify_emails = explode(',', $settings->get_setting('single_purchase_notification_emails'));
-				foreach($notify_emails as $notify_email){
-					$notify_email = trim($notify_email);
-					if(!$notify_email) continue;
-
-					try {
-						$notify_user = User::GetByEmail($notify_email);
-						if(!$notify_user) {
-							// Skip if user doesn't exist
-							continue;
-						}
-						$body = 'Order '. $order->key .' was charged - user: '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
-						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						EmailSender::sendTemplate($email_inner_template,
-							$notify_user->get('usr_email'),
-							[
-								'subject' => 'Order Charged',
-								'body' => $body,
-								'recipient' => $notify_user->export_as_array()
-							]
-						);
-					}
-					catch (Exception $e) {
-						//DO NOTHING
-						$error = "";
-					}
-				}
-			}
-
-			// In-app notification: purchase confirmed
-			try {
-				Notification::create_notification(
-					$user->key,
-					'order',
-					'Your purchase is confirmed: ' . $product->get('pro_name'),
-					'Order #' . $order->key,
-					'/profile#orders',
-					null
-				);
-			} catch (Exception $e) { /* notification system not available */ }
-		}
-
-		//ATTACH USERS TO THE RIGHT EVENTS/COURSES.
-		//Email delivery is now centralized after the item loop (see "BUILD AND SEND
-		//RECEIPT EMAILS" below) so this block only does registration/grouping work
-		//and captures per-line data into $line_summaries for later rendering.
-		$event_registrant = null;
-		$event_name = null;
-		$event_list = null;
-
-		if($product->get('pro_evt_event_id')){
-
-			$event = new Event($product->get('pro_evt_event_id'), TRUE);
-			$event_name = $event->get('evt_name');
-
-			//ADD THE USER TO THE EVENT
-			$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
-			$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
-			$order_item->save();
-
-			// In-app notification: event registration
-			try {
-				Notification::create_notification(
-					$user->key,
-					'event',
-					"You're registered for " . $event->get('evt_name'),
-					null,
-					'/event/' . $event->get('evt_link'),
-					null
-				);
-			} catch (Exception $e) { /* notification system not available */ }
-		}
-		else if($product->get('pro_grp_group_id')){
-
-			//IT IS AN EVENT BUNDLE
-			$group = new Group($product->get('pro_grp_group_id'), TRUE);
-			$group_members = $group->get_member_list();
-			$event_list = array();
-			$last_event_registrant = null;
-			foreach ($group_members as $group_member){
-				$bundle_event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
-				$event_list[] = $bundle_event->get('evt_name');
-				//ADD THE USER TO THE EVENT, SUBSCRIPTIONS CANNOT BE TIME LIMITED
-				$last_event_registrant = $bundle_event->add_registrant($user->key, $order_item, $product->get('pro_grp_group_id'), NULL);
-				$last_event_registrant->save();
-			}
-			// One activation link for the bundle: use the last registrant created.
-			$event_registrant = $last_event_registrant;
-		}
-
-		//Determine outcome category (mirrors the conditionals in the template body).
-		if ($product->get('pro_evt_event_id')) {
-			$outcome = 'event';
-		} else if ($product->get('pro_grp_group_id')) {
-			$outcome = 'bundle';
-		} else if ($product_version->is_subscription()) {
-			$outcome = 'subscription';
-		} else if ($product->get('pro_digital_link')) {
-			$outcome = 'digital';
-		} else {
-			$outcome = 'plain';
-		}
-
-		//Canonicalize emails to decide is_gift. Empty data['email'] already
-		//collapsed to billing user above (line ~322), so $user is the recipient.
-		$billing_email_canon = strtolower(trim($billing_user->get('usr_email')));
-		$line_email_canon = strtolower(trim($user->get('usr_email')));
-		$is_gift = ($line_email_canon !== $billing_email_canon);
-
-		$line_summaries[] = array(
-			'order_item' => $order_item,
-			'product' => $product,
-			'product_version' => $product_version,
-			'cart_data' => $data,
-			'product_name' => $product_name,
-			'quantity' => $quantity,
-			'price' => $price - $discount,
-			'recipient_email' => $line_email_canon,
-			'recipient_user' => $user,
-			'is_gift' => $is_gift,
-			'outcome' => $outcome,
-			'act_code' => $user->get('usr_act_code'),
-			'event_registrant_id' => $event_registrant ? $event_registrant->key : null,
-			'event_name' => $event_name,
-			'event_list' => $event_list,                       // array of names, or null
-			'digital_link' => $product->get('pro_digital_link'),
-		);
-			
-		//RUN THE PRODUCT SCRIPTS
-		$product->run_product_scripts($user, $order_item);
-
-		// Run requirement-level post_purchase hooks
-		require_once(PathHelper::getIncludePath('includes/requirements/AbstractProductRequirement.php'));
-		foreach (AbstractProductRequirement::getProductRequirements($product->key) as $requirement) {
-			$requirement->post_purchase($data, $order_item, $user, $order);
-		}
-
-		// Handle subscription tier assignment - ONLY if payment was successful
-		if($order_item->get('odi_status') == OrderItem::STATUS_PAID) {
-			require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-			SubscriptionTier::handleProductPurchase($user, $product, $order_item, $order);
-		}
-
-		if($product_version->get('prv_trial_period_days')){
-			$trial = ' (' . $product_version->get('prv_trial_period_days') . ' day free trial)';	
-		}
-		else{
-			$trial = '';
-		}
-	
-		$receipts[$key+1]['pname'] = $product_name . $trial;
-		$receipts[$key+1]['name'] = $data['full_name_first']. ' ' .$data['full_name_last'];
-		$receipts[$key+1]['price'] = $price - $discount;
-		$receipts[$key+1]['after_purchase_message'] = $product->get('pro_after_purchase_message');
-
-		if($product->get('pro_digital_link')){
-			$receipts[$key+1]['link'] = $product->get('pro_digital_link');
-		}
-		
-		//UPDATE THE CALCULATED STILL AVAILABLE FIELD
-		if($product->get('pro_max_purchase_count') > 0){
-			$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
-			$product->set('pro_num_remaining_calc', $remaining);
-			$product->save();
-		}			
-
 	}
-
+	
+	
+	
+	
+	
+	
 	// =========================================================================
-	// BUILD AND SEND RECEIPT EMAILS
-	// Routing rules per specs/receipts_refactor.md §6.1:
-	//   R1 — one default order receipt to the billing user, always
-	//   R2 — per-registrant activation email for event/bundle gift recipients
-	//   R3 — per-product additional email (opt-in) to the billing user, deduped
+	// PHASE 3 of cart_charge_atomicity: post-charge work as a two-pass restructure.
+	//   Pass 1: data persistence (must succeed for the line to be "real")
+	//   R1/R2/R3: send receipts referencing pass-1 data
+	//   Pass 2: best-effort side effects (failure does not block receipts)
+	// All wrapped in an inner try/catch. On exception: log to ord_error, notify
+	// ops, render the success page anyway. Order is already PAID (Phase 2)
+	// before we enter this block, so a partial failure leaves the customer with
+	// a confirmed payment and the operator with a worklist via /admin/admin_orders.
 	// =========================================================================
-	$applied_coupon_codes_list = array_keys($applied_coupon_codes);
+	$r1_already_sent = false;
+	$confirmation_surveys = array();
 
-	$build_line_for_template = function($summary, $for_billing_view) {
-		$line = array(
-			'product_name' => $summary['product_name'],
-			'quantity' => $summary['quantity'],
-			'outcome' => $summary['outcome'],
-			'is_gift_to' => null,
-			'event_name' => $summary['event_name'],
-			'digital_link' => $summary['digital_link'],
-			'event_list' => is_array($summary['event_list']) ? implode('<br>', $summary['event_list']) : null,
-			'subscription_active' => ($summary['outcome'] === 'subscription'),
-		);
-		if ($for_billing_view) {
-			$line['price'] = $summary['price'];
-			if ($summary['is_gift']) {
-				// Gift line for billing user: ack only; no activation token, no welcome content.
-				$line['is_gift_to'] = $summary['recipient_email'];
-				// Generic per-product info (e.g. digital_link) stays so the buyer
-				// can forward it; act_code / event_registrant_id are deliberately omitted.
+	$send_r1_r2_r3 = function() use (&$line_summaries, &$applied_coupon_codes, &$billing_user, &$order, &$currency_symbol) {
+		$applied_coupon_codes_list = array_keys($applied_coupon_codes);
+
+		$build_line_for_template = function($summary, $for_billing_view) {
+			$line = array(
+				'product_name' => $summary['product_name'],
+				'quantity' => $summary['quantity'],
+				'outcome' => $summary['outcome'],
+				'is_gift_to' => null,
+				'event_name' => $summary['event_name'],
+				'digital_link' => $summary['digital_link'],
+				'event_list' => is_array($summary['event_list']) ? implode('<br>', $summary['event_list']) : null,
+				'subscription_active' => ($summary['outcome'] === 'subscription'),
+			);
+			if ($for_billing_view) {
+				$line['price'] = $summary['price'];
+				if ($summary['is_gift']) {
+					$line['is_gift_to'] = $summary['recipient_email'];
+				} else {
+					$line['act_code'] = $summary['act_code'];
+					$line['event_registrant_id'] = $summary['event_registrant_id'];
+				}
 			} else {
 				$line['act_code'] = $summary['act_code'];
 				$line['event_registrant_id'] = $summary['event_registrant_id'];
 			}
-		} else {
-			// Registrant view: full activation, no price, no gift acks.
-			$line['act_code'] = $summary['act_code'];
-			$line['event_registrant_id'] = $summary['event_registrant_id'];
-		}
-		return $line;
-	};
+			return $line;
+		};
 
-	// --- R1: default order receipt to billing user --------------------------
-	if (!empty($line_summaries)) {
-		$billing_lines = array();
-		foreach ($line_summaries as $summary) {
-			$billing_lines[] = $build_line_for_template($summary, true);
-		}
-		$billing_fill = array(
-			'recipient' => $billing_user->export_as_array(),
-			'is_billing' => true,
-			'order' => $order->export_as_array(),
-			'order_total' => $order->get('ord_total_cost'),
-			'currency_symbol' => $currency_symbol,
-			'line_items' => $billing_lines,
-			'coupon_codes_used' => $applied_coupon_codes_list,
-		);
-		try {
-			EmailSender::sendTemplate('purchase_receipt_default', $billing_user->get('usr_email'), $billing_fill);
-		} catch (Exception $e) {
-			error_log('purchase_receipt_default send to billing user failed: ' . $e->getMessage());
-		}
-	}
-
-	// --- R2: per-registrant activation for event/bundle gift recipients -----
-	$registrant_groups = array();
-	foreach ($line_summaries as $summary) {
-		if (!$summary['is_gift']) continue;
-		if (!in_array($summary['outcome'], array('event', 'bundle'), true)) continue;
-		$registrant_groups[$summary['recipient_email']][] = $summary;
-	}
-	foreach ($registrant_groups as $recipient_email => $summaries) {
-		$registrant_lines = array();
-		foreach ($summaries as $summary) {
-			$registrant_lines[] = $build_line_for_template($summary, false);
-		}
-		$registrant_user = $summaries[0]['recipient_user'];
-		$registrant_fill = array(
-			'recipient' => $registrant_user->export_as_array(),
-			'is_billing' => false,
-			'order' => $order->export_as_array(),
-			'currency_symbol' => $currency_symbol,
-			'line_items' => $registrant_lines,
-		);
-		try {
-			EmailSender::sendTemplate('purchase_receipt_default', $recipient_email, $registrant_fill);
-		} catch (Exception $e) {
-			error_log('purchase_receipt_default registrant send failed: ' . $e->getMessage());
-		}
-	}
-
-	// --- R3: per-product additional email to billing user (deduped) --------
-	$seen_product_ids = array();
-	foreach ($line_summaries as $summary) {
-		$product = $summary['product'];
-		if (isset($seen_product_ids[$product->key])) continue;
-		$has_msg = (bool)$product->get('pro_after_purchase_message');
-		$has_override = (bool)$product->get('pro_emt_receipt_template_id');
-		if (!$has_msg && !$has_override) continue;
-		$seen_product_ids[$product->key] = true;
-
-		$tpl_name = _resolve_receipt_template($product, 'purchase_receipt_product_default');
-		$product_fill = array(
-			'recipient' => $billing_user->export_as_array(),
-			'product_name' => $summary['product_name'],
-			'after_purchase_message' => (string)$product->get('pro_after_purchase_message'),
-			'order_item' => $summary['order_item']->export_as_array(),
-			'order' => $order->export_as_array(),
-		);
-		try {
-			EmailSender::sendTemplate($tpl_name, $billing_user->get('usr_email'), $product_fill);
-		} catch (Exception $e) {
-			error_log("Per-product receipt send ({$tpl_name}) failed: " . $e->getMessage());
-		}
-	}
-
-	//MARK THE ORDER PAID
-	$order->set('ord_status', Order::STATUS_PAID);
-	$order->save();
-
-	// Record PURCHASE conversion event — the canonical attribution signal for
-	// revenue-by-channel. UTM is carried automatically from the session by
-	// save_visitor_event() (Part C Gap 3).
-	require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
-	$session->save_visitor_event(VisitorEvent::TYPE_PURCHASE, FALSE, 'order', $order->key);
-	unset($_SESSION['checkout_started']);
-
-	// Collect optional surveys for confirmation page display
-	$confirmation_surveys = array();
-	foreach ($cart->items as $key => $cart_item) {
-		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
-		if ($product->get('pro_evt_event_id')) {
-			require_once(PathHelper::getIncludePath('data/events_class.php'));
-			$evt = new Event($product->get('pro_evt_event_id'), TRUE);
-			if ($evt->get('evt_svy_survey_id') && $evt->get('evt_survey_display') === 'optional_at_confirmation') {
-				$confirmation_surveys[] = array(
-					'survey_id' => $evt->get('evt_svy_survey_id'),
-					'event_id' => $evt->key,
-					'event_name' => $evt->get('evt_name'),
-				);
+		// --- R1: default order receipt to billing user ----------------------
+		if (!empty($line_summaries)) {
+			$billing_lines = array();
+			foreach ($line_summaries as $summary) {
+				$billing_lines[] = $build_line_for_template($summary, true);
+			}
+			$billing_fill = array(
+				'recipient' => $billing_user->export_as_array(),
+				'is_billing' => true,
+				'order' => $order->export_as_array(),
+				'order_total' => $order->get('ord_total_cost'),
+				'currency_symbol' => $currency_symbol,
+				'line_items' => $billing_lines,
+				'coupon_codes_used' => $applied_coupon_codes_list,
+			);
+			try {
+				EmailSender::sendTemplate('purchase_receipt_default', $billing_user->get('usr_email'), $billing_fill);
+			} catch (Exception $e) {
+				error_log('purchase_receipt_default send to billing user failed: ' . $e->getMessage());
 			}
 		}
-	}
-	$session->save_session_item('confirmation_surveys', $confirmation_surveys);
 
+		// --- R2: per-registrant activation for event/bundle gift recipients -
+		$registrant_groups = array();
+		foreach ($line_summaries as $summary) {
+			if (!$summary['is_gift']) continue;
+			if (!in_array($summary['outcome'], array('event', 'bundle'), true)) continue;
+			$registrant_groups[$summary['recipient_email']][] = $summary;
+		}
+		foreach ($registrant_groups as $recipient_email => $summaries) {
+			$registrant_lines = array();
+			foreach ($summaries as $summary) {
+				$registrant_lines[] = $build_line_for_template($summary, false);
+			}
+			$registrant_user = $summaries[0]['recipient_user'];
+			$registrant_fill = array(
+				'recipient' => $registrant_user->export_as_array(),
+				'is_billing' => false,
+				'order' => $order->export_as_array(),
+				'currency_symbol' => $currency_symbol,
+				'line_items' => $registrant_lines,
+			);
+			try {
+				EmailSender::sendTemplate('purchase_receipt_default', $recipient_email, $registrant_fill);
+			} catch (Exception $e) {
+				error_log('purchase_receipt_default registrant send failed: ' . $e->getMessage());
+			}
+		}
+
+		// --- R3: per-product additional email to billing user (deduped) ----
+		$seen_product_ids = array();
+		foreach ($line_summaries as $summary) {
+			$r3_product = $summary['product'];
+			if (isset($seen_product_ids[$r3_product->key])) continue;
+			$has_msg = (bool)$r3_product->get('pro_after_purchase_message');
+			$has_override = (bool)$r3_product->get('pro_emt_receipt_template_id');
+			if (!$has_msg && !$has_override) continue;
+			$seen_product_ids[$r3_product->key] = true;
+
+			$tpl_name = _resolve_receipt_template($r3_product, 'purchase_receipt_product_default');
+			$product_fill = array(
+				'recipient' => $billing_user->export_as_array(),
+				'product_name' => $summary['product_name'],
+				'after_purchase_message' => (string)$r3_product->get('pro_after_purchase_message'),
+				'order_item' => $summary['order_item']->export_as_array(),
+				'order' => $order->export_as_array(),
+			);
+			try {
+				EmailSender::sendTemplate($tpl_name, $billing_user->get('usr_email'), $product_fill);
+			} catch (Exception $e) {
+				error_log("Per-product receipt send ({$tpl_name}) failed: " . $e->getMessage());
+			}
+		}
+	};
+
+	try {
+
+		// ----- PASS 1: data persistence -----
+		// Must succeed for the line to be "real". If anything throws here, the
+		// outer catch handler records ord_error, fires a best-effort R1 with
+		// whatever has accumulated in $line_summaries, and notifies ops.
+		foreach($cart->items as $key => $cart_item) {
+			$email_fill = array();
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+			$product_name = $product->get('pro_name').' '.$product_version->get('prv_version_name');
+			$email_fill['purchase_amount'] = $price - $discount;
+
+			//User was resolved pre-charge (Phase 1). Pulling from the parallel
+			//array means user-creation validation errors have already surfaced
+			//to /cart with no Stripe activity.
+			$user = $resolved_users[$key];
+
+			//Fire activation email for newly-created recipient users (deferred
+			//from Phase 1's send_emails=false pre-charge resolution). Best-
+			//effort: a send failure here is non-blocking — the recipient can
+			//set their initial password via forgot-password.
+			if(!empty($is_newly_created[$key])){
+				try {
+					Activation::email_activate_send($user);
+				}
+				catch (Exception $e) {
+					error_log("Activation email send failed for user {$user->key}: " . $e->getMessage());
+				}
+			}
+
+			//CREATE THE ORDER ITEM
+			$order_item = new OrderItem(NULL);
+			$order_item->set('odi_ord_order_id', $order->key);
+			$order_item->set('odi_pro_product_id', $product->key);
+			$order_item->set('odi_usr_user_id', $user->key);
+			$order_item->set('odi_product_info', base64_encode(serialize($data)));
+			$order_item->set('odi_price', $price - $discount);
+			$order_item->set('odi_prv_product_version_id', $product_version->key);
+
+			if($product_version->is_subscription()){
+				$order_item->set('odi_is_subscription', true);
+			}
+			else{
+				$order_item->set('odi_is_subscription', false);
+			}
+
+			//STORE COMMENT IF ENTERED (legacy — now handled via QuestionRequirement)
+			if(isset($data['comment']) && !is_array($data['comment'])){
+				$order_item->set('odi_comment', $data['comment']);
+			}
+
+			$order_item->set('odi_prv_product_version_id', $product_version->key);
+			$order_item->set('odi_status', OrderItem::STATUS_UNPAID);
+			$order_item->set('odi_status_change_time', 'now()');
+
+			$order_item->save();
+			$order_item->load();
+
+			//SAVE THE EXTRA INFO THE USER ENTERED.
+			$order_item->save_cart_data($data);
+
+			//STORE ANY USED COUPONS, ONE ENTRY IN THE COUPON CODES USE TABLE, FK IN ORDER ITEMS
+			foreach($cart->coupon_codes as $coupon_code_name){
+				if($valid_coupons = $product->get_valid_coupons($product_version)){
+					foreach($valid_coupons as $valid_coupon){
+						if($coupon_code_name == $valid_coupon->get('ccd_code')){
+							$coupon_code_use = new CouponCodeUse(NULL);
+							$coupon_code_use->set('ccu_odi_order_item_id', $order_item->key);
+							$coupon_code_use->set('ccu_ccd_coupon_code_id', $valid_coupon->key);
+							$coupon_code_use->set('ccu_amount_discount', $valid_coupon->get('ccd_amount_discount'));
+							$coupon_code_use->set('ccu_percent_discount', $valid_coupon->get('ccd_percent_discount'));
+							$coupon_code_use->prepare();
+							$coupon_code_use->save();
+							$applied_coupon_codes[$valid_coupon->get('ccd_code')] = true;
+						}
+					}
+				}
+			}
+
+			//HANDLE SUBSCRIPTIONS — data persistence only; notifications run in pass 2.
+			$subscription_result = null;
+			if($product_version->is_subscription()){
+				if($payment_service == 'stripe_regular'){
+					$final_price = $price - $discount;
+					$stripe_price = $stripe_helper->get_or_create_price($product_version, $final_price);
+					$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($stripe_price, $order_item, $billing_user, $stripe_customer_id);
+					$order_item->set('odi_subscription_status', $subscription_result['status']);
+					$order_item->set('odi_status', OrderItem::STATUS_PAID);
+					$order_item->save();
+				}
+				else if($payment_service == 'stripe_checkout'){
+					$order_item->set('odi_status', OrderItem::STATUS_PAID);
+					//MOVE THE SUBSCRIPTION ID FROM THE ORDER TO THE ORDER ITEM
+					$order_item->set('odi_stripe_subscription_id', $order->get('ord_stripe_subscription_id_temp'));
+					$order_item->save();
+					$order->set('ord_stripe_subscription_id_temp', NULL);
+					$order->save();
+				}
+				else if($payment_service == 'paypal' && isset($_GET['paypal_subscription_id']) && $_GET['paypal_subscription_id']){
+					$order_item->set('odi_status', OrderItem::STATUS_PAID);
+					$order_item->set('odi_paypal_subscription_id', $_GET['paypal_subscription_id']);
+					$order_item->set('odi_subscription_status', 'active');
+					$order_item->save();
+				}
+			}
+			else{
+				//NON-SUBSCRIPTION: paid above
+				$order_item->set('odi_status', OrderItem::STATUS_PAID);
+				$order_item->save();
+			}
+
+			//ATTACH USER TO EVENTS/COURSES — data persistence only (R2 receipt
+			//depends on registrant_id). In-app notifications run in pass 2.
+			$event_registrant = null;
+			$event_name = null;
+			$event_list = null;
+
+			if($product->get('pro_evt_event_id')){
+				$event = new Event($product->get('pro_evt_event_id'), TRUE);
+				$event_name = $event->get('evt_name');
+				$event_registrant = $event->add_registrant($user->key, $order_item, NULL, $product->get('pro_expires'));
+				$order_item->set('odi_evr_event_registrant_id', $event_registrant->key);
+				$order_item->save();
+			}
+			else if($product->get('pro_grp_group_id')){
+				//IT IS AN EVENT BUNDLE
+				$group = new Group($product->get('pro_grp_group_id'), TRUE);
+				$group_members = $group->get_member_list();
+				$event_list = array();
+				$last_event_registrant = null;
+				foreach ($group_members as $group_member){
+					$bundle_event = new Event($group_member->get('grm_foreign_key_id'), TRUE);
+					$event_list[] = $bundle_event->get('evt_name');
+					$last_event_registrant = $bundle_event->add_registrant($user->key, $order_item, $product->get('pro_grp_group_id'), NULL);
+					$last_event_registrant->save();
+				}
+				// One activation link for the bundle: use the last registrant created.
+				$event_registrant = $last_event_registrant;
+			}
+
+			//Outcome category (mirrors template body conditionals).
+			if ($product->get('pro_evt_event_id')) {
+				$outcome = 'event';
+			} else if ($product->get('pro_grp_group_id')) {
+				$outcome = 'bundle';
+			} else if ($product_version->is_subscription()) {
+				$outcome = 'subscription';
+			} else if ($product->get('pro_digital_link')) {
+				$outcome = 'digital';
+			} else {
+				$outcome = 'plain';
+			}
+
+			//Canonicalize emails to decide is_gift. Empty data['email'] already
+			//collapsed to billing user during pre-charge resolution.
+			$billing_email_canon = strtolower(trim($billing_user->get('usr_email')));
+			$line_email_canon = strtolower(trim($user->get('usr_email')));
+			$is_gift = ($line_email_canon !== $billing_email_canon);
+
+			$line_summaries[$key] = array(
+				'order_item' => $order_item,
+				'product' => $product,
+				'product_version' => $product_version,
+				'cart_data' => $data,
+				'product_name' => $product_name,
+				'quantity' => $quantity,
+				'price' => $price - $discount,
+				'recipient_email' => $line_email_canon,
+				'recipient_user' => $user,
+				'is_gift' => $is_gift,
+				'outcome' => $outcome,
+				'act_code' => $user->get('usr_act_code'),
+				'event_registrant_id' => $event_registrant ? $event_registrant->key : null,
+				'event_name' => $event_name,
+				'event_list' => $event_list,                       // array of names, or null
+				'digital_link' => $product->get('pro_digital_link'),
+				'subscription_result' => $subscription_result,     // for pass-2 ops notification
+			);
+
+			//Legacy receipts array for $cart->last_receipt (used by older display paths).
+			if($product_version->get('prv_trial_period_days')){
+				$trial = ' (' . $product_version->get('prv_trial_period_days') . ' day free trial)';
+			}
+			else{
+				$trial = '';
+			}
+
+			$receipts[$key+1]['pname'] = $product_name . $trial;
+			$receipts[$key+1]['name'] = $data['full_name_first'].' '.$data['full_name_last'];
+			$receipts[$key+1]['price'] = $price - $discount;
+			$receipts[$key+1]['after_purchase_message'] = $product->get('pro_after_purchase_message');
+			if($product->get('pro_digital_link')){
+				$receipts[$key+1]['link'] = $product->get('pro_digital_link');
+			}
+		}
+
+		// =========================================================================
+		// BUILD AND SEND RECEIPT EMAILS (between passes — receipts reference
+		// fully-persisted pass-1 data; pass-2 plugin failures cannot strand them).
+		// Routing rules per specs/receipts_refactor.md §6.1:
+		//   R1 — one default order receipt to the billing user, always
+		//   R2 — per-registrant activation email for event/bundle gift recipients
+		//   R3 — per-product additional email (opt-in) to the billing user, deduped
+		// =========================================================================
+		$send_r1_r2_r3();
+		$r1_already_sent = true;
+
+		// ----- PASS 2: best-effort side effects -----
+		// Failures here do NOT block receipts (already sent above). Each block
+		// is individually try/wrapped so one failing extension point does not
+		// skip later blocks for the same line. The outer pass-2 try/catch (the
+		// inner try/catch of the whole post-charge block) catches anything
+		// truly unexpected and routes it to ord_error + ops notification.
+		foreach($cart->items as $key => $cart_item) {
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+			if (!isset($line_summaries[$key])) continue;
+			$user = $resolved_users[$key];
+			$summary = $line_summaries[$key];
+			$order_item = $summary['order_item'];
+
+			//Plugin product scripts.
+			try {
+				$product->run_product_scripts($user, $order_item);
+			}
+			catch (Exception $e) {
+				error_log("run_product_scripts failed for product {$product->key} (order {$order->key}): " . $e->getMessage());
+			}
+
+			//Requirement post_purchase hooks.
+			try {
+				require_once(PathHelper::getIncludePath('includes/requirements/AbstractProductRequirement.php'));
+				foreach (AbstractProductRequirement::getProductRequirements($product->key) as $requirement) {
+					$requirement->post_purchase($data, $order_item, $user, $order);
+				}
+			}
+			catch (Exception $e) {
+				error_log("Requirement post_purchase failed for product {$product->key} (order {$order->key}): " . $e->getMessage());
+			}
+
+			//Subscription tier assignment — only if payment was successful.
+			if($order_item->get('odi_status') == OrderItem::STATUS_PAID) {
+				try {
+					require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+					SubscriptionTier::handleProductPurchase($user, $product, $order_item, $order);
+				}
+				catch (Exception $e) {
+					error_log("SubscriptionTier::handleProductPurchase failed for product {$product->key} (order {$order->key}): " . $e->getMessage());
+				}
+			}
+
+			//Refresh cached remaining-count for capacity-limited products.
+			if($product->get('pro_max_purchase_count') > 0){
+				try {
+					$remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased();
+					$product->set('pro_num_remaining_calc', $remaining);
+					$product->save();
+				}
+				catch (Exception $e) {
+					error_log("pro_num_remaining_calc refresh failed for product {$product->key}: " . $e->getMessage());
+				}
+			}
+
+			//In-app notification: event registration.
+			if($product->get('pro_evt_event_id')){
+				try {
+					$event = new Event($product->get('pro_evt_event_id'), TRUE);
+					Notification::create_notification(
+						$user->key,
+						'event',
+						"You're registered for " . $event->get('evt_name'),
+						null,
+						'/event/' . $event->get('evt_link'),
+						null
+					);
+				} catch (Exception $e) { /* notification system not available */ }
+			}
+
+			if($product_version->is_subscription()){
+				//In-app notification: subscription confirmed.
+				try {
+					Notification::create_notification(
+						$user->key,
+						'subscription',
+						'Your ' . $product->get('pro_name') . ' subscription is active',
+						'Order #' . $order->key,
+						'/profile#orders',
+						null
+					);
+				} catch (Exception $e) { /* notification system not available */ }
+
+				//Operator notification email for new subscription.
+				if($settings->get_setting('subscription_notification_emails')){
+					$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
+					foreach($notify_emails as $notify_email){
+						$notify_email = trim($notify_email);
+						if(!$notify_email) continue;
+						try {
+							$notify_user = User::GetByEmail($notify_email);
+							if(!$notify_user) continue;
+							$sub_id = isset($summary['subscription_result']['id']) ? $summary['subscription_result']['id'] : '';
+							$body = 'Subscription '.$sub_id.' (Order '.$order->key.') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
+							$email_inner_template = $settings->get_setting('individual_email_inner_template');
+							EmailSender::sendTemplate($email_inner_template,
+								$notify_user->get('usr_email'),
+								[
+									'subject' => 'New Subscription',
+									'body' => $body,
+									'recipient' => $notify_user->export_as_array()
+								]
+							);
+						}
+						catch (Exception $e) { /* DO NOTHING */ }
+					}
+				}
+			}
+			else{
+				//In-app notification: purchase confirmed.
+				try {
+					Notification::create_notification(
+						$user->key,
+						'order',
+						'Your purchase is confirmed: ' . $product->get('pro_name'),
+						'Order #' . $order->key,
+						'/profile#orders',
+						null
+					);
+				} catch (Exception $e) { /* notification system not available */ }
+
+				//Operator notification email for single purchase.
+				if($settings->get_setting('single_purchase_notification_emails')){
+					$notify_emails = explode(',', $settings->get_setting('single_purchase_notification_emails'));
+					foreach($notify_emails as $notify_email){
+						$notify_email = trim($notify_email);
+						if(!$notify_email) continue;
+						try {
+							$notify_user = User::GetByEmail($notify_email);
+							if(!$notify_user) continue;
+							$body = 'Order '.$order->key.' was charged - user: '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
+							$email_inner_template = $settings->get_setting('individual_email_inner_template');
+							EmailSender::sendTemplate($email_inner_template,
+								$notify_user->get('usr_email'),
+								[
+									'subject' => 'Order Charged',
+									'body' => $body,
+									'recipient' => $notify_user->export_as_array()
+								]
+							);
+						}
+						catch (Exception $e) { /* DO NOTHING */ }
+					}
+				}
+			}
+		}
+
+		// Record PURCHASE conversion event — canonical attribution signal for
+		// revenue-by-channel. UTM is carried automatically from the session.
+		require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+		$session->save_visitor_event(VisitorEvent::TYPE_PURCHASE, FALSE, 'order', $order->key);
+		unset($_SESSION['checkout_started']);
+
+		// Collect optional surveys for confirmation page display.
+		foreach ($cart->items as $key => $cart_item) {
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+			if ($product->get('pro_evt_event_id')) {
+				require_once(PathHelper::getIncludePath('data/events_class.php'));
+				$evt = new Event($product->get('pro_evt_event_id'), TRUE);
+				if ($evt->get('evt_svy_survey_id') && $evt->get('evt_survey_display') === 'optional_at_confirmation') {
+					$confirmation_surveys[] = array(
+						'survey_id' => $evt->get('evt_svy_survey_id'),
+						'event_id' => $evt->key,
+						'event_name' => $evt->get('evt_name'),
+					);
+				}
+			}
+		}
+		$session->save_session_item('confirmation_surveys', $confirmation_surveys);
+
+	}
+	catch (Exception $post_charge_e) {
+		// Phase 3 lite safety net: post-charge work threw, but order is already
+		// PAID (Phase 2). Record the error, page the operator, render the
+		// success page anyway so the customer doesn't see a generic error after
+		// being charged.
+		error_log("Post-charge work failed for order {$order->key}: " . $post_charge_e->getMessage() . " in " . $post_charge_e->getFile() . ":" . $post_charge_e->getLine());
+
+		try {
+			$order->set('ord_error', substr($post_charge_e->getMessage(), 0, 250));
+			$order->save();
+		}
+		catch (Exception $inner_e) {
+			error_log("Failed to write ord_error for order {$order->key}: " . $inner_e->getMessage());
+		}
+
+		// Best-effort R1 send if pass 1 threw before reaching the receipt block.
+		if (!$r1_already_sent) {
+			try {
+				$send_r1_r2_r3();
+			}
+			catch (Exception $r1_e) {
+				error_log("Best-effort R1 send failed for order {$order->key}: " . $r1_e->getMessage());
+			}
+		}
+
+		// Operator notification — paged the instant it happens.
+		try {
+			$ops_email = $settings->get_setting('defaultemail');
+			if ($ops_email) {
+				$body = "Post-charge work failed for order #{$order->key}.\n\n".
+					"Billing user: ".$billing_user->get('usr_email')."\n".
+					"Error: ".$post_charge_e->getMessage()."\n".
+					"Location: ".$post_charge_e->getFile().":".$post_charge_e->getLine()."\n\n".
+					"Order is PAID; manual fix-up via /admin/admin_orders.";
+				$email_inner_template = $settings->get_setting('individual_email_inner_template');
+				EmailSender::sendTemplate($email_inner_template, $ops_email, array(
+					'subject' => 'Order #'.$order->key.' post-charge failure',
+					'body' => $body,
+					'recipient' => array('display_name' => 'Operator')
+				));
+			}
+		}
+		catch (Exception $ops_e) {
+			error_log("Operator notification failed for order {$order->key}: " . $ops_e->getMessage());
+		}
+	}
+
+	// Always run — order is PAID (Phase 2), errors recorded on ord_error for
+	// operator follow-up, customer sees the success page.
 	$cart->last_receipt = $receipts;
 	$cart->clear_cart();
 

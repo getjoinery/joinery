@@ -801,3 +801,18 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Fix purchase_receipt_default itemized list table width (v131) ==========
+	// v129 seeded the receipt with width:100%, which inherits its rendered width
+	// from whatever container the mail client puts it in — produces uneven /
+	// stretched layouts. Lock the itemized table to a fixed 600px (industry-
+	// standard email width). The seed in migration_receipt_templates_unify.php
+	// is updated to match so fresh installs (which run v129 and find the template
+	// already 600px) and upgrades (which had v129 install at 100% and now get
+	// rewritten by v131) end in the same state.
+	$migration = array();
+	$migration['database_version'] = '131';
+	$migration['test'] = "SELECT count(1) as count FROM emt_email_templates WHERE emt_name = 'purchase_receipt_default' AND emt_delete_time IS NULL AND emt_body LIKE '%width:600px;border-collapse:collapse;margin:1rem 0;%'";
+	$migration['migration_sql'] = "UPDATE emt_email_templates SET emt_body = REPLACE(emt_body, '<table style=\"width:100%;border-collapse:collapse;margin:1rem 0;\">', '<table style=\"width:600px;border-collapse:collapse;margin:1rem 0;\">'), emt_update_time = now() WHERE emt_name = 'purchase_receipt_default' AND emt_delete_time IS NULL";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+

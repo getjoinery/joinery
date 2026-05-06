@@ -134,9 +134,13 @@ class RecipeRunner {
                     return;
                 }
 
-                // Append assistant turn verbatim, then build a user turn of
-                // tool_result blocks for the next iteration.
-                $messages[] = ['role' => 'assistant', 'content' => $content];
+                // Append assistant turn, then build a user turn of tool_result
+                // blocks for the next iteration. Normalize tool_use.input so an
+                // empty {} from the API doesn't round-trip as a JSON [] (PHP
+                // assoc-decode collapses {} into [] which json_encode emits as
+                // an array — Anthropic then rejects with "Input should be an
+                // object").
+                $messages[] = ['role' => 'assistant', 'content' => self::normalizeAssistantContent($content)];
 
                 $tool_result_blocks = [];
                 $iter_had_error = false;
@@ -230,6 +234,17 @@ class RecipeRunner {
                 'cache_control' => ['type' => 'ephemeral'],
             ],
         ];
+    }
+
+    private static function normalizeAssistantContent(array $content): array {
+        foreach ($content as &$block) {
+            if (($block['type'] ?? '') === 'tool_use') {
+                if (!isset($block['input']) || (is_array($block['input']) && empty($block['input']))) {
+                    $block['input'] = new stdClass();
+                }
+            }
+        }
+        return $content;
     }
 
     private static function executeToolUse(array $tool_use, RecipeRunContext $ctx): array {
