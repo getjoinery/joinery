@@ -120,9 +120,9 @@ public function get_requirement_info($output='text') {
 		return $pri_lists;
 	}
 	
-	function run_product_scripts($user, $order_item){
+	function run_product_scripts($user, $order_item, $order = null){
 		//REQUIRE ALL OF THE PRODUCT SCRIPTS, THE MAIN ONE AND ALL OF THE PLUGINS
-		require_once(PathHelper::getIncludePath('logic/product_scripts_logic.php'));
+		require_once(PathHelper::getIncludePath('hooks/product_purchase.php'));
 
 		$plugins = LibraryFunctions::list_plugins();
 		foreach($plugins as $plugin){
@@ -131,15 +131,15 @@ public function get_requirement_info($output='text') {
 				require_once($product_script_file);
 			}
 		}
-		
+
 		//RUN THE PRODUCT SCRIPTS
 		if($product_scripts_list = $this->get('pro_product_scripts')){
 			$product_scripts = explode(',', $product_scripts_list);
 			foreach($product_scripts as $product_script){
-				$product_script($user, $order_item);
+				$product_script($user, $this, $order_item, $order);
 			}
 		}
-		
+
 		return true;
 	}
 

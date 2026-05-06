@@ -254,7 +254,7 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 
 	// Build product scripts options
 	$product_scripts_optionvals = array();
-	$product_scripts_optionvals = array_merge($product_scripts_optionvals, LibraryFunctions::getFunctionNamesFromFile(PathHelper::getRootDir() . '/logic/product_scripts_logic.php'));
+	$product_scripts_optionvals = array_merge($product_scripts_optionvals, LibraryFunctions::getFunctionNamesFromFile(PathHelper::getIncludePath('hooks/product_purchase.php')));
 
 	$plugins = LibraryFunctions::list_plugins();
 	foreach($plugins as $plugin){

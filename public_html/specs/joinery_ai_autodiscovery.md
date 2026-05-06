@@ -59,6 +59,8 @@ plugins/joinery_ai/recipe_tools/
 
 `ModelQueryExecutor` enforcement layers stack in order: model opt-in → owner-field injection (non-overridable) → blocklist + auto-block → Multi-class own checks. The recipe's `rcp_allowed_tools` gates whether `query_model` is reachable at all.
 
+`ModelRegistry` can use `require_once` directly on files in `data/` and `plugins/*/data/` — all files in those directories are safe to include (function/class definitions only, no top-level executable code).
+
 ## Costs and caveats
 
 - **Token cost of `describe_models()`:** with ~20 opt-in models, the response is 5–10k tokens. Mitigations: cache the JSON via Anthropic prompt caching; support `describe_models(prefix)` to scope; or skip discovery when the recipe prompt names the models it needs.

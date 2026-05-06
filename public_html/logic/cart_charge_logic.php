@@ -704,7 +704,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 			//Plugin product scripts.
 			try {
-				$product->run_product_scripts($user, $order_item);
+				$product->run_product_scripts($user, $order_item, $order);
 			}
 			catch (Exception $e) {
 				error_log("run_product_scripts failed for product {$product->key} (order {$order->key}): " . $e->getMessage());
