@@ -1,6 +1,6 @@
 <?php
 
-function joinery_ai_dashboard_logic($get_vars, $post_vars) {
+function joinery_ai_dashboard_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));

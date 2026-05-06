@@ -20,14 +20,16 @@ Every logic file follows this naming convention and structure:
 
 **File naming:** `[page_name]_logic.php`
 
-**Function naming:** `[page_name]_logic($get_vars, $post_vars, ...)`
+**Function naming:** `[page_name]_logic(array $input): LogicResult`
+
+Every logic file takes a single `$input` array (the merged `$_GET`/`$_POST`/route params from the caller) and returns a `LogicResult`. There are no extra positional parameters and no per-route variants — the calling convention is identical for page handlers, action surfaces, and API entry points.
 
 ### Basic Structure
 
 ```php
 <?php
 
-function page_name_logic($get_vars, $post_vars) {
+function page_name_logic(array $input): LogicResult {
     // PathHelper, Globalvars, SessionControl are always available
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 

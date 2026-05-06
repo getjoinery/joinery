@@ -1,15 +1,14 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
-function post_logic($get_vars, $post_vars, $post){
-	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+function post_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 	require_once(PathHelper::getIncludePath('data/posts_class.php'));
 	require_once(PathHelper::getIncludePath('data/comments_class.php'));
 
 	$session = SessionControl::get_instance();
+	$page_vars = [];
 	$page_vars['session'] = $session;
 
 
@@ -19,13 +18,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		//TURNED OFF
 		return LogicResult::error('This feature is turned off');
 	}
-	
+
+	$post = null;
+	if (!empty($input['slug'])) {
+		$post = Post::get_by_link($input['slug']);
+	}
+	if (!$post || !$post->key) {
+		require_once(LibraryFunctions::display_404_page());
+	}
 	$page_vars['post'] = $post;
 
-	if(!$post){
-		require_once(LibraryFunctions::display_404_page());	
-	}
-	else if ($post && $session->get_user_id() && $session->get_permission() > 4) {
+	if ($session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
@@ -41,9 +44,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['tags'] = $tags;
 		
 
-	if($post_vars){
-		
-		$new_comment = Comment::add_comment($post->key, $session, $post_vars);
+	if (!empty($_POST)) {
+
+		$new_comment = Comment::add_comment($post->key, $session, $_POST);
 
 		//IF AUTHOR IS COMMENTER
 		if($author->key == $new_comment->get('cmt_usr_user_id')){

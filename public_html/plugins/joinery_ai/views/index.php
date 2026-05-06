@@ -12,7 +12,7 @@ require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/logic/joinery_ai_dashboard_logic.php'));
 
-$page_vars = process_logic(joinery_ai_dashboard_logic($_GET, $_POST));
+$page_vars = process_logic(joinery_ai_dashboard_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
 $page = new PublicPage();

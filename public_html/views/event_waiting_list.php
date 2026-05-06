@@ -3,8 +3,7 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('event_waiting_list_logic.php', 'logic'));
 
-    $event_id = LibraryFunctions::fetch_variable('event_id', 0, 1, 'You must pass an event.', true, 'int');
-    $page_vars = process_logic(event_waiting_list_logic($_GET, $_POST, $event_id));
+    $page_vars = process_logic(event_waiting_list_logic(array_merge($_GET, $_POST, $params ?? [])));
     $event = $page_vars['event'];
 
     $page = new PublicPage();

@@ -3,7 +3,7 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('mobileconfig_logic.php', 'logic', 'system', null, 'dns_filtering'));
 
-$page_vars = process_logic(mobileconfig_logic($_GET, $_POST));
+$page_vars = process_logic(mobileconfig_logic(array_merge($_GET, $_POST, $params ?? [])));
 $device = $page_vars['device'];
 $doh_url = $page_vars['doh_url'];
 $dns_host = $page_vars['dns_host'];

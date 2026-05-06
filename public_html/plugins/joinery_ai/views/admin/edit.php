@@ -8,7 +8,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/logic/admin_edit_logic.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 
-$page_vars = process_logic(admin_joinery_ai_edit_logic($_GET, $_POST));
+$page_vars = process_logic(admin_joinery_ai_edit_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
 $is_new = !$recipe->key;

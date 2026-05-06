@@ -31,7 +31,7 @@ function _resolve_receipt_template(Product $product, $default_name) {
 	return $default_name;
 }
 
-function cart_charge_logic($get_vars, $post_vars){
+function cart_charge_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));

@@ -2,7 +2,7 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('video_logic.php', 'logic'));
 
-    $page_vars = process_logic(video_logic($_GET, $_POST, $video, $params));
+    $page_vars = process_logic(video_logic(array_merge($_GET, $_POST, $params ?? [])));
     $video     = $page_vars['video'];
 
     $page = new PublicPage();

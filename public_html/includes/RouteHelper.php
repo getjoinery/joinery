@@ -382,23 +382,22 @@ class RouteHelper {
     }
     
     /**
-     * Handle dynamic routes with optional model loading and theme override support
-     * 
+     * Handle dynamic routes with theme override support
+     *
      * This unified method handles all dynamic content routes:
      * 1. Simple view routes ('/login' => ['view' => 'views/login'])
      * 2. System routes with placeholders ('/admin/*' => ['view' => 'adm/{path}'])
-     * 3. Model-based content routes ('/page/{slug}' => ['model' => 'Page', ...])
-     * 4. Mixed routes (models + path placeholders + fallbacks)
-     * 
+     * 3. Slug-based content routes ('/page/{slug}' => ['view' => 'views/page'])
+     *
      * @param array $route Route configuration
-     * @param array $params URL parameters  
+     * @param array $params URL parameters
      * @param string $template_directory Theme directory
      * @return bool True if handled successfully
      */
     public static function handleDynamicRoute($route, $params, $template_directory) {
         $pattern = $route['pattern'];
         $path = $route['path'];
-        
+
         // Check setting requirement if specified
         if (!empty($route['check_setting'])) {
             $settings = Globalvars::get_instance();
@@ -406,104 +405,53 @@ class RouteHelper {
                 return false;
             }
         }
-        
-        // Initialize variables that might be extracted to view scope
-        $model_instance = null;
-        $route_params = [];
-        
-        // MODEL LOADING LOGIC (optional)
-        if (!empty($route['model'])) {
-            $model_name = $route['model'];
-            
-            // Require model file
-            if (empty($route['model_file'])) {
-                error_log("RouteHelper: ERROR - 'model_file' is required when 'model' is specified");
-                return false;
-            }
-            
-            try {
-                require_once(PathHelper::getIncludePath($route['model_file'] . '.php'));
-            } catch (Exception $e) {
-                error_log("RouteHelper: ERROR - Failed to load model file: " . $route['model_file'] . " - " . $e->getMessage());
-                return false;
-            }
-            
-            // Extract parameters from route pattern
-            $route_params = self::extractRouteParams($pattern, $path);
 
-            // Create model instance based on available parameters
-            if (isset($route_params['slug'])) {
-                $model_instance = call_user_func([$model_name, 'get_by_link'], $route_params['slug']);
-            } elseif (isset($route_params['id'])) {
-                $model_instance = new $model_name($route_params['id'], true);
-            } else {
-                // No specific parameter - might be a collection route or current user
-                // This could be extended to support other patterns
-            }
-        } else {
-            // No model - just extract route parameters for view use
-            $route_params = self::extractRouteParams($pattern, $path);
-        }
-        
+        // Extract route parameters for view use, and rebind $params so views/logic
+        // see the named placeholder map ({slug => 'foo'}) rather than the raw
+        // request-segment array passed in by processRoutes().
+        $route_params = self::extractRouteParams($pattern, $path);
+        $params = $route_params;
+
         // DETERMINE VIEW PATH
-        $view_path = null;
-        
-        if (!empty($route['view'])) {
-            // Explicit view path specified
-            $view_path = $route['view'];
-            
-            // Handle dynamic placeholders in view path
-            if (strpos($view_path, '{path}') !== false) {
-                $pattern_prefix = rtrim(str_replace('*', '', $pattern), '/');
-                $remaining_path = substr($path, strlen($pattern_prefix));
-                $remaining_path = ltrim($remaining_path, '/');
-                $view_path = str_replace('{path}', $remaining_path, $view_path);
-            }
-            
-            if (strpos($view_path, '{file}') !== false) {
-                $path_parts = explode('/', ltrim($path, '/'));
-                $file = end($path_parts);
-                
-                // File should keep its extension for proper file operations
-                // No stripping needed - routes don't have .php, files do
-                
-                $view_path = str_replace('{file}', $file, $view_path);
-            }
-            
-            // Replace other route parameters in view path
-            foreach ($route_params as $key => $value) {
-                $view_path = str_replace('{' . $key . '}', $value, $view_path);
-            }
-            
-        } elseif (!empty($route['model'])) {
-            // Auto-determine view from model name
-            $view_path = 'views/' . strtolower($route['model']);
-        } else {
-            error_log("RouteHelper: ERROR - Either 'view' or 'model' must be specified for dynamic routes");
+        if (empty($route['view'])) {
+            error_log("RouteHelper: ERROR - 'view' must be specified for dynamic routes");
             return false;
         }
-        
+
+        $view_path = $route['view'];
+
+        // Handle dynamic placeholders in view path
+        if (strpos($view_path, '{path}') !== false) {
+            $pattern_prefix = rtrim(str_replace('*', '', $pattern), '/');
+            $remaining_path = substr($path, strlen($pattern_prefix));
+            $remaining_path = ltrim($remaining_path, '/');
+            $view_path = str_replace('{path}', $remaining_path, $view_path);
+        }
+
+        if (strpos($view_path, '{file}') !== false) {
+            $path_parts = explode('/', ltrim($path, '/'));
+            $file = end($path_parts);
+            $view_path = str_replace('{file}', $file, $view_path);
+        }
+
+        // Replace other route parameters in view path
+        foreach ($route_params as $key => $value) {
+            $view_path = str_replace('{' . $key . '}', $value, $view_path);
+        }
+
         // HANDLE SPECIAL ROUTE TYPES
-        
+
         // Admin routes - direct inclusion, no theme overrides
         if (strpos($view_path, 'adm/') === 0) {
             $admin_file = PathHelper::getAbsolutePath($view_path . '.php');
             if (file_exists($admin_file)) {
-                // Extract model and params to scope if available
-                if ($model_instance) {
-                    extract([
-                        strtolower($route['model']) => $model_instance,
-                        'params' => $route_params
-                    ], EXTR_SKIP);
-                } else {
-                    extract(['params' => $route_params], EXTR_SKIP);
-                }
+                extract(['params' => $route_params], EXTR_SKIP);
                 require_once($admin_file);
                 return true;
             }
             return false;
         }
-        
+
         // Test/Utils/Ajax routes - allow plugin overrides, no theme overrides
         if (strpos($view_path, 'tests/') === 0 || strpos($view_path, 'utils/') === 0 || strpos($view_path, 'ajax/') === 0) {
             if (strpos($view_path, 'tests/') === 0) {
@@ -513,15 +461,15 @@ class RouteHelper {
             } else {
                 $route_type = 'ajax';
             }
-            
+
             // Check for plugin override
             if (preg_match('#^/' . $route_type . '/(.+)$#', $path, $matches)) {
                 $file = $matches[1];
-                
+
                 if (!class_exists('PluginHelper')) {
                     require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
                 }
-                
+
                 $activePlugins = PluginHelper::getActivePlugins();
                 foreach ($activePlugins as $pluginName => $pluginHelper) {
                     if ($pluginHelper->includeFile($route_type . '/' . $file . '.php')) {
@@ -529,65 +477,36 @@ class RouteHelper {
                     }
                 }
             }
-            
+
             // Fall back to base file
             $base_file = PathHelper::getAbsolutePath($view_path . '.php');
             if (file_exists($base_file)) {
-                if ($model_instance) {
-                    extract([
-                        strtolower($route['model']) => $model_instance,
-                        'params' => $route_params
-                    ], EXTR_SKIP);
-                } else {
-                    extract(['params' => $route_params], EXTR_SKIP);
-                }
+                extract(['params' => $route_params], EXTR_SKIP);
                 require_once($base_file);
                 return true;
             }
             return false;
         }
-        
+
         // STANDARD VIEW LOADING with theme overrides
-        
-        // Extract model and parameters to view scope
+
         global $is_valid_page;
-        if ($model_instance) {
-            $var_name = $route['var_name'] ?? strtolower($route['model']);
-            extract([
-                $var_name => $model_instance,
-                'params' => $route_params,
-                'is_valid_page' => $is_valid_page
-            ], EXTR_SKIP);
-        } else {
-            extract([
-                'params' => $route_params,
-                'is_valid_page' => $is_valid_page
-            ], EXTR_SKIP);
-        }
-
-        // Prepare view variables
-        $viewVariables = ['params' => $route_params, 'is_valid_page' => $is_valid_page];
-
-        if ($model_instance) {
-            // Add model instance with its class name as key
-            // Use var_name if specified, otherwise lowercase model name
-            // e.g., Page model -> $page, MailingList model -> $mailing_list (via var_name)
-            $modelKey = $route['var_name'] ?? strtolower($route['model']);
-            $viewVariables[$modelKey] = $model_instance;
-        }
 
         // Ensure view_path has .php extension for PathHelper::getThemeFilePath
         if (substr($view_path, -4) !== '.php') {
             $view_path .= '.php';
         }
-        
+
         // Include view with explicit variables.
         // Extract plugin name from URL pattern so getThemeFilePath can look in the
         // correct plugin directory — no plugin_specify field needed.
         $plugin_name_for_view = self::extractPluginNameFromPattern($pattern);
         $full_path = PathHelper::getThemeFilePath(basename($view_path), dirname($view_path), 'system', null, $plugin_name_for_view, false, false);
         if ($full_path) {
-            extract($viewVariables);
+            extract([
+                'params' => $route_params,
+                'is_valid_page' => $is_valid_page,
+            ], EXTR_SKIP);
             require_once($full_path);
             return true;
         }
@@ -875,36 +794,14 @@ class RouteHelper {
                             "  Explanation: The system automatically adds .php extension to view paths"
                         );
                     }
-                    
-                    
-                    // Check for .php extension in model_file
-                    if (isset($config['model_file']) && substr($config['model_file'], -4) === '.php') {
-                        throw new Exception(
-                            "Route validation error in {$source}:\n" .
-                            "  Route: {$pattern}\n" .
-                            "  Problem: Model file path '{$config['model_file']}' contains .php extension\n" .
-                            "  Solution: Remove .php extension - use 'model_file' => '" . substr($config['model_file'], 0, -4) . "'\n" .
-                            "  Explanation: The system automatically adds .php extension to model files"
-                        );
-                    }
-                    
+
                     // Check for missing required fields
-                    if (!isset($config['view']) && !isset($config['model'])) {
+                    if (!isset($config['view'])) {
                         throw new Exception(
                             "Route validation error in {$source}:\n" .
                             "  Route: {$pattern}\n" .
-                            "  Problem: Dynamic route must specify either 'view' or 'model'\n" .
-                            "  Solution: Add 'view' => 'template_name' or 'model' => 'ModelClass' to the route configuration"
-                        );
-                    }
-                    
-                    // Check model configuration
-                    if (isset($config['model']) && !isset($config['model_file'])) {
-                        throw new Exception(
-                            "Route validation error in {$source}:\n" .
-                            "  Route: {$pattern}\n" .
-                            "  Problem: Route with 'model' => '{$config['model']}' is missing 'model_file'\n" .
-                            "  Solution: Add 'model_file' => 'data/modelname_class' to specify where the model class is located"
+                            "  Problem: Dynamic route must specify 'view'\n" .
+                            "  Solution: Add 'view' => 'template_name' to the route configuration"
                         );
                     }
                 }
@@ -954,11 +851,10 @@ class RouteHelper {
      * 1. Database URL redirects (if enabled)
      * 2. Static asset routes
      * 3. Custom routes with complex logic
-     * 4. Content routes (model-view pattern)
-     * 5. Simple routes (direct file serving)
-     * 6. View directory fallback (automatic theme-aware view lookup)
-     * 7. Plugin routes (backward compatibility)
-     * 8. 404 fallback
+     * 4. Dynamic view routes (with optional URL placeholders)
+     * 5. View directory fallback (automatic theme-aware view lookup)
+     * 6. Plugin routes (backward compatibility)
+     * 7. 404 fallback
      *
      * @param array $routes Route configuration array
      * @param string $request_path The request path from $_REQUEST['path']

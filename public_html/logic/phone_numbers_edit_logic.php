@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function phone_numbers_edit_logic($get_vars, $post_vars){
+function phone_numbers_edit_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/phone_number_class.php'));
 
@@ -11,15 +11,15 @@ function phone_numbers_edit_logic($get_vars, $post_vars){
 	$user_id = $session->get_user_id();
 
 	// Load or create phone number
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$phone_number = new PhoneNumber($post_vars['edit_primary_key_value'], TRUE);
+	if (isset($input['edit_primary_key_value'])) {
+		$phone_number = new PhoneNumber($input['edit_primary_key_value'], TRUE);
 		// Verify user owns this phone number
 		$phone_number->authenticate_write(array(
 			'current_user_id' => $user_id,
 			'current_user_permission' => $session->get_permission()
 		));
-	} elseif (isset($get_vars['phn_phone_number_id'])) {
-		$phone_number = new PhoneNumber($get_vars['phn_phone_number_id'], TRUE);
+	} elseif (isset($input['phn_phone_number_id'])) {
+		$phone_number = new PhoneNumber($input['phn_phone_number_id'], TRUE);
 		// Verify user owns this phone number
 		$phone_number->authenticate_write(array(
 			'current_user_id' => $user_id,
@@ -36,7 +36,7 @@ function phone_numbers_edit_logic($get_vars, $post_vars){
 		}
 	}
 
-	if($post_vars){
+	if (!empty($_POST)) {
 		// Add-only logic - set user_id when creating new phone number
 		if (!$phone_number->key) {
 			$phone_number->set('phn_usr_user_id', $user_id);
@@ -45,8 +45,8 @@ function phone_numbers_edit_logic($get_vars, $post_vars){
 		// Set editable fields
 		$editable_fields = array('phn_cco_country_code_id', 'phn_phone_number');
 		foreach($editable_fields as $field) {
-			if(isset($post_vars[$field])){
-				$phone_number->set($field, $post_vars[$field]);
+			if(isset($input[$field])){
+				$phone_number->set($field, $input[$field]);
 			}
 		}
 

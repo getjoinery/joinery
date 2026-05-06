@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function password_reset_2_logic($get_vars, $post_vars){
+function password_reset_2_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
@@ -18,13 +18,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('This feature is turned off');
 	}
 
-	$act_code = $get_vars['act_code'];
+	$act_code = $input['act_code'];
 	if(!$act_code){
-		$act_code = $post_vars['act_code'];
+		$act_code = $input['act_code'];
 	}
 	$page_vars['act_code'] = $act_code;
 
-	if ($post_vars) {
+	if (!empty($_POST)) {
 
 		if (!RequestLogger::check_rate_limit('password_reset_complete', 5, 900, false)) {
 			return LogicResult::error('Too many reset attempts. Please wait a few minutes and try again.');
@@ -36,11 +36,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('Sorry, this code has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');
 		}
 
-		if(!isset($post_vars['usr_password']) || !isset($post_vars['usr_password_again'])){
+		if(!isset($input['usr_password']) || !isset($input['usr_password_again'])){
 			return LogicResult::error('The following required fields were not set: passwords');
 		}
 
-		if ($post_vars['usr_password'] != $post_vars['usr_password_again']) {
+		if ($input['usr_password'] != $input['usr_password_again']) {
 			return LogicResult::error('Your password did not match in both fields.');
 		}
 
@@ -55,7 +55,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				return LogicResult::error('This feature is turned off for this user.  Please email us to recover your password.');
 		}
 
-		$user->set('usr_password', User::GeneratePassword($post_vars['usr_password']));
+		$user->set('usr_password', User::GeneratePassword($input['usr_password']));
 		$user->save();
 
 		// Now delete the code

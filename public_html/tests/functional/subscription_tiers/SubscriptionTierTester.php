@@ -712,7 +712,7 @@ class SubscriptionTierTester {
         echo "<p style='margin-left:20px'>Debug: Calling change_tier_logic with action=upgrade, product_id=" . $this->tier_products[$levels[1]] . "</p>";
 
         try {
-            $result = change_tier_logic([], $post);
+            $result = change_tier_logic($post);
 
             // Debug: Check what logic returned
             if ($result->error) {
@@ -782,7 +782,7 @@ class SubscriptionTierTester {
         ];
 
         try {
-            $result = change_tier_logic([], $post);
+            $result = change_tier_logic($post);
 
             if ($immediate) {
                 // Check if user is now on lower tier
@@ -836,7 +836,7 @@ class SubscriptionTierTester {
         $post = ['action' => 'cancel'];
 
         try {
-            $result = change_tier_logic([], $post);
+            $result = change_tier_logic($post);
 
             if ($immediate) {
                 // User should be removed from tier
@@ -895,7 +895,7 @@ class SubscriptionTierTester {
         $cancel_post = ['action' => 'cancel'];
 
         try {
-            $cancel_result = change_tier_logic([], $cancel_post);
+            $cancel_result = change_tier_logic($cancel_post);
 
             // Debug: Check what the logic returned
             if (isset($cancel_result->data['error_message'])) {
@@ -951,7 +951,7 @@ class SubscriptionTierTester {
             echo "<p style='margin-left:20px'>Step 2: Reactivating subscription...</p>";
             $reactivate_post = ['action' => 'reactivate'];
 
-            $reactivate_result = change_tier_logic([], $reactivate_post);
+            $reactivate_result = change_tier_logic($reactivate_post);
 
             // Check for success message
             if (isset($reactivate_result->data['success_message'])) {
@@ -1036,7 +1036,7 @@ class SubscriptionTierTester {
                 'product_id' => $this->tier_products[$levels[2]]  // Use tier 3 instead of tier 2
             ];
 
-            $result = change_tier_logic([], $post);
+            $result = change_tier_logic($post);
 
             if (isset($result->data['error_message'])) {
                 $message = "Upgrade failed: " . $result->data['error_message'];

@@ -3,7 +3,7 @@
     require_once(PathHelper::getThemeFilePath('survey_logic.php', 'logic'));
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-    $page_vars = process_logic(survey_logic($_GET, $_POST));
+    $page_vars = process_logic(survey_logic(array_merge($_GET, $_POST, $params ?? [])));
     $survey = $page_vars['survey'];
 
     $page = new PublicPage();

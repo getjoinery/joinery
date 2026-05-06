@@ -4,7 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('event_sessions_logic.php', 'logic'));
 
-	$page_vars = process_logic(event_sessions_logic($_GET, $_POST));
+	$page_vars = process_logic(event_sessions_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$pager = $page_vars['pager'];
 
 	if($page_vars['error_message']){

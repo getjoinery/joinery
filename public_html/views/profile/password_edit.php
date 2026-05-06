@@ -4,7 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('password_edit_logic.php', 'logic'));
 
-	$page_vars = process_logic(password_edit_logic($_GET, $_POST));
+	$page_vars = process_logic(password_edit_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	$page = new PublicPage();
 	$page->public_header([

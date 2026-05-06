@@ -1,7 +1,7 @@
 <?php
 // PathHelper is pre-loaded when accessed via the route system
 
-function admin_marketplace_logic($get, $post) {
+function admin_marketplace_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/themes_class.php'));
@@ -23,8 +23,8 @@ function admin_marketplace_logic($get, $post) {
 	}
 
 	// Handle install action (POST only)
-	if (isset($post['action']) && $post['action'] === 'install') {
-		return handle_marketplace_install($post, $upgrade_source, $session);
+	if (isset($input['action']) && $input['action'] === 'install') {
+		return handle_marketplace_install($input, $upgrade_source, $session);
 	}
 
 	// Fetch remote catalogs
@@ -40,8 +40,8 @@ function admin_marketplace_logic($get, $post) {
 	$plugins = enrich_with_local_status($remote_plugins, $local_plugins, 'plugin');
 
 	return LogicResult::render(array(
-		'message' => $get['message'] ?? '',
-		'error' => $get['error'] ?? '',
+		'message' => $input['message'] ?? '',
+		'error' => $input['error'] ?? '',
 		'themes' => $themes,
 		'plugins' => $plugins,
 		'upgrade_source' => $upgrade_source,
@@ -97,9 +97,9 @@ function enrich_with_local_status($remote_items, $local_names, $type) {
 /**
  * Handle install action (POST)
  */
-function handle_marketplace_install($post, $upgrade_source, $session) {
+function handle_marketplace_install($input, $upgrade_source, $session) {
 	// CSRF check
-	$token = $post['_csrf_token'] ?? '';
+	$token = $input['_csrf_token'] ?? '';
 	if (empty($token) || !isset($_SESSION['csrf_tokens']['marketplace_install'])) {
 		$session->save_message(new DisplayMessage(
 			'Invalid request token. Please try again.',
@@ -123,8 +123,8 @@ function handle_marketplace_install($post, $upgrade_source, $session) {
 	}
 	unset($_SESSION['csrf_tokens']['marketplace_install']);
 
-	$name = basename($post['name'] ?? '');
-	$type = ($post['type'] ?? '') === 'plugin' ? 'plugin' : 'theme';
+	$name = basename($input['name'] ?? '');
+	$type = ($input['type'] ?? '') === 'plugin' ? 'plugin' : 'theme';
 
 	if (empty($name)) {
 		$session->save_message(new DisplayMessage(

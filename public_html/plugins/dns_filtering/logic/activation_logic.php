@@ -1,6 +1,6 @@
 <?php
 
-function activation_logic($get_vars, $post_vars){
+function activation_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));

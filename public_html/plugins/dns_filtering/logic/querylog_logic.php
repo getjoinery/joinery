@@ -1,6 +1,6 @@
 <?php
 
-function querylog_logic($get_vars, $post_vars) {
+function querylog_logic(array $input): LogicResult {
 
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/dns_filtering/data/devices_class.php'));
@@ -12,7 +12,7 @@ function querylog_logic($get_vars, $post_vars) {
 		return LogicResult::redirect('/login');
 	}
 
-	$device_id = isset($get_vars['device_id']) ? (int)$get_vars['device_id'] : 0;
+	$device_id = isset($input['device_id']) ? (int)$input['device_id'] : 0;
 	if (!$device_id) {
 		return LogicResult::redirect('/profile/dns_filtering/devices');
 	}
@@ -37,7 +37,7 @@ function querylog_logic($get_vars, $post_vars) {
 
 	// Clamp lines_requested to supported values
 	$allowed_lines = array(100, 250, 500);
-	$requested     = isset($get_vars['lines']) ? (int)$get_vars['lines'] : 100;
+	$requested     = isset($input['lines']) ? (int)$input['lines'] : 100;
 	$lines_requested = 100;
 	$min_diff        = PHP_INT_MAX;
 	foreach ($allowed_lines as $n) {

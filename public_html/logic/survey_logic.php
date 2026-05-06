@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function survey_logic($get_vars, $post_vars){
+function survey_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -20,11 +20,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['settings'] = $settings;
 	$session->check_permission(0);
 
-	if($get_vars['survey_id']){
-		$survey_id = LibraryFunctions::decode($get_vars['survey_id']);
+	if($input['survey_id']){
+		$survey_id = LibraryFunctions::decode($input['survey_id']);
 	}
-	else if($post_vars['survey_id']){
-		$survey_id = LibraryFunctions::decode($post_vars['survey_id']);
+	else if($input['survey_id']){
+		$survey_id = LibraryFunctions::decode($input['survey_id']);
 	}
 	else{
 		return LogicResult::error('Survey id is missing.');
@@ -35,18 +35,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	$numperpage = 30;
 	$offset = 0;
-	if($get_vars['offset']){
-		$offset = $get_vars['offset'];
+	if($input['offset']){
+		$offset = $input['offset'];
 	}
 
 	$sort = 'survey_question_id';
-	if($get_vars['sort']){
-		$sort = $get_vars['sort'];
+	if($input['sort']){
+		$sort = $input['sort'];
 	}
 	
 	$sdirection = 'DESC';
-	if($get_vars['sdirection']){
-		$sdirection = $get_vars['sdirection'];
+	if($input['sdirection']){
+		$sdirection = $input['sdirection'];
 	}
 
 	
@@ -63,23 +63,23 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['numrecords'] = $numrecords;
 
 
-	if($post_vars){
+	if (!empty($_POST)) {
 		$invalid_messages = array();
 		foreach($survey_questions as $survey_question){
 			$question = new Question($survey_question->get('srq_qst_question_id'), TRUE);
-			if(isset($post_vars['question_'.$question->key]) && $post_vars['question_'.$question->key]){
-				$valid = $question->validate_answers($post_vars['question_'.$question->key]);
+			if(isset($input['question_'.$question->key]) && $input['question_'.$question->key]){
+				$valid = $question->validate_answers($input['question_'.$question->key]);
 				if($valid == 'valid'){
 					$survey_answer = new SurveyAnswer(NULL);
 					$survey_answer->set('sva_svy_survey_id', $survey->key);
 					$survey_answer->set('sva_create_time', 'now()');
 					$survey_answer->set('sva_qst_question_id', $question->key);
 					$survey_answer->set('sva_usr_user_id', $session->get_user_id());
-					if(is_array($post_vars['question_'.$question->key])){
-						$answer = implode(',',$post_vars['question_'.$question->key]);
+					if(is_array($input['question_'.$question->key])){
+						$answer = implode(',',$input['question_'.$question->key]);
 					}
 					else{
-						$answer = $post_vars['question_'.$question->key];
+						$answer = $input['question_'.$question->key];
 					}
 					$survey_answer->set('sva_answer', strip_tags(trim($answer)));
 					if($survey_answer->check_for_duplicates()){

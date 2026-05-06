@@ -3,7 +3,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('billing_logic.php', 'logic'));
 
-$page_vars = process_logic(billing_logic($_GET, $_POST));
+$page_vars = process_logic(billing_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 $user                = $page_vars['user'];
 $settings            = $page_vars['settings'];

@@ -983,7 +983,7 @@ class ProductTester {
             require_once(PathHelper::getRootDir() . '/logic/product_logic.php');
 
             // Call product logic which will add to cart
-            $result = product_logic(array(), $post_data, null);
+            $result = product_logic($post_data);
 
             // Check if we got a redirect result (indicating successful cart addition)
             if ($result instanceof LogicResult && $result->redirect === '/cart') {
@@ -1707,7 +1707,7 @@ class ProductTester {
             
             try {
                 require_once(PathHelper::getRootDir() . '/logic/cart_charge_logic.php');
-                cart_charge_logic($get_vars, $post_vars);
+                cart_charge_logic(array_merge($get_vars, $post_vars));
             } catch (Exception $e) {
                 ob_end_clean();
                 

@@ -3,7 +3,7 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic'));
 
-    $page_vars = process_logic(login_logic($_GET, $_POST));
+    $page_vars = process_logic(login_logic(array_merge($_GET, $_POST, $params ?? [])));
     $settings = $page_vars['settings'];
     $email = $page_vars['email'] ?? null;
 

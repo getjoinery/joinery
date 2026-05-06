@@ -1,9 +1,6 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
-function event_logic($get_vars, $post_vars, $event, $instance_date = null){
-	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+function event_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
@@ -13,12 +10,21 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/locations_class.php'));
 
 	$session = SessionControl::get_instance();
+	$page_vars = [];
 	$page_vars['session'] = $session;
 	$page_vars['is_virtual'] = false;
 
-	if(!$event){
+	$event = null;
+	if (!empty($input['slug'])) {
+		$event = Event::get_by_link($input['slug']);
+	} elseif (!empty($input['evt_event_id'])) {
+		$event = new Event($input['evt_event_id'], TRUE);
+	}
+	if (!$event || !$event->key) {
 		require_once(LibraryFunctions::display_404_page());
 	}
+
+	$instance_date = $input['date'] ?? $input['instance_date'] ?? null;
 
 	// Handle recurring event instance resolution
 	if ($instance_date && !strtotime($instance_date)) {

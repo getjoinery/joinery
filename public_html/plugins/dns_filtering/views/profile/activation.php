@@ -5,7 +5,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('activation_logic.php', 'logic', 'system', null, 'dns_filtering'));
 
-$page_vars = process_logic(activation_logic($_GET, $_POST));
+$page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$tier = $page_vars['tier'];
 	$device = $page_vars['device'];
 	$user = $page_vars['user'];

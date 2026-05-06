@@ -5,7 +5,7 @@
  * @version 1.0
  */
 
-function events_profile_logic($get_vars, $post_vars) {
+function events_profile_logic(array $input): LogicResult {
 	$page_vars = array();
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -26,7 +26,7 @@ function events_profile_logic($get_vars, $post_vars) {
 	$page_vars['user'] = $user;
 
 	// Status filter
-	$status_filter = isset($get_vars['status']) ? $get_vars['status'] : 'all';
+	$status_filter = isset($input['status']) ? $input['status'] : 'all';
 	$page_vars['status_filter'] = $status_filter;
 
 	// Load all registrations, then filter in PHP since status depends on event + registrant data
@@ -114,7 +114,7 @@ function events_profile_logic($get_vars, $post_vars) {
 	// Manual pagination on filtered results
 	$numperpage = 10;
 	$total = count($all_events);
-	$page_offset = isset($get_vars['offset']) ? max(0, (int)$get_vars['offset']) : 0;
+	$page_offset = isset($input['offset']) ? max(0, (int)$input['offset']) : 0;
 	$pager = new Pager(array('numrecords' => $total, 'numperpage' => $numperpage, 'offset' => $page_offset));
 	$page_vars['event_registrations'] = array_slice($all_events, $page_offset, $numperpage);
 	$page_vars['num_events'] = $total;

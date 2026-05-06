@@ -4,7 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('event_sessions_course_logic.php', 'logic'));
 
-	$page_vars = process_logic(event_sessions_course_logic($_GET, $_POST));
+	$page_vars = process_logic(event_sessions_course_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	if($page_vars['error_message']){
 		PublicPage::OutputGenericPublicPage('Not Registered', 'Not Registered', $page_vars['error_message']);

@@ -6,7 +6,7 @@ require_once(PathHelper::getIncludePath('data/address_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/order_items_class.php'));
 
-function orders_recurring_action_logic($get_vars, $post_vars) {
+function orders_recurring_action_logic(array $input): LogicResult {
 	$stripe_helper = new StripeHelper();
 
 	$settings = Globalvars::get_instance();
@@ -17,7 +17,7 @@ function orders_recurring_action_logic($get_vars, $post_vars) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
 
-	$order_item_id = $post_vars['order_item_id'] ?? $get_vars['order_item_id'] ?? null;
+	$order_item_id = $input['order_item_id'] ?? $input['order_item_id'] ?? null;
 	if (!$order_item_id) {
 		return LogicResult::error('order_item_id is required');
 	}

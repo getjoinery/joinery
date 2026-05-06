@@ -3,7 +3,8 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('list_logic.php', 'logic'));
 
-    $page_vars = process_logic(list_logic($_GET, $_POST, $mailing_list, $params));
+    $page_vars = process_logic(list_logic(array_merge($_GET, $_POST, $params ?? [])));
+    $mailing_list  = $page_vars['mailing_list'];
     $messages      = $page_vars['messages'];
     $member_of_list = $page_vars['member_of_list'];
     $session       = $page_vars['session'];

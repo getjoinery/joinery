@@ -23,8 +23,7 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * '/plugins/{plugin}/assets/*' => ['cache' => 43200]  // Plugin activation always automatic (non-overridable)
  * NOTE: Static routes should NEVER serve PHP files or dynamic content
  * 
- * DYNAMIC ROUTES - Unified system for all dynamic content (views + models)
- * Simple view routes:
+ * DYNAMIC ROUTES - View-based routing with optional URL placeholders
  * '/login' => ['view' => 'views/login']        // Simple view file
  * '/robots.txt' => ['view' => 'views/robots']  // Dynamic content (PHP-generated)
  * '/api/v1/*' => ['view' => 'api/apiv1']       // Explicit view file
@@ -32,34 +31,26 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * '/profile/*' => ['view' => 'views/profile/{path}']
  * '/ajax/*' => ['view' => 'ajax/{file}']       // Plugin override automatic
  * '/utils/*' => ['view' => 'utils/{file}']     // Plugin override automatic
+ * '/page/{slug}' => ['view' => 'views/page', 'check_setting' => 'page_contents_active']  // {slug} captured into $params['slug']
+ * '/event/{slug}/{date}' => ['view' => 'views/event']  // Multiple URL placeholders
  *
- * Model-based routes (optional model loading):
- * '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class']  // Auto-determined view: views/page
- * '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active']  // With feature flag check
- * '/item/{id}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'valid_page' => false]  // Don't count for stats
- * '/custom/{slug}' => ['model' => 'Custom', 'model_file' => 'plugins/myplugin/data/customs_class']  // Plugin-specific model
- * '/item/{slug}' => ['model' => 'Item', 'model_file' => 'data/items_class', 'view' => 'views/profile/item']  // Custom view path
- *
- * Mixed routes (model + path placeholders + fallbacks):
- * '/user/{action}' => ['model' => 'User', 'model_file' => 'data/users_class', 'view' => 'views/user/{action}']
- * 
  * NOTE: All routes set $is_valid_page = true by default
  * Use ['valid_page' => false] to override for non-tracked pages
- * 
+ *
  * CUSTOM ROUTES - Complex logic with PHP closures
  * '/complex' => function($params, $settings, $session, $template_directory) {
  *     // Custom logic here
  *     // Return true if handled, false if not
  * }
- * 
+ *
  * PATH RESOLUTION RULES:
  * - {path} placeholder: /admin/users/edit with 'adm/{path}' -> adm/users/edit
  * - {file} placeholder: /ajax/endpoint with 'ajax/{file}' -> ajax/endpoint
- * - Model routes: /page/{slug} with model 'Page' -> data/pages_class + views/page
+ * - {slug}, {id}, etc.: extracted into $params and made available to the view
  * - Static files -> serve directly with proper MIME types and caching
  * - Plugin overrides: ajax/utils routes automatically check plugins first, then main files
  * - View directory fallback: /login -> theme/falcon/views/login (theme) OR views/login (base)
- * 
+ *
  * AUTOMATIC FEATURES:
  * - Plugin activation checking (automatic for ALL /plugins/* paths - non-overridable)
  * - Database URL redirect checking (before route processing)
@@ -67,21 +58,18 @@ require_once(__DIR__ . '/includes/RouteHelper.php');
  * - $is_valid_page = true (unless 'valid_page' => false)
  * - Theme override checking (theme files before base files)
  * - Plugin override checking (plugins checked first for all routes)
- * - Parameter extraction from {slug}, {id}, etc.
+ * - Parameter extraction from {slug}, {id}, etc. into $params
  * - Feature flag checking via 'check_setting'
- * - Model loading and instantiation
  * - MIME type detection and HTTP caching headers
  * - View directory fallback (automatic theme-aware lookup for any path)
- * 
+ *
  * ROUTE OPTIONS:
  * Static routes:
  * - 'cache' => 43200 - Cache time in seconds for static files
  * - 'exclude_from_cache' => ['.ext'] - File extensions to not cache (short cache instead)
  *
  * Dynamic routes:
- * - 'view' => 'path/file' - Explicit view file to serve (required unless model specified)
- * - 'model' => 'ClassName' - Load model class and instantiate object (optional)
- * - 'model_file' => 'path/to/model_class' - Explicit model file path (required when model specified)
+ * - 'view' => 'path/file' - View file to serve (required)
  * - 'check_setting' => 'setting_name' - Only serve if setting is active
  * - 'valid_page' => false - Don't count this route for statistics (default: true)
  * - 'min_permission' => 10 - Minimum permission level required to access route (uses SessionControl)
@@ -108,15 +96,15 @@ $routes = [
     
     // Dynamic routes (unified content + simple routes)
     'dynamic' => [
-        // Model-based content routes
-        '/post/{slug}' => ['model' => 'Post', 'model_file' => 'data/posts_class', 'check_setting' => 'blog_active'],
-        '/page/{slug}' => ['model' => 'Page', 'model_file' => 'data/pages_class', 'check_setting' => 'page_contents_active'],
-        '/event/{slug}/{date}' => ['model' => 'Event', 'model_file' => 'data/events_class', 'check_setting' => 'events_active', 'view' => 'views/event'],
-        '/event/{slug}' => ['model' => 'Event', 'model_file' => 'data/events_class', 'check_setting' => 'events_active'],
-        '/location/{slug}' => ['model' => 'Location', 'model_file' => 'data/locations_class', 'check_setting' => 'events_active'],
-        '/product/{slug}' => ['model' => 'Product', 'model_file' => 'data/products_class', 'check_setting' => 'products_active'],
-        '/list/{slug}' => ['model' => 'MailingList', 'model_file' => 'data/mailing_lists_class', 'view' => 'views/list', 'var_name' => 'mailing_list'],
-		'/video/{slug}' => ['model' => 'Video', 'model_file' => 'data/videos_class', 'check_setting' => 'videos_active'],
+        // Slug-based content routes
+        '/post/{slug}'         => ['view' => 'views/post', 'check_setting' => 'blog_active'],
+        '/page/{slug}'         => ['view' => 'views/page', 'check_setting' => 'page_contents_active'],
+        '/event/{slug}/{date}' => ['view' => 'views/event', 'check_setting' => 'events_active'],
+        '/event/{slug}'        => ['view' => 'views/event', 'check_setting' => 'events_active'],
+        '/location/{slug}'     => ['view' => 'views/location', 'check_setting' => 'events_active'],
+        '/product/{slug}'      => ['view' => 'views/product', 'check_setting' => 'products_active'],
+        '/list/{slug}'         => ['view' => 'views/list'],
+        '/video/{slug}'        => ['view' => 'views/video', 'check_setting' => 'videos_active'],
         
         // Simple view routes (explicit view files)
         '/robots.txt' => ['view' => 'views/robots'],

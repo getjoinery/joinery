@@ -1,10 +1,7 @@
 <?php
-function product_logic($get_vars, $post_vars, $product){
-	require_once(__DIR__ . '/../includes/PathHelper.php');
+function product_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-
-	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/ShoppingCart.php'));
 	require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
@@ -16,6 +13,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/product_requirement_instances_class.php'));
 
 	$session = SessionControl::get_instance();
+	$page_vars = [];
 	$page_vars['session'] = $session;
 
 	$settings = Globalvars::get_instance();
@@ -24,23 +22,19 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::error('This feature is turned off');
 	}
 
-	if($product){
-		$page_vars['product'] = $product;
-	}
-	else if(!empty($get_vars['product_id'])){
-		$product_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_id', NULL, TRUE, 'Product ID is required', TRUE, 'int');
+	$product = null;
+	if (!empty($input['slug'])) {
+		$product = Product::get_by_link($input['slug']);
+	} elseif (!empty($input['product_id'])) {
+		$product_id = LibraryFunctions::fetch_variable_local($input, 'product_id', NULL, TRUE, 'Product ID is required', TRUE, 'int');
 		$product = new Product($product_id, TRUE);
 	}
-	else if(!empty($post_vars['product_id'])){
-		$product_id = LibraryFunctions::fetch_variable_local($post_vars, 'product_id', NULL, TRUE, 'Product ID is required', TRUE, 'int');
-		$product = new Product($product_id, TRUE);
-	}
-	else{
+	if (!$product || !$product->key) {
 		require_once(LibraryFunctions::display_404_page());
 	}
 
-	if(!empty($get_vars['product_version_id'])){
-		$product_version_id = LibraryFunctions::fetch_variable_local($get_vars, 'product_version_id', NULL, FALSE, '', TRUE, 'int');
+	if(!empty($input['product_version_id'])){
+		$product_version_id = LibraryFunctions::fetch_variable_local($input, 'product_version_id', NULL, FALSE, '', TRUE, 'int');
 		$product_version = new ProductVersion($product_version_id, TRUE);
 		$page_vars['product_version'] = $product_version;
 	}
@@ -77,8 +71,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['user'] = $user;
 
 	// Handle edit_item mode: pre-fill form with existing cart item data
-	$edit_item_index = isset($get_vars['edit_item']) ? intval($get_vars['edit_item']) : null;
-	if ($edit_item_index !== null && !$post_vars) {
+	$edit_item_index = isset($input['edit_item']) ? intval($input['edit_item']) : null;
+	if ($edit_item_index !== null && empty($_POST)) {
 		$cart = $session->get_shopping_cart();
 		$cart_item = $cart->get_item($edit_item_index);
 		if ($cart_item) {
@@ -87,10 +81,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 
-	if ($post_vars) {
+	if (!empty($_POST)) {
 
 		try {
-			list($form_data, $display_data) = $product->validate_form($post_vars, $session);
+			list($form_data, $display_data) = $product->validate_form($_POST, $session);
 		}
 		catch (BasicProductRequirementException $e) {
 			return LogicResult::error($e->getMessage());
@@ -100,12 +94,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$cart = $session->get_shopping_cart();
 
 			// Check if we're updating an existing cart item
-			$edit_index = isset($post_vars['edit_item_index']) ? intval($post_vars['edit_item_index']) : null;
+			$edit_index = isset($input['edit_item_index']) ? intval($input['edit_item_index']) : null;
 			if ($edit_index !== null && $cart->get_item($edit_index) !== null) {
 				$cart->update_item($edit_index, $form_data);
 			} else {
 				// New item — add to cart
-				if($post_vars['user_price']){
+				if(!empty($input['user_price'])){
 					$extra_donation = new Product(Product::PRODUCT_ID_OPTIONAL_DONATION, TRUE);
 					$cart->add_item($extra_donation, $form_data);
 				}

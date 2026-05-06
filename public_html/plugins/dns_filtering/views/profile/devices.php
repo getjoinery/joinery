@@ -5,7 +5,7 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('devices_logic.php', 'logic', 'system', null, 'dns_filtering'));
 
-	$page_vars = process_logic(devices_logic($_GET, $_POST));
+	$page_vars = process_logic(devices_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$tier = $page_vars['tier'];
 	$devices = $page_vars['devices'];
 	$num_devices =  $page_vars['num_devices'];

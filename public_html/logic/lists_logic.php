@@ -1,15 +1,14 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
 require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
-function lists_logic($get_vars, $post_vars, $params){
-	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+function lists_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	$settings = Globalvars::get_instance();
+	$page_vars = [];
 	$page_vars['settings'] = $settings;
 
 	if(!$settings->get_setting('mailing_lists_active')){

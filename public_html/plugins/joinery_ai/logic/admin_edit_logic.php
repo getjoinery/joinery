@@ -1,6 +1,6 @@
 <?php
 
-function admin_joinery_ai_edit_logic($get_vars, $post_vars) {
+function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
@@ -9,10 +9,10 @@ function admin_joinery_ai_edit_logic($get_vars, $post_vars) {
     $session->check_permission(10);
 
     // Resolve which recipe we're editing (or that we're creating new)
-    if (isset($post_vars['edit_primary_key_value']) && $post_vars['edit_primary_key_value']) {
-        $recipe = new Recipe($post_vars['edit_primary_key_value'], TRUE);
-    } elseif (isset($get_vars['rcp_recipe_id']) && $get_vars['rcp_recipe_id']) {
-        $recipe = new Recipe($get_vars['rcp_recipe_id'], TRUE);
+    if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
+        $recipe = new Recipe($input['edit_primary_key_value'], TRUE);
+    } elseif (isset($input['rcp_recipe_id']) && $input['rcp_recipe_id']) {
+        $recipe = new Recipe($input['rcp_recipe_id'], TRUE);
     } else {
         $recipe = new Recipe(NULL);
         // Pre-fill defaults so the form shows sensible values for a new recipe.
@@ -38,10 +38,10 @@ function admin_joinery_ai_edit_logic($get_vars, $post_vars) {
         $recipe->set('rcp_monthly_token_cap', 200000);
     }
 
-    if ($post_vars && isset($post_vars['btn_submit'])) {
+    if ($input && isset($input['btn_submit'])) {
 
         // Soft delete handler
-        if (isset($post_vars['btn_delete']) && $recipe->key) {
+        if (isset($input['btn_delete']) && $recipe->key) {
             $recipe->soft_delete();
             return LogicResult::redirect('/admin/joinery_ai');
         }
@@ -59,8 +59,8 @@ function admin_joinery_ai_edit_logic($get_vars, $post_vars) {
             'rcp_workspace',
         ];
         foreach ($simple_fields as $f) {
-            if (array_key_exists($f, $post_vars)) {
-                $value = $post_vars[$f];
+            if (array_key_exists($f, $input)) {
+                $value = $input[$f];
                 if ($f === 'rcp_schedule_day_of_week' && $value === '') {
                     $value = null;
                 }
@@ -71,7 +71,7 @@ function admin_joinery_ai_edit_logic($get_vars, $post_vars) {
         // The timeinput widget posts a normalized 24h "HH:MM" string in the
         // admin's local timezone via its hidden input (kept in sync by the
         // shared outputTimeInputJavaScript handler). Convert to UTC for storage.
-        $time_local = trim($post_vars['rcp_schedule_time'] ?? '');
+        $time_local = trim($input['rcp_schedule_time'] ?? '');
         if (preg_match('/^\d{1,2}:\d{2}(:\d{2})?$/', $time_local)) {
             if (substr_count($time_local, ':') === 1) $time_local .= ':00';
             $today = gmdate('Y-m-d');
@@ -84,12 +84,12 @@ function admin_joinery_ai_edit_logic($get_vars, $post_vars) {
         }
 
         // Checkboxes — absent = false
-        $recipe->set('rcp_delivery_dashboard', !empty($post_vars['rcp_delivery_dashboard']));
-        $recipe->set('rcp_enabled', !empty($post_vars['rcp_enabled']));
+        $recipe->set('rcp_delivery_dashboard', !empty($input['rcp_delivery_dashboard']));
+        $recipe->set('rcp_enabled', !empty($input['rcp_enabled']));
 
         // Allowed tools — checkboxes post as `rcp_allowed_tools[]`. Absent
         // means no tools selected.
-        $tools_post = $post_vars['rcp_allowed_tools'] ?? [];
+        $tools_post = $input['rcp_allowed_tools'] ?? [];
         if (!is_array($tools_post)) $tools_post = [];
         $tool_list = array_values(array_filter(array_map('strval', $tools_post), 'strlen'));
         $recipe->set('rcp_allowed_tools', $tool_list);
@@ -111,7 +111,7 @@ function admin_joinery_ai_edit_logic($get_vars, $post_vars) {
     $page_vars = [
         'recipe' => $recipe,
         'session' => $session,
-        'saved' => !empty($get_vars['saved']),
+        'saved' => !empty($input['saved']),
     ];
 
     return LogicResult::render($page_vars);

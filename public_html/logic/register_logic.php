@@ -3,7 +3,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
-function register_logic($get_vars, $post_vars){
+function register_logic(array $input): LogicResult{
 	// Check if the page was requested with jQuery, if so, we should process this page differently
 	$ajax = !(empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['HTTP_X_REQUESTED_WITH'] != 'XMLHttpRequest');
 
@@ -34,25 +34,25 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::redirect('/profile/profile');
 	}
 
-	if ($post_vars) {
+	if (!empty($_POST)) {
 
 		$formwriter = new FormWriter('form1');
-		if(!$formwriter->honeypot_check($post_vars)){
+		if(!$formwriter->honeypot_check($input)){
 			return LogicResult::error('This feature is turned off');
 		}
 
-		if(!$formwriter->antispam_question_check($post_vars)){
+		if(!$formwriter->antispam_question_check($input)){
 			return LogicResult::error('Please type the correct value into the anti-spam field.');
 		}
 
-		$captcha_success = $formwriter->captcha_check($post_vars);
+		$captcha_success = $formwriter->captcha_check($input);
 		if (!$captcha_success) {
-			$errormsg = 'Sorry, '.strip_tags($post_vars['usr_first_name']).' '.strip_tags($post_vars['usr_last_name']).', you must click the CAPTCHA to submit the form.';
+			$errormsg = 'Sorry, '.strip_tags($input['usr_first_name']).' '.strip_tags($input['usr_last_name']).', you must click the CAPTCHA to submit the form.';
 			return LogicResult::error($errormsg);
 		}
 
-		if(isset($post_vars['prevformname'])){
-			$session->save_formfields($post_vars['prevformname']);
+		if(isset($input['prevformname'])){
+			$session->save_formfields($input['prevformname']);
 		}
 
 		$required_fields = array(
@@ -69,10 +69,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// Since each registration field may either be "name" or "lbx_reg_name", we have to go
 		// through and pull them both out, and put them in fixed_fields
 		foreach ($required_fields as $field => $description) {
-			if (isset($post_vars[$field])) {
-				$fixed_fields[$field] = trim($post_vars[$field]);
-			} else if (isset($post_vars['lbx_reg_' . $field])) {
-				$fixed_fields[$field] = trim($post_vars['lbx_reg_' . $field]);
+			if (isset($input[$field])) {
+				$fixed_fields[$field] = trim($input[$field]);
+			} else if (isset($input['lbx_reg_' . $field])) {
+				$fixed_fields[$field] = trim($input['lbx_reg_' . $field]);
 			} else {
 				$error_fields[] = $description;
 				continue;
@@ -83,7 +83,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
-		if (isset($post_vars['setcookie']) || isset($post_vars['lbx_reg_setcookie'])) {
+		if (isset($input['setcookie']) || isset($input['lbx_reg_setcookie'])) {
 			$fixed_fields['setcookie'] = TRUE;
 		} else {
 			$fixed_fields['setcookie'] = FALSE;

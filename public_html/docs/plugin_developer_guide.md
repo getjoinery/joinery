@@ -284,22 +284,20 @@ class MyData extends SystemBase {
 
 ### Business Logic Files
 
-Plugin logic files follow the same LogicResult pattern as core logic files. For comprehensive documentation on logic file architecture and best practices, see the [Logic Architecture Guide](CLAUDE_logic_architecture.md).
+Plugin logic files follow the same LogicResult pattern as core logic files. Every logic file in the codebase — core or plugin — uses one signature: `function foo_logic(array $input): LogicResult`. There is no second variant. For comprehensive documentation, see the [Logic Architecture Guide](logic_architecture.md).
 
 ```php
 // plugins/my-plugin/logic/my_feature_logic.php
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
-function my_feature_logic($get_vars, $post_vars) {
+function my_feature_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('plugins/my-plugin/data/my_data_class.php'));
 
     // Business logic processing
-    $data = new MyData($get_vars['id'], TRUE);
+    $data = new MyData($input['id'], TRUE);
 
     // Use LogicResult for consistent returns
-    if ($post_vars['action'] === 'delete') {
+    if (($input['action'] ?? null) === 'delete') {
         $data->soft_delete();
         return LogicResult::redirect('/plugins/my-plugin/admin/list');
     }

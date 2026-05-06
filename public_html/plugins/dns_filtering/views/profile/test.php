@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('test_logic.php', 'logic', 'system', null, 'dns_filtering'));
 
-$page_vars     = process_logic(test_logic($_GET, $_POST));
+$page_vars     = process_logic(test_logic(array_merge($_GET, $_POST, $params ?? [])));
 $device        = $page_vars['device'];
 $device_id     = (int)$device->key;
 $device_name   = htmlspecialchars($device->get_readable_name());

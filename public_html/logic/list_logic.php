@@ -1,25 +1,28 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
 require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
-function list_logic($get_vars, $post_vars, $mailing_list, $params){
-	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+function list_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	$settings = Globalvars::get_instance();
+	$page_vars = [];
 	$page_vars['settings'] = $settings;
-	
+
 	if(!$settings->get_setting('mailing_lists_active')){
 		return LogicResult::error('This feature is turned off');
 	}
 
-	
-	if(!$mailing_list || !$mailing_list->get('mlt_is_active') || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE){
-		require_once(LibraryFunctions::display_404_page());				
+	$mailing_list = null;
+	if (!empty($input['slug'])) {
+		$mailing_list = MailingList::get_by_link($input['slug']);
 	}
+	if(!$mailing_list || !$mailing_list->key || !$mailing_list->get('mlt_is_active') || $mailing_list->get('mlt_visibility') == MailingList::VISIBILITY_PRIVATE){
+		require_once(LibraryFunctions::display_404_page());
+	}
+	$page_vars['mailing_list'] = $mailing_list;
 	
 
 	$session = SessionControl::get_instance();

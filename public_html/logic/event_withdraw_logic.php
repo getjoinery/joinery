@@ -7,7 +7,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/events_class.php'));
 require_once(PathHelper::getIncludePath('data/event_registrants_class.php'));
 
-function event_withdraw_logic($get_vars, $post_vars) {
+function event_withdraw_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 	if (!$settings->get_setting('events_active')) {
 		return LogicResult::error('This feature is turned off');
@@ -17,17 +17,17 @@ function event_withdraw_logic($get_vars, $post_vars) {
 	$page_vars['session'] = $session;
 
 	// Get event registrant ID from parameters
-	$evr_event_registrant_id = $post_vars['evr_event_registrant_id'] ?? $get_vars['evr_event_registrant_id'] ?? null;
+	$evr_event_registrant_id = $input['evr_event_registrant_id'] ?? $input['evr_event_registrant_id'] ?? null;
 	if (!$evr_event_registrant_id) {
 		return LogicResult::error('You must provide a registrant.');
 	}
 	$evr_event_registrant_id = intval($evr_event_registrant_id);
 	$page_vars['evr_event_registrant_id'] = $evr_event_registrant_id;
 
-	if ($post_vars) {
+	if (!empty($_POST)) {
 		$session->check_permission(0);
 
-		$confirm = $post_vars['confirm'] ?? null;
+		$confirm = $input['confirm'] ?? null;
 
 		if ($confirm) {
 			if (EventRegistrant::check_if_exists($evr_event_registrant_id)) {

@@ -1,6 +1,6 @@
 <?php
 
-function admin_joinery_ai_note_logic($get_vars, $post_vars) {
+function admin_joinery_ai_note_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_notes_class.php'));
@@ -8,26 +8,26 @@ function admin_joinery_ai_note_logic($get_vars, $post_vars) {
     $session = SessionControl::get_instance();
     $session->check_permission(10);
 
-    if (isset($post_vars['edit_primary_key_value']) && $post_vars['edit_primary_key_value']) {
-        $note = new RecipeNote($post_vars['edit_primary_key_value'], TRUE);
-    } elseif (isset($get_vars['rcn_note_id']) && $get_vars['rcn_note_id']) {
-        $note = new RecipeNote($get_vars['rcn_note_id'], TRUE);
+    if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
+        $note = new RecipeNote($input['edit_primary_key_value'], TRUE);
+    } elseif (isset($input['rcn_note_id']) && $input['rcn_note_id']) {
+        $note = new RecipeNote($input['rcn_note_id'], TRUE);
     } else {
         $note = new RecipeNote(NULL);
         $note->set('rcn_owner_user_id', $session->get_user_id());
     }
 
-    if ($post_vars && isset($post_vars['btn_submit'])) {
-        if (isset($post_vars['btn_delete']) && $note->key) {
+    if ($input && isset($input['btn_submit'])) {
+        if (isset($input['btn_delete']) && $note->key) {
             $note->soft_delete();
             return LogicResult::redirect('/admin/joinery_ai/notes');
         }
 
-        $note->set('rcn_title', trim((string)($post_vars['rcn_title'] ?? '')));
-        $note->set('rcn_content', (string)($post_vars['rcn_content'] ?? ''));
+        $note->set('rcn_title', trim((string)($input['rcn_title'] ?? '')));
+        $note->set('rcn_content', (string)($input['rcn_content'] ?? ''));
 
         // Tags posted as comma-separated string
-        $tags_raw = trim((string)($post_vars['rcn_tags_text'] ?? ''));
+        $tags_raw = trim((string)($input['rcn_tags_text'] ?? ''));
         $tags = $tags_raw === ''
             ? []
             : array_values(array_filter(array_map('trim', explode(',', $tags_raw)), 'strlen'));
@@ -47,6 +47,6 @@ function admin_joinery_ai_note_logic($get_vars, $post_vars) {
     return LogicResult::render([
         'note' => $note,
         'session' => $session,
-        'saved' => !empty($get_vars['saved']),
+        'saved' => !empty($input['saved']),
     ]);
 }

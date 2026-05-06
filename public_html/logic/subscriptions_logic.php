@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function subscriptions_logic($get_vars, $post_vars){
+function subscriptions_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 

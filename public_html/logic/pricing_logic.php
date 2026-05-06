@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function pricing_logic($get_vars, $post_vars){
+function pricing_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -23,7 +23,7 @@ function pricing_logic($get_vars, $post_vars){
 	}
 
 	// Determine billing period (month or year)
-	$page_choice = isset($get_vars['page']) ? $get_vars['page'] : 'month';
+	$page_choice = isset($input['page']) ? $input['page'] : 'month';
 	$billing_period = ($page_choice == 'year') ? 'year' : 'month';
 	$page_vars['page_choice'] = $page_choice;
 

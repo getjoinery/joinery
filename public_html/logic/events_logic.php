@@ -1,5 +1,5 @@
 <?php
-function events_logic($get_vars, $post_vars){
+function events_logic(array $input): LogicResult{
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
@@ -12,8 +12,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$swaoffset = 0;
 	$swasort = 'start_time';
 	$swasdirection = 'ASC';
-	$searchterm = $get_vars['searchterm'] ?? '';
-	$user_id = $get_vars['u'] ?? null;
+	$searchterm = $input['searchterm'] ?? '';
+	$user_id = $input['u'] ?? null;
 	
 	$searches = array();
 	$searches['deleted'] = FALSE;
@@ -29,25 +29,25 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	
 	//SEE IF WE ARE ON A TAB
-	if(!isset($get_vars['type']) || $get_vars['type'] == 'future'){
+	if(!isset($input['type']) || $input['type'] == 'future'){
 		//ASSUME WE'RE JUST LISTING FUTURE EVENTS
 		$searches['past'] = FALSE;
 		$searches['status'] = Event::STATUS_ACTIVE;
 	}	
-	else if($get_vars['type'] == 'past'){
+	else if($input['type'] == 'past'){
 		$searches['past'] = TRUE;		
 	}
 	else{
 		$searches['past'] = FALSE;
 		$searches['status'] = Event::STATUS_ACTIVE;
-		if($get_vars['type']){
-			$searches['type'] = (int)$get_vars['type'];
+		if($input['type']){
+			$searches['type'] = (int)$input['type'];
 		}
 		
 	}
 
 	// Expand recurring events for future/active listings; plain query for past
-	$use_recurring = (!isset($get_vars['type']) || $get_vars['type'] == 'future');
+	$use_recurring = (!isset($input['type']) || $input['type'] == 'future');
 	if ($use_recurring) {
 		$all_events = MultiEvent::getWithRepeatingEvents($searches, null, $numperpage);
 	} else {
