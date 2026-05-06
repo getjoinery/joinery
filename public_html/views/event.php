@@ -3,9 +3,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('event_logic.php', 'logic'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-$instance_date = isset($params['date']) ? $params['date'] : null;
-
-$page_vars = process_logic(event_logic($_GET, $_POST, $event, $instance_date));
+$page_vars = process_logic(event_logic(array_merge($_GET, $_POST, $params ?? [])));
 $event           = $page_vars['event'];
 $is_virtual_event = !empty($page_vars['is_virtual']);
 $settings        = Globalvars::get_instance();

@@ -5,7 +5,7 @@
  * @version 1.0
  */
 
-function conversations_logic($get_vars, $post_vars) {
+function conversations_logic(array $input): LogicResult {
 	$page_vars = array();
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -25,7 +25,7 @@ function conversations_logic($get_vars, $post_vars) {
 	}
 
 	$numperpage = 20;
-	$page_offset = isset($get_vars['offset']) ? (int)$get_vars['offset'] : 0;
+	$page_offset = isset($input['offset']) ? (int)$input['offset'] : 0;
 
 	$conversations = new MultiConversation(
 		array('participant_user_id' => $session->get_user_id(), 'deleted' => false),

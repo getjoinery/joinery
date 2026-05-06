@@ -1,6 +1,6 @@
 <?php
 
-function device_delete_logic($get_vars, $post_vars){
+function device_delete_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));

@@ -21,7 +21,7 @@ The view fallback handles simple pages. You need an explicit route in `serve.php
 
 | Scenario | Example | Why fallback isn't enough |
 |----------|---------|--------------------------|
-| **Model-based routes** | `/post/{slug}` | Needs to load a model object by slug/id before rendering |
+| **URL placeholders** | `/post/{slug}` | URL captures a variable into `$params` for the view/logic |
 | **Feature-flag gating** | `'check_setting' => 'events_active'` | Page should 404 when feature is disabled |
 | **Permission gating** | `'min_permission' => 10` | Page requires login/role check before rendering |
 | **Wildcard routes** | `/admin/*` → `adm/{path}` | Maps a URL prefix to a different directory |
@@ -38,7 +38,7 @@ Requests are processed in this order — first match wins:
 1. Static routes     → Assets (CSS, JS, images) served with cache headers
 2. Plugin routes     → Plugin-registered routes (checked before main routes)
 3. Custom routes     → PHP closures for complex logic
-4. Dynamic routes    → View and model-based routes defined in serve.php
+4. Dynamic routes    → View routes defined in serve.php
 5. View fallback     → Automatic: /foo → views/foo.php (theme-aware)
 6. 404               → No match found
 ```
@@ -91,17 +91,16 @@ Options: `cache` (seconds), `exclude_from_cache` (array of file extensions).
 
 ### Dynamic Routes
 
-All view and model-based routes.
+View-based routes, with optional URL placeholders captured into `$params`.
 
 ```php
 'dynamic' => [
     // Simple view — explicit file path
     '/robots.txt' => ['view' => 'views/robots'],
 
-    // Model route — loads object, auto-determines view from model name
+    // Slug-based content route — {slug} captured into $params['slug']
     '/post/{slug}' => [
-        'model' => 'Post',
-        'model_file' => 'data/posts_class',
+        'view' => 'views/post',
         'check_setting' => 'blog_active'
     ],
 
@@ -112,14 +111,13 @@ All view and model-based routes.
 ]
 ```
 
+URL placeholders (`{slug}`, `{id}`, etc.) are extracted into a `$params` array that's available in the view and any logic file it calls. Logic files load their own model objects from `$params['slug']` (or whatever value is captured).
+
 **All dynamic route options:**
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `view` | Yes (unless `model` set) | View file path, no `.php`. Supports `{path}`, `{file}`, `{slug}` placeholders |
-| `model` | No | Model class name. Auto-determines view as `views/{lowercase_model}` if `view` not set |
-| `model_file` | When `model` set | Path to model class file, no `.php` |
-| `var_name` | No | Variable name for model instance in view scope (defaults to lowercase model name) |
+| `view` | Yes | View file path, no `.php`. Supports `{path}`, `{file}`, `{slug}` placeholders |
 | `check_setting` | No | Setting name — route only serves if setting is truthy |
 | `min_permission` | No | Integer permission level required (uses `SessionControl::check_permission()`) |
 | `valid_page` | No | Set `false` to exclude from page statistics (default: `true`) |
@@ -146,16 +144,15 @@ logic/notifications_logic.php    → auto-loaded (optional)
 ```
 No serve.php change needed.
 
-### Model-based content page
+### Slug-based content page
 ```php
 // In serve.php dynamic routes:
 '/product/{slug}' => [
-    'model' => 'Product',
-    'model_file' => 'data/products_class',
+    'view' => 'views/product',
     'check_setting' => 'products_active'
 ],
 ```
-View auto-resolves to `views/product.php`. The `$product` variable is available in the view.
+The view at `views/product.php` calls `product_logic(array_merge($_GET, $_POST, $params ?? []))`, and the logic file loads the Product by `$input['slug']`.
 
 ### Admin page
 Admin files live in `/adm/`, not `/admin/`. The wildcard route handles mapping:

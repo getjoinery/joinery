@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function security_logic($get_vars, $post_vars){
+function security_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
@@ -27,7 +27,7 @@ function security_logic($get_vars, $post_vars){
 	$page_vars['backup_codes'] = null;
 	$page_vars['just_enabled'] = false;
 
-	$msgtxt_from_get = $get_vars['msgtext'] ?? null;
+	$msgtxt_from_get = $input['msgtext'] ?? null;
 	if ($msgtxt_from_get) {
 		$message = new DisplayMessage(htmlspecialchars($msgtxt_from_get), 'Two-Factor Authentication',
 			'/\/profile\/security.*/', DisplayMessage::MESSAGE_WARNING,
@@ -35,7 +35,7 @@ function security_logic($get_vars, $post_vars){
 		$session->save_message($message);
 	}
 
-	$action = $post_vars['action'] ?? '';
+	$action = $input['action'] ?? '';
 
 	if ($action === 'start_enable' && !$page_vars['totp_enabled']) {
 		$totp = \OTPHP\TOTP::generate();
@@ -52,7 +52,7 @@ function security_logic($get_vars, $post_vars){
 			return LogicResult::redirect('/profile/security');
 		}
 
-		$submitted = isset($post_vars['totp_code']) ? trim($post_vars['totp_code']) : '';
+		$submitted = isset($input['totp_code']) ? trim($input['totp_code']) : '';
 		$canonical = preg_replace('/[\s-]+/', '', $submitted);
 		if (!preg_match('/^\d{6}$/', $canonical)) {
 			$msgtxt = 'Please enter the 6-digit code from your authenticator app.';
@@ -117,7 +117,7 @@ function security_logic($get_vars, $post_vars){
 	}
 
 	if ($action === 'disable' && $page_vars['totp_enabled']) {
-		$confirmation = isset($post_vars['confirm_code']) ? trim($post_vars['confirm_code']) : '';
+		$confirmation = isset($input['confirm_code']) ? trim($input['confirm_code']) : '';
 		$confirmed = false;
 		if ($confirmation !== '') {
 			$canonical = strtoupper(preg_replace('/[\s-]+/', '', $confirmation));

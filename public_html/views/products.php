@@ -3,7 +3,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('products_logic.php', 'logic'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-$page_vars = process_logic(products_logic($_GET, $_POST));
+$page_vars = process_logic(products_logic(array_merge($_GET, $_POST, $params ?? [])));
 $page = new PublicPage();
 $page->public_header([
     'is_valid_page' => $is_valid_page,

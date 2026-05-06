@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
-function admin_email_forwarding_logic($get_vars, $post_vars) {
+function admin_email_forwarding_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
@@ -12,8 +12,8 @@ function admin_email_forwarding_logic($get_vars, $post_vars) {
 	$settings = Globalvars::get_instance();
 
 	// Handle delete action
-	if ($post_vars && isset($post_vars['action']) && $post_vars['action'] === 'delete') {
-		$alias = new EmailForwardingAlias($post_vars['efa_email_forwarding_alias_id'], TRUE);
+	if ($input && isset($input['action']) && $input['action'] === 'delete') {
+		$alias = new EmailForwardingAlias($input['efa_email_forwarding_alias_id'], TRUE);
 		$alias->soft_delete();
 
 		$session->save_message(new DisplayMessage(
@@ -27,8 +27,8 @@ function admin_email_forwarding_logic($get_vars, $post_vars) {
 	}
 
 	// Handle enable/disable toggle
-	if ($post_vars && isset($post_vars['action']) && $post_vars['action'] === 'toggle_enabled') {
-		$alias = new EmailForwardingAlias($post_vars['efa_email_forwarding_alias_id'], TRUE);
+	if ($input && isset($input['action']) && $input['action'] === 'toggle_enabled') {
+		$alias = new EmailForwardingAlias($input['efa_email_forwarding_alias_id'], TRUE);
 		$alias->set('efa_is_enabled', $alias->get('efa_is_enabled') ? false : true);
 		$alias->save();
 		return LogicResult::redirect('/plugins/email_forwarding/admin/admin_email_forwarding');

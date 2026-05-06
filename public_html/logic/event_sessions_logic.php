@@ -1,6 +1,6 @@
 <?php
 
-function event_sessions_logic($get_vars, $post_vars){
+function event_sessions_logic(array $input): LogicResult{
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -29,11 +29,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$session->set_return();
 
 	//ACCEPT EITHER VARIABLE
-	if($get_vars['evt_event_id']){
-		$event_id = $get_vars['evt_event_id'];
+	if($input['evt_event_id']){
+		$event_id = $input['evt_event_id'];
 	}
-	else if ($get_vars['event_id']){
-		$event_id = $get_vars['event_id'];
+	else if ($input['event_id']){
+		$event_id = $input['event_id'];
 	}
 	else{
 		return LogicResult::error("This event does not exist.");
@@ -80,8 +80,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['next_session'] = $next_session;
 
 	$searches = array();
-	if($get_vars['offset']){
-		$offset = $get_vars['offset'];
+	if($input['offset']){
+		$offset = $input['offset'];
 	}
 	else{
 		$offset = 0;

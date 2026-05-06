@@ -3,7 +3,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('change_tier_logic.php', 'logic'));
 
-$page_vars = process_logic(change_tier_logic($_GET, $_POST));
+$page_vars = process_logic(change_tier_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 $page = new PublicPage();
 $page->public_header([

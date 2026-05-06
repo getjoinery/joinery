@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function password_edit_logic($get_vars, $post_vars){
+function password_edit_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
@@ -19,27 +19,27 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$has_old_password = $user->get('usr_password') !== NULL;
 
-	if($post_vars) {
+	if (!empty($_POST)) {
 
-		if(!isset($post_vars['usr_password']) || !isset($post_vars['usr_password_again'])){
+		if(!isset($input['usr_password']) || !isset($input['usr_password_again'])){
 			return LogicResult::error('The following required fields were not set: passwords');
 		}
 
 		if ($has_old_password) {
 			// If the user doesn't have an existing password
 			// then no need for them to type in their old password.
-			if(!isset($post_vars['usr_old_password'])){
+			if(!isset($input['usr_old_password'])){
 				return LogicResult::error('The following required fields were not set: old password');
 			}
 
 		}
 
 		// Only check the old password if they had one!
-		if ($has_old_password && !$user->check_password($post_vars['usr_old_password'])) {
+		if ($has_old_password && !$user->check_password($input['usr_old_password'])) {
 			return LogicResult::error('Sorry, the old password you typed in was not correct.');
 		}
 		else {
-			$user->set('usr_password', User::GeneratePassword($post_vars['usr_password']));
+			$user->set('usr_password', User::GeneratePassword($input['usr_password']));
 			$user->save();
 			$msgtext = '<p>Your password has been updated!</p>';
 			$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/password_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "addressbox", TRUE);

@@ -9,7 +9,7 @@
 	$_GET['numperpage'] = 100;
 	$_GET['sdirection'] = 'ASC';
 	$_GET['subscriptions'] = 'all';
-	$page_vars = products_logic($_GET, $_POST);
+	$page_vars = products_logic(array_merge($_GET, $_POST, $params ?? []));
 	
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);

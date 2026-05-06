@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function password_set_logic($get_vars, $post_vars){
+function password_set_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
@@ -17,7 +17,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::error('This feature is turned off');
 	}
 
-	if ($post_vars) {
+	if (!empty($_POST)) {
 
 		if(!$session->get_user_id()){
 			return LogicResult::error('You must be logged in to set a password.');
@@ -30,15 +30,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('Sorry, your password is already set.  If you need to reset it, <a href="/password-reset-1">click here</a> to send a password reset email.');
 		}
 
-		if(!isset($post_vars['usr_password']) || !isset($post_vars['usr_password_again'])){
+		if(!isset($input['usr_password']) || !isset($input['usr_password_again'])){
 				return LogicResult::error('The following required fields were not set: passwords');
 		}
 
-		if ($post_vars['usr_password'] != $post_vars['usr_password_again']) {
+		if ($input['usr_password'] != $input['usr_password_again']) {
 			return LogicResult::error('Your password did not match in both fields.');
 		}
 
-		$user->set('usr_password', User::GeneratePassword($post_vars['usr_password']));
+		$user->set('usr_password', User::GeneratePassword($input['usr_password']));
 		$user->save();
 
 		$page_vars['message_type'] = 'success';

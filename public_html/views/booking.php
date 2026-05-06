@@ -3,7 +3,7 @@
     require_once(PathHelper::getThemeFilePath('booking_logic.php', 'logic'));
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-    $page_vars = process_logic(booking_logic($_GET, $_POST));
+    $page_vars = process_logic(booking_logic(array_merge($_GET, $_POST, $params ?? [])));
     $booking_type = $page_vars['booking_type'];
     $client_user  = $page_vars['client_user'];
 

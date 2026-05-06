@@ -4,7 +4,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('event_withdraw_logic.php', 'logic'));
 
-	$page_vars = process_logic(event_withdraw_logic($_GET, $_POST));
+	$page_vars = process_logic(event_withdraw_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	$page = new PublicPage();
 	$page->public_header([

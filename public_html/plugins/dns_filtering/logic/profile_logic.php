@@ -1,6 +1,6 @@
 <?php
 
-function profile_logic($get_vars, $post_vars){
+function profile_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('includes/ErrorHandler.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

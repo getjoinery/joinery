@@ -11,7 +11,7 @@ require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_for
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/logic/admin_email_forwarding_logic.php'));
 
-$page_vars = process_logic(admin_email_forwarding_logic($_GET, $_POST));
+$page_vars = process_logic(admin_email_forwarding_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
 $numperpage = 30;

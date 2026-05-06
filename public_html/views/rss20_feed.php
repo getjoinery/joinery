@@ -3,7 +3,7 @@
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('blog_logic.php', 'logic'));
 
-	$page_vars = process_logic(blog_logic($_GET, $_POST));
+	$page_vars = process_logic(blog_logic(array_merge($_GET, $_POST, $params ?? [])));
 	
 	header('Content-type: application/rss+xml; charset=utf-8');
 	

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function booking_logic($get_vars, $post_vars){
+function booking_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
@@ -19,7 +19,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::error('This feature is turned off');
 	}
 
-	$booking_type_id = $get_vars['booking_type_id'];
+	$booking_type_id = $input['booking_type_id'];
 	$booking_type = new BookingType($booking_type_id, TRUE);
 	$client_user = new User($session->get_user_id(), TRUE);
 	$page_vars['booking_type'] = $booking_type;

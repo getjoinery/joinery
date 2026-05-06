@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function event_sessions_course_logic($get_vars, $post_vars){
+function event_sessions_course_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
@@ -24,11 +24,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	//ACCEPT EITHER VARIABLE
-	if($get_vars['evt_event_id']){
-		$event_id = LibraryFunctions::fetch_variable_local($get_vars, 'evt_event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
+	if($input['evt_event_id']){
+		$event_id = LibraryFunctions::fetch_variable_local($input, 'evt_event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
-	else if ($get_vars['event_id']){
-		$event_id = LibraryFunctions::fetch_variable_local($get_vars, 'event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
+	else if ($input['event_id']){
+		$event_id = LibraryFunctions::fetch_variable_local($input, 'event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else{
 		require_once(LibraryFunctions::display_404_page());
@@ -50,8 +50,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 
-	if(isset($get_vars['session_number'])){
-		$session_number = (int)$get_vars['session_number'];
+	if(isset($input['session_number'])){
+		$session_number = (int)$input['session_number'];
 	}
 	else{
 		$session_number = $event->get_lowest_session_number();

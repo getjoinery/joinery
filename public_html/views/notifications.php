@@ -8,7 +8,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('notifications_logic.php', 'logic'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-$page_vars = process_logic(notifications_logic($_GET, $_POST));
+$page_vars = process_logic(notifications_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 $page = new PublicPage();
 $page->public_header([

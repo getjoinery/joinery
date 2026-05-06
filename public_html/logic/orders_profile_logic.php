@@ -5,7 +5,7 @@
  * @version 1.0
  */
 
-function orders_profile_logic($get_vars, $post_vars) {
+function orders_profile_logic(array $input): LogicResult {
 	$page_vars = array();
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -21,7 +21,7 @@ function orders_profile_logic($get_vars, $post_vars) {
 	$session->check_permission(0);
 
 	$numperpage = 10;
-	$page_offset = isset($get_vars['offset']) ? max(0, (int)$get_vars['offset']) : 0;
+	$page_offset = isset($input['offset']) ? max(0, (int)$input['offset']) : 0;
 
 	$search_criteria = array();
 	$search_criteria['user_id'] = $session->get_user_id();

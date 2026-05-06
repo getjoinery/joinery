@@ -7,7 +7,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/logic/admin_note_logic.php'));
 
-$page_vars = process_logic(admin_joinery_ai_note_logic($_GET, $_POST));
+$page_vars = process_logic(admin_joinery_ai_note_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
 $is_new = !$note->key;

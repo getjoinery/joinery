@@ -1,6 +1,6 @@
 <?php
 
-function scheduled_block_edit_logic($get_vars, $post_vars){
+function scheduled_block_edit_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -28,7 +28,7 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 
 	if(isset($_POST['action']) && $_POST['action'] == 'delete'){
 		// DELETE A SCHEDULED BLOCK (always-on blocks can't be deleted from the UI)
-		$block_id = LibraryFunctions::fetch_variable_local($post_vars, 'block_id', NULL, 'required', 'Block id is required.', 'safemode', 'int');
+		$block_id = LibraryFunctions::fetch_variable_local($input, 'block_id', NULL, 'required', 'Block id is required.', 'safemode', 'int');
 		$block = new SdScheduledBlock($block_id, TRUE);
 		$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
@@ -42,11 +42,11 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 	}
 	else if(isset($_POST['action']) && $_POST['action'] == 'edit'){
 		// CREATE OR EDIT A BLOCK
-		$device_id = LibraryFunctions::fetch_variable_local($post_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
+		$device_id = LibraryFunctions::fetch_variable_local($input, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
 		$device = new SdDevice($device_id, TRUE);
 		$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
-		$block_id = LibraryFunctions::fetch_variable_local($post_vars, 'block_id', NULL, '', '', 'safemode', 'int');
+		$block_id = LibraryFunctions::fetch_variable_local($input, 'block_id', NULL, '', '', 'safemode', 'int');
 
 		if($block_id){
 			// Edit existing (could be scheduled or always-on)
@@ -74,15 +74,15 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 
 		// Name: only editable for scheduled blocks; always-on block keeps its fixed label
 		if(!$is_always_on){
-			$name = LibraryFunctions::fetch_variable_local($post_vars, 'sdb_name', '', '', '', 'safemode', NULL);
+			$name = LibraryFunctions::fetch_variable_local($input, 'sdb_name', '', '', '', 'safemode', NULL);
 			$block->set('sdb_name', $name);
 		}
 
 		// Schedule: only applies to scheduled blocks
 		if(!$is_always_on){
-			$start_time = LibraryFunctions::fetch_variable_local($post_vars, 'start_time', '', '', '', 'safemode', NULL);
-			$end_time = LibraryFunctions::fetch_variable_local($post_vars, 'end_time', '', '', '', 'safemode', NULL);
-			$days_blocked = isset($post_vars['days_blocked']) ? $post_vars['days_blocked'] : array();
+			$start_time = LibraryFunctions::fetch_variable_local($input, 'start_time', '', '', '', 'safemode', NULL);
+			$end_time = LibraryFunctions::fetch_variable_local($input, 'end_time', '', '', '', 'safemode', NULL);
+			$days_blocked = isset($input['days_blocked']) ? $input['days_blocked'] : array();
 
 			if($start_time !== '' && $end_time !== '' && !empty($days_blocked)){
 				$block->set('sdb_schedule_start', strip_tags($start_time));
@@ -105,10 +105,10 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 
 			// Allow the user to delete an existing advanced override even without the
 			// feature — the override row UI surfaces a working Remove button.
-			if(isset($post_vars['remove_advanced_keys']) && is_array($post_vars['remove_advanced_keys'])){
+			if(isset($input['remove_advanced_keys']) && is_array($input['remove_advanced_keys'])){
 				require_once(PathHelper::getIncludePath('plugins/dns_filtering/data/scheduled_block_filters_class.php'));
 				require_once(PathHelper::getIncludePath('plugins/dns_filtering/data/scheduled_block_services_class.php'));
-				foreach($post_vars['remove_advanced_keys'] as $key){
+				foreach($input['remove_advanced_keys'] as $key){
 					if(!in_array($key, ScrollDaddyHelper::getRestrictedFilters(), true)){
 						continue; // only restricted keys may flow through this path
 					}
@@ -122,19 +122,19 @@ function scheduled_block_edit_logic($get_vars, $post_vars){
 		}
 
 		// Update filter and service rules
-		$block->update_filters($post_vars, $skip_keys);
-		$block->update_services($post_vars, $skip_keys);
+		$block->update_filters($input, $skip_keys);
+		$block->update_services($input, $skip_keys);
 
 		return LogicResult::redirect('/profile/dns_filtering/devices');
 	}
 	else{
 		// GET - LOAD FORM DATA
-		$device_id = LibraryFunctions::fetch_variable_local($get_vars, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
+		$device_id = LibraryFunctions::fetch_variable_local($input, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
 		$device = new SdDevice($device_id, TRUE);
 		$device->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$page_vars['device'] = $device;
 
-		$block_id = LibraryFunctions::fetch_variable_local($get_vars, 'block_id', NULL, '', '', 'safemode', 'int');
+		$block_id = LibraryFunctions::fetch_variable_local($input, 'block_id', NULL, '', '', 'safemode', 'int');
 
 		if($block_id){
 			$block = new SdScheduledBlock($block_id, TRUE);

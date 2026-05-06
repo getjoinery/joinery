@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function billing_logic($get, $post) {
+function billing_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
@@ -182,9 +182,9 @@ function billing_logic($get, $post) {
     }
 
     // Handle POST actions
-    if (isset($post['action'])) {
+    if (isset($input['action'])) {
         try {
-            switch ($post['action']) {
+            switch ($input['action']) {
                 case 'update_payment_method':
                     if (!$stripe_customer_id) {
                         throw new Exception('No Stripe account found.');
@@ -197,7 +197,7 @@ function billing_logic($get, $post) {
                     if (!$current_subscription || $payment_system !== 'stripe') {
                         throw new Exception('Billing cycle changes are only available for Stripe subscriptions.');
                     }
-                    $new_version_id = intval($post['new_version_id']);
+                    $new_version_id = intval($input['new_version_id']);
                     $new_version = new ProductVersion($new_version_id, TRUE);
 
                     if (!$new_version->key || $new_version->get('prv_pro_product_id') != $current_subscription->get('odi_pro_product_id')) {
@@ -246,7 +246,7 @@ function billing_logic($get, $post) {
     }
 
     // Success messages from redirects
-    if (isset($get['payment_updated'])) {
+    if (isset($input['payment_updated'])) {
         $page_vars['success_message'] = 'Your payment method has been updated.';
     }
 

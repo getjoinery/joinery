@@ -259,7 +259,7 @@ class HttpRoutingTestRunner {
         ];
         
         foreach ($view_files_to_check as $path => $description) {
-            $view_file = $_SERVER['DOCUMENT_ROOT'] . "/views" . $path . ".php";
+            $view_file = PathHelper::getRootDir() . "/views" . $path . ".php";
             if (file_exists($view_file)) {
                 $test_cases[] = [$path, 200, "{$description} (exists)"];
             } else {
@@ -292,16 +292,16 @@ class HttpRoutingTestRunner {
         $should_exist_files = [];
         
         // Check if robots.txt exists as static file OR dynamic route (robots.php view)
-        if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/robots.txt')) {
+        if (file_exists(PathHelper::getRootDir() . '/robots.txt')) {
             $should_exist_files['/robots.txt'] = 'Robots.txt (exists)';
-        } elseif (file_exists($_SERVER['DOCUMENT_ROOT'] . '/views/robots.php')) {
+        } elseif (file_exists(PathHelper::getRootDir() . '/views/robots.php')) {
             $should_exist_files['/robots.txt'] = 'Robots.txt (exists)';
         }
         
         // Check if sitemap exists as static file OR dynamic route (sitemap.php view) 
-        if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/sitemap.xml')) {
+        if (file_exists(PathHelper::getRootDir() . '/sitemap.xml')) {
             $should_exist_files['/sitemap.xml'] = 'Sitemap (exists)';
-        } elseif (file_exists($_SERVER['DOCUMENT_ROOT'] . '/views/sitemap.php')) {
+        } elseif (file_exists(PathHelper::getRootDir() . '/views/sitemap.php')) {
             $should_exist_files['/sitemap.xml'] = 'Sitemap (exists)';
         }
         
@@ -316,7 +316,7 @@ class HttpRoutingTestRunner {
         ];
         
         foreach ($might_exist_files as $path => $description) {
-            $full_path = $_SERVER['DOCUMENT_ROOT'] . $path;
+            $full_path = PathHelper::getRootDir() . $path;
             if (file_exists($full_path)) {
                 $test_cases[] = [$path, 200, "{$description} (exists)"];
             } else {
@@ -383,7 +383,7 @@ class HttpRoutingTestRunner {
         
         
         foreach ($theme_files_to_check as $path => $description) {
-            $full_path = $_SERVER['DOCUMENT_ROOT'] . $path;
+            $full_path = PathHelper::getRootDir() . $path;
             if (file_exists($full_path)) {
                 $test_cases[] = [$path, 200, "{$description} (exists)"];
             } else {
@@ -433,8 +433,8 @@ class HttpRoutingTestRunner {
         
         foreach ($theme_views_to_check as $route => $description) {
             // Check if theme has this view file
-            $theme_view_path = $_SERVER['DOCUMENT_ROOT'] . "/theme/{$current_theme}/views{$route}.php";
-            $base_view_path = $_SERVER['DOCUMENT_ROOT'] . "/views{$route}.php";
+            $theme_view_path = PathHelper::getRootDir() . "/theme/{$current_theme}/views{$route}.php";
+            $base_view_path = PathHelper::getRootDir() . "/views{$route}.php";
             
             if (file_exists($theme_view_path)) {
                 $test_cases[] = [$route, 200, "{$description} (exists)"];
@@ -516,7 +516,7 @@ class HttpRoutingTestRunner {
     private function testPluginViews() {
         echo '<div class="test-section"><h3>6. TESTING PLUGIN VIEW AUTO-DISCOVERY</h3><ul>';
 
-        $doc_root = $_SERVER['DOCUMENT_ROOT'];
+        $doc_root = PathHelper::getRootDir();
 
         // Whitelists: views known to be safe without parameters or session state
         $root_whitelist   = ['index', 'pricing', 'forms_example'];
@@ -564,9 +564,10 @@ class HttpRoutingTestRunner {
             // --- Root namespace tests ---
 
             // Plugin index: /{plugin} resolves to views/index.php
+            // Accept 302 for permission-gated indexes (e.g. owner-only dashboards redirect to login)
             $index_file = $views_dir . '/index.php';
             if (file_exists($index_file)) {
-                $result = HttpTester::testUrl('/' . $plugin_name, 200, "Plugin {$plugin_name}: index page");
+                $result = HttpTester::testUrl('/' . $plugin_name, [200, 302], "Plugin {$plugin_name}: index page");
                 if ($result['success']) {
                     $this->pass("Plugin {$plugin_name} index: /{$plugin_name} -> {$result['actual_status']}");
                 } else {
@@ -697,7 +698,7 @@ class HttpRoutingTestRunner {
         
         $test_cases = [
             // Existing utility (avoid sync scripts)
-            ['/utils/forms_example_bootstrap', [200, 301, 302, 401, 403], 'Existing utility page'],
+            ['/utils/forms_example_bootstrapv2', [200, 301, 302, 401, 403], 'Existing utility page'],
 
             // Utility page that doesn't exist
             ['/utils/definitely-fake-utility', [302, 404, 401, 403], 'Utility page (does not exist)'],

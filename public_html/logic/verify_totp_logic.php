@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function verify_totp_logic($get_vars, $post_vars){
+function verify_totp_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -22,7 +22,7 @@ function verify_totp_logic($get_vars, $post_vars){
 		return LogicResult::redirect('/login?msgtext=session_expired');
 	}
 
-	if ($post_vars) {
+	if (!empty($_POST)) {
 		if (!RequestLogger::check_rate_limit('totp', 5, 300, false)) {
 			return LogicResult::error('Too many verification attempts. Please wait 5 minutes and try again.');
 		}
@@ -34,7 +34,7 @@ function verify_totp_logic($get_vars, $post_vars){
 			return LogicResult::redirect('/login');
 		}
 
-		$submitted = isset($post_vars['totp_code']) ? trim($post_vars['totp_code']) : '';
+		$submitted = isset($input['totp_code']) ? trim($input['totp_code']) : '';
 		$canonical = strtoupper(preg_replace('/[\s-]+/', '', $submitted));
 
 		$valid = false;

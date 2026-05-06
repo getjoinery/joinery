@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function password_reset_1_logic($get_vars, $post_vars){
+function password_reset_1_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
@@ -19,7 +19,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('This feature is turned off');
 	}
 
-	if (isset($post_vars['email']) || isset($post_vars['usr_email'])){
+	if (isset($input['email']) || isset($input['usr_email'])){
 
 		// Rate limiting: block after too many password reset requests from this IP
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
@@ -27,7 +27,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('Too many password reset requests. Please try again in 15 minutes.');
 		}
 
-		$email = strtolower(trim($post_vars['email'] ?? $post_vars['usr_email']));
+		$email = strtolower(trim($input['email'] ?? $input['usr_email']));
 
 		$user = User::GetByEmail($email);
 
@@ -58,8 +58,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	else{
 
 		$email = '';
-		if (isset($get_vars['e'])) {
-			$e = rawurldecode($get_vars['e']);
+		if (isset($input['e'])) {
+			$e = rawurldecode($input['e']);
 			if (LibraryFunctions::IsValidEmail($e)) {
 				$email = $e;
 			}

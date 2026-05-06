@@ -3,7 +3,7 @@
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('verify_totp_logic.php', 'logic'));
 
-    $page_vars = process_logic(verify_totp_logic($_GET, $_POST));
+    $page_vars = process_logic(verify_totp_logic(array_merge($_GET, $_POST, $params ?? [])));
 
     $page = new PublicPage();
     $page->public_header([

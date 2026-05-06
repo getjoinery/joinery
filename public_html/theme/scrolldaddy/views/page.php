@@ -2,7 +2,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('page_logic.php', 'logic'));
 
-	$page_vars = process_logic(page_logic($_GET, $_POST, $page, $params));
+	$page_vars = process_logic(page_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$page = $page_vars['page'];
 
 	require_once(PathHelper::getIncludePath('data/abt_tests_class.php'));

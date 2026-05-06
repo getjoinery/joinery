@@ -1,15 +1,14 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
-function location_logic($get_vars, $post_vars, $location, $params){
-	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+function location_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
+	require_once(PathHelper::getIncludePath('data/locations_class.php'));
 
 	$session = SessionControl::get_instance();
+	$page_vars = [];
 	$page_vars['session'] = $session;
 
 
@@ -18,13 +17,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	if(!$settings->get_setting('page_contents_active')){
 		return LogicResult::error('This feature is turned off');
 	}
-	
+
+	$location = null;
+	if (!empty($input['slug'])) {
+		$location = Location::get_by_link($input['slug']);
+	}
+	if (!$location || !$location->key) {
+		require_once(LibraryFunctions::display_404_page());
+	}
 	$page_vars['location'] = $location;
 
-	if($params[0] != 'location' || !$location){
-		require_once(LibraryFunctions::display_404_page());	
-	}
-	
 	if ($session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}

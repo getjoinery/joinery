@@ -9,7 +9,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/logic/admin_email_forwarding_alias_logic.php'));
 
-$page_vars = process_logic(admin_email_forwarding_alias_logic($_GET, $_POST));
+$page_vars = process_logic(admin_email_forwarding_alias_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
 $is_edit = ($alias->key) ? true : false;

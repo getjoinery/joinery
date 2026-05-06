@@ -1,5 +1,5 @@
 <?php
-function products_logic($get_vars, $post_vars){
+function products_logic(array $input): LogicResult{
 	require_once(__DIR__ . '/../includes/PathHelper.php');
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -22,14 +22,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::error('This feature is turned off');			
 	}
 
-	if(!empty($get_vars['numperpage'])){
-		$numperpage = $get_vars['numperpage'];
+	if(!empty($input['numperpage'])){
+		$numperpage = $input['numperpage'];
 	}
 	else{
 		$numperpage = 12;
 	}
 	$page_vars['numperpage'] = $numperpage;
-	$offset = $get_vars['offset'] ?? 0;
+	$offset = $input['offset'] ?? 0;
 	$page_vars['offset'] = $offset;
 	if(!$offset){
 		$offsetdisp = 1;
@@ -39,26 +39,26 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	$page_vars['offsetdisp'] = $offsetdisp;
 	
-	if(!empty($get_vars['sort'])){
-		$sort = $get_vars['sort'];
+	if(!empty($input['sort'])){
+		$sort = $input['sort'];
 	}
 	else{
 		$sort = 'product_id';
 	}
 
-	if(!empty($get_vars['sdirection'])){
-		$sdirection = $get_vars['sdirection'];
+	if(!empty($input['sdirection'])){
+		$sdirection = $input['sdirection'];
 	}
 	else{
 		$sdirection = 'DESC';
 	}
 
-	$searchterm = $get_vars['searchterm'] ?? '';
+	$searchterm = $input['searchterm'] ?? '';
 	
 	$searches = array();
 	$searches['is_active'] = TRUE;
 	
-	if(($get_vars['subscriptions'] ?? '') == 'all'){
+	if(($input['subscriptions'] ?? '') == 'all'){
 		//NO FILTER
 	}
 

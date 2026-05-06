@@ -2,7 +2,7 @@
     require_once(PathHelper::getThemeFilePath('register_logic.php', 'logic'));
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-    $page_vars = process_logic(register_logic($_GET, $_POST));
+    $page_vars = process_logic(register_logic(array_merge($_GET, $_POST, $params ?? [])));
     $extra = '';
     if (isset($_GET['m'])) {
         $extra = '?m=' . htmlspecialchars($_GET['m']);

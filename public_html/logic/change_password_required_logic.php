@@ -1,7 +1,7 @@
 <?php
 // PathHelper, Globalvars, SessionControl are pre-loaded - no need to require them
 
-function change_password_required_logic($get_vars, $post_vars){
+function change_password_required_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
@@ -37,9 +37,9 @@ function change_password_required_logic($get_vars, $post_vars){
 		return LogicResult::redirect('/admin/admin_users');
 	}
 
-	if ($post_vars) {
+	if (!empty($_POST)) {
 		// Validate passwords
-		if (empty($post_vars['new_password'])) {
+		if (empty($input['new_password'])) {
 			if ($ajax) {
 				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
 				throw new ValidationException('Please enter a new password.', ['new_password' => 'Password is required']);
@@ -47,7 +47,7 @@ function change_password_required_logic($get_vars, $post_vars){
 			return LogicResult::error('Please enter a new password.');
 		}
 
-		if ($post_vars['new_password'] !== $post_vars['confirm_password']) {
+		if ($input['new_password'] !== $input['confirm_password']) {
 			if ($ajax) {
 				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
 				throw new ValidationException('Passwords do not match.', ['confirm_password' => 'Passwords do not match']);
@@ -55,7 +55,7 @@ function change_password_required_logic($get_vars, $post_vars){
 			return LogicResult::error('Passwords do not match.');
 		}
 
-		if (strlen($post_vars['new_password']) < 8) {
+		if (strlen($input['new_password']) < 8) {
 			if ($ajax) {
 				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
 				throw new ValidationException('Password must be at least 8 characters long.', ['new_password' => 'Minimum 8 characters']);
@@ -64,7 +64,7 @@ function change_password_required_logic($get_vars, $post_vars){
 		}
 
 		// Update password and clear flag
-		$user->set('usr_password', User::GeneratePassword($post_vars['new_password']));
+		$user->set('usr_password', User::GeneratePassword($input['new_password']));
 		$user->set('usr_force_password_change', false);
 		$user->save();
 

@@ -5,7 +5,7 @@
  * @version 1.0
  */
 
-function conversation_logic($get_vars, $post_vars) {
+function conversation_logic(array $input): LogicResult {
 	$page_vars = array();
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -28,8 +28,8 @@ function conversation_logic($get_vars, $post_vars) {
 	$current_user_id = $session->get_user_id();
 
 	// Compose mode: new conversation
-	if (isset($get_vars['new']) && $get_vars['new'] == '1' && isset($get_vars['to'])) {
-		$recipient_id = (int)$get_vars['to'];
+	if (isset($input['new']) && $input['new'] == '1' && isset($input['to'])) {
+		$recipient_id = (int)$input['to'];
 
 		if ($recipient_id == $current_user_id) {
 			return LogicResult::redirect('/profile/conversations');
@@ -84,11 +84,11 @@ function conversation_logic($get_vars, $post_vars) {
 	}
 
 	// View existing conversation
-	if (!isset($get_vars['id'])) {
+	if (!isset($input['id'])) {
 		return LogicResult::redirect('/profile/conversations');
 	}
 
-	$conversation_id = (int)$get_vars['id'];
+	$conversation_id = (int)$input['id'];
 
 	try {
 		$conversation = new Conversation($conversation_id, TRUE);
@@ -103,7 +103,7 @@ function conversation_logic($get_vars, $post_vars) {
 
 	// Load messages
 	$numperpage = 50;
-	$page_offset = isset($get_vars['offset']) ? (int)$get_vars['offset'] : 0;
+	$page_offset = isset($input['offset']) ? (int)$input['offset'] : 0;
 
 	$messages = new MultiMessage(
 		array('conversation_id' => $conversation_id, 'deleted' => false),

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
-function admin_email_forwarding_alias_logic($get_vars, $post_vars) {
+function admin_email_forwarding_alias_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
@@ -12,24 +12,24 @@ function admin_email_forwarding_alias_logic($get_vars, $post_vars) {
 	$settings = Globalvars::get_instance();
 
 	// Load or create alias
-	if (isset($post_vars['edit_primary_key_value']) && $post_vars['edit_primary_key_value']) {
-		$alias = new EmailForwardingAlias($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['efa_email_forwarding_alias_id'])) {
-		$alias = new EmailForwardingAlias($get_vars['efa_email_forwarding_alias_id'], TRUE);
+	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
+		$alias = new EmailForwardingAlias($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['efa_email_forwarding_alias_id'])) {
+		$alias = new EmailForwardingAlias($input['efa_email_forwarding_alias_id'], TRUE);
 	} else {
 		$alias = new EmailForwardingAlias(NULL);
 	}
 
 	// Process form submission
-	if ($post_vars && isset($post_vars['efa_alias'])) {
+	if ($input && isset($input['efa_alias'])) {
 		$editable_fields = array('efa_efd_email_forwarding_domain_id', 'efa_alias', 'efa_destinations', 'efa_description');
 		foreach ($editable_fields as $field) {
-			if (isset($post_vars[$field])) {
-				$alias->set($field, $post_vars[$field]);
+			if (isset($input[$field])) {
+				$alias->set($field, $input[$field]);
 			}
 		}
 
-		$alias->set('efa_is_enabled', isset($post_vars['efa_is_enabled']) ? true : false);
+		$alias->set('efa_is_enabled', isset($input['efa_is_enabled']) ? true : false);
 
 		try {
 			$alias->prepare();

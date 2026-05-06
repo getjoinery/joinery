@@ -540,10 +540,14 @@ if (in_array($operation, $classes)) {
 	$json_params = json_decode($raw_input, true);
 	$post_params = is_array($json_params) ? $json_params : $_POST;
 
+	// Populate $_POST from JSON body so logic files can use !empty($_POST)
+	// to detect submission consistently across browser POSTs and JSON API calls.
+	$_POST = $post_params;
+
 	// Call the logic function
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	try {
-		$result = call_user_func($logic_function, $get_params, $post_params);
+		$result = call_user_func($logic_function, array_merge($get_params, $post_params));
 	} catch (Exception $e) {
 		if ($requires_session) {
 			$session->clear_api_user();

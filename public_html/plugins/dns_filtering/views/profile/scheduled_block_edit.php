@@ -7,7 +7,7 @@ require_once(PathHelper::getIncludePath('plugins/dns_filtering/includes/ScrollDa
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('scheduled_block_edit_logic.php', 'logic', 'system', null, 'dns_filtering'));
 
-$page_vars = process_logic(scheduled_block_edit_logic($_GET, $_POST));
+$page_vars = process_logic(scheduled_block_edit_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$device = $page_vars['device'];
 	$block = $page_vars['block'];
 	$filter_rules = $page_vars['filter_rules'];

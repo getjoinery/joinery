@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function contact_preferences_logic($get_vars, $post_vars){
+function contact_preferences_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -12,10 +12,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$session = SessionControl::get_instance();
 
-	if($get_vars['hash']){
-		$user = new User($get_vars['user'], TRUE);
+	if($input['hash']){
+		$user = new User($input['user'], TRUE);
 
-		if($get_vars['hash'] !== $user->get('usr_authhash')){
+		if($input['hash'] !== $user->get('usr_authhash')){
 			return LogicResult::error("Users don't match.  You cannot edit someone else's info.");
 		}
 	}
@@ -30,7 +30,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		array('name'=>'ASC'));
 	$mailing_lists->load();
 
-	if($post_vars){
+	if (!empty($_POST)) {
 		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
 
 	}

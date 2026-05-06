@@ -221,7 +221,7 @@ All logic functions must return `LogicResult`. Functions that currently return n
 
 **Complexity: medium — coordinated change across 9 logic files, 8 route entries, RouteHelper, ~20 views (9 base + 11 theme overrides), test-file and internal callers (notably `event_register_logic.php` and `tests/functional/products/ProductTester.php`), the routing docs, and a final sweep that brings the ~57 view call sites normalized in Step 4 onto the same call-site form *and* fixes a handful of stale Step-4 call sites in tests/utils that are silently broken. Mechanical, no cross-file logical dependencies.**
 
-**Status: decided — Option B (drop model injection), with the scope expanded after a deeper read of RouteHelper and the affected views.** See rationale below.
+**Status: Done (2026-05-06).** All five layers landed, smoke-tested live, and verified against `tests/integration/routing_test.php` (53/53 passing). See "Bugs surfaced during implementation" below for two regressions caught and fixed during the work — neither was in scope for Step 5 originally, but both blocked verification.
 
 ### Background: what the original Step 5 proposed
 
@@ -551,6 +551,41 @@ grep -iE 'fatal|warning|undefined|error' /var/www/html/joinerytest/logs/error.lo
 ```
 Any new `Undefined variable` warnings (especially `$params`, `$event`, `$product` etc.) are the most likely failure mode and warrant immediate attention.
 
+### Bugs surfaced during implementation (2026-05-06)
+
+Two pre-existing regressions blocked verification and were fixed as part of Step 5. Recording here for posterity since they explain why this commit is bigger than the spec described, and because the second one is systemic and may need follow-up if any of the unfixed callers are ever exercised.
+
+**1. RouteHelper `extract` skipping `$params` (latent since the original handleDynamicRoute was written; surfaced when Step 5 made views depend on it).**
+
+`RouteHelper::handleDynamicRoute($route, $params, $template_directory)` took a `$params` function argument (the URL-segment array `[0=>'',1=>'product',2=>'one-time-donation']`) and *also* tried to push the named placeholder map (`['slug'=>'one-time-donation']`) into view scope via `extract([..., 'params'=>$route_params], EXTR_SKIP)`. Because `$params` was already bound as a function argument, `EXTR_SKIP` silently kept the wrong value, so views received the segment array instead of the named map.
+
+This was invisible before Step 5 because the model-injection path bypassed `$params['slug']` entirely — RouteHelper loaded the model itself and pushed it into scope as `$event` / `$product` / etc. After Step 5 made logic files self-load from `$input['slug']`, slugs flowed through `$params`, and every slug route 404'd because `$input['slug']` was empty.
+
+**Fix:** rebind `$params = $route_params` directly in `handleDynamicRoute`, before any `extract()` call, so the function-arg `$params` is overwritten with the named map. (`includes/RouteHelper.php` around line 412.)
+
+**2. Step-4 `if ($input)` always-truthy gate (12 logic files).**
+
+Step 4's mechanical `($get_vars, $post_vars)` → `(array $input)` rename replaced gates like `if ($post_vars)` with `if ($input)`. But `$input` is `array_merge($_GET, $_POST, $params ?? [])`, and the routing layer always injects `__route` into `$_GET`, so `$input` is truthy on every request — including fresh GETs.
+
+Affected files entered their submission/action branch on every page load, attempted to validate empty form data, and either threw a `SystemDisplayableError` (surfacing as 500) or returned a redirect like `/login?retry=1`. Surface area: 12 files, but only `/login` and `/register` were exercised by the routing test, so the others are silent regressions:
+
+```
+register_logic.php             login_logic.php
+password_reset_2_logic.php     password_edit_logic.php
+survey_logic.php               contact_preferences_logic.php
+verify_totp_logic.php          address_edit_logic.php
+phone_numbers_edit_logic.php   event_withdraw_logic.php
+password_set_logic.php         change_password_required_logic.php
+```
+
+**Fix:** all 12 gates rewritten as `if (!empty($_POST))`. To keep API entry points working (apiv1.php parses JSON request bodies into a separate `$post_params` and PHP doesn't auto-populate `$_POST` for `application/json`), `apiv1.php` now copies `$post_params` into `$_POST` before invoking the logic function — same gate works for browser POST and JSON API submissions. (`api/apiv1.php` around line 543.)
+
+This is the post-Step-5 convention for action-vs-load gates in mixed logic files: `if (!empty($_POST))`, mirroring `cart_logic`, `post_logic`, `lists_logic`, and `event_waiting_list_logic`. No `$_SERVER` references.
+
+**3. Test-file fixes folded in.**
+
+`tests/integration/routing_test.php` had three CLI-incompatibility issues that prevented the test from being a real verification path: it used `$_SERVER['DOCUMENT_ROOT']` (empty in CLI), asserted plugin-index URLs return 200 unconditionally (joinery_ai is owner-only and 302s to login), and referenced a renamed util (`forms_example_bootstrap` → `forms_example_bootstrapv2`). Test now runs cleanly from CLI and passes 53/53.
+
 ### Cost
 
 Two costs, both small:
@@ -587,84 +622,17 @@ After Layer 3, route-level model loading is no longer a routing-system feature. 
 
 ## Step 6 — FormWriter reads from descriptors
 
-**Complexity: medium — requires FormWriter changes + descriptor completeness**
+**Broken out into [`FUTURE_formwriter_descriptors.md`](../FUTURE_formwriter_descriptors.md).**
 
-Once descriptors exist (step 3) and are complete for action-shaped files, FormWriter can generate forms from them rather than requiring developers to declare each field manually.
-
-### How it works
-
-```php
-// Current: developer declares each field
-$fw = $page->getFormWriter('register');
-$fw->addText('usr_email', 'Email');
-$fw->addPassword('usr_password', 'Password');
-
-// With descriptor-driven forms:
-$fw = $page->getFormWriter('register');
-$fw->fromDescriptor(register_logic_descriptor());
-// generates all fields from the descriptor's 'input' array
-```
-
-### Type mapping
-
-Each descriptor `type` maps to a FormWriter field type. The mapping lives in `FormWriterV2HTML5` and `FormWriterBootstrap`:
-
-| Descriptor type | FormWriter field |
-|----------------|-----------------|
-| `string` | `addText` |
-| `email` | `addEmail` |
-| `password` | `addPassword` |
-| `int` | `addNumber` |
-| `bool` | `addCheckbox` |
-| `select` | `addSelect` (with `options` from descriptor) |
-| `text` | `addTextarea` |
-| `date` | `addDate` |
-
-### Field-level extras
-
-Descriptor fields can carry additional FormWriter hints:
-
-```php
-'email' => [
-    'type'        => 'email',
-    'required'    => true,
-    'label'       => 'Email address',
-    'placeholder' => 'you@example.com',
-    'help'        => 'We will send a confirmation to this address.',
-],
-```
-
-Fields not representable by a descriptor type (file uploads, rich text, custom widgets) are added manually after `fromDescriptor()` — the method adds only what it knows about, remaining fields are hand-added as before.
-
-### What this enables
-
-One declaration drives: form HTML, client-side validation attributes, server-side type coercion, API documentation, AI tool schemas. A developer adds a field to the descriptor and it appears everywhere.
+The standalone spec covers the FormWriter `fromDescriptor()` method, the descriptor-type → field-type mapping, the migration approach for existing forms, and the dependencies. Independent of Step 7 — either can ship first.
 
 ---
 
 ## Step 7 — REST API and AI consume descriptors natively
 
-**Complexity: medium — requires steps 3–5 to be substantially complete**
+**Broken out into [`FUTURE_descriptor_consumers.md`](../FUTURE_descriptor_consumers.md).**
 
-The REST API's action surface and the AI's tool discovery both read from `_logic_descriptor()`. The `_logic_api()` opt-in is retired.
-
-### REST API changes
-
-`apiv1.php` action discovery (`GET /api/v1/actions`) reads `_logic_descriptor()` instead of `_logic_api()`. The `description` and `requires_session` fields are the same; the new `input` field drives parameter documentation. The invocation path (`POST /api/v1/action/{name}`) validates incoming parameters against the descriptor's input schema before calling `_logic()`.
-
-Migration: files with `_logic_api()` but no descriptor get the descriptor added; `_logic_api()` is then deleted. Files with descriptors only work automatically.
-
-### AI tool discovery changes
-
-Per [`joinery_ai_autodiscovery.md`](joinery_ai_autodiscovery.md), the AI already has the model auto-discovery surface. With descriptors in place on action-shaped logic files, a second surface (`describe_actions` / `invoke_action`) can be added without per-action `RecipeToolInterface` classes. The descriptor's `mutates` flag gates read vs. write exposure. See [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md) for the write side.
-
-### Input validation at the boundary
-
-Both the REST API and AI invocation paths validate and normalize inputs against the descriptor schema before calling `_logic()`. This is the equivalent of what `$field_specifications` does for model inputs — a boundary check that catches type errors before they propagate into business logic. The logic file's own validation still runs; the descriptor check is a fast first-pass, not a replacement.
-
-### The payoff
-
-At this point: write a business action, add a descriptor, and it is available to HTTP forms (step 6), REST API (step 7), and AI tools (step 7) with no per-consumer boilerplate. The same experience as adding `$ai_read_safe = true` to a model.
+The standalone spec covers the four sub-pieces (REST API descriptor switch, boundary input validator, AI describe_actions/invoke_action surface, and `_logic_api()` retirement migration), the dependencies on Steps 3–5, and the effort estimate (medium-large, 3–5 days).
 
 ---
 
@@ -676,11 +644,11 @@ At this point: write a business action, add a descriptor, and it is available to
 | 2 | Entity state transitions → model methods | Low | Done (largely N/A) | Clean model/logic boundary |
 | 3 | Add descriptors to action-shaped files | Low | Done | Rich API metadata, AI schemas |
 | 4 | Normalize logic function signatures | Medium | Done | Uniform invocation from any caller |
-| 5 | Normalize extra-param page controllers | Medium | Decided — Option B | Single calling convention everywhere |
-| 6 | FormWriter reads from descriptors | Medium | Not started | One declaration drives forms |
-| 7 | REST API + AI consume descriptors natively | Medium | Not started | Free integration payoff |
+| 5 | Normalize extra-param page controllers | Medium | Done (2026-05-06) | Single calling convention everywhere |
+| 6 | FormWriter reads from descriptors — see [`FUTURE_formwriter_descriptors.md`](../FUTURE_formwriter_descriptors.md) | Medium | Not started | One declaration drives forms |
+| 7 | REST API + AI consume descriptors natively — see [`FUTURE_descriptor_consumers.md`](../FUTURE_descriptor_consumers.md) | Medium-large | Not started | Free integration payoff |
 
-Steps 1–4 are done. Step 5 is decided (Option B) and ready to implement. Steps 6–7 are the payoff and can begin as soon as a critical mass of descriptors exist — they do not require Step 5 to be complete.
+Steps 1–5 are done. Steps 6–7 are the payoff and can begin as soon as a critical mass of descriptors exist — they do not require Step 5 to be complete.
 
 ### The one-type principle
 

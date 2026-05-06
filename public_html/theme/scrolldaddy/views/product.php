@@ -5,7 +5,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('product_logic.php', 'logic'));
 
 	// Always call product_logic - it contains essential business logic
-	$page_vars = process_logic(product_logic($_GET, $_POST, $product));
+	$page_vars = process_logic(product_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$product = $page_vars['product'];
 	$product_version = $page_vars['product_version'];
 	$cart = $page_vars['cart'];

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
-function admin_email_forwarding_domains_logic($get_vars, $post_vars) {
+function admin_email_forwarding_domains_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
@@ -14,17 +14,17 @@ function admin_email_forwarding_domains_logic($get_vars, $post_vars) {
 	$redirect_url = '/plugins/email_forwarding/admin/admin_email_forwarding_domains';
 
 	// Handle form submission (add/edit domain)
-	if ($post_vars && isset($post_vars['efd_domain'])) {
-		if (isset($post_vars['edit_primary_key_value']) && $post_vars['edit_primary_key_value']) {
-			$domain = new EmailForwardingDomain($post_vars['edit_primary_key_value'], TRUE);
+	if ($input && isset($input['efd_domain'])) {
+		if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
+			$domain = new EmailForwardingDomain($input['edit_primary_key_value'], TRUE);
 		} else {
 			$domain = new EmailForwardingDomain(NULL);
 		}
 
-		$domain->set('efd_domain', $post_vars['efd_domain']);
-		$domain->set('efd_is_enabled', isset($post_vars['efd_is_enabled']) ? true : false);
-		$domain->set('efd_catch_all_address', $post_vars['efd_catch_all_address'] ?: null);
-		$domain->set('efd_reject_unmatched', isset($post_vars['efd_reject_unmatched']) ? true : false);
+		$domain->set('efd_domain', $input['efd_domain']);
+		$domain->set('efd_is_enabled', isset($input['efd_is_enabled']) ? true : false);
+		$domain->set('efd_catch_all_address', $input['efd_catch_all_address'] ?: null);
+		$domain->set('efd_reject_unmatched', isset($input['efd_reject_unmatched']) ? true : false);
 
 		try {
 			$domain->prepare();
@@ -49,9 +49,9 @@ function admin_email_forwarding_domains_logic($get_vars, $post_vars) {
 	}
 
 	// Handle delete/undelete/permanent_delete actions
-	if ($post_vars && isset($post_vars['action'])) {
-		$action = $post_vars['action'];
-		$domain_id = $post_vars['efd_email_forwarding_domain_id'] ?? null;
+	if ($input && isset($input['action'])) {
+		$action = $input['action'];
+		$domain_id = $input['efd_email_forwarding_domain_id'] ?? null;
 
 		if ($domain_id && in_array($action, ['delete', 'undelete', 'permanent_delete'])) {
 			$domain = new EmailForwardingDomain($domain_id, TRUE);
@@ -120,8 +120,8 @@ function admin_email_forwarding_domains_logic($get_vars, $post_vars) {
 
 	// Load domain for editing
 	$edit_domain = null;
-	if (isset($get_vars['efd_email_forwarding_domain_id'])) {
-		$edit_domain = new EmailForwardingDomain($get_vars['efd_email_forwarding_domain_id'], TRUE);
+	if (isset($input['efd_email_forwarding_domain_id'])) {
+		$edit_domain = new EmailForwardingDomain($input['efd_email_forwarding_domain_id'], TRUE);
 	}
 
 	return LogicResult::render(array(

@@ -5,7 +5,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/admin_marketplace_logic.php'));
 
-$page_vars = process_logic(admin_marketplace_logic($_GET, $_POST));
+$page_vars = process_logic(admin_marketplace_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 $session = SessionControl::get_instance();
 

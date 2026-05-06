@@ -138,7 +138,7 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 
 **Three things to know about routing:**
 1. **Adding a page requires no route config.** Create `views/foo.php` and `/foo` works automatically. Add `logic/foo_logic.php` for business logic — it's auto-loaded.
-2. **You only need a serve.php route** for model-based routes (`/post/{slug}`), feature flags (`check_setting`), permission gates (`min_permission`), wildcards (`/admin/*`), or custom logic.
+2. **You only need a serve.php route** for URL placeholders (`/post/{slug}`), feature flags (`check_setting`), permission gates (`min_permission`), wildcards (`/admin/*`), or custom logic.
 3. **Views resolve through the theme chain:** `theme/{theme}/views/` → `plugins/{plugin}/views/` → `views/` → 404.
 
 **📖 [Routing Documentation](docs/routing.md)** — Full guide with route options, common patterns, and debugging
@@ -681,7 +681,7 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 **RouteHelper** - Manages URL routing and file serving for the front controller system
 - `processRoutes($routes, $request_path)` - Main route processing with pattern matching
 - `handleStaticRoute($route, $params, $template_directory)` - Serve static assets with caching
-- `handleDynamicRoute($route, $params, $template_directory)` - Handle view and model-based routes
+- `handleDynamicRoute($route, $params, $template_directory)` - Handle view routes with optional URL placeholders
 - `extractRouteParams($pattern, $path)` - Extract parameters from URL patterns
 - `serveStaticFile($file_path, $cache_seconds)` - Serve files with HTTP caching headers
 

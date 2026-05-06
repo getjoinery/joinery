@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function address_edit_logic($get_vars, $post_vars){
+function address_edit_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
 
@@ -11,15 +11,15 @@ function address_edit_logic($get_vars, $post_vars){
 	$user_id = $session->get_user_id();
 
 	// Load or create address
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$address = new Address($post_vars['edit_primary_key_value'], TRUE);
+	if (isset($input['edit_primary_key_value'])) {
+		$address = new Address($input['edit_primary_key_value'], TRUE);
 		// Verify user owns this address
 		$address->authenticate_write(array(
 			'current_user_id' => $user_id,
 			'current_user_permission' => $session->get_permission()
 		));
-	} elseif (isset($get_vars['usa_address_id'])) {
-		$address = new Address($get_vars['usa_address_id'], TRUE);
+	} elseif (isset($input['usa_address_id'])) {
+		$address = new Address($input['usa_address_id'], TRUE);
 		// Verify user owns this address
 		$address->authenticate_write(array(
 			'current_user_id' => $user_id,
@@ -36,7 +36,7 @@ function address_edit_logic($get_vars, $post_vars){
 		}
 	}
 
-	if($post_vars){
+	if (!empty($_POST)) {
 		// Add-only logic - set user_id and defaults when creating new address
 		if (!$address->key) {
 			$address->set('usa_usr_user_id', $user_id);
@@ -55,8 +55,8 @@ function address_edit_logic($get_vars, $post_vars){
 		);
 
 		foreach($editable_fields as $field) {
-			if(isset($post_vars[$field])){
-				$address->set($field, $post_vars[$field]);
+			if(isset($input[$field])){
+				$address->set($field, $input[$field]);
 			}
 		}
 

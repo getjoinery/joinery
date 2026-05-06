@@ -5,7 +5,7 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic'));
 
-	$page_vars = process_logic(contact_preferences_logic($_GET, $_POST));
+	$page_vars = process_logic(contact_preferences_logic(array_merge($_GET, $_POST, $params ?? [])));
 
 	$messages = $page_vars['messages'];
 

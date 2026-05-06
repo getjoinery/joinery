@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function change_tier_logic($get, $post) {
+function change_tier_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
@@ -27,7 +27,7 @@ function change_tier_logic($get, $post) {
     }
 
     // Get period filter from GET parameter (default to 'month')
-    $period_filter = isset($get['period']) ? $get['period'] : 'month';
+    $period_filter = isset($input['period']) ? $input['period'] : 'month';
     $page_vars['period_filter'] = $period_filter;
 
     $user_id = $session->get_user_id();
@@ -108,13 +108,13 @@ function change_tier_logic($get, $post) {
     $page_vars['is_paypal'] = $is_paypal;
 
     // Handle POST actions
-    if (isset($post['action'])) {
+    if (isset($input['action'])) {
 
         // Check if user has an active subscription
         if (!$current_subscription) {
             // For upgrade action with no active subscription, redirect to product page (new purchase / reactivation)
-            if ($post['action'] === 'upgrade' && !empty($post['product_id'])) {
-                $reactivate_product = new Product(intval($post['product_id']), TRUE);
+            if ($input['action'] === 'upgrade' && !empty($input['product_id'])) {
+                $reactivate_product = new Product(intval($input['product_id']), TRUE);
                 if ($reactivate_product->key) {
                     return LogicResult::redirect($reactivate_product->get_url());
                 }
@@ -128,7 +128,7 @@ function change_tier_logic($get, $post) {
         $error = null;
 
         try {
-            switch ($post['action']) {
+            switch ($input['action']) {
                 case 'upgrade':
                     // Block upgrade for PayPal subscribers
                     if ($is_paypal) {
@@ -136,12 +136,12 @@ function change_tier_logic($get, $post) {
                     }
 
                     // Validate product selection
-                    if (!isset($post['product_id'])) {
+                    if (!isset($input['product_id'])) {
                         throw new Exception('Please select a plan to upgrade to.');
                     }
 
                     // Validate product exists and loads correctly
-                    $product = new Product($post['product_id'], TRUE);
+                    $product = new Product($input['product_id'], TRUE);
                     if (!$product->key) {
                         throw new Exception('The selected plan could not be found. Please try again or contact support.');
                     }
@@ -267,12 +267,12 @@ function change_tier_logic($get, $post) {
                     }
 
                     // Validate product selection
-                    if (!isset($post['product_id'])) {
+                    if (!isset($input['product_id'])) {
                         throw new Exception('Please select a plan to downgrade to.');
                     }
 
                     // Validate product exists and loads correctly
-                    $product = new Product($post['product_id'], TRUE);
+                    $product = new Product($input['product_id'], TRUE);
                     if (!$product->key) {
                         throw new Exception('The selected plan could not be found. Please try again or contact support.');
                     }

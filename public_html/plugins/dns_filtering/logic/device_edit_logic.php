@@ -1,6 +1,6 @@
 <?php
 
-function device_edit_logic($get_vars, $post_vars){
+function device_edit_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -48,7 +48,7 @@ function device_edit_logic($get_vars, $post_vars){
 
 		if($device){
 			// Edit existing device
-			$device_name = LibraryFunctions::fetch_variable_local($post_vars, 'device_name', 0, 'required', 'Device name is required.', 'safemode', NULL);
+			$device_name = LibraryFunctions::fetch_variable_local($input, 'device_name', 0, 'required', 'Device name is required.', 'safemode', NULL);
 
 			// Add user prefix if not already present
 			if(!preg_match('/^user\d+-/', $device_name)){

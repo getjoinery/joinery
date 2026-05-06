@@ -2,7 +2,7 @@
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('post_logic.php', 'logic'));
 
-	$page_vars = process_logic(post_logic($_GET, $_POST, $post));
+	$page_vars = process_logic(post_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$post = $page_vars['post'];
 	$session = $page_vars['session'];
 

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-function login_logic($get_vars, $post_vars){
+function login_logic(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -11,8 +11,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/login_class.php'));
 
 	//HANDLE ACTIVATION FIRST IF PRESENT
-	if (!empty($get_vars['act_code'])) {
-		$act_code = $get_vars['act_code'];
+	if (!empty($input['act_code'])) {
+		$act_code = $input['act_code'];
 		$activated_user = NULL;
 		$activated = FALSE;
 
@@ -76,7 +76,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	// AJAX requests will be handled by the new ErrorManager system
 
-	if($post_vars){
+	if (!empty($_POST)) {
 		// Rate limiting: block after too many failed login attempts from this IP
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 		if (!RequestLogger::check_rate_limit('login', 10, 900, false)) {
@@ -88,8 +88,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
-		if ((empty($post_vars['email']) && empty($post_vars['lbx_email'])) ||
-			(empty($post_vars['password']) && empty($post_vars['lbx_password']))) {
+		if ((empty($input['email']) && empty($input['lbx_email'])) ||
+			(empty($input['password']) && empty($input['lbx_password']))) {
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
 				throw new ValidationException('Please enter both a username and a password to login.', [
@@ -101,8 +101,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
-		$email = empty($post_vars['email']) ? $post_vars['lbx_email'] : $post_vars['email'];
-		$password = empty($post_vars['password']) ? $post_vars['lbx_password'] : $post_vars['password'];
+		$email = empty($input['email']) ? $input['lbx_email'] : $input['email'];
+		$password = empty($input['password']) ? $input['lbx_password'] : $input['password'];
 		$user = User::GetByEmail($email);
 
 		if (!$user || !$user->check_password($password)) {
@@ -147,7 +147,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if ($user->has_totp_enabled() && !$session->has_valid_trusted_device_cookie($user)) {
 			session_regenerate_id(true);
 			$_SESSION['totp_pending_user_id']  = $user->key;
-			$_SESSION['totp_pending_remember'] = !empty($post_vars['setcookie']) || !empty($post_vars['lbx_setcookie']);
+			$_SESSION['totp_pending_remember'] = !empty($input['setcookie']) || !empty($input['lbx_setcookie']);
 			$_SESSION['totp_pending_return']   = $session->get_return();
 			$_SESSION['totp_pending_expires']  = time() + 600;
 
@@ -167,7 +167,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		LoginClass::StoreUserLogin($user->key, LoginClass::LOGIN_FORM);
 
 		// Potentially save a cookie if they set "Remember Me"
-		if (!empty($post_vars['setcookie']) || !empty($post_vars['lbx_setcookie'])) {
+		if (!empty($input['setcookie']) || !empty($input['lbx_setcookie'])) {
 			$session->save_user_to_cookie();
 		}
 
@@ -197,15 +197,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		'login_to_email_verify'=>'Please log in to verify your email address.',
 	);
 
-	if(isset($get_vars['msgtext'])){
-		if (array_key_exists($get_vars['msgtext'], $login_messages)) {
-			$message = new DisplayMessage(htmlspecialchars($login_messages[$get_vars['msgtext']]), 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
+	if(isset($input['msgtext'])){
+		if (array_key_exists($input['msgtext'], $login_messages)) {
+			$message = new DisplayMessage(htmlspecialchars($login_messages[$input['msgtext']]), 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
 			$session->save_message($message);
 		}
 	}
-	if(isset($get_vars['retry'])){
-		if(isset($get_vars['ip_blocked'])){
-			$blocked_ip = isset($get_vars['ip']) ? htmlspecialchars($get_vars['ip']) : 'unknown';
+	if(isset($input['retry'])){
+		if(isset($input['ip_blocked'])){
+			$blocked_ip = isset($input['ip']) ? htmlspecialchars($input['ip']) : 'unknown';
 			$message = new DisplayMessage('Login from your IP address (' . $blocked_ip . ') is not permitted for this account. Please contact an administrator if you believe this is an error.', 'Login blocked', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
 		} else {
 			$message = new DisplayMessage('Your username or password was incorrect.  Please try again below, or sign up if you don\'t have an account.  If you forgot your password, <a href="/password-reset-1">click here</a> and we\'ll send you a new one.', 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
@@ -214,8 +214,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	$email = '';
-	if (isset($get_vars['e'])) {
-		$e = rawurldecode($get_vars['e']);
+	if (isset($input['e'])) {
+		$e = rawurldecode($input['e']);
 		if (LibraryFunctions::IsValidEmail($e)) {
 			$page_vars['email'] = $e;
 		}

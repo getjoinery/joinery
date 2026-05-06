@@ -1,6 +1,6 @@
 <?php
 
-function test_logic($get_vars, $post_vars) {
+function test_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
@@ -16,7 +16,7 @@ function test_logic($get_vars, $post_vars) {
 	}
 	$session->check_permission(0);
 
-	$device_id = isset($get_vars['device_id']) ? (int)$get_vars['device_id'] : 0;
+	$device_id = isset($input['device_id']) ? (int)$input['device_id'] : 0;
 	if (!$device_id) {
 		return LogicResult::redirect('/profile/dns_filtering/devices');
 	}

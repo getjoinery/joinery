@@ -1,14 +1,12 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
-function video_logic($get_vars, $post_vars, $video, $params){
-	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+function video_logic(array $input): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/videos_class.php'));
 
 	$session = SessionControl::get_instance();
+	$page_vars = [];
 	$page_vars['session'] = $session;
 
 
@@ -17,13 +15,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	if(!$settings->get_setting('videos_active')){
 		return LogicResult::error('This feature is turned off');
 	}
-	
+
+	$video = null;
+	if (!empty($input['slug'])) {
+		$video = Video::get_by_link($input['slug']);
+	}
+	if (!$video || !$video->key) {
+		require_once(LibraryFunctions::display_404_page());
+	}
 	$page_vars['video'] = $video;
 
-	if($params[0] != 'video' || !$video){
-		require_once(LibraryFunctions::display_404_page());	
-	}
-	
 	if ($session->get_user_id() && $session->get_permission() > 4) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}

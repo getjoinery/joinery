@@ -5,7 +5,7 @@
  * @version 2.0
  */
 
-function profile_logic($get_vars, $post_vars){
+function profile_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -32,11 +32,11 @@ function profile_logic($get_vars, $post_vars){
 	$session->set_return();
 
 	// Activation code handling
-	if (isset($get_vars['act_code']) && $get_vars['act_code']) {
+	if (isset($input['act_code']) && $input['act_code']) {
 		if ($user_id = $session->get_user_id()) {
-			$activated_user = Activation::ActivateUser($get_vars['act_code'], $user_id);
+			$activated_user = Activation::ActivateUser($input['act_code'], $user_id);
 		} else {
-			$activated_user = Activation::ActivateUser($get_vars['act_code']);
+			$activated_user = Activation::ActivateUser($input['act_code']);
 		}
 	}
 

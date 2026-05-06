@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-	function blog_logic ($get_vars, $post_vars) {
+	function blog_logic(array $input): LogicResult {
 		$page_vars = array();
 		
 		require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
@@ -22,9 +22,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		
 		
 		$numperpage = 10;
-		$page_offset = LibraryFunctions::fetch_variable_local($get_vars, 'offset', 0, 'notrequired', '', 'safemode', 'int');
-		$page_sort = LibraryFunctions::fetch_variable_local($get_vars, 'sort', 'post_id', 0, 'notrequired', 'safemode', 'int');	
-		$page_direction = LibraryFunctions::fetch_variable_local($get_vars, 'sdirection', 'DESC', 'notrequired', '', 'safemode', 'string');
+		$page_offset = LibraryFunctions::fetch_variable_local($input, 'offset', 0, 'notrequired', '', 'safemode', 'int');
+		$page_sort = LibraryFunctions::fetch_variable_local($input, 'sort', 'post_id', 0, 'notrequired', 'safemode', 'int');	
+		$page_direction = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'DESC', 'notrequired', '', 'safemode', 'string');
 		
 
 		
