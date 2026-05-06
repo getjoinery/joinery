@@ -40,4 +40,15 @@ function orders_recurring_action_logic_api() {
 		'description' => 'Recurring order action',
 	];
 }
+
+function orders_recurring_action_logic_descriptor(): array {
+	return [
+		'description'      => 'Execute a recurring-order action (cancel, reactivate, etc.) for an order item.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'order_item_id' => ['type' => 'int', 'required' => true, 'label' => 'Order item ID'],
+		],
+	];
+}
 ?>

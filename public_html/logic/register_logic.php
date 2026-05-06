@@ -135,4 +135,19 @@ function register_logic_api() {
         'description' => 'Register a new user account',
     ];
 }
+
+function register_logic_descriptor(): array {
+	return [
+		'description'      => 'Create a new user account.',
+		'requires_session' => false,
+		'mutates'          => true,
+		'input'            => [
+			'usr_email' => ['type' => 'email', 'required' => true, 'label' => 'Email address'],
+			'usr_first_name' => ['type' => 'string', 'required' => true, 'label' => 'First name'],
+			'usr_last_name' => ['type' => 'string', 'required' => true, 'label' => 'Last name'],
+			'password' => ['type' => 'password', 'required' => true, 'label' => 'Password'],
+			'setcookie' => ['type' => 'bool', 'required' => false, 'label' => 'Remember me'],
+		],
+	];
+}
 ?>

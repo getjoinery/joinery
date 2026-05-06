@@ -117,4 +117,19 @@ function event_waiting_list_logic_api() {
 		'description' => 'Join event waiting list',
 	];
 }
+
+function event_waiting_list_logic_descriptor(): array {
+	return [
+		'description'      => 'Add the current user (or a guest) to an event\'s waiting list.',
+		'requires_session' => false,
+		'mutates'          => true,
+		'input'            => [
+			'event_id' => ['type' => 'int', 'required' => true, 'label' => 'Event ID'],
+			'usr_first_name' => ['type' => 'string', 'required' => false, 'label' => 'First name (guests)'],
+			'usr_last_name' => ['type' => 'string', 'required' => false, 'label' => 'Last name (guests)'],
+			'usr_email' => ['type' => 'email', 'required' => false, 'label' => 'Email (guests)'],
+			'newsletter' => ['type' => 'bool', 'required' => false, 'label' => 'Subscribe to newsletter'],
+		],
+	];
+}
 ?>

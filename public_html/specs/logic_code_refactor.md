@@ -37,6 +37,8 @@ Already specced in [`fix_legacy_logic_files.md`](fix_legacy_logic_files.md). Mus
 
 **Complexity: low**
 
+**Codebase survey result (2026-05-06): largely inapplicable.** Single-column toggles (activate/deactivate, enable/disable) are already trivially handled by `set()`/`save()` and don't warrant a model method. The only multi-field candidates found (`Question::publish()` sets flag + timestamp; `Email::unqueue()` resets status + deletes recipients) are marginal. All genuinely interesting transitions (booking cancel, subscription cancellation, event withdrawal) are entangled with Stripe or email and don't qualify. Step 2 is effectively done — the right boundary already exists. Apply the pattern if a new transition with a real guard condition and multiple fields emerges.
+
 Some logic files contain operations that are really just changing one entity's own state — no external API calls, no cross-system side effects, no multi-entity orchestration. These belong on the model, not in logic files.
 
 ### What qualifies

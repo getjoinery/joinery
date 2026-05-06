@@ -87,4 +87,16 @@ function change_password_required_logic_api() {
         'description' => 'Forced password change',
     ];
 }
+
+function change_password_required_logic_descriptor(): array {
+	return [
+		'description'      => 'Satisfy a forced password-change requirement for admin users.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'new_password' => ['type' => 'password', 'required' => true, 'label' => 'New password'],
+			'confirm_password' => ['type' => 'password', 'required' => true, 'label' => 'Confirm password'],
+		],
+	];
+}
 ?>

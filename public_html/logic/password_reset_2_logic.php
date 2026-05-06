@@ -74,4 +74,17 @@ function password_reset_2_logic_api() {
         'description' => 'Set new password via reset code',
     ];
 }
+
+function password_reset_2_logic_descriptor(): array {
+	return [
+		'description'      => 'Set a new password using a one-time reset code.',
+		'requires_session' => false,
+		'mutates'          => true,
+		'input'            => [
+			'act_code' => ['type' => 'string', 'required' => true, 'label' => 'Reset code'],
+			'usr_password' => ['type' => 'password', 'required' => true, 'label' => 'New password'],
+			'usr_password_again' => ['type' => 'password', 'required' => true, 'label' => 'Confirm new password'],
+		],
+	];
+}
 ?>

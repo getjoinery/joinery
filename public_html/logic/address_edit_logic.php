@@ -92,4 +92,21 @@ function address_edit_logic_api() {
         'description' => 'Update address',
     ];
 }
+
+function address_edit_logic_descriptor(): array {
+	return [
+		'description'      => 'Create or update the current user\'s address.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'edit_primary_key_value' => ['type' => 'int', 'required' => false, 'label' => 'Address ID (omit to create)'],
+			'usa_cco_country_code_id' => ['type' => 'string', 'required' => false, 'label' => 'Country'],
+			'usa_address1' => ['type' => 'string', 'required' => false, 'label' => 'Address line 1'],
+			'usa_address2' => ['type' => 'string', 'required' => false, 'label' => 'Address line 2'],
+			'usa_city' => ['type' => 'string', 'required' => false, 'label' => 'City'],
+			'usa_state' => ['type' => 'string', 'required' => false, 'label' => 'State / province'],
+			'usa_zip_code_id' => ['type' => 'string', 'required' => false, 'label' => 'Postal code'],
+		],
+	];
+}
 ?>

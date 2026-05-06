@@ -79,4 +79,15 @@ function contact_preferences_logic_api() {
         'description' => 'Update contact preferences',
     ];
 }
+
+function contact_preferences_logic_descriptor(): array {
+	return [
+		'description'      => 'Update the user\'s mailing list subscriptions.',
+		'requires_session' => true,
+		'mutates'          => true,
+		'input'            => [
+			'new_list_subscribes' => ['type' => 'string', 'required' => false, 'label' => 'Mailing list IDs to subscribe to (array)'],
+		],
+	];
+}
 ?>
