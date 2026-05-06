@@ -15,7 +15,7 @@ $session->set_return();
 
 $numperpage = 30;
 $offset = (int)LibraryFunctions::fetch_variable_local($_GET, 'offset', 0);
-$filter_recipe_id = (int)LibraryFunctions::fetch_variable_local($_GET, 'rcp_recipe_id', 0);
+$filter_recipe_id = (int)LibraryFunctions::fetch_variable_local($_GET, 'filter', 0);
 
 $search = ['deleted' => false];
 if ($filter_recipe_id > 0) {
@@ -31,25 +31,13 @@ $runs = new MultiRecipeRun(
 $numrecords = $runs->count_all();
 $runs->load();
 
-// Eager-load recipe names to avoid N+1.
-$recipe_names = [];
-if (count($runs)) {
-    $ids = [];
-    foreach ($runs as $r) $ids[(int)$r->get('rcr_rcp_recipe_id')] = true;
-    if ($ids) {
-        $db = DbConnector::get_instance()->get_db_link();
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $q = $db->prepare("SELECT rcp_recipe_id, rcp_name FROM rcp_recipes WHERE rcp_recipe_id IN ($placeholders)");
-        $q->execute(array_keys($ids));
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $recipe_names[(int)$row['rcp_recipe_id']] = $row['rcp_name'];
-        }
-    }
-}
-
-// Filter dropdown options.
+// Recipe names for the filter dropdown and the rows in the table.
 $all_recipes = new MultiRecipe(['deleted' => false], ['rcp_name' => 'ASC']);
 $all_recipes->load();
+$recipe_names = [];
+foreach ($all_recipes as $r) {
+    $recipe_names[(int)$r->key] = $r->get('rcp_name');
+}
 
 // Auto-refresh while any visible run is still in flight.
 $any_in_flight = false;
@@ -78,34 +66,18 @@ $page->admin_header([
     'session' => $session,
 ]);
 
-// Filter bar
-?>
-<div class="card mb-3"><div class="card-body">
-    <form method="get" class="row g-2 align-items-end">
-        <div class="col-auto">
-            <label class="form-label">Recipe</label>
-            <select name="rcp_recipe_id" class="form-select form-select-sm">
-                <option value="">All recipes</option>
-                <?php foreach ($all_recipes as $r): ?>
-                    <option value="<?php echo (int)$r->key; ?>"<?php echo $filter_recipe_id == $r->key ? ' selected' : ''; ?>>
-                        <?php echo htmlspecialchars($r->get('rcp_name')); ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-auto">
-            <button type="submit" class="btn btn-sm btn-primary">Filter</button>
-            <?php if ($filter_recipe_id): ?>
-                <a href="/admin/joinery_ai/runs" class="btn btn-sm btn-outline-secondary">Clear</a>
-            <?php endif; ?>
-        </div>
-    </form>
-</div></div>
-<?php
-
 $pager = new Pager(['numrecords' => $numrecords, 'numperpage' => $numperpage]);
+
+$filter_options = ['All recipes' => 0];
+foreach ($all_recipes as $r) {
+    $filter_options[$r->get('rcp_name')] = (int)$r->key;
+}
+
 $headers = ['Run', 'Recipe', 'Status', 'Trigger', 'Started', 'Duration', 'Tokens', 'Cost'];
-$page->tableheader($headers, ['title' => 'Runs (' . $numrecords . ')'], $pager);
+$page->tableheader($headers, [
+    'title'         => 'Runs',
+    'filteroptions' => $filter_options,
+], $pager);
 
 foreach ($runs as $run) {
     $row = [];
@@ -114,7 +86,7 @@ foreach ($runs as $run) {
 
     $rcp_id = (int)$run->get('rcr_rcp_recipe_id');
     $rname = $recipe_names[$rcp_id] ?? '(deleted)';
-    $row[] = '<a href="/admin/joinery_ai/runs?rcp_recipe_id=' . $rcp_id . '">' . htmlspecialchars($rname) . '</a>';
+    $row[] = htmlspecialchars($rname);
 
     $status = $run->get('rcr_status');
     $badge = 'secondary';
