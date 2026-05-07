@@ -19,6 +19,17 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 **CRITICAL:** NEVER commit to git unless explicitly directed to by the user. File changes are allowed, but git commits require explicit user permission.
 
+## Secret Handling Rules
+
+**CRITICAL:** NEVER echo, print, log, or otherwise surface passwords, API keys, tokens, or other credentials into the chat transcript when it can be avoided. This includes:
+
+- **Do not print a secret just to "confirm" it** — say "password read from Globalvars" instead of pasting the value.
+- **Do not include a secret in a tool-result summary** if the tool already handled it. The raw tool output may contain it (unavoidable when reading a config file), but your own text to the user should not repeat it.
+- **When passing a password to a command**, prefer mechanisms that don't echo it: env vars set on the remote side (`ssh host 'docker exec X bash -c "export PGPASSWORD=\$POSTGRES_PASSWORD && ..."'`), password files with `--password-file`, or piping via stdin — not positional arguments that show up in logs.
+- **If a secret slips into a response**, flag it to the user so they can decide whether to rotate.
+
+The goal is minimizing the blast radius if a transcript is shared, archived, or logged. Reading a secret from a file into a tool call is fine; narrating its value back to the user is not.
+
 ## File Permissions
 
 This is a development server. When creating new files, set liberal permissions to avoid access issues:
@@ -127,7 +138,7 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 
 **Three things to know about routing:**
 1. **Adding a page requires no route config.** Create `views/foo.php` and `/foo` works automatically. Add `logic/foo_logic.php` for business logic — it's auto-loaded.
-2. **You only need a serve.php route** for model-based routes (`/post/{slug}`), feature flags (`check_setting`), permission gates (`min_permission`), wildcards (`/admin/*`), or custom logic.
+2. **You only need a serve.php route** for URL placeholders (`/post/{slug}`), feature flags (`check_setting`), permission gates (`min_permission`), wildcards (`/admin/*`), or custom logic.
 3. **Views resolve through the theme chain:** `theme/{theme}/views/` → `plugins/{plugin}/views/` → `views/` → 404.
 
 **📖 [Routing Documentation](docs/routing.md)** — Full guide with route options, common patterns, and debugging
@@ -140,7 +151,9 @@ See `/docs/` for detailed guides on specific subsystems:
 
 - [Admin Pages](docs/admin_pages.md) - Admin interface development patterns
 - [Admin Page Reference](docs/admin_page_reference.md) - Quick reference for admin pages
+- [Analytics](docs/analytics.md) - Visitor events, conversion tracking, and attribution reporting
 - [API](docs/api.md) - REST API authentication, endpoints, and usage
+- [Cloud Storage](docs/cloud_storage.md) - S3-compatible cloud bucket for public uploaded files
 - [Component System](docs/component_system.md) - Reusable component architecture
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
@@ -152,17 +165,20 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
 - [Photo System](docs/photo_system.md) - Photo management and uploads
 - [Plugin Developer Guide](docs/plugin_developer_guide.md) - Plugin development, routing, themes
+- [Product Requirements](docs/product_requirements.md) - Collecting data from buyers at checkout (built-in and custom requirement types)
 - [Routing](docs/routing.md) - URL routing, view fallback, route configuration
 - [Product Purchase Hooks](docs/product_purchase_hooks.md) - Purchase event hooks
 - [Publish/Upgrade System Analysis](docs/publish_upgrade_system_analysis.md) - Publishing workflow
 - [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
 - [Scheduled Tasks](docs/scheduled_tasks.md) - Scheduled task system, cron runner, and task development
 - [ScrollDaddy Plugin](docs/scrolldaddy_plugin.md) - DNS filtering service: unified block model, tier gating, editor UI, and resolver flow
+- [SEO Metadata](docs/seo_metadata.md) - SEO, Open Graph, and Twitter Card tag conventions for public views
 - [Server Manager](docs/server_manager.md) - Remote server management plugin and Go agent
 - [Settings](docs/settings.md) - System settings management
 - [Social Features](docs/social_features.md) - Like/favorite system, block system, report system, messaging/conversations
 - [Subscription Tiers](docs/subscription_tiers.md) - Subscription and tier system
 - [Theme Integration Instructions](docs/theme_integration_instructions.md) - Theme setup and integration
+- [Questions & Surveys](docs/questions_surveys.md) - Built-in questionnaire system: question types, surveys, answer storage
 - [Validation](docs/validation.md) - Input validation patterns
 
 ## Database & Configuration
@@ -174,6 +190,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - `$settings = Globalvars::get_instance()` - Get settings singleton
 - `$settings->get_setting('setting_name')` - Get configuration value
 - **Note:** There is no `set_setting()` method - see `/adm/admin_settings.php` for how to change settings
+- Plugin-owned settings with factory defaults are declared in the plugin's `plugin.json` under `settings`. Core settings with factory defaults are declared in `settings.json` at the `public_html/` root. Both are seeded into `stg_settings` automatically; no migrations needed. See `docs/plugin_developer_guide.md#plugin-settings-declarative`.
 
 ### Important Settings
 - **composerAutoLoad**: Path to vendor directory (e.g., `/home/user1/vendor/`)
@@ -209,6 +226,7 @@ class TableName extends SystemBase {
     
     // Data Access Methods
     function get($key);
+    function get_json_decoded($key);  // opt-in JSON decode helper — normalizes the string-post-load vs. array-post-set() asymmetry on JSON columns; returns raw string on decode failure
     function set($key, $value, $check_existance = TRUE);
     function export_as_array();
     
@@ -539,33 +557,10 @@ This is the live test server where changes can be verified in a browser.
 **Log In As Another User:**
 Navigate to `/admin/admin_user_login_as?usr_user_id={id}` while logged in as a permission-10 admin. This switches the session to that user and redirects to `/`. To find a user's ID, go to `/admin/admin_users` and click the user — the URL will show `?usr_user_id=N`.
 
-### Docker Production Server (docker-prod)
-**IP:** `23.239.11.53`
-**SSH Key:** `~/.ssh/id_ed25519_claude` (no passphrase)
+### Production Servers
+For the full list of managed nodes (IPs, containers, SSH details), see the Server Manager dashboard at `/admin/server_manager`. All node connection info is stored there.
 
-Production Docker server hosting multiple client sites. Each site runs in its own container.
-
-**Claude superuser** (permission 10, exists on all containers): See Claude memory for credentials.
-
-**Containers:**
-- `empoweredhealthtn` - Empowered Health (empoweredhealthtn.com)
-- `scrolldaddy` - ScrollDaddy web app (port 8087); DB exposed on port 9087
-
-### ScrollDaddy DNS Servers
-**Source code:** `/home/user1/scrolldaddy-dns/` (Go project — this is the authoritative repo, NOT `/tmp/scrolldaddy-dns/` on the DNS server)
-**Primary:** `45.56.103.84` | **Secondary:** `97.107.131.227` | **SSH Key:** `~/.ssh/id_ed25519_claude`
-**Ops guide:** `/etc/scrolldaddy/OPS_GUIDE.md` on each server — full config, file locations, deploy steps, and troubleshooting
-
-**Deploy (build installer locally, copy to server, run):**
-```bash
-cd /home/user1/scrolldaddy-dns
-make release VERSION=1.x.x
-scp scrolldaddy-dns-installer.sh root@45.56.103.84:/tmp/
-ssh root@45.56.103.84 bash /tmp/scrolldaddy-dns-installer.sh --verbose
-scp scrolldaddy-dns-installer.sh root@97.107.131.227:/tmp/
-ssh root@97.107.131.227 bash /tmp/scrolldaddy-dns-installer.sh --verbose
-```
-The installer auto-detects install vs upgrade. On fresh install it prompts to edit `/etc/scrolldaddy/scrolldaddy.env` before starting. On upgrade it stops, swaps binary, restarts, and auto-rolls back on failure.
+For ScrollDaddy DNS server IPs, deploy procedure, and ops guide location, see Claude memory (`reference_scrolldaddy_infra.md`).
 
 ### Browser Testing (MCP)
 A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
@@ -640,9 +635,6 @@ sudo systemctl status apache2
 sudo systemctl restart apache2
 ```
 
-### Theme Reference Files
-Commercial theme source files (HTML demos, docs) are stored at `/home/user1/theme-sources/` and symlinked into the web root at `public_html/theme-sources/` (gitignored). Browse them at `https://joinerytest.site/theme-sources/`. Currently available: Canvas 7.
-
 ### Test Server Monitoring
 **Usage Pattern:**
 1. Make code changes
@@ -665,8 +657,9 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 3. **Method Existence Validation**: ALWAYS run validate_php_file.php on created/modified PHP files and investigate any flagged issues before completion
 4. **Method Verification**: NEVER assume available functions - always check class definitions first
 5. **Security**: Always validate and sanitize user input
-6. **FormWriter**: Always use FormWriter class for forms
-7. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
+6. **FormWriter**: NEVER write hand-rolled HTML forms. Always use FormWriter for every form in the platform — it handles validation styling, CSRF, `novalidate`/`is-invalid` integration, and consistent UX automatically. See **📖 [FormWriter Documentation](docs/formwriter.md)**. The only exception is single-button action forms (a `<form>` with only hidden inputs and a submit button) that trigger a server action with no user-entered fields.
+7. **Data Collection**: NEVER write custom scripts or ad-hoc forms to collect data from users. Use **Questions/Surveys** (`/admin/admin_questions`, `/admin/admin_surveys`) for standalone questionnaires, and **Product Requirements** (attached to products via the admin product edit page) for data collected at purchase time. See **📖 [Questions & Surveys](docs/questions_surveys.md)** and **📖 [Product Requirements](docs/product_requirements.md)**. Only reach for custom code if these systems genuinely cannot accommodate the use case.
+8. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
 8. **Version Numbers**: ALWAYS look for version numbers in files when making changes and increment them appropriately
 
 ## Security Notes
@@ -688,7 +681,7 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 **RouteHelper** - Manages URL routing and file serving for the front controller system
 - `processRoutes($routes, $request_path)` - Main route processing with pattern matching
 - `handleStaticRoute($route, $params, $template_directory)` - Serve static assets with caching
-- `handleDynamicRoute($route, $params, $template_directory)` - Handle view and model-based routes
+- `handleDynamicRoute($route, $params, $template_directory)` - Handle view routes with optional URL placeholders
 - `extractRouteParams($pattern, $path)` - Extract parameters from URL patterns
 - `serveStaticFile($file_path, $cache_seconds)` - Serve files with HTTP caching headers
 
