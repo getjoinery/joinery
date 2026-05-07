@@ -21,6 +21,12 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	public static $tablename = 'odi_order_items';
 	public static $pkey_column = 'odi_order_item_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Line items within the user\'s orders.';
+	public static $ai_owner_field     = 'odi_usr_user_id';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'odi_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'odi_pro_product_id' => ['action' => 'prevent', 'message' => 'Cannot delete product - order items exist'],

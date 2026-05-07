@@ -18,6 +18,12 @@ class ProductRequirement extends SystemBase {	public static $prefix = 'prq';
 	public static $tablename = 'prq_product_requirements';
 	public static $pkey_column = 'prq_product_requirement_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Required data fields a buyer must complete at checkout for a product.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

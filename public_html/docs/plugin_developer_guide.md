@@ -282,6 +282,8 @@ class MyData extends SystemBase {
 
 **Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, soft-delete cascading patterns, and undelete strategies, see the [Deletion System Documentation](deletion_system.md).
 
+**AI Auto-Discovery**: To make a plugin model queryable by joinery_ai recipes, declare the four `$ai_*` static properties (`$ai_readable`, `$ai_description`, `$ai_owner_field`, `$ai_excluded_fields`) on the class. Default-deny: omit them and the model stays invisible to AI tools. See the [Joinery AI Plugin Documentation](joinery_ai.md) for the property contract, the auto-block regex, and forward-compat owner-scoping semantics.
+
 ### Business Logic Files
 
 Plugin logic files follow the same LogicResult pattern as core logic files. Every logic file in the codebase — core or plugin — uses one signature: `function foo_logic(array $input): LogicResult`. There is no second variant. For comprehensive documentation, see the [Logic Architecture Guide](logic_architecture.md).

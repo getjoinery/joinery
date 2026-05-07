@@ -16,6 +16,12 @@ class Survey extends SystemBase {	public static $prefix = 'svy';
 	public static $tablename = 'svy_surveys';
 	public static $pkey_column = 'svy_survey_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Admin-curated surveys.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

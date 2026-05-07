@@ -15,6 +15,12 @@ class AddressTravelMismatchException extends DisplayableAddressException {}
 class Address extends SystemBase {	public static $prefix = 'usa';
 	public static $tablename = 'usa_users_addrs';
 	public static $pkey_column = 'usa_users_addr_id';
+
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Mailing or billing addresses attached to user accounts.';
+	public static $ai_owner_field     = 'usa_usr_user_id';
+	public static $ai_excluded_fields = [];
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	const PRIVACY_SHOW_ALL = 1;

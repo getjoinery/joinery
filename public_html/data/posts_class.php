@@ -17,6 +17,12 @@ class PostException extends SystemBaseException {}
 class Post extends SystemBase {	public static $prefix = 'pst';
 	public static $tablename = 'pst_posts';
 	public static $pkey_column = 'pst_post_id';
+
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Public blog posts.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
 	public static $url_namespace = 'post';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [

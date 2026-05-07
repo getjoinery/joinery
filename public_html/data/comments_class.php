@@ -13,6 +13,12 @@ class Comment extends SystemBase {	public static $prefix = 'cmt';
 	public static $tablename = 'cmt_comments';
 	public static $pkey_column = 'cmt_comment_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Comments authored by users on posts and other content.';
+	public static $ai_owner_field     = 'cmt_usr_user_id';
+	public static $ai_excluded_fields = [];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

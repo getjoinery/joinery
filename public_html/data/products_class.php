@@ -26,6 +26,12 @@ class Product extends SystemBase {
 	public static $prefix = 'pro';
 	public static $tablename = 'pro_products';
 	public static $pkey_column = 'pro_product_id';
+
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Products available for purchase.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = ['pro_stripe_product_id', 'pro_stripe_product_id_test', 'pro_product_scripts'];
 	public static $url_namespace = 'product';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [

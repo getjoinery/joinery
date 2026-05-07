@@ -38,6 +38,12 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	public static $tablename = 'evr_event_registrants';
 	public static $pkey_column = 'evr_event_registrant_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'The user\'s registrations for events.';
+	public static $ai_owner_field     = 'evr_usr_user_id';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'evr_grp_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete group - event registrations exist'],
 		'evr_ord_order_id' => ['action' => 'null']

@@ -18,6 +18,12 @@ class EntityPhoto extends SystemBase {
 	public static $tablename = 'eph_entity_photos';
 	public static $pkey_column = 'eph_entity_photo_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Photos attached to events, locations, products, and other entities.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 	public static $field_specifications = array(
 		'eph_entity_photo_id' => array('type'=>'int4', 'is_nullable'=>false, 'serial'=>true),
 		'eph_entity_type' => array('type'=>'varchar(50)', 'is_nullable'=>false, 'required'=>true),

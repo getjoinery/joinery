@@ -16,6 +16,12 @@ class ConversationParticipant extends SystemBase {
 	public static $tablename = 'cnp_conversation_participants';
 	public static $pkey_column = 'cnp_conversation_participant_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'The user\'s participation in a conversation (read state, mute setting). Does not include message bodies.';
+	public static $ai_owner_field     = 'cnp_usr_user_id';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'cnp_usr_user_id' => ['action' => 'permanent_delete'],
 		'cnp_cnv_conversation_id' => ['action' => 'permanent_delete']

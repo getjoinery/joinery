@@ -1,0 +1,93 @@
+<?php
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelQueryExecutor.php'));
+
+/**
+ * Run a filtered read against an AI-readable model. Field names come from
+ * describe_models. Soft-deleted rows are excluded automatically.
+ *
+ * Filter operators (suffixed on the field name):
+ *   field          equality
+ *   field_like     ILIKE '%value%'
+ *   field_after    >= (timestamps)
+ *   field_before   <=
+ *   field_min      >= (numerics)
+ *   field_max      <=
+ */
+class QueryModelTool implements RecipeToolInterface {
+
+    public static function name(): string {
+        return 'query_model';
+    }
+
+    public static function description(): string {
+        return 'Query rows from a readable data model. Filters use field '
+             . 'names exactly as shown by describe_models. Default operator '
+             . 'is equality; suffix the field name with _like (substring), '
+             . '_after / _min (>=), or _before / _max (<=) for ranges. '
+             . 'Soft-deleted rows are excluded automatically. Default limit '
+             . 'is 50, max is 200.';
+    }
+
+    public static function inputSchema(): array {
+        return [
+            'type' => 'object',
+            'required' => ['model'],
+            'properties' => [
+                'model' => [
+                    'type' => 'string',
+                    'description' => 'The model class name (e.g. "EventRegistrant", "Order"). Use describe_models to discover.',
+                ],
+                'filters' => [
+                    'type' => 'object',
+                    'description' => 'Field => value pairs. Suffix the field name with _like, _after, _before, _min, _max for non-equality operators.',
+                ],
+                'sort' => [
+                    'type' => 'object',
+                    'description' => 'Field => "ASC" or "DESC". Order in the object is significant.',
+                ],
+                'limit' => [
+                    'type' => 'integer',
+                    'description' => 'Max rows to return (1–200, default 50).',
+                    'minimum' => 1,
+                    'maximum' => 200,
+                ],
+                'fields' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string'],
+                    'description' => 'Optional list of fields to include. Default is all readable fields. Unknown or blocked fields are silently dropped.',
+                ],
+            ],
+        ];
+    }
+
+    public function execute(array $input, RecipeRunContext $ctx) {
+        $model = (string)($input['model'] ?? '');
+        if ($model === '') {
+            return ['content' => "Missing 'model' parameter.", 'is_error' => true];
+        }
+
+        $filters = isset($input['filters']) && is_array($input['filters']) ? $input['filters'] : [];
+        $sort    = isset($input['sort'])    && is_array($input['sort'])    ? $input['sort']    : [];
+        $limit   = isset($input['limit'])   ? (int)$input['limit']         : null;
+        $fields  = isset($input['fields'])  && is_array($input['fields'])  ? $input['fields']  : null;
+
+        try {
+            $rows = ModelQueryExecutor::query($model, $filters, $sort, $limit, $fields, $ctx);
+        } catch (InvalidArgumentException $e) {
+            return ['content' => $e->getMessage(), 'is_error' => true];
+        } catch (Throwable $e) {
+            error_log('[joinery_ai] query_model failed: ' . $e->getMessage());
+            return ['content' => 'Query failed: ' . $e->getMessage(), 'is_error' => true];
+        }
+
+        if (empty($rows)) {
+            return 'No rows match.';
+        }
+        $count = count($rows);
+        $header = $count . ' row' . ($count === 1 ? '' : 's') . ' returned:';
+        return $header . "\n\n" . json_encode($rows, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+
+}

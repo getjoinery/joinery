@@ -17,6 +17,12 @@ class SdDevice extends SystemBase {
 	public static $tablename = 'sdd_devices';
 	public static $pkey_column = 'sdd_device_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'DNS-filtering devices the user has registered.';
+	public static $ai_owner_field     = 'sdd_usr_user_id';
+	public static $ai_excluded_fields = ['sdd_deactivation_pin', 'sdd_resolver_uid'];
+
 	protected static $foreign_key_actions = [
 		'sdd_usr_user_id' => ['action' => 'permanent_delete'],
 	];

@@ -17,6 +17,12 @@ class Group extends SystemBase {	public static $prefix = 'grp';
 	public static $tablename = 'grp_groups';
 	public static $pkey_column = 'grp_group_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Groups the user has created (mailing lists, member groups, etc.).';
+	public static $ai_owner_field     = 'grp_usr_user_id_created';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'grp_usr_user_id_created' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
