@@ -20,7 +20,6 @@ class QuestionOption extends SystemBase {	public static $prefix = 'qop';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Answer choices for multiple-choice questions.';
-	public static $ai_owner_field     = null;
 	public static $ai_excluded_fields = [];
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 

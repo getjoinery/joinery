@@ -21,7 +21,6 @@ class ProductRequirement extends SystemBase {	public static $prefix = 'prq';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Required data fields a buyer must complete at checkout for a product.';
-	public static $ai_owner_field     = null;
 	public static $ai_excluded_fields = [];
 
 		/**

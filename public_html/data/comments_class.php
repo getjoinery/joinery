@@ -16,7 +16,6 @@ class Comment extends SystemBase {	public static $prefix = 'cmt';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Comments authored by users on posts and other content.';
-	public static $ai_owner_field     = 'cmt_usr_user_id';
 	public static $ai_excluded_fields = [];
 
 		/**

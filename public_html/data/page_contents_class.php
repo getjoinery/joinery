@@ -27,7 +27,6 @@ class PageContent extends SystemBase {
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Component blocks rendered on public pages.';
-	public static $ai_owner_field     = null;
 	public static $ai_excluded_fields = [];
 
 	// A/B testing opt-in. pac_config is deferred for now (component-specific schema).

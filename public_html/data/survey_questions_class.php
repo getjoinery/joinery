@@ -19,7 +19,6 @@ class SurveyQuestion extends SystemBase {	public static $prefix = 'srq';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Questions associated with a survey (joins Question to Survey).';
-	public static $ai_owner_field     = null;
 	public static $ai_excluded_fields = [];
 
 		/**

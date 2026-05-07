@@ -17,7 +17,6 @@ class SubscriptionTier extends SystemBase {
     // AI auto-discovery (read)
     public static $ai_readable        = true;
     public static $ai_description     = 'Membership tier definitions (free, paid tiers, etc.).';
-    public static $ai_owner_field     = null;
     public static $ai_excluded_fields = [];
 
     public static $field_specifications = array(

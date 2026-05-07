@@ -20,7 +20,6 @@ class Group extends SystemBase {	public static $prefix = 'grp';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Groups the user has created (mailing lists, member groups, etc.).';
-	public static $ai_owner_field     = 'grp_usr_user_id_created';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [

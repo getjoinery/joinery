@@ -21,7 +21,6 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s purchase orders.';
-	public static $ai_owner_field     = 'ord_usr_user_id';
 	public static $ai_excluded_fields = ['ord_raw_response', 'ord_raw_cart', 'ord_serialized_cart', 'ord_error', 'ord_stripe_session_id', 'ord_stripe_payment_intent_id', 'ord_stripe_charge_id', 'ord_stripe_invoice_id', 'ord_stripe_subscription_id_temp', 'ord_paypal_order_id'];
 
 	protected static $foreign_key_actions = [

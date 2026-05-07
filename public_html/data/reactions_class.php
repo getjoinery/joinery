@@ -23,7 +23,6 @@ class Reaction extends SystemBase {
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s emoji reactions on posts and comments.';
-	public static $ai_owner_field     = 'rct_usr_user_id';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [

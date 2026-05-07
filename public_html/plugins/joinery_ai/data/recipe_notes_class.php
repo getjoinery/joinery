@@ -13,7 +13,6 @@ class RecipeNote extends SystemBase {
     // AI auto-discovery (read)
     public static $ai_readable        = true;
     public static $ai_description     = 'Notes written by the AI or by the user inside a recipe.';
-    public static $ai_owner_field     = 'rcn_owner_user_id';
     public static $ai_excluded_fields = [];
 
     public static $field_specifications = array(

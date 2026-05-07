@@ -19,7 +19,6 @@ class ConversationParticipant extends SystemBase {
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s participation in a conversation (read state, mute setting). Does not include message bodies.';
-	public static $ai_owner_field     = 'cnp_usr_user_id';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [

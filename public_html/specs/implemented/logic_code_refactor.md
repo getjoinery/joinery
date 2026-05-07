@@ -21,7 +21,7 @@ After this work: write a business action once, give it a descriptor, and it is a
 
 - [`fix_legacy_logic_files.md`](fix_legacy_logic_files.md) — prerequisite: removes the three logic files with top-level executable code
 - [`joinery_ai_autodiscovery.md`](joinery_ai_autodiscovery.md) — the AI model auto-discovery surface; steps here unlock the action surface
-- [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md) — write tool design for AI; depends on steps 4–5 here
+- [`joinery_ai_write_tools.md`](../joinery_ai_write_tools.md) — write tool design for AI; depends on steps 4–5 here
 
 ---
 

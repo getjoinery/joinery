@@ -282,7 +282,7 @@ class MyData extends SystemBase {
 
 **Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, soft-delete cascading patterns, and undelete strategies, see the [Deletion System Documentation](deletion_system.md).
 
-**AI Auto-Discovery**: To make a plugin model queryable by joinery_ai recipes, declare the four `$ai_*` static properties (`$ai_readable`, `$ai_description`, `$ai_owner_field`, `$ai_excluded_fields`) on the class. Default-deny: omit them and the model stays invisible to AI tools. See the [Joinery AI Plugin Documentation](joinery_ai.md) for the property contract, the auto-block regex, and forward-compat owner-scoping semantics.
+**AI Auto-Discovery**: To make a plugin model queryable by joinery_ai recipes, declare the three `$ai_*` static properties (`$ai_readable`, `$ai_description`, `$ai_excluded_fields`) on the class. Default-deny: omit them and the model stays invisible to AI tools. See the [Joinery AI Plugin Documentation](joinery_ai.md) for the property contract and the auto-block regex.
 
 ### Business Logic Files
 
