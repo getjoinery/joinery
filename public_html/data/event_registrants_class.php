@@ -41,7 +41,6 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s registrations for events.';
-	public static $ai_owner_field     = 'evr_usr_user_id';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [

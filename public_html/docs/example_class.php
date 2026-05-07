@@ -40,9 +40,6 @@ class Example extends SystemBase
     // reading from it.
     public static $ai_readable        = true;
     public static $ai_description     = 'Example records used to demonstrate the data-model template.';
-    public static $ai_owner_field     = 'exm_created_by';  // user-id column, or null for public/admin metadata.
-                                                            // Currently inert metadata; the executor begins
-                                                            // honouring it when end-user recipes ship.
     public static $ai_excluded_fields = [];                 // Per-model blocklist for sensitive columns.
                                                             // Auto-block regex /_(password|secret|key|token|hash)$/i
                                                             // applies on top, so list only columns it misses
@@ -54,7 +51,7 @@ class Example extends SystemBase
     // does nothing until create_model / update_model / delete_model ship.
     // Only opt in when the model's prepare()/save() field-level rules are
     // the *entire* validation gauntlet (no cross-record invariants, no
-    // payment effects, no hook firings). See specs/implemented/joinery_ai_autodiscovery.md.
+    // payment effects, no hook firings). See specs/joinery_ai_write_tools.md.
     // public static $ai_writable_fields = ['exm_name', 'exm_description'];
 
     // REQUIRED: Field definitions - controls database schema

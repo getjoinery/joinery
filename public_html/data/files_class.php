@@ -20,7 +20,6 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Files the user has uploaded.';
-	public static $ai_owner_field     = 'fil_usr_user_id';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [

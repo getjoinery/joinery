@@ -13,7 +13,6 @@ class Recipe extends SystemBase {
     // AI auto-discovery (read)
     public static $ai_readable        = true;
     public static $ai_description     = 'AI automation recipes the user has configured.';
-    public static $ai_owner_field     = 'rcp_owner_user_id';
     public static $ai_excluded_fields = [];
 
     public static $field_specifications = array(

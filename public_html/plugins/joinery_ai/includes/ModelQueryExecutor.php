@@ -18,13 +18,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *      vocabulary is per-model and inappropriate to drive from outside;
  *      direct SELECT against $field_specifications-validated names is safer.
  *
- * Owner-scoping is intentionally NOT enforced. Joinery AI v2 is admin-only;
+ * Owner-scoping is not enforced. Joinery AI is admin-only by design;
  * admins legitimately need cross-user views ("show me all unpaid orders"),
- * and forced owner-scoping breaks those use cases. The $ai_owner_field
- * declarations on opted-in models remain as inert forward-compat metadata
- * — when end-user recipes ship, owner-scoping returns and the executor
- * starts honouring the field. Until then, the real defenses are model
- * opt-in, the auto-block regex, and per-model $ai_excluded_fields.
+ * which forced owner-scoping would break. The defenses are model opt-in,
+ * the auto-block regex, and per-model $ai_excluded_fields.
  *
  * Operator vocabulary on filter keys:
  *   field           -> field = value

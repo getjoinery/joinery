@@ -18,7 +18,7 @@ class ModelRegistry {
 
     /**
      * Return [class_name => metadata] for every model with $ai_readable = true.
-     * Metadata: { class, description, owner_field, excluded_fields }.
+     * Metadata: { class, description, excluded_fields }.
      */
     public static function all(): array {
         if (self::$models === null) self::scan();
@@ -56,7 +56,6 @@ class ModelRegistry {
             self::$models[$class] = [
                 'class'           => $class,
                 'description'     => self::staticOr($class, 'ai_description', ''),
-                'owner_field'     => self::staticOr($class, 'ai_owner_field', null),
                 'excluded_fields' => self::staticOr($class, 'ai_excluded_fields', []),
             ];
         }

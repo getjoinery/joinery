@@ -19,7 +19,6 @@ class CouponCode extends SystemBase {	public static $prefix = 'ccd';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Promotional codes available for product purchases.';
-	public static $ai_owner_field     = null;
 	public static $ai_excluded_fields = [];
 
 		/**

@@ -17,7 +17,6 @@ class EventType extends SystemBase {	public static $prefix = 'ety';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Categories of events (workshop, meetup, class, etc.).';
-	public static $ai_owner_field     = null;
 	public static $ai_excluded_fields = [];
 
 		/**

@@ -18,7 +18,6 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Phone numbers attached to the user\'s account.';
-	public static $ai_owner_field     = 'phn_usr_user_id';
 	public static $ai_excluded_fields = [];
 
 		/**

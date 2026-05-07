@@ -28,7 +28,6 @@ class Booking extends SystemBase {
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Time-slot bookings the user has made.';
-	public static $ai_owner_field     = 'bkn_usr_user_id_booked';
 	public static $ai_excluded_fields = [];
 
 	const BOOKING_STATUS_CREATED = 0;

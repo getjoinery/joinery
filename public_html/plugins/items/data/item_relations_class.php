@@ -18,7 +18,6 @@ class ItemRelation extends SystemBase {
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Relationships the user has defined between items.';
-	public static $ai_owner_field     = 'itr_usr_user_id';
 	public static $ai_excluded_fields = [];
 	public static $url_namespace = 'item_relation';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 

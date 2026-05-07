@@ -105,7 +105,6 @@ class UserNote extends SystemBase {
     // AI auto-discovery (read)
     public static $ai_readable        = true;
     public static $ai_description     = 'User-created notes attached to events.';
-    public static $ai_owner_field     = 'unt_usr_user_id';  // forward-compat metadata; see "Owner-scoping" below
     public static $ai_excluded_fields = [];                 // blocklist; merges with auto-block patterns
 
     // ... existing $field_specifications, etc.
@@ -125,13 +124,11 @@ Fields are filtered through two layers before exposure:
 
 Both layers apply to **all three surfaces** — schema output, filter inputs, and result rows. The LLM cannot see, filter on, or sort by a field on either blocklist. Attempting to filter on an excluded field raises `InvalidArgumentException`, which the tool reports as `is_error: true`.
 
-### Owner-scoping (currently inert)
+### No owner-scoping
 
-Joinery AI is admin-only today. Admins can already see every row in the database through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). Owner-scoping would break those use cases, so `ModelQueryExecutor` does **not** inject any owner filter.
+Joinery AI is admin-only by design. Admins can already see every row in the database through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). Owner-scoping would break those use cases, so `ModelQueryExecutor` does **not** inject any owner filter.
 
-The `$ai_owner_field` property is declared on user-data models anyway as forward-compat metadata. When end-user recipes ship — at which point `recipe-owner ≠ admin` — the executor will start enforcing the field, with a per-recipe escape hatch for admin recipes that need cross-user views. Re-enabling it is a one-line executor change rather than a 19-file sweep.
-
-If you're authoring a new user-owned model and want the declaration to do the right thing later, set `$ai_owner_field` to the user-id column. If the model has no user-id column or represents public/admin metadata, set it to `null`.
+If admin-only ever changes (end-user recipes), owner-scoping returns as new work — there is no inert metadata waiting to be flipped on. The defenses today are model opt-in (`$ai_readable`), the auto-block regex, and per-model `$ai_excluded_fields`.
 
 ### Default-deny posture
 
@@ -140,9 +137,9 @@ If you're authoring a new user-owned model and want the declaration to do the ri
 
 ### Write side (deferred)
 
-`$ai_writable_fields` is reserved for direct-to-model writes on self-contained models (notes, bookmarks, simple records). It is **currently a no-op** — declaring it does nothing until `ModelWriteExecutor` and the `create_model` / `update_model` / `delete_model` tools ship. See [`specs/implemented/joinery_ai_autodiscovery.md`](../specs/implemented/joinery_ai_autodiscovery.md) for the design and the gauntlet test for when a model qualifies.
+`$ai_writable_fields` is reserved for direct-to-model writes on self-contained models (notes, bookmarks, simple records). It is **currently a no-op** — declaring it does nothing until `ModelWriteExecutor` and the `create_model` / `update_model` / `delete_model` tools ship. See [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md) (Path 1) for the design and the gauntlet test for when a model qualifies.
 
-Any write that needs cross-record invariants (capacity, payment effects, hooks, external system calls) belongs in a logic file with a write-capable descriptor — see [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md).
+Any write that needs cross-record invariants (capacity, payment effects, hooks, external system calls) belongs in a logic file with a write-capable descriptor — see [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md) (Path 2).
 
 ## Adding a new hand-written tool
 
@@ -221,8 +218,8 @@ SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_run_id = ?;
 ## See also
 
 - [`specs/implemented/joinery_ai.md`](../specs/implemented/joinery_ai.md) — original system spec
-- [`specs/implemented/joinery_ai_autodiscovery.md`](../specs/implemented/joinery_ai_autodiscovery.md) — auto-discovery design and threat model
-- [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md) — write-tool design (deferred)
+- [`specs/implemented/joinery_ai_autodiscovery.md`](../specs/implemented/joinery_ai_autodiscovery.md) — auto-discovery read-side design and threat model
+- [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md) — write-tool design covering both direct-model and logic-file paths (deferred)
 - [`specs/FUTURE_descriptor_consumers.md`](../specs/FUTURE_descriptor_consumers.md) — Step 7: API + AI consume `_logic_descriptor()` natively
 - [Plugin Developer Guide](plugin_developer_guide.md) — plugin architecture and routing
 - [Logic Architecture](logic_architecture.md) — business logic layer
