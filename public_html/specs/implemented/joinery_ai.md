@@ -6,8 +6,8 @@ For the vision, philosophy, and scope rationale, see [`FUTURE_personal_ai_recipe
 
 ## Related specs
 
-- [`joinery_ai_autodiscovery.md`](implemented/joinery_ai_autodiscovery.md) — v2 auto-discovered model reads: `describe_models` / `query_model`
-- [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md) — write tool design: authorization gating, validation-gauntlet concern, and the two design paths (deferred, not v1 or v2)
+- [`joinery_ai_autodiscovery.md`](joinery_ai_autodiscovery.md) — v2 auto-discovered model reads: `describe_models` / `query_model`
+- [`joinery_ai_write_tools.md`](../joinery_ai_write_tools.md) — write tool design: authorization gating, validation-gauntlet concern, and the two design paths (deferred, not v1 or v2)
 
 ## Acceptance use cases
 
@@ -39,8 +39,10 @@ Anything not required by these two cases is out of scope for v1.
 - Multi-user / household mode
 - Custom model providers beyond Anthropic
 - Tier gating, complex cost caps (per-run token budget is enough for v1)
-- **Write tools** (any tool that mutates state) — see [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md)
-- **Auto-discovered model reads** (`describe_models` / `query_model`) — see [`joinery_ai_autodiscovery.md`](implemented/joinery_ai_autodiscovery.md)
+- **Write tools** (any tool that mutates state) — see [`joinery_ai_write_tools.md`](../joinery_ai_write_tools.md)
+
+**Shipped as v2 (after this spec was originally written):**
+- **Auto-discovered model reads** (`describe_models` / `query_model`) — see [`joinery_ai_autodiscovery.md`](joinery_ai_autodiscovery.md). Per-model `$ai_readable = true` opt-in; 37 models opted in at ship.
 
 ## Data models
 
@@ -137,7 +139,7 @@ Tools receive `RecipeRunContext` which carries `owner_user_id`. Owner-scoping is
 
 ### Read vs. write tools
 
-**v1 is read-only.** Write tools are deferred — see [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md) for the full design discussion including authorization gating and the validation-gauntlet concern. Read tools are the bulk of the value for digest/research recipes anyway.
+**v1 is read-only.** Write tools are deferred — see [`joinery_ai_write_tools.md`](../joinery_ai_write_tools.md) for the full design discussion including authorization gating and the validation-gauntlet concern. Read tools are the bulk of the value for digest/research recipes anyway.
 
 ## Cost protection
 
@@ -404,8 +406,7 @@ a 10-minute refactor when a second implementation actually shows up.
 ## Deferred / open
 
 1. **Tool registry boot cost.** Scanning every plugin's `recipe_tools/` on every page load is wasteful but tolerable at v1 plugin counts. Add APCu / file cache + plugin-sync invalidation when this becomes measurable. Not v1.
-2. **Write tools.** Deferred — need authorization gating and a guaranteed path through the logic-file validation gauntlet. See [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md).
-3. **Auto-discovered model reads.** Deferred to v2 — `describe_models` / `query_model` backed by a per-model `$ai_read_safe` opt-in flag. See [`joinery_ai_autodiscovery.md`](implemented/joinery_ai_autodiscovery.md).
+2. **Write tools.** Deferred — need authorization gating and a guaranteed path through the logic-file validation gauntlet. See [`joinery_ai_write_tools.md`](../joinery_ai_write_tools.md).
 
 ## Build phases
 

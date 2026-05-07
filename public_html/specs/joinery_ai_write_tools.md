@@ -1,6 +1,6 @@
 # Joinery AI — Write Tools (design, deferred)
 
-Part of the Joinery AI plugin. See [`joinery_ai.md`](joinery_ai.md) for the core system spec.
+Part of the Joinery AI plugin. See [`joinery_ai.md`](implemented/joinery_ai.md) for the core system spec.
 
 Write tools are explicitly deferred from v1 and v2. This document captures the design constraints so the decision is made deliberately when write tools are actually needed, not retrofitted.
 

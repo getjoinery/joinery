@@ -1,6 +1,6 @@
 # Joinery AI — Auto-Discovered Model Reads and Writes (v2)
 
-Part of the Joinery AI plugin. See [`joinery_ai.md`](joinery_ai.md) for the core system spec. Write actions that need cross-record invariants live on logic files — see [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md) and [`FUTURE_descriptor_consumers.md`](FUTURE_descriptor_consumers.md) for that path. This spec covers the model side: reads of any opted-in model, plus direct writes to self-contained models where the field-spec layer is genuinely the entire validation gauntlet.
+Part of the Joinery AI plugin. See [`joinery_ai.md`](joinery_ai.md) for the core system spec. Write actions that need cross-record invariants live on logic files — see [`joinery_ai_write_tools.md`](../joinery_ai_write_tools.md) and [`FUTURE_descriptor_consumers.md`](../FUTURE_descriptor_consumers.md) for that path. This spec covers the model side: reads of any opted-in model, plus direct writes to self-contained models where the field-spec layer is genuinely the entire validation gauntlet.
 
 v1 ships hand-written `RecipeToolInterface` tools. v2 adds a generic auto-discovery surface that lets opted-in models become AI-readable (and, where appropriate, AI-writable) without a per-model PHP class.
 
@@ -52,7 +52,7 @@ The test the author applies before declaring `$ai_writable_fields`:
 
 If the answer is **"field-spec is the entire gauntlet"** — opt in. The model is self-contained: notes, bookmarks, preferences, tags, user-owned simple records.
 
-If there are any cross-record or cross-system effects — leave `$ai_writable_fields` undeclared. Writes for that model belong in a logic file with an `ai_writable` descriptor flag, where the full gauntlet runs by construction. See [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md).
+If there are any cross-record or cross-system effects — leave `$ai_writable_fields` undeclared. Writes for that model belong in a logic file with an `ai_writable` descriptor flag, where the full gauntlet runs by construction. See [`joinery_ai_write_tools.md`](../joinery_ai_write_tools.md).
 
 The two write surfaces coexist by design:
 

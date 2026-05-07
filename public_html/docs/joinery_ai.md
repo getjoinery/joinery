@@ -2,7 +2,7 @@
 
 The `joinery_ai` plugin runs LLM-driven recipes against the platform: scheduled or on-demand prompts that call Claude with a curated set of tools and persist the results. It is **admin-only** in the current state — recipes are configured by admins through the admin UI, and the recipe runner executes with the recipe owner's identity.
 
-This doc covers what plugin authors and model authors need to know. For original design rationale, see [`specs/joinery_ai.md`](../specs/joinery_ai.md), [`specs/implemented/joinery_ai_autodiscovery.md`](../specs/implemented/joinery_ai_autodiscovery.md), and [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md).
+This doc covers what plugin authors and model authors need to know. For original design rationale, see [`specs/implemented/joinery_ai.md`](../specs/implemented/joinery_ai.md), [`specs/implemented/joinery_ai_autodiscovery.md`](../specs/implemented/joinery_ai_autodiscovery.md), and [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md).
 
 ## What's in the plugin
 
@@ -220,7 +220,7 @@ SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_run_id = ?;
 
 ## See also
 
-- [`specs/joinery_ai.md`](../specs/joinery_ai.md) — original system spec
+- [`specs/implemented/joinery_ai.md`](../specs/implemented/joinery_ai.md) — original system spec
 - [`specs/implemented/joinery_ai_autodiscovery.md`](../specs/implemented/joinery_ai_autodiscovery.md) — auto-discovery design and threat model
 - [`specs/joinery_ai_write_tools.md`](../specs/joinery_ai_write_tools.md) — write-tool design (deferred)
 - [`specs/FUTURE_descriptor_consumers.md`](../specs/FUTURE_descriptor_consumers.md) — Step 7: API + AI consume `_logic_descriptor()` natively
