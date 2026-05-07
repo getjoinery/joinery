@@ -16,6 +16,12 @@ class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 	public static $tablename = 'mlr_mailing_list_registrants';
 	public static $pkey_column = 'mlr_mailing_list_registrant_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'The user\'s mailing-list subscription records.';
+	public static $ai_owner_field     = 'mlr_usr_user_id';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'mlr_mlt_mailing_list_id' => ['action' => 'prevent', 'message' => 'Cannot delete mailing list - registrants exist']
 	];

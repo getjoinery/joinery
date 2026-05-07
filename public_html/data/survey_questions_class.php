@@ -16,6 +16,12 @@ class SurveyQuestion extends SystemBase {	public static $prefix = 'srq';
 	public static $tablename = 'srq_survey_questions';
 	public static $pkey_column = 'srq_survey_question_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Questions associated with a survey (joins Question to Survey).';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

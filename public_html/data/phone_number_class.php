@@ -15,6 +15,12 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	public static $tablename = 'phn_phone_numbers';
 	public static $pkey_column = 'phn_phone_number_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Phone numbers attached to the user\'s account.';
+	public static $ai_owner_field     = 'phn_usr_user_id';
+	public static $ai_excluded_fields = [];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

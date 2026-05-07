@@ -13,6 +13,12 @@ class VideoException extends SystemBaseException {}
 class Video extends SystemBase {	public static $prefix = 'vid';
 	public static $tablename = 'vid_videos';
 	public static $pkey_column = 'vid_video_id';
+
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Embedded videos shown on the site.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
 	public static $url_namespace = 'video';
 
 	protected static $foreign_key_actions = [

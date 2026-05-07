@@ -10,6 +10,12 @@ class RecipeNote extends SystemBase {
     public static $tablename = 'rcn_notes';
     public static $pkey_column = 'rcn_note_id';
 
+    // AI auto-discovery (read)
+    public static $ai_readable        = true;
+    public static $ai_description     = 'Notes written by the AI or by the user inside a recipe.';
+    public static $ai_owner_field     = 'rcn_owner_user_id';
+    public static $ai_excluded_fields = [];
+
     public static $field_specifications = array(
         'rcn_note_id'         => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'rcn_owner_user_id'   => array('type'=>'int4', 'required'=>true),

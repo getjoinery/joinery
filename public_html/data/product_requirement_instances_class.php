@@ -17,6 +17,12 @@ class DisplayablePermanentProductRequirementInstanceException extends ProductReq
 class ProductRequirementInstance extends SystemBase {	public static $prefix = 'pri';
 	public static $tablename = 'pri_product_requirement_instances';
 	public static $pkey_column = 'pri_product_requirement_instance_id';
+
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Per-product instances of checkout requirement definitions.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**

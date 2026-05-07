@@ -29,7 +29,34 @@ class Example extends SystemBase
     public static $prefix = 'exm';                   // 3-character prefix for field names (always 3 chars)
     public static $tablename = 'exm_examples';       // Actual database table name
     public static $pkey_column = 'exm_id';          // Primary key column name
-    
+
+    // OPTIONAL: AI auto-discovery (read)
+    //
+    // Setting $ai_readable = true exposes this model to the joinery_ai
+    // plugin's describe_models / query_model tools. See docs/joinery_ai.md.
+    //
+    // Default-deny: omit these properties entirely if the model is system
+    // infrastructure, contains secrets, or you simply don't want recipes
+    // reading from it.
+    public static $ai_readable        = true;
+    public static $ai_description     = 'Example records used to demonstrate the data-model template.';
+    public static $ai_owner_field     = 'exm_created_by';  // user-id column, or null for public/admin metadata.
+                                                            // Currently inert metadata; the executor begins
+                                                            // honouring it when end-user recipes ship.
+    public static $ai_excluded_fields = [];                 // Per-model blocklist for sensitive columns.
+                                                            // Auto-block regex /_(password|secret|key|token|hash)$/i
+                                                            // applies on top, so list only columns it misses
+                                                            // (raw payment blobs, internal IDs, PINs, etc.).
+
+    // OPTIONAL: AI auto-discovery (write) — currently a no-op
+    //
+    // Reserved for the deferred write executor. Declaring a non-empty array
+    // does nothing until create_model / update_model / delete_model ship.
+    // Only opt in when the model's prepare()/save() field-level rules are
+    // the *entire* validation gauntlet (no cross-record invariants, no
+    // payment effects, no hook firings). See specs/implemented/joinery_ai_autodiscovery.md.
+    // public static $ai_writable_fields = ['exm_name', 'exm_description'];
+
     // REQUIRED: Field definitions - controls database schema
     public static $fields = array(
         // Primary key - always required

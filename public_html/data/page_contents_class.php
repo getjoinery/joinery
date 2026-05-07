@@ -24,6 +24,12 @@ class PageContent extends SystemBase {
 	public static $tablename = 'pac_page_contents';
 	public static $pkey_column = 'pac_page_content_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Component blocks rendered on public pages.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 	// A/B testing opt-in. pac_config is deferred for now (component-specific schema).
 	public static $ab_testable = true;
 	public static $ab_testable_fields = array('pac_body');

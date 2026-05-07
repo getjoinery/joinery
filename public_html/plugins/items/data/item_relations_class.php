@@ -14,6 +14,12 @@ class ItemRelation extends SystemBase {
 	public static $prefix = 'itr';
 	public static $tablename = 'itr_item_relations';
 	public static $pkey_column = 'itr_item_relation_id';
+
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Relationships the user has defined between items.';
+	public static $ai_owner_field     = 'itr_usr_user_id';
+	public static $ai_excluded_fields = [];
 	public static $url_namespace = 'item_relation';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [

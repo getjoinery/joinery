@@ -17,6 +17,12 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	public static $tablename = 'qst_questions';
 	public static $pkey_column = 'qst_question_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Library of reusable form/survey questions.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 	const LANGUAGE_ENGLISH = 1;
 	
 	const TYPE_SHORT_TEXT = 1;

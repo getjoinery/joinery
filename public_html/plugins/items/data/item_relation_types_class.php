@@ -11,6 +11,12 @@ class ItemRelationType extends SystemBase {
 	public static $tablename = 'itt_item_relation_types';
 	public static $pkey_column = 'itt_item_relation_type_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Types of relationships items can have.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 	/**
 	 * Field specifications define database column properties and validation rules
 	 * 

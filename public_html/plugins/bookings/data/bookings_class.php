@@ -25,6 +25,12 @@ class Booking extends SystemBase {
 	public static $tablename = 'bkn_bookings';
 	public static $pkey_column = 'bkn_booking_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Time-slot bookings the user has made.';
+	public static $ai_owner_field     = 'bkn_usr_user_id_booked';
+	public static $ai_excluded_fields = [];
+
 	const BOOKING_STATUS_CREATED = 0;
 	const BOOKING_STATUS_BOOKED = 1;
 	const BOOKING_STATUS_COMPLETED = 2;

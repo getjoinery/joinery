@@ -14,6 +14,12 @@ class Notification extends SystemBase {
 	public static $tablename = 'ntf_notifications';
 	public static $pkey_column = 'ntf_notification_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Notifications addressed to the user.';
+	public static $ai_owner_field     = 'ntf_usr_user_id';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'ntf_usr_user_id' => ['action' => 'permanent_delete'],
 		'ntf_source_usr_user_id' => ['action' => 'set_null']

@@ -83,7 +83,7 @@ Replace per-action wrappers (for descriptor-backed actions) with two generic too
 
 Existing hand-written tools that map cleanly to descriptor-backed actions can be retired. Tools that have logic outside the descriptor model (web search, fetch URL, stock data) stay as-is — they're not action wrappers.
 
-**Cross-references:** [`joinery_ai_autodiscovery.md`](joinery_ai_autodiscovery.md) covers the read-side AI surface (model auto-discovery); [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md) covers the write-side design. Both should be reviewed before starting 7c.
+**Cross-references:** [`joinery_ai_autodiscovery.md`](implemented/joinery_ai_autodiscovery.md) covers the read-side AI surface (model auto-discovery); [`joinery_ai_write_tools.md`](joinery_ai_write_tools.md) covers the write-side design. Both should be reviewed before starting 7c.
 
 ### 7d — Migration and cleanup (~75 lines, mechanical)
 
@@ -121,7 +121,7 @@ A diff pass before deletion confirms no metadata loss: some `_logic_api()` retur
 ## What this step does NOT include
 
 - New descriptor types beyond what Step 3 established (unless 7d migration surfaces a need).
-- Changing the AI's read-side model auto-discovery — that's [`joinery_ai_autodiscovery.md`](joinery_ai_autodiscovery.md).
+- Changing the AI's read-side model auto-discovery — that's [`joinery_ai_autodiscovery.md`](implemented/joinery_ai_autodiscovery.md).
 - Touching FormWriter — that's [`FUTURE_formwriter_descriptors.md`](FUTURE_formwriter_descriptors.md). Independent.
 
 ## Dependencies

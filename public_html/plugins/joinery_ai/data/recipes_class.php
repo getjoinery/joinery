@@ -10,6 +10,12 @@ class Recipe extends SystemBase {
     public static $tablename = 'rcp_recipes';
     public static $pkey_column = 'rcp_recipe_id';
 
+    // AI auto-discovery (read)
+    public static $ai_readable        = true;
+    public static $ai_description     = 'AI automation recipes the user has configured.';
+    public static $ai_owner_field     = 'rcp_owner_user_id';
+    public static $ai_excluded_fields = [];
+
     public static $field_specifications = array(
         'rcp_recipe_id'           => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'rcp_name'                => array('type'=>'varchar(255)', 'required'=>true),

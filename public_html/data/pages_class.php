@@ -15,6 +15,12 @@ class PageException extends SystemBaseException {}
 class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $tablename = 'pag_pages';
 	public static $pkey_column = 'pag_page_id';
+
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Pages on the public site.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
 	public static $url_namespace = 'page';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	public static $ab_testable = true;

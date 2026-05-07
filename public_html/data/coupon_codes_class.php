@@ -16,6 +16,12 @@ class CouponCode extends SystemBase {	public static $prefix = 'ccd';
 	public static $tablename = 'ccd_coupon_codes';
 	public static $pkey_column = 'ccd_coupon_code_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Promotional codes available for product purchases.';
+	public static $ai_owner_field     = null;
+	public static $ai_excluded_fields = [];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
