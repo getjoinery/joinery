@@ -33,6 +33,18 @@ A write tool that calls `Booking::save()` directly gets only layer 1. A write to
 
 For models with logic-file invariants, direct-to-model writes are ruled out. For models without them — notes, bookmarks, preferences — layer 1 IS the entire gauntlet, and direct-to-model writes are safe by construction. That's the split. The two paths below cover both cases.
 
+## Prompt injection (separate concern)
+
+The validation gauntlet defends against *data integrity* failures (writes that bypass business rules). It does **not** defend against *intent* failures — the LLM being tricked, via untrusted text in tool results, into emitting structurally valid write calls that the admin never asked for. That threat is distinct and not solvable at the LLM layer.
+
+See [`INFO_prompt_injection.md`](INFO_prompt_injection.md) for the full analysis, including a concrete exploit walkthrough, why each existing defense (descriptor validation, gauntlet, `rcp_allowed_tools`) catches or misses it, and which mitigations are real vs. theater. Three recommendations from that analysis should be folded into this spec when writes are implemented:
+
+1. **`$ai_untrusted_fields` on models containing user-generated text** — the query executor wraps those fields with delimiters in tool results; the system prompt frames them as data, not instructions.
+2. **`confirmation_required` flag on high-impact descriptors** — selective per-action approval gating (cancel_order, send_email_to_list, delete_user); the runtime surfaces those calls to the admin for explicit OK before executing.
+3. **Audit alerting on write rate** — every write logged to `rcr_tool_calls` (already planned) plus a configurable rate-limit alert per recipe run.
+
+These are noted but not yet specified in detail; the first real write use case will determine which of the three need to ship before that recipe runs in production vs. which can ship later.
+
 ---
 
 ## Path 1: Direct-model writes (self-contained tables)
