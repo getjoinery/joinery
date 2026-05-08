@@ -23,6 +23,18 @@ class InboundEmail extends SystemBase {
 	public static $pkey_column = 'iem_inbound_email_id';
 	public static $permanent_delete_actions = array();
 
+	// AI auto-discovery (read)
+	// NOTE: iem_body_plain is attacker-controllable (anyone can email *@inbox.*).
+	// Highest-risk prompt-injection surface in the read set. The executor
+	// blocklist + auto-block regex prevent extracting credentials, but recipe
+	// authors should treat retrieved bodies as data, not instructions, and
+	// avoid composing inbound-mail reads with write tools when those land.
+	// iem_body_html is excluded — markup-heavy duplicate of iem_body_plain.
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Mailgun-routed inbound emails to *@inbox.joinerytest.site. iem_body_plain is the message text.';
+	public static $ai_excluded_fields = ['iem_body_html'];
+	public static $ai_untrusted_fields = ['iem_body_plain', 'iem_subject', 'iem_sender'];
+
 	public static $field_specifications = array(
 		'iem_inbound_email_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'iem_sender' => array('type'=>'varchar(500)'),

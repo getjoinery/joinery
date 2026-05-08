@@ -46,6 +46,18 @@ class Example extends SystemBase
                                                             // applies on top, so list only columns it misses
                                                             // (raw payment blobs, internal IDs, PINs, etc.).
 
+    // OPTIONAL: untrusted-input markers
+    //
+    // List fields whose values originate outside the trust boundary —
+    // user-authored bios, message bodies, inbound email, public form
+    // responses. The query executor wraps those values in tool results
+    // with a per-run nonce, and the system prompt instructs the LLM to
+    // treat the wrapped content as data, not instructions.
+    //
+    // Probabilistic defense against indirect prompt injection. Cheap to
+    // declare; costs nothing for fields you don't list.
+    public static $ai_untrusted_fields = [];                // e.g. ['exm_user_note', 'exm_public_caption']
+
     // OPTIONAL: AI auto-discovery (write) — currently a no-op
     //
     // Reserved for the deferred write executor. Declaring a non-empty array

@@ -29,6 +29,7 @@ class Booking extends SystemBase {
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Time-slot bookings the user has made.';
 	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['bkn_notes'];
 
 	const BOOKING_STATUS_CREATED = 0;
 	const BOOKING_STATUS_BOOKED = 1;

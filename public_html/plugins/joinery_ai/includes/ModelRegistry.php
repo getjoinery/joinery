@@ -18,7 +18,7 @@ class ModelRegistry {
 
     /**
      * Return [class_name => metadata] for every model with $ai_readable = true.
-     * Metadata: { class, description, excluded_fields }.
+     * Metadata: { class, description, excluded_fields, untrusted_fields }.
      */
     public static function all(): array {
         if (self::$models === null) self::scan();
@@ -54,9 +54,10 @@ class ModelRegistry {
             if (!is_subclass_of($class, 'SystemBase')) continue;
             if (!self::isOptedIn($class)) continue;
             self::$models[$class] = [
-                'class'           => $class,
-                'description'     => self::staticOr($class, 'ai_description', ''),
-                'excluded_fields' => self::staticOr($class, 'ai_excluded_fields', []),
+                'class'            => $class,
+                'description'      => self::staticOr($class, 'ai_description', ''),
+                'excluded_fields'  => self::staticOr($class, 'ai_excluded_fields', []),
+                'untrusted_fields' => self::staticOr($class, 'ai_untrusted_fields', []),
             ];
         }
     }

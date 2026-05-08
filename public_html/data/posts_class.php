@@ -22,6 +22,7 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Public blog posts.';
 	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['pst_body', 'pst_title', 'pst_short_description'];
 	public static $url_namespace = 'post';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [

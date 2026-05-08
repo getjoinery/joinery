@@ -22,11 +22,22 @@ class RecipeRunContext {
     /** @var string */
     public $owner_timezone;
 
+    /**
+     * Per-run hex nonce used to wrap user-generated text in tool results
+     * (see $ai_untrusted_fields on data models). 32 bits is enough that an
+     * attacker can't pre-embed a closing tag in their content; rotated each
+     * run so seeing one prior run's nonce doesn't help guess the next.
+     *
+     * @var string
+     */
+    public $untrusted_input_nonce;
+
     public function __construct(Recipe $recipe, RecipeRun $run) {
         $this->recipe = $recipe;
         $this->run = $run;
         $this->owner_user_id = (int)$recipe->get('rcp_owner_user_id');
         $this->owner_timezone = self::resolveTimezone($this->owner_user_id);
+        $this->untrusted_input_nonce = bin2hex(random_bytes(4));
     }
 
     /**

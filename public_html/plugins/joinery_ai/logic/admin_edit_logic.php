@@ -88,10 +88,13 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $recipe->set('rcp_enabled', !empty($input['rcp_enabled']));
 
         // Allowed tools — checkboxes post as `rcp_allowed_tools[]`. Absent
-        // means no tools selected.
+        // means no tools selected. query_model is never user-facing here;
+        // the runner derives it from rcp_allowed_models. Strip it defensively
+        // so old recipes don't carry forward the now-redundant entry.
         $tools_post = $input['rcp_allowed_tools'] ?? [];
         if (!is_array($tools_post)) $tools_post = [];
         $tool_list = array_values(array_filter(array_map('strval', $tools_post), 'strlen'));
+        $tool_list = array_values(array_filter($tool_list, fn($t) => $t !== 'query_model'));
         $recipe->set('rcp_allowed_tools', $tool_list);
 
         // Allowed models — same pattern as tools.

@@ -17,6 +17,13 @@ class GroupMember extends SystemBase {	public static $prefix = 'grm';
 	public static $pkey_column = 'grm_group_member_id';
 	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
+	// AI auto-discovery (read)
+	// grm_foreign_key_id is polymorphic — its referent is determined by the parent
+	// Group's category (user, event, etc.). The LLM can infer the type from context.
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Membership join rows. grm_grp_group_id points to the Group; grm_foreign_key_id points to whatever the group contains (user, event, etc., depending on the group category).';
+	public static $ai_excluded_fields = [];
+
 	/**
 	 * Field specifications define database column properties and validation rules
 	 * 

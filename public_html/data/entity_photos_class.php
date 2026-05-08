@@ -22,6 +22,7 @@ class EntityPhoto extends SystemBase {
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Photos attached to events, locations, products, and other entities.';
 	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['eph_caption'];
 
 	public static $field_specifications = array(
 		'eph_entity_photo_id' => array('type'=>'int4', 'is_nullable'=>false, 'serial'=>true),

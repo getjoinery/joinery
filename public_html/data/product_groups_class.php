@@ -14,6 +14,11 @@ class ProductGroup extends SystemBase {	public static $prefix = 'prg';
 	public static $tablename = 'prg_product_groups';
 	public static $pkey_column = 'prg_product_group_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Bundle groupings for products (e.g. choose-one menus). prg_max_items caps how many items in the group a buyer may select.';
+	public static $ai_excluded_fields = [];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
