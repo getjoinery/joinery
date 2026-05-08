@@ -6,15 +6,20 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  * Read-side security boundary for query_model.
  *
  * Enforcement order (fixed):
- *   1. Model opt-in (via ModelRegistry).
- *   2. Filter, sort, and output-field validation — every name must be in
+ *   1. Per-recipe allowlist — the requested model must appear in the
+ *      recipe's rcp_allowed_models. The recipe edit form picks this
+ *      explicitly; absence means "this recipe was never granted access."
+ *   2. Global model opt-in (via ModelRegistry / $ai_readable). The recipe
+ *      allowlist is the user-facing knob; $ai_readable is the model
+ *      author's ceiling. Both must agree.
+ *   3. Filter, sort, and output-field validation — every name must be in
  *      $field_specifications, must NOT be auto-blocked, must NOT be in
  *      $ai_excluded_fields. Same blocklist function used by the schema
  *      builder, so the LLM can never see a field it can't filter on (or
  *      vice versa).
- *   3. Soft-delete exclusion ({prefix}_delete_time IS NULL) when the model
+ *   4. Soft-delete exclusion ({prefix}_delete_time IS NULL) when the model
  *      has that column.
- *   4. Direct PDO SELECT against the table. Multi-class option-key
+ *   5. Direct PDO SELECT against the table. Multi-class option-key
  *      vocabulary is per-model and inappropriate to drive from outside;
  *      direct SELECT against $field_specifications-validated names is safer.
  *
@@ -46,6 +51,19 @@ class ModelQueryExecutor {
         ?array $output_fields,
         RecipeRunContext $ctx
     ): array {
+        $allowed = $ctx->recipe->get('rcp_allowed_models');
+        if (is_string($allowed)) {
+            $decoded = json_decode($allowed, true);
+            $allowed = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($allowed)) $allowed = [];
+        if (!in_array($class, $allowed, true)) {
+            throw new InvalidArgumentException(
+                "Model '$class' is not allowed for this recipe. Allowed models: "
+                . (empty($allowed) ? '(none)' : implode(', ', $allowed))
+            );
+        }
+
         $info = ModelRegistry::get($class);
         if ($info === null) {
             throw new InvalidArgumentException("Model '$class' is not AI-readable.");

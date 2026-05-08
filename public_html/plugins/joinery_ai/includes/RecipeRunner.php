@@ -5,6 +5,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AnthropicCl
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/CostGuard.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchemaBuilder.php'));
 
 /**
  * Bounded tool-use loop. Operates on a RecipeRun row that's already been
@@ -213,6 +215,11 @@ class RecipeRunner {
      * System prompt as an array of text blocks. cache_control on the last
      * block caches both `tools` and `system` together (render order is
      * tools → system → messages).
+     *
+     * The model-schema block (one section per entry in rcp_allowed_models)
+     * lives in this same cached prefix. Schemas are static for the lifetime
+     * of the recipe, so repeated runs hit the prompt cache and pay near-zero
+     * input tokens for the catalog.
      */
     private static function buildSystemPrompt(Recipe $recipe, RecipeRunContext $ctx): array {
         $today_local = LibraryFunctions::convert_time(
@@ -225,15 +232,61 @@ class RecipeRunner {
                   . "Current date/time (owner timezone): $today_local\n"
                   . "Recipe name: " . $recipe->get('rcp_name') . "\n";
 
+        $models_block = self::buildModelsBlock($recipe);
+
         $instructions = "## Recipe instructions\n\n" . $recipe->get('rcp_prompt');
+
+        $text = $preamble . "\n";
+        if ($models_block !== '') $text .= $models_block . "\n";
+        $text .= $instructions;
 
         return [
             [
                 'type' => 'text',
-                'text' => $preamble . "\n" . $instructions,
+                'text' => $text,
                 'cache_control' => ['type' => 'ephemeral'],
             ],
         ];
+    }
+
+    /**
+     * Render the allowed-models schema section. Returns '' if the recipe
+     * has no allowed models — query_model will then refuse every call,
+     * which is the intended behavior.
+     */
+    private static function buildModelsBlock(Recipe $recipe): string {
+        $allowed = $recipe->get('rcp_allowed_models');
+        if (is_string($allowed)) {
+            $decoded = json_decode($allowed, true);
+            $allowed = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($allowed) || empty($allowed)) return '';
+
+        $registry = ModelRegistry::all();
+        $sections = [];
+        foreach ($allowed as $class) {
+            if (!isset($registry[$class])) continue;
+            $schema = ModelSchemaBuilder::build($class);
+            $section = "### " . $schema['class'];
+            if (!empty($schema['description'])) {
+                $section .= " — " . $schema['description'];
+            }
+            $section .= "\nFields:\n";
+            foreach ($schema['fields'] as $field => $spec) {
+                $type = $spec['type'] ?? 'string';
+                if (isset($spec['format'])) $type .= " (" . $spec['format'] . ")";
+                $section .= "  - $field: $type\n";
+            }
+            $sections[] = $section;
+        }
+
+        if (empty($sections)) return '';
+
+        return "## Available data models\n\n"
+             . "Use query_model to read these. Field names below match the "
+             . "database exactly — do not abbreviate or alias them. Models "
+             . "not listed here cannot be queried.\n\n"
+             . implode("\n", $sections);
     }
 
     private static function normalizeAssistantContent(array $content): array {

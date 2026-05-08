@@ -1,8 +1,9 @@
 <?php
 /**
  * Converts a model's $field_specifications into a JSON-schema-flavoured
- * description suitable for the describe_models tool output. Drops fields
- * caught by the auto-block pattern or listed in $ai_excluded_fields.
+ * description used by the recipe runner to inject model schemas into the
+ * system prompt. Drops fields caught by the auto-block pattern or listed
+ * in $ai_excluded_fields.
  *
  * The output is informational — it tells the LLM what fields exist and what
  * shape they take. The actual query enforcement lives in ModelQueryExecutor.
