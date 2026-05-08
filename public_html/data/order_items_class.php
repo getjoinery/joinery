@@ -25,6 +25,7 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Line items within the user\'s orders.';
 	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['odi_comment'];
 
 	protected static $foreign_key_actions = [
 		'odi_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],

@@ -93,8 +93,16 @@ if (is_string($selected_tools)) {
 if (!is_array($selected_tools)) $selected_tools = [];
 
 $registry_map = RecipeToolRegistry::all();
+// query_model is implied by Allowed Models below — never a user-facing
+// checkbox. The runner adds it automatically when at least one model is
+// checked, and refuses to expose it otherwise.
+unset($registry_map['query_model']);
 echo '<div class="form-group mb-3">';
 echo '<label class="form-label">Allowed Tools</label>';
+echo '<p class="text-muted small mb-2">'
+   . '<code>query_model</code> is added automatically when you check any '
+   . 'model in the Allowed Models section below — no need to list it here.'
+   . '</p>';
 if (empty($registry_map)) {
     echo '<p class="text-muted">No tools registered. Drop a class implementing '
        . '<code>RecipeToolInterface</code> into <code>plugins/&lt;plugin&gt;/recipe_tools/</code>.</p>';

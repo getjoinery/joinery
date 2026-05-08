@@ -12,6 +12,11 @@ class ProductDetail extends SystemBase {	public static $prefix = 'prd';
 	public static $tablename = 'prd_product_details';
 	public static $pkey_column = 'prd_product_detail_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Per-user product entitlements — sessions purchased and consumed. Use to find users with remaining sessions, expired entitlements, etc.';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'prd_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];

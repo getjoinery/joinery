@@ -14,6 +14,11 @@ class EventSessionFile extends SystemBase {	public static $prefix = 'esf';
 	public static $tablename = 'esf_event_session_files';
 	public static $pkey_column = 'esf_event_session_file_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Join row attaching a File to an EventSession.';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'esf_fil_file_id' => ['action' => 'prevent', 'message' => 'Cannot delete file - event sessions exist']
 	];

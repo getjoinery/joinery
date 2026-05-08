@@ -24,6 +24,11 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	public static $pkey_column = 'mlt_mailing_list_id';
 	public static $url_namespace = 'list';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Mailing lists users can subscribe to. Pair with MailingListRegistrant for membership.';
+	public static $ai_excluded_fields = ['mlt_provider_list_id'];
+
 	protected static $foreign_key_actions = [
 		'mlt_emt_email_template_id' => ['action' => 'prevent', 'message' => 'Cannot delete email template - mailing lists exist'],
 		'mlt_fil_file_id' => ['action' => 'null'],

@@ -17,6 +17,12 @@ class Conversation extends SystemBase {
 	public static $tablename = 'cnv_conversations';
 	public static $pkey_column = 'cnv_conversation_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Direct-message conversation thread headers. Pair with Message for the actual content and ConversationParticipant for who is in the thread.';
+	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['cnv_subject'];
+
 	const MAX_MESSAGE_LENGTH = 5000;
 
 	public static $field_specifications = array(

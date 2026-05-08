@@ -20,6 +20,7 @@ class SurveyAnswer extends SystemBase {	public static $prefix = 'sva';
 	public static $ai_readable        = true;
 	public static $ai_description     = 'The user\'s answers to survey questions.';
 	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['sva_answer'];
 
 	protected static $foreign_key_actions = [
 		'sva_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]

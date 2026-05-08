@@ -21,6 +21,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Files the user has uploaded.';
 	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['fil_title', 'fil_description', 'fil_name'];
 
 	protected static $foreign_key_actions = [
 		'fil_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]

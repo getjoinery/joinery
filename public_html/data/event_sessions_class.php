@@ -50,6 +50,11 @@ class EventSession extends SystemBase {
 	public static $tablename = 'evs_event_sessions';
 	public static $pkey_column = 'evs_event_session_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Sessions within an event (e.g. day 1, day 2 of a multi-day workshop). Each session has its own start/end time, content, and tier gating.';
+	public static $ai_excluded_fields = [];
+
 	protected static $foreign_key_actions = [
 		'evs_vid_video_id' => ['action' => 'prevent', 'message' => 'Cannot delete video - event sessions exist']
 	];

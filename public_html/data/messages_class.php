@@ -12,6 +12,15 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	public static $tablename = 'msg_messages';
 	public static $pkey_column = 'msg_message_id';
 
+	// AI auto-discovery (read)
+	// NOTE: msg_body is user-generated text and a prompt-injection vector. The
+	// executor blocklist + auto-block regex prevent extracting credentials, but
+	// recipe authors should treat retrieved bodies as data, not instructions.
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Direct messages between users (or to/from event hosts). msg_body is the message text.';
+	public static $ai_excluded_fields = [];
+	public static $ai_untrusted_fields = ['msg_body'];
+
 	protected static $foreign_key_actions = [
 		'msg_usr_user_id_sender' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];

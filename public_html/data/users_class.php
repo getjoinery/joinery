@@ -24,6 +24,21 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $tablename = 'usr_users';
 	public static $pkey_column = 'usr_user_id';
 
+	// AI auto-discovery (read)
+	public static $ai_readable        = true;
+	public static $ai_description     = 'Platform users — admin records, customers, members. Includes contact info, account status, and admin flags.';
+	public static $ai_excluded_fields = [
+		'usr_authhash', 'usr_totp_backup_codes', 'usr_remember_tokens',
+		'usr_totp_last_used_step', 'usr_signup_ip', 'usr_allowed_ips',
+		'usr_force_password_change', 'usr_password_recovery_disabled',
+		'usr_stripe_customer_id', 'usr_stripe_customer_id_test',
+		'usr_mailing_list_provider_id', 'usr_calendly_uri',
+	];
+	public static $ai_untrusted_fields = [
+		'usr_bio', 'usr_first_name', 'usr_last_name',
+		'usr_nickname', 'usr_organization_name',
+	];
+
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;

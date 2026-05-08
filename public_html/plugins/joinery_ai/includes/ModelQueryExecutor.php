@@ -22,6 +22,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *   5. Direct PDO SELECT against the table. Multi-class option-key
  *      vocabulary is per-model and inappropriate to drive from outside;
  *      direct SELECT against $field_specifications-validated names is safer.
+ *   6. Wrap any value from $ai_untrusted_fields with per-run sentinel
+ *      delimiters keyed to the run's nonce. Probabilistic defense against
+ *      prompt injection — paired system-prompt language tells the LLM to
+ *      treat content between the markers as data, not instructions.
  *
  * Owner-scoping is not enforced. Joinery AI is admin-only by design;
  * admins legitimately need cross-user views ("show me all unpaid orders"),
@@ -136,7 +140,46 @@ class ModelQueryExecutor {
         $db = DbConnector::get_instance()->get_db_link();
         $q = $db->prepare($sql);
         $q->execute($params);
-        return $q->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+
+        return self::wrapUntrustedFields($rows, $info, $select_fields, $ctx);
+    }
+
+    /**
+     * Wrap any returned values from $ai_untrusted_fields with the run's
+     * untrusted-input nonce. The system prompt instructs the LLM to treat
+     * anything between the markers as data, never as instructions — defense
+     * in depth against indirect prompt injection from user-generated text
+     * (DM bodies, inbound mail, public bios, etc.). Per-run nonce so an
+     * attacker can't pre-embed a closing tag.
+     *
+     * Excluded fields are already absent from $select_fields, so an
+     * untrusted-and-excluded field never reaches the wrap step. JSONB
+     * values are wrapped as the serialized blob whole — recipes needing
+     * finer granularity can opt the field out.
+     */
+    private static function wrapUntrustedFields(array $rows, array $info, array $select_fields, RecipeRunContext $ctx): array {
+        $untrusted = isset($info['untrusted_fields']) && is_array($info['untrusted_fields'])
+            ? $info['untrusted_fields'] : [];
+        if (empty($untrusted)) return $rows;
+
+        $effective = array_values(array_intersect($untrusted, $select_fields));
+        if (empty($effective)) return $rows;
+
+        $nonce = $ctx->untrusted_input_nonce;
+        $open  = "<<UNTRUSTED_$nonce>>";
+        $close = "<</UNTRUSTED_$nonce>>";
+
+        foreach ($rows as &$row) {
+            foreach ($effective as $field) {
+                if (!array_key_exists($field, $row)) continue;
+                $val = $row[$field];
+                if ($val === null) continue;
+                if (!is_string($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES);
+                $row[$field] = $open . $val . $close;
+            }
+        }
+        return $rows;
     }
 
     private static function resolveOutputFields(?array $requested, array $all, array $excluded): array {
