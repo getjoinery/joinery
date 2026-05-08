@@ -48,15 +48,25 @@ $formwriter->textarea('rcp_prompt', 'Prompt', [
 ]);
 
 // --- Schedule ---
+// Show/hide day_of_week and time fields based on frequency. timeinput's
+// Bootstrap renderer doesn't emit a container id, so we wrap it ourselves
+// and target the wrapper. The dropinput already emits {name}_container.
 $formwriter->dropinput('rcp_schedule_frequency', 'Schedule Frequency', [
     'options' => [
+        'none'   => 'No Schedule',
         'hourly' => 'Hourly',
-        'daily' => 'Daily',
+        'daily'  => 'Daily',
         'weekly' => 'Weekly',
+    ],
+    'visibility_rules' => [
+        'none'   => ['hide' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']],
+        'hourly' => ['hide' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']],
+        'daily'  => ['show' => ['rcp_schedule_time_wrap'], 'hide' => ['rcp_schedule_day_of_week']],
+        'weekly' => ['show' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']],
     ],
 ]);
 
-$formwriter->dropinput('rcp_schedule_day_of_week', 'Day of Week (weekly only)', [
+$formwriter->dropinput('rcp_schedule_day_of_week', 'Day of Week', [
     'options' => [
         '' => '—',
         '0' => 'Sunday',
@@ -69,7 +79,9 @@ $formwriter->dropinput('rcp_schedule_day_of_week', 'Day of Week (weekly only)', 
     ],
 ]);
 
-$formwriter->timeinput('rcp_schedule_time', 'Time of Day (daily/weekly only)');
+echo '<div id="rcp_schedule_time_wrap">';
+$formwriter->timeinput('rcp_schedule_time', 'Time of Day');
+echo '</div>';
 
 // --- Model & tools ---
 $settings = Globalvars::get_instance();
@@ -99,10 +111,6 @@ $registry_map = RecipeToolRegistry::all();
 unset($registry_map['query_model']);
 echo '<div class="form-group mb-3">';
 echo '<label class="form-label">Allowed Tools</label>';
-echo '<p class="text-muted small mb-2">'
-   . '<code>query_model</code> is added automatically when you check any '
-   . 'model in the Allowed Models section below — no need to list it here.'
-   . '</p>';
 if (empty($registry_map)) {
     echo '<p class="text-muted">No tools registered. Drop a class implementing '
        . '<code>RecipeToolInterface</code> into <code>plugins/&lt;plugin&gt;/recipe_tools/</code>.</p>';

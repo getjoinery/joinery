@@ -116,6 +116,7 @@ class RecipeDispatcher implements ScheduledTaskInterface {
      * Is this recipe due to fire now?
      *
      * Times are compared in UTC. Edge cases:
+     *   - none:   never auto-fires; manual Run Now is the only trigger
      *   - hourly: due if it hasn't run in the current UTC clock hour
      *   - daily:  due if past schedule_time today (UTC) and no run today
      *   - weekly: due if today is the correct day_of_week (UTC), past
