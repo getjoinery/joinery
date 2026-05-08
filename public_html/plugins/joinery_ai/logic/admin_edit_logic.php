@@ -94,6 +94,12 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $tool_list = array_values(array_filter(array_map('strval', $tools_post), 'strlen'));
         $recipe->set('rcp_allowed_tools', $tool_list);
 
+        // Allowed models — same pattern as tools.
+        $models_post = $input['rcp_allowed_models'] ?? [];
+        if (!is_array($models_post)) $models_post = [];
+        $model_list = array_values(array_filter(array_map('strval', $models_post), 'strlen'));
+        $recipe->set('rcp_allowed_models', $model_list);
+
         // Owner: single-user v1 — current admin owns the recipe
         if (!$recipe->get('rcp_owner_user_id')) {
             $recipe->set('rcp_owner_user_id', $session->get_user_id());

@@ -26,7 +26,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 - [Product Purchase Hooks](product_purchase_hooks.md) -- Plugin hooks triggered on product purchase
 - [Scheduled Tasks](scheduled_tasks.md) -- Cron-based task runner and task development
 - [REST API](api.md) -- API authentication, endpoints, and usage
-- [Joinery AI Plugin](joinery_ai.md) -- LLM-driven recipes, the tool layer, and the model auto-discovery surface (`describe_models` / `query_model`)
+- [Joinery AI Plugin](joinery_ai.md) -- LLM-driven recipes, the tool layer, and the generic `query_model` read surface gated by per-recipe model allowlists
 
 ## Extensibility
 

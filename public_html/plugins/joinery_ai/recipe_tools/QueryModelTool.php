@@ -4,8 +4,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunCo
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelQueryExecutor.php'));
 
 /**
- * Run a filtered read against an AI-readable model. Field names come from
- * describe_models. Soft-deleted rows are excluded automatically.
+ * Run a filtered read against a model in the recipe's allowlist. The
+ * available models and their field schemas are listed in the recipe's
+ * system prompt. Soft-deleted rows are excluded automatically.
  *
  * Filter operators (suffixed on the field name):
  *   field          equality
@@ -22,12 +23,13 @@ class QueryModelTool implements RecipeToolInterface {
     }
 
     public static function description(): string {
-        return 'Query rows from a readable data model. Filters use field '
-             . 'names exactly as shown by describe_models. Default operator '
-             . 'is equality; suffix the field name with _like (substring), '
-             . '_after / _min (>=), or _before / _max (<=) for ranges. '
-             . 'Soft-deleted rows are excluded automatically. Default limit '
-             . 'is 50, max is 200.';
+        return 'Query rows from a model in the recipe\'s allowlist. The '
+             . 'allowed models and their field schemas are listed in the '
+             . 'system prompt — use those field names exactly. Default '
+             . 'operator is equality; suffix the field name with _like '
+             . '(substring), _after / _min (>=), or _before / _max (<=) '
+             . 'for ranges. Soft-deleted rows are excluded automatically. '
+             . 'Default limit is 50, max is 200.';
     }
 
     public static function inputSchema(): array {
@@ -37,7 +39,7 @@ class QueryModelTool implements RecipeToolInterface {
             'properties' => [
                 'model' => [
                     'type' => 'string',
-                    'description' => 'The model class name (e.g. "EventRegistrant", "Order"). Use describe_models to discover.',
+                    'description' => 'The model class name (e.g. "EventRegistrant", "Order"). Must be in the recipe\'s allowlist as shown in the system prompt.',
                 ],
                 'filters' => [
                     'type' => 'object',

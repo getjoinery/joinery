@@ -7,9 +7,9 @@
  * `plugins/{plugin}/data/*_class.php` once per request, requires each file,
  * and indexes opted-in classes by their class name.
  *
- * Companion to ModelSchemaBuilder (turns the spec into JSON schema for the
- * describe_models tool) and ModelQueryExecutor (the read-side security
- * boundary for query_model).
+ * Companion to ModelSchemaBuilder (turns the spec into a schema block the
+ * recipe runner injects into the system prompt) and ModelQueryExecutor
+ * (the read-side security boundary for query_model).
  */
 class ModelRegistry {
 

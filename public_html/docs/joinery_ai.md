@@ -20,12 +20,11 @@ plugins/joinery_ai/
     AnthropicClient.php        # HTTP client for Anthropic Messages API
     CostGuard.php              # Per-run token/dollar ceilings
     UrlSafetyValidator.php     # SSRF guard for fetch_url tool
-    ModelRegistry.php          # Auto-discovery: finds models with $ai_readable
-    ModelSchemaBuilder.php     # Auto-discovery: field_specifications -> JSON schema
-    ModelQueryExecutor.php     # Auto-discovery: read security boundary
+    ModelRegistry.php          # Generic reads: finds models with $ai_readable
+    ModelSchemaBuilder.php     # Generic reads: field_specifications -> system-prompt schema block
+    ModelQueryExecutor.php     # Generic reads: read security boundary
   recipe_tools/                # Each PHP file declares one RecipeToolInterface class
-    DescribeModelsTool.php     # describe_models — auto-discovery
-    QueryModelTool.php         # query_model — auto-discovery
+    QueryModelTool.php         # query_model — generic reads
     GetMyNotesTool.php
     SaveNoteTool.php
     GetWorkspaceTool.php
@@ -47,6 +46,7 @@ A recipe is a row in `rcp_recipes` with:
 - **prompt** — the system + user message text the LLM sees
 - **owner** (`rcp_owner_user_id`) — the user the run executes as. `RecipeRunContext::owner_user_id` and `owner_timezone` are derived from this.
 - **allowed tools** (`rcp_allowed_tools`) — JSON array of tool names. Only listed tools are exposed to the LLM. Unknown names are silently skipped (the runner logs them to the trace).
+- **allowed models** (`rcp_allowed_models`) — JSON array of class names. Drives both the schema block in the system prompt and the per-recipe gate in `query_model`. Empty array = no model reads.
 - **schedule** — cron expression, "manual only", or "interactive only".
 
 Recipes are configured at `/admin/joinery_ai` (dashboard) and edited at `/admin/joinery_ai/edit`.
@@ -83,14 +83,20 @@ interface RecipeToolInterface {
 
 `RecipeRunContext` carries `$recipe`, `$run`, `$owner_user_id`, `$owner_timezone`, plus `appendToolCall()` for trace entries.
 
-## Auto-discovery: `describe_models` + `query_model`
+## Generic reads: `query_model` + per-recipe model allowlist
 
-Two generic tools let opted-in data models become readable by recipes without writing a per-model PHP class:
+A single generic tool lets opted-in data models become readable by recipes without writing a per-model PHP class:
 
-- **`describe_models(prefix?)`** — returns the schema of every model with `$ai_readable = true`. Optional case-insensitive prefix filter (e.g. `"Event"` returns `Event`, `EventRegistrant`, `EventType`).
 - **`query_model(model, filters, sort, limit, fields)`** — runs a SELECT against the named model. Filter operators: equality (default), `_like`, `_after` / `_min` (>=), `_before` / `_max` (<=). Soft-deleted rows are excluded automatically.
 
-A recipe gets these tools by listing `describe_models` and/or `query_model` in `rcp_allowed_tools`.
+A recipe gets read access in two layers:
+
+1. **Model author opts the class in globally** with `public static $ai_readable = true` — this is the ceiling.
+2. **Recipe author picks the subset the recipe should see** by checking boxes in the **Allowed Models** section of the recipe edit page. The selection is stored in `rcp_allowed_models` (JSON array of class names).
+
+`query_model` rejects any class not in `rcp_allowed_models`, even if it's globally `$ai_readable`. The recipe runner injects the field schemas of the chosen models directly into the system prompt at run start, so the LLM opens every run already knowing exactly what it can query — no discovery round-trip. The schema block sits in the cached prefix, so repeat runs of the same recipe pay near-zero input tokens for the catalog.
+
+A recipe also needs `query_model` listed in `rcp_allowed_tools`. Without it, the recipe knows the schemas but has no way to fetch rows.
 
 ### Opting a model into AI reads
 
@@ -111,11 +117,11 @@ class UserNote extends SystemBase {
 }
 ```
 
-`ModelRegistry` auto-discovers it on next request. No registration step.
+`ModelRegistry` auto-discovers it on next request. No registration step. The model then shows up as a checkbox in every recipe's **Allowed Models** section.
 
-### What `describe_models` returns
+### What the system-prompt schema block looks like
 
-For each opted-in model: `class`, `description`, and a `fields` map derived from `$field_specifications`. PostgreSQL types are translated to JSON Schema types (`int4` → integer, `varchar` → string, `timestamp` → string with `date-time` format, `jsonb` → object, etc.).
+For each model in `rcp_allowed_models`, the recipe runner emits a section listing `class`, `description`, and each visible field with a PostgreSQL → JSON-Schema-flavoured type (`int4` → integer, `varchar` → string, `timestamp` → string with `date-time` format, `jsonb` → object, etc.). Field names match the database exactly.
 
 Fields are filtered through two layers before exposure:
 
@@ -132,8 +138,9 @@ If admin-only ever changes (end-user recipes), owner-scoping returns as new work
 
 ### Default-deny posture
 
-- Models without `$ai_readable = true` are invisible to `describe_models` and rejected by `query_model`. The `User`, `Setting`, `ApiKey`, `RequestLog`, `WebhookLog`, `EventLog`, `ChangeTracking`, all email-infrastructure models, all plugin-system models, etc. are deliberately not opted in.
-- Adding a column to an opted-in model surfaces it by default (read posture matches the admin UI). If the column is sensitive, add it to `$ai_excluded_fields`.
+- Models without `$ai_readable = true` never appear in the Allowed Models checkbox list and are rejected by `query_model` even if a recipe somehow named them. The `User`, `Setting`, `ApiKey`, `RequestLog`, `WebhookLog`, `EventLog`, `ChangeTracking`, all email-infrastructure models, all plugin-system models, etc. are deliberately not opted in.
+- A new recipe with no boxes checked has zero model access — `query_model` returns "no models allowed" until the author explicitly opts in.
+- Adding a column to an opted-in model surfaces it by default in any recipe that already lists the model (read posture matches the admin UI). If the column is sensitive, add it to `$ai_excluded_fields`.
 
 ### Write side (deferred)
 

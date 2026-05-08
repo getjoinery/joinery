@@ -7,6 +7,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/logic/admin_edit_logic.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
 
 $page_vars = process_logic(admin_joinery_ai_edit_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
@@ -109,6 +110,43 @@ if (empty($registry_map)) {
         echo '<label class="form-check-label" for="tool_' . htmlspecialchars($tool_name) . '">';
         echo '<strong>' . htmlspecialchars($tool_name) . '</strong>'
            . '<br><small class="text-muted">' . $desc . '</small>';
+        echo '</label></div>';
+    }
+}
+echo '</div>';
+
+// Allowed models — checkboxes against the live ModelRegistry. Recipes can
+// only query models that are (a) opted in globally via $ai_readable and
+// (b) explicitly checked here. Their schemas get injected into the system
+// prompt at run start.
+$selected_models = $recipe->get('rcp_allowed_models');
+if (is_string($selected_models)) {
+    $decoded = json_decode($selected_models, true);
+    $selected_models = is_array($decoded) ? $decoded : [];
+}
+if (!is_array($selected_models)) $selected_models = [];
+
+$model_map = ModelRegistry::all();
+ksort($model_map);
+echo '<div class="form-group mb-3">';
+echo '<label class="form-label">Allowed Models</label>';
+echo '<p class="text-muted small mb-2">Models this recipe can query via <code>query_model</code>. '
+   . 'Field schemas for the selected models are added to the system prompt automatically.</p>';
+if (empty($model_map)) {
+    echo '<p class="text-muted">No models are opted into AI reads. Add '
+       . '<code>public static $ai_readable = true;</code> to a data class.</p>';
+} else {
+    foreach ($model_map as $class_name => $info) {
+        $checked = in_array($class_name, $selected_models, true) ? ' checked' : '';
+        $desc = htmlspecialchars($info['description'] ?? '');
+        echo '<div class="form-check">';
+        echo '<input class="form-check-input" type="checkbox" '
+           . 'name="rcp_allowed_models[]" '
+           . 'value="' . htmlspecialchars($class_name) . '" '
+           . 'id="model_' . htmlspecialchars($class_name) . '"' . $checked . '>';
+        echo '<label class="form-check-label" for="model_' . htmlspecialchars($class_name) . '">';
+        echo '<strong>' . htmlspecialchars($class_name) . '</strong>';
+        if ($desc !== '') echo '<br><small class="text-muted">' . $desc . '</small>';
         echo '</label></div>';
     }
 }

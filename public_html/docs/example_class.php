@@ -32,8 +32,9 @@ class Example extends SystemBase
 
     // OPTIONAL: AI auto-discovery (read)
     //
-    // Setting $ai_readable = true exposes this model to the joinery_ai
-    // plugin's describe_models / query_model tools. See docs/joinery_ai.md.
+    // Setting $ai_readable = true makes this model eligible for the joinery_ai
+    // plugin's query_model tool — once a recipe also opts the class in via its
+    // Allowed Models checkboxes. See docs/joinery_ai.md.
     //
     // Default-deny: omit these properties entirely if the model is system
     // infrastructure, contains secrets, or you simply don't want recipes
