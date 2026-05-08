@@ -75,7 +75,7 @@ foreach ($recipes as $recipe) {
            . htmlspecialchars($recipe->get('rcp_name')) . '</a>';
 
     $freq = $recipe->get('rcp_schedule_frequency');
-    $sched_label = ucfirst($freq);
+    $sched_label = $freq === 'none' ? 'No Schedule' : ucfirst($freq);
     if ($freq === 'weekly') {
         $days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         $dow = $recipe->get('rcp_schedule_day_of_week');
