@@ -66,9 +66,9 @@ $page->begin_box(array('altlinks' => $altlinks));
         <?php endif; ?>
 
         <?php if ($message): ?>
-            <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+            <div class="alert alert-<?php echo $message_type; ?>" role="alert">
                 <?php echo $message; ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="alert-close" aria-label="Close">&times;</button>
             </div>
         <?php endif; ?>
 

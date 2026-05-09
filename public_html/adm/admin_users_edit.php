@@ -104,11 +104,10 @@ if (!empty($totp_enabled_time)) {
 	echo '<p><strong>Status:</strong> Enabled (since '
 		. htmlspecialchars(LibraryFunctions::convert_time($totp_enabled_time, 'UTC',
 			$session->get_timezone(), 'M j, Y g:i A T')) . ')</p>';
-	echo '<form method="POST" action="/admin/admin_users_edit?usr_user_id=' . (int)$user->key . '"'
-		. ' onsubmit="return confirm(\'Reset 2FA for this user? They will need to set it up again on their next login.\');">';
+	echo '<form id="reset2fa_form" method="POST" action="/admin/admin_users_edit?usr_user_id=' . (int)$user->key . '">';
 	echo '<input type="hidden" name="action" value="reset_2fa">';
 	echo '<input type="hidden" name="edit_primary_key_value" value="' . (int)$user->key . '">';
-	echo '<button type="submit" class="btn btn-warning">Reset 2FA</button>';
+	echo '<button type="button" class="btn btn-warning" onclick="JoineryModal.confirm(\'Reset 2FA for this user? They will need to set it up again on their next login.\', function(){ document.getElementById(\'reset2fa_form\').submit(); })">Reset 2FA</button>';
 	echo '</form>';
 	echo '<p style="margin-top: 1em; font-size: 0.9em; color: #666;">Use this if the user has lost access to their authenticator and exhausted their backup codes.</p>';
 } else {

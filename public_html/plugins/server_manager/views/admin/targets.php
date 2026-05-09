@@ -170,9 +170,9 @@ $display_messages = $session->get_messages('/admin/server_manager');
 if (!empty($display_messages)) {
 	foreach ($display_messages as $msg) {
 		$alert_class = $msg->display_type == DisplayMessage::MESSAGE_ERROR ? 'alert-danger' : 'alert-success';
-		echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show">';
+		echo '<div class="alert ' . $alert_class . '">';
 		echo htmlspecialchars($msg->message);
-		echo '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 	}
 	$session->clear_clearable_messages();
 }
@@ -302,7 +302,7 @@ if ($target !== null) {
 
 	echo '<a href="/admin/server_manager/targets" class="btn btn-outline-secondary ms-2">Cancel</a>';
 	if ($is_edit) {
-		echo '<a href="/admin/server_manager/targets?bkt_id=' . $target->key . '&action=delete" class="btn btn-outline-danger ms-2" onclick="return confirm(\'Delete this target?\')">Delete</a>';
+		echo '<a href="#" class="btn btn-outline-danger ms-2" onclick="JoineryModal.confirm(\'Delete this target?\', function(){ window.location=\'/admin/server_manager/targets?bkt_id=' . $target->key . '&amp;action=delete\'; })">Delete</a>';
 	}
 
 	$page->end_box();

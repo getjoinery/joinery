@@ -98,12 +98,12 @@ if (!empty($display_messages)) {
 		} elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
 			$alert_class = 'alert-success';
 		}
-		echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show" role="alert">';
+		echo '<div class="alert ' . $alert_class . '" role="alert">';
 		if ($msg->message_title) {
 			echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 		}
 		echo htmlspecialchars($msg->message);
-		echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
 		echo '</div>';
 	}
 	$session->clear_clearable_messages();

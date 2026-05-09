@@ -110,10 +110,10 @@ foreach ($display_messages as $msg) {
 	$alert_class = 'alert-info';
 	if ($msg->display_type == DisplayMessage::MESSAGE_ERROR) $alert_class = 'alert-danger';
 	elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) $alert_class = 'alert-success';
-	echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show" role="alert">';
+	echo '<div class="alert ' . $alert_class . '" role="alert">';
 	if ($msg->message_title) echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 	echo htmlspecialchars($msg->message);
-	echo '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+	echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 }
 $session->clear_clearable_messages();
 
@@ -162,10 +162,10 @@ $page->begin_box($pageoptions);
 					</td>
 					<td><small><?php echo nl2br(htmlspecialchars($u->get('upg_release_notes') ?? '')); ?></small></td>
 					<td class="text-end">
-						<form method="post" style="display:inline" onsubmit="return confirm('Delete upgrade <?php echo htmlspecialchars($version); ?>? This removes both the archive file and the database record.');">
+						<form method="post" style="display:inline">
 							<input type="hidden" name="action" value="delete_upgrade">
 							<input type="hidden" name="upgrade_id" value="<?php echo $u->key; ?>">
-							<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+							<button type="button" class="btn btn-sm btn-outline-danger" onclick="var f=this.parentElement; JoineryModal.confirm('Delete upgrade <?php echo htmlspecialchars($version); ?>? This removes both the archive file and the database record.', function(){ f.submit(); })">Delete</button>
 						</form>
 					</td>
 				</tr>

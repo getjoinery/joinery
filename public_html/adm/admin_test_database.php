@@ -235,9 +235,9 @@ $page->admin_header(array(
             <p class="text-muted">Manage the test database used for automated testing.</p>
 
             <?php if ($message): ?>
-            <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+            <div class="alert alert-<?php echo $message_type; ?>" role="alert">
                 <?php echo htmlspecialchars($message); ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                <button type="button" class="alert-close" aria-label="Close">&times;</button>
             </div>
             <?php endif; ?>
 
@@ -355,7 +355,7 @@ $page->admin_header(array(
                     <h5 class="mb-0"><i class="fas fa-tools"></i> Actions</h5>
                 </div>
                 <div class="card-body">
-                    <form method="POST" onsubmit="return confirm('This will DROP the test database and replace it with a copy of the live database. All test data will be lost. Continue?');">
+                    <form method="POST" id="copy_live_to_test_form">
                         <input type="hidden" name="action" value="copy_live_to_test">
 
                         <div class="mb-3">
@@ -374,7 +374,7 @@ $page->admin_header(array(
                             </div>
                         </div>
 
-                        <button type="submit" class="btn btn-danger">
+                        <button type="button" class="btn btn-danger" onclick="JoineryModal.confirm('This will DROP the test database and replace it with a copy of the live database. All test data will be lost. Continue?', function(){ document.getElementById('copy_live_to_test_form').submit(); })">
                             <i class="fas fa-copy"></i> Copy Live to Test Database
                         </button>
                     </form>

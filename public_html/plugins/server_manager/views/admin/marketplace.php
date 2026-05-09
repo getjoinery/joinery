@@ -84,12 +84,12 @@ $page->begin_box(array('altlinks' => $altlinks));
 								<?php if ($item['install_status'] === 'installed'): ?>
 									<span class="badge bg-success"><i class="fas fa-check me-1"></i>Installed</span>
 								<?php else: ?>
-									<form method="post" class="d-inline" onsubmit="return confirm('Install <?= htmlspecialchars($item['display_name'] ?? $item['name'], ENT_QUOTES) ?>?');">
+									<form method="post" class="d-inline">
 										<input type="hidden" name="action" value="install">
 										<input type="hidden" name="_csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
 										<input type="hidden" name="name" value="<?= htmlspecialchars($item['directory_name'] ?? $item['name']) ?>">
 										<input type="hidden" name="type" value="theme">
-										<button type="submit" class="btn btn-primary btn-sm">
+										<button type="button" class="btn btn-primary btn-sm" onclick="var f=this.parentElement; JoineryModal.confirm('Install <?= htmlspecialchars($item['display_name'] ?? $item['name'], ENT_QUOTES) ?>?', function(){ f.submit(); }, { confirmLabel: 'Install', confirmStyle: 'primary' })">
 											<i class="fas fa-download me-1"></i>Install
 										</button>
 									</form>
@@ -126,12 +126,12 @@ $page->begin_box(array('altlinks' => $altlinks));
 								<?php if ($item['install_status'] === 'installed'): ?>
 									<span class="badge bg-success"><i class="fas fa-check me-1"></i>Installed</span>
 								<?php else: ?>
-									<form method="post" class="d-inline" onsubmit="return confirm('Install <?= htmlspecialchars($item['display_name'] ?? $item['name'], ENT_QUOTES) ?>?');">
+									<form method="post" class="d-inline">
 										<input type="hidden" name="action" value="install">
 										<input type="hidden" name="_csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
 										<input type="hidden" name="name" value="<?= htmlspecialchars($item['directory_name'] ?? $item['name']) ?>">
 										<input type="hidden" name="type" value="plugin">
-										<button type="submit" class="btn btn-primary btn-sm">
+										<button type="button" class="btn btn-primary btn-sm" onclick="var f=this.parentElement; JoineryModal.confirm('Install <?= htmlspecialchars($item['display_name'] ?? $item['name'], ENT_QUOTES) ?>?', function(){ f.submit(); }, { confirmLabel: 'Install', confirmStyle: 'primary' })">
 											<i class="fas fa-download me-1"></i>Install
 										</button>
 									</form>

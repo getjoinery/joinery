@@ -432,12 +432,12 @@ if (!empty($display_messages)) {
 		} elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
 			$alert_class = 'alert-success';
 		}
-		echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show" role="alert">';
+		echo '<div class="alert ' . $alert_class . '" role="alert">';
 		if ($msg->message_title) {
 			echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 		}
 		echo htmlspecialchars($msg->message);
-		echo '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 	}
 	$session->clear_clearable_messages();
 }
@@ -486,9 +486,9 @@ if ($tab === 'overview') {
 		if ($row) {
 			echo ' <a href="/admin/server_manager/job_detail?job_id=' . $row['mjb_id'] . '" class="alert-link">View job #' . $row['mjb_id'] . ' output</a>.';
 		}
-		echo '<div class="mt-2"><form method="post" style="display:inline" onsubmit="return confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\');">';
+		echo '<div class="mt-2"><form method="post" style="display:inline" id="retry_install_form">';
 		echo '<input type="hidden" name="action" value="retry_install">';
-		echo '<button type="submit" class="btn btn-sm btn-warning">Retry Install</button></form></div>';
+		echo '<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\', function(){ document.getElementById(\'retry_install_form\').submit(); })">Retry Install</button></form></div>';
 		echo '</div>';
 	}
 
@@ -543,7 +543,7 @@ if ($tab === 'overview') {
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
 			<?php if (!$node->get('mgn_delete_time')): ?>
 				<li><hr class="dropdown-divider"></li>
-				<li><a class="dropdown-item text-danger" href="<?php echo $base_url; ?>&action=delete" onclick="return confirm('Delete this site?')">Delete Site</a></li>
+				<li><a class="dropdown-item text-danger" href="#" onclick="JoineryModal.confirm('Delete this site?', function(){ window.location='<?php echo $base_url; ?>&amp;action=delete'; })">Delete Site</a></li>
 			<?php endif; ?>
 		</ul>
 	</div>
@@ -1187,44 +1187,40 @@ if ($tab === 'overview') {
 
 	// ── Shared Restore modal (used by per-row Restore buttons above) ──
 ?>
-	<div id="restoreModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.5);" onclick="if(event.target===this) closeRestoreModal();">
-		<div style="max-width:500px; margin:10vh auto; background:white; border-radius:.5rem; box-shadow:0 .5rem 1rem rgba(0,0,0,.2);">
-			<?php
-			$fw_restore = $page->getFormWriter('restoreForm');
-			$fw_restore->begin_form();
-			$fw_restore->hiddeninput('action', '', ['id' => 'rm_action', 'value' => '']);
-			$fw_restore->hiddeninput('backup_filename', '', ['id' => 'rm_filename', 'value' => '']);
-			$fw_restore->hiddeninput('backup_local_path', '', ['id' => 'rm_local_path', 'value' => '']);
-			$fw_restore->hiddeninput('backup_cloud_path', '', ['id' => 'rm_cloud_path', 'value' => '']);
-			?>
-			<div style="padding:1rem 1.25rem; border-bottom:1px solid #dee2e6; display:flex; justify-content:space-between; align-items:center;">
-				<h5 style="margin:0">Restore from <code id="rm_title"></code></h5>
-				<button type="button" class="btn-close" aria-label="Close" onclick="closeRestoreModal();" style="background:none;border:none;font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
-			</div>
-			<div style="padding:1.25rem;">
-				<p class="text-muted small">
-					A pre-restore snapshot of the current database and project files is written to
-					<code>/backups/auto_pre_project_restore_*</code> before the restore runs.
-				</p>
-				<label class="form-label">What to restore</label>
-				<?php
-				echo '<div id="rm_files_wrap">';
-				$fw_restore->checkboxinput('restore_files', 'Project files (<code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code>)', ['checked' => true, 'id' => 'rm_files']);
-				echo '</div>';
-				$fw_restore->checkboxinput('restore_database', 'Database', ['checked' => true, 'id' => 'rm_database']);
-				echo '<div id="rm_apache_wrap">';
-				$fw_restore->checkboxinput('restore_apache', 'Apache config', ['checked' => true, 'id' => 'rm_apache']);
-				echo '</div>';
-				?>
-				<div id="rm_component_error" class="text-danger small mt-2" style="display:none">Select at least one component.</div>
-			</div>
-			<div style="padding:.75rem 1.25rem; border-top:1px solid #dee2e6; text-align:right;">
-				<button type="button" class="btn btn-secondary" onclick="closeRestoreModal();">Cancel</button>
-				<button type="submit" class="btn btn-danger" onclick="return submitRestoreModal();">Restore</button>
-			</div>
-			<?php $fw_restore->end_form(); ?>
+	<dialog id="restoreModal">
+		<?php
+		$fw_restore = $page->getFormWriter('restoreForm');
+		$fw_restore->begin_form();
+		$fw_restore->hiddeninput('action', '', ['id' => 'rm_action', 'value' => '']);
+		$fw_restore->hiddeninput('backup_filename', '', ['id' => 'rm_filename', 'value' => '']);
+		$fw_restore->hiddeninput('backup_local_path', '', ['id' => 'rm_local_path', 'value' => '']);
+		$fw_restore->hiddeninput('backup_cloud_path', '', ['id' => 'rm_cloud_path', 'value' => '']);
+		?>
+		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+			<h5 style="margin:0">Restore from <code id="rm_title"></code></h5>
+			<button type="button" aria-label="Close" onclick="closeRestoreModal();" style="background:none;border:none;font-size:1.5rem;cursor:pointer;line-height:1;">&times;</button>
 		</div>
-	</div>
+		<p class="text-muted small">
+			A pre-restore snapshot of the current database and project files is written to
+			<code>/backups/auto_pre_project_restore_*</code> before the restore runs.
+		</p>
+		<label class="form-label">What to restore</label>
+		<?php
+		echo '<div id="rm_files_wrap">';
+		$fw_restore->checkboxinput('restore_files', 'Project files (<code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code>)', ['checked' => true, 'id' => 'rm_files']);
+		echo '</div>';
+		$fw_restore->checkboxinput('restore_database', 'Database', ['checked' => true, 'id' => 'rm_database']);
+		echo '<div id="rm_apache_wrap">';
+		$fw_restore->checkboxinput('restore_apache', 'Apache config', ['checked' => true, 'id' => 'rm_apache']);
+		echo '</div>';
+		?>
+		<div id="rm_component_error" class="text-danger small mt-2" style="display:none">Select at least one component.</div>
+		<div class="dialog-actions">
+			<button type="button" class="dialog-btn-cancel" onclick="closeRestoreModal();">Cancel</button>
+			<button type="button" class="dialog-btn-confirm dialog-btn-danger" onclick="submitRestoreModal();">Restore</button>
+		</div>
+		<?php $fw_restore->end_form(); ?>
+	</dialog>
 
 <script>
 var backupNodeId = <?php echo $node->key; ?>;
@@ -1315,11 +1311,11 @@ function openRestoreModal(type, filename, localPath, cloudPath) {
 	document.getElementById('rm_database').checked = true;
 	document.getElementById('rm_apache').checked   = isProject;
 
-	document.getElementById('restoreModal').style.display = 'block';
+	document.getElementById('restoreModal').showModal();
 }
 
 function closeRestoreModal() {
-	document.getElementById('restoreModal').style.display = 'none';
+	document.getElementById('restoreModal').close();
 }
 
 function submitRestoreModal() {
@@ -1331,18 +1327,23 @@ function submitRestoreModal() {
 		var err = document.getElementById('rm_component_error');
 		if (boxes.length === 0) {
 			err.style.display = 'block';
-			return false;
+			return;
 		}
 		err.style.display = 'none';
 		var parts = [];
 		if (document.getElementById('rm_files').checked)    parts.push('project files');
 		if (document.getElementById('rm_database').checked) parts.push('database');
 		if (document.getElementById('rm_apache').checked)   parts.push('Apache config');
-		return confirm('Restore ' + parts.join(', ') + ' from ' + fn + '?\n\nThis will overwrite the current site. A pre-restore snapshot is written to /backups/ first.');
+		JoineryModal.confirm('Restore ' + parts.join(', ') + ' from ' + fn + '? This will overwrite the current site. A pre-restore snapshot is written to /backups/ first.', function() {
+			document.getElementById('restoreForm').submit();
+		});
+		return;
 	}
 
 	// restore_database
-	return confirm('Restore database from ' + fn + '?\n\nThis will overwrite the current database. A pre-restore snapshot is written first.');
+	JoineryModal.confirm('Restore database from ' + fn + '? This will overwrite the current database. A pre-restore snapshot is written first.', function() {
+		document.getElementById('restoreForm').submit();
+	});
 }
 
 function deleteBackup(target, filename, localPath, cloudPath) {
@@ -1351,26 +1352,26 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 	else if (target === 'local') locations = 'the local copy';
 	else                         locations = 'the cloud copy';
 
-	if (!confirm('Delete ' + filename + '?\n\nThis will remove ' + locations + '. This cannot be undone.')) return;
+	JoineryModal.confirm('Delete ' + filename + '? This will remove ' + locations + '. This cannot be undone.', function() {
+		var url = '/ajax/backup_actions?action=delete_file&node_id=' + backupNodeId
+			+ '&target=' + encodeURIComponent(target)
+			+ '&local_path=' + encodeURIComponent(localPath)
+			+ '&cloud_path=' + encodeURIComponent(cloudPath);
 
-	var url = '/ajax/backup_actions?action=delete_file&node_id=' + backupNodeId
-		+ '&target=' + encodeURIComponent(target)
-		+ '&local_path=' + encodeURIComponent(localPath)
-		+ '&cloud_path=' + encodeURIComponent(cloudPath);
-
-	fetch(url)
-		.then(function(r) { return r.json(); })
-		.then(function(data) {
-			if (!data.success) {
-				alert('Delete failed: ' + data.message);
-				return;
-			}
-			// Refresh the backup list after deletion
-			refreshBackupList();
-		})
-		.catch(function() {
-			alert('Delete request failed');
-		});
+		fetch(url)
+			.then(function(r) { return r.json(); })
+			.then(function(data) {
+				if (!data.success) {
+					alert('Delete failed: ' + data.message);
+					return;
+				}
+				// Refresh the backup list after deletion
+				refreshBackupList();
+			})
+			.catch(function() {
+				alert('Delete request failed');
+			});
+	});
 }
 </script>
 
@@ -1410,7 +1411,7 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 	]);
 	$fw_copy->submitbutton('btn_copy_db', 'Copy Database', [
 		'class'   => 'btn btn-danger',
-		'onclick' => 'return confirm(\'Are you sure? This will overwrite the database on ' . addslashes($node_name) . '.\')',
+		'onclick' => 'event.preventDefault(); JoineryModal.confirm(\'Are you sure? This will overwrite the database on ' . addslashes($node_name) . '.\', function(){ document.getElementById(\'copy_db_form\').submit(); })',
 	]);
 	$fw_copy->end_form();
 	$page->end_box();
@@ -1442,7 +1443,7 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 		]);
 		$fw_icopy->submitbutton('btn_icopy_db', 'Copy Database', [
 			'class'   => 'btn btn-danger',
-			'onclick' => 'return confirm(\'Are you sure? This will overwrite the database on ' . addslashes($node_name) . '.\')',
+			'onclick' => 'event.preventDefault(); JoineryModal.confirm(\'Are you sure? This will overwrite the database on ' . addslashes($node_name) . '.\', function(){ document.getElementById(\'internal_copy_form\').submit(); })',
 		]);
 		$fw_icopy->end_form();
 	endif; ?>
@@ -1523,17 +1524,16 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 		</div>
 	</div>
 	<div class="mt-2">
-		<form method="post" style="display:inline">
+		<form method="post" style="display:inline" id="apply_update_form">
 			<input type="hidden" name="action" value="apply_update">
-			<button type="submit" class="btn btn-sm btn-outline-primary" onclick="return confirm('Apply update to <?php echo $node_name; ?>?')">Apply Update</button>
+			<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm('Apply update to <?php echo $node_name; ?>?', function(){ document.getElementById('apply_update_form').submit(); })">Apply Update</button>
 		</form>
 	</div>
 	<hr>
 	<div class="mt-3">
-		<form method="post" style="display:inline"
-		      onsubmit="return confirm('Queue an upgrade job for every enabled site on host <?php echo htmlspecialchars($node->get('mgn_host')); ?>?');">
+		<form method="post" style="display:inline" id="upgrade_all_form">
 			<input type="hidden" name="action" value="apply_update_all_on_host">
-			<button type="submit" class="btn btn-sm btn-warning">Upgrade All Sites on This Host</button>
+			<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Queue an upgrade job for every enabled site on host <?php echo htmlspecialchars($node->get('mgn_host')); ?>?', function(){ document.getElementById('upgrade_all_form').submit(); })">Upgrade All Sites on This Host</button>
 		</form>
 		<p class="text-muted small mt-2 mb-0">
 			Queues one independent upgrade job per enabled, non-deleted site that shares this host
@@ -1685,8 +1685,8 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 	$fw_api->submitbutton('btn_api_save', 'Save', ['class' => 'btn btn-sm btn-primary']);
 	$fw_api->end_form();
 	if ($has_api_pub) {
-		echo ' <button type="submit" form="api_keys_clear_form" class="btn btn-sm btn-outline-danger" '
-		   . 'onclick="return confirm(\'Clear API credentials? Jobs will fall back to SSH.\')">Clear</button>';
+		echo ' <button type="button" class="btn btn-sm btn-outline-danger" '
+		   . 'onclick="JoineryModal.confirm(\'Clear API credentials? Jobs will fall back to SSH.\', function(){ document.getElementById(\'api_keys_clear_form\').submit(); })">Clear</button>';
 	}
 
 	if ($has_api_pub) {

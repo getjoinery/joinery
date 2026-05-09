@@ -488,12 +488,12 @@
 				} elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
 					$alert_class = 'alert-success';
 				}
-				echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show" role="alert">';
+				echo '<div class="alert ' . $alert_class . '" role="alert">';
 				if ($msg->message_title) {
 					echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 				}
 				echo htmlspecialchars($msg->message);
-				echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+				echo '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
 				echo '</div>';
 			}
 			$session->clear_clearable_messages();
@@ -526,7 +526,7 @@
 			// Add delete link
 			$delete_url = '/admin/server_manager/publish?delete=' . $upgrade->key;
 			$version_label = $upgrade->get('upg_major_version') . '.' . $upgrade->get('upg_minor_version') . '.' . $upgrade->get('upg_patch_version');
-			$version_string .= ' <a href="' . htmlspecialchars($delete_url) . '" onclick="return confirm(\'Are you sure you want to delete version ' . $version_label . '? This will delete both the archive file and database record.\');" style="color: #dc3545; margin-left: 10px;"><i class="fas fa-trash-alt"></i> Delete</a>';
+			$version_string .= ' <a href="#" onclick="JoineryModal.confirm(\'Delete version ' . $version_label . '? This will delete both the archive file and database record.\', function(){ window.location=\'' . htmlspecialchars($delete_url, ENT_QUOTES) . '\'; })" style="color: #dc3545; margin-left: 10px;"><i class="fas fa-trash-alt"></i> Delete</a>';
 
 			echo $version_string.'<br />';
 		}

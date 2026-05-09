@@ -628,7 +628,7 @@
 
 		// Action
 		$action_link = '<a href="/admin/admin_event_session_edit?evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-soft-default">Edit</a> ';
-		$action_link .= '<a href="/admin/admin_event_session_edit?action=delete&evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-soft-danger" onclick="return confirm(\'Are you sure you want to delete this session?\')">Delete</a>';
+		$action_link .= '<a href="#" class="btn btn-sm btn-soft-danger" onclick="JoineryModal.confirm(\'Delete this session?\', function(){ window.location=\'/admin/admin_event_session_edit?action=delete&amp;evs_event_session_id='.$event_session->key.'\'; })">Delete</a>';
 		array_push($rowvalues, $action_link);
 
 		$page->disprow($rowvalues);

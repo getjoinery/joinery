@@ -174,8 +174,9 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                                     // Add delete option for non-system themes with missing files or inactive themes
                                     if (!$is_system && (!$files_exist || !$is_active)) {
-                                        $receives_upgrades_theme = $receives_upgrades ? 'true' : 'false';
-                                        $actions['Permanently Delete'] = "javascript:showDeleteModal('$theme_name', '" . htmlspecialchars($display_name, ENT_QUOTES) . "', $receives_upgrades_theme)";
+                                        $msg_json = htmlspecialchars(json_encode('Delete theme "' . $display_name . '"?'));
+                                        $name_json = htmlspecialchars(json_encode($theme_name));
+                                        $actions['Permanently Delete'] = "javascript:JoineryModal.confirm($msg_json, function(){ submitAction('delete', $name_json); }, { confirmLabel: 'Delete' })";
                                     }
                                 }
 
@@ -207,119 +208,7 @@ $page->begin_box(array('altlinks' => $altlinks));
     
 </div>
 
-<!-- Delete Confirmation Modal -->
-<style>
-.jy-modal-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-}
-.jy-modal-overlay.active { display: flex; }
-.jy-modal {
-    background: var(--white);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    width: 100%;
-    max-width: 500px;
-    margin: 1rem;
-}
-.jy-modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border);
-}
-.jy-modal-header h5 { margin: 0; font-size: 1.1rem; }
-.jy-modal-close {
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    line-height: 1;
-    cursor: pointer;
-    color: var(--muted);
-    padding: 0;
-}
-.jy-modal-close:hover { color: var(--body-color); }
-.jy-modal-body { padding: 1.5rem; }
-.jy-modal-body p { margin-bottom: 0.75rem; }
-.jy-modal-body ul { list-style: disc; padding-left: 1.5rem; margin-bottom: 0.75rem; }
-.jy-modal-body ul li { list-style: disc; margin-bottom: 0.25rem; }
-.jy-modal-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--border);
-}
-</style>
-
-<div id="deleteThemeModal" class="jy-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="deleteThemeModalLabel">
-    <div class="jy-modal">
-        <div class="jy-modal-header">
-            <h5 id="deleteThemeModalLabel">Confirm Theme Deletion</h5>
-            <button type="button" class="jy-modal-close" onclick="closeDeleteModal()" aria-label="Close">&times;</button>
-        </div>
-        <div class="jy-modal-body">
-            <p>Are you sure you want to permanently delete the theme "<strong><span id="deleteThemeName"></span></strong>"?</p>
-            <p>This will:</p>
-            <ul>
-                <li>Remove all theme files from the server</li>
-                <li>Delete the theme's database record</li>
-            </ul>
-            <div id="upgradableThemeWarning" class="alert alert-info" style="display:none;">
-                This theme has <strong>receives_upgrades=true</strong>. If it is published by the upgrade server, it can be re-downloaded later.
-            </div>
-            <div id="preservedThemeWarning" class="alert alert-danger" style="display:none;">
-                <strong>WARNING:</strong> This theme has upgrades disabled (receives_upgrades=false). Deleting it removes a copy that the upgrade system will not re-download.
-            </div>
-            <p style="color:var(--danger);"><strong>This action cannot be undone.</strong></p>
-        </div>
-        <div class="jy-modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
-            <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Permanently Delete Theme</button>
-        </div>
-    </div>
-</div>
-
 <script>
-var themeToDelete = '';
-
-function showDeleteModal(themeName, displayName, receivesUpgrades) {
-    themeToDelete = themeName;
-    document.getElementById('deleteThemeName').textContent = displayName;
-
-    if (receivesUpgrades) {
-        document.getElementById('upgradableThemeWarning').style.display = 'block';
-        document.getElementById('preservedThemeWarning').style.display = 'none';
-    } else {
-        document.getElementById('upgradableThemeWarning').style.display = 'none';
-        document.getElementById('preservedThemeWarning').style.display = 'block';
-    }
-
-    document.getElementById('deleteThemeModal').classList.add('active');
-    document.body.style.overflow = 'hidden';
-}
-
-function closeDeleteModal() {
-    document.getElementById('deleteThemeModal').classList.remove('active');
-    document.body.style.overflow = '';
-}
-
-document.getElementById('deleteThemeModal').addEventListener('click', function(e) {
-    if (e.target === this) closeDeleteModal();
-});
-
-document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
-    if (themeToDelete) {
-        submitAction('delete', themeToDelete);
-    }
-});
-
 function submitAction(action, themeName) {
     var form = document.createElement('form');
     form.method = 'post';
