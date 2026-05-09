@@ -42,7 +42,10 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $recipe->set('rcp_monthly_token_cap', 200000);
     }
 
-    if ($input && isset($input['btn_submit'])) {
+    // joinery-validate.js calls form.submit() directly, which strips the
+    // submitter button — so isset($input['btn_submit']) is unreliable.
+    // POST is the only signal we need on this admin-only page.
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
         // Soft delete handler
         if (isset($input['btn_delete']) && $recipe->key) {

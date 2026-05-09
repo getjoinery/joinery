@@ -37,7 +37,7 @@ class RecipeRun extends SystemBase {
         'rcr_tool_calls'        => array('type'=>'jsonb'),
         'rcr_workspace_before'  => array('type'=>'text'),
         'rcr_workspace_after'   => array('type'=>'text'),
-        'rcr_kill_requested'    => array('type'=>'bool', 'default'=>'false'),
+        'rcr_kill_requested'    => array('type'=>'bool', 'default'=>false),
         'rcr_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'rcr_delete_time'       => array('type'=>'timestamp(6)'),
     );

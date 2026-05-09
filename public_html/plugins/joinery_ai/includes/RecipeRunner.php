@@ -455,11 +455,15 @@ class RecipeRunner {
             gmdate('Y-m-d H:i:s'), 'UTC', $ctx->owner_timezone, 'l, F j, Y g:i A T'
         );
 
+        $owner_id = (int)$recipe->get('rcp_owner_user_id');
         $preamble = "You are a Joinery AI recipe runner. You execute scheduled tasks "
                   . "by calling the tools available to you and producing a final text "
                   . "report. Do not chat — produce the report. Use Markdown for formatting.\n\n"
                   . "Current date/time (owner timezone): $today_local\n"
-                  . "Recipe name: " . $recipe->get('rcp_name') . "\n";
+                  . "Recipe name: " . $recipe->get('rcp_name') . "\n"
+                  . "Recipe owner user_id: $owner_id (permission 10, admin reach)\n"
+                  . "Use this user_id when a write tool needs an owner / created_by / "
+                  . "updated_by column set.\n";
 
         $models_block = self::buildModelsBlock($recipe);
 
