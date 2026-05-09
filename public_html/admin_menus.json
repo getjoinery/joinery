@@ -380,15 +380,6 @@
             "parent": "system"
         },
         {
-            "slug": "system-specs",
-            "title": "Specifications",
-            "url": "/admin/admin_specs",
-            "order": 5,
-            "permission": 10,
-            "icon": "file-alt",
-            "parent": "system"
-        },
-        {
             "slug": "test-database",
             "title": "Test Database",
             "url": "admin_test_database",
@@ -416,21 +407,12 @@
         },
         {
             "slug": "system-components",
-            "title": "Components",
+            "title": "Component Types",
             "url": "admin_component_types",
             "order": 6,
             "permission": 9,
             "icon": "puzzle-piece",
             "parent": "system"
-        },
-        {
-            "slug": "component-types",
-            "title": "Component Types",
-            "url": "admin_component_types",
-            "order": 3,
-            "permission": 5,
-            "settingActivate": "page_contents_active",
-            "parent": "pages"
         },
         {
             "slug": "event-types",
