@@ -1009,6 +1009,15 @@ class SessionControl{
 				}
 			}
 
+			// Check if user must accept terms before accessing any other page
+			if ($this->must_accept_terms()) {
+				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+				if ($current_path !== '/terms-accept' && $current_path !== '/logout') {
+					header('Location: /terms-accept');
+					exit();
+				}
+			}
+
 			// Enforce 2FA on admin accounts when totp_require_admins is set.
 			// Exempt /profile/security (where they enable it) and /logout to avoid loops.
 			if ($this->must_enable_totp_for_admin()) {
@@ -1062,6 +1071,25 @@ class SessionControl{
 		return $_SESSION['force_password_change'];
 	}
 
+	/**
+	 * Check whether the current user still owes terms acceptance.
+	 * Cached in session to avoid per-request DB hits; the cache is
+	 * cleared on /terms-accept submit and on logout.
+	 */
+	function must_accept_terms() {
+		if (!isset($_SESSION['usr_user_id'])) {
+			return false;
+		}
+
+		if (!isset($_SESSION['terms_accepted'])) {
+			require_once(PathHelper::getIncludePath('data/users_class.php'));
+			$user = new User($_SESSION['usr_user_id'], true);
+			$_SESSION['terms_accepted'] = !empty($user->get('usr_terms_accepted_time'));
+		}
+
+		return !$_SESSION['terms_accepted'];
+	}
+
 	// Log somebody into the site and store their information in the session
 	function store_session_variables($user, $mode='') {
 		if (!$user->actions_allowed()) {
@@ -1076,6 +1104,7 @@ class SessionControl{
 		$_SESSION['usr_user_id'] = $user->key;
 		$_SESSION['ip_address'] = $this->_get_client_ip();
 		$_SESSION['timezone'] = $user->get('usr_timezone');
+		$_SESSION['terms_accepted'] = !empty($user->get('usr_terms_accepted_time'));
 
 		if ($mode === 'admin') {
 			$_SESSION['permission'] = 10;

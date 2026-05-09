@@ -124,6 +124,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if(!$billing_user){
 			return _checkout_error("We couldn't create your account. Please check your information and try again.");
 		}
+		// Implicit consent was shown under the Continue button on the cart billing form.
+		$billing_user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+		$billing_user->save();
+		$_SESSION['terms_accepted'] = true;
 	}
 	
 	if($settings->get_setting('checkout_type') == 'stripe_regular' || $settings->get_setting('checkout_type') == 'stripe_checkout'){

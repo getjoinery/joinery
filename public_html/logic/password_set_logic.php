@@ -17,6 +17,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::error('This feature is turned off');
 	}
 
+	// Determine whether the consent checkbox should be shown.
+	$page_vars['terms_already_accepted'] = false;
+	if ($session->get_user_id()) {
+		$current_user = new User($session->get_user_id(), TRUE);
+		$page_vars['terms_already_accepted'] = !empty($current_user->get('usr_terms_accepted_time'));
+	}
+
 	if (!empty($_POST)) {
 
 		if(!$session->get_user_id()){
@@ -38,8 +45,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('Your password did not match in both fields.');
 		}
 
+		$terms_already_accepted = !empty($user->get('usr_terms_accepted_time'));
+		if (!$terms_already_accepted && empty($input['accept_terms'])) {
+			return LogicResult::error('You must agree to the Terms of Use and Privacy Policy to continue.');
+		}
+
 		$user->set('usr_password', User::GeneratePassword($input['usr_password']));
+		if (!$terms_already_accepted) {
+			$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+		}
 		$user->save();
+
+		$_SESSION['terms_accepted'] = true;
 
 		$page_vars['message_type'] = 'success';
 		$page_vars['message_title'] = 'Reset code sent';

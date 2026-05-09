@@ -67,6 +67,9 @@ function event_waiting_list_logic(array $input): LogicResult {
 					'send_emails' => true
 				);
 				$user = User::CreateNew($data);
+				if (!empty($_POST['privacy'])) {
+					$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+				}
 			}
 
 			if($_POST['usr_nickname']){

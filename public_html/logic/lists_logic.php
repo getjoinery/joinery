@@ -69,7 +69,11 @@ function lists_logic(array $input): LogicResult {
 				'password' => $_POST['usr_password'],
 				'send_emails' => false
 			);
-			$user = User::CreateNew($data);	
+			$user = User::CreateNew($data);
+			if (!empty($_POST['privacy'])) {
+				$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+				$user->save();
+			}
 		}
 		$page_vars['user'] = $user;
 

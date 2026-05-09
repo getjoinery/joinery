@@ -816,3 +816,16 @@
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Backfill usr_terms_accepted_time + clean usr_lastlogin_time (v132) ==========
+	// Spec: specs/implemented/terms_acceptance_capture.md.
+	// Schema: usr_terms_accepted_time was added (and usr_lastlogin_time default
+	// dropped) via $field_specifications, applied by update_database before this
+	// migration. This step is the data backfill: stamp existing users who have
+	// real log_logins entries, and null out fictional usr_lastlogin_time values
+	// that the old default => now() left on every insert.
+	$migration = array();
+	$migration['database_version'] = '132';
+	$migration['migration_file'] = 'migration_terms_accepted_backfill.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
