@@ -263,12 +263,12 @@ function admin_items_logic($get_vars, $post_vars) {
             $alert_class = 'alert-success';
         }
         ?>
-        <div class="alert <?= $alert_class ?> alert-dismissible fade show" role="alert">
+        <div class="alert <?= $alert_class ?>" role="alert">
             <?php if ($msg->message_title): ?>
                 <strong><?= htmlspecialchars($msg->message_title) ?>:</strong>
             <?php endif; ?>
             <?= htmlspecialchars($msg->message) ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <button type="button" class="alert-close" aria-label="Close">&times;</button>
         </div>
     <?php endforeach; ?>
     <?php $session->clear_clearable_messages(); ?>
@@ -320,28 +320,93 @@ $altlinks['Action'] = '/admin/admin_page_name?action=value';
 $altlinks['Action'] = '/admin/admin_page_name?action=value';
 ```
 
-### Modal/AJAX Integration
-```php
-// For pages that need JavaScript interaction
-echo '<button type="button" class="btn btn-primary" data-toggle="modal" data-target="#editModal">
-    Edit Item
-</button>';
+### Modal Dialogs
 
-// Modal structure
-echo '<div class="modal fade" id="editModal">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Edit Item</h5>
-                <button type="button" class="close" data-dismiss="modal">&times;</button>
-            </div>
-            <div class="modal-body">
-                <!-- Form content -->
-            </div>
-        </div>
-    </div>
-</div>';
+The joinery-system theme provides `JoineryModal`, a vanilla-JS utility built on the native `<dialog>` element. Use it for all confirmation and notification dialogs — never use `window.confirm()` or Bootstrap modals.
+
+#### Three methods
+
+```js
+// Confirmation — two buttons, danger-styled by default
+JoineryModal.confirm('Delete this record?', function() {
+    submitAction();
+});
+
+// Alert — one button (OK), primary-styled, no cancel
+JoineryModal.alert('Settings saved successfully.');
+
+// Prompt — text input, returns typed value to callback
+JoineryModal.prompt('Enter the item name to confirm:', function(value) {
+    if (value === expected) submitDelete();
+});
 ```
+
+#### Options
+
+All three methods accept an optional third argument:
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `confirmLabel` | string | `'Confirm'` / `'OK'` | Label on the action button |
+| `cancelLabel` | string | `'Cancel'` | Label on the cancel button (`confirm` and `prompt` only) |
+| `confirmStyle` | `'danger'` \| `'primary'` | `'danger'` / `'primary'` | Button color |
+| `placeholder` | string | `''` | Input placeholder (`prompt` only) |
+| `defaultValue` | string | `''` | Pre-filled input value (`prompt` only) |
+
+```js
+// Constructive action — override style and label
+JoineryModal.confirm('Apply this update?', function() {
+    submitForm();
+}, { confirmLabel: 'Apply', confirmStyle: 'primary' });
+
+// Prompt with placeholder
+JoineryModal.prompt('Type the plugin name to confirm removal:', function(value) {
+    if (value === pluginName) submitUninstall(value);
+}, { placeholder: 'plugin-name', confirmLabel: 'Uninstall', confirmStyle: 'danger' });
+```
+
+#### Triggering from PHP-generated action links
+
+The standard pattern for PHP-rendered action buttons that need confirmation:
+
+```php
+// In a table row or action cell
+$plugin_name = htmlspecialchars($plugin['name']);
+$warning = "This will permanently delete all data. This cannot be undone.";
+$action_cell .= '<a href="javascript:void(0)" onclick="confirmAndDelete(\'' . $plugin_name . '\', \'' . addslashes($warning) . '\')">'
+              . 'Delete</a>';
+```
+
+```js
+function confirmAndDelete(name, message) {
+    JoineryModal.confirm(message, function() {
+        submitPluginAction('delete', name);
+    }, { confirmLabel: 'Delete' });
+}
+```
+
+#### Form-hosting modals (complex overlays)
+
+When a modal needs to contain real form fields (multiple inputs, selects, checkboxes), use a raw `<dialog>` element directly in the page. The theme's `dialog` CSS rule styles it automatically.
+
+```html
+<dialog id="myModal">
+    <form method="post">
+        <!-- form fields -->
+        <div class="dialog-actions">
+            <button type="button" onclick="document.getElementById('myModal').close()">Cancel</button>
+            <button type="submit" class="dialog-btn-confirm dialog-btn-primary">Save</button>
+        </div>
+    </form>
+</dialog>
+```
+
+```js
+document.getElementById('myModal').showModal();
+document.getElementById('myModal').close();
+```
+
+Full API reference: `specs/joinery_modal_api.md`
 
 ### Bulk Actions
 ```php
@@ -367,11 +432,11 @@ echo '<form method="post" action="/admin/admin_bulk_action">
 
 ## Layout Rules and Best Practices
 
-### Bootstrap Classes
-1. **Use standard Bootstrap classes**: `form-control`, `btn btn-primary`, `alert-info`, etc.
+### CSS Classes
+1. **Use theme CSS classes**: `form-control`, `btn btn-primary`, `alert-info`, etc. — joinery-system provides its own implementations of these common utility classes
 2. **Container structure**: Always wrap content in `<div class="row">` and `<div class="col-12">` or appropriate column classes
 3. **No nested panels**: Avoid cards inside cards unless there's a specific UI reason
-4. **Responsive design**: Use Bootstrap's responsive utilities (`d-md-block`, `col-md-6`, etc.)
+4. **Responsive design**: Use column classes (`col-md-4`, `col-md-6`, `col-md-8`, `col-12`) — joinery-system implements a standard subset of the grid
 
 ### Form Best Practices
 1. **Always use FormWriter**: Never create forms manually - always use the FormWriter system
@@ -399,12 +464,12 @@ echo '<form method="post" action="/admin/admin_bulk_action">
 - **Delete page**: Simple confirmation form with model deletion
 
 ### Dashboard/Analytics Pages
-- **Statistics cards**: Bootstrap card components with key metrics  
+- **Statistics cards**: Card layout with key metrics using `.card` / `.card-header` / `.card-body`
 - **Charts**: Include Chart.js or similar for data visualization
 - **Time period selectors**: Date range pickers for filtering data
 
 ### Settings Pages
-- **Tab interface**: Multiple settings categories in Bootstrap tabs
+- **Tab interface**: Multiple settings categories using a custom CSS tab structure or `<details>` groups
 - **Section groups**: Related settings grouped in card components
 - **Immediate feedback**: Success/error messages for setting changes
 
@@ -412,7 +477,7 @@ echo '<form method="post" action="/admin/admin_bulk_action">
 - **Real-time updates**: JavaScript refresh or WebSocket updates
 - **Filtering**: Multiple filter options (date, severity, user, etc.)
 - **Export options**: CSV/PDF export functionality
-- **Expandable details**: Use `<details>/<summary>` tags or Bootstrap collapse
+- **Expandable details**: Use `<details>/<summary>` tags
 
 ## File Naming Conventions
 
@@ -437,7 +502,7 @@ echo '<form method="post" action="/admin/admin_bulk_action">
 Add your page to the admin menu by updating the appropriate menu configuration. Check existing admin pages for the correct `menu-id` to use.
 
 ### Consistent Styling
-Your admin pages automatically inherit the current admin theme (Falcon/Bootstrap). Follow the existing visual patterns from other admin pages.
+Your admin pages automatically inherit the joinery-system admin theme. Follow the existing visual patterns from other admin pages.
 
 ### Database Integration
 Use the existing model classes and follow the SystemBase patterns. Create new model classes in `/data/` if needed following the established naming conventions.
