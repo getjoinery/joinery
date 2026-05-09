@@ -24,6 +24,19 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 	$page_vars['act_code'] = $act_code;
 
+	// Decide whether to render the terms checkbox. Show it when this code resolves
+	// to a user who has never accepted terms (typically a recipient auto-create or
+	// admin-add user using the reset link as activation).
+	$page_vars['terms_already_accepted'] = true;
+	if ($act_code) {
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$pre_user_id = Activation::getIdFromTempCode($act_code, 2);
+		if ($pre_user_id) {
+			$pre_user = new User($pre_user_id, true);
+			$page_vars['terms_already_accepted'] = !empty($pre_user->get('usr_terms_accepted_time'));
+		}
+	}
+
 	if (!empty($_POST)) {
 
 		if (!RequestLogger::check_rate_limit('password_reset_complete', 5, 900, false)) {
@@ -55,7 +68,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				return LogicResult::error('This feature is turned off for this user.  Please email us to recover your password.');
 		}
 
+		$terms_already_accepted = !empty($user->get('usr_terms_accepted_time'));
+		if (!$terms_already_accepted && empty($input['accept_terms'])) {
+			return LogicResult::error('You must agree to the Terms of Use and Privacy Policy to continue.');
+		}
+
 		$user->set('usr_password', User::GeneratePassword($input['usr_password']));
+		if (!$terms_already_accepted) {
+			$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+		}
 		$user->save();
 
 		// Now delete the code

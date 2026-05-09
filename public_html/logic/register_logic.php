@@ -108,6 +108,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		else{
 			$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);
+			$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+			$user->save();
+			$_SESSION['terms_accepted'] = true;
 		}
 
 		$returnurl = $session->get_return();
