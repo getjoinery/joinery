@@ -106,22 +106,25 @@ public function get_requirement_info($output='text') {
 	
 	//GET ALL OF THE ADDITIONAL PRODUCT REQUIREMENTS FOR THIS PRODUCT
 	function get_requirement_instances($deleted=false){
+		if (!$this->key) {
+			return new MultiProductRequirementInstance([], NULL, NULL, NULL);
+		}
 		if(!$deleted){
 			$pri_lists = new MultiProductRequirementInstance(
 			array('product_id'=>$this->key, 'deleted' => false),
 			NULL,		//SORT BY => DIRECTION
 			NULL,  //NUM PER PAGE
-			NULL);  //OFFSET			
+			NULL);  //OFFSET
 		}
 		else{
 			$pri_lists = new MultiProductRequirementInstance(
 			array('product_id'=>$this->key),
 			NULL,		//SORT BY => DIRECTION
 			NULL,  //NUM PER PAGE
-			NULL);  //OFFSET			
+			NULL);  //OFFSET
 		}
 
-		$pri_lists->load();	
+		$pri_lists->load();
 		return $pri_lists;
 	}
 	

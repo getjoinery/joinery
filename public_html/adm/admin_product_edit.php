@@ -152,19 +152,15 @@ $formwriter->dropinput('pro_tier_min_level', 'Minimum Tier to View', [
 	'helptext' => 'Restrict viewing/purchasing this product to users with this subscription tier or higher'
 ]);
 
-$formwriter->textinput('pro_max_purchase_count', 'Total Number available for purchase (0 for unlimited)', [
-	'validation' => ['required' => true]
-]);
+$formwriter->textinput('pro_max_purchase_count', 'Total Number available for purchase (0 for unlimited)');
 
-$formwriter->textinput('pro_max_cart_count', 'Max Number that can be added to cart per user (0 for unlimited)', [
-	'validation' => ['required' => true]
-]);
+$formwriter->textinput('pro_max_cart_count', 'Max Number that can be added to cart per user (0 for unlimited)');
 
 $formwriter->textinput('pro_expires', 'Purchase expires after (days, 0 for never)');
 
 if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
 	$formwriter->textinput('pro_link', 'Link (optional): '.$settings->get_setting('webDir').'/product/', [
-		'validation' => ['required' => true, 'maxlength' => 255]
+		'validation' => ['required' => false, 'maxlength' => 255]
 	]);
 }
 

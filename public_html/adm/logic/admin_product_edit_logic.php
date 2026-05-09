@@ -74,8 +74,6 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 			}
 		}
 
-		$product->save_requirement_instances($requirement_specs);
-
 		if($post_vars['pro_evt_event_id'] == '' || $post_vars['pro_evt_event_id'] == 0){
 			$product->set('pro_evt_event_id', NULL);
 
@@ -157,6 +155,8 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 
 		$product->save();
 		$product->load();
+
+		$product->save_requirement_instances($requirement_specs);
 
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
