@@ -100,7 +100,14 @@
                         <div class="col-12">
                             <div class="form-check">
                                 <input type="checkbox" name="privacy" id="privacy" class="form-check-input" value="1">
-                                <label for="privacy" class="form-check-label">I consent to the privacy policy.</label>
+                                <label for="privacy" class="form-check-label">
+                                    <?php $privacy_url = trim((string)$settings->get_setting('privacy_url')); ?>
+                                    <?php if ($privacy_url !== ''): ?>
+                                        I consent to the <a href="<?php echo htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">privacy policy</a>.
+                                    <?php else: ?>
+                                        I consent to the privacy policy.
+                                    <?php endif; ?>
+                                </label>
                             </div>
                         </div>
                     </div>

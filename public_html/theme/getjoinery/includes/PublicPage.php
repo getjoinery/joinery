@@ -130,8 +130,12 @@ class PublicPage extends PublicPageBase {
         </div>
         <div class="footer-bottom">
             &copy; <?php echo date('Y'); ?> Joinery. All rights reserved.
-            &middot; <a href="/privacy">Privacy</a>
-            &middot; <a href="/terms">Terms</a>
+            <?php $privacy_url = trim((string)$settings->get_setting('privacy_url')); if ($privacy_url !== ''): ?>
+            &middot; <a href="<?php echo htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">Privacy</a>
+            <?php endif; ?>
+            <?php $terms_url = trim((string)$settings->get_setting('terms_url')); if ($terms_url !== ''): ?>
+            &middot; <a href="<?php echo htmlspecialchars($terms_url, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">Terms</a>
+            <?php endif; ?>
         </div>
     </div>
 </footer>

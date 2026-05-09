@@ -96,9 +96,15 @@
             </div>
 
             <div class="col-12">
-                <?php $formwriter->checkboxinput('privacy', "I have read and agree to the <a href='/privacy' target='_blank'>privacy policy</a>", [
+                <?php
+                $privacy_url = trim((string)$settings->get_setting('privacy_url'));
+                $privacy_label = $privacy_url !== ''
+                    ? "I have read and agree to the <a href='" . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . "' target='_blank' rel='noopener'>privacy policy</a>"
+                    : "I have read and agree to the privacy policy";
+                $formwriter->checkboxinput('privacy', $privacy_label, [
                     'value' => 'yes',
-                ]); ?>
+                ]);
+                ?>
             </div>
             <div class="col-12">
                 <?php $formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
