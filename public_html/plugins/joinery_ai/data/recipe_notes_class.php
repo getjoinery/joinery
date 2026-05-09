@@ -14,6 +14,7 @@ class RecipeNote extends SystemBase {
     public static $ai_readable        = true;
     public static $ai_description     = 'Notes written by the AI or by the user inside a recipe.';
     public static $ai_excluded_fields = [];
+    public static $ai_writable_fields = ['rcn_owner_user_id', 'rcn_title', 'rcn_content', 'rcn_tags'];
 
     public static $field_specifications = array(
         'rcn_note_id'         => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

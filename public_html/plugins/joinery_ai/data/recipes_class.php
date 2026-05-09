@@ -25,7 +25,7 @@ class Recipe extends SystemBase {
         'rcp_allowed_tools'       => array('type'=>'jsonb'),
         'rcp_allowed_models'      => array('type'=>'jsonb'),
         'rcp_allowed_actions'     => array('type'=>'jsonb'),
-        'rcp_allow_tainted_writes'=> array('type'=>'bool', 'default'=>'false'),
+        'rcp_allow_tainted_writes'=> array('type'=>'bool', 'default'=>false),
         'rcp_model'               => array('type'=>'varchar(100)', 'default'=>'claude-haiku-4-5'),
         'rcp_delivery_email'      => array('type'=>'varchar(255)'),
         'rcp_delivery_dashboard'  => array('type'=>'bool', 'default'=>true),
