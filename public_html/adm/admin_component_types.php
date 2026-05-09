@@ -38,11 +38,11 @@ $categories = Component::get_categories();
 
 $page = new AdminPage();
 $page->admin_header(array(
-	'menu-id' => 'pages',
+	'menu-id' => 'system-components',
 	'page_title' => 'Component Types',
 	'readable_title' => 'Component Types',
 	'breadcrumbs' => array(
-		'Pages' => '/admin/admin_pages',
+		'System' => '/admin/admin_settings',
 		'Component Types' => '',
 	),
 	'session' => $session,

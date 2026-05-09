@@ -53,9 +53,9 @@ usort($implemented_specs, function($a, $b) {
 $page = new AdminPage();
 $page->admin_header(
     array(
-        'menu-id' => 'settings',
+        'menu-id' => 'system-specs',
         'breadcrumbs' => array(
-            'Settings' => '/admin/admin_settings',
+            'Server Manager' => '/admin/server_manager',
             'Specifications' => '',
         ),
         'session' => $session,

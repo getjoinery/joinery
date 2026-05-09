@@ -37,16 +37,16 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const subNav = link.nextElementSibling;
             if (!subNav || !subNav.classList.contains('sidebar-subnav')) return;
-            const isOpen = subNav.classList.contains('open');
-            // Optionally close siblings
+            if (subNav.classList.contains('open')) return;
+            // Close siblings
             link.parentElement.parentElement.querySelectorAll('.sidebar-subnav.open').forEach(el => {
                 if (el !== subNav) {
                     el.classList.remove('open');
                     el.previousElementSibling?.classList.remove('open');
                 }
             });
-            subNav.classList.toggle('open', !isOpen);
-            link.classList.toggle('open', !isOpen);
+            subNav.classList.add('open');
+            link.classList.add('open');
         });
     });
 

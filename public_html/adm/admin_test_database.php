@@ -219,7 +219,7 @@ function copyLiveToTest($live_db, $test_db, $db_user) {
 
 // Start output
 $page->admin_header(array(
-    'menu-id' => NULL,
+    'menu-id' => 'test-database',
     'page_title' => 'Test Database Management',
     'readable_title' => 'Test Database Management',
     'breadcrumbs' => array(
