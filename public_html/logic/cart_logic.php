@@ -79,14 +79,9 @@ function cart_logic(array $input): LogicResult{
 		$cart->billing_user = NULL;
 	}
 	else if (isset($_POST['billing_email']) && $_POST['billing_email']) {
-		if (!$session->get_user_id()) {
-			if (empty($_POST['privacy'])) {
-				return LogicResult::error('You must agree to the terms of use and privacy policy.');
-			}
-			if (empty($_POST['password'])) {
-				return LogicResult::error('Password is required.');
-			}
-		}
+		// Implicit consent via the action-button copy replaces the explicit
+		// privacy checkbox. Password is auto-generated downstream by
+		// User::CreateNew when one is not supplied.
 		$cart->determine_billing_user($_POST, false);
 		// For free orders, go directly to charge processing
 		if ($cart->get_total() <= 0 && !empty($_POST['complete_order'])) {
@@ -98,57 +93,25 @@ function cart_logic(array $input): LogicResult{
 		$cart->determine_billing_user($_POST, false);
 	}
 
-	// Pre-fill contact email from cart items if not already set
-	if (empty($cart->billing_user['billing_email'])) {
+	// For logged-in users, auto-populate billing from their account if not already set.
+	// This auto-completes the contact section so they don't have to click through it.
+	if ($session->is_logged_in() && empty($cart->billing_user['billing_email'])) {
+		$logged_in_user = new User($session->get_user_id(), TRUE);
+		$cart->billing_user = array(
+			'billing_first_name' => $logged_in_user->get('usr_first_name'),
+			'billing_last_name'  => $logged_in_user->get('usr_last_name'),
+			'billing_email'      => $logged_in_user->get('usr_email'),
+		);
+	}
+	// Pre-fill contact email from cart items if not already set (guest checkout)
+	else if (empty($cart->billing_user['billing_email'])) {
 		$cart->billing_user_prefill_from_items();
 	}
 
 	// Build sections array for the accordion
 	$sections = array();
 
-	// Section 1: Contact - always shown
-	$contact_state = 'active';
-	if (!empty($cart->billing_user['billing_email'])) {
-		$contact_state = 'completed';
-	}
-	$sections['contact'] = array(
-		'title' => 'Contact Information',
-		'state' => $contact_state,
-		'number' => 1,
-		'summary' => !empty($cart->billing_user['billing_email']) ? htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8') : '',
-	);
-
-	// Section 2: Coupon - shown if coupons active
-	if ($settings->get_setting('coupons_active')) {
-		$coupon_state = ($contact_state == 'completed') ? 'active' : 'pending';
-		// Coupon is completed if codes were applied OR if billing is already complete (user passed through coupon)
-		if (!empty($cart->coupon_codes) || $cart->is_billing_user_complete()) {
-			$coupon_state = 'completed';
-		}
-		$coupon_summary = '';
-		if (!empty($cart->coupon_codes)) {
-			$coupon_summary = htmlspecialchars(implode(', ', $cart->coupon_codes), ENT_QUOTES, 'UTF-8') . ' applied';
-		} else if ($cart->is_billing_user_complete()) {
-			$coupon_summary = 'No coupon';
-		}
-		$sections['coupon'] = array(
-			'title' => 'Coupon Code',
-			'state' => $coupon_state,
-			'number' => count($sections) + 1,
-			'summary' => $coupon_summary,
-		);
-	}
-
-	// Section 3: Billing - always shown
-	$billing_state = 'pending';
-	if ($contact_state == 'completed' && (!isset($sections['coupon']) || $sections['coupon']['state'] != 'active')) {
-		$billing_state = 'active';
-	}
-	if ($cart->is_billing_user_complete()) {
-		$billing_state = 'completed';
-	}
-
-	// Get pre-fill name from cart items
+	// Get pre-fill name from cart items (for guest checkout pre-population)
 	$prefill_name = array('first' => '', 'last' => '');
 	foreach ($cart->items as $cart_item) {
 		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
@@ -159,24 +122,26 @@ function cart_logic(array $input): LogicResult{
 		}
 	}
 	$page_vars['prefill_name'] = $prefill_name;
-
 	$has_name_from_cart = !empty($prefill_name['first']);
 	$page_vars['has_name_from_cart'] = $has_name_from_cart;
 
+	// Section 1: Billing User - always shown
+	$billing_state = $cart->is_billing_user_complete() ? 'completed' : 'active';
 	$billing_summary = '';
 	if (!empty($cart->billing_user['billing_first_name'])) {
 		$billing_summary = htmlspecialchars($cart->billing_user['billing_first_name'] . ' ' . $cart->billing_user['billing_last_name'], ENT_QUOTES, 'UTF-8');
 		$billing_summary .= ' (' . htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8') . ')';
+	} else if (!empty($cart->billing_user['billing_email'])) {
+		$billing_summary = htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8');
 	}
-
 	$sections['billing'] = array(
-		'title' => 'Billing & Account',
-		'state' => $billing_state,
-		'number' => count($sections) + 1,
+		'title'   => 'Billing User',
+		'state'   => $billing_state,
+		'number'  => count($sections) + 1,
 		'summary' => $billing_summary,
 	);
 
-	// Section 4: Payment - shown if total > 0
+	// Section 2: Payment - shown if total > 0
 	if ($cart->get_total() > 0) {
 		$payment_state = ($billing_state == 'completed') ? 'active' : 'pending';
 		$sections['payment'] = array(
@@ -209,8 +174,15 @@ function cart_logic(array $input): LogicResult{
 
 	$page_vars['sections'] = $sections;
 
-	// Payment setup (only when billing is complete and total > 0)
-	if ($cart->get_total() > 0 && $cart->billing_user['billing_email']) {
+	// stripe_regular only needs the helper object (no API call); initialize whenever total > 0
+	// so the payment section can always render its form (even before billing is filled in).
+	if ($cart->get_total() > 0 && $settings->get_setting('checkout_type') == 'stripe_regular') {
+		$stripe_helper = new StripeHelper();
+		$page_vars['stripe_helper'] = $stripe_helper;
+	}
+
+	// Payment setup requiring billing email (API calls, PayPal, stripe_checkout session)
+	if ($cart->get_total() > 0 && !empty($cart->billing_user['billing_email'])) {
 
 		if ($settings->get_setting('use_paypal_checkout')) {
 			$paypal = new PaypalHelper();
@@ -243,10 +215,6 @@ function cart_logic(array $input): LogicResult{
 				$create_list = $stripe_helper->build_checkout_item_array($cart, NULL);
 			}
 			$stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
-		}
-		else if ($settings->get_setting('checkout_type') == 'stripe_regular') {
-			$stripe_helper = new StripeHelper();
-			$page_vars['stripe_helper'] = $stripe_helper;
 		}
 	}
 
@@ -285,12 +253,8 @@ function validate_checkout_section($section, $data) {
 			if (empty($data['billing_last_name'])) {
 				$errors['billing_last_name'] = 'Last name is required.';
 			}
-			if (empty($data['privacy'])) {
-				$errors['privacy'] = 'You must agree to the terms of use and privacy policy.';
-			}
-			$session = SessionControl::get_instance();
-			if (!$session->get_user_id() && empty($data['password'])) {
-				$errors['password'] = 'Password is required to create your account.';
+			if (empty($data['billing_email']) || !filter_var($data['billing_email'], FILTER_VALIDATE_EMAIL)) {
+				$errors['billing_email'] = 'A valid email address is required.';
 			}
 			break;
 	}

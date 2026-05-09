@@ -354,6 +354,28 @@ class LibraryFunctions {
 		return true;
 	}
 
+	// Renders implicit-consent copy adapted to which Terms/Privacy URLs are
+	// configured. Returns '' when neither is set so callers can omit the
+	// surrounding markup.
+	static function consent_copy($action_verb = 'continuing') {
+		$settings = Globalvars::get_instance();
+		$terms = trim((string)$settings->get_setting('terms_url'));
+		$privacy = trim((string)$settings->get_setting('privacy_url'));
+		$verb = htmlspecialchars($action_verb, ENT_QUOTES, 'UTF-8');
+		$terms_link = $terms !== '' ? '<a href="' . htmlspecialchars($terms, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Terms of Use</a>' : null;
+		$privacy_link = $privacy !== '' ? '<a href="' . htmlspecialchars($privacy, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Privacy Policy</a>' : null;
+		if ($terms_link && $privacy_link) {
+			return "By {$verb}, you agree to our {$terms_link} and {$privacy_link}.";
+		}
+		if ($terms_link) {
+			return "By {$verb}, you agree to our {$terms_link}.";
+		}
+		if ($privacy_link) {
+			return "By {$verb}, you agree to our {$privacy_link}.";
+		}
+		return '';
+	}
+
 	static function IsValidEmail($email) {
 		if (preg_match('/^[A-Z0-9._%+\\-\\#!$%&\'*\/=?^_`{}|~]+@[A-Z0-9.-]+\.[A-Z]{2,10}$/i', $email) === 0) {
 			return false;

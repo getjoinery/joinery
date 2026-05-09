@@ -28,6 +28,20 @@ function admin_settings_logic($get, $post) {
 			));
 		}
 
+		// Validate: terms_url and privacy_url must be empty, a relative path,
+		// or an http(s) URL — never a javascript: or data: scheme.
+		foreach (['terms_url', 'privacy_url'] as $url_field) {
+			if (!isset($post[$url_field])) continue;
+			$candidate = trim($post[$url_field]);
+			if ($candidate === '') continue;
+			if (!preg_match('#^(/|https?://)#i', $candidate)) {
+				return LogicResult::render(array(
+					'run_validation' => $run_validation,
+					'error_message' => "Invalid {$url_field}: must start with '/', 'http://', or 'https://'."
+				));
+			}
+		}
+
 		// Validate: new theme's required plugins must all be active (only when theme is changing)
 		if (isset($post['theme_template']) && $post['theme_template'] !== 'plugin'
 			&& $post['theme_template'] !== $settings->get_setting('theme_template')) {

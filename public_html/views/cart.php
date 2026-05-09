@@ -98,6 +98,8 @@
             </div>
         </div>
 
+        <?php $total_discount = 0; ?>
+
         <!-- Mobile Order Summary (hidden on desktop) -->
         <div id="mobile-order-summary" style="display: none; margin-bottom: 1rem;">
             <div onclick="this.querySelector('.mobile-summary-detail').style.display = this.querySelector('.mobile-summary-detail').style.display === 'none' ? 'block' : 'none'; this.querySelector('.chevron').classList.toggle('expanded');"
@@ -178,141 +180,84 @@
                          role="region" aria-labelledby="header-<?php echo $section_key; ?>"
                          style="padding: 1.5rem; <?php if ($section['state'] != 'active') echo 'display: none;'; ?>">
 
-                    <?php if ($section_key == 'contact'): ?>
-                        <!-- CONTACT SECTION -->
-                        <?php if ($session->is_logged_in()):
+                    <?php if ($section_key == 'billing'): ?>
+                        <!-- BILLING USER SECTION -->
+                        <?php
+                        $is_logged_in = $session->is_logged_in();
+                        if ($is_logged_in && !isset($user)) {
                             $user = new User($session->get_user_id(), TRUE);
+                        }
+                        // Logged-in users with a complete profile see read-only summary.
+                        // Logged-in users with missing first/last names see editable name fields with email read-only.
+                        $logged_in_complete = $is_logged_in
+                            && trim((string)$user->get('usr_first_name')) !== ''
+                            && trim((string)$user->get('usr_last_name')) !== '';
                         ?>
-                            <div class="alert alert-info" style="margin-bottom: 1rem;">
-                                Logged in as <strong><?php echo htmlspecialchars($user->get('usr_fname') . ' ' . $user->get('usr_lname'), ENT_QUOTES, 'UTF-8'); ?></strong>
-                                (<?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?>)
+                        <?php if ($logged_in_complete):
+                            $display_name = trim($user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
+                        ?>
+                            <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.875rem 1rem; background: var(--jy-color-surface); border-radius: 6px; margin-bottom: 1rem;">
+                                <div>
+                                    <div style="font-weight: 600;"><?php echo htmlspecialchars($display_name, ENT_QUOTES, 'UTF-8'); ?></div>
+                                    <div style="color: var(--jy-color-text-muted); font-size: 0.9375rem;"><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></div>
+                                </div>
+                                <a href="/logout?redirect=/cart" style="font-size: 0.8125rem; color: var(--jy-color-text-muted); text-decoration: none;">Not you?</a>
                             </div>
                             <input type="hidden" id="contact_email" value="<?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?>">
-                        <?php else: ?>
-                            <?php
-                            $contact_email = '';
-                            if (!empty($cart->billing_user['billing_email'])) {
-                                $contact_email = $cart->billing_user['billing_email'];
-                            }
-                            ?>
-                            <label for="contact_email" style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Email Address <span style="color: var(--jy-color-danger);">*</span></label>
-                            <input type="email" id="contact_email" name="email" value="<?php echo htmlspecialchars($contact_email, ENT_QUOTES, 'UTF-8'); ?>"
-                                   style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
-                                   required aria-required="true" autocomplete="email" placeholder="your@email.com"
-                                   aria-describedby="contact_email_error">
-                            <div id="contact_email_error" role="alert" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.25rem; display: none;"></div>
-                            <div id="contact_email_exists" style="background: #e8f4fd; padding: 0.75rem 1rem; border-radius: 6px; margin-top: 0.75rem; font-size: 0.9375rem; display: none;">
-                                Welcome back! <a href="#" onclick="showLoginModal(); return false;">Log in</a> for faster checkout, or continue as guest.
+                            <input type="hidden" id="billing_first_name" value="<?php echo htmlspecialchars($user->get('usr_first_name'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" id="billing_last_name" value="<?php echo htmlspecialchars($user->get('usr_last_name'), ENT_QUOTES, 'UTF-8'); ?>">
+                        <?php elseif ($is_logged_in): ?>
+                            <div style="background: var(--jy-color-surface); padding: 0.875rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9375rem; color: var(--jy-color-text-muted);">
+                                Signed in as <strong><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></strong>. Please confirm your name to continue.
                             </div>
-                        <?php endif; ?>
-                        <div style="margin-top: 1.25rem;">
-                            <button type="button" class="btn btn-primary" onclick="validateAndContinue('contact')" style="width: 100%;">Continue</button>
-                        </div>
-
-                    <?php elseif ($section_key == 'coupon'): ?>
-                        <!-- COUPON SECTION -->
-                        <?php if (!empty($cart->coupon_codes)): ?>
-                        <div style="margin-bottom: 1rem;">
-                            <strong style="font-size: 0.875rem;">Applied:</strong>
-                            <?php foreach ($cart->coupon_codes as $coupon_code): ?>
-                            <span class="applied-coupon" style="display: inline-flex; align-items: center; gap: 0.25rem; background: #198754; color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.625rem; border-radius: 4px; margin: 0.25rem 0.25rem 0 0;">
-                                <?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>
-                                <a href="#" onclick="removeCoupon('<?php echo addslashes($coupon_code); ?>'); return false;" style="color: #fff; text-decoration: none; font-weight: 700;">&times;</a>
-                            </span>
-                            <?php endforeach; ?>
-                        </div>
-                        <?php endif; ?>
-
-                        <?php if (StripeHelper::isTestMode() && !empty($page_vars['all_coupons'])): ?>
-                        <div class="alert alert-info" style="font-size: 0.875rem; margin-bottom: 1rem;">
-                            <strong>Test coupons:</strong>
-                            <?php foreach ($page_vars['all_coupons'] as $coupon): ?>
-                            <a href="#" onclick="applyCouponCode('<?php echo addslashes($coupon->get('ccd_code')); ?>'); return false;" class="btn btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.6rem; margin: 0.25rem 0 0 0.25rem;">
-                                <?php echo htmlspecialchars($coupon->get('ccd_code'), ENT_QUOTES, 'UTF-8'); ?>
-                            </a>
-                            <?php endforeach; ?>
-                        </div>
-                        <?php endif; ?>
-
-                        <div style="display: flex; gap: 0.5rem;">
-                            <input type="text" id="coupon_code_input" placeholder="Enter coupon code"
-                                   style="flex: 1; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;">
-                            <button type="button" class="btn btn-outline" onclick="applyCoupon()">Apply</button>
-                        </div>
-                        <div id="coupon_error" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.5rem; display: none;"></div>
-                        <?php if (!empty($page_vars['coupon_error'])): ?>
-                        <div style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.5rem;">
-                            <?php echo htmlspecialchars($page_vars['coupon_error'], ENT_QUOTES, 'UTF-8'); ?>
-                        </div>
-                        <?php endif; ?>
-                        <div style="margin-top: 1.25rem;">
-                            <button type="button" class="btn btn-primary" onclick="validateAndContinue('coupon')" style="width: 100%;">Continue</button>
-                        </div>
-
-                    <?php elseif ($section_key == 'billing'): ?>
-                        <!-- BILLING SECTION -->
-                        <?php if ($session->is_logged_in()):
-                            if (!isset($user)) $user = new User($session->get_user_id(), TRUE);
-                        ?>
-                            <div style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--jy-color-surface); border-radius: 6px;">
-                                <strong><?php echo htmlspecialchars($user->get('usr_fname') . ' ' . $user->get('usr_lname'), ENT_QUOTES, 'UTF-8'); ?></strong>
-                                <br><span style="color: var(--jy-color-text-muted); font-size: 0.9375rem;"><?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?></span>
-                            </div>
-                        <?php else: ?>
-                            <!-- Name (read-only from cart or editable) -->
-                            <?php if ($has_name_from_cart): ?>
-                            <div id="billing_name_display" style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--jy-color-surface); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                            <input type="hidden" id="contact_email" value="<?php echo htmlspecialchars($user->get('usr_email'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                                 <div>
-                                    <strong id="billing_name_text"><?php echo htmlspecialchars($prefill_name['first'] . ' ' . $prefill_name['last'], ENT_QUOTES, 'UTF-8'); ?></strong>
-                                    <br><span style="color: var(--jy-color-text-muted); font-size: 0.9375rem;" id="billing_email_text"><?php echo htmlspecialchars($cart->billing_user['billing_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <label for="billing_first_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">First Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <input type="text" id="billing_first_name" name="billing_first_name"
+                                           value="<?php echo htmlspecialchars($cart->billing_user['billing_first_name'] ?? $user->get('usr_first_name') ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                           required autocomplete="given-name">
                                 </div>
-                                <a href="#" onclick="document.getElementById('billing_name_fields').style.display='block'; this.parentElement.style.display='none'; return false;" style="font-size: 0.8125rem; color: var(--jy-color-primary);">Change</a>
+                                <div>
+                                    <label for="billing_last_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Last Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <input type="text" id="billing_last_name" name="billing_last_name"
+                                           value="<?php echo htmlspecialchars($cart->billing_user['billing_last_name'] ?? $user->get('usr_last_name') ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                           required autocomplete="family-name">
+                                </div>
                             </div>
-                            <div id="billing_name_fields" style="display: none; margin-bottom: 1rem;">
-                            <?php else: ?>
-                            <div id="billing_name_fields" style="margin-bottom: 1rem;">
-                            <?php endif; ?>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                                    <div>
-                                        <label for="billing_first_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">First Name <span style="color: var(--jy-color-danger);">*</span></label>
-                                        <input type="text" id="billing_first_name" name="billing_first_name"
-                                               value="<?php echo htmlspecialchars($cart->billing_user['billing_first_name'] ?? $prefill_name['first'], ENT_QUOTES, 'UTF-8'); ?>"
-                                               style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
-                                               required autocomplete="given-name">
-                                    </div>
-                                    <div>
-                                        <label for="billing_last_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Last Name <span style="color: var(--jy-color-danger);">*</span></label>
-                                        <input type="text" id="billing_last_name" name="billing_last_name"
-                                               value="<?php echo htmlspecialchars($cart->billing_user['billing_last_name'] ?? $prefill_name['last'], ENT_QUOTES, 'UTF-8'); ?>"
-                                               style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
-                                               required autocomplete="family-name">
-                                    </div>
+                        <?php else: ?>
+                            <!-- Email -->
+                            <div style="margin-bottom: 1rem;">
+                                <label for="contact_email" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Email Address <span style="color: var(--jy-color-danger);">*</span></label>
+                                <input type="email" id="contact_email" name="billing_email"
+                                       value="<?php echo htmlspecialchars($cart->billing_user['billing_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                       style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                       required autocomplete="email" placeholder="your@email.com">
+                                <div id="contact_email_exists" style="background: #e8f4fd; padding: 0.75rem 1rem; border-radius: 6px; margin-top: 0.75rem; font-size: 0.9375rem; display: none;">
+                                    Welcome back! <a href="#" onclick="showLoginModal(); return false;">Log in</a> for faster checkout, or continue as guest.
                                 </div>
                             </div>
 
-                            <!-- Password -->
-                            <div style="margin-bottom: 1rem;">
-                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9375rem;">
-                                    <input type="checkbox" id="create_account_toggle" onchange="document.getElementById('password_field').style.display = this.checked ? 'block' : 'none';">
-                                    Create an account for faster checkout next time
-                                </label>
-                                <div id="password_field" style="display: none; margin-top: 0.75rem;">
-                                    <label for="billing_password" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Password <span style="color: var(--jy-color-danger);">*</span></label>
-                                    <input type="password" id="billing_password" name="password"
+                            <!-- Name -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                                <div>
+                                    <label for="billing_first_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">First Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <input type="text" id="billing_first_name" name="billing_first_name"
+                                           value="<?php echo htmlspecialchars($cart->billing_user['billing_first_name'] ?? $prefill_name['first'], ENT_QUOTES, 'UTF-8'); ?>"
                                            style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
-                                           autocomplete="new-password">
+                                           required autocomplete="given-name">
+                                </div>
+                                <div>
+                                    <label for="billing_last_name" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9375rem;">Last Name <span style="color: var(--jy-color-danger);">*</span></label>
+                                    <input type="text" id="billing_last_name" name="billing_last_name"
+                                           value="<?php echo htmlspecialchars($cart->billing_user['billing_last_name'] ?? $prefill_name['last'], ENT_QUOTES, 'UTF-8'); ?>"
+                                           style="width: 100%; padding: 0.625rem 0.875rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 1rem;"
+                                           required autocomplete="family-name">
                                 </div>
                             </div>
                         <?php endif; ?>
-
-                        <!-- Terms -->
-                        <div style="margin-bottom: 1rem;">
-                            <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; font-size: 0.9375rem;">
-                                <input type="checkbox" id="billing_privacy" name="privacy" required style="margin-top: 0.2rem;">
-                                <span>I agree to the <a href="/terms" target="_blank">Terms of Use</a> and <a href="/privacy" target="_blank">Privacy Policy</a>. <span style="color: var(--jy-color-danger);">*</span></span>
-                            </label>
-                            <div id="billing_privacy_error" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-top: 0.25rem; display: none;"></div>
-                        </div>
 
                         <div id="billing_errors" style="color: var(--jy-color-danger); font-size: 0.875rem; margin-bottom: 0.75rem; display: none;"></div>
 
@@ -321,6 +266,11 @@
                             <button type="button" class="btn btn-primary" onclick="submitBillingAndComplete()" style="width: 100%;">Complete Order</button>
                             <?php else: ?>
                             <button type="button" class="btn btn-primary" onclick="validateAndContinue('billing')" style="width: 100%;">Continue</button>
+                            <?php endif; ?>
+                            <?php $consent_copy = LibraryFunctions::consent_copy('continuing'); if ($consent_copy): ?>
+                            <p style="font-size: 0.8125rem; color: var(--jy-color-text-muted); text-align: center; margin: 0.75rem 0 0;">
+                                <?php echo $consent_copy; ?>
+                            </p>
                             <?php endif; ?>
                         </div>
 
@@ -333,7 +283,7 @@
                         </div>
                         <?php else: ?>
 
-                            <?php if ($settings->get_setting('checkout_type') == 'stripe_checkout' || $settings->get_setting('checkout_type') == 'stripe_regular'): ?>
+                            <?php if (($settings->get_setting('checkout_type') == 'stripe_checkout' || $settings->get_setting('checkout_type') == 'stripe_regular') && !empty($page_vars['stripe_helper'])): ?>
                             <div style="margin-bottom: 1.5rem;">
                                 <?php
                                 $formwriter = $page->getFormWriter('form_stripe');
@@ -421,6 +371,42 @@
                         </div>
                     </div>
                     <?php endforeach; ?>
+
+                    <?php if ($settings->get_setting('coupons_active')): ?>
+                    <div style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--jy-color-border);">
+                        <?php if (!empty($cart->coupon_codes)): ?>
+                        <div style="margin-bottom: 0.5rem;">
+                            <?php foreach ($cart->coupon_codes as $coupon_code): ?>
+                            <span style="display: inline-flex; align-items: center; gap: 0.25rem; background: #198754; color: #fff; font-size: 0.8125rem; padding: 0.25rem 0.625rem; border-radius: 4px; margin: 0 0.25rem 0.25rem 0;">
+                                <?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>
+                                <a href="#" onclick="removeCoupon('<?php echo addslashes($coupon_code); ?>'); return false;" style="color: #fff; text-decoration: none; font-weight: 700; line-height: 1;">&times;</a>
+                            </span>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
+                        <?php if (StripeHelper::isTestMode() && !empty($page_vars['all_coupons'])): ?>
+                        <div style="font-size: 0.8125rem; color: var(--jy-color-text-muted); margin-bottom: 0.5rem;">
+                            Test:
+                            <?php foreach ($page_vars['all_coupons'] as $coupon): ?>
+                            <a href="#" onclick="applyCouponCode('<?php echo addslashes($coupon->get('ccd_code')); ?>'); return false;" style="color: var(--jy-color-primary); margin-left: 0.25rem;">
+                                <?php echo htmlspecialchars($coupon->get('ccd_code'), ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <input type="text" id="coupon_code_input" placeholder="Coupon code"
+                                   style="flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--jy-color-border); border-radius: 6px; font-size: 0.9375rem;">
+                            <button type="button" class="btn btn-outline" onclick="applyCoupon()" style="font-size: 0.9375rem; padding: 0.5rem 0.875rem;">Apply</button>
+                        </div>
+                        <div id="coupon_error" style="color: var(--jy-color-danger); font-size: 0.8125rem; margin-top: 0.375rem; display: none;"></div>
+                        <?php if (!empty($page_vars['coupon_error'])): ?>
+                        <div style="color: var(--jy-color-danger); font-size: 0.8125rem; margin-top: 0.375rem;">
+                            <?php echo htmlspecialchars($page_vars['coupon_error'], ENT_QUOTES, 'UTF-8'); ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
 
                     <div style="background: var(--jy-color-surface); padding: 1rem 1.5rem;">
                         <dl style="margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 0.375rem 1rem;">
@@ -545,60 +531,6 @@
     }
 
     function validateAndContinue(sectionKey) {
-        if (sectionKey === 'contact') {
-            var email = document.getElementById('contact_email').value.trim();
-            var errorEl = document.getElementById('contact_email_error');
-            if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-                if (errorEl) { errorEl.textContent = 'Please enter a valid email address.'; errorEl.style.display = 'block'; }
-                return;
-            }
-            if (errorEl) errorEl.style.display = 'none';
-
-            // Save email to billing via form POST
-            var form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/cart';
-            var fields = {
-                'billing_email': email,
-                'billing_first_name': '<?php echo addslashes($prefill_name['first']); ?>',
-                'billing_last_name': '<?php echo addslashes($prefill_name['last']); ?>',
-                'privacy': '<?php echo $session->is_logged_in() ? "1" : ""; ?>',
-                'password': '<?php echo $session->is_logged_in() ? "x" : ""; ?>'
-            };
-            <?php if ($session->is_logged_in()): ?>
-            // For logged-in users, just advance the section
-            markCompleted('contact', email);
-            openSection(getNextSection('contact'));
-            return;
-            <?php endif; ?>
-            for (var key in fields) {
-                var input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = key;
-                input.value = fields[key];
-                form.appendChild(input);
-            }
-            document.body.appendChild(form);
-            form.submit();
-            return;
-        }
-
-        if (sectionKey === 'coupon') {
-            // Coupons are optional, just advance
-            var summary = '';
-            var applied = document.querySelectorAll('[data-section="coupon"] .section-body span[style*="background: #198754"]');
-            if (applied.length > 0) {
-                var codes = [];
-                applied.forEach(function(el) { codes.push(el.textContent.replace('×', '').trim()); });
-                summary = codes.join(', ') + ' applied';
-            } else {
-                summary = 'No coupon';
-            }
-            markCompleted('coupon', summary);
-            openSection(getNextSection('coupon'));
-            return;
-        }
-
         if (sectionKey === 'billing') {
             submitBilling(false);
             return;
@@ -610,44 +542,25 @@
         form.method = 'POST';
         form.action = '/cart';
 
-        var email = document.getElementById('contact_email') ? document.getElementById('contact_email').value.trim() : '<?php echo addslashes($cart->billing_user['billing_email'] ?? ''); ?>';
-        var firstName = document.getElementById('billing_first_name') ? document.getElementById('billing_first_name').value.trim() : '<?php echo addslashes($prefill_name['first']); ?>';
-        var lastName = document.getElementById('billing_last_name') ? document.getElementById('billing_last_name').value.trim() : '<?php echo addslashes($prefill_name['last']); ?>';
-        var privacy = document.getElementById('billing_privacy') ? (document.getElementById('billing_privacy').checked ? '1' : '') : '';
-        var password = document.getElementById('billing_password') ? document.getElementById('billing_password').value : '';
+        var email = document.getElementById('contact_email') ? document.getElementById('contact_email').value.trim() : '';
+        var firstName = document.getElementById('billing_first_name') ? document.getElementById('billing_first_name').value.trim() : '';
+        var lastName = document.getElementById('billing_last_name') ? document.getElementById('billing_last_name').value.trim() : '';
 
-        // Client-side validation
         var errors = [];
+        if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) errors.push('A valid email address is required.');
         if (!firstName) errors.push('First name is required.');
         if (!lastName) errors.push('Last name is required.');
-        if (!privacy) errors.push('You must agree to the terms.');
-        <?php if (!$session->is_logged_in()): ?>
-        var createAccount = document.getElementById('create_account_toggle');
-        if (createAccount && createAccount.checked && !password) {
-            errors.push('Password is required to create an account.');
-        }
-        if (!createAccount || !createAccount.checked) {
-            // Still need a password for guest checkout account creation
-            password = password || Math.random().toString(36).slice(-12);
-        }
-        <?php endif; ?>
 
         if (errors.length > 0) {
             var errDiv = document.getElementById('billing_errors');
             if (errDiv) { errDiv.innerHTML = errors.join('<br>'); errDiv.style.display = 'block'; }
-            if (!privacy) {
-                var privErr = document.getElementById('billing_privacy_error');
-                if (privErr) { privErr.textContent = 'Required'; privErr.style.display = 'block'; }
-            }
             return;
         }
 
         var fields = {
             'billing_email': email,
             'billing_first_name': firstName,
-            'billing_last_name': lastName,
-            'privacy': privacy,
-            'password': password
+            'billing_last_name': lastName
         };
         if (andComplete) {
             fields['complete_order'] = '1';
