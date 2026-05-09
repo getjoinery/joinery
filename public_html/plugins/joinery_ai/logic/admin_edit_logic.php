@@ -4,6 +4,10 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
 
     $session = SessionControl::get_instance();
     $session->check_permission(10);
@@ -97,21 +101,69 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $tool_list = array_values(array_filter($tool_list, fn($t) => $t !== 'query_model'));
         $recipe->set('rcp_allowed_tools', $tool_list);
 
-        // Allowed models — same pattern as tools.
+        // Allowed models — same pattern as tools. Filter out stale references
+        // (model classes that no longer resolve) on save so the persisted
+        // list stays clean. The run-start staleness check is the safety net;
+        // this is the convenience cleanup at the moment the admin is editing.
         $models_post = $input['rcp_allowed_models'] ?? [];
         if (!is_array($models_post)) $models_post = [];
         $model_list = array_values(array_filter(array_map('strval', $models_post), 'strlen'));
+        $live_models = ModelRegistry::all();
+        $model_list = array_values(array_filter($model_list, fn($m) => isset($live_models[$m])));
         $recipe->set('rcp_allowed_models', $model_list);
 
-        // Owner: single-user v1 — current admin owns the recipe
-        if (!$recipe->get('rcp_owner_user_id')) {
+        // Allowed actions — same pattern. Strip stale entries against the
+        // live action registry.
+        $actions_post = $input['rcp_allowed_actions'] ?? [];
+        if (!is_array($actions_post)) $actions_post = [];
+        $action_list = array_values(array_filter(array_map('strval', $actions_post), 'strlen'));
+        $live_actions = ActionRegistry::all();
+        $action_list = array_values(array_filter($action_list, fn($a) => isset($live_actions[$a])));
+        $recipe->set('rcp_allowed_actions', $action_list);
+
+        // Tainted-writes opt-in. The save-time gate below verifies this is
+        // set if the recipe is tainted-capable.
+        $recipe->set('rcp_allow_tainted_writes', !empty($input['rcp_allow_tainted_writes']));
+
+        // Owner: dropdown post or fall back to current admin for new recipes.
+        $owner_post = (int)($input['rcp_owner_user_id'] ?? 0);
+        if ($owner_post > 0) {
+            $recipe->set('rcp_owner_user_id', $owner_post);
+        } elseif (!$recipe->get('rcp_owner_user_id')) {
             $recipe->set('rcp_owner_user_id', $session->get_user_id());
+        }
+
+        // Save-time taint gate. A tainted-capable recipe must explicitly
+        // opt in via rcp_allow_tainted_writes. The check fires here so the
+        // admin sees the trade-off in plain language at the moment they're
+        // configuring scope, instead of a mid-run failure.
+        $taint_eval = TaintGate::evaluate(
+            $tool_list, $model_list, (string)$recipe->get('rcp_workspace')
+        );
+        if ($taint_eval['tainted_capable'] && !$recipe->get('rcp_allow_tainted_writes')) {
+            return LogicResult::error(
+                'Tainted-write opt-in required: ' . TaintGate::explain($taint_eval),
+                ['recipe' => $recipe, 'session' => $session]
+            );
         }
 
         $recipe->set('rcp_update_time', gmdate('Y-m-d H:i:s'));
 
         $recipe->prepare();
         $recipe->save();
+
+        // Disabling a recipe should also halt its in-flight runs. Otherwise
+        // "stop everything" requires hunting through the runs view.
+        if (!$recipe->get('rcp_enabled') && $recipe->key) {
+            $db = DbConnector::get_instance()->get_db_link();
+            $q = $db->prepare("UPDATE rcr_recipe_runs
+                              SET rcr_kill_requested = TRUE
+                              WHERE rcr_rcp_recipe_id = ?
+                                AND rcr_status IN ('pending', 'running')
+                                AND rcr_delete_time IS NULL");
+            $q->execute([(int)$recipe->key]);
+        }
+
         $recipe->load();
 
         return LogicResult::redirect('/admin/joinery_ai/edit?rcp_recipe_id=' . $recipe->key . '&saved=1');

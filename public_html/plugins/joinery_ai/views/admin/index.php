@@ -27,16 +27,23 @@ $recipes = new MultiRecipe(
 $numrecords = $recipes->count_all();
 $recipes->load();
 
-// Latest run per recipe (one query rather than per-recipe lookups)
+// Latest run per recipe (one query rather than per-recipe lookups). Also
+// pull the run id so we can render a Stop button on in-flight rows.
 $latest_runs = [];
+$owner_status = []; // owner_user_id => 'active' | 'inactive' | 'missing'
+$owner_names  = []; // owner_user_id => display label
 if (count($recipes)) {
     $db = DbConnector::get_instance()->get_db_link();
     $ids = [];
+    $owner_ids = [];
     foreach ($recipes as $r) {
         $ids[] = (int)$r->key;
+        $oid = (int)$r->get('rcp_owner_user_id');
+        if ($oid > 0) $owner_ids[$oid] = true;
     }
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $sql = "SELECT DISTINCT ON (rcr_rcp_recipe_id) rcr_rcp_recipe_id, rcr_status, rcr_started_time
+    $sql = "SELECT DISTINCT ON (rcr_rcp_recipe_id) rcr_rcp_recipe_id, rcr_run_id,
+                   rcr_status, rcr_started_time
             FROM rcr_recipe_runs
             WHERE rcr_rcp_recipe_id IN ($placeholders)
               AND rcr_delete_time IS NULL
@@ -45,6 +52,35 @@ if (count($recipes)) {
     $q->execute($ids);
     foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $latest_runs[$row['rcr_rcp_recipe_id']] = $row;
+    }
+
+    // Owner lookup: name + active status. Same predicate the runner uses
+    // (exists, not soft-deleted, permission >= 10) so the badge here matches
+    // what the runner will accept.
+    if (!empty($owner_ids)) {
+        $oid_list = array_keys($owner_ids);
+        $oph = implode(',', array_fill(0, count($oid_list), '?'));
+        $oq = $db->prepare(
+            "SELECT usr_user_id, usr_first_name, usr_last_name, usr_email,
+                    usr_permission, usr_delete_time
+             FROM usr_users WHERE usr_user_id IN ($oph)"
+        );
+        $oq->execute($oid_list);
+        foreach ($oq->fetchAll(PDO::FETCH_ASSOC) as $orow) {
+            $oid = (int)$orow['usr_user_id'];
+            $name = trim(($orow['usr_first_name'] ?? '') . ' ' . ($orow['usr_last_name'] ?? ''));
+            $owner_names[$oid] = $name !== '' ? $name : $orow['usr_email'];
+            $active = !$orow['usr_delete_time'] && (int)$orow['usr_permission'] >= 10;
+            $owner_status[$oid] = $active ? 'active' : 'inactive';
+        }
+        // Owners that exist in rcp_owner_user_id but not in usr_users (deleted
+        // permanently) are missing.
+        foreach ($oid_list as $oid) {
+            if (!isset($owner_status[$oid])) {
+                $owner_status[$oid] = 'missing';
+                $owner_names[$oid] = '(user #' . $oid . ', deleted)';
+            }
+        }
     }
 }
 
@@ -65,7 +101,7 @@ $table_options = [
     'title' => 'Recipes',
     'altlinks' => ['New Recipe' => '/admin/joinery_ai/edit'],
 ];
-$headers = ['Name', 'Schedule', 'Model', 'Last Run', 'Enabled', 'Actions'];
+$headers = ['Name', 'Owner', 'Schedule', 'Model', 'Last Run', 'Enabled', 'Actions'];
 $page->tableheader($headers, $table_options, $pager);
 
 foreach ($recipes as $recipe) {
@@ -73,6 +109,19 @@ foreach ($recipes as $recipe) {
 
     $row[] = '<a href="/admin/joinery_ai/edit?rcp_recipe_id=' . (int)$recipe->key . '">'
            . htmlspecialchars($recipe->get('rcp_name')) . '</a>';
+
+    // Owner column. Active = user exists, not deleted, permission >= 10.
+    // Inactive (deleted/demoted/missing) is the visible signal that the
+    // recipe is broken and needs ownership transferred via the edit page.
+    $oid = (int)$recipe->get('rcp_owner_user_id');
+    if ($oid > 0 && isset($owner_names[$oid])) {
+        $stat = $owner_status[$oid];
+        $badge = $stat === 'active' ? 'success' : 'danger';
+        $row[] = htmlspecialchars($owner_names[$oid])
+               . ' <span class="badge bg-' . $badge . '">' . $stat . '</span>';
+    } else {
+        $row[] = '<span class="badge bg-danger">no owner</span>';
+    }
 
     $freq = $recipe->get('rcp_schedule_frequency');
     $sched_label = $freq === 'none' ? 'No Schedule' : ucfirst($freq);
@@ -109,10 +158,12 @@ foreach ($recipes as $recipe) {
         );
         $status = $latest['rcr_status'];
         $badge = 'secondary';
-        if ($status === 'success')      $badge = 'success';
-        elseif ($status === 'running')  $badge = 'info';
-        elseif ($status === 'pending')  $badge = 'warning';
-        elseif (in_array($status, ['failed', 'timeout'])) $badge = 'danger';
+        if ($status === 'success')                          $badge = 'success';
+        elseif ($status === 'running')                      $badge = 'info';
+        elseif ($status === 'pending')                      $badge = 'warning';
+        elseif (in_array($status, ['failed', 'timeout']))   $badge = 'danger';
+        elseif ($status === 'incomplete')                   $badge = 'warning';
+        elseif ($status === 'cancelled')                    $badge = 'dark';
         $row[] = '<span class="badge bg-' . $badge . '">' . htmlspecialchars($status) . '</span> '
                . htmlspecialchars($when);
     } else {
@@ -130,13 +181,26 @@ foreach ($recipes as $recipe) {
              . '<button type="submit" class="btn btn-sm btn-outline-success" '
              . 'onclick="this.disabled=true;this.innerHTML=\'Running…\';this.form.submit();">'
              . 'Run Now</button></form>';
+
+    // Stop button — shown only when the latest run is in-flight. Sets
+    // rcr_kill_requested so the runner exits at the next iteration boundary
+    // (or, for pending rows, marks them cancelled directly).
+    if ($latest && in_array($latest['rcr_status'], ['pending', 'running'], true)) {
+        $actions .= ' <form method="post" action="/admin/joinery_ai/stop_run" class="d-inline">'
+                  . '<input type="hidden" name="rcr_run_id" value="' . (int)$latest['rcr_run_id'] . '">'
+                  . '<input type="hidden" name="rcp_recipe_id" value="' . (int)$recipe->key . '">'
+                  . '<button type="submit" class="btn btn-sm btn-outline-danger" '
+                  . 'onclick="return confirm(\'Stop this run?\');">Stop</button>'
+                  . '</form>';
+    }
+
     $row[] = $actions;
 
     $page->disprow($row);
 }
 
 if (!count($recipes)) {
-    echo '<tr><td colspan="6" class="text-center text-muted py-4">'
+    echo '<tr><td colspan="7" class="text-center text-muted py-4">'
        . 'No recipes yet. <a href="/admin/joinery_ai/edit">Create one</a>.</td></tr>';
 }
 

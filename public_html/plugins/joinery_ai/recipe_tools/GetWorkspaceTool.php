@@ -35,7 +35,12 @@ class GetWorkspaceTool implements RecipeToolInterface {
         if ($value === '') {
             return '(workspace is empty)';
         }
-        return $value;
+        // Wrap in the per-run untrusted nonce. The system prompt explains
+        // why: workspace content is past LLM output, structurally untrusted
+        // even though the recipe itself wrote it. Using the same nonce as
+        // $ai_untrusted_fields so the LLM only learns one contract.
+        $nonce = $ctx->untrusted_input_nonce;
+        return "<<UNTRUSTED_$nonce>>$value<</UNTRUSTED_$nonce>>";
     }
 
 }
