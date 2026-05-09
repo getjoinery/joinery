@@ -224,7 +224,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // Build actions array
                     $actions = array();
 
-                    $uninstall_warning = "This will drop all of this plugin's tables and delete its data. Plugin files will stay on disk. This cannot be undone.";
+                    $uninstall_warning = "This will drop all of this plugin\\'s tables, delete its data, and remove all plugin files from disk. This cannot be undone.";
 
                     if (!$plugin['plugin'] || !$plugin_status) {
                         // Not installed (no database record) — files on disk, awaiting install.
@@ -232,7 +232,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                         $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
                     } elseif ($plugin_status === 'active') {
                         $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
-                    } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed') {
+                    } elseif ($plugin_status === 'inactive' || $plugin_status === 'installed' || $plugin_status === 'stale') {
                         $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
                         if (!$is_active_theme_provider) {
                             $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
@@ -389,9 +389,9 @@ function submitPluginAction(action, pluginName) {
 }
 
 function confirmPluginAction(action, pluginName, message) {
-    if (confirm(message)) {
+    JoineryModal.confirm(message, function() {
         submitPluginAction(action, pluginName);
-    }
+    });
 }
 </script>
 

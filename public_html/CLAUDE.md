@@ -442,7 +442,7 @@ $page_vars = process_logic(profile_logic($_GET, $_POST));
 
 **CRITICAL: Vanilla CSS and vanilla JS is the default for all themes and plugins. Never introduce Bootstrap, jQuery, or any other external JS/CSS framework unless the theme or plugin explicitly declares one (via `cssFramework` in `theme.json`) or one is specifically requested.**
 
-The admin interface is the only exception — it always runs Bootstrap and jQuery.
+The admin interface runs the Joinery System theme (`joinery-system`), which is vanilla HTML5 and JavaScript — no Bootstrap, jQuery, or other frameworks.
 
 To confirm what a theme uses, check `theme.json`: `"cssFramework": "html5"` (or absent) means vanilla only; `"cssFramework": "bootstrap"` means Bootstrap is available; `"cssFramework": "tailwind"` means Tailwind is available.
 

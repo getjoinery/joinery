@@ -1071,6 +1071,13 @@ class PluginManager extends AbstractExtensionManager {
 
         // Step 8: Delete the plg_plugins row
         $plugin->permanent_delete();
+
+        // Step 9: Delete plugin files from disk
+        $plugin_dir = PathHelper::getAbsolutePath("plugins/{$name}");
+        if (is_dir($plugin_dir)) {
+            require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+            LibraryFunctions::delete_directory($plugin_dir);
+        }
     }
 
     // ========== Public API Methods (Backward Compatibility) ==========

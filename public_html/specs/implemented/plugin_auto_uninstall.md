@@ -21,7 +21,7 @@ This spec also relocates per-plugin cleanup (settings, menus) out of hand-writte
 | Active | `active` | yes | yes | yes | yes |
 | Deactivated | `inactive` | yes | yes | yes | yes |
 | Uninstalled (preserved) | `uninstalled` | yes | no | yes | yes |
-| Permanent-deleted | — | no | no | no | optionally deleted |
+| Permanent-deleted | — | no | no | no | deleted |
 
 `PluginManager::uninstall()` at `includes/PluginManager.php:855` leaves tables alone. A separate `permanentDeleteTables()` at `:937` drops them, and `plugins_class.php::permanent_delete_with_files()` at `:247` bundles uninstall + table drop + file deletion.
 
@@ -56,7 +56,7 @@ There is no plugin in today's system that's genuinely auto-install-everywhere. E
 |---|---|---|---|---|---|
 | Active | yes | yes | yes | yes | yes |
 | Deactivated | yes | yes | yes | yes | no |
-| Uninstalled | **no row** | **dropped** | **dropped** | yes | no |
+| Uninstalled | **no row** | **dropped** | **dropped** | **deleted** | no |
 
 No `'uninstalled'` status value. No `plg_uninstalled_time` column. No `permanent_delete` admin action. Uninstall = gone. Files stay on disk; operator can `rm` the directory manually if they want them removed (rare and out of scope for the UI).
 
@@ -70,6 +70,7 @@ No `'uninstalled'` status value. No `plg_uninstalled_time` column. No `permanent
 6. **Run `uninstall.php` hook** — plugin-specific external cleanup. Runs *after* declarative cleanup (so it doesn't reason about scaffolding rows the system will delete) but *before* table drop (so the hook can still query the plugin's own tables for external teardown — e.g., enumerating cached DNS records to revoke).
 7. **Drop plugin tables** — moved in from `permanentDeleteTables()`. Reuses existing table-discovery regex.
 8. **Delete the `plg_plugins` row.**
+9. **Delete plugin files from disk** — `LibraryFunctions::delete_directory()` removes the `plugins/{name}/` directory. Runs last so the hook and table-drop steps can still read plugin files if needed.
 
 ### Hook failure is fatal
 
@@ -241,7 +242,7 @@ Check any other `/docs/` file for "Permanently Delete" or "uninstalled" referenc
 ## Out of Scope
 
 - Introducing an `is_system` flag for plugins that must always be installed. No current plugin needs this.
-- Plugin file removal from disk as an admin action. If an operator wants `plugins/{name}/` gone, they can `rm` it manually.
+- Force-uninstall that skips the hook on failure. Add if a real need emerges.
 - Table discovery via reflection instead of regex. Existing regex approach works.
 - Core-code uninstall (core doesn't get uninstalled).
 - A "force uninstall" that skips the hook on failure. Add if a real need emerges.
