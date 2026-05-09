@@ -24,6 +24,8 @@ class Recipe extends SystemBase {
         'rcp_schedule_time'       => array('type'=>'time'),
         'rcp_allowed_tools'       => array('type'=>'jsonb'),
         'rcp_allowed_models'      => array('type'=>'jsonb'),
+        'rcp_allowed_actions'     => array('type'=>'jsonb'),
+        'rcp_allow_tainted_writes'=> array('type'=>'bool', 'default'=>'false'),
         'rcp_model'               => array('type'=>'varchar(100)', 'default'=>'claude-haiku-4-5'),
         'rcp_delivery_email'      => array('type'=>'varchar(255)'),
         'rcp_delivery_dashboard'  => array('type'=>'bool', 'default'=>true),
@@ -38,7 +40,7 @@ class Recipe extends SystemBase {
         'rcp_delete_time'         => array('type'=>'timestamp(6)'),
     );
 
-    public static $json_vars = array('rcp_allowed_tools', 'rcp_allowed_models');
+    public static $json_vars = array('rcp_allowed_tools', 'rcp_allowed_models', 'rcp_allowed_actions');
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {

@@ -10,12 +10,14 @@ class RecipeRun extends SystemBase {
     public static $tablename = 'rcr_recipe_runs';
     public static $pkey_column = 'rcr_run_id';
 
-    const STATUS_PENDING  = 'pending';
-    const STATUS_RUNNING  = 'running';
-    const STATUS_SUCCESS  = 'success';
-    const STATUS_FAILED   = 'failed';
-    const STATUS_TIMEOUT  = 'timeout';
-    const STATUS_SKIPPED  = 'skipped';
+    const STATUS_PENDING    = 'pending';
+    const STATUS_RUNNING    = 'running';
+    const STATUS_SUCCESS    = 'success';
+    const STATUS_FAILED     = 'failed';
+    const STATUS_TIMEOUT    = 'timeout';
+    const STATUS_SKIPPED    = 'skipped';
+    const STATUS_INCOMPLETE = 'incomplete';
+    const STATUS_CANCELLED  = 'cancelled';
 
     const TRIGGER_SCHEDULE = 'schedule';
     const TRIGGER_MANUAL   = 'manual';
@@ -35,6 +37,7 @@ class RecipeRun extends SystemBase {
         'rcr_tool_calls'        => array('type'=>'jsonb'),
         'rcr_workspace_before'  => array('type'=>'text'),
         'rcr_workspace_after'   => array('type'=>'text'),
+        'rcr_kill_requested'    => array('type'=>'bool', 'default'=>'false'),
         'rcr_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'rcr_delete_time'       => array('type'=>'timestamp(6)'),
     );
