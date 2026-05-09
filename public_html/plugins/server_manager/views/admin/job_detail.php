@@ -92,9 +92,9 @@ $page->admin_header([
 if (!empty($display_messages)) {
 	foreach ($display_messages as $msg) {
 		$alert_class = $msg->display_type == DisplayMessage::MESSAGE_ERROR ? 'alert-danger' : 'alert-success';
-		echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show">';
+		echo '<div class="alert ' . $alert_class . '">';
 		echo htmlspecialchars($msg->message);
-		echo '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 	}
 	$session->clear_clearable_messages();
 }
@@ -186,7 +186,7 @@ $status_class = match($job->get('mjb_status')) {
 
 		<div class="mt-2">
 			<?php if ($job->get('mjb_status') === 'pending'): ?>
-				<a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>&action=cancel" class="btn btn-sm btn-warning" onclick="return confirm('Cancel this job?')">Cancel</a>
+				<a href="#" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Cancel this job?', function(){ window.location='/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>&amp;action=cancel'; })">Cancel</a>
 			<?php endif; ?>
 			<?php if (in_array($job->get('mjb_status'), ['completed', 'failed', 'cancelled'])): ?>
 				<a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>&action=rerun" class="btn btn-sm btn-outline-primary">Re-run</a>

@@ -125,9 +125,11 @@ document.addEventListener('DOMContentLoaded', function() {
 	const regenerateLink = document.querySelector('a[href*="action=regenerate_secret"]');
 	if(regenerateLink) {
 		regenerateLink.addEventListener('click', function(e) {
-			if(!confirm('Regenerate secret key?\n\nThis will invalidate the current secret key immediately. Any applications using the old secret will stop working.\n\nYou will be shown the new secret key ONE TIME only.\n\nContinue?')) {
-				e.preventDefault();
-			}
+			e.preventDefault();
+			var href = regenerateLink.href;
+			JoineryModal.confirm('Regenerate secret key? This will invalidate the current secret key immediately. Any applications using the old secret will stop working. You will be shown the new secret key ONE TIME only.', function() {
+				window.location = href;
+			});
 		});
 	}
 });

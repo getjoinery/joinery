@@ -36,10 +36,10 @@ if (!empty($display_messages)) {
 		if ($msg->display_type == DisplayMessage::MESSAGE_ERROR)        $alert_class = 'alert-danger';
 		elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING)  $alert_class = 'alert-warning';
 		elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) $alert_class = 'alert-success';
-		echo '<div class="alert ' . $alert_class . ' alert-dismissible fade show" role="alert">';
+		echo '<div class="alert ' . $alert_class . '" role="alert">';
 		if ($msg->message_title) echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
 		echo htmlspecialchars($msg->message);
-		echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
 		echo '</div>';
 	}
 }
@@ -335,10 +335,11 @@ $page->end_box();
 			var src = (publicUrl && publicUrl.value) ? publicUrl.value : (endpoint ? endpoint.value : '');
 			var provider = detectRawHost(hostnameOf(src));
 			if (provider) {
+				e.preventDefault();
 				var msg = 'Your public URL appears to be a raw ' + provider + ' bucket. '
 				        + 'Without a CDN you\'ll pay egress on every file view, which can exceed storage savings. '
 				        + 'Continue anyway?';
-				if (!window.confirm(msg)) { e.preventDefault(); return false; }
+				JoineryModal.confirm(msg, function() { form.submit(); }, { confirmLabel: 'Continue', confirmStyle: 'primary' });
 			}
 		});
 	}

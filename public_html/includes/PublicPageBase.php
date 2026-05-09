@@ -720,18 +720,19 @@ abstract class PublicPageBase {
 		$confirm_msg   = isset($options['confirm']) ? $options['confirm'] : '';
 		$extra_class   = isset($options['class'])   ? ' ' . $options['class'] : '';
 
-		$onsubmit = '';
+		$btn_onclick = '';
 		if ($confirm_msg) {
-			$escaped = htmlspecialchars($confirm_msg, ENT_QUOTES);
-			$onsubmit = ' onsubmit="return confirm(\'' . $escaped . '\');"';
+			$escaped = addslashes(htmlspecialchars($confirm_msg, ENT_QUOTES));
+			$btn_onclick = ' onclick="var f=this.closest(\'form\'); JoineryModal.confirm(\'' . $escaped . '\', function(){ f.submit(); });"';
 		}
 
-		$html = '<form method="POST" action="' . htmlspecialchars($url) . '" style="display:inline;"' . $onsubmit . '>';
+		$html = '<form method="POST" action="' . htmlspecialchars($url) . '" style="display:inline;">';
 		foreach ($hidden_fields as $name => $value) {
 			$html .= '<input type="hidden" name="' . htmlspecialchars($name) . '" value="' . htmlspecialchars($value) . '">';
 		}
 		$btn_class = ($extra_class !== '') ? ltrim($extra_class) : 'btn btn-soft-default btn-sm';
-		$html .= '<button type="submit" class="' . $btn_class . '">' . htmlspecialchars($label) . '</button>';
+		$btn_type  = $confirm_msg ? 'button' : 'submit';
+		$html .= '<button type="' . $btn_type . '" class="' . $btn_class . '"' . $btn_onclick . '>' . htmlspecialchars($label) . '</button>';
 		$html .= '</form>';
 
 		return $html;
