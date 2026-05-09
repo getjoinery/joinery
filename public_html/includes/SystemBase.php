@@ -1303,7 +1303,8 @@ abstract class SystemBase {
 
 		foreach($rowdata as $column_name=>$column_val){
 			if(is_array($column_val) || is_object($column_val) || !is_string($column_val) || $column_val !== "-NOUPDATE-"){
-				if($column_meta[$column_name]['data_type'] == 'integer' || $column_meta[$column_name]['data_type'] == 'smallint'){
+				if($column_meta[$column_name]['data_type'] == 'integer' || $column_meta[$column_name]['data_type'] == 'smallint' || $column_meta[$column_name]['data_type'] == 'bigint'){
+					if($column_val === '') $column_val = NULL;
 					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_INT);
 				}
 				else if($column_meta[$column_name]['data_type'] == 'boolean'){

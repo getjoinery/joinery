@@ -103,7 +103,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		$validation_options = unserialize($this->get('qst_validate')) ?: [];
 
 		if(array_key_exists('required', $validation_options)){
-			if($answers == '' || $answers === NULL || count($answers) == 0){
+			if($answers == '' || $answers === NULL || (is_array($answers) && count($answers) == 0)){
 				return 'You did not answer this question: '. $this->get('qst_question');
 			}
 		}

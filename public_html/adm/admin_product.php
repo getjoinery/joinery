@@ -46,7 +46,7 @@
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Price:</td>
-								<td class="p-1 text-600"><strong><?php echo $currency_symbol . htmlspecialchars($product->get_readable_price()); ?></strong></td>
+								<td class="p-1 text-600"><strong><?php echo htmlspecialchars($product->get_readable_price()); ?></strong></td>
 							</tr>
 							<?php if($product->get('pro_max_purchase_count') > 0): ?>
 								<?php $remaining = $product->get('pro_max_purchase_count') - $product->get_number_purchased(); ?>
