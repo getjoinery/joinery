@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Showcase — Joinery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../theme/getjoinery/assets/css/style.css?v=6">
+</head>
+<body>
+
+<nav class="site-nav">
+    <div class="container">
+        <a href="index.html" class="nav-logo">Joinery</a>
+        <div class="nav-links" id="nav-links">
+            <a href="features.html">Features</a>
+            <a href="pricing.html">Pricing</a>
+            <a href="developers.html">Developers</a>
+            <a href="showcase.html" class="active">Showcase</a>
+            <a href="philosophy.html">Philosophy</a>
+            <a href="about.html">About</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <h1>Built with Joinery</h1>
+    <p>Joinery is an application framework. Membership management is one thing you can build with it — but it's not the only thing. Here's what's running on the platform today.</p>
+</section>
+
+<!-- SCROLLDADDY -->
+<section class="section">
+    <div class="container">
+        <div class="showcase-card">
+            <a href="https://scrolldaddy.app" class="showcase-image" target="_blank">
+                <img src="../theme/getjoinery/assets/img/showcase-scrolldaddy.png" alt="ScrollDaddy — DNS-based web filtering">
+            </a>
+            <div class="showcase-details">
+                <h2><a href="https://scrolldaddy.app" target="_blank">ScrollDaddy</a></h2>
+                <p class="showcase-tagline">DNS-based web filtering. Block social media, gambling, porn, news, and more — before it gets to your device.</p>
+                <p>ScrollDaddy is a consumer web filtering service with real paying users. The web application — user accounts, device management, filter configuration, subscription billing — is built entirely on Joinery. A companion Go DNS server handles the actual filtering at the network level, reading device configurations from the shared Joinery database.</p>
+                <p>This is the production proof point competitors don't have. ScrollDaddy launched before SaaSykit, Wave, or Nana existed.</p>
+                <div class="showcase-built-with">
+                    <h4>Joinery features used</h4>
+                    <ul>
+                        <li>Plugin system — 11 data models, admin interface, scheduled tasks</li>
+                        <li>Custom theme — full public-facing site with its own design language</li>
+                        <li>Subscription tiers — feature-gated plans with Stripe billing</li>
+                        <li>Scheduled tasks — daily blocklist updates from external sources</li>
+                        <li>User accounts — registration, login, profile, device management</li>
+                        <li>REST API — device configuration served to the DNS server</li>
+                    </ul>
+                </div>
+                <a href="https://scrolldaddy.app" class="btn btn-primary" target="_blank">Visit ScrollDaddy</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- MORE COMING -->
+<section class="section section-alt text-center">
+    <div class="container">
+        <h2 class="section-title">More projects coming</h2>
+        <p class="section-subtitle">Joinery's plugin system, theme engine, and data model layer make it possible to build complete web applications — not just membership sites. If you've built something with Joinery, we'd love to feature it.</p>
+        <a href="mailto:hello@getjoinery.com?subject=Showcase Submission" class="btn btn-primary">Submit Your Project</a>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="section section-dark text-center">
+    <div class="container">
+        <h2 class="section-title" style="margin-bottom: 1rem;">Build something with Joinery</h2>
+        <p style="max-width: 480px; margin: 0 auto 2rem; font-size: 1.05rem;">A plugin system, theme engine, data models, REST API, and user management — all ready to go. Start with the framework, build what you want.</p>
+        <div class="btn-group btn-group-center">
+            <a href="https://github.com/getjoinery/joinery" class="btn btn-primary">View on GitHub</a>
+            <a href="developers.html" class="btn btn-secondary" style="color: white; border-color: rgba(255,255,255,0.3);">Developer Docs</a>
+        </div>
+    </div>
+</section>
+
+<footer class="site-footer">
+    <div class="container">
+        <div class="footer-links">
+            <a href="features.html">Features</a>
+            <a href="pricing.html">Pricing</a>
+            <a href="developers.html">Developers</a>
+            <a href="showcase.html">Showcase</a>
+            <a href="philosophy.html">Philosophy</a>
+            <a href="about.html">About</a>
+            <a href="https://github.com/getjoinery/joinery" target="_blank">GitHub</a>
+        </div>
+        <div class="footer-bottom">&copy; 2026 Joinery. All rights reserved.</div>
+    </div>
+</footer>
+
+<script src="../theme/getjoinery/assets/js/script.js"></script>
+</body>
+</html>

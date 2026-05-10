@@ -132,6 +132,8 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 
 ### Routing & Theme System
 
+**CRITICAL: NEVER edit Apache config files** (`/etc/apache2/`) **unless explicitly directed to by the user.** All routing is handled through `serve.php` for core routes, and through plugin view auto-discovery for plugin routes — those are always the correct places to add or modify routes. See **📖 [Routing Documentation](docs/routing.md)** and **📖 [Plugin Developer Guide](docs/plugin_developer_guide.md)**.
+
 **CRITICAL: NEVER use .php extension in URLs or links! All requests go through the routing system.**
 - ❌ WRONG: `<a href="/admin/admin_user_edit.php?id=1">` - Query parameters will be lost!
 - ✅ CORRECT: `<a href="/admin/admin_user_edit?id=1">` - Routes properly with parameters

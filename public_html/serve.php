@@ -88,6 +88,8 @@ $routes = [
         '/theme/{theme}/assets/*' => ['cache' => 43200],
         '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],
         '/favicon.ico' => ['cache' => 43200],
+        // TEMPORARY: content staging area for copy editing — remove when done
+        '/content_staging/*' => ['cache' => 0],
         // REMOVED: '/plugins/ * /includes/*' - All plugins now use /assets/
         // REMOVED: '/includes/*' - No static files should be in /includes/ anymore
         // REMOVED: '/adm/includes/*' - Admin should use proper asset organization

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developers — Joinery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../theme/getjoinery/assets/css/style.css?v=6">
+</head>
+<body>
+
+<nav class="site-nav">
+    <div class="container">
+        <a href="index.html" class="nav-logo">Joinery</a>
+        <div class="nav-links" id="nav-links">
+            <a href="features.html">Features</a>
+            <a href="pricing.html">Pricing</a>
+            <a href="developers.html" class="active">Developers</a>
+            <a href="showcase.html">Showcase</a>
+            <a href="philosophy.html">Philosophy</a>
+            <a href="about.html">About</a>
+        </div>
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <h1>Your AI already knows how to work with this</h1>
+    <p>Joinery ships with AGENTS.md — a file that tells your AI assistant exactly how the codebase is structured, what patterns to follow, and where everything lives. Zero onboarding tax.</p>
+    <div class="btn-group btn-group-center">
+        <a href="https://github.com/getjoinery/joinery" class="btn btn-primary">View on GitHub</a>
+        <a href="#api" class="btn btn-secondary">API Docs</a>
+    </div>
+</section>
+
+<!-- AGENTS.md callout -->
+<section class="section section-alt">
+    <div class="container">
+        <div class="section-label">Marquee Feature</div>
+        <h2 class="section-title">AGENTS.md — AI onboarding, solved</h2>
+        <p class="section-subtitle">The single biggest friction for vibe coders adopting a new codebase is getting the AI up to speed. Joinery ships with AGENTS.md so you don't have to write it.</p>
+        <div class="diff-cards" style="max-width: 800px; margin: 0 auto;">
+            <div class="diff-card">
+                <div class="diff-ours">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    Where to find things
+                </div>
+                <div class="diff-theirs">Routing, views, data models, logic layer, plugins — all documented for your AI to reference.</div>
+            </div>
+            <div class="diff-card">
+                <div class="diff-ours">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    What patterns to follow
+                </div>
+                <div class="diff-theirs">Data model conventions, include rules, FormWriter, LogicResult — the AI knows to use them correctly.</div>
+            </div>
+            <div class="diff-card">
+                <div class="diff-ours">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    What to avoid
+                </div>
+                <div class="diff-theirs">Common mistakes, security patterns, architectural constraints — preventing the AI from going sideways.</div>
+            </div>
+            <div class="diff-card">
+                <div class="diff-ours">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    How to extend it
+                </div>
+                <div class="diff-theirs">Plugin system, theme overrides, routing — your AI can add features without breaking the architecture.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section class="section">
+    <div class="container">
+        <div class="section-label">The Stack</div>
+        <h2 class="section-title">Architecture overview</h2>
+        <p class="section-subtitle">A clean, well-structured PHP application. No framework magic — just patterns that work.</p>
+        <div class="arch-grid">
+            <div class="arch-card">
+                <h4>Database</h4>
+                <p>PostgreSQL with PDO prepared statements everywhere. Active Record pattern for data models. Version-controlled migrations.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Backend</h4>
+                <p>PHP 8.x, MVC-like architecture. Front-controller routing. Clean separation of data, logic, and views.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Frontend</h4>
+                <p>Zero-dependency HTML5 by default. Modern vanilla JavaScript. No Node build step required. Bootstrap and Tailwind also supported.</p>
+            </div>
+            <div class="arch-card">
+                <h4>API</h4>
+                <p>Full REST API with key-based authentication, rate limiting, CORS support. 40+ model endpoints with CRUD + actions.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Plugins</h4>
+                <p>Self-contained modules with their own data models, views, admin pages, routes, and scheduled tasks.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Themes</h4>
+                <p>Override chain — theme → plugin → base. Customize anything without forking. Component system for reusable sections.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- SECURITY -->
+<section class="section section-alt">
+    <div class="container">
+        <h2 class="section-title">Security</h2>
+        <p class="section-subtitle">Security is not a feature here. It is the baseline. Every query, every form, every session — handled correctly.</p>
+        <div class="arch-grid">
+            <div class="arch-card">
+                <h4>SQL Injection</h4>
+                <p>Every database query uses PDO prepared statements. No exceptions, no raw string concatenation paths. Enforced structurally.</p>
+            </div>
+            <div class="arch-card">
+                <h4>XSS Prevention</h4>
+                <p>All user-generated output is escaped with htmlspecialchars. FormWriter handles output encoding automatically.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Auth &amp; Permissions</h4>
+                <p>Session-based authentication with role-based access control. Permission checks happen at the controller level before any data loads.</p>
+            </div>
+            <div class="arch-card">
+                <h4>CSRF Protection</h4>
+                <p>CSRF token generation is built into FormWriter. Available on every form out of the box — no extra setup required.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Password Hashing</h4>
+                <p>Argon2id — current best practice. Legacy bcrypt hashes upgrade automatically on next login. No plaintext, no MD5, no SHA.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Source Available</h4>
+                <p>Read every line of code that touches your users' data. No obfuscation, no compiled binaries, no trust-us black boxes.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- API -->
+<section class="section" id="api">
+    <div class="container">
+        <div class="feature-showcase">
+            <div class="feature-showcase-content">
+                <h3>REST API</h3>
+                <p>Every feature is accessible through the API. Build integrations, automate workflows, or build your own frontend.</p>
+                <ul>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Key-based authentication</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 40+ model endpoints</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> CRUD + action operations</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Rate limiting and CORS</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> JSON request/response</li>
+                </ul>
+            </div>
+            <div class="feature-showcase-image">
+                <pre class="code-block" style="margin: 0; font-size: 0.8rem;"># List members
+curl -H "X-API-Key: your_key" \
+  https://yoursite.com/api/users
+
+# Get a single member
+curl -H "X-API-Key: your_key" \
+  https://yoursite.com/api/users/42
+
+# Create an event
+curl -X POST \
+  -H "X-API-Key: your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"evt_name": "Monthly Meetup"}' \
+  https://yoursite.com/api/events</pre>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- PLUGIN SYSTEM -->
+<section class="section section-alt">
+    <div class="container">
+        <div class="feature-showcase reverse">
+            <div class="feature-showcase-content">
+                <h3>Plugin System</h3>
+                <p>Plugins are self-contained modules that can add data models, views, admin pages, API endpoints, and scheduled tasks. ScrollDaddy uses 11 plugin models.</p>
+                <ul>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Own data models with automatic table management</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Admin interface pages</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Custom routes and views</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Scheduled task support</li>
+                    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Activate/deactivate without data loss</li>
+                </ul>
+            </div>
+            <div class="feature-showcase-image">
+                <pre class="code-block" style="margin: 0; font-size: 0.8rem;"># Plugin directory structure
+plugins/bookings/
+├── plugin.json
+├── data/
+│   └── bookings_class.php
+├── views/
+│   └── booking.php
+├── admin/
+│   └── admin_bookings.php
+├── logic/
+│   └── booking_logic.php
+└── assets/
+    └── css/style.css</pre>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- SELF-HOSTING -->
+<section class="section">
+    <div class="container">
+        <h2 class="section-title">Self-hosting</h2>
+        <p class="section-subtitle">Run Joinery on your own infrastructure. Same software, complete control.</p>
+        <div class="arch-grid" style="max-width: 800px; margin: 0 auto;">
+            <div class="arch-card">
+                <h4>Requirements</h4>
+                <p>PHP 8.x, PostgreSQL, Apache or Nginx. Standard LAMP/LEMP stack — nothing exotic.</p>
+            </div>
+            <div class="arch-card">
+                <h4>Installation</h4>
+                <p>Clone the repo, run the installer, configure your database. Docker supported. Or let us do it with White Glove Install ($249).</p>
+            </div>
+            <div class="arch-card">
+                <h4>Updates</h4>
+                <p>Automated upgrade system. Run one command to pull the latest version and apply migrations.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="section section-dark text-center">
+    <div class="container">
+        <h2 class="section-title" style="margin-bottom: 1rem;">Explore the source</h2>
+        <p style="max-width: 480px; margin: 0 auto 2rem; font-size: 1.05rem;">Source-available under the PolyForm Noncommercial license. Read the code, file issues, or build something.</p>
+        <div class="btn-group btn-group-center">
+            <a href="https://github.com/getjoinery/joinery" class="btn btn-primary">View on GitHub</a>
+            <a href="#" class="btn btn-secondary" style="color: white; border-color: rgba(255,255,255,0.3);">Read the Docs</a>
+        </div>
+    </div>
+</section>
+
+<footer class="site-footer">
+    <div class="container">
+        <div class="footer-links">
+            <a href="features.html">Features</a>
+            <a href="pricing.html">Pricing</a>
+            <a href="developers.html">Developers</a>
+            <a href="showcase.html">Showcase</a>
+            <a href="philosophy.html">Philosophy</a>
+            <a href="about.html">About</a>
+            <a href="https://github.com/getjoinery/joinery" target="_blank">GitHub</a>
+        </div>
+        <div class="footer-bottom">&copy; 2026 Joinery. All rights reserved.</div>
+    </div>
+</footer>
+
+<script src="../theme/getjoinery/assets/js/script.js"></script>
+</body>
+</html>
