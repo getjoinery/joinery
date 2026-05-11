@@ -20,6 +20,12 @@ class ServiceTests {
         $results['smtp_sending'] = $this->testSMTPSending();
         $results['mailgun_config'] = $this->testMailgunConfiguration();
         $results['mailgun_sending'] = $this->testMailgunSending();
+        $results['sendgrid_sending'] = $this->testSendGridSending();
+        $results['ses_sending'] = $this->testSesSending();
+        $results['postmark_sending'] = $this->testPostmarkSending();
+        $results['brevo_sending'] = $this->testBrevoSending();
+        $results['resend_sending'] = $this->testResendSending();
+        $results['mailjet_sending'] = $this->testMailjetSending();
         $results['service_detection'] = $this->testServiceDetection();
 
         // Provider abstraction tests
@@ -200,6 +206,377 @@ class ServiceTests {
                     'error' => $e->getMessage(),
                     'test_recipient' => $testRecipient,
                 ]
+            ];
+        }
+    }
+
+    private function testSendGridSending(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+        $settings = Globalvars::get_instance();
+        $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
+
+        if (empty($testRecipient)) {
+            return [
+                'passed' => false,
+                'message' => 'No test recipient configured',
+            ];
+        }
+
+        $apiKey = $settings->get_setting('sendgrid_api_key');
+        if (empty($apiKey)) {
+            return [
+                'passed' => true,
+                'message' => 'SendGrid not configured, skipping',
+                'details' => ['skipped' => true],
+            ];
+        }
+
+        // Temporarily route the active service through SendGrid so $sender->send()
+        // exercises the SendGrid provider regardless of the current default.
+        $snapshot = $this->snapshotSettings(['email_service', 'email_fallback_service']);
+        EmailSender::resetProviderCache();
+
+        try {
+            $this->writeSetting('email_service', 'sendgrid');
+            $this->writeSetting('email_fallback_service', '');
+
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'SENDGRID-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                    ->to($testRecipient, 'SendGrid Test Recipient')
+                    ->subject('SendGrid Test Email - ' . date('Y-m-d H:i:s'));
+
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message, false);
+
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via SendGrid to $testRecipient" : 'SendGrid sending failed',
+                'details' => [
+                    'service_type' => 'sendgrid',
+                    'test_recipient' => $testRecipient,
+                    'region' => $settings->get_setting('sendgrid_region') ?: 'global',
+                    'sandbox_mode' => $settings->get_setting('sendgrid_sandbox_mode') == '1',
+                    'send_result' => $sendResult,
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+            return [
+                'passed' => false,
+                'message' => 'SendGrid sending failed: ' . $e->getMessage(),
+                'details' => [
+                    'error' => $e->getMessage(),
+                    'test_recipient' => $testRecipient,
+                ]
+            ];
+        }
+    }
+
+    private function testSesSending(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+        $settings = Globalvars::get_instance();
+        $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
+
+        if (empty($testRecipient)) {
+            return ['passed' => false, 'message' => 'No test recipient configured'];
+        }
+
+        // SES auth: either explicit access key, or IAM role on EC2/ECS/Lambda.
+        // If neither, skip — running outside AWS without credentials.
+        $hasStaticCreds = !empty($settings->get_setting('ses_access_key_id'))
+                       && !empty($settings->get_setting('ses_secret_access_key'));
+        if (!$hasStaticCreds) {
+            return [
+                'passed' => true,
+                'message' => 'SES static credentials not configured, skipping (would attempt IAM role auto-discovery on AWS hosts)',
+                'details' => ['skipped' => true],
+            ];
+        }
+
+        $snapshot = $this->snapshotSettings(['email_service', 'email_fallback_service']);
+        EmailSender::resetProviderCache();
+
+        try {
+            $this->writeSetting('email_service', 'ses');
+            $this->writeSetting('email_fallback_service', '');
+
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'SES-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                    ->to($testRecipient, 'SES Test Recipient')
+                    ->subject('SES Test Email - ' . date('Y-m-d H:i:s'));
+
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message, false);
+
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via SES to $testRecipient" : 'SES sending failed',
+                'details' => [
+                    'service_type' => 'ses',
+                    'test_recipient' => $testRecipient,
+                    'region' => $settings->get_setting('ses_region') ?: 'us-east-1',
+                    'configuration_set' => $settings->get_setting('ses_configuration_set') ?: '(none)',
+                    'send_result' => $sendResult,
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+            return [
+                'passed' => false,
+                'message' => 'SES sending failed: ' . $e->getMessage(),
+                'details' => ['error' => $e->getMessage()],
+            ];
+        }
+    }
+
+    private function testPostmarkSending(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+        $settings = Globalvars::get_instance();
+        $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
+
+        if (empty($testRecipient)) {
+            return ['passed' => false, 'message' => 'No test recipient configured'];
+        }
+
+        $token = $settings->get_setting('postmark_server_token');
+        if (empty($token)) {
+            return [
+                'passed' => true,
+                'message' => 'Postmark not configured, skipping',
+                'details' => ['skipped' => true],
+            ];
+        }
+
+        $snapshot = $this->snapshotSettings(['email_service', 'email_fallback_service']);
+        EmailSender::resetProviderCache();
+
+        try {
+            $this->writeSetting('email_service', 'postmark');
+            $this->writeSetting('email_fallback_service', '');
+
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'POSTMARK-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                    ->to($testRecipient, 'Postmark Test Recipient')
+                    ->subject('Postmark Test Email - ' . date('Y-m-d H:i:s'));
+
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message, false);
+
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via Postmark to $testRecipient" : 'Postmark sending failed',
+                'details' => [
+                    'service_type' => 'postmark',
+                    'test_recipient' => $testRecipient,
+                    'message_stream' => $settings->get_setting('postmark_message_stream') ?: 'outbound',
+                    'send_result' => $sendResult,
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+            return [
+                'passed' => false,
+                'message' => 'Postmark sending failed: ' . $e->getMessage(),
+                'details' => ['error' => $e->getMessage()],
+            ];
+        }
+    }
+
+    private function testBrevoSending(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+        $settings = Globalvars::get_instance();
+        $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
+
+        if (empty($testRecipient)) {
+            return ['passed' => false, 'message' => 'No test recipient configured'];
+        }
+
+        if (empty($settings->get_setting('brevo_api_key'))) {
+            return [
+                'passed' => true,
+                'message' => 'Brevo not configured, skipping',
+                'details' => ['skipped' => true],
+            ];
+        }
+
+        $snapshot = $this->snapshotSettings(['email_service', 'email_fallback_service']);
+        EmailSender::resetProviderCache();
+
+        try {
+            $this->writeSetting('email_service', 'brevo');
+            $this->writeSetting('email_fallback_service', '');
+
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'BREVO-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                    ->to($testRecipient, 'Brevo Test Recipient')
+                    ->subject('Brevo Test Email - ' . date('Y-m-d H:i:s'));
+
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message, false);
+
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via Brevo to $testRecipient" : 'Brevo sending failed',
+                'details' => [
+                    'service_type' => 'brevo',
+                    'test_recipient' => $testRecipient,
+                    'sandbox_mode' => $settings->get_setting('brevo_sandbox_mode') == '1',
+                    'send_result' => $sendResult,
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+            return [
+                'passed' => false,
+                'message' => 'Brevo sending failed: ' . $e->getMessage(),
+                'details' => ['error' => $e->getMessage()],
+            ];
+        }
+    }
+
+    private function testResendSending(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+        $settings = Globalvars::get_instance();
+        $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
+
+        if (empty($testRecipient)) {
+            return ['passed' => false, 'message' => 'No test recipient configured'];
+        }
+
+        if (empty($settings->get_setting('resend_api_key'))) {
+            return [
+                'passed' => true,
+                'message' => 'Resend not configured, skipping',
+                'details' => ['skipped' => true],
+            ];
+        }
+
+        $snapshot = $this->snapshotSettings(['email_service', 'email_fallback_service']);
+        EmailSender::resetProviderCache();
+
+        try {
+            $this->writeSetting('email_service', 'resend');
+            $this->writeSetting('email_fallback_service', '');
+
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'RESEND-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                    ->to($testRecipient, 'Resend Test Recipient')
+                    ->subject('Resend Test Email - ' . date('Y-m-d H:i:s'));
+
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message, false);
+
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via Resend to $testRecipient" : 'Resend sending failed',
+                'details' => [
+                    'service_type' => 'resend',
+                    'test_recipient' => $testRecipient,
+                    'send_result' => $sendResult,
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+            return [
+                'passed' => false,
+                'message' => 'Resend sending failed: ' . $e->getMessage(),
+                'details' => ['error' => $e->getMessage()],
+            ];
+        }
+    }
+
+    private function testMailjetSending(): array {
+        require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+        $settings = Globalvars::get_instance();
+        $testRecipient = $this->config['test_email'] ?? $settings->get_setting('email_test_recipient');
+
+        if (empty($testRecipient)) {
+            return ['passed' => false, 'message' => 'No test recipient configured'];
+        }
+
+        $hasCreds = !empty($settings->get_setting('mailjet_api_key'))
+                 && !empty($settings->get_setting('mailjet_api_secret'));
+        if (!$hasCreds) {
+            return [
+                'passed' => true,
+                'message' => 'Mailjet not configured (need both api key and secret), skipping',
+                'details' => ['skipped' => true],
+            ];
+        }
+
+        $snapshot = $this->snapshotSettings(['email_service', 'email_fallback_service']);
+        EmailSender::resetProviderCache();
+
+        try {
+            $this->writeSetting('email_service', 'mailjet');
+            $this->writeSetting('email_fallback_service', '');
+
+            $message = EmailMessage::fromTemplate('activation_content', [
+                'act_code' => 'MAILJET-TEST-' . date('His'),
+                'resend' => false,
+            ]);
+            $message->from($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'))
+                    ->to($testRecipient, 'Mailjet Test Recipient')
+                    ->subject('Mailjet Test Email - ' . date('Y-m-d H:i:s'));
+
+            $sender = new EmailSender();
+            $sendResult = $sender->send($message, false);
+
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+
+            return [
+                'passed' => $sendResult,
+                'message' => $sendResult ? "Successfully sent via Mailjet to $testRecipient" : 'Mailjet sending failed',
+                'details' => [
+                    'service_type' => 'mailjet',
+                    'test_recipient' => $testRecipient,
+                    'sandbox_mode' => $settings->get_setting('mailjet_sandbox_mode') == '1',
+                    'send_result' => $sendResult,
+                ]
+            ];
+        } catch (Exception $e) {
+            $this->restoreSettings($snapshot);
+            EmailSender::resetProviderCache();
+            return [
+                'passed' => false,
+                'message' => 'Mailjet sending failed: ' . $e->getMessage(),
+                'details' => ['error' => $e->getMessage()],
             ];
         }
     }

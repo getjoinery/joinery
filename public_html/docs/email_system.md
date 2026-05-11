@@ -556,8 +556,21 @@ The email system uses a provider abstraction so that new email services can be a
 ### Architecture
 
 - **`EmailServiceProvider`** — interface in `includes/EmailServiceProvider.php` that all providers implement
-- **Provider classes** — live in `includes/email_providers/` (e.g., `MailgunProvider.php`, `SmtpProvider.php`)
+- **Provider classes** — live in `includes/email_providers/` (e.g., `MailgunProvider.php`, `SmtpProvider.php`, `SendGridProvider.php`)
 - **Auto-discovery** — `EmailSender` scans `includes/email_providers/` for classes implementing the interface; no manual registration needed
+
+### Built-in Providers
+
+| Key | Label | Batch | Live API check | Notes |
+|---|---|---|---|---|
+| `mailgun` | Mailgun | Native (recipient-variables, 500/chunk) | Yes (domain show) | EU region supported via `mailgun_eu_api_link` |
+| `smtp` | SMTP | Per-recipient loop via PHPMailer | Yes (connect + auth) | Generic SMTP, works with any provider that supports it |
+| `sendgrid` | SendGrid | Native (personalizations, 1000/chunk) | Yes (`/v3/user/account`) | Global or EU region via `sendgrid_region`; supports sandbox mode and per-message click-tracking toggle |
+| `ses` | Amazon SES | Per-recipient `SendEmail` loop (no native non-templated batch) | Yes (`GetAccount`) | AWS region selectable; static keys or IAM role auto-discovery; optional Configuration Set for engagement tracking |
+| `postmark` | Postmark | Native (`sendEmailBatch`, 500/chunk, per-recipient failure status) | Yes (`getServer`) | Server token (not Account token); message stream selection (transactional vs broadcast); per-message open and link tracking |
+| `brevo` | Brevo | Native (`messageVersions`, 1000/chunk) | Yes (`/v3/account`) | Single global endpoint; supports sandbox mode via `X-Sib-Sandbox` header |
+| `resend` | Resend | Native (`batch->send`, 100/chunk) | Yes (`apiKeys->list`) | Simplest config — single bearer token. Restricted/sending-only keys validate as "API Key Valid (Restricted)" |
+| `mailjet` | Mailjet | Native v3.1 Send API (50 messages/chunk, per-message status) | Yes (`/v3/REST/myprofile`) | Two-part credential (key + secret); supports sandbox mode |
 
 ### Adding a New Provider
 
