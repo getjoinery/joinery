@@ -114,7 +114,7 @@ function get_discount($full_price){
 			$coupon_code_uses = new MultiCouponCodeUse($searches);
 			$num_uses = $coupon_code_uses->count_all();
 
-			if($num_uses > $max_uses){
+			if($num_uses >= $max_uses){
 				return false;
 			}
 		}

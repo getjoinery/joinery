@@ -986,8 +986,9 @@ class ProductTester {
             $result = product_logic($post_data);
 
             // Check if we got a redirect result (indicating successful cart addition)
-            if ($result instanceof LogicResult && $result->redirect === '/cart') {
-                echo "✓ Product added to cart successfully (redirect to cart)<br>\n";
+            $cart_redirects = ['/cart', '/checkout'];
+            if ($result instanceof LogicResult && in_array($result->redirect, $cart_redirects)) {
+                echo "✓ Product added to cart successfully (redirect to " . htmlspecialchars($result->redirect, ENT_QUOTES, 'UTF-8') . ")<br>\n";
             } else {
                 echo "⚠ Product logic completed but cart action status unclear<br>\n";
             }
@@ -1690,7 +1691,7 @@ class ProductTester {
             // Create checkout session using existing helper
             $create_list = $stripe_helper->build_checkout_item_array($cart, $billing_user);
             $create_list['success_url'] = LibraryFunctions::get_absolute_url('/cart_charge?session_id={CHECKOUT_SESSION_ID}');
-            $create_list['cancel_url'] = LibraryFunctions::get_absolute_url('/cart');
+            $create_list['cancel_url'] = LibraryFunctions::get_absolute_url('/checkout');
             
             $stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
             echo "✓ Created Stripe session: " . $stripe_session->id . "<br>\n";

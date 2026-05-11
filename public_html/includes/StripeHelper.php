@@ -567,7 +567,7 @@ class StripeHelper {
 			'billing_address_collection' => 'auto',
 			'payment_method_types' => ['card'],
 			'success_url' => LibraryFunctions::get_absolute_url('/cart_charge?session_id={CHECKOUT_SESSION_ID}'),
-			'cancel_url' => LibraryFunctions::get_absolute_url('/cart'),
+			'cancel_url' => LibraryFunctions::get_absolute_url('/checkout'),
 			
 		);
 		

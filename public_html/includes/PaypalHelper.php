@@ -36,7 +36,7 @@ class PaypalHelper{
 		}
 		
 		$this->return_url = LibraryFunctions::get_absolute_url('/cart_charge');
-		$this->cancel_url = LibraryFunctions::get_absolute_url('/cart');
+		$this->cancel_url = LibraryFunctions::get_absolute_url('/checkout');
 
 	}
 	

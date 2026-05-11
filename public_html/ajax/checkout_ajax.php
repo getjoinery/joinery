@@ -23,7 +23,7 @@ switch ($action) {
         $section = isset($_POST['section']) ? $_POST['section'] : '';
         $data = isset($_POST['data']) ? $_POST['data'] : array();
 
-        require_once(PathHelper::getThemeFilePath('cart_logic.php', 'logic'));
+        require_once(PathHelper::getThemeFilePath('checkout_logic.php', 'logic'));
         $errors = validate_checkout_section($section, $data);
 
         if (empty($errors)) {

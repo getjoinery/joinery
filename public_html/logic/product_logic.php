@@ -110,7 +110,9 @@ function product_logic(array $input): LogicResult {
 			return LogicResult::error($e->getMessage());
 		}
 
-		return LogicResult::redirect('/cart');
+		$settings = Globalvars::get_instance();
+		$dest = $settings->get_setting('cart_intermediate_page') ? '/cart' : '/checkout';
+		return LogicResult::redirect($dest);
 	}
 
 	$page_vars['cart'] = $session->get_shopping_cart();

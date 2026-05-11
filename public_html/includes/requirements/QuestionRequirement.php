@@ -50,7 +50,9 @@ class QuestionRequirement extends AbstractProductRequirement {
     public function render_fields($formwriter, $product, $existing_data = []) {
         $question = $this->getQuestion();
         $field_name = 'question_' . $question->key;
-        $value = isset($existing_data[$field_name]) ? $existing_data[$field_name] : null;
+        $raw = isset($existing_data[$field_name]) ? $existing_data[$field_name] : null;
+        // Cart stores question data as ['question'=>..., 'answer'=>...]; unwrap to scalar for prefill.
+        $value = is_array($raw) ? ($raw['answer'] ?? null) : $raw;
 
         // Get append text from config if provided
         $append_text = isset($this->config['append_text']) ? $this->config['append_text'] : null;
