@@ -12,7 +12,12 @@
         "phpmailer/phpmailer": "^6.10.0",
         "aws/aws-sdk-php": "^3.300",
         "spomky-labs/otphp": "^11.0",
-        "chillerlan/php-qrcode": "^5.0"
+        "chillerlan/php-qrcode": "^5.0",
+        "sendgrid/sendgrid": "^8.1",
+        "wildbit/postmark-php": "^4.0",
+        "getbrevo/brevo-php": "^2.0",
+        "resend/resend-php": "^0.10",
+        "mailjet/mailjet-apiv3-php": "^1.5"
     },
     "config": {
         "allow-plugins": {
