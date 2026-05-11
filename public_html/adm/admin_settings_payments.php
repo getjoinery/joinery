@@ -380,6 +380,12 @@
 		
 		// Checkout Configuration Section
 		echo '<h4>Checkout Configuration</h4>';
+		$formwriter->dropinput('cart_intermediate_page', 'Show Cart Review Page', [
+			'options' => array(1 => 'Yes — show /cart before /checkout', 0 => 'No — go straight to /checkout'),
+			'value' => $settings->get_setting('cart_intermediate_page'),
+			'empty_option' => false,
+			'help_text' => 'When enabled, customers see a cart review page after adding items. When disabled, they go directly to the checkout accordion.'
+		]);
 		$optionvals = array('stripe_regular'=>"Stripe Regular", 'stripe_checkout' => 'Stripe Checkout', 'none' => 'None');
 		$formwriter->dropinput('checkout_type', 'Checkout Type', [
 			'options' => $optionvals,

@@ -67,6 +67,10 @@ class SessionControl{
 			|| (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
 			|| (!empty($_SERVER['HTTP_FORWARDED']) && preg_match('/proto=https/i', $_SERVER['HTTP_FORWARDED']))
 			|| (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+		// Keep server-side session files alive for 2 hours so idle carts survive.
+		// The default php.ini gc_maxlifetime of 1440 s (24 min) was silently
+		// expiring sessions while the browser still held a valid cookie.
+		ini_set('session.gc_maxlifetime', 7200);
 		session_set_cookie_params([
 			'lifetime' => 0,
 			'path'     => '/',

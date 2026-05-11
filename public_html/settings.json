@@ -61,6 +61,7 @@
     { "name": "allowed_upload_extensions", "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a" },
     { "name": "anti_spam_answer", "default": "" },
     { "name": "anti_spam_answer_comments", "default": "" },
+    { "name": "cart_intermediate_page", "default": "1" },
     { "name": "checkout_type", "default": "stripe_regular" },
     { "name": "cloud_storage_access_key", "default": "" },
     { "name": "cloud_storage_bucket", "default": "" },

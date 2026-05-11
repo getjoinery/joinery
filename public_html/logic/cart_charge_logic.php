@@ -8,7 +8,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function _checkout_error($message) {
 	$session = SessionControl::get_instance();
 	$session->save_message(new DisplayMessage($message, 'Payment Error', null, DisplayMessage::MESSAGE_ERROR));
-	return LogicResult::redirect('/cart');
+	return LogicResult::redirect('/checkout');
 }
 
 /**
