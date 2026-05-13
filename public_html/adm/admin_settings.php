@@ -1299,6 +1299,9 @@
 	$plugins = LibraryFunctions::list_plugins();
 	$plugin_settings_forms = array();
 	foreach($plugins as $plugin) {
+		if(!PluginHelper::isPluginActive($plugin)) {
+			continue;
+		}
 		$settings_form = PathHelper::getIncludePath("plugins/$plugin/settings_form.php");
 		if(file_exists($settings_form)) {
 			$plugin_settings_forms[$plugin] = $settings_form;
@@ -1306,7 +1309,7 @@
 	}
 
 	if(!empty($plugin_settings_forms)) {
-		echo '<hr><h2>Plugin Settings</h2>';
+		echo '<hr><h2 id="plugin-settings">Plugin Settings</h2>';
 		foreach($plugin_settings_forms as $plugin => $settings_form) {
 			echo "<div class='plugin-settings-section'>";
 			echo "<h4>" . ucfirst($plugin) . " Plugin</h4>";

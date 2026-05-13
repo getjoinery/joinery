@@ -114,7 +114,8 @@
                 endif; ?>
 
                 <div style="padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--jy-color-border);">
-                    <a href="/products" style="color: var(--jy-color-text-muted); text-decoration: none; font-size: 0.9375rem;">&#8592; Back to Products</a>
+                    <?php $products_list_on = $settings->get_setting('products_list_items_active') || $settings->get_setting('products_list_events_active'); ?>
+                    <a href="<?= $products_list_on ? '/products' : '/' ?>" style="color: var(--jy-color-text-muted); text-decoration: none; font-size: 0.9375rem;">&#8592; <?= $products_list_on ? 'Back to Products' : 'Back to Home' ?></a>
                 </div>
             </div>
 

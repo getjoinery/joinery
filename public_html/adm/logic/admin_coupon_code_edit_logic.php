@@ -89,7 +89,7 @@ function admin_coupon_code_edit_logic($get_vars, $post_vars) {
 
 		//LOAD THE NEW ENTRIES
 		if($post_vars['ccd_applies_to'] == 3){
-			foreach ($get_vars['products_list'] as $product_id){
+			foreach (($post_vars['products_list'] ?? []) as $product_id){
 				$coupon_code_product = new CouponCodeProduct(NULL);
 				$coupon_code_product->set('ccp_ccd_coupon_code_id', $coupon_code->key);
 				$coupon_code_product->set('ccp_pro_product_id', $product_id);

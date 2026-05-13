@@ -46,7 +46,7 @@
 	$formwriter->textinput('ccd_code', 'Coupon code');
 
 	$formwriter->dropinput('ccd_is_active', 'Active?', [
-		'options' => ['Inactive' => 0, 'Active' => 1]
+		'options' => [0 => 'Inactive', 1 => 'Active']
 	]);
 
 	$formwriter->textinput('ccd_amount_discount', 'Amount of discount ('.$currency_symbol.')', [
@@ -68,15 +68,15 @@
 	]);
 
 	$formwriter->dropinput('ccd_is_stackable', 'Is this coupon stackable?', [
-		'options' => ['No' => 0, 'Yes' => 1]
+		'options' => [0 => 'No', 1 => 'Yes']
 	]);
 
 	$formwriter->dropinput('ccd_applies_to', 'Applies to', [
 		'options' => [
-			'All products' => 0,
-			'Subscriptions only' => 1,
-			'One time purchases only' => 2,
-			'Custom (below)' => 3
+			0 => 'All products',
+			1 => 'Subscriptions only',
+			2 => 'One time purchases only',
+			3 => 'Custom (below)',
 		],
 		'visibility_rules' => [
 			'' => [

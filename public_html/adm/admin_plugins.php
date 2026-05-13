@@ -204,6 +204,36 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $status_cell .= '</div>';
                 }
 
+                // Warn if plugin is active, has a settings form, and all settings are blank/default
+                if (
+                    $plugin['plugin'] &&
+                    $plugin['plugin']->get('plg_status') === 'active' &&
+                    file_exists(PathHelper::getIncludePath('plugins/' . $plugin['name'] . '/settings_form.php'))
+                ) {
+                    try {
+                        $ph = PluginHelper::getInstance($plugin['name']);
+                        $declared = $ph->getDeclaredSettings();
+                        if (!empty($declared)) {
+                            $all_default = true;
+                            foreach ($declared as $s) {
+                                $current = $settings->get_setting($s['name'], true, true);
+                                $default = $s['default'] ?? '';
+                                if ($current !== '' && $current !== null && (string)$current !== (string)$default) {
+                                    $all_default = false;
+                                    break;
+                                }
+                            }
+                            if ($all_default) {
+                                $status_cell .= '<br><div class="alert alert-warning p-1 mt-1 mb-0" style="font-size: 0.8em;">';
+                                $status_cell .= '⚠ <a href="/admin/admin_settings#plugin-settings">Settings not configured</a>';
+                                $status_cell .= '</div>';
+                            }
+                        }
+                    } catch (Exception $e) {
+                        // Skip if plugin helper unavailable
+                    }
+                }
+
                 array_push($rowvalues, $status_cell);
 
                 // Actions column
