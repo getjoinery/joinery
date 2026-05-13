@@ -1,9 +1,9 @@
 <?php
 /**
- * Admin Help Documentation Viewer - Logic
+ * Public Documentation Page - Logic
  *
- * Thin wrapper over the shared DocsScanner. Scans docs/, validates the
- * ?doc= parameter, renders markdown for display.
+ * Mirrors adm/logic/admin_help_logic.php but with no permission check and a
+ * /documentation base URL. Uses the shared DocsScanner.
  */
 
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -11,19 +11,16 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/DocsScanner.php'));
 
-function admin_help_logic($get_vars, $post_vars) {
+function documentation_logic($vars) {
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
-	$session->set_return();
-
 	$settings = Globalvars::get_instance();
 	$docs_dir = PathHelper::getIncludePath('docs');
-	$base_url = '/admin/admin_help';
+	$base_url = '/documentation';
 
 	$doc_tree = DocsScanner::scan($docs_dir);
 
-	$selected_doc = isset($get_vars['doc']) ? $get_vars['doc'] : '';
+	$selected_doc = isset($vars['doc']) ? $vars['doc'] : '';
 	$rendered_html = '';
 	$page_title = 'Documentation';
 	$error = '';

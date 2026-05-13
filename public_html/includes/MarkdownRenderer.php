@@ -15,17 +15,38 @@ class MarkdownRenderer {
      * Input is HTML-escaped first for XSS protection.
      */
     public static function render($text) {
-        // Escape HTML first
         $text = htmlspecialchars($text);
 
-        // Code blocks (``` ... ```)
-        $text = preg_replace_callback('/```(\w*)\n(.*?)\n```/s', function($matches) {
+        // Extract fenced and inline code to placeholders BEFORE any other pass so
+        // their contents are invisible to header/italic/etc. regexes. Without this,
+        // a `# comment` line inside a ```bash block becomes an <h1>, and a single
+        // `*` inside an inline code span pairs with another `*` later in the
+        // document and italicizes everything between.
+        $placeholders = array();
+        $counter = 0;
+
+        // Fenced code blocks (``` ... ```)
+        $text = preg_replace_callback('/```(\w*)\n(.*?)\n```/s', function($matches) use (&$placeholders, &$counter) {
             $lang = $matches[1] ? ' class="language-' . $matches[1] . '"' : '';
-            return '<pre><code' . $lang . '>' . $matches[2] . '</code></pre>';
+            $key = "\x02MDPH" . $counter++ . "\x02";
+            $placeholders[$key] = '<pre><code' . $lang . '>' . $matches[2] . '</code></pre>';
+            return $key;
         }, $text);
 
-        // Inline code (`code`)
-        $text = preg_replace('/`([^`]+)`/', '<code>$1</code>', $text);
+        // Double-backtick inline code (``...``) — used when content contains a backtick
+        $text = preg_replace_callback('/``([^`]+)``/', function($matches) use (&$placeholders, &$counter) {
+            $key = "\x02MDPH" . $counter++ . "\x02";
+            $placeholders[$key] = '<code>' . trim($matches[1]) . '</code>';
+            return $key;
+        }, $text);
+
+        // Single-backtick inline code (`code`) — restricted to a single line so an
+        // unclosed backtick can't swallow the rest of the document
+        $text = preg_replace_callback('/`([^`\n]+)`/', function($matches) use (&$placeholders, &$counter) {
+            $key = "\x02MDPH" . $counter++ . "\x02";
+            $placeholders[$key] = '<code>' . $matches[1] . '</code>';
+            return $key;
+        }, $text);
 
         // Headers (# to ######)
         $text = preg_replace('/^###### (.+)$/m', '<h6>$1</h6>', $text);
@@ -91,6 +112,10 @@ class MarkdownRenderer {
         $text = preg_replace('/<p><hr><\/p>/', '<hr>', $text);
         $text = preg_replace('/<p><hr>/', '<hr><p>', $text);
 
+        if (!empty($placeholders)) {
+            $text = strtr($text, $placeholders);
+        }
+
         return $text;
     }
 
@@ -98,15 +123,17 @@ class MarkdownRenderer {
      * Rewrite internal doc links in rendered HTML.
      * Converts href values pointing to .md files within docs/ to help viewer URLs.
      *
-     * Patterns handled:
+     * $base_url is the viewer path, e.g. '/admin/admin_help' or '/documentation'.
+     *
+     * Patterns handled (with $base_url='/admin/admin_help'):
      *   href="routing.md"              => href="/admin/admin_help?doc=routing"
      *   href="/docs/admin_pages.md"    => href="/admin/admin_help?doc=admin_pages"
      *   href="validation.md#overview"  => href="/admin/admin_help?doc=validation#overview"
      *
      * Links outside docs/ (../../, ../CLAUDE.md, /specs/, https://) are left alone.
      */
-    public static function rewrite_doc_links($html, $docs_dir) {
-        return preg_replace_callback('/href="([^"]*\.md(?:#[^"]*)?)"/', function($matches) use ($docs_dir) {
+    public static function rewrite_doc_links($html, $docs_dir, $base_url = '/admin/admin_help') {
+        return preg_replace_callback('/href="([^"]*\.md(?:#[^"]*)?)"/', function($matches) use ($docs_dir, $base_url) {
             $href = $matches[1];
 
             // Split off anchor if present
@@ -149,7 +176,7 @@ class MarkdownRenderer {
                 return $matches[0]; // File doesn't exist, leave link alone
             }
 
-            return 'href="/admin/admin_help?doc=' . htmlspecialchars($doc_key) . $anchor . '"';
+            return 'href="' . $base_url . '?doc=' . htmlspecialchars($doc_key) . $anchor . '"';
         }, $html);
     }
 

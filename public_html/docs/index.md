@@ -4,29 +4,37 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 
 ## Getting Started
 
-- [Routing](routing.md) -- How pages are created and served, URL patterns, and the theme override chain
-- [Admin Pages](admin_pages.md) -- Building admin interface pages with AdminPage, tables, and forms
-- [Admin Page Reference](admin_page_reference.md) -- Quick-reference for admin page patterns
-- [Logic Architecture](logic_architecture.md) -- Business logic layer, LogicResult pattern, and page flow
+- [Installation](installation.md) -- Deploy Joinery on Docker or bare-metal, configure SSL, manage domains
 
 ## Core Systems
 
+- [Routing](routing.md) -- How pages are created and served, URL patterns, and the theme override chain
+- [Logic Architecture](logic_architecture.md) -- Business logic layer, LogicResult pattern, and page flow
+- [Admin Pages](admin_pages.md) -- Building admin interface pages with AdminPage, tables, and forms
 - [FormWriter](formwriter.md) -- Form generation, validation integration, and field types
 - [Validation](validation.md) -- Three-layer validation system (client, server, model)
 - [Settings](settings.md) -- System settings management and auto-creating settings
 - [Email System](email_system.md) -- Composing and sending email with templates, service fallback, and batch operations
 - [Email Forwarding](email_forwarding_plugin.md) -- Self-hosted email forwarding with virtual mailboxes
 - [Photo System](photo_system.md) -- Multi-photo management, uploads, and image sizing
+- [Cloud Storage](cloud_storage.md) -- S3-compatible cloud bucket for public uploaded files
 - [Deletion System](deletion_system.md) -- Soft delete, permanent delete, cascading, and foreign key actions
+- [SEO Metadata](seo_metadata.md) -- SEO, Open Graph, and Twitter Card conventions for public views
 
 ## Features
 
+- [Analytics](analytics.md) -- Visitor events, conversion tracking, and attribution reporting
+- [A/B Testing](ab_testing.md) -- Experiments, variant assignment, and conversion measurement
 - [Recurring Events](recurring_events.md) -- Virtual/materialized instance pattern for recurring events
 - [Subscription Tiers](subscription_tiers.md) -- Subscription management and feature-based access control
 - [Product Purchase Hooks](product_purchase_hooks.md) -- Plugin hooks triggered on product purchase
+- [Product Requirements](product_requirements.md) -- Collecting data from buyers at checkout
+- [Questions & Surveys](questions_surveys.md) -- Built-in questionnaire system: question types, surveys, answer storage
+- [Social Features](social_features.md) -- Like/favorite, block, report, and messaging systems
 - [Scheduled Tasks](scheduled_tasks.md) -- Cron-based task runner and task development
 - [REST API](api.md) -- API authentication, endpoints, and usage
-- [Joinery AI Plugin](joinery_ai.md) -- LLM-driven recipes, the tool layer, and the generic `query_model` read surface gated by per-recipe model allowlists
+- [Joinery AI Plugin](joinery_ai.md) -- LLM-driven recipes and the generic `query_model` read surface
+- [ScrollDaddy Plugin](scrolldaddy_plugin.md) -- DNS filtering: unified block model, tier gating, editor UI, resolver flow
 
 ## Extensibility
 
@@ -39,7 +47,4 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 
 - [Deploy and Upgrade](deploy_and_upgrade.md) -- Deployment, upgrades, and installation
 - [Publish/Upgrade System Analysis](publish_upgrade_system_analysis.md) -- How upgrade packages are built and distributed
-
-## Analysis
-
-- [jQuery Removal Analysis](jquery_removal_analysis.md) -- jQuery dependency audit and removal roadmap
+- [Server Manager](server_manager.md) -- Remote server management and the Go agent

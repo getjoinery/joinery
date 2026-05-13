@@ -1,182 +1,297 @@
-# Admin Pages Documentation
+# Admin Pages
 
-This document provides comprehensive guidance for creating admin interface pages in the joinery platform.
+Reference for building admin interface pages on the Joinery platform. Admin pages follow the logic/view split: business logic lives in `/adm/logic/admin_*_logic.php` and returns a `LogicResult`; presentation lives in `/adm/admin_*.php` and renders through `AdminPage`.
 
-## Required Setup
+The canonical reference implementation is `/adm/admin_user.php` and `/adm/logic/admin_user_logic.php`.
 
-Every admin page must include these basic requirements:
+## Table of Contents
+
+1. [Core Principles](#core-principles)
+2. [File Structure & Naming](#file-structure--naming)
+3. [Logic File Pattern](#logic-file-pattern)
+4. [View File Pattern](#view-file-pattern)
+5. [Common Patterns by Page Type](#common-patterns-by-page-type)
+6. [Advanced Patterns](#advanced-patterns)
+7. [Layout & CSS Rules](#layout--css-rules)
+8. [Best Practices](#best-practices)
+9. [Troubleshooting](#troubleshooting)
+10. [Testing Checklist](#testing-checklist)
+
+## Core Principles
+
+1. **Separation of concerns** — business logic in `/adm/logic/`, presentation in `/adm/`.
+2. **LogicResult pattern** — logic functions return a `LogicResult` (`render`, `redirect`, or `error`).
+3. **`process_logic()` in views** — views wrap the logic call so redirects and errors are handled centrally.
+4. **POST → redirect** — admin actions always redirect after POST; messages flow via session, never via query strings.
+5. **No `.php` in URLs** — all admin URLs are served through the front controller; the `.php` extension breaks routing.
+
+See [Logic Architecture](logic_architecture.md) for the broader pattern.
+
+## File Structure & Naming
+
+```
+/adm/
+  ├── admin_user.php                  # View — display only
+  └── logic/
+      └── admin_user_logic.php        # Business logic
+```
+
+Logic files always live in `/adm/logic/` (no subdirectories). Plugin admin pages mirror this in `/plugins/{plugin}/admin/logic/`.
+
+### Naming Conventions
+
+| Page Type      | View                      | Logic                              |
+|----------------|---------------------------|-------------------------------------|
+| List page      | `admin_users.php`         | `admin_users_logic.php`             |
+| Detail page    | `admin_user.php`          | `admin_user_logic.php`              |
+| Edit form      | `admin_user_edit.php`     | `admin_user_edit_logic.php`         |
+| Delete action  | `admin_user_delete.php`   | `admin_user_delete_logic.php`       |
+| Other actions  | `admin_user_{action}.php` | `admin_user_{action}_logic.php`     |
+
+## Logic File Pattern
+
+### Complete Template
 
 ```php
 <?php
-// PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper, PluginHelper are guaranteed available
+// Logic files require PathHelper directly. Views get it from serve.php's front
+// controller, but logic files are included by views — by the time PHP parses
+// the require below, PathHelper is already loaded — but keep this for
+// defensive consistency with the rest of the codebase.
+require_once(__DIR__ . '/../../includes/PathHelper.php');
 
+function admin_page_logic($get_vars, $post_vars) {
+    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+    require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+    require_once(PathHelper::getIncludePath('includes/Pager.php'));
+    require_once(PathHelper::getIncludePath('data/users_class.php'));
+
+    // Globalvars, SessionControl, DbConnector, ThemeHelper, PluginHelper are
+    // always pre-loaded — never require them.
+    $settings = Globalvars::get_instance();
+    $session = SessionControl::get_instance();
+
+    $session->check_permission(5);  // 5=admin, 9=super admin, 10=full
+    $session->set_return();
+
+    $page_vars = array();
+    $page_vars['settings'] = $settings;
+    $page_vars['session'] = $session;
+
+    // Process actions BEFORE loading display data.
+    if (isset($post_vars['action']) || isset($get_vars['action'])) {
+        $action = $post_vars['action'] ?? $get_vars['action'] ?? null;
+        switch ($action) {
+            case 'delete':
+                $item = new Item($get_vars['item_id'], TRUE);
+                $item->soft_delete();
+                return LogicResult::redirect('/admin/admin_items');
+
+            case 'save':
+                $item = new Item($post_vars['item_id'] ?? NULL);
+                $item->set('field_name', $post_vars['field_name']);
+                $item->prepare();
+                $item->save();
+                return LogicResult::redirect('/admin/admin_item?item_id=' . $item->key);
+        }
+    }
+
+    // Load data for display.
+    $items = new MultiItem(
+        array('deleted' => false),
+        array('item_id' => 'DESC'),
+        30, 0
+    );
+    $numrecords = $items->count_all();
+    $items->load();
+
+    $page_vars['items'] = $items;
+    $page_vars['numrecords'] = $numrecords;
+
+    return LogicResult::render($page_vars);
+}
+?>
+```
+
+### Section Notes
+
+- **Permission levels**: `5` = basic admin, `7` = higher admin, `9` = super admin, `10` = full system admin. `check_permission()` redirects unauthorized users automatically.
+- **Always include `$settings` and `$session`** in `$page_vars`.
+- **Process actions before loading data** — avoids wasted queries when the path ends in a redirect.
+- **Always redirect after POST** — return `LogicResult::redirect(...)` so refresh doesn't re-submit.
+
+### Return Types
+
+```php
+return LogicResult::render($page_vars);  // Normal display
+return LogicResult::redirect('/path');   // After action
+return LogicResult::error('Error msg');  // Failure (404, etc.)
+```
+
+## View File Pattern
+
+### Complete Template
+
+```php
+<?php
+// PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper,
+// PluginHelper are always pre-loaded — never require them.
+
+require_once(PathHelper::getIncludePath('adm/logic/admin_page_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
-$session = SessionControl::get_instance();
-$session->check_permission(9); // Adjust permission level as needed (5=basic admin, 9=super admin)
-$session->set_return();
+$page_vars = process_logic(admin_page_logic($_GET, $_POST));
+
+$session = $page_vars['session'];
+$settings = $page_vars['settings'];
+$items = $page_vars['items'];
+$numrecords = $page_vars['numrecords'];
 
 $page = new AdminPage();
-$settings = Globalvars::get_instance();
-```
-
-**Critical Notes:**
-- **NEVER use `$_SERVER['DOCUMENT_ROOT']`** for includes - always use `PathHelper`
-- **Always call `$session->set_return()`** to handle redirects properly
-- **Permission levels**: 5 = basic admin access, 9 = super admin access
-
-## Basic Page Structure
-
-### Standard Layout Pattern
-```php
-$page->admin_header([
-    'menu-id' => 'menu-identifier',
-    'page_title' => 'Page Title',
-    'readable_title' => 'Human Readable Title',
-    'breadcrumbs' => NULL,
+$page->admin_header(array(
+    'menu-id' => 'items-list',
+    'page_title' => 'Items',
+    'readable_title' => 'Item List',
+    'breadcrumbs' => array('All Items' => ''),
     'session' => $session,
-]);
-?>
+));
 
-<div class="row">
-    <div class="col-12">
-        <h5 class="mb-3">Section Title</h5>
-        
-        <!-- Page content here -->
-        
-    </div>
-</div>
-
-<?php $page->admin_footer(); ?>
-```
-
-### Form Structure with FormWriter
-
-Every admin form must be wrapped in `begin_box()`/`end_box()`. Without the wrapper the form renders with no card-header or card-body, losing the standard padding and visual container.
-
-```php
-<?php
-$page->begin_box(['title' => 'Edit Item']);
-
-// Get FormWriter V2 instance from the page object
-$formwriter = $page->getFormWriter('form_name', 'v2', [
-    'model' => $object  // Auto-fills values and applies validation from model
-]);
-
-$formwriter->begin_form();
-
-// Field with clean options array
-$formwriter->textinput('field_name', 'Label', [
-    'placeholder' => 'Enter value',
-    'helptext' => 'Help text here',
-    'maxlength' => 255
-]);
-
-$formwriter->submitbutton('submit', 'Submit Text');
-$formwriter->end_form();
-
-$page->end_box();
-?>
-```
-
-**Note:** Admin pages use `$page->getFormWriter('form_name', 'v2')` which automatically provides FormWriterV2Bootstrap for admin interfaces with automatic CSRF protection, validation, and value filling.
-
-## Table-Based Admin Pages
-
-### Standard Data Table Pattern
-For pages that display lists of data (like admin_errors.php), use this pattern:
-
-```php
-// Get URL parameters using LibraryFunctions
-$numperpage = 30;
-$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-$sort = LibraryFunctions::fetch_variable('sort', 'create_time', 0, '');
-$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
-
-// Load data using MultiModel pattern
-$search_criteria = array();
-if ($searchterm) {
-    $search_criteria['field_name'] = 'LIKE %' . $searchterm . '%';
-}
-
-$items = new MultiTableName(
-    $search_criteria,
-    array($sort => $sdirection),
-    $numperpage,
-    $offset
-);
-$numrecords = $items->count_all();
-$items->load();
-
-// Set up table
-$headers = array("Column 1", "Column 2", "Column 3", "Actions");
-$sortoptions = array(
-    "Column 1" => "field_name_1",
-    "Column 2" => "field_name_2"
-);
-
-$pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage));
-$table_options = array(
-    'sortoptions' => $sortoptions,
-    'title' => 'Table Title',
-    'search_on' => TRUE // or FALSE
-);
+$pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => 30));
+$headers = array('Name', 'Date', 'Actions');
+$table_options = array('title' => 'Items', 'search_on' => TRUE);
 
 $page->tableheader($headers, $table_options, $pager);
-
-// Display rows
 foreach ($items as $item) {
-    $rowvalues = array();
-    
-    array_push($rowvalues, $item->get('field_1'));
-    array_push($rowvalues, $item->get('field_2'));
-    array_push($rowvalues, $item->get('field_3'));
-    
-    // Action links - CRITICAL: Never use .php extension in URLs!
-    $actions = '<a href="/admin/admin_item_edit?id=' . $item->get('primary_key') . '" class="btn btn-sm btn-primary">Edit</a>';
-    array_push($rowvalues, $actions);
-    
-    $page->disprow($rowvalues);
+    $row = array();
+    array_push($row, htmlspecialchars($item->get('name')));
+    array_push($row, LibraryFunctions::convert_time($item->get('created'), 'UTC', $session->get_timezone()));
+    array_push($row, '<a href="/admin/admin_item_edit?id=' . $item->key . '">Edit</a>');
+    $page->disprow($row);
 }
+$page->endtable($pager);
 
+$page->admin_footer();
+?>
+```
+
+### `process_logic()` Behaviour
+
+1. Calls the logic function.
+2. If it returns `LogicResult::redirect(...)`, performs the redirect and exits.
+3. If it returns `LogicResult::error(...)`, displays the error or throws.
+4. Otherwise returns the `$page_vars` array from `LogicResult::render()`.
+
+### `admin_header()` Options
+
+| Option           | Notes                                              |
+|------------------|----------------------------------------------------|
+| `menu-id`        | For sidebar highlighting                           |
+| `page_title`     | Browser `<title>`                                  |
+| `readable_title` | Page H1                                            |
+| `breadcrumbs`    | `['Label' => '/url', ...]`; empty string = current |
+| `session`        | Required                                           |
+| `no_page_card`   | Skip the surrounding card wrapper                  |
+| `header_action`  | Action button or dropdown HTML                     |
+
+## Common Patterns by Page Type
+
+### List Page
+
+```php
+// Logic
+$numperpage = 30;
+$offset = LibraryFunctions::fetch_variable_local($get_vars, 'offset', 0);
+$sort = LibraryFunctions::fetch_variable_local($get_vars, 'sort', 'user_id');
+$sdirection = LibraryFunctions::fetch_variable_local($get_vars, 'sdirection', 'DESC');
+$searchterm = LibraryFunctions::fetch_variable_local($get_vars, 'searchterm', '');
+
+$criteria = array('deleted' => false);
+if ($searchterm) $criteria['search'] = $searchterm;
+
+$users = new MultiUser($criteria, array($sort => $sdirection), $numperpage, $offset);
+$numrecords = $users->count_all();
+$users->load();
+
+$page_vars['users'] = $users;
+$page_vars['numrecords'] = $numrecords;
+$page_vars['numperpage'] = $numperpage;
+$page_vars['sortoptions'] = array('Name' => 'last_name', 'Email' => 'email');
+```
+
+```php
+// View
+$pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage));
+$page->tableheader(
+    array('Name', 'Email', 'Signup Date'),
+    array('sortoptions' => $page_vars['sortoptions'], 'title' => 'Users', 'search_on' => TRUE),
+    $pager
+);
+
+foreach ($users as $user) {
+    $row = array();
+    array_push($row, '<a href="/admin/admin_user?usr_user_id=' . $user->key . '">' . $user->display_name() . '</a>');
+    array_push($row, htmlspecialchars($user->get('usr_email')));
+    array_push($row, LibraryFunctions::convert_time($user->get('usr_signup_date'), 'UTC', $session->get_timezone(), 'M j, Y'));
+    $page->disprow($row);
+}
 $page->endtable($pager);
 ```
 
-### Alternative: File-Based Data Tables
-For parsing log files or other non-database sources:
+### Detail Page
+
+Loads one main record and any related collections. Handles multiple POST actions via an `action` field. See `/adm/logic/admin_user_logic.php` for a worked example covering add/remove group, add/remove event, multiple related tables, and a custom altlinks dropdown.
 
 ```php
-// Parse data from external source (like error logs)
-$parser = new DataParser();
-$all_data = $parser->getData();
+// Logic — sketch
+$user_id = $get_vars['usr_user_id'] ?? null;
+if (!$user_id) return LogicResult::error('User ID is required');
 
-// Paginate manually
-$numrecords = count($all_data);
-$data = array_slice($all_data, $offset, $numperpage);
-
-// Continue with same table pattern as above
-$page->tableheader($headers, $table_options, $pager);
-
-foreach ($data as $item) {
-    $rowvalues = array();
-    // Build row data...
-    $page->disprow($rowvalues);
+$user = new User($user_id, TRUE);
+if (!$user->get('usr_id')) {
+    header('HTTP/1.0 404 Not Found');
+    return LogicResult::error('User not found');
 }
 
-$page->endtable($pager);
+if ($post_vars) {
+    switch ($post_vars['action']) {
+        case 'add_to_group':
+            $group = new Group($post_vars['grp_group_id'], TRUE);
+            $group->add_member($user->key);
+            return LogicResult::redirect('/admin/admin_user?usr_user_id=' . $user->key);
+    }
+}
+
+// Load related data...
+$page_vars['user'] = $user;
+return LogicResult::render($page_vars);
 ```
 
-## Form Handling Best Practices
-
-### Edit Forms with FormWriterV2
-
-When using FormWriterV2 with `edit_primary_key_value`, your logic file must check for this POST field first:
+### Edit Form
 
 ```php
-// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+// Logic
+$user_id = $get_vars['usr_user_id'] ?? null;
+$user = new User($user_id ?? NULL, $user_id ? TRUE : FALSE);
+
+if ($post_vars) {
+    try {
+        $user->set('usr_first_name', $post_vars['usr_first_name']);
+        $user->set('usr_last_name',  $post_vars['usr_last_name']);
+        $user->set('usr_email',      $post_vars['usr_email']);
+        $user->prepare();
+        $user->save();
+        return LogicResult::redirect('/admin/admin_user?usr_user_id=' . $user->key);
+    } catch (Exception $e) {
+        $page_vars['error_message'] = $e->getMessage();
+    }
+}
+```
+
+When using FormWriterV2's `edit_primary_key_value` hidden field, **check the POST field first**, then fall back to GET:
+
+```php
 if (isset($post_vars['edit_primary_key_value'])) {
     $item = new Item($post_vars['edit_primary_key_value'], TRUE);
 } elseif (isset($get_vars['itm_item_id'])) {
@@ -186,195 +301,171 @@ if (isset($post_vars['edit_primary_key_value'])) {
 }
 ```
 
-**See [FormWriter Documentation - Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value)** for complete details on this pattern and why it's required.
-
-### Data Processing Pattern (Logic File)
-
-Admin pages that handle POST actions should use the logic file pattern with session-based messages. **Never pass messages via URL query parameters.**
+See [FormWriter — Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value).
 
 ```php
-// In adm/logic/admin_items_logic.php
-function admin_items_logic($get_vars, $post_vars) {
-    require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+// View — wrap in begin_box / end_box so the form gets the standard card chrome
+$page->begin_box(array('title' => 'Edit User'));
 
-    $session = SessionControl::get_instance();
-    $session->check_permission(5);
+$formwriter = $page->getFormWriter('form1', 'v2', array('model' => $user));
+$formwriter->begin_form();
 
-    // Regex matching the admin page URL (used to target messages)
-    $page_regex = '/\/admin\/admin_items/';
+// Fields prefixed with the model's column prefix (e.g. usr_) pick up
+// validation from the model automatically.
+$formwriter->textinput('usr_first_name', 'First Name');
+$formwriter->textinput('usr_last_name',  'Last Name');
+$formwriter->textinput('usr_email',      'Email');
 
-    if ($post_vars && isset($post_vars['action'])) {
-        $message = null;
-        $error = null;
+$formwriter->submitbutton('submit', 'Save User');
+$formwriter->end_form();
 
-        try {
-            $item = new ItemClass($post_vars['item_id'] ?? NULL,
-                                  isset($post_vars['item_id']) ? TRUE : FALSE);
-            $item->set('field_name', $post_vars['field_name']);
-            $item->prepare();
-            $item->save();
-            $message = 'Item saved successfully.';
-        } catch (Exception $e) {
-            $error = $e->getMessage();
-        }
+$page->end_box();
+```
 
-        // Store messages in session (displayed after redirect)
-        if ($message) {
-            $session->save_message(new DisplayMessage(
-                $message, 'Success', $page_regex,
-                DisplayMessage::MESSAGE_ANNOUNCEMENT,
-                DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-            ));
-        }
-        if ($error) {
-            $session->save_message(new DisplayMessage(
-                $error, 'Error', $page_regex,
-                DisplayMessage::MESSAGE_ERROR,
-                DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-            ));
-        }
+### Delete Confirmation
 
-        // Always redirect after POST to prevent form resubmission
-        return LogicResult::redirect('/admin/admin_items');
-    }
-
-    // Retrieve session messages for display
-    $display_messages = $session->get_messages('/admin/admin_items');
-
-    return LogicResult::render(array(
-        'session' => $session,
-        'display_messages' => $display_messages,
-    ));
+```php
+// Logic
+$user = new User($get_vars['usr_user_id'], TRUE);
+if ($post_vars && ($post_vars['confirm'] ?? '') === 'yes') {
+    $user->soft_delete();
+    return LogicResult::redirect('/admin/admin_users');
 }
+$page_vars['user'] = $user;
 ```
-
-### Displaying Session Messages (View File)
 
 ```php
-<?php if (!empty($display_messages)): ?>
-    <?php foreach ($display_messages as $msg): ?>
-        <?php
-        $alert_class = 'alert-info';
-        if ($msg->display_type == DisplayMessage::MESSAGE_ERROR) {
-            $alert_class = 'alert-danger';
-        } elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING) {
-            $alert_class = 'alert-warning';
-        } elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
-            $alert_class = 'alert-success';
-        }
-        ?>
-        <div class="alert <?= $alert_class ?>" role="alert">
-            <?php if ($msg->message_title): ?>
-                <strong><?= htmlspecialchars($msg->message_title) ?>:</strong>
-            <?php endif; ?>
-            <?= htmlspecialchars($msg->message) ?>
-            <button type="button" class="alert-close" aria-label="Close">&times;</button>
-        </div>
-    <?php endforeach; ?>
-    <?php $session->clear_clearable_messages(); ?>
-<?php endif; ?>
+// View
+?>
+<div class="alert alert-warning">
+    <p>Delete <strong><?= htmlspecialchars($user->display_name()) ?></strong>?</p>
+    <form method="POST" action="/admin/admin_user_delete?usr_user_id=<?= $user->key ?>">
+        <input type="hidden" name="confirm" value="yes" />
+        <button type="submit" class="btn btn-danger">Yes, delete</button>
+        <a href="/admin/admin_user?usr_user_id=<?= $user->key ?>" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>
 ```
 
-**Important:** Never pass confirmation or error messages via URL query parameters (e.g., `?message=saved`). Always use the `DisplayMessage` + `$session->save_message()` pattern shown above. This prevents messages from persisting on page refresh and follows the established session message architecture.
+### Dashboard / Analytics / Settings / Logs
+
+These don't need their own pattern — they're composed from the basics above:
+
+- **Dashboard**: Stat cards (`.card` / `.card-header` / `.card-body`), Chart.js or similar, date-range selectors.
+- **Settings**: Tabs or `<details>` groups; group related fields into card-style sections; show success/error after save.
+- **Log/Monitoring**: Filter inputs feed `MultiX` criteria; `<details>` / `<summary>` for expandable rows; CSV export via a `?action=export` branch in the logic.
 
 ## Advanced Patterns
 
 ### Options Dropdown (Action Menu)
 
-Admin pages use a built-in options dropdown system. Two patterns:
+Both content pages and table pages support an `altlinks` dropdown — a small menu of secondary actions.
 
-#### Content Pages - Use `begin_box()` / `end_box()`
 ```php
-// Setup dropdown links for actions
-$altlinks = array();
-$altlinks['Enable'] = '/admin/admin_page_name?action=enable';
-$altlinks['Disable'] = '/admin/admin_page_name?action=disable';
-
+// Content pages — pass to begin_box()
+$altlinks = array(
+    'Enable'  => '/admin/admin_page_name?action=enable',
+    'Disable' => '/admin/admin_page_name?action=disable',
+);
 $page->begin_box(array('altlinks' => $altlinks));
-// Your content here
+// content
 $page->end_box();
 ```
 
-**Note:** Action handling and confirmation messages should be in the logic file using the `DisplayMessage` session pattern (see "Data Processing Pattern" above). Do not handle actions inline or pass messages via URL.
-
-#### Table Pages - Use `tableheader()` with `altlinks`
 ```php
-$altlinks = array();
-$altlinks['Add New'] = '/admin/admin_item_edit';
-$altlinks['Export'] = '/admin/admin_items?action=export';
-
-$table_options = array(
+// Table pages — pass via tableheader() options
+$altlinks = array(
+    'Add New' => '/admin/admin_item_edit',
+    'Export'  => '/admin/admin_items?action=export',
+);
+$page->tableheader($headers, array(
     'altlinks' => $altlinks,
     'title' => 'Items',
-    'search_on' => TRUE
-);
-$page->tableheader($headers, $table_options, $pager);
+    'search_on' => TRUE,
+), $pager);
 ```
 
-#### URL Format - CRITICAL
+Action handling and the resulting flash message belong in the logic file (see the [DisplayMessage pattern](#displaymessage-flash-messages) below). Never handle actions inline in the view and never pass messages through query strings.
+
+### DisplayMessage Flash Messages
+
 ```php
-// ✅ CORRECT - No .php extension
-$altlinks['Action'] = '/admin/admin_page_name?action=value';
+// In the logic file — after a successful save/delete
+$page_regex = '/\/admin\/admin_items/';
 
-// ❌ WRONG - Breaks routing
-$altlinks['Action'] = '/admin/admin_page_name?action=value';
+if ($message) {
+    $session->save_message(new DisplayMessage(
+        $message, 'Success', $page_regex,
+        DisplayMessage::MESSAGE_ANNOUNCEMENT,
+        DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+    ));
+}
+return LogicResult::redirect('/admin/admin_items');
+
+// Earlier in the same logic function, on the GET path
+$display_messages = $session->get_messages('/admin/admin_items');
+$page_vars['display_messages'] = $display_messages;
 ```
 
-### Modal Dialogs
+```php
+// View — render and clear
+if (!empty($display_messages)) {
+    foreach ($display_messages as $msg) {
+        $alert_class = 'alert-info';
+        if ($msg->display_type == DisplayMessage::MESSAGE_ERROR)        $alert_class = 'alert-danger';
+        elseif ($msg->display_type == DisplayMessage::MESSAGE_WARNING)  $alert_class = 'alert-warning';
+        elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) $alert_class = 'alert-success';
+        ?>
+        <div class="alert <?= $alert_class ?>">
+            <?php if ($msg->message_title): ?><strong><?= htmlspecialchars($msg->message_title) ?>:</strong><?php endif; ?>
+            <?= htmlspecialchars($msg->message) ?>
+        </div>
+        <?php
+    }
+    $session->clear_clearable_messages();
+}
+```
 
-The joinery-system theme provides `JoineryModal`, a vanilla-JS utility built on the native `<dialog>` element. Use it for all confirmation and notification dialogs — never use `window.confirm()` or Bootstrap modals.
+### Modal Dialogs (JoineryModal)
 
-#### Three methods
+The joinery-system admin theme ships `JoineryModal`, a vanilla-JS utility built on the native `<dialog>` element. Use it for confirmations and notifications — never `window.confirm()` or Bootstrap modals.
 
 ```js
-// Confirmation — two buttons, danger-styled by default
-JoineryModal.confirm('Delete this record?', function() {
-    submitAction();
-});
+// Confirmation (two buttons, danger-styled by default)
+JoineryModal.confirm('Delete this record?', function() { submitAction(); });
 
-// Alert — one button (OK), primary-styled, no cancel
+// Alert (one OK button, primary-styled)
 JoineryModal.alert('Settings saved successfully.');
 
-// Prompt — text input, returns typed value to callback
+// Prompt (text input)
 JoineryModal.prompt('Enter the item name to confirm:', function(value) {
     if (value === expected) submitDelete();
 });
 ```
 
-#### Options
+All three accept an options object:
 
-All three methods accept an optional third argument:
-
-| Option | Type | Default | Notes |
-|---|---|---|---|
-| `confirmLabel` | string | `'Confirm'` / `'OK'` | Label on the action button |
-| `cancelLabel` | string | `'Cancel'` | Label on the cancel button (`confirm` and `prompt` only) |
-| `confirmStyle` | `'danger'` \| `'primary'` | `'danger'` / `'primary'` | Button color |
-| `placeholder` | string | `''` | Input placeholder (`prompt` only) |
-| `defaultValue` | string | `''` | Pre-filled input value (`prompt` only) |
+| Option         | Type                       | Default                   | Notes                                |
+|----------------|----------------------------|---------------------------|--------------------------------------|
+| `confirmLabel` | string                     | `'Confirm'` / `'OK'`      | Label on the action button           |
+| `cancelLabel`  | string                     | `'Cancel'`                | `confirm` and `prompt` only          |
+| `confirmStyle` | `'danger'` \| `'primary'`  | `'danger'` / `'primary'`  | Button color                         |
+| `placeholder`  | string                     | `''`                      | `prompt` only                        |
+| `defaultValue` | string                     | `''`                      | `prompt` only                        |
 
 ```js
-// Constructive action — override style and label
+// Constructive action
 JoineryModal.confirm('Apply this update?', function() {
     submitForm();
 }, { confirmLabel: 'Apply', confirmStyle: 'primary' });
-
-// Prompt with placeholder
-JoineryModal.prompt('Type the plugin name to confirm removal:', function(value) {
-    if (value === pluginName) submitUninstall(value);
-}, { placeholder: 'plugin-name', confirmLabel: 'Uninstall', confirmStyle: 'danger' });
 ```
 
-#### Triggering from PHP-generated action links
-
-The standard pattern for PHP-rendered action buttons that need confirmation:
+**From PHP-rendered action links:**
 
 ```php
-// In a table row or action cell
 $plugin_name = htmlspecialchars($plugin['name']);
-$warning = "This will permanently delete all data. This cannot be undone.";
-$action_cell .= '<a href="javascript:void(0)" onclick="confirmAndDelete(\'' . $plugin_name . '\', \'' . addslashes($warning) . '\')">'
-              . 'Delete</a>';
+$warning = 'This will permanently delete all data. This cannot be undone.';
+$action_cell .= '<a href="javascript:void(0)" onclick="confirmAndDelete(\'' . $plugin_name . '\', \'' . addslashes($warning) . '\')">Delete</a>';
 ```
 
 ```js
@@ -385,14 +476,12 @@ function confirmAndDelete(name, message) {
 }
 ```
 
-#### Form-hosting modals (complex overlays)
-
-When a modal needs to contain real form fields (multiple inputs, selects, checkboxes), use a raw `<dialog>` element directly in the page. The theme's `dialog` CSS rule styles it automatically.
+**Form-hosting modals** — when a modal needs real form fields, use a raw `<dialog>` element; the theme styles it automatically:
 
 ```html
 <dialog id="myModal">
     <form method="post">
-        <!-- form fields -->
+        <!-- fields -->
         <div class="dialog-actions">
             <button type="button" onclick="document.getElementById('myModal').close()">Cancel</button>
             <button type="submit" class="dialog-btn-confirm dialog-btn-primary">Save</button>
@@ -406,16 +495,18 @@ document.getElementById('myModal').showModal();
 document.getElementById('myModal').close();
 ```
 
-Full API reference: `specs/joinery_modal_api.md`
+Full API: `specs/joinery_modal_api.md`.
 
 ### Bulk Actions
-```php
-// Add checkboxes to table rows
-$checkbox = '<input type="checkbox" name="selected_ids[]" value="' . $item->get('primary_key') . '">';
-array_push($rowvalues, $checkbox);
 
-// Add bulk action form
-echo '<form method="post" action="/admin/admin_bulk_action">
+```php
+// Add a checkbox column to each row
+$checkbox = '<input type="checkbox" name="selected_ids[]" value="' . $item->get('primary_key') . '">';
+array_push($row, $checkbox);
+
+// Wrap the table in a form with an action selector
+?>
+<form method="post" action="/admin/admin_bulk_action">
     <div class="form-row align-items-center mb-3">
         <div class="col-auto">
             <select name="bulk_action" class="form-control">
@@ -427,84 +518,182 @@ echo '<form method="post" action="/admin/admin_bulk_action">
         <div class="col-auto">
             <button type="submit" class="btn btn-secondary">Apply</button>
         </div>
-    </div>';
+    </div>
+    <!-- table here -->
+</form>
 ```
 
-## Layout Rules and Best Practices
+## Layout & CSS Rules
 
-### CSS Classes
-1. **Use theme CSS classes**: `form-control`, `btn btn-primary`, `alert-info`, etc. — joinery-system provides its own implementations of these common utility classes
-2. **Container structure**: Always wrap content in `<div class="row">` and `<div class="col-12">` or appropriate column classes
-3. **No nested panels**: Avoid cards inside cards unless there's a specific UI reason
-4. **Responsive design**: Use column classes (`col-md-4`, `col-md-6`, `col-md-8`, `col-12`) — joinery-system implements a standard subset of the grid
+The admin theme (joinery-system) is vanilla HTML5 with a small set of utility classes that mirror common Bootstrap names (`form-control`, `btn`, `alert-*`, grid columns) — these are theme-provided, not Bootstrap. Don't pull in Bootstrap.
 
-### Form Best Practices
-1. **Always use FormWriter**: Never create forms manually - always use the FormWriter system
-2. **Prefer FormWriter validation**: Use built-in FormWriter validation over custom JavaScript
-3. **Consistent styling**: Use `form-control` class for all inputs
-4. **Help text**: Include helpful placeholder text and validation messages
+- Wrap content in `<div class="row">` / `<div class="col-12">` (or appropriate column sizes).
+- Don't nest cards inside cards unless there's a real reason.
+- Responsive columns: `col-md-4`, `col-md-6`, `col-md-8`, `col-12`.
+- Use `form-control` on inputs, `btn btn-primary` / `btn btn-secondary` / `btn btn-danger` on buttons.
 
-### Security Considerations
-1. **Permission checks**: Always validate user permissions at the top of the page
-2. **CSRF protection**: FormWriter automatically includes CSRF tokens
-3. **Input sanitization**: Use `htmlspecialchars()` for output, FormWriter handles input sanitization
-4. **SQL injection prevention**: Always use model methods or prepared statements
+## Best Practices
 
-### Performance Tips
-1. **Pagination**: Always paginate large datasets using the Pager class
-2. **Efficient queries**: Use count_all() for pagination instead of loading all records
-3. **Caching**: Consider caching expensive operations (file parsing, API calls)
-4. **Lazy loading**: Load related data only when needed
+### Code Organization
 
-## Common Patterns by Page Type
+✅ Logic file owns all business logic, data loading, action handling. View renders only.
+❌ Don't load data in the view (except trivial display-specific lookups).
+❌ Don't use generic variable names like `$data` or `$result` in `$page_vars`.
 
-### CRUD Pages
-- **List page**: Uses tableheader/disprow/endtable pattern with search and sorting
-- **Edit page**: Uses FormWriter with model load/save pattern
-- **Delete page**: Simple confirmation form with model deletion
+### Action Handling Order
 
-### Dashboard/Analytics Pages
-- **Statistics cards**: Card layout with key metrics using `.card` / `.card-header` / `.card-body`
-- **Charts**: Include Chart.js or similar for data visualization
-- **Time period selectors**: Date range pickers for filtering data
+Process actions before loading display data:
 
-### Settings Pages
-- **Tab interface**: Multiple settings categories using a custom CSS tab structure or `<details>` groups
-- **Section groups**: Related settings grouped in card components
-- **Immediate feedback**: Success/error messages for setting changes
+```php
+if ($post_vars) {
+    // handle and redirect
+    return LogicResult::redirect('/path');
+}
 
-### Log/Monitoring Pages
-- **Real-time updates**: JavaScript refresh or WebSocket updates
-- **Filtering**: Multiple filter options (date, severity, user, etc.)
-- **Export options**: CSV/PDF export functionality
-- **Expandable details**: Use `<details>/<summary>` tags
+// only reached on GET
+$data = load_data();
+```
 
-## File Naming Conventions
+### URL Formation
 
-- **List pages**: `admin_[items].php` (e.g., `admin_users.php`)
-- **Single item pages**: `admin_[item].php` (e.g., `admin_user.php`)
-- **Edit pages**: `admin_[item]_edit.php` (e.g., `admin_user_edit.php`)
-- **Action pages**: `admin_[item]_[action].php` (e.g., `admin_user_delete.php`)
-- **Special functions**: `admin_[descriptive_name].php` (e.g., `admin_errors_file.php`)
+```php
+// ✅ No .php extension
+return LogicResult::redirect('/admin/admin_users');
+$link = '<a href="/admin/admin_user?usr_user_id=' . $id . '">View</a>';
 
-## Testing Your Admin Pages
+// ❌ Breaks routing — query parameters can be lost
+return LogicResult::redirect('/admin/admin_users.php');
+```
 
-1. **Permission levels**: Test with different user permission levels
-2. **Form validation**: Test both client-side and server-side validation
-3. **Error handling**: Test with invalid data and server errors
-4. **Pagination**: Test with large datasets and edge cases
-5. **Mobile responsiveness**: Test on different screen sizes
-6. **Performance**: Test with realistic data volumes
+### Error Handling
 
-## Integration with Existing System
+```php
+if (!$user_id) {
+    return LogicResult::error('User ID is required');
+}
 
-### Menu Integration
-Add your page to the admin menu by updating the appropriate menu configuration. Check existing admin pages for the correct `menu-id` to use.
+$user = new User($user_id, TRUE);
+if (!$user->get('usr_id')) {
+    header('HTTP/1.0 404 Not Found');
+    return LogicResult::error('User not found');
+}
 
-### Consistent Styling
-Your admin pages automatically inherit the joinery-system admin theme. Follow the existing visual patterns from other admin pages.
+try {
+    $user->prepare();
+    $user->save();
+} catch (Exception $e) {
+    $page_vars['error_message'] = $e->getMessage();
+}
+```
 
-### Database Integration
-Use the existing model classes and follow the SystemBase patterns. Create new model classes in `/data/` if needed following the established naming conventions.
+### Security
 
-This documentation should be used alongside the main CLAUDE.md file for complete development guidance.
+- Permissions in the logic file, not the view: `$session->check_permission(5);`
+- Authenticate writes on the model: `$user->authenticate_write([...])`.
+- Always `htmlspecialchars()` user-supplied output.
+- Use model methods or PDO prepared statements — never concatenate into SQL.
+- FormWriter handles CSRF tokens automatically.
+
+### Data Loading Efficiency
+
+```php
+// ✅ count_all() runs a count query without loading rows
+$users = new MultiUser($criteria, $sort, $limit, $offset);
+$numrecords = $users->count_all();
+$users->load();
+
+// ❌ Loads everything just to count
+$users = new MultiUser($criteria);
+$users->load();
+$numrecords = $users->count();
+```
+
+### FormWriter
+
+```php
+$formwriter = $page->getFormWriter('form1', 'v2', array('model' => $object));
+$formwriter->begin_form();
+$formwriter->textinput('field_name', 'Label', array(
+    'placeholder' => 'Enter value',
+    'helptext'    => 'Help text here',
+));
+$formwriter->submitbutton('submit', 'Save');
+$formwriter->end_form();
+```
+
+`$page->getFormWriter()` automatically returns the right FormWriter for the theme (FormWriterV2Bootstrap in admin). Never hand-roll admin forms — see [FormWriter](formwriter.md).
+
+## Troubleshooting
+
+### "Cannot use object of type LogicResult as array"
+
+The view isn't wrapping the logic call with `process_logic()`.
+
+```php
+// ❌
+$page_vars = admin_page_logic($_GET, $_POST);
+
+// ✅
+$page_vars = process_logic(admin_page_logic($_GET, $_POST));
+```
+
+### "Undefined variable" in view
+
+The variable wasn't added to `$page_vars` in the logic file. Every value the view reads must be returned through `LogicResult::render($page_vars)`.
+
+### Redirect not working
+
+Either output was sent before the redirect, or the logic used `header()` directly.
+
+```php
+// ❌
+echo 'Debug';
+header('Location: /admin/admin_users');
+
+// ✅
+return LogicResult::redirect('/admin/admin_users');
+```
+
+### Form not processing
+
+The logic file isn't handling the action:
+
+```php
+if ($post_vars && ($post_vars['action'] ?? '') === 'your_action') {
+    // ...
+    return LogicResult::redirect('/path');
+}
+```
+
+### Validation Commands
+
+```bash
+# Syntax check
+php -l /var/www/html/joinerytest/public_html/adm/logic/admin_user_logic.php
+php -l /var/www/html/joinerytest/public_html/adm/admin_user.php
+
+# Method existence check
+php /var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php \
+    /var/www/html/joinerytest/public_html/adm/logic/admin_user_logic.php
+```
+
+## Testing Checklist
+
+- [ ] `php -l` clean on both files
+- [ ] `validate_php_file.php` clean (or false positives understood)
+- [ ] Unauthorized users are redirected by `check_permission()`
+- [ ] Data loads in every section of the page
+- [ ] Sort, search, pagination work (where applicable)
+- [ ] POST forms redirect cleanly (no resubmit on refresh)
+- [ ] Error paths surface useful messages (invalid IDs, missing required fields)
+- [ ] DisplayMessage success/error renders and clears
+- [ ] All admin URLs are extension-less
+- [ ] Mobile / narrow viewports render correctly
+
+## Related Documentation
+
+- [Logic Architecture](logic_architecture.md) — LogicResult pattern in depth
+- [FormWriter](formwriter.md) — Form generation, validation, model binding
+- [Validation](validation.md) — Client/server/model validation layers
+- [Routing](routing.md) — How admin URLs reach these files
+- [Plugin Developer Guide](plugin_developer_guide.md) — Same pattern in plugin admin pages
