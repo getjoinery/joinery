@@ -5,7 +5,7 @@
  * Extracted from adm/admin_spec_view.php for reuse across
  * the spec viewer and help documentation viewer.
  *
- * Version: 1.0
+ * Version: 1.1
  */
 
 class MarkdownRenderer {
@@ -25,12 +25,14 @@ class MarkdownRenderer {
         $placeholders = array();
         $counter = 0;
 
-        // Fenced code blocks (``` ... ```)
-        $text = preg_replace_callback('/```(\w*)\n(.*?)\n```/s', function($matches) use (&$placeholders, &$counter) {
-            $lang = $matches[1] ? ' class="language-' . $matches[1] . '"' : '';
+        // Fenced code blocks (``` ... ```) — fences may be indented 0–3 spaces (e.g. inside list items).
+        // Leading whitespace is preserved in the replacement so the placeholder stays on an indented
+        // continuation line, which lets the list regex below absorb it into the parent list item.
+        $text = preg_replace_callback('/^( {0,3})```(\w*)[ \t]*\n(.*?)\n {0,3}```[ \t]*$/ms', function($matches) use (&$placeholders, &$counter) {
+            $lang = $matches[2] ? ' class="language-' . $matches[2] . '"' : '';
             $key = "\x02MDPH" . $counter++ . "\x02";
-            $placeholders[$key] = '<pre><code' . $lang . '>' . $matches[2] . '</code></pre>';
-            return $key;
+            $placeholders[$key] = '<pre><code' . $lang . '>' . $matches[3] . '</code></pre>';
+            return $matches[1] . $key;
         }, $text);
 
         // Double-backtick inline code (``...``) — used when content contains a backtick
@@ -70,16 +72,28 @@ class MarkdownRenderer {
         // Links [text](url)
         $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '<a href="$2">$1</a>', $text);
 
-        // Unordered lists (- item)
-        $text = preg_replace_callback('/(?:^- .+$\n?)+/m', function($matches) {
-            $items = preg_replace('/^- (.+)$/m', '<li>$1</li>', trim($matches[0]));
-            return '<ul>' . $items . '</ul>';
+        // Unordered lists (- item) — each item may span indented continuation lines
+        $text = preg_replace_callback('/(?:^- .+$(?:\n[ \t]+[^\n]*)*\n?)+/m', function($matches) {
+            $raw = trim($matches[0]);
+            $items = preg_split('/^(?=- )/m', $raw, -1, PREG_SPLIT_NO_EMPTY);
+            $html = '';
+            foreach ($items as $item) {
+                $content = trim(preg_replace('/^- /', '', $item));
+                if ($content !== '') $html .= '<li>' . $content . '</li>';
+            }
+            return '<ul>' . $html . '</ul>';
         }, $text);
 
-        // Ordered lists (1. item)
-        $text = preg_replace_callback('/(?:^\d+\. .+$\n?)+/m', function($matches) {
-            $items = preg_replace('/^\d+\. (.+)$/m', '<li>$1</li>', trim($matches[0]));
-            return '<ol>' . $items . '</ol>';
+        // Ordered lists (1. item) — each item may span indented continuation lines
+        $text = preg_replace_callback('/(?:^\d+\. .+$(?:\n[ \t]+[^\n]*)*\n?)+/m', function($matches) {
+            $raw = trim($matches[0]);
+            $items = preg_split('/^(?=\d+\. )/m', $raw, -1, PREG_SPLIT_NO_EMPTY);
+            $html = '';
+            foreach ($items as $item) {
+                $content = trim(preg_replace('/^\d+\. /', '', $item));
+                if ($content !== '') $html .= '<li>' . $content . '</li>';
+            }
+            return '<ol>' . $html . '</ol>';
         }, $text);
 
         // Tables
