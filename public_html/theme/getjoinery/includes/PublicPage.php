@@ -73,7 +73,7 @@ class PublicPage extends PublicPageBase {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/theme/getjoinery/assets/css/style.css?v=6">
+    <link rel="stylesheet" href="/theme/getjoinery/assets/css/style.css?v=7">
 
     <?php
     if ($settings->get_setting('custom_css')) {
@@ -90,7 +90,16 @@ class PublicPage extends PublicPageBase {
         <div class="nav-links" id="nav-links">
             <a href="/features"<?php echo $request_path === '/features' ? ' class="active"' : ''; ?>>Features</a>
             <a href="/pricing"<?php echo $request_path === '/pricing' ? ' class="active"' : ''; ?>>Pricing</a>
-            <a href="/developers"<?php echo $request_path === '/developers' ? ' class="active"' : ''; ?>>Developers</a>
+            <div class="nav-dropdown">
+                <button class="nav-dropdown-toggle<?php echo in_array($request_path, ['/developers', '/documentation']) ? ' active' : ''; ?>" aria-haspopup="true" aria-expanded="false">
+                    Developers
+                    <svg class="nav-dropdown-chevron" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 9,1"/></svg>
+                </button>
+                <div class="nav-dropdown-menu">
+                    <a href="/developers"<?php echo $request_path === '/developers' ? ' class="active"' : ''; ?>>Overview</a>
+                    <a href="/documentation"<?php echo $request_path === '/documentation' ? ' class="active"' : ''; ?>>Documentation</a>
+                </div>
+            </div>
             <a href="/showcase"<?php echo $request_path === '/showcase' ? ' class="active"' : ''; ?>>Showcase</a>
             <a href="/philosophy"<?php echo $request_path === '/philosophy' ? ' class="active"' : ''; ?>>Philosophy</a>
             <a href="/about"<?php echo $request_path === '/about' ? ' class="active"' : ''; ?>>About</a>

@@ -1,5 +1,5 @@
 /**
- * Get Joinery Marketing Theme — JavaScript v1.0.0
+ * Get Joinery Marketing Theme — JavaScript v1.1.0
  */
 (function() {
     'use strict';
@@ -18,6 +18,23 @@
             });
         });
     }
+
+    // --- Dropdown nav (mobile click, desktop hover via CSS) ---
+    document.querySelectorAll('.nav-dropdown-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            var dropdown = btn.closest('.nav-dropdown');
+            var isOpen = dropdown.classList.toggle('open');
+            btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        });
+    });
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.nav-dropdown')) {
+            document.querySelectorAll('.nav-dropdown.open').forEach(function(d) {
+                d.classList.remove('open');
+                d.querySelector('.nav-dropdown-toggle').setAttribute('aria-expanded', 'false');
+            });
+        }
+    });
 
     // --- Pricing toggle (annual/monthly) ---
     var billingToggle = document.getElementById('billing-toggle');

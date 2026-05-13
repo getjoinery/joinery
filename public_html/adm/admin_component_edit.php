@@ -33,8 +33,9 @@ if (isset($_POST['edit_primary_key_value'])) {
 
 // Page context for post-save redirect only — comes from querystring or referrer,
 // never stored on the component.
-$return_page_id = isset($_GET['pag_page_id']) && $_GET['pag_page_id']
-	? intval($_GET['pag_page_id'])
+// Read from $_REQUEST so the value survives when FormWriter strips the query string from the form action.
+$return_page_id = !empty($_REQUEST['pag_page_id'])
+	? intval($_REQUEST['pag_page_id'])
 	: null;
 
 // Check if loading a previous version
@@ -88,6 +89,7 @@ if ($_POST && !$loading_version) {
 
 	// Build config from POST data based on component type schema
 	$config = array();
+	$component_type = null;
 	$component_type_id = $_POST['pac_com_component_id'];
 	if ($component_type_id) {
 		$component_type = new Component($component_type_id, TRUE);
@@ -141,9 +143,24 @@ if ($_POST && !$loading_version) {
 	if (!empty($validation_errors)) {
 		$error_message = implode('; ', $validation_errors);
 	} else {
+		$is_new = !$content->key;
 		try {
 			$content->prepare();
 			$content->save();
+
+			// New component created in a page context — add it to that page's layout
+			if ($is_new && $return_page_id) {
+				$parent_page = new Page($return_page_id, TRUE);
+				if ($parent_page->key) {
+					$layout = $parent_page->get_component_layout();
+					$new_id = (int)$content->key;
+					if (!in_array($new_id, array_map('intval', $layout), true)) {
+						$layout[] = $new_id;
+						$parent_page->set('pag_component_layout', $layout);
+						$parent_page->save();
+					}
+				}
+			}
 
 			// Redirect: back to the referring page if a page context came through,
 			// otherwise to the global components list.
@@ -221,48 +238,50 @@ if ($content->key) {
 	$formwriter->hiddeninput('pac_page_content_id', '', ['value' => $content->key]);
 }
 
+// Carry page context through POST so $return_page_id survives form submission
+if ($return_page_id) {
+	$formwriter->hiddeninput('pag_page_id', '', ['value' => $return_page_id]);
+}
+
 echo '<div class="row"><div class="col-md-8">';
 
-// Component type selection
-echo '<div class="mb-3">';
-echo '<label class="form-label">Component Type</label>';
-$current_type_id = $_GET['component_type'] ?? $content->get('pac_com_component_id');
+$current_type_id = $_REQUEST['component_type'] ?? $content->get('pac_com_component_id');
+
+// Build options for component type dropdown
+$type_options_fw = ['' => '-- Select Component Type --'];
+foreach ($component_types as $type) {
+	$label = $type->get('com_title');
+	$tk = $type->get('com_type_key');
+	if ($tk) $label .= ' (' . $tk . ')';
+	$type_options_fw[(int)$type->key] = $label;
+}
 
 if ($content->key) {
-	// Edit mode - show disabled dropdown with hidden input to preserve value
-	echo '<select class="form-select" disabled>';
-	foreach ($component_types as $type) {
-		$selected = ($current_type_id == $type->key) ? ' selected' : '';
-		echo '<option value="' . $type->key . '"' . $selected . '>' . htmlspecialchars($type->get('com_title'));
-		$type_key = $type->get('com_type_key');
-		if ($type_key) {
-			echo ' (' . htmlspecialchars($type_key) . ')';
-		}
-		echo '</option>';
-	}
-	echo '</select>';
-	echo '<input type="hidden" name="pac_com_component_id" value="' . htmlspecialchars($current_type_id) . '">';
+	// Edit mode — type locked; render disabled and carry value via hidden input
+	$formwriter->dropinput('_pac_com_component_id_display', 'Component Type', [
+		'options' => $type_options_fw,
+		'value'   => (string)$current_type_id,
+		'model'   => false,
+	]);
+	$formwriter->hiddeninput('pac_com_component_id', '', ['value' => (int)$current_type_id]);
+	echo '<script>document.querySelector("[name=_pac_com_component_id_display]").disabled=true;</script>';
 } else {
-	// Add mode - show editable dropdown with redirect on change
-	$type_change_url = '/admin/admin_component_edit?';
-	if ($return_page_id) {
-		$type_change_url .= 'pag_page_id=' . $return_page_id . '&';
-	}
-	echo '<select name="pac_com_component_id" id="pac_com_component_id" class="form-select" onchange="location.href=\'' . $type_change_url . 'component_type=\'+this.value">';
-	echo '<option value="">-- Select Component Type --</option>';
-	foreach ($component_types as $type) {
-		$selected = ($current_type_id == $type->key) ? ' selected' : '';
-		echo '<option value="' . $type->key . '"' . $selected . '>' . htmlspecialchars($type->get('com_title'));
-		$type_key = $type->get('com_type_key');
-		if ($type_key) {
-			echo ' (' . htmlspecialchars($type_key) . ')';
-		}
-		echo '</option>';
-	}
-	echo '</select>';
-	echo '<div class="form-text">Select the type of component to create</div>';
+	// Add mode — reload page on change to show schema fields for the chosen type
+	$formwriter->dropinput('pac_com_component_id', 'Component Type', [
+		'options'  => $type_options_fw,
+		'value'    => (string)($current_type_id ?: ''),
+		'helptext' => 'Select the type of component to create',
+		'model'    => false,
+	]);
+	$type_change_base = '/admin/admin_component_edit?' . ($return_page_id ? 'pag_page_id=' . (int)$return_page_id . '&' : '');
+	echo '<script>(function(){';
+	echo 'var s=document.querySelector("[name=pac_com_component_id]");';
+	echo 'if(!s)return;';
+	echo 's.addEventListener("change",function(){';
+	echo 'if(this.value)window.location.href=' . json_encode($type_change_base) . '+"component_type="+encodeURIComponent(this.value);';
+	echo '});';
+	echo '})();</script>';
 }
-echo '</div>';
 
 $formwriter->textinput('pac_title', 'Label', [
 	'helptext' => 'Internal name for identifying this component'

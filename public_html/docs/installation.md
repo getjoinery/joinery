@@ -1,5 +1,7 @@
 # Installation
 
+> **New to Joinery?** The [Quick Start guide](quickstart.md) walks you through renting a server, configuring your domain, and installing Joinery step by step — no prior experience required.
+
 Deploy Joinery on a fresh Ubuntu 24.04 server, either in a Docker container or directly on the host (bare-metal). The same `install.sh` script handles both — the deployment mode is auto-detected from whether a port is supplied.
 
 ## Table of Contents

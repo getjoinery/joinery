@@ -150,9 +150,14 @@
 	$available_components = [];
 	foreach ($available_components_ms as $comp) {
 		if (!in_array((int)$comp->key, $layout_ids, true)) {
-			$available_components[(int)$comp->key] = $comp->get('pac_title') ?: ('(' . $comp->get('pac_location_name') . ')') ?: ('#' . $comp->key);
+			$loc = $comp->get('pac_location_name');
+			$available_components[(int)$comp->key] = $comp->get('pac_title') ?: ($loc ? '(' . $loc . ')' : '#' . $comp->key);
 		}
 	}
+
+	// Component types for the primary "add" dropdown
+	$component_types_ms = new MultiComponent(['deleted' => false, 'active' => true], ['com_title' => 'ASC']);
+	$component_types_ms->load();
 
 	$paget = new AdminPage();
 	$paget->admin_header(
@@ -227,7 +232,6 @@
 			<a href="/admin/admin_component_edit?pag_page_id=<?php echo (int)$page->key; ?>" class="btn btn-sm btn-outline-primary">New Component</a>
 		</div>
 		<div class="card-body">
-			?>
 			<form method="post" id="layoutForm">
 				<input type="hidden" name="action" value="save_layout">
 				<ul id="layoutList" class="list-group mb-3">
@@ -265,24 +269,64 @@
 				<?php endif; ?>
 			</form>
 
+			<?php if (empty($layout_components)): ?>
 			<hr>
 
-			<form method="post" class="mt-3">
-				<input type="hidden" name="action" value="add_component">
-				<div class="row g-2">
-					<div class="col-md-8">
-						<select name="pac_page_content_id" class="form-select form-select-sm" required>
-							<option value="">-- Select a component to add --</option>
-							<?php foreach ($available_components as $id => $label): ?>
-								<option value="<?php echo (int)$id; ?>"><?php echo htmlspecialchars($label); ?></option>
-							<?php endforeach; ?>
-						</select>
-					</div>
-					<div class="col-md-4">
-						<button type="submit" class="btn btn-sm btn-outline-primary w-100">Add to Layout</button>
-					</div>
+			<!-- Primary: create a new component instance of a chosen type -->
+			<?php
+			$type_options = ['' => '-- Select component type --'];
+			foreach ($component_types_ms as $type) {
+				$type_options[(int)$type->key] = $type->get('com_title');
+			}
+			$add_type_fw = $paget->getFormWriter('form_add_component_type', [
+				'method' => 'GET',
+				'action' => '/admin/admin_component_edit',
+			]);
+			echo '<div class="d-flex justify-content-center"><div style="max-width:480px;width:100%;">';
+			$add_type_fw->begin_form();
+			$add_type_fw->hiddeninput('pag_page_id', '', ['value' => (int)$page->key]);
+			$add_type_fw->dropinput('component_type', 'Component Type', [
+				'options'  => $type_options,
+				'required' => true,
+			]);
+			$add_type_fw->submitbutton('btn_add_type', 'Add Component');
+			$add_type_fw->end_form();
+			echo '</div></div>';
+			?>
+
+			<!-- Secondary: add an existing component instance -->
+			<?php if (!empty($available_components)): ?>
+			<div class="mt-2 text-center">
+				<a href="#" class="small text-muted" id="toggleAddExisting">Add existing component</a>
+				<div id="addExistingSection" style="display:none;" class="mt-2">
+					<form method="post">
+						<input type="hidden" name="action" value="add_component">
+						<div class="row g-2">
+							<div class="col-md-8">
+								<select name="pac_page_content_id" class="form-select form-select-sm" required>
+									<option value="">-- Select existing component --</option>
+									<?php foreach ($available_components as $id => $label): ?>
+										<option value="<?php echo (int)$id; ?>"><?php echo htmlspecialchars($label); ?></option>
+									<?php endforeach; ?>
+								</select>
+							</div>
+							<div class="col-md-4">
+								<button type="submit" class="btn btn-sm btn-outline-secondary w-100">Add to Layout</button>
+							</div>
+						</div>
+					</form>
 				</div>
-			</form>
+			</div>
+			<script>
+			document.getElementById('toggleAddExisting').addEventListener('click', function(e) {
+				e.preventDefault();
+				var section = document.getElementById('addExistingSection');
+				section.style.display = section.style.display === 'none' ? 'block' : 'none';
+			});
+			</script>
+			<?php endif; ?>
+
+			<?php endif; // empty($layout_components) ?>
 		</div>
 	</div>
 

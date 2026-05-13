@@ -4,7 +4,8 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 
 ## Getting Started
 
-- [Installation](installation.md) -- Deploy Joinery on Docker or bare-metal, configure SSL, manage domains
+- [Quick Start](quickstart.md) -- **New? Start here.** Rent a server, point your domain, and install Joinery in about 15 minutes — no prior experience required
+- [Installation](installation.md) -- Full reference: Docker or bare-metal, SSL, domain management, multi-site, cloning
 
 ## Core Systems
 
