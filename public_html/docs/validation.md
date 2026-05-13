@@ -884,6 +884,5 @@ try {
 
 ## Related Documentation
 
-- [Data Model Classes](/docs/admin_page_reference.md) - Model validation details
-- [Admin Pages Guide](/docs/admin_pages.md) - Form patterns
+- [Admin Pages Guide](/docs/admin_pages.md) - Form patterns and validation integration
 - [Logic Architecture](/docs/logic_architecture.md) - Business logic validation

@@ -308,8 +308,8 @@ sudo certbot --apache -d mysite.example.com
 ### Server Requirements
 - Fresh Ubuntu 24.04 LTS installation
 - Root access
-- At least 4GB RAM
-- At least 10GB disk space
+- At least 1GB RAM
+- At least 3GB disk space
 - For Docker: Ports 8080+ available (or your chosen port range)
 - For Bare-metal: Ports 80/443 available
 

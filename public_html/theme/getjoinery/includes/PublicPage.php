@@ -122,6 +122,7 @@ class PublicPage extends PublicPageBase {
             <a href="/showcase">Showcase</a>
             <a href="/philosophy">Philosophy</a>
             <a href="/about">About</a>
+            <a href="/documentation">Docs</a>
 <?php if ($settings->get_setting('social_github_link')): ?>
             <a href="<?php echo htmlspecialchars($settings->get_setting('social_github_link')); ?>" target="_blank">GitHub</a>
 <?php else: ?>

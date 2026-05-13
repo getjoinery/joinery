@@ -152,7 +152,6 @@ For themes and plugins: **📖 [Plugin Developer Guide](/docs/plugin_developer_g
 See `/docs/` for detailed guides on specific subsystems:
 
 - [Admin Pages](docs/admin_pages.md) - Admin interface development patterns
-- [Admin Page Reference](docs/admin_page_reference.md) - Quick reference for admin pages
 - [Analytics](docs/analytics.md) - Visitor events, conversion tracking, and attribution reporting
 - [API](docs/api.md) - REST API authentication, endpoints, and usage
 - [Cloud Storage](docs/cloud_storage.md) - S3-compatible cloud bucket for public uploaded files
@@ -163,7 +162,6 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Email Forwarding Plugin](docs/email_forwarding_plugin.md) - Self-hosted email forwarding with virtual mailboxes
 - [Email System](docs/email_system.md) - Email sending and templates
 - [FormWriter](docs/formwriter.md) - Form generation system
-- [jQuery Removal Analysis](docs/jquery_removal_analysis.md) - jQuery dependency analysis
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
 - [Photo System](docs/photo_system.md) - Photo management and uploads
 - [Plugin Developer Guide](docs/plugin_developer_guide.md) - Plugin development, routing, themes
