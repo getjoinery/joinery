@@ -21,7 +21,7 @@ function admin_help_logic($get_vars, $post_vars) {
 	$docs_dir = PathHelper::getIncludePath('docs');
 	$base_url = '/admin/admin_help';
 
-	$doc_tree = DocsScanner::scan($docs_dir);
+	$doc_tree = DocsScanner::scan_all($docs_dir);
 
 	$selected_doc = isset($get_vars['doc']) ? $get_vars['doc'] : '';
 	$rendered_html = '';
@@ -34,10 +34,15 @@ function admin_help_logic($get_vars, $post_vars) {
 		if ($result['error']) {
 			$error = $result['error'];
 		} else {
+			$current_doc_dir = $docs_dir;
+			if (strpos($selected_doc, 'plugin/') === 0) {
+				$parts = explode('/', $selected_doc);
+				$current_doc_dir = PathHelper::getIncludePath('plugins/' . $parts[1] . '/docs');
+			}
 			$rendered_html = MarkdownRenderer::render($result['content']);
-			$rendered_html = MarkdownRenderer::rewrite_doc_links($rendered_html, $docs_dir, $base_url);
+			$rendered_html = MarkdownRenderer::rewrite_doc_links($rendered_html, $current_doc_dir, $base_url);
 			$page_title = $result['title'];
-			$meta_description = DocsScanner::extract_description($docs_dir . '/' . $selected_doc . '.md');
+			$meta_description = $result['description'];
 		}
 	} else {
 		$index_path = $docs_dir . '/index.md';

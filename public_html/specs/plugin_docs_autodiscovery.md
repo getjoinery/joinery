@@ -173,3 +173,112 @@ Create `plugins/{plugin_name}/docs/` and add `.md` files. That's it. No registra
 6. Update `documentation_logic.php`: same three changes
 7. Validate PHP syntax (`php -l`) on all modified files; run `validate_php_file.php` on each
 8. Test: drop a sample doc into any plugin's `docs/` dir and verify it (a) appears in both viewers grouped under the plugin name, (b) renders without error, (c) has a non-empty meta description, (d) a bare-filename link to a sibling doc inside the plugin rewrites to the correct viewer URL, and (e) a traversal attempt (e.g. `?doc=plugin/{name}/../escape`) is rejected
+
+## Phase 2: Unified Path-to-Key Mapping (cross-viewer cross-doc links)
+
+### Problem
+
+Phase 1 left one rough edge: a core doc linking to a plugin doc (or a plugin doc linking to another plugin's doc) currently has no rewriter support. The author has to write a hardcoded `[X](/documentation?doc=plugin/{name}/{slug})` URL — which works, but always lands the user in the public viewer, even when they clicked the link from inside `/admin/admin_help`. The viewer switches under the user's feet.
+
+The Phase 1 rewriter was deliberately scoped to sibling links inside the current doc's own directory, which is why this gap exists.
+
+### Goal
+
+Phase 2 collapses author rules to a single one: **write a markdown link to a `.md` file by whatever path you'd use to open that file**. Sibling filename, absolute path from the web root, `..`-relative — all are accepted as long as they resolve to a real doc file. The rewriter normalizes everything to the active viewer's URL. No convention table to memorize, no "always use absolute paths" footnote, no awareness of the viewer at all.
+
+### Design: one place that knows the path↔key mapping
+
+Today the path↔key knowledge is duplicated. `DocsScanner::load_doc()` decodes keys back into filesystem paths (with its `plugin/` branch). `MarkdownRenderer::rewrite_doc_links()` encodes filesystem paths into keys (with its `$key_prefix` workaround). Adding more recognized input shapes to the rewriter inline would deepen the duplication.
+
+Factor the mapping into a single static method on `DocsScanner` that accepts *any* path shape and uses realpath confinement for safety:
+
+```php
+public static function path_to_key($href, $current_doc_dir) {
+    // Returns a canonical doc key (e.g. 'routing', 'plugin/bookings/api'),
+    // or null if $href doesn't resolve to a doc file inside an allowed root.
+    //
+    // Resolution:
+    //   - $href is resolved against $current_doc_dir (handles bare filenames,
+    //     relative paths with .., and absolute paths from the web root)
+    //   - The resolved path is passed through realpath() for canonicalization
+    //   - The canonical path must live inside public_html/docs/ or
+    //     public_html/plugins/{name}/docs/ — anything else returns null
+    //   - The key is derived from the canonical path's location in the tree
+    //
+    // External URLs (http://, https://, mailto:, etc.) return null untouched.
+}
+```
+
+The rewriter collapses to:
+
+```php
+public static function rewrite_doc_links($html, $current_doc_dir, $base_url = '/admin/admin_help') {
+    return preg_replace_callback('/href="([^"]*\.md(?:#[^"]*)?)"/', function($matches) use ($current_doc_dir, $base_url) {
+        // ...split off anchor...
+        $key = DocsScanner::path_to_key($href, $current_doc_dir);
+        if ($key === null) return $matches[0];
+        return 'href="' . $base_url . '?doc=' . htmlspecialchars($key) . $anchor . '"';
+    }, $html);
+}
+```
+
+The `$key_prefix` parameter introduced in Phase 1 goes away — `path_to_key()` derives the right key from where the resolved file actually lives. The rewriter no longer knows about plugin/core layout rules; it just asks "is this a known doc?" and emits.
+
+**Why `..` is safe now:** `realpath()` canonicalizes any path (resolving `..`, symlinks, double-slashes) into a single absolute path. After canonicalization the method checks whether that path starts with `public_html/docs/` or matches `public_html/plugins/{name}/docs/` where `{name}` matches `^[a-zA-Z0-9_-]+$`. A traversal attempt like `../../../etc/passwd` canonicalizes to `/etc/passwd`, fails the root check, and returns null. The link is left untouched.
+
+### Changes Required
+
+**1. `DocsScanner::path_to_key($href, $current_doc_dir)` — new method**
+
+- If `$href` matches `^[a-z]+://`, return null (external).
+- Strip an `#anchor` suffix if present (defensive — the rewriter strips it too).
+- Build a candidate path: if `$href` starts with `/`, treat as web-root absolute (`public_html . $href`); otherwise concatenate `$current_doc_dir . '/' . $href`.
+- `$canonical = realpath($candidate)`. If false, return null.
+- Confirm `$canonical` ends in `.md`. If not, return null.
+- Determine which root it lives in:
+  - If under `realpath(PathHelper::getIncludePath('docs'))`, return the relative path with `.md` stripped (e.g. `subfolder/foo`). Reject if more than one subfolder deep (matches `load_doc()`'s core limit).
+  - If under `realpath(PathHelper::getIncludePath('plugins'))` and matches `plugins/{name}/docs/{rest}` where `{name}` is `^[a-zA-Z0-9_-]+$`, return `plugin/{name}/{rest-with-.md-stripped}`. Reject if `{rest}` is more than one subfolder deep.
+  - Otherwise return null.
+
+**2. `MarkdownRenderer::rewrite_doc_links()` — simplify**
+
+- Drop the `$key_prefix` parameter (introduced in Phase 1).
+- Drop the inline `..`-skip check.
+- Drop the inline `/docs/` strip, segment validation, and file-exists check.
+- Body becomes "ask `path_to_key()`, emit if non-null."
+
+**3. `admin_help_logic.php` and `documentation_logic.php` — drop the prefix-handling branch**
+
+The Phase 1 "if `$selected_doc` starts with `plugin/`, pass the plugin dir + prefix" conditional collapses to a single call: `rewrite_doc_links($rendered_html, $current_doc_dir, $base_url)` where `$current_doc_dir` is the directory the currently-loaded doc lives in. The logic file still computes that directory (core docs dir vs. specific plugin's docs dir), but no prefix is passed.
+
+**4. Revert Phase 1's hardcoded `/documentation` URLs**
+
+Phase 1 left 8 cross-doc links pointing to absolute `/documentation?doc=plugin/...` URLs to avoid bouncing through the rewriter. After Phase 2 they can be real paths in whatever form is natural:
+
+- `docs/index.md` — 4 lines
+- `docs/deploy_and_upgrade.md` — 1 line
+- `docs/installation.md` — 1 line
+- `docs/email_system.md` — 1 line
+- `docs/plugin_developer_guide.md` — 1 line
+
+Each `(/documentation?doc=plugin/{name}/overview)` becomes a real filesystem path — `(/plugins/{name}/docs/overview.md)` is one valid form; `(../plugins/{name}/docs/overview.md)` from within `docs/` is another; both resolve identically.
+
+The 7 `../../../specs/...` links inside `plugins/joinery_ai/docs/overview.md` (fixed in Phase 1 to point at specs files in the editor) are unaffected — they target `specs/`, which isn't a docs root, so `path_to_key()` returns null and the rewriter leaves them untouched.
+
+### Author rules after Phase 2
+
+One: **write a markdown link to the `.md` file by its path**. The viewer figures out the rest.
+
+### Out of Scope for Phase 2
+
+- Unifying `load_doc()` through the same mapping (it's the inverse direction — key → path — and works fine today). Could be a Phase 3 if the duplication becomes painful.
+- Linking to non-doc files (e.g., a spec file or a source file). Those continue to pass through the rewriter untouched and behave as normal hrefs.
+
+### Implementation Plan
+
+1. Add `DocsScanner::path_to_key()` with realpath-based root confinement
+2. Simplify `MarkdownRenderer::rewrite_doc_links()`: drop `$key_prefix` and the inline path logic, call `path_to_key()`
+3. Update `admin_help_logic.php` and `documentation_logic.php`: pass `$current_doc_dir` only (no prefix branch)
+4. Revert the 8 hardcoded `/documentation?doc=plugin/...` cross-references to filesystem-path form
+5. Validate PHP syntax and run `validate_php_file.php` on all modified files
+6. Test: from `/admin/admin_help?doc=email_system`, click the Email Forwarding cross-doc link and confirm it lands at `/admin/admin_help?doc=plugin/email_forwarding/overview` (not `/documentation?...`); same test mirrored from the public viewer; sibling links inside core docs and inside plugin docs still rewrite correctly; a `..`-relative path between two docs rewrites correctly; a `..`-relative path that escapes both docs roots (e.g. `../../../etc/passwd`) is left untouched; external `http://` and `mailto:` links untouched

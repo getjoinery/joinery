@@ -698,5 +698,5 @@ certbot --apache -d yoursite.com -d www.yoursite.com
 
 - [Deploy and Upgrade](deploy_and_upgrade.md) — Upgrade pipeline and `upgrade.php`
 - [Publish/Upgrade System Analysis](publish_upgrade_system_analysis.md) — How upgrade archives are built and distributed
-- [Server Manager](server_manager.md) — Remote node management and applying upgrades via the admin UI
+- [Server Manager](/plugins/server_manager/docs/overview.md) — Remote node management and applying upgrades via the admin UI
 - [Settings](settings.md) — Configuring a site after installation

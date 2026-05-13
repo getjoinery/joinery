@@ -16,7 +16,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 - [Validation](validation.md) -- Three-layer validation system (client, server, model)
 - [Settings](settings.md) -- System settings management and auto-creating settings
 - [Email System](email_system.md) -- Composing and sending email with templates, service fallback, and batch operations
-- [Email Forwarding](email_forwarding_plugin.md) -- Self-hosted email forwarding with virtual mailboxes
+- [Email Forwarding](/plugins/email_forwarding/docs/overview.md) -- Self-hosted email forwarding with virtual mailboxes
 - [Photo System](photo_system.md) -- Multi-photo management, uploads, and image sizing
 - [Cloud Storage](cloud_storage.md) -- S3-compatible cloud bucket for public uploaded files
 - [Deletion System](deletion_system.md) -- Soft delete, permanent delete, cascading, and foreign key actions
@@ -34,8 +34,8 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 - [Social Features](social_features.md) -- Like/favorite, block, report, and messaging systems
 - [Scheduled Tasks](scheduled_tasks.md) -- Cron-based task runner and task development
 - [REST API](api.md) -- API authentication, endpoints, and usage
-- [Joinery AI Plugin](joinery_ai.md) -- LLM-driven recipes and the generic `query_model` read surface
-- [ScrollDaddy Plugin](scrolldaddy_plugin.md) -- DNS filtering: unified block model, tier gating, editor UI, resolver flow
+- [Joinery AI Plugin](/plugins/joinery_ai/docs/overview.md) -- LLM-driven recipes and the generic `query_model` read surface
+- [ScrollDaddy Plugin](/plugins/dns_filtering/docs/overview.md) -- DNS filtering: unified block model, tier gating, editor UI, resolver flow
 
 ## Extensibility
 
@@ -48,4 +48,4 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 
 - [Deploy and Upgrade](deploy_and_upgrade.md) -- Deployment, upgrades, and installation
 - [Publish/Upgrade System Analysis](publish_upgrade_system_analysis.md) -- How upgrade packages are built and distributed
-- [Server Manager](server_manager.md) -- Remote server management and the Go agent
+- [Server Manager](/plugins/server_manager/docs/overview.md) -- Remote server management and the Go agent
