@@ -11,6 +11,121 @@
 class DocsScanner {
 
 	/**
+	 * Resolve a markdown link href to a canonical doc key, or null if it
+	 * doesn't point at a known doc file inside an allowed root.
+	 *
+	 * Accepts any path shape:
+	 *   - bare filename ("api.md")                — resolved against $current_doc_dir
+	 *   - web-root absolute ("/docs/routing.md")  — resolved against public_html
+	 *   - relative with .. ("../foo/bar.md")      — resolved against $current_doc_dir
+	 *
+	 * Security: realpath() canonicalizes the resolved path, then the result
+	 * must live inside public_html/docs/ or public_html/plugins/{name}/docs/
+	 * (with plugin name matching ^[a-zA-Z0-9_-]+$). Anything else returns null.
+	 *
+	 * Returns 'foo', 'subfolder/foo', or 'plugin/{name}/{slug}'.
+	 */
+	public static function path_to_key($href, $current_doc_dir) {
+		if (preg_match('/^[a-z][a-z0-9+.-]*:/i', $href)) return null;
+
+		if (($hash_pos = strpos($href, '#')) !== false) {
+			$href = substr($href, 0, $hash_pos);
+		}
+		if ($href === '') return null;
+
+		if ($href[0] === '/') {
+			$candidate = PathHelper::getIncludePath(ltrim($href, '/'));
+		} else {
+			$candidate = $current_doc_dir . '/' . $href;
+		}
+
+		$canonical = realpath($candidate);
+		if ($canonical === false) return null;
+		if (substr($canonical, -3) !== '.md') return null;
+
+		$docs_root = realpath(PathHelper::getIncludePath('docs'));
+		if ($docs_root !== false && strpos($canonical, $docs_root . DIRECTORY_SEPARATOR) === 0) {
+			$relative = substr($canonical, strlen($docs_root) + 1);
+			$relative = preg_replace('/\.md$/', '', $relative);
+			$segments = explode('/', $relative);
+			if (count($segments) > 2) return null;
+			foreach ($segments as $seg) {
+				if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) return null;
+			}
+			return $relative;
+		}
+
+		$plugins_root = realpath(PathHelper::getIncludePath('plugins'));
+		if ($plugins_root !== false && strpos($canonical, $plugins_root . DIRECTORY_SEPARATOR) === 0) {
+			$relative = substr($canonical, strlen($plugins_root) + 1);
+			$parts = explode('/', $relative);
+			if (count($parts) < 3) return null;
+			$plugin_name = $parts[0];
+			if (!preg_match('/^[a-zA-Z0-9_-]+$/', $plugin_name)) return null;
+			if ($parts[1] !== 'docs') return null;
+			$slug_parts = array_slice($parts, 2);
+			if (count($slug_parts) > 2) return null;
+			$last_idx = count($slug_parts) - 1;
+			$slug_parts[$last_idx] = preg_replace('/\.md$/', '', $slug_parts[$last_idx]);
+			foreach ($slug_parts as $seg) {
+				if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) return null;
+			}
+			return 'plugin/' . $plugin_name . '/' . implode('/', $slug_parts);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Discover plugin docs directories. Returns [plugin_name => absolute_docs_path].
+	 */
+	public static function discover_plugin_docs() {
+		$sources = array();
+		$plugins_dir = PathHelper::getIncludePath('plugins');
+		if (!is_dir($plugins_dir)) return $sources;
+
+		$entries = scandir($plugins_dir);
+		foreach ($entries as $entry) {
+			if ($entry === '.' || $entry === '..') continue;
+			$docs_path = $plugins_dir . '/' . $entry . '/docs';
+			if (is_dir($docs_path) && is_readable($docs_path)) {
+				$sources[$entry] = $docs_path;
+			}
+		}
+		return $sources;
+	}
+
+	/**
+	 * Scan core docs plus every plugin's docs/ directory. Plugin docs land in
+	 * groups keyed 'plugin/{plugin_name}' with their doc keys prefixed by
+	 * 'plugin/{plugin_name}/'.
+	 */
+	public static function scan_all($core_dir) {
+		$tree = self::scan($core_dir);
+
+		foreach (self::discover_plugin_docs() as $plugin_name => $plugin_docs_dir) {
+			$plugin_tree = self::scan($plugin_docs_dir);
+			$new_group = 'plugin/' . $plugin_name;
+
+			foreach ($plugin_tree as $group => $docs) {
+				if (!isset($tree[$new_group])) $tree[$new_group] = array();
+				foreach ($docs as $doc) {
+					$doc['key'] = 'plugin/' . $plugin_name . '/' . $doc['key'];
+					$doc['group'] = $new_group;
+					$tree[$new_group][] = $doc;
+				}
+			}
+
+			if (isset($tree[$new_group])) {
+				usort($tree[$new_group], function ($a, $b) {
+					return strcasecmp($a['title'], $b['title']);
+				});
+			}
+		}
+		return $tree;
+	}
+
+	/**
 	 * Recursively scan a docs directory for .md files (one level of subdirs).
 	 * Returns: ['_top' => [...], 'subfolder' => [...]] where each entry has
 	 * keys: key, filename, title, description, group.
@@ -143,21 +258,67 @@ class DocsScanner {
 
 	/**
 	 * Validate and load a doc file by its slug. Returns
-	 * ['content' => string, 'title' => string, 'error' => string].
+	 * ['content' => string, 'title' => string, 'description' => string, 'error' => string].
 	 *
-	 * Enforces: each path segment must match ^[a-zA-Z0-9_-]+$, max one
+	 * Core keys: each path segment must match ^[a-zA-Z0-9_-]+$, max one
 	 * subdirectory deep, realpath must resolve inside $docs_dir.
+	 *
+	 * Plugin keys ('plugin/{plugin_name}/{slug}[/{subslug}]'): plugin_name and
+	 * each slug segment must match ^[a-zA-Z0-9_-]+$; realpath must resolve
+	 * inside that plugin's docs/ directory.
 	 */
 	public static function load_doc($doc_key, $docs_dir) {
 		$segments = explode('/', $doc_key);
 
+		if (count($segments) >= 2 && $segments[0] === 'plugin') {
+			$plugin_name = $segments[1];
+			$slug_segments = array_slice($segments, 2);
+
+			if (empty($slug_segments) || count($slug_segments) > 2) {
+				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document path.');
+			}
+
+			if (!preg_match('/^[a-zA-Z0-9_-]+$/', $plugin_name)) {
+				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid plugin name.');
+			}
+
+			foreach ($slug_segments as $seg) {
+				if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) {
+					return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document name.');
+				}
+			}
+
+			$plugin_docs_dir = PathHelper::getIncludePath('plugins/' . $plugin_name . '/docs');
+			$relative_path = implode('/', $slug_segments) . '.md';
+			$filepath = $plugin_docs_dir . '/' . $relative_path;
+
+			$real_docs = realpath($plugin_docs_dir);
+			$real_file = realpath($filepath);
+
+			if ($real_file === false || $real_docs === false || strpos($real_file, $real_docs . DIRECTORY_SEPARATOR) !== 0) {
+				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document not found.');
+			}
+
+			if (!is_readable($filepath)) {
+				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document is not readable.');
+			}
+
+			$basename = pathinfo($filepath, PATHINFO_FILENAME);
+			return array(
+				'content' => file_get_contents($filepath),
+				'title' => self::extract_title($filepath, $basename),
+				'description' => self::extract_description($filepath),
+				'error' => '',
+			);
+		}
+
 		if (count($segments) > 2) {
-			return array('content' => '', 'title' => '', 'error' => 'Invalid document path.');
+			return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document path.');
 		}
 
 		foreach ($segments as $seg) {
 			if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) {
-				return array('content' => '', 'title' => '', 'error' => 'Invalid document name.');
+				return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Invalid document name.');
 			}
 		}
 
@@ -167,18 +328,19 @@ class DocsScanner {
 		$real_docs = realpath($docs_dir);
 		$real_file = realpath($filepath);
 
-		if ($real_file === false || $real_docs === false || strpos($real_file, $real_docs) !== 0) {
-			return array('content' => '', 'title' => '', 'error' => 'Document not found.');
+		if ($real_file === false || $real_docs === false || strpos($real_file, $real_docs . DIRECTORY_SEPARATOR) !== 0) {
+			return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document not found.');
 		}
 
 		if (!is_readable($filepath)) {
-			return array('content' => '', 'title' => '', 'error' => 'Document is not readable.');
+			return array('content' => '', 'title' => '', 'description' => '', 'error' => 'Document is not readable.');
 		}
 
 		$basename = pathinfo($filepath, PATHINFO_FILENAME);
 		return array(
 			'content' => file_get_contents($filepath),
 			'title' => self::extract_title($filepath, $basename),
+			'description' => self::extract_description($filepath),
 			'error' => '',
 		);
 	}
@@ -199,7 +361,8 @@ class DocsScanner {
 		foreach ($doc_tree as $group => $docs) {
 			if ($group === '_top') continue;
 
-			$group_title = ucwords(str_replace(array('_', '-'), array(' ', ' '), $group));
+			$display_label = preg_replace('/^plugin\//', '', $group);
+			$group_title = ucwords(str_replace(array('_', '-'), array(' ', ' '), $display_label));
 			$html .= '<h2 class="docs-landing-group">' . htmlspecialchars($group_title) . '</h2>';
 			$html .= self::render_landing_group($docs, $base_url);
 		}
@@ -243,7 +406,8 @@ class DocsScanner {
 
 		foreach ($doc_tree as $group => $docs) {
 			if ($group === '_top') continue;
-			$group_title = ucwords(str_replace(array('_', '-'), array(' ', ' '), $group));
+			$display_label = preg_replace('/^plugin\//', '', $group);
+			$group_title = ucwords(str_replace(array('_', '-'), array(' ', ' '), $display_label));
 			$out .= '<div class="docs-group-label">' . htmlspecialchars($group_title) . '</div>';
 			foreach ($docs as $doc) {
 				$out .= self::render_sidebar_link($doc, $selected_doc, $base);

@@ -159,7 +159,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
 - [Deploy and Upgrade](docs/deploy_and_upgrade.md) - Deployment and upgrade procedures
-- [Email Forwarding Plugin](docs/email_forwarding_plugin.md) - Self-hosted email forwarding with virtual mailboxes
+- [Email Forwarding Plugin](plugins/email_forwarding/docs/overview.md) - Self-hosted email forwarding with virtual mailboxes
 - [Email System](docs/email_system.md) - Email sending and templates
 - [FormWriter](docs/formwriter.md) - Form generation system
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
@@ -171,9 +171,9 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Publish/Upgrade System Analysis](docs/publish_upgrade_system_analysis.md) - Publishing workflow
 - [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
 - [Scheduled Tasks](docs/scheduled_tasks.md) - Scheduled task system, cron runner, and task development
-- [ScrollDaddy Plugin](docs/scrolldaddy_plugin.md) - DNS filtering service: unified block model, tier gating, editor UI, and resolver flow
+- [ScrollDaddy Plugin](plugins/dns_filtering/docs/overview.md) - DNS filtering service: unified block model, tier gating, editor UI, and resolver flow
 - [SEO Metadata](docs/seo_metadata.md) - SEO, Open Graph, and Twitter Card tag conventions for public views
-- [Server Manager](docs/server_manager.md) - Remote server management plugin and Go agent
+- [Server Manager](plugins/server_manager/docs/overview.md) - Remote server management plugin and Go agent
 - [Settings](docs/settings.md) - System settings management
 - [Social Features](docs/social_features.md) - Like/favorite system, block system, report system, messaging/conversations
 - [Subscription Tiers](docs/subscription_tiers.md) - Subscription and tier system

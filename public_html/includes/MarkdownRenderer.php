@@ -120,63 +120,31 @@ class MarkdownRenderer {
     }
 
     /**
-     * Rewrite internal doc links in rendered HTML.
-     * Converts href values pointing to .md files within docs/ to help viewer URLs.
+     * Rewrite markdown-doc links in rendered HTML to point at the active
+     * viewer (e.g. '/admin/admin_help' or '/documentation').
      *
-     * $base_url is the viewer path, e.g. '/admin/admin_help' or '/documentation'.
+     * Any .md href that DocsScanner::path_to_key() recognizes as pointing at
+     * a real doc inside docs/ or plugins/*\/docs/ is rewritten. Everything
+     * else (external URLs, paths outside the docs roots, missing files) is
+     * left untouched.
      *
-     * Patterns handled (with $base_url='/admin/admin_help'):
-     *   href="routing.md"              => href="/admin/admin_help?doc=routing"
-     *   href="/docs/admin_pages.md"    => href="/admin/admin_help?doc=admin_pages"
-     *   href="validation.md#overview"  => href="/admin/admin_help?doc=validation#overview"
-     *
-     * Links outside docs/ (../../, ../CLAUDE.md, /specs/, https://) are left alone.
+     * $current_doc_dir is the directory of the doc whose content is being
+     * rendered — used to resolve relative links (bare filenames, ../ paths).
      */
-    public static function rewrite_doc_links($html, $docs_dir, $base_url = '/admin/admin_help') {
-        return preg_replace_callback('/href="([^"]*\.md(?:#[^"]*)?)"/', function($matches) use ($docs_dir, $base_url) {
+    public static function rewrite_doc_links($html, $current_doc_dir, $base_url = '/admin/admin_help') {
+        return preg_replace_callback('/href="([^"]*\.md(?:#[^"]*)?)"/', function($matches) use ($current_doc_dir, $base_url) {
             $href = $matches[1];
 
-            // Split off anchor if present
             $anchor = '';
             if (($hash_pos = strpos($href, '#')) !== false) {
                 $anchor = substr($href, $hash_pos);
                 $href = substr($href, 0, $hash_pos);
             }
 
-            // Skip external links (shouldn't have .md but just in case)
-            if (preg_match('/^https?:\/\//', $href)) {
-                return $matches[0];
-            }
+            $key = DocsScanner::path_to_key($href, $current_doc_dir);
+            if ($key === null) return $matches[0];
 
-            // Skip links that traverse outside docs (../ patterns)
-            if (strpos($href, '..') !== false) {
-                return $matches[0];
-            }
-
-            // Strip /docs/ prefix if present
-            $clean = preg_replace('#^/docs/#', '', $href);
-
-            // Strip any remaining leading slashes
-            $clean = ltrim($clean, '/');
-
-            // Remove .md extension
-            $doc_key = preg_replace('/\.md$/', '', $clean);
-
-            // Validate the doc key segments
-            $segments = explode('/', $doc_key);
-            foreach ($segments as $seg) {
-                if (!preg_match('/^[a-zA-Z0-9_-]+$/', $seg)) {
-                    return $matches[0]; // Invalid segment, leave link alone
-                }
-            }
-
-            // Verify the file actually exists in docs/
-            $filepath = $docs_dir . '/' . $doc_key . '.md';
-            if (!file_exists($filepath)) {
-                return $matches[0]; // File doesn't exist, leave link alone
-            }
-
-            return 'href="' . $base_url . '?doc=' . htmlspecialchars($doc_key) . $anchor . '"';
+            return 'href="' . $base_url . '?doc=' . htmlspecialchars($key) . $anchor . '"';
         }, $html);
     }
 
