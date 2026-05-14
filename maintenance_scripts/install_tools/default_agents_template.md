@@ -1,6 +1,7 @@
-# CLAUDE.md
+# Agent Instructions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents (Claude Code, Gemini, etc.)
+working in this Joinery installation.
 
 ## System Overview
 
@@ -10,9 +11,9 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 ## Database Access Rules
 
-**CRITICAL:** While database access is auto-approved, you MUST follow these rules:
+**CRITICAL:** Follow these rules for database access:
 
-1. **READ operations** (SELECT, SHOW, DESCRIBE, \d, \dt, etc.) - Execute without asking
+1. **READ operations** (SELECT, SHOW, DESCRIBE, \d, \dt, etc.) - Safe to execute as needed for investigation
 2. **WRITE operations** (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE) - ALWAYS ask for explicit user confirmation before executing
 
 ## Version Control Rules
@@ -31,17 +32,7 @@ The goal is minimizing blast radius if a transcript is shared, archived, or logg
 
 ## File Permissions
 
-This is a development server. When creating new files, set liberal permissions to avoid access issues:
-
-```bash
-# After creating new PHP files, set permissions to 666
-chmod 666 /path/to/new/file.php
-
-# After creating new directories, set permissions to 777
-chmod 777 /path/to/new/directory
-```
-
-This ensures the web server and all users can read/write files without permission errors.
+When creating new files, match the permissions and ownership of existing files in the same directory (`stat -c '%a %U:%G' otherfile.php`). Do not loosen production permissions; if unsure, ask before chmod'ing.
 
 ## File Include Rules
 
@@ -184,7 +175,6 @@ For complete guidance on creating admin interface pages, including required setu
 
 **📖 [Admin Pages Documentation](/docs/admin_pages.md)**
 
-
 ## Common Tasks & Quick Reference
 
 ### Time/Date Handling
@@ -252,18 +242,18 @@ $session->check_permission(5); // Requires permission level 5 (admin minimum)
 
 ### Tests
 - `/tests/email/` - Email sending and authentication patterns
-- `/tests/functional/products/` - Product-related functionality  
+- `/tests/functional/products/` - Product-related functionality
 - `/tests/integration/` - External services (Mailgun, PHPMailer, routing)
 - `/tests/models/` - Data model CRUD operations and validation
-- **Inbound email testing:** Emails sent to `*@inbox.joinerytest.site` are stored via Mailgun webhook in `iem_inbound_emails` — query with `SELECT * FROM iem_inbound_emails WHERE iem_recipient LIKE '%address%' ORDER BY iem_received_time DESC LIMIT 1;`
+- **Inbound email testing:** When Mailgun inbound routing is configured, received emails are stored in `iem_inbound_emails` — query that table to inspect messages: `SELECT * FROM iem_inbound_emails WHERE iem_recipient LIKE '%address%' ORDER BY iem_received_time DESC LIMIT 1;`
 
 ### Deployment Scripts
-Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
+Located in `maintenance_scripts/install_tools/`.
 
-### Deploying to Production
-**Preferred method:** Use the Server Manager dashboard at `/admin/server_manager`. The "Publish Upgrade" form on the dashboard creates a job that builds archives. Then use the node detail Updates tab to apply upgrades to remote nodes.
+### Receiving Upgrades
+Apply pending upgrades with `php utils/upgrade.php --verbose`.
 
-**CLI fallback:** Publish: `php plugins/server_manager/includes/publish_upgrade.php "release notes"` (auto-detects next version). Apply on the remote site: `php utils/upgrade.php --verbose`.
+For multi-site setups, the Server Manager dashboard at `/admin/server_manager` provides a UI for managing remote nodes and publishing upgrades between them.
 
 ## Development Workflow
 
@@ -286,17 +276,9 @@ Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 
 ### Specifications Management
 
-**IMPORTANT: Specs go in `public_html/specs/`, NOT the root-level `/var/www/html/joinerytest/specs/` directory.**
+Place feature specifications in `specs/` (active) and move them to `specs/implemented/` when complete.
 
-**Directory Structure:**
-- **`public_html/specs/`** - Active specifications awaiting implementation
-- **`public_html/specs/implemented/`** - Completed specifications
-
-**Workflow:** Place new specs in `public_html/specs/`, follow during development, move to `public_html/specs/implemented/` when complete. This structure must be used unless explicitly specified otherwise.
-
-**🚨 CRITICAL RULE: NEVER MODIFY FILES IN `/specs/implemented/`**
-
-**Historical Reference:** When discussing past work or previously implemented features, consult `specs/implemented/` for detailed requirements and git history (`git log`) for implementation details and context.
+**🚨 CRITICAL RULE: NEVER MODIFY FILES IN `specs/implemented/`** — they are historical record. Consult them and `git log` for context on past work, but treat them as immutable.
 
 ### Database Schema Management
 
@@ -305,7 +287,7 @@ Located in `/var/www/html/joinerytest/maintenance_scripts/install_tools/`
 #### Automatic Database Updates
 The system automatically:
 - Creates tables based on data class `$tablename` and `$field_specifications`
-- Adds missing columns from `$field_specifications` 
+- Adds missing columns from `$field_specifications`
 - Updates column types and constraints
 - Creates indexes and foreign keys as needed
 
@@ -323,61 +305,39 @@ Migrations are executed by running `update_database` from the admin utilities pa
 
 ## Development Environment
 
-### Test Site
-**URL:** `https://joinerytest.site`
-
-This is the live test server where changes can be verified in a browser.
-
-**Admin Login (Permission 10):** See Claude memory for credentials.
+### Production Servers
+For managing deployment nodes (IPs, containers, SSH details), use the Server Manager dashboard at `/admin/server_manager`.
 
 **Log In As Another User:**
 Navigate to `/admin/admin_user_login_as?usr_user_id={id}` while logged in as a permission-10 admin. This switches the session to that user and redirects to `/`. To find a user's ID, go to `/admin/admin_users` and click the user — the URL will show `?usr_user_id=N`.
 
-### Production Servers
-For the full list of managed nodes (IPs, containers, SSH details), see the Server Manager dashboard at `/admin/server_manager`. All node connection info is stored there.
-
-For ScrollDaddy DNS server IPs, deploy procedure, and ops guide location, see Claude memory (`reference_scrolldaddy_infra.md`).
-
 ### Browser Testing (MCP)
-A Playwright browser is available for visual testing. Use it to verify page rendering, check layouts, and debug visual issues.
+If a Playwright browser is available via MCP, use it for visual testing — verifying page rendering, layouts, form interactions, and theme changes.
 
 **Common browser commands:**
 ```
 # Navigate to a page
-mcp__browser__browser_navigate with url: "https://joinerytest.site/path"
+mcp__browser__browser_navigate with url: "https://yoursite/path"
 
 # Get page snapshot (accessibility tree - preferred for understanding page structure)
 mcp__browser__browser_snapshot
 
 # Take a screenshot (for visual verification)
-# ALWAYS specify filename in /tmp/ to avoid polluting public_html
+# ALWAYS specify filename in /tmp/
 mcp__browser__browser_take_screenshot with filename: "/tmp/description.png"
 
 # Click an element (use ref from snapshot)
 mcp__browser__browser_click with element: "description" and ref: "e123"
 ```
 
-**CRITICAL: Always save screenshots to `/tmp/`** — always specify `filename: "/tmp/something.png"`. Omitting the filename saves to `.playwright-mcp/` inside `public_html`, and bare filenames save directly to `public_html`.
-
-**When to use the browser:**
-- Verifying component rendering and layouts
-- Debugging CSS/styling issues
-- Testing form interactions
-- Checking responsive behavior
-- Validating theme changes
-
-**Workflow:**
-1. Make code changes
-2. Navigate to the relevant page: `https://joinerytest.site/path`
-3. Use `browser_snapshot` to see page structure
-4. Use `browser_take_screenshot` if visual verification needed
+**CRITICAL: Always save screenshots to `/tmp/`** with an explicit filename. Omitting the filename or using a bare name saves to the wrong directory.
 
 ### Local Development Setup
-**Available Locally:**
+For local development you typically have:
 - PHP Runtime for syntax checking (`php -l filename.php`)
 - File system access and basic bash commands
-- PostgreSQL database access via psql
-- Web server (Apache) and configuration access
+- PostgreSQL database access via `psql`
+- Web server (Apache, nginx, or built-in)
 
 **CRITICAL REQUIREMENTS for PHP Development:**
 
@@ -385,11 +345,11 @@ mcp__browser__browser_click with element: "description" and ref: "e123"
 
 2. **Method Existence Validation**: Run the PHP file validator on all PHP files created or modified:
    ```bash
-   php "/var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php" /path/to/modified/file.php
+   php maintenance_scripts/dev_tools/validate_php_file.php /path/to/modified/file.php
    ```
    - Investigate any missing methods flagged by the script
    - Only report task completion after all flags are investigated and resolved
-   - The script will identify calls to non-existent functions and methods
+   - The script identifies calls to non-existent functions and methods
    - Whitelisted common methods (SystemBase, PDO, etc.) are automatically skipped
 
 ### Common Development Commands
@@ -398,28 +358,22 @@ mcp__browser__browser_click with element: "description" and ref: "e123"
 php -l filename.php
 
 # PHP File Validation
-php "/var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.php" /path/to/file.php
+php maintenance_scripts/dev_tools/validate_php_file.php /path/to/file.php
 
-# Check error logs
-tail /var/www/html/joinerytest/logs/error.log
+# Database access (credentials in config/Globalvars_site.php)
+psql -U <user> -d <database>
 
-# Database access (get credentials from /var/www/html/joinerytest/config/Globalvars_site.php)
-psql -U postgres -d joinerytest
-
-# Apache service management
+# Apache service management (if using Apache)
 sudo systemctl status apache2
 sudo systemctl restart apache2
 ```
 
-### Test Server Monitoring
-**Usage Pattern:**
+### Workflow
 1. Make code changes
 2. Run syntax validation (`php -l filename.php`)
 3. Run method existence validation on modified files
-4. Test changes locally (web server is available)
-5. Check error logs for any issues
-
-**Quick Log Check:** `tail /var/www/html/joinerytest/logs/error.log` - Shows recent Apache error.log entries. Note: logs are very verbose (routing debug output); always `grep` for specific keywords (e.g., `Fatal`, `error`, `resize`) rather than relying on `tail` alone.
+4. Test changes locally (web server available)
+5. Check the platform error log for issues. Logs are typically verbose (routing debug output); `grep` for specific keywords (e.g., `Fatal`, `error`) rather than scanning `tail` output directly.
 
 ## Plugin Development
 
@@ -428,14 +382,13 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 
 ## Best Practices
 
-1. **Custom Commands**: Check `/home/user1/.claude/commands/` for project-specific slash commands before proceeding
-2. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
-3. **Method Existence Validation**: ALWAYS run validate_php_file.php on created/modified PHP files and investigate any flagged issues before completion
-4. **Method Verification**: NEVER assume available functions - always check class definitions first
-5. **Security**: Always validate and sanitize user input
-6. **FormWriter**: NEVER write hand-rolled HTML forms. Always use FormWriter for every form in the platform — it handles validation styling, CSRF, `novalidate`/`is-invalid` integration, and consistent UX automatically. See **📖 [FormWriter Documentation](docs/formwriter.md)**. The only exception is single-button action forms (a `<form>` with only hidden inputs and a submit button) that trigger a server action with no user-entered fields.
-7. **Data Collection**: NEVER write custom scripts or ad-hoc forms to collect data from users. Use **Questions/Surveys** (`/admin/admin_questions`, `/admin/admin_surveys`) for standalone questionnaires, and **Product Requirements** (attached to products via the admin product edit page) for data collected at purchase time. See **📖 [Questions & Surveys](docs/questions_surveys.md)** and **📖 [Product Requirements](docs/product_requirements.md)**. Only reach for custom code if these systems genuinely cannot accommodate the use case.
-8. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
+1. **Syntax Validation**: ALWAYS run `php -l filename.php` on all PHP files before completing any task
+2. **Method Existence Validation**: ALWAYS run validate_php_file.php on created/modified PHP files and investigate any flagged issues before completion
+3. **Method Verification**: NEVER assume available functions - always check class definitions first
+4. **Security**: Always validate and sanitize user input
+5. **FormWriter**: NEVER write hand-rolled HTML forms. Always use FormWriter for every form in the platform — it handles validation styling, CSRF, `novalidate`/`is-invalid` integration, and consistent UX automatically. See **📖 [FormWriter Documentation](docs/formwriter.md)**. The only exception is single-button action forms (a `<form>` with only hidden inputs and a submit button) that trigger a server action with no user-entered fields.
+6. **Data Collection**: NEVER write custom scripts or ad-hoc forms to collect data from users. Use **Questions/Surveys** (`/admin/admin_questions`, `/admin/admin_surveys`) for standalone questionnaires, and **Product Requirements** (attached to products via the admin product edit page) for data collected at purchase time. See **📖 [Questions & Surveys](docs/questions_surveys.md)** and **📖 [Product Requirements](docs/product_requirements.md)**. Only reach for custom code if these systems genuinely cannot accommodate the use case.
+7. **Follow Existing Patterns**: Look at similar files in the codebase before creating new ones
 8. **Version Numbers**: ALWAYS look for version numbers in files when making changes and increment them appropriately
 
 ## Security Notes
@@ -461,15 +414,3 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 - **ComponentBase** — Base class shared by `PluginHelper` and `ThemeHelper`
 
 For exact method surfaces, read the corresponding files in `/includes/`.
-
-## Workflow Notes
-
-### Viewing Files After Edits
-
-After making edits to any file, always provide a `batcat` command that the user can copy/paste to verify the changes. Do NOT run the batcat command yourself:
-
-```bash
-batcat /path/to/file.php
-```
-
-This allows the user to quickly review what was changed without needing to ask for a file view.

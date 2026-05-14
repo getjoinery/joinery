@@ -21,14 +21,13 @@ This is a custom PHP membership and event management platform with a modular MVC
 
 ## Secret Handling Rules
 
-**CRITICAL:** NEVER echo, print, log, or otherwise surface passwords, API keys, tokens, or other credentials into the chat transcript when it can be avoided. This includes:
+**CRITICAL:** Never echo passwords, API keys, tokens, or other credentials into the chat transcript when avoidable.
 
-- **Do not print a secret just to "confirm" it** — say "password read from Globalvars" instead of pasting the value.
-- **Do not include a secret in a tool-result summary** if the tool already handled it. The raw tool output may contain it (unavoidable when reading a config file), but your own text to the user should not repeat it.
-- **When passing a password to a command**, prefer mechanisms that don't echo it: env vars set on the remote side (`ssh host 'docker exec X bash -c "export PGPASSWORD=\$POSTGRES_PASSWORD && ..."'`), password files with `--password-file`, or piping via stdin — not positional arguments that show up in logs.
-- **If a secret slips into a response**, flag it to the user so they can decide whether to rotate.
+- Don't print a secret to "confirm" it — describe its source instead (e.g., "read from Globalvars").
+- When passing a password to a command, use stdin, env vars, or password files — not positional arguments that show up in logs.
+- If a secret slips into a response, flag it so the user can decide whether to rotate.
 
-The goal is minimizing the blast radius if a transcript is shared, archived, or logged. Reading a secret from a file into a tool call is fine; narrating its value back to the user is not.
+The goal is minimizing blast radius if a transcript is shared, archived, or logged.
 
 ## File Permissions
 
@@ -44,67 +43,16 @@ chmod 777 /path/to/new/directory
 
 This ensures the web server and all users can read/write files without permission errors.
 
-## CRITICAL: File Include Rules
+## File Include Rules
 
-**⚠️ NEVER REQUIRE PathHelper, Globalvars, or SessionControl - THEY ARE ALWAYS AVAILABLE! ⚠️**
+**Core files are pre-loaded — never require them.** Use directly: `PathHelper`, `Globalvars`, `SessionControl`, `ThemeHelper`, `PluginHelper`, `DbConnector`.
 
-**NEVER use `$_SERVER['DOCUMENT_ROOT']` for include paths!**
+For all other files:
 
-### Core File Guarantees
-**These files are ALWAYS pre-loaded - NEVER use require/require_once for them:**
-- **PathHelper** - Always available in ALL PHP files (loaded by serve.php)
-- **Globalvars** - Always available in ALL PHP files (loaded by PathHelper)
-- **SessionControl** - Always available in ALL PHP files
-- **ThemeHelper** - Always available in ALL PHP files (loaded by PathHelper)
-- **PluginHelper** - Always available in ALL PHP files (loaded by PathHelper)
-- **DbConnector** - Always available in ALL PHP files (loaded by Globalvars)
+- Standard: `require_once(PathHelper::getIncludePath('path/to/file.php'))`
+- Theme-overridable: `require_once(PathHelper::getThemeFilePath('filename.php', 'subdirectory'))`
 
-```php
-// ❌ WRONG - NEVER DO THIS
-require_once('PathHelper.php');
-require_once(__DIR__ . '/../includes/PathHelper.php');
-require_once(__DIR__ . '/../includes/Globalvars.php');
-require_once(__DIR__ . '/../includes/ThemeHelper.php');
-require_once(__DIR__ . '/../includes/PluginHelper.php');
-require_once(__DIR__ . '/../includes/DbConnector.php');
-require_once(PathHelper::getIncludePath('includes/PathHelper.php'));
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-
-// ✅ CORRECT - Just use them directly
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-$settings = Globalvars::get_instance();
-$session = SessionControl::get_instance();
-```
-
-### Include Path Rules:
-- **Core files (PathHelper, Globalvars, SessionControl, ThemeHelper, PluginHelper, DbConnector)**: Already loaded - NEVER require them
-- **All other files**: Use `require_once(PathHelper::getIncludePath('path/to/file.php'))`
-- **Theme-overridable files**: Use `require_once(PathHelper::getThemeFilePath('filename.php', 'subdirectory'))`
-- **EXCEPTION**: In bootstrap tests or deployment scripts running outside the normal application flow, you may need to manually require core files using `require_once(PathHelper::getIncludePath('includes/Globalvars.php'))` after loading PathHelper
-
-```php
-// ✅ CORRECT - Standard file inclusion
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
-
-// ✅ CORRECT - Theme-overridable files
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-require_once(PathHelper::getThemeFilePath('profile_logic.php', 'logic'));
-
-// ❌ WRONG - NEVER do this
-require_once($_SERVER['DOCUMENT_ROOT'] . '/includes/filename.php');
-```
-
-### Variable Scope Note
-When including files that define variables you need to access (like `$migrations`), the standard `require_once(PathHelper::getIncludePath())` pattern works perfectly as it maintains proper scope:
-
-```php
-// ✅ Standard pattern - variables are accessible
-require_once(PathHelper::getIncludePath('migrations/migrations.php'));
-// Now $migrations array is available
-```
+Run `php maintenance_scripts/dev_tools/validate_php_file.php <file>` after edits — it flags incorrect requires, `__DIR__ . '/../'` navigation, `$_SERVER['DOCUMENT_ROOT']` usage, and other anti-patterns.
 
 ## Architecture Patterns
 
@@ -114,7 +62,7 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/views/` - Base presentation templates
 - `/adm/` - Complete admin interface (uses PublicPageJoinerySystem theme)
 - `/includes/` - Core system classes (Globalvars, DbConnector, FormWriterHTML5, LogicResult, etc.)
-- `/theme/` - Multi-theme system (active public theme: `default`, using PublicPage extending PublicPageBase)
+- `/theme/` - Multi-theme system; the active theme is configured per deployment
 - `/plugins/` - Self-contained modules with own MVC structure
 - `/ajax/` - AJAX endpoints and webhook handlers
 - `/api/` - REST API with key-based authentication
@@ -123,12 +71,10 @@ require_once(PathHelper::getIncludePath('migrations/migrations.php'));
 - `/specs/` - Feature specifications (active and implemented)
 - `/docs/` - Documentation and Claude-specific guidance
 - `/tests/` - Test suites (email, functional, integration, models)
-- `/var/www/html/joinerytest/maintenance_scripts/` - Deployment and maintenance scripts
+- `maintenance_scripts/` - Deployment and maintenance scripts
   - `install_tools/` - Installation scripts (install.sh, _site_init.sh, deploy.sh, etc.)
   - `sysadmin_tools/` - Maintenance utilities (backup, restore, etc.)
   - `dev_tools/` - Development utilities (PHP validation, etc.)
-
-**Repository Structure Note:** In the GitHub repository (getjoinery/joinery), theme/ and plugins/ are located inside public_html/. The paths above reflect the deployed structure where public_html/ is the web root.
 
 ### Routing & Theme System
 
@@ -159,7 +105,7 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Creating Components from Themes](docs/creating_components_from_themes.md) - Theme component extraction
 - [Deletion System](docs/deletion_system.md) - Soft delete and permanent delete patterns
 - [Deploy and Upgrade](docs/deploy_and_upgrade.md) - Deployment and upgrade procedures
-- [Email Forwarding Plugin](docs/email_forwarding_plugin.md) - Self-hosted email forwarding with virtual mailboxes
+- [Email Forwarding Plugin](plugins/email_forwarding/docs/overview.md) - Self-hosted email forwarding with virtual mailboxes
 - [Email System](docs/email_system.md) - Email sending and templates
 - [FormWriter](docs/formwriter.md) - Form generation system
 - [Logic Architecture](docs/logic_architecture.md) - Business logic layer patterns
@@ -171,9 +117,9 @@ See `/docs/` for detailed guides on specific subsystems:
 - [Publish/Upgrade System Analysis](docs/publish_upgrade_system_analysis.md) - Publishing workflow
 - [Recurring Events](docs/recurring_events.md) - Recurring event architecture and virtual/materialized instances
 - [Scheduled Tasks](docs/scheduled_tasks.md) - Scheduled task system, cron runner, and task development
-- [ScrollDaddy Plugin](docs/scrolldaddy_plugin.md) - DNS filtering service: unified block model, tier gating, editor UI, and resolver flow
+- [ScrollDaddy Plugin](plugins/dns_filtering/docs/overview.md) - DNS filtering service: unified block model, tier gating, editor UI, and resolver flow
 - [SEO Metadata](docs/seo_metadata.md) - SEO, Open Graph, and Twitter Card tag conventions for public views
-- [Server Manager](docs/server_manager.md) - Remote server management plugin and Go agent
+- [Server Manager](plugins/server_manager/docs/overview.md) - Remote server management plugin and Go agent
 - [Settings](docs/settings.md) - System settings management
 - [Social Features](docs/social_features.md) - Like/favorite system, block system, report system, messaging/conversations
 - [Subscription Tiers](docs/subscription_tiers.md) - Subscription and tier system
@@ -184,8 +130,9 @@ See `/docs/` for detailed guides on specific subsystems:
 ## Database & Configuration
 
 **Database:** PostgreSQL with PDO prepared statements
-**Configuration:** 
-- File-based config for core settings: `Globalvars_site.php` (available at `/var/www/html/joinerytest/config/`)
+
+**Configuration:**
+- File-based config for core settings: `Globalvars_site.php` (in `{site root}/config/`, the directory alongside `public_html`)
 - Additional, database-stored settings in `stg_settings` table, accessed with settings singleton
 - `$settings = Globalvars::get_instance()` - Get settings singleton
 - `$settings->get_setting('setting_name')` - Get configuration value
@@ -193,214 +140,43 @@ See `/docs/` for detailed guides on specific subsystems:
 - Plugin-owned settings with factory defaults are declared in the plugin's `plugin.json` under `settings`. Core settings with factory defaults are declared in `settings.json` at the `public_html/` root. Both are seeded into `stg_settings` automatically; no migrations needed. See `docs/plugin_developer_guide.md#plugin-settings-declarative`.
 
 ### Important Settings
-- **composerAutoLoad**: Path to vendor directory (e.g., `/home/user1/vendor/`)
-  - This setting contains the path to the vendor directory, NOT the full path to autoload.php
-  - Code should append `autoload.php` to this path when using it
+- **composerAutoLoad**: Path to the vendor directory, e.g., `../vendor/` (relative to `public_html`). The setting is the directory path, NOT the full path to `autoload.php` — code appends `autoload.php` when using it.
 
-### Data Model Classes (Single and Multi Patterns)
+### Data Model Classes
 
-#### Single Object Pattern (extends SystemBase)
-```php
-class TableName extends SystemBase {
-    public static $prefix = 'tbl';
-    public static $tablename = 'tbl_table_name';
-    public static $pkey_column = 'tbl_id';
-    public static $fields = array();
-    public static $field_specifications = array();
-    public static $timestamp_fields = array();
-    public static $required_fields = array();
-    public static $initial_default_values = array();
-    public static $zero_variables = array();
-    public static $permanent_delete_actions = array();
-    public static $json_vars = array('key');
-    public static $url_namespace; // For URL generation
-    
-    // Constructor
-    function __construct($key, $and_load = FALSE);
-    
-    // Static Methods
-    static function GetByColumn($column, $value);
-    static function get_by_link($link, $search_deleted = false);
-    static function CheckForDuplicate($obj_to_check, $fields = NULL, $search_deleted = false);
-    static function check_if_exists($key);
-    
-    // Data Access Methods
-    function get($key);
-    function get_json_decoded($key);  // opt-in JSON decode helper — normalizes the string-post-load vs. array-post-set() asymmetry on JSON columns; returns raw string on decode failure
-    function set($key, $value, $check_existance = TRUE);
-    function export_as_array();
-    
-    // Loading & Saving Methods
-    function load();
-    function prepare(); // Validation before save
-    function save($debug = false);
-    
-    // Deletion Methods
-    function soft_delete(); // Sets delete_time field
-    function undelete(); // Clears delete_time field
-    function permanent_delete($debug = false); // Permanently removes from database
-    // Note: There is NO delete() method - use soft_delete() or permanent_delete()
-    
-    // Utility Methods
-    function check_for_duplicate($fields = NULL, $search_deleted = false);
-    function check_unique_constraints(); // Check field_specifications unique constraints
-    
-    // URL/Link Methods
-    function create_url($input_url); // Create URL-safe slug
-    function get_url($format = 'short'); // Get record's URL
-    
-    // Authentication & Security
-    function authenticate_read($data);
-    function authenticate_write($data);
-    function is_owner($session);
-    
-    // JSON Export
-    function get_json(); // Returns array suitable for json_encode()
-	
-	//There are more methods available in the SystemBase class that are not listed here
-}
-```
+Models follow an Active Record pattern. Single-row classes extend `SystemBase`; collection classes extend `SystemMultiBase`. For the full method surface and conventions, read `includes/SystemBase.php` and `includes/SystemMultiBase.php` directly, or skim a representative concrete class like `data/users_class.php` or `data/coupon_codes_class.php`.
 
-#### Multi-Object Collection Pattern (extends SystemMultiBase)
-```php
-class MultiTableName extends SystemMultiBase {
-    public static $table_name = 'tbl_table_name';
-    public static $table_primary_key = 'tbl_id';
-    protected static $default_options = array();
-    
-    // Constructor
-    function __construct($options = array(), $order_by = array(), 
-                        $limit = NULL, $offset = NULL, $operation = 'AND', $write_lock = FALSE);
-    
-    // Loading Methods
-    function load($debug = false); // Load all matching objects
-    function count_all(); // Get total count without loading (implemented in concrete classes)
-    
-    // Collection Access Methods
-    function get($index); // Get object at specific index (0-based)
-    function get_by_key($key); // Get object by primary key value
-    function is_valid($location); // Check if index exists
-    function contains($item); // Check if collection contains object
-    function contains_key($key); // Check if collection contains key
-    
-    // Collection Manipulation Methods
-    function add($value); // Add object to collection
-    function remove($location); // Remove object at index
-    
-    // Iterator Implementation (IteratorAggregate, Countable)
-    function count(); // Get number of loaded objects
-    function getIterator(); // Returns ArrayIterator for foreach loops
-    function incremental_iterator($incremental_limit = 200); // For large datasets
-    
-    // Authentication
-    function authenticate_read($data); // Calls authenticate_read on all children
-    
-    // Internal Methods (used by concrete implementations)
-    protected function _get_resultsv2($table, $filters = [], $sorts = [],
-                                     $only_count = false, $debug = false);
-	// More methods are available in the SystemMultiBase class
-}
-```
+Two non-obvious rules worth knowing up front:
 
-**⚠️ CRITICAL: Multi-Object Filter Keys**
+**1. Constructors require a parameter.** New: `new Product(NULL)`. Load: `new Product($id, TRUE)`. Calling `new Product()` raises "Too few arguments."
 
-Multi classes use **custom option keys** that may differ from database column names. Always check the `getMultiResults()` method in the specific Multi class to see which option keys it accepts.
-
-**Common mistake:**
-```php
-// ❌ WRONG - Using database column names directly
-$groups = new MultiGroup(['grp_name' => 'Basic Plan', 'grp_category' => 'subscription_tier']);
-
-// ✅ CORRECT - Using the option keys defined in MultiGroup::getMultiResults()
-$groups = new MultiGroup(['group_name' => 'Basic Plan', 'category' => 'subscription_tier']);
-```
-
-**Always verify option keys** in `/data/[table]_class.php` before using Multi classes!
-
-### DbConnector Usage and Database Calls
-
-**CRITICAL RULE:** **NEVER use DbConnector directly if there is a model class available!**
-- ✅ Use `User`, `MultiUser`, `Product`, `MultiProduct`, etc. when they exist
-- ✅ Use model methods like `load()`, `save()`, `get()`, `set()`, etc.
-- ❌ Only use DbConnector for tables that don't have model classes or complex queries
-
-#### Essential Database Patterns:
-
-**USE MODELS (Preferred):**
-```php
-// Loading and modifying records
-$user = new User($user_id, TRUE); // Load user by ID
-$email = $user->get('usr_email');
-$user->set('usr_name', 'New Name');
-$user->prepare();
-$user->save();
-
-// Finding multiple records
-$users = new MultiUser(['usr_active' => 1], ['usr_id' => 'DESC']);
-$users->load();
-
-// Creating new records
-$product = new Product(NULL);
-$product->set('pro_name', 'New Product');
-$product->save();
-```
-
-**USE DbConnector (ONLY when no model exists):**
-```php
-$dbconnector = DbConnector::get_instance();
-$dblink = $dbconnector->get_db_link();
-$sql = "SELECT COUNT(*) FROM some_table WHERE complex_condition = ?";
-$q = $dblink->prepare($sql);
-$q->execute([$value]);
-$result = $q->fetch(PDO::FETCH_ASSOC);
-```
-
-**CRITICAL RULES:**
-1. **Always use prepared statements** - Never concatenate user input directly into SQL
-2. **Always use the PDO connection** from `$dbconnector->get_db_link()`
-3. **Use proper PDO fetch modes** - `PDO::FETCH_ASSOC` for arrays, `PDO::FETCH_OBJ` for objects
-
-## Model Querying Patterns and Best Practices
-
-### Single Object Access
-
-**CRITICAL**: All SystemBase-derived classes require at least one parameter in their constructor! Never call `new ClassName()` without parameters - this is the most common model usage error.
+**2. Multi-class filter keys differ from db column names.** Each Multi class defines its option keys in `getMultiResults()` — don't pass raw prefixed column names. Example:
 
 ```php
-// ✅ CORRECT patterns
-$product = new Product($id, TRUE);    // Creates and loads data
-$product = new Product(NULL);         // Creates new object for insertion
+// ❌ WRONG - raw column names
+$groups = new MultiGroup(['grp_name' => 'Basic Plan']);
 
-// ❌ WRONG - will cause "Too few arguments" error
-$product = new Product();
+// ✅ CORRECT - option keys from MultiGroup::getMultiResults()
+$groups = new MultiGroup(['group_name' => 'Basic Plan']);
 ```
 
-### Multi-Object Filter Patterns
+### DbConnector Usage
 
-**Filter Types in `getMultiResults()`:**
-```php
-// 1. Parameterized (safe from SQL injection)
-$filters['evr_evt_event_id'] = [$event_id, PDO::PARAM_INT];  // Becomes: evr_evt_event_id = ?
+**Prefer models over raw DbConnector.** Use `User`, `MultiUser`, `Product`, `MultiProduct`, etc. when they exist — they handle prepared statements, validation, and lifecycle correctly. Fall back to `DbConnector::get_instance()->get_db_link()` only for queries that don't fit a model (complex joins, aggregations, ad-hoc reporting).
 
-// 2. String conditions
-$filters['evr_delete_time'] = "IS NULL";                      // Becomes: evr_delete_time IS NULL
-$filters['evt_start_time'] = "> now()";                       // Becomes: evt_start_time > now()
+When using DbConnector directly:
+- Always use prepared statements; never concatenate user input into SQL.
+- Use `PDO::FETCH_ASSOC` for arrays, `PDO::FETCH_OBJ` for objects.
 
-// 3. Complex OR conditions (CRITICAL: split parentheses for precedence)
-$filters['(evr_expires_time'] = ">= now() OR evr_expires_time IS NULL)";
-// Becomes: (evr_expires_time >= now() OR evr_expires_time IS NULL)
+## Model Querying Patterns
 
-// Usage example
-$registrants = new MultiEventRegistrant(
-    array('event_id' => 123, 'deleted' => false, 'expired' => false),
-    array('evr_created_time' => 'DESC')
-);
-if ($registrants->count_all() > 0) {
-    $registrants->load();
-}
-```
+`getMultiResults()` in each Multi class accepts filter values in three formats:
 
-**Method Verification Best Practice:** Always check the actual class definition in `/data/[class]_class.php` to confirm method names, signatures, and parameters before using any method.
+1. **Parameterized array** for safe value binding: `$filters['evr_evt_event_id'] = [$event_id, PDO::PARAM_INT];` → produces `evr_evt_event_id = ?`.
+2. **String condition** appended literally: `$filters['evr_delete_time'] = "IS NULL";` → `evr_delete_time IS NULL`.
+3. **Split-parenthesis OR conditions** for grouped clauses with precedence: `$filters['(evr_expires_time'] = ">= now() OR evr_expires_time IS NULL)";` → `(evr_expires_time >= now() OR evr_expires_time IS NULL)`.
+
+When in doubt about a Multi class's accepted options, read its `getMultiResults()` method directly.
 
 ## Admin Page Development
 
@@ -442,7 +218,7 @@ $page_vars = process_logic(profile_logic($_GET, $_POST));
 
 **CRITICAL: Vanilla CSS and vanilla JS is the default for all themes and plugins. Never introduce Bootstrap, jQuery, or any other external JS/CSS framework unless the theme or plugin explicitly declares one (via `cssFramework` in `theme.json`) or one is specifically requested.**
 
-The admin interface is the only exception — it always runs Bootstrap and jQuery.
+The admin interface runs the Joinery System theme (`joinery-system`), which is vanilla HTML5 and JavaScript — no Bootstrap, jQuery, or other frameworks.
 
 To confirm what a theme uses, check `theme.json`: `"cssFramework": "html5"` (or absent) means vanilla only; `"cssFramework": "bootstrap"` means Bootstrap is available; `"cssFramework": "tailwind"` means Tailwind is available.
 
@@ -671,30 +447,20 @@ See **📖 [Plugin Developer Guide](/docs/plugin_developer_guide.md)** for compl
 
 ## Key Integration Points
 
-**Payment Processing:** StripeHelper, PaypalHelper classes
-**Email:** SystemMailer with template support  
+**Payment Processing:** `StripeHelper`, `PaypalHelper` classes
+**Email:** `SystemMailer` with template support
 **External APIs:** Webhooks in `/ajax/` for Stripe
 **File Management:** Secure upload handling in `/includes/UploadHandler.php`
 
 ### Helper Classes
 
-**RouteHelper** - Manages URL routing and file serving for the front controller system
-- `processRoutes($routes, $request_path)` - Main route processing with pattern matching
-- `handleStaticRoute($route, $params, $template_directory)` - Serve static assets with caching
-- `handleDynamicRoute($route, $params, $template_directory)` - Handle view routes with optional URL placeholders
-- `extractRouteParams($pattern, $path)` - Extract parameters from URL patterns
-- `serveStaticFile($file_path, $cache_seconds)` - Serve files with HTTP caching headers
+- **RouteHelper** — URL routing and static file serving for the front controller
+- **ThemeHelper** — Theme metadata, asset URLs with cache busting, theme configuration lookup
+- **PluginHelper** — Plugin metadata and helper functions
+- **PathHelper** — Path resolution and file operations
+- **ComponentBase** — Base class shared by `PluginHelper` and `ThemeHelper`
 
-**ThemeHelper** - Manages theme metadata and provides theme-specific functionality
-- `getInstance($themeName)` - Get singleton instance for theme operations
-- `asset($path, $themeName)` - Generate theme asset URLs with cache busting
-- `config($key, $default, $themeName)` - Get theme configuration values
-
-**PluginHelper** - Manages plugin metadata and provides plugin helper functions
-
-**PathHelper** - Provides standardized path resolution and file operations across the system
-
-**ComponentBase** - Base class providing common functionality for PluginHelper and ThemeHelper
+For exact method surfaces, read the corresponding files in `/includes/`.
 
 ## Workflow Notes
 

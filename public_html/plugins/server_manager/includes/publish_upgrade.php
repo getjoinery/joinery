@@ -257,11 +257,40 @@
 		mkdir($core_temp_dir . '/config', 0755, true);
 		mkdir($core_temp_dir . '/maintenance_scripts', 0755, true);
 
+		// Build agent file exclusion list — covers any filename managed by the agent files admin.
+		// Hardcoded fallback set keeps the common names excluded even if the DB query fails.
+		$agent_file_excludes = array('CLAUDE.md', 'GEMINI.md', 'AGENTS.md');
+		try {
+			$_agf_db = DbConnector::get_instance()->get_db_link();
+			$_agf_q  = $_agf_db->prepare("SELECT agf_target_filenames FROM agf_agent_files WHERE agf_delete_time IS NULL");
+			$_agf_q->execute();
+			while ($_agf_row = $_agf_q->fetch(PDO::FETCH_ASSOC)) {
+				$_agf_raw = $_agf_row['agf_target_filenames'];
+				if (!$_agf_raw) continue;
+				$_agf_targets = is_array($_agf_raw) ? $_agf_raw : json_decode($_agf_raw, true);
+				if (is_array($_agf_targets)) {
+					foreach ($_agf_targets as $_agf_name) {
+						if (is_string($_agf_name) && $_agf_name !== '' && strpos($_agf_name, '/') === false && strpos($_agf_name, '\\') === false) {
+							$agent_file_excludes[] = $_agf_name;
+						}
+					}
+				}
+			}
+		} catch (\Throwable $e) {
+			// agf_agent_files table not yet present or DB unavailable — fallback set still applies.
+		}
+		$agent_file_excludes = array_unique($agent_file_excludes);
+		$agent_excludes_str = '';
+		foreach ($agent_file_excludes as $_agf_name) {
+			$agent_excludes_str .= ' --exclude=' . escapeshellarg($_agf_name);
+		}
+
 		// Copy public_html excluding themes and plugins content
 		// Note: Use anchored patterns (/theme/*, /plugins/*) to only exclude top-level directories,
 		// not subdirectories like assets/vendor/Trumbowyg-2-26/dist/plugins/
 		$rsync_core_cmd = sprintf(
-			'rsync -av --exclude=.git --exclude=.gitignore --exclude=.claude --exclude=specs --exclude=CLAUDE.md --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=tests --exclude=theme-sources --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
+			'rsync -av --exclude=.git --exclude=.gitignore --exclude=.claude --exclude=specs%s --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=theme-sources --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
+			$agent_excludes_str,
 			escapeshellarg($full_site_dir . '/public_html/'),
 			escapeshellarg($core_temp_dir . '/public_html/')
 		);

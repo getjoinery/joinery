@@ -79,6 +79,14 @@ class MethodExistenceTest {
             "require_once(PathHelper::getIncludePath('includes/ThemeHelper.php'))" => 'ThemeHelper is always loaded - never require it',
             "require_once(PathHelper::getIncludePath('includes/PluginHelper.php'))" => 'PluginHelper is always loaded - never require it',
 
+            // Bare-relative require of core files (no path prefix at all)
+            "require_once('PathHelper.php')" => 'PathHelper is always loaded - never require it',
+            "require_once('Globalvars.php')" => 'Globalvars is always loaded - never require it',
+            "require_once('DbConnector.php')" => 'DbConnector is always loaded - never require it',
+            "require_once('SessionControl.php')" => 'SessionControl is always loaded - never require it',
+            "require_once('ThemeHelper.php')" => 'ThemeHelper is always loaded - never require it',
+            "require_once('PluginHelper.php')" => 'PluginHelper is always loaded - never require it',
+
             // Direct path usage
             '$_SERVER[\'DOCUMENT_ROOT\']' => 'Never use $_SERVER[\'DOCUMENT_ROOT\'] - use PathHelper::getIncludePath() instead',
             '__DIR__ . \'/../' => 'Avoid __DIR__ navigation - use PathHelper::getIncludePath() for proper path resolution',

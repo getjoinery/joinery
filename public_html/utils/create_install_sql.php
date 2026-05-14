@@ -301,6 +301,41 @@ echo "   Generated system user (user_id 2)\n";
 echo "   Generated deleted user (user_id 3)\n";
 
 // ============================================================================
+// GENERATE DEFAULT AGENT FILE ROW (Customer baseline CLAUDE.md)
+// ============================================================================
+//
+// Seeds a single "Customer baseline" row into agf_agent_files with the curated
+// customer-facing agent instructions from maintenance_scripts/install_tools/
+// default_agents_template.md. agf_last_written_time is left NULL so the upgrade
+// regenerate step skips the row until the customer explicitly opts in via
+// "Write to disk" in admin.
+
+echo "[7.5/10] Generating default agent file row...\n";
+
+$agent_file = null;
+$agent_template_path = PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/default_agents_template.md';
+if (file_exists($agent_template_path)) {
+    $agent_template_content = file_get_contents($agent_template_path);
+    if ($agent_template_content === false) {
+        echo "   WARNING: Could not read default_agents_template.md — skipping agent file seed\n";
+    } else {
+        $agent_file_sql = "-- Customer baseline agent file row.\n"
+            . "-- agf_last_written_time is NULL — upgrade regenerate skips never-written rows,\n"
+            . "-- so the customer must explicitly click 'Write to disk' in admin to opt in.\n"
+            . "INSERT INTO public.agf_agent_files (agf_name, agf_target_filenames, agf_content, agf_create_time)\n"
+            . "VALUES ('Customer baseline', '[\"CLAUDE.md\"]'::jsonb, \$agf\$"
+            . $agent_template_content
+            . "\$agf\$, now());\n\n";
+
+        $agent_file = $temp_dir . '/agent_file.sql';
+        file_put_contents($agent_file, $agent_file_sql);
+        echo "   Generated agent file row (" . strlen($agent_template_content) . " bytes from template)\n";
+    }
+} else {
+    echo "   WARNING: default_agents_template.md not found at $agent_template_path — skipping agent file seed\n";
+}
+
+// ============================================================================
 // ASSEMBLE FINAL SQL FILE
 // ============================================================================
 
@@ -393,6 +428,14 @@ fwrite($output_handle, "\n-- ===================================================
 fwrite($output_handle, "-- DEFAULT USERS (Admin, System, Deleted)\n");
 fwrite($output_handle, "-- ============================================================================\n\n");
 fwrite($output_handle, file_get_contents($admin_file));
+
+// Write default agent file row (if generated)
+if ($agent_file && file_exists($agent_file)) {
+    fwrite($output_handle, "\n-- ============================================================================\n");
+    fwrite($output_handle, "-- DEFAULT AGENT FILE (Customer baseline)\n");
+    fwrite($output_handle, "-- ============================================================================\n\n");
+    fwrite($output_handle, file_get_contents($agent_file));
+}
 
 // ============================================================================
 // GENERATE SEQUENCE RESET STATEMENTS

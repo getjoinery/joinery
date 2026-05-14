@@ -388,6 +388,14 @@
             "parent": "system"
         },
         {
+            "slug": "system-agent-files",
+            "title": "Agent Files",
+            "url": "admin_agent_files",
+            "order": 6,
+            "permission": 10,
+            "parent": "system"
+        },
+        {
             "slug": "pages-list",
             "title": "Pages list",
             "url": "admin_pages",

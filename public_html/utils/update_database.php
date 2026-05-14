@@ -706,6 +706,41 @@
 			// Non-fatal — core DB update already succeeded
 		}
 
+		// Step: Regenerate agent files (CLAUDE.md, etc.) from the database.
+		// agf_agent_files is the source of truth — re-write any row that has been
+		// previously flushed to disk so post-upgrade the on-disk files match the DB.
+		echo "<br>\n<strong>Agent Files Regenerate</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('data/agent_files_class.php'));
+
+			$agent_files = new MultiAgentFile(array('deleted' => false, 'written' => true));
+			$agent_files->load();
+
+			$agent_written_count = 0;
+			$agent_failed_count  = 0;
+			foreach ($agent_files as $agent_file) {
+				try {
+					$agent_file->write_to_disk();
+					$agent_written_count++;
+				} catch (\Throwable $e) {
+					$agent_failed_count++;
+					echo "  ⚠ Failed to write agent file '" . htmlspecialchars($agent_file->get('agf_name') ?? '') . "': "
+						. htmlspecialchars($e->getMessage()) . "<br>\n";
+				}
+			}
+
+			if ($agent_written_count === 0 && $agent_failed_count === 0) {
+				echo "✓ Agent files: nothing to write (no rows flushed to disk yet)<br>\n";
+			} else {
+				echo "✓ Agent files: {$agent_written_count} written"
+					. ($agent_failed_count > 0 ? ", {$agent_failed_count} failed" : '')
+					. "<br>\n";
+			}
+		} catch (\Throwable $e) {
+			echo "⚠️  Agent file regenerate failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+			// Non-fatal — core DB and plugin sync already succeeded
+		}
+
 		// Self-heal system_version from the canonical VERSION file. Keeps stg_settings
 		// in sync even on publish servers that don't run upgrade.php against themselves.
 		try {
