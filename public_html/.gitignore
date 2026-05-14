@@ -13,3 +13,8 @@ Globalvars_site.php
 *.log
 /cache
 /theme-sources
+
+# Agent instruction files — managed via /admin/admin_agent_files (db-backed, written on demand)
+/CLAUDE.md
+/GEMINI.md
+/AGENTS.md

@@ -30,10 +30,6 @@ if ($written) {
 	echo '<div class="alert alert-success" role="alert">Agent file written to disk.</div>';
 }
 
-echo '<div style="margin-bottom: 12px;">';
-echo '<p><strong>Agent files</strong> (CLAUDE.md, GEMINI.md, etc.) are stored in the database and written to disk on demand. The database row is authoritative; direct edits to the file on disk are overwritten on the next write.</p>';
-echo '</div>';
-
 $headers = array('Name', 'Target Filenames', 'Last Written', 'Status', 'Actions');
 $altlinks = array('New Agent File' => '/admin/admin_agent_file_edit');
 $pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage));
