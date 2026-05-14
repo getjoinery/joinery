@@ -22,6 +22,7 @@ class ContentVersion extends SystemBase {	public static $prefix = 'cnv';
 	const TYPE_PAGE = 6;
 	const TYPE_LOCATION = 7;
 	const TYPE_ITEM = 8;
+	const TYPE_AGENT_FILE = 9;
 
 		/**
 	 * Field specifications define database column properties and validation rules
