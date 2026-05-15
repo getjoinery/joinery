@@ -706,6 +706,26 @@
 			// Non-fatal — core DB update already succeeded
 		}
 
+		// Step: Seed SEO page metadata inventory (enumeration).
+		// Idempotent — upserts entity rows by (spm_entity_type, spm_entity_id),
+		// static rows by spm_path. Includes bounded auto-cleanup.
+		echo "<br>\n<strong>SEO Page Metadata Seed</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
+			$seo_result = SeoPageMetadata::sync_inventory();
+			echo sprintf("✓ SEO inventory synced: %d entity inserted, %d static inserted, %d path updates, %d soft-deleted<br>\n",
+				$seo_result['inserted_entity'], $seo_result['inserted_static'],
+				$seo_result['updated_path'], $seo_result['soft_deleted']);
+			if (!empty($seo_result['errors'])) {
+				foreach ($seo_result['errors'] as $err) {
+					echo "  ⚠ " . htmlspecialchars($err) . "<br>\n";
+				}
+			}
+		} catch (\Throwable $e) {
+			echo "⚠️  SEO inventory seed failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+			// Non-fatal — admin can run "Scan now" from /admin/admin_seo_pages
+		}
+
 		// Step: Regenerate agent files (CLAUDE.md, etc.) from the database.
 		// agf_agent_files is the source of truth — re-write any row that has been
 		// previously flushed to disk so post-upgrade the on-disk files match the DB.

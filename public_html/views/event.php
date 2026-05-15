@@ -17,9 +17,11 @@ $evt_get = function($field) use ($event, $is_virtual_event) {
 
 $page         = new PublicPage();
 $page_options = [
-    'is_valid_page' => $is_valid_page,
-    'title'         => $evt_get('evt_name'),
-    'og_type'       => 'article',
+    'is_valid_page'    => $is_valid_page,
+    'title'            => $evt_get('evt_name'),
+    'og_type'          => 'article',
+    'entity_type'      => 'event',
+    'entity_body_html' => $evt_get('evt_description'),
 ];
 if ($evt_get('evt_short_description')) {
     $page_options['meta_description'] = $evt_get('evt_short_description');

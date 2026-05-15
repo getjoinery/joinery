@@ -8,7 +8,6 @@ $page_vars = process_logic(pricing_logic(array_merge($_GET, $_POST, $params ?? [
 $page = new PublicPage();
 $page->public_header([
     'is_valid_page' => $is_valid_page,
-    'title'         => 'Pricing',
 ]);
 ?>
 <div class="jy-ui">

@@ -4,8 +4,6 @@ require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
 
 $page = new PublicPage();
 $page->public_header([
-    'title' => 'Philosophy — Joinery',
-    'description' => 'Why Joinery exists. Privacy, data ownership, transparency, and building software that respects the people who use it.',
     'showheader' => true,
 ]);
 

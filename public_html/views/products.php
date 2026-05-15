@@ -7,7 +7,6 @@ $page_vars = process_logic(products_logic(array_merge($_GET, $_POST, $params ?? 
 $page = new PublicPage();
 $page->public_header([
     'is_valid_page' => $is_valid_page,
-    'title'         => 'Products',
 ]);
 ?>
 <div class="jy-ui">

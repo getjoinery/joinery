@@ -7,19 +7,12 @@
 
     $page = new PublicPage();
     $video_header_options = [
-        'is_valid_page' => $is_valid_page,
-        'title'         => $video->get('vid_title'),
-        'og_type'       => 'article',
+        'is_valid_page'    => $is_valid_page,
+        'title'            => $video->get('vid_title'),
+        'og_type'          => 'article',
+        'entity_type'      => 'video',
+        'entity_body_html' => $video->get('vid_description'),
     ];
-    if ($video->get('vid_description')) {
-        $vid_desc = trim(strip_tags($video->get('vid_description')));
-        if (mb_strlen($vid_desc) > 160) {
-            $vid_desc = mb_substr($vid_desc, 0, 157) . '...';
-        }
-        if ($vid_desc) {
-            $video_header_options['meta_description'] = $vid_desc;
-        }
-    }
     $page->public_header($video_header_options);
 ?>
 <div class="jy-ui">

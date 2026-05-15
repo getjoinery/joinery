@@ -14,14 +14,9 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$session = SessionControl::get_instance();
 
 	$page = new PublicPage();
-	$hoptions = array(
-		'is_valid_page'    => $is_valid_page,
-		'title'            => 'ScrollDaddy | DNS Content Filtering | Save Your Sanity Online',
-		'meta_description' => 'Block social media, porn, gambling, and distractions at the DNS level. 5-minute setup, works on every device on your network. Save your sanity online.',
-		'og_title'         => 'ScrollDaddy — Take control of your browsing',
-		'og_description'   => 'DNS-level blocking that works across every device. 5-minute setup.',
-	);
-	$page->public_header($hoptions);
+	$page->public_header(array(
+		'is_valid_page' => $is_valid_page,
+	));
 
 	//echo PublicPage::BeginPage('');
 	?>

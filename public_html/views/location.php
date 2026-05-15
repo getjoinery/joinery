@@ -7,8 +7,10 @@
 
     $page = new PublicPage();
     $location_header_options = [
-        'is_valid_page' => $is_valid_page,
-        'title'         => $location->get('loc_name'),
+        'is_valid_page'    => $is_valid_page,
+        'title'            => $location->get('loc_name'),
+        'entity_type'      => 'location',
+        'entity_body_html' => $location->get('loc_description'),
     ];
     if ($location->get('loc_short_description')) {
         $location_header_options['meta_description'] = $location->get('loc_short_description');

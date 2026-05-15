@@ -67,10 +67,6 @@ class PublicPage extends PublicPageBase {
 		$_head_inject = ob_get_clean();
 
 		$menu_data = $this->get_menu_data();
-		$site_name = $settings->get_setting('site_name', true, true) ?: 'Jeremy Tunnell';
-
-		$title = isset($options['title']) ? $options['title'] : $site_name;
-		$description = isset($options['description']) ? $options['description'] : ($settings->get_setting('site_description', true, true) ?: '');
 
 		?>
 <!DOCTYPE html>
@@ -78,8 +74,6 @@ class PublicPage extends PublicPageBase {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="<?php echo htmlspecialchars($description); ?>">
-    <title><?php echo htmlspecialchars($title); ?></title>
 
     <?php echo $_head_inject; ?>
     <?php $this->global_includes_top($options); ?>

@@ -8,9 +8,11 @@
 
     $page = new PublicPage();
     $post_header_options = [
-        'is_valid_page' => $is_valid_page,
-        'title'         => $post->get('pst_title'),
-        'og_type'       => 'article',
+        'is_valid_page'    => $is_valid_page,
+        'title'            => $post->get('pst_title'),
+        'og_type'          => 'article',
+        'entity_type'      => 'post',
+        'entity_body_html' => $post->get('pst_body'),
     ];
     if ($post->get('pst_short_description')) {
         $post_header_options['meta_description'] = $post->get('pst_short_description');

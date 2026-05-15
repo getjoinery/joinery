@@ -11,9 +11,11 @@
 
     $page = new PublicPage();
     $product_header_options = [
-        'is_valid_page' => $is_valid_page,
-        'title'         => $product->get('pro_name'),
-        'og_type'       => 'product',
+        'is_valid_page'    => $is_valid_page,
+        'title'            => $product->get('pro_name'),
+        'og_type'          => 'product',
+        'entity_type'      => 'product',
+        'entity_body_html' => $product->get('pro_description'),
     ];
     if ($product->get('pro_short_description')) {
         $product_header_options['meta_description'] = $product->get('pro_short_description');

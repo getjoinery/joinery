@@ -24,10 +24,7 @@ class PublicPage extends PublicPageBase {
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-            <meta name="description" content="<?php echo $options['description'] ?? ''; ?>">
             <meta name="keywords" content="">
-
-            <title><?php echo htmlspecialchars($options['title'] ?? $menu_data['site_info']['site_name'] ?? 'Galactic Tribune'); ?></title>
 
             <?php echo $_head_inject; ?>
             <?php $this->global_includes_top($options); ?>

@@ -552,6 +552,14 @@
             "icon": "wrench"
         },
         {
+            "slug": "core-admin-seo-pages",
+            "title": "SEO Pages",
+            "url": "/admin/admin_seo_pages",
+            "order": 125,
+            "permission": 10,
+            "icon": "search"
+        },
+        {
             "slug": "core-admin-utilities",
             "title": "Admin Utilities",
             "url": "/admin/admin_utilities",
