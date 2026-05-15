@@ -10,11 +10,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
-		'is_valid_page'    => $is_valid_page,
-		'title'            => 'ScrollDaddy Pricing | DNS Content Filtering | Save Your Sanity Online',
-		'meta_description' => 'Simple plans for DNS-level content filtering. Block social media, porn, gambling and more across every device on your network. 5-minute setup.',
-		'og_title'         => 'ScrollDaddy Pricing',
-		'og_description'   => 'Pick a plan and take control of your browsing. DNS-level filtering, every device.',
+		'is_valid_page' => $is_valid_page,
 	));
 	echo PublicPage::BeginPage('Pricing');
 

@@ -13,7 +13,6 @@
     $page = new PublicPage();
     $page->public_header([
         'is_valid_page' => $is_valid_page,
-        'title'         => 'Newsletter',
     ]);
     echo PublicPage::BeginPage('Newsletter Lists', ['subtitle' => 'Get updates from us.']);
 ?>

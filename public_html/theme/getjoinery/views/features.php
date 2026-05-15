@@ -4,8 +4,6 @@ require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
 
 $page = new PublicPage();
 $page->public_header([
-    'title' => 'Features — Joinery',
-    'description' => 'Members, events, payments, email, themes, plugins, API, and more — all included in every plan.',
     'showheader' => true,
 ]);
 

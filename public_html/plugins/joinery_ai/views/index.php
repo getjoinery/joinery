@@ -16,10 +16,7 @@ $page_vars = process_logic(joinery_ai_dashboard_logic(array_merge($_GET, $_POST,
 extract($page_vars);
 
 $page = new PublicPage();
-$page->public_header([
-    'title'            => 'Joinery AI',
-    'meta_description' => 'Your scheduled AI recipes.',
-]);
+$page->public_header([]);
 ?>
 
 <style>

@@ -436,38 +436,86 @@ abstract class PublicPageBase {
 	public function global_includes_top($options=array()){
 		$settings = Globalvars::get_instance();
 		$webDir = $settings->get_setting('webDir');
+		$site_url = 'https://' . $webDir;
+		$site_name = $settings->get_setting('site_name');
+		$og_site_name = $site_name;
 
-		// Output canonical tag for SEO
+		require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
+
+		// Canonical URL (absolute, query-string stripped, pagination removed)
 		$canonical_url = $this->get_canonical_url();
+		$canonical_url = SeoPageMetadata::absolutize_url($canonical_url, $site_url);
 		echo '<link rel="canonical" href="' . htmlspecialchars($canonical_url, ENT_QUOTES, 'UTF-8') . '">' . "\n";
 
-		// SEO + social metadata — shared source values
-		$page_title = !empty($options['title']) ? $options['title'] : $settings->get_setting('site_name');
-		$meta_description = !empty($options['meta_description']) ? $options['meta_description'] : $settings->get_setting('site_description');
-		$og_type = !empty($options['og_type']) ? $options['og_type'] : 'website';
-		$og_site_name = $settings->get_setting('site_name');
+		// Layer 2b — resolve SEO via DB override → $options → inferred → site setting
+		$request_path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+		$canonical_path = SeoPageMetadata::canonicalize_path($request_path);
+		$override = SeoPageMetadata::find_for_path($canonical_path);
+		$inferred = SeoPageMetadata::infer_for_request($canonical_path, $options);
 
-		// Strip HTML and truncate description
+		// Accept 'description' as an alias for 'meta_description' (legacy views)
+		if (empty($options['meta_description']) && !empty($options['description'])) {
+			$options['meta_description'] = $options['description'];
+		}
+
+		$page_title = ($override && $override->get('spm_title'))
+			? $override->get('spm_title')
+			: (!empty($options['title']) ? $options['title']
+				: ($inferred['title'] ?? $site_name));
+
+		$meta_description = ($override && $override->get('spm_meta_description'))
+			? $override->get('spm_meta_description')
+			: (!empty($options['meta_description']) ? $options['meta_description']
+				: ($inferred['meta_description'] ?? $settings->get_setting('site_description')));
+
+		$og_title = ($override && $override->get('spm_og_title'))
+			? $override->get('spm_og_title')
+			: (!empty($options['og_title']) ? $options['og_title'] : $page_title);
+
+		$og_description = ($override && $override->get('spm_og_description'))
+			? $override->get('spm_og_description')
+			: (!empty($options['og_description']) ? $options['og_description'] : $meta_description);
+
+		$preview_image = ($override && $override->get('spm_preview_image_url'))
+			? $override->get('spm_preview_image_url')
+			: (!empty($options['preview_image_url']) ? $options['preview_image_url']
+				: ($inferred['preview_image'] ?? $settings->get_setting('preview_image')));
+
+		$og_type = ($override && $override->get('spm_og_type'))
+			? $override->get('spm_og_type')
+			: (!empty($options['og_type']) ? $options['og_type']
+				: ($inferred['og_type'] ?? 'website'));
+
+		$noindex = (isset($options['is_valid_page']) && $options['is_valid_page'] === false)
+			|| !empty($options['noindex'])
+			|| ($override && $override->get('spm_noindex'));
+
+		// Apply site-wide title format (skipped when title already equals site_name)
+		$page_title = SeoPageMetadata::apply_title_format($page_title, $site_name);
+
+		// Strip HTML / multi-byte safe truncate for descriptions
 		if ($meta_description) {
 			$meta_description = strip_tags($meta_description);
 			if (mb_strlen($meta_description) > 200) {
 				$meta_description = mb_substr($meta_description, 0, 197) . '...';
 			}
 		}
-
-		// Optional social-copy overrides — fall through to SEO copy when unset
-		$og_title = !empty($options['og_title']) ? $options['og_title'] : $page_title;
-		$og_description = !empty($options['og_description']) ? $options['og_description'] : $meta_description;
-		if (!empty($options['og_description'])) {
+		if ($og_description) {
 			$og_description = strip_tags($og_description);
 			if (mb_strlen($og_description) > 200) {
 				$og_description = mb_substr($og_description, 0, 197) . '...';
 			}
 		}
 
-		// SEO: standard meta description
+		// Single emission point for <title>, <meta name="description">, og:*, twitter:*
+		echo '<title>' . htmlspecialchars($page_title, ENT_QUOTES, 'UTF-8') . '</title>' . "\n";
+
 		if ($meta_description) {
 			echo '<meta name="description" content="' . htmlspecialchars($meta_description, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		}
+
+		if ($noindex) {
+			echo '<meta name="robots" content="noindex" />' . "\n";
 		}
 
 		echo '<meta property="og:title" content="' . htmlspecialchars($og_title, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
@@ -481,36 +529,30 @@ abstract class PublicPageBase {
 		}
 		echo '<meta property="og:locale" content="en_US" />' . "\n";
 
-		// og:image - page-specific or site default
 		$emitted_og_image = null;
-		if(isset($options['preview_image_url']) && $options['preview_image_url']){
-			$og_image = $options['preview_image_url'];
-			if (strpos($og_image, 'http') !== 0) {
-				$og_image = 'https://' . $webDir . $og_image;
-			}
-			$increment = isset($options['preview_image_increment']) ? $options['preview_image_increment'] : 1;
-			$emitted_og_image = $og_image . '?' . $increment;
+		if ($preview_image) {
+			$og_image = SeoPageMetadata::absolutize_url($preview_image, $site_url);
+			$increment = $options['preview_image_increment']
+				?? $settings->get_setting('preview_image_increment', false, true)
+				?? 1;
+			$emitted_og_image = $og_image . (strpos($og_image, '?') === false ? '?' : '&') . $increment;
 			echo '<meta property="og:image" content="' . htmlspecialchars($emitted_og_image, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
-		else{
-			$preview_image_url = $settings->get_setting('preview_image');
-			if($preview_image_url){
-				if (strpos($preview_image_url, 'http') !== 0) {
-					$preview_image_url = 'https://' . $webDir . $preview_image_url;
-				}
-				$emitted_og_image = $preview_image_url . '?' . $settings->get_setting('preview_image_increment');
-				echo '<meta property="og:image" content="' . htmlspecialchars($emitted_og_image, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
-			}
-		}
 
-		// Twitter Card tags — mirror the og values
-		echo '<meta name="twitter:card" content="summary_large_image" />' . "\n";
+		// Twitter Card type auto-selected by image presence
+		$twitter_card = $emitted_og_image ? 'summary_large_image' : 'summary';
+		echo '<meta name="twitter:card" content="' . $twitter_card . '" />' . "\n";
 		echo '<meta name="twitter:title" content="' . htmlspecialchars($og_title, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		if ($og_description) {
 			echo '<meta name="twitter:description" content="' . htmlspecialchars($og_description, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
 		if ($emitted_og_image) {
 			echo '<meta name="twitter:image" content="' . htmlspecialchars($emitted_og_image, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+		}
+
+		// Lazy auto-create row for any new public path (admin previews included)
+		if (!$override) {
+			SeoPageMetadata::lazy_auto_create($canonical_path, $options);
 		}
 
 		$this->render_base_assets();
@@ -647,13 +689,9 @@ abstract class PublicPageBase {
 			header('Referrer-Policy: strict-origin-when-cross-origin');
 		}
 
-		if(!isset($options['title']) || !$options['title']){
-			$options['title'] = $settings->get_setting('site_name');
-		}
-		
-		if(!isset($options['meta_description']) || !$options['meta_description']){
-			$options['meta_description'] = $settings->get_setting('site_description');
-		}
+		// NOTE: Do not default $options['title'] / $options['meta_description'] here.
+		// global_includes_top() runs the full precedence chain (override → options →
+		// inferred → site setting). Pre-populating $options would short-circuit inference.
 
 		if(empty($options['noheader']) && !$options['is_404'] && ($options['is_valid_page'] ?? false) ){
 			//TRACKING

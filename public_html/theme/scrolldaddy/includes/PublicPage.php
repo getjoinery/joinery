@@ -201,7 +201,6 @@ Career Area
 		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
         <meta name="keywords" content="adblocker, social media blocker, adult content filter, malware blocker">
 
-		<title><?php echo $options['title']; ?></title>
 				<?php echo $_head_inject; ?>
 				<?php $this->global_includes_top($options); ?>
 				
