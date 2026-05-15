@@ -68,7 +68,7 @@ Walk through:
 
 1. Click the affiliate link above to go to Linode and create an account.
 2. Click **Create → Linode**.
-3. **Choose an image:** Select **Ubuntu 24.04 LTS**. Explain that this is the operating system — Joinery requires exactly this version (or Ubuntu 22.04 as a fallback).
+3. **Choose an image:** Select **Ubuntu 24.04 LTS**. Explain that this is the operating system — Joinery requires this exact version. The installer will warn and continue on other Ubuntu versions, but they are not supported.
 4. **Choose a region:** Pick a data center geographically close to your expected users. Any region works.
 5. **Choose a plan:** The **Nanode 1 GB** ($5/month) is sufficient for a small site. Recommend **Linode 2 GB** ($12/month) for anything with real users, because it gives more breathing room. Note that you can resize later.
 6. **Set a root password:** This is the master password for your server. Use a strong, random password and save it in a password manager. Note forbidden characters (single quote, backslash, dollar sign) that can cause problems — link to the forbidden characters table in `installation.md`.
@@ -135,6 +135,26 @@ mkdir -p /tmp/joinery && \
 **Before running:** replace `yourdomain.com` with your actual domain. If you don't have a domain yet, you can use your server's IP address in place of the domain — you just won't get SSL.
 
 **What this does:** Downloads the latest Joinery release, installs PHP, Apache, PostgreSQL, and all dependencies, then creates a site called `mysite` at your domain.
+
+**What to expect during the install — two passwords:**
+
+The installer will pause twice for passwords. Have your password manager open before you paste the command.
+
+1. **PostgreSQL master password (you choose this).** During the server-setup step, the installer will pause and prompt:
+   ```
+   Please enter a password for PostgreSQL postgres user:
+   Confirm password:
+   ```
+   Pick a strong, random password and save it in your password manager. Characters won't appear as you type. Avoid these characters, which break shell escaping: single quote (`'`), backslash (`\`), and dollar sign (`$`) — see the [forbidden characters table](installation.md#forbidden-characters) for the full list.
+
+2. **Per-site database password (auto-generated, displayed once).** During the site-creation step, the installer will print a highlighted yellow block that looks like:
+   ```
+   ═══════════════════════════════════════════════════════════════
+     IMPORTANT: Save this auto-generated password!
+     Database Password: <a long random string>
+   ═══════════════════════════════════════════════════════════════
+   ```
+   Copy that password into your password manager immediately. It is shown only once. You will not need it for normal admin use, but you will need it if you ever connect to the database directly or restore from a backup.
 
 **If DNS hasn't propagated yet:** the SSL step may be skipped automatically. The installer will print instructions for running Certbot manually once DNS is ready. You can also run the domain management script later — see `installation.md`.
 
