@@ -194,11 +194,24 @@ function admin_plugins_logic($get, $post) {
 	// Get all plugins with their status
 	$plugins = MultiPlugin::get_all_plugins_with_status();
 
+	// Determine which active plugins declare provisioners. This only reads
+	// plugin.json manifests — no provisioning checks are run here; those run
+	// asynchronously via ajax/check_provisioning.php after the page renders.
+	$provisioning_plugins = array();
+	try {
+		require_once(PathHelper::getIncludePath('includes/PluginProvisioning.php'));
+		$provisioning_plugins = array_keys(PluginProvisioning::getProvisioners());
+	} catch (Throwable $e) {
+		// Non-fatal: the setup indicator simply will not appear.
+		error_log('admin_plugins_logic: provisioner discovery failed: ' . $e->getMessage());
+	}
+
 	return LogicResult::render(array(
 		'system_health' => $system_health,
 		'message' => $message,
 		'message_type' => $message_type,
-		'plugins' => $plugins
+		'plugins' => $plugins,
+		'provisioning_plugins' => $provisioning_plugins
 	));
 }
 ?>

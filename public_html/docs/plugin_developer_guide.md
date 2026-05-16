@@ -698,6 +698,81 @@ function my_plugin_uninstall() {
 
 **Do not** include `DROP TABLE`, `DELETE FROM stg_settings`, or `DELETE FROM amu_admin_menus` in the hook — those are the system's job now. A hook that duplicates them isn't harmful (drops are `IF EXISTS`, deletes match exact keys the system already cleared), but the extra code rots.
 
+## Declaring Host Provisioners
+
+`update_database` handles the *database* side of plugin setup. **Provisioners** handle the other side: the external runtime resources a plugin needs that the database system knows nothing about — mail servers, relays, services, extensions, APIs.
+
+A plugin can be installed and activated while one of these resources is missing or misconfigured, so the feature silently fails. Provisioning checks detect that on demand and surface it on the admin Plugins page (`/admin/admin_plugins`), with the command that fixes it where one exists. The system **only detects and reports — it never runs a fix.**
+
+### Declaration
+
+Declare runtime dependencies as a `provisioners` array in `plugin.json`, alongside `settings` and `adminMenu`:
+
+```json
+"provisioners": [
+  {
+    "key": "inbound_mail_server",
+    "label": "Inbound mail server (Postfix) running",
+    "details": "Postfix on the host receives inbound mail and pipes it to the forwarder.",
+    "check": { "type": "probe", "probe": "tcp", "host": "host-gateway", "port": 25 },
+    "script": "scripts/install_email.sh"
+  },
+  {
+    "key": "outbound_forwarding_relay",
+    "label": "Outbound mail relay for forwarding",
+    "details": "Forwarded messages are relayed out through this SMTP server.",
+    "check": { "type": "code", "call": "EmailForwardingHealth::checkForwardingRelay" }
+  }
+]
+```
+
+| Field | Required | Purpose |
+|---|---|---|
+| `key` | yes | Stable identifier, unique within the plugin. |
+| `label` | yes | Human-readable name shown in the admin UI. |
+| `details` | no | One-line explanation shown under the label. |
+| `check` | yes | A check object; `type` is `code` or `probe`. |
+| `script` | no | Path to a fix script, relative to the plugin root. Include it only when the fix is a host-level install; omit it when the failure is a configuration problem the admin fixes directly. |
+
+### Two check types — when to use each
+
+**`code` check** — `{ "type": "code", "call": "Class::method" }`. Use this for a resource your plugin *reaches out to acquire* (an SMTP relay, a database, an extension). The check IS your plugin's real acquisition routine, invoked on demand: it exercises the exact code path the feature uses, and it works the same inside a container or on bare metal because it only asks "can our code acquire this." A `code` check passing yields the `verified` state — the strongest pass.
+
+**`probe` check** — `{ "type": "probe", "probe": "tcp", "host": "...", "port": N }`. Use this for a dependency that *pushes into* your plugin rather than being acquired by it (an inbound mail server that pipes mail to a script — your code never connects to it, so a `code` check is structurally blind to it). The system opens a TCP connection within a 5-second enforced timeout. A `probe` passing yields the weaker `reachable` state — it proves something is listening, not that it is the right software or correctly configured.
+
+`probe` is `tcp` in v1. `host` may be a literal IP/hostname or the token **`host-gateway`**, which resolves to the Docker bridge gateway inside a container and to `127.0.0.1` on bare metal — the portable way to say "reach a service on my host."
+
+### The `code` check contract
+
+`call` names a **static method** (`Class::method`). By convention the class is a `*Health` class in the plugin's `includes/` directory — the system loads `plugins/{plugin}/includes/{Class}.php` automatically if the class is not already loaded. The method must:
+
+- **Perform the plugin's real acquisition step** — or call the shared routine the feature itself uses. Factor each dependency into one acquisition routine called from both places so the check and the feature cannot diverge.
+- **Have no side effects** — open and close a connection, never send a real message or write data. It verifies *acquisition*, not *use*.
+- **Be idempotent and cheap** — it runs every time the Plugins page opens.
+
+Outcomes:
+
+- **Returns normally** → `verified`.
+- **Throws `ProvisioningCheckFailed`** → `unmet`. This is the *expected* failure signal. Catch the underlying acquisition exception (a `PDOException`, an SMTP error) and rethrow it as `ProvisioningCheckFailed` with a clean, human-readable message — that message is shown to the admin.
+- **Throws any other `Throwable`, or the class/method cannot be loaded** → `error` (a broken check, reported distinctly from a missing dependency).
+
+> ⚠️ **A `code` check must set its own short connection timeout.** The provisioning system runs the check inside a request and **cannot forcibly interrupt blocked PHP I/O**. A check method that connects to a dead host without a timeout will hang its own badge indefinitely. Setting a short timeout (e.g. `$mailer->Timeout = 5`) is a convention, not something the system enforces — it is the only thing protecting against a stuck check.
+
+### Result states and the admin UI
+
+Checks run asynchronously (via `ajax/check_provisioning.php`) after the Plugins page renders, so a slow check never blocks the page. Each plugin with provisioners gets a rolled-up badge:
+
+| Rollup | Badge |
+|---|---|
+| All `verified` | green **Setup complete** |
+| All pass, some only `reachable` | teal **Reachable — not fully verified** |
+| Any `unmet` | amber **Needs setup** |
+| Any `error` | red **Check failed** |
+
+The teal state is deliberate: a plugin whose green status rests on probes never claims the unqualified "Setup complete." Expanding the badge lists each provisioner, with the reason and — for `unmet` provisioners that declare a `script` — the fix command as an absolute path.
+
+The CLI equivalent is `php utils/check_provisioning.php`, which prints the same results and exits non-zero when anything is `unmet` or `error`.
+
 ## Provider Abstractions
 
 The system has two pluggable provider abstractions for external services. Each follows the same shape: an interface, a service manager that auto-discovers concrete classes, and one provider class per third-party service. Adding a new provider is a single-file change — drop a class into the providers directory and the rest of the system picks it up.
