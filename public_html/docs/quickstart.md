@@ -22,13 +22,7 @@ Joinery runs on a **VPS** (Virtual Private Server) — a Linux computer you rent
 
 We recommend **Linode** (now part of Akamai Cloud). It's reliable, straightforward to use, and competitively priced.
 
-> ### Get $100 in free credit
->
-> Sign up for Linode using our referral link and you'll receive **$100 of credit to use over your first 60 days** — enough to run your server for months while you get started.
->
-> **[Sign up for Linode →](https://www.linode.com/lp/refer/?r=f89d0c9308eeef26368cc67356eb8fa81365d488)**
->
-> *We earn a small referral fee if you sign up this way — it doesn't affect your price.*
+[Sign up for Linode using our referral link](https://www.linode.com/lp/refer/?r=f89d0c9308eeef26368cc67356eb8fa81365d488) and you'll receive $100 of credit to use over your first 60 days.
 
 Once you have a Linode account, follow these steps to create your server:
 
