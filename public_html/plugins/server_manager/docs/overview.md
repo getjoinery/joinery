@@ -570,7 +570,8 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `data/management_job_class.php` | ManagementJob + MultiManagementJob |
 | `data/agent_heartbeat_class.php` | AgentHeartbeat + MultiAgentHeartbeat |
 | `data/backup_target_class.php` | BackupTarget + MultiBackupTarget |
-| `includes/JobCommandBuilder.php` | Command generation for all job types |
+| `includes/JobCommandBuilder.php` | Command generation for all job types; `ssh_prefix()` is public for use by other tools |
+| `node_exec.php` | **Dev/AI diagnostic CLI** — run any command on a managed node in one call; handles SSH + Docker transparently. Usage: `php node_exec.php` (list nodes), `php node_exec.php <slug> "<cmd>"` (run), or pipe stdin with `--stdin` for SQL queries. |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage (get/put/delete) |
 | `includes/TargetUploader.php` | Web-tier upload + delete helpers using S3Signer |
