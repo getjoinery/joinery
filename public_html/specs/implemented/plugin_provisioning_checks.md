@@ -238,8 +238,9 @@ lets `install.sh` / `upgrade.php` optionally echo a "plugins need setup" summary
 
 ## First Consumer — Email Forwarding
 
-Email Forwarding declares two provisioners, one of each type — together they
-cover both directions of its mail flow:
+Email Forwarding declares three provisioners — one `probe` and two `code`
+checks — covering both directions of its mail flow and the DNS its domains
+depend on:
 
 - **`inbound_mail_server`** (`probe`) — a TCP probe of `host-gateway:25`. If no
   mail server is listening, inbound mail cannot arrive at all. Offers
@@ -250,6 +251,13 @@ cover both directions of its mail flow:
   makes the SMTP library throw; the method catches that and rethrows it as
   `ProvisioningCheckFailed` with a clean message, which is reported as `unmet`.
   No `script` — a relay failure is a configuration problem.
+- **`domain_dns_records`** (`code`) — `EmailForwardingHealth::checkDomainDns()`
+  loads the enabled forwarding domains from the database at check time and
+  verifies each one publishes an MX record and an SPF record, throwing
+  `ProvisioningCheckFailed` listing the misconfigured domains. It is a `code`
+  check, not a `dns` probe, precisely because the domain list is dynamic and
+  cannot be enumerated in a static `plugin.json` declaration. No `script` —
+  DNS records are external and cannot be fixed by a host script.
 
 Bump the plugin `version` in `plugin.json` when the `provisioners` block is
 added.

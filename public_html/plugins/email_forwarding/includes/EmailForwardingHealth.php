@@ -5,16 +5,16 @@
  *
  * Each public static method here is a `code` provisioning check (see the
  * "Declaring host provisioners" section of docs/plugin_developer_guide.md).
- * A check method performs the plugin's REAL resource-acquisition step — so it
- * exercises the exact code path the feature uses — and rethrows any failure
- * as ProvisioningCheckFailed with a clean message. It must be side-effect-free,
- * time-bounded, and cheap to run.
+ * A check method verifies one of the plugin's real runtime dependencies and
+ * rethrows any failure as ProvisioningCheckFailed with a clean message. It
+ * must be side-effect-free, time-bounded, and cheap to run.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/includes/EmailForwarder.php'));
+require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
 
 class EmailForwardingHealth {
 
@@ -53,5 +53,65 @@ class EmailForwardingHealth {
         }
 
         $mailer->smtpClose();
+    }
+
+    /**
+     * Verify DNS records for every enabled forwarding domain.
+     *
+     * For each enabled, non-deleted domain it confirms an MX record exists and
+     * an SPF (v=spf1) TXT record is published. DKIM is intentionally not checked
+     * here — DKIM keys are generated per domain and are optional; the Domains
+     * page surfaces DKIM separately.
+     *
+     * Lookups go through the system resolver, so with many domains this is the
+     * slowest of the plugin's checks; it stays a quick check (two lookups per
+     * domain, no DKIM selector scanning) and the async Plugins-page UI absorbs
+     * the latency.
+     *
+     * @throws ProvisioningCheckFailed if any enabled domain is missing MX or SPF.
+     */
+    public static function checkDomainDns() {
+        $domains = new MultiEmailForwardingDomain(['enabled' => true, 'deleted' => false]);
+        $domains->load();
+
+        if (count($domains) === 0) {
+            return; // No forwarding domains configured — nothing to verify.
+        }
+
+        $problems = [];
+        foreach ($domains as $domain) {
+            $name = $domain->get('efd_domain');
+            $issues = [];
+
+            $mx = @dns_get_record($name, DNS_MX);
+            if (empty($mx)) {
+                $issues[] = 'missing MX';
+            }
+
+            $spf_found = false;
+            $txt = @dns_get_record($name, DNS_TXT);
+            if (!empty($txt)) {
+                foreach ($txt as $record) {
+                    if (stripos($record['txt'] ?? '', 'v=spf1') !== false) {
+                        $spf_found = true;
+                        break;
+                    }
+                }
+            }
+            if (!$spf_found) {
+                $issues[] = 'missing SPF';
+            }
+
+            if ($issues) {
+                $problems[] = $name . ' (' . implode(', ', $issues) . ')';
+            }
+        }
+
+        if ($problems) {
+            throw new ProvisioningCheckFailed(
+                'DNS not configured for ' . count($problems) . ' of ' . count($domains)
+                . ' forwarding domain(s): ' . implode('; ', $problems)
+            );
+        }
     }
 }
