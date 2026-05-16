@@ -825,9 +825,9 @@ The container detects this is not a first run and skips initial setup. Your data
 # Production: use upgrade.php for archive-based upgrades
 php /var/www/html/$SITENAME/public_html/utils/upgrade.php
 
-# Development only: deploy.sh does git-based deployments.
+# Development only: build_dev_from_source.sh does git-based deployments.
 # Not recommended for production — see docs/deploy_and_upgrade.md.
-./deploy.sh $SITENAME --verbose
+./build_dev_from_source.sh $SITENAME --verbose
 ```
 
 ### Run Database Migrations

@@ -25,6 +25,13 @@ Globalvars_site.php
 /uploads/
 /docs/api_documentation.md
 
+# Agent instruction files — managed in the database (agf_agent_files table),
+# generated to disk by update_database. Not tracked in git.
+public_html/CLAUDE.md
+public_html/GEMINI.md
+public_html/AGENTS.md
+public_html/*.md.old
+
 # REMOVED these lines since theme/plugins are now tracked in repo:
 # /theme
 # /plugins

@@ -42,8 +42,13 @@ function admin_agent_file_edit_logic($get_vars, $post_vars) {
 		$agent_file->save();
 
 		if (isset($post_vars['btn_save_and_write'])) {
-			$agent_file->write_to_disk();
-			return LogicResult::redirect('/admin/admin_agent_files?written=' . $agent_file->key);
+			try {
+				$agent_file->write_to_disk();
+				return LogicResult::redirect('/admin/admin_agent_files?written=' . $agent_file->key);
+			} catch (AgentFileDriftException $e) {
+				// On-disk edits would be lost — the list page prompts for confirmation.
+				return LogicResult::redirect('/admin/admin_agent_files?confirm_overwrite=' . $agent_file->key);
+			}
 		}
 
 		return LogicResult::redirect('/admin/admin_agent_file_edit?agf_agent_file_id=' . $agent_file->key);

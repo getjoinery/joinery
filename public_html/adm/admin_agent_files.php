@@ -12,6 +12,7 @@ $numrecords  = $page_vars['numrecords'];
 $numperpage  = $page_vars['numperpage'];
 $written     = $page_vars['written'];
 $error       = $page_vars['error'];
+$confirm_row = $page_vars['confirm_row'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -28,6 +29,25 @@ if ($error) {
 }
 if ($written) {
 	echo '<div class="alert alert-success" role="alert">Agent file written to disk.</div>';
+}
+if ($confirm_row) {
+	$drifted = $confirm_row->get_drifted_targets();
+	echo '<div class="alert alert-warning" role="alert">';
+	echo '<strong>On-disk edits would be overwritten.</strong> ';
+	echo 'These target file(s) for &ldquo;' . htmlspecialchars($confirm_row->get('agf_name') ?? '(unnamed)')
+		. '&rdquo; have changed on disk since they were last written from the database: <strong>'
+		. htmlspecialchars(implode(', ', $drifted)) . '</strong>.';
+	echo '<p style="margin:8px 0 0;">Overwriting replaces them with the database content. The current '
+		. 'on-disk copy of each file is saved next to it as <code>&lt;filename&gt;.old</code> before it is replaced.</p>';
+	echo '<div style="margin-top:10px;">';
+	echo '<form method="POST" action="/admin/admin_agent_files" style="display:inline; margin-right:8px;">'
+		. '<input type="hidden" name="action" value="write_to_disk">'
+		. '<input type="hidden" name="agf_agent_file_id" value="' . (int)$confirm_row->key . '">'
+		. '<input type="hidden" name="force" value="1">'
+		. '<button type="submit" class="btn btn-danger">Yes, overwrite</button>'
+		. '</form>';
+	echo '<a class="btn btn-secondary" href="/admin/admin_agent_files">Cancel</a>';
+	echo '</div></div>';
 }
 
 $headers = array('Name', 'Target Filenames', 'Last Written', 'Status', 'Actions');

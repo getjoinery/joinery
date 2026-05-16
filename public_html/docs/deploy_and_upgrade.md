@@ -8,7 +8,7 @@ Five complementary tools provide deployment and upgrade capabilities:
 2. **publish_upgrade.php** - Package creation tool for distributing updates (core + themes + plugins) — lives in the Server Manager plugin
 3. **publish_theme.php** - Individual theme/plugin publishing — lives in the Server Manager plugin
 4. **install.sh** - Universal installer for Docker and bare-metal deployments
-5. **deploy.sh** - Git-based deployment for development environments (not recommended for production)
+5. **build_dev_from_source.sh** - Git-based deployment for development environments (not recommended for production)
 
 Tools 1, 4, and 5 use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation. Tools 2 and 3 require the **Server Manager** plugin to be active.
 
@@ -88,24 +88,24 @@ Universal installer for Docker and bare-metal deployments. Supports `--themes` f
 
 ---
 
-### deploy.sh
+### build_dev_from_source.sh
 
-**Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/deploy.sh`
+**Location:** `/var/www/html/joinerytest/maintenance_scripts/install_tools/build_dev_from_source.sh`
 
-> **Note:** This script is functional but not recommended for production. Use `upgrade.php` for production deployments. `deploy.sh` is suitable for development environments where git-based deployment is convenient.
+> **Note:** This script is functional but not recommended for production. Use `upgrade.php` for production deployments. `build_dev_from_source.sh` is suitable for development environments where git-based deployment is convenient.
 
 ```bash
 # Basic deployment
-./deploy.sh joinerytest
+./build_dev_from_source.sh joinerytest
 
 # Verbose mode (recommended)
-./deploy.sh joinerytest --verbose
+./build_dev_from_source.sh joinerytest --verbose
 
 # Disable auto-rollback for debugging
-./deploy.sh joinerytest --norollback
+./build_dev_from_source.sh joinerytest --norollback
 
 # Manual rollback
-./deploy.sh joinerytest --rollback
+./build_dev_from_source.sh joinerytest --rollback
 ```
 
 **Features:**
@@ -364,6 +364,12 @@ The same principle applies to core admin/profile menu rows (declared in `public_
 
 `update_database.php` always runs with `include_plugins => false`. Plugin tables are managed through the plugin activation workflow (`PluginManager::activate()` calls `DatabaseUpdater::runPluginTablesOnly()`), not through the core updater. This is intentional — core can't know about plugins at compile time.
 
+### Agent File Regeneration
+
+After migrations and plugin sync, `update_database` regenerates DB-managed agent files (`CLAUDE.md`, `GEMINI.md`, etc.) from the `agf_agent_files` table — the table is the source of truth, the on-disk files are generated output. Only rows previously written to disk (`agf_last_written_time IS NOT NULL`) are regenerated, so a never-written customer baseline row stays dormant until the customer opts in.
+
+A drift guard protects out-of-band edits: if a target file on disk was changed since it was last written (its sha256 no longer matches `agf_last_written_hash`), the row is **skipped with a warning** rather than overwritten. Resolve a skipped row from `/admin/admin_agent_files` — writing from there prompts for confirmation and backs the on-disk copy up as `<filename>.old` before overwriting. See `specs/implemented/agent_files_management.md` for the full design.
+
 ---
 
 ## DeploymentHelper API
@@ -479,4 +485,4 @@ The `publish_theme.php` catalog endpoints (`?list=themes`, `?list=plugins`) incl
 
 ---
 
-*Last Updated: 2026-04-22*
+*Last Updated: 2026-05-16*

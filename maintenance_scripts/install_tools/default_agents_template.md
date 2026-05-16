@@ -63,7 +63,7 @@ Run `php maintenance_scripts/dev_tools/validate_php_file.php <file>` after edits
 - `/docs/` - Documentation and Claude-specific guidance
 - `/tests/` - Test suites (email, functional, integration, models)
 - `maintenance_scripts/` - Deployment and maintenance scripts
-  - `install_tools/` - Installation scripts (install.sh, _site_init.sh, deploy.sh, etc.)
+  - `install_tools/` - Installation scripts (install.sh, _site_init.sh, build_dev_from_source.sh, etc.)
   - `sysadmin_tools/` - Maintenance utilities (backup, restore, etc.)
   - `dev_tools/` - Development utilities (PHP validation, etc.)
 
