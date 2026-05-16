@@ -72,7 +72,7 @@ selects the check kind.
     "label": "Inbound mail server (Postfix) running",
     "details": "Postfix on the host receives inbound mail and pipes it to the forwarder.",
     "check": { "type": "probe", "probe": "tcp", "host": "host-gateway", "port": 25 },
-    "script": "scripts/install_email.sh"
+    "script": "provisioning/install_email.sh"
   },
   {
     "key": "outbound_forwarding_relay",
@@ -223,7 +223,7 @@ the reason (caught exception message, or "connection refused"), and — if a
   Inbound mail server (Postfix) running
   Postfix on the host receives inbound mail and pipes it to the forwarder.
   Reason:  Connection refused (172.17.0.1:25)
-  Run:     sudo bash /var/www/html/SITENAME/public_html/plugins/email_forwarding/scripts/install_email.sh
+  Run:     sudo bash /var/www/html/SITENAME/public_html/plugins/email_forwarding/provisioning/install_email.sh
 ```
 
 When several `unmet` provisioners share a `script`, the command shows once. When
@@ -243,7 +243,7 @@ cover both directions of its mail flow:
 
 - **`inbound_mail_server`** (`probe`) — a TCP probe of `host-gateway:25`. If no
   mail server is listening, inbound mail cannot arrive at all. Offers
-  `scripts/install_email.sh` (an idempotent host installer) as the fix.
+  `provisioning/install_email.sh` (an idempotent host installer) as the fix.
 - **`outbound_forwarding_relay`** (`code`) — `EmailForwardingHealth::checkForwardingRelay()`
   calls the same routine the forwarder uses to acquire its outbound SMTP relay:
   it connects and authenticates, then closes. A down relay or bad credentials
@@ -304,8 +304,8 @@ something to pre-build now.
   opens a socket. Neither shells out, and neither adds a trust boundary an
   active plugin did not already have. Probe targets come verbatim from
   `plugin.json`, never from request input.
-- Fix scripts are committed under each plugin's `scripts/` directory and reviewed
-  like any other code.
+- Fix scripts are committed under each plugin's `provisioning/` directory and
+  reviewed like any other code.
 - The Plugins page and the AJAX endpoint are permission-gated to level 5+.
 
 ## Documentation
