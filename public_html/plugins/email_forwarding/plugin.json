@@ -1,7 +1,7 @@
 {
     "name": "Email Forwarding",
     "description": "Self-hosted email forwarding with virtual mailboxes, SRS, and DKIM verification",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -18,6 +18,21 @@
             "permission": 5,
             "order": 10,
             "settingActivate": "email_forwarding_enabled"
+        }
+    ],
+    "provisioners": [
+        {
+            "key": "inbound_mail_server",
+            "label": "Inbound mail server (Postfix) running",
+            "details": "Postfix on the host receives inbound mail and pipes it to the forwarder script.",
+            "check": { "type": "probe", "probe": "tcp", "host": "host-gateway", "port": 25 },
+            "script": "scripts/install_email.sh"
+        },
+        {
+            "key": "outbound_forwarding_relay",
+            "label": "Outbound mail relay for forwarding",
+            "details": "Forwarded messages are relayed out through this SMTP server.",
+            "check": { "type": "code", "call": "EmailForwardingHealth::checkForwardingRelay" }
         }
     ],
     "settings": [

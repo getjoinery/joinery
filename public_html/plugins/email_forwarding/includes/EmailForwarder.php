@@ -5,7 +5,7 @@
  * Parses raw email, looks up alias, verifies DKIM, checks rate limits,
  * and forwards via SmtpMailer. Handles SRS bounce processing.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
@@ -394,8 +394,14 @@ class EmailForwarder {
 
 	/**
 	 * Create a SmtpMailer instance with forwarding-specific settings (or fallback to main).
+	 *
+	 * This is the single outbound-relay acquisition routine: it is called both
+	 * by the forwarder itself and by EmailForwardingHealth::checkForwardingRelay(),
+	 * so the provisioning check exercises the exact relay the feature uses.
 	 */
-	private function createMailer() {
+	public function createMailer() {
+		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
+
 		$mailer = new SmtpMailer();
 
 		// Override with forwarding-specific SMTP settings if configured

@@ -18,6 +18,7 @@ $message = $page_vars['message'];
 $message_type = $page_vars['message_type'];
 $system_health = $page_vars['system_health'];
 $plugins = $page_vars['plugins'];
+$provisioning_plugins = $page_vars['provisioning_plugins'] ?? array();
 
 // Plugin data loaded successfully
 
@@ -234,6 +235,15 @@ $page->begin_box(array('altlinks' => $altlinks));
                     }
                 }
 
+                // Provisioning setup indicator — resolved asynchronously by
+                // the script at the bottom of the page.
+                if (in_array($plugin['name'], $provisioning_plugins, true)) {
+                    $status_cell .= '<div class="plugin-provisioning" data-provisioning-plugin="'
+                        . htmlspecialchars($plugin['name']) . '">';
+                    $status_cell .= '<span class="prov-badge prov-unknown">Checking setup&hellip;</span>';
+                    $status_cell .= '</div>';
+                }
+
                 array_push($rowvalues, $status_cell);
 
                 // Actions column
@@ -424,6 +434,139 @@ function confirmPluginAction(action, pluginName, message) {
     });
 }
 </script>
+
+<?php if (!empty($provisioning_plugins)): ?>
+<style>
+.plugin-provisioning { margin-top: 4px; }
+.prov-badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.78em; font-weight: 600; cursor: pointer; }
+.prov-verified  { background: #1e7e34; color: #fff; }
+.prov-reachable { background: #0f8b8d; color: #fff; }
+.prov-unmet     { background: #e0a800; color: #212529; }
+.prov-error     { background: #c82333; color: #fff; }
+.prov-unknown   { background: #6c757d; color: #fff; }
+.prov-panel { margin-top: 6px; padding: 6px 8px; border: 1px solid #dee2e6;
+    border-radius: 4px; background: #f8f9fa; font-size: 0.8em; }
+.prov-item { padding: 4px 0; border-bottom: 1px solid #e9ecef; }
+.prov-item:last-child { border-bottom: none; }
+.prov-item-label { font-weight: 600; }
+.prov-item-details { color: #6c757d; }
+.prov-item-status { margin-top: 2px; }
+.prov-item-unmet .prov-item-status { color: #9a7400; }
+.prov-item-error .prov-item-status { color: #c82333; }
+.prov-item-command { background: #212529; color: #f8f9fa; padding: 6px 8px;
+    border-radius: 4px; margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; }
+</style>
+<script>
+(function() {
+    var nodes = document.querySelectorAll('[data-provisioning-plugin]');
+    if (!nodes.length) { return; }
+
+    fetch('/ajax/check_provisioning', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function(r) {
+            if (!r.ok) { throw new Error('http ' + r.status); }
+            return r.json();
+        })
+        .then(function(data) {
+            if (!data || !data.success) { throw new Error('bad response'); }
+            nodes.forEach(function(node) {
+                var name = node.getAttribute('data-provisioning-plugin');
+                render(node, data.plugins[name] || {});
+            });
+        })
+        .catch(function() {
+            nodes.forEach(function(node) {
+                node.innerHTML = '<span class="prov-badge prov-unknown">Cannot check setup</span>';
+            });
+        });
+
+    function render(node, provisionersMap) {
+        var items = Object.keys(provisionersMap).map(function(k) { return provisionersMap[k]; });
+        if (!items.length) { node.innerHTML = ''; return; }
+
+        var states = items.map(function(i) { return i.state; });
+        var roll = states.indexOf('error') !== -1 ? 'error'
+                 : states.indexOf('unmet') !== -1 ? 'unmet'
+                 : states.indexOf('reachable') !== -1 ? 'reachable'
+                 : 'verified';
+
+        var labels = {
+            verified:  'Setup complete',
+            reachable: 'Reachable — not fully verified',
+            unmet:     'Needs setup',
+            error:     'Check failed'
+        };
+
+        node.innerHTML = '';
+        var badge = document.createElement('span');
+        badge.className = 'prov-badge prov-' + roll;
+        badge.textContent = labels[roll];
+        badge.setAttribute('role', 'button');
+        badge.tabIndex = 0;
+        badge.title = 'Click for details';
+
+        var panel = buildPanel(items);
+        node.appendChild(badge);
+        node.appendChild(panel);
+
+        function toggle() {
+            panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+        }
+        badge.addEventListener('click', toggle);
+        badge.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+    }
+
+    function buildPanel(items) {
+        var panel = document.createElement('div');
+        panel.className = 'prov-panel';
+        panel.style.display = 'none';
+
+        var seenCommands = {};
+        items.forEach(function(it) {
+            var row = document.createElement('div');
+            row.className = 'prov-item prov-item-' + it.state;
+
+            var label = document.createElement('div');
+            label.className = 'prov-item-label';
+            label.textContent = it.label;
+            row.appendChild(label);
+
+            if (it.details) {
+                var details = document.createElement('div');
+                details.className = 'prov-item-details';
+                details.textContent = it.details;
+                row.appendChild(details);
+            }
+
+            var status = document.createElement('div');
+            status.className = 'prov-item-status';
+            if (it.state === 'verified') {
+                status.textContent = 'Verified';
+            } else if (it.state === 'reachable') {
+                status.textContent = 'Reachable (listening, not verified)';
+            } else if (it.state === 'unmet') {
+                status.textContent = 'Needs setup — ' + (it.reason || '');
+            } else {
+                status.textContent = 'Check failed — ' + (it.reason || '');
+            }
+            row.appendChild(status);
+
+            if (it.state === 'unmet' && it.script_command && !seenCommands[it.script_command]) {
+                seenCommands[it.script_command] = true;
+                var cmd = document.createElement('pre');
+                cmd.className = 'prov-item-command';
+                cmd.textContent = it.script_command;
+                row.appendChild(cmd);
+            }
+            panel.appendChild(row);
+        });
+        return panel;
+    }
+})();
+</script>
+<?php endif; ?>
 
 <?php
 $page->end_box();
