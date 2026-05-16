@@ -39,6 +39,14 @@ Postfix and opendkim are installed automatically by `install.sh server`. For Doc
 
 ## Server Setup
 
+On apt-based systems, run `provisioning/install_email.sh` as root — it installs
+Postfix and opendkim and applies the **fixed** base configuration automatically
+and idempotently: the `joinery` pipe transport in `master.cf`, `virtual_transport`,
+and a safe `mydestination`. The per-domain steps below (`virtual_mailbox_domains`,
+DNS, opendkim keys) still have to be done for each domain; the manual `master.cf`
+/ `main.cf` snippets here are the reference for what the script applies and for
+non-apt systems.
+
 ### DNS (per domain)
 
 ```
