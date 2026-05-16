@@ -715,7 +715,7 @@ Declare runtime dependencies as a `provisioners` array in `plugin.json`, alongsi
     "label": "Inbound mail server (Postfix) running",
     "details": "Postfix on the host receives inbound mail and pipes it to the forwarder.",
     "check": { "type": "probe", "probe": "tcp", "host": "host-gateway", "port": 25 },
-    "script": "scripts/install_email.sh"
+    "script": "provisioning/install_email.sh"
   },
   {
     "key": "outbound_forwarding_relay",

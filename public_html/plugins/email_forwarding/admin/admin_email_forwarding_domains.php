@@ -416,7 +416,7 @@ $page->endtable();
 // --- Generate setup script silently (used by per-domain edit view) ---
 $hostname = gethostname();
 $site_path = rtrim(PathHelper::getBasePath(), '/');
-$pipe_script = $site_path . '/plugins/email_forwarding/scripts/email_forwarder.php';
+$pipe_script = $site_path . '/plugins/email_forwarding/utils/email_forwarder.php';
 
 $all_domain_names = array();
 foreach ($active_domains as $d) {

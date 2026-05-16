@@ -14,7 +14,7 @@ Postfix receives inbound mail, pipes it to a PHP script, which looks up the alia
 
 Postfix and opendkim are installed automatically by `install.sh server`. For Docker, Postfix must also run on the host (see Docker setup below).
 
-> **Setup status on the Plugins page.** Once activated, this plugin declares two provisioners, so the admin Plugins page (`/admin/admin_plugins`) reports whether its runtime dependencies are working: a missing inbound mail server shows **Needs setup** with the `scripts/install_email.sh` fix command, and a down or misconfigured outbound relay shows **Needs setup** with the reason. See the "Declaring Host Provisioners" section of `docs/plugin_developer_guide.md`.
+> **Setup status on the Plugins page.** Once activated, this plugin declares two provisioners, so the admin Plugins page (`/admin/admin_plugins`) reports whether its runtime dependencies are working: a missing inbound mail server shows **Needs setup** with the `provisioning/install_email.sh` fix command, and a down or misconfigured outbound relay shows **Needs setup** with the reason. See the "Declaring Host Provisioners" section of `docs/plugin_developer_guide.md`.
 
 ### Enabling
 
@@ -69,7 +69,7 @@ Add to `/etc/postfix/master.cf`:
 ```
 joinery   unix  -  n  n  -  5  pipe
   flags=DRhu user=www-data
-  argv=/usr/bin/php /var/www/html/SITENAME/public_html/plugins/email_forwarding/scripts/email_forwarder.php ${recipient}
+  argv=/usr/bin/php /var/www/html/SITENAME/public_html/plugins/email_forwarding/utils/email_forwarder.php ${recipient}
 ```
 
 ### Docker Multi-Container
@@ -147,8 +147,9 @@ ufw allow 2525:2550/tcp   # Docker host relay ports
 /plugins/email_forwarding/
 ├── plugin.json, uninstall.php
 ├── data/          — Domain, Alias, Log models (auto-create tables)
-├── includes/      — EmailForwarder (processing), SRSRewriter
-├── scripts/       — Postfix pipe script (email_forwarder.php)
+├── includes/      — EmailForwarder (processing), EmailForwardingHealth, SRSRewriter
+├── utils/         — Postfix pipe script (email_forwarder.php)
+├── provisioning/  — Host setup scripts (install_email.sh)
 ├── admin/         — Admin pages (aliases, alias edit, domains, logs)
 ├── logic/         — Logic files for admin pages
 ├── tasks/         — PurgeOldForwardingLogs scheduled task
@@ -173,7 +174,7 @@ echo "From: alice@gmail.com
 To: info@example.com
 Subject: Test
 
-Hello" | php plugins/email_forwarding/scripts/email_forwarder.php info@example.com
+Hello" | php plugins/email_forwarding/utils/email_forwarder.php info@example.com
 echo $?   # 0 = success, 67 = unknown alias, 75 = temp failure
 ```
 
