@@ -1,9 +1,9 @@
 <?php
 /**
- * DeploymentHelper - Shared deployment utilities for upgrade.php and deploy.sh
+ * DeploymentHelper - Shared deployment utilities for upgrade.php and build_dev_from_source.sh
  *
  * Provides validation, rollback, and theme/plugin preservation functionality
- * used by both web-based (upgrade.php) and command-line (deploy.sh) deployment systems.
+ * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  */
 
 class DeploymentHelper {

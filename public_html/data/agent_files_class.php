@@ -10,6 +10,24 @@ require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 class AgentFileException extends SystemBaseException {}
 
+/**
+ * Thrown by write_to_disk() when a target file on disk has been edited since
+ * it was last written from the database — overwriting would discard those
+ * edits. Carries the list of drifted filenames so callers can report them.
+ */
+class AgentFileDriftException extends AgentFileException {
+	protected $drifted_files;
+
+	public function __construct($message, array $drifted_files = array()) {
+		parent::__construct($message);
+		$this->drifted_files = $drifted_files;
+	}
+
+	public function get_drifted_files() {
+		return $this->drifted_files;
+	}
+}
+
 class AgentFile extends SystemBase {
 	public static $prefix = 'agf';
 	public static $tablename = 'agf_agent_files';
@@ -180,7 +198,33 @@ class AgentFile extends SystemBase {
 		}
 	}
 
-	public function write_to_disk() {
+	/**
+	 * Returns the target filenames whose on-disk copy no longer matches the
+	 * hash recorded at the last write — i.e. they were edited out of band.
+	 * Empty if the row has never been written (nothing on disk to protect).
+	 */
+	public function get_drifted_targets() {
+		$stored_hash = $this->get('agf_last_written_hash');
+		if (!$stored_hash) {
+			return array();
+		}
+		$project_root = self::get_project_root();
+		$drifted = array();
+		foreach ($this->get_target_filenames_array() as $filename) {
+			try {
+				self::validate_target_filename($filename);
+			} catch (\Throwable $e) {
+				continue;
+			}
+			$full_path = $project_root . '/' . $filename;
+			if (file_exists($full_path) && hash_file('sha256', $full_path) !== $stored_hash) {
+				$drifted[] = $filename;
+			}
+		}
+		return $drifted;
+	}
+
+	public function write_to_disk($force = false) {
 		if ($this->get('agf_delete_time')) {
 			throw new AgentFileException('Cannot write to disk: this agent file is deleted.');
 		}
@@ -190,13 +234,33 @@ class AgentFile extends SystemBase {
 			throw new AgentFileException('Cannot write to disk: no target filenames configured.');
 		}
 
+		// Drift guard: a target whose on-disk copy no longer matches what we
+		// last wrote has been edited out of band. Unless forced, refuse and
+		// let the caller decide — the admin UI prompts the user, the upgrade
+		// regenerate step skips the row and warns.
+		$drifted = $this->get_drifted_targets();
+		if (!empty($drifted) && !$force) {
+			throw new AgentFileDriftException(
+				'On-disk edits to ' . implode(', ', $drifted) . ' would be overwritten.',
+				$drifted
+			);
+		}
+
 		$content      = (string)$this->get('agf_content');
 		$project_root = self::get_project_root();
+		$drifted_set  = array_flip($drifted);
 
 		foreach ($targets as $filename) {
 			self::validate_target_filename($filename);
 			$full_path = $project_root . '/' . $filename;
 			$tmp_path  = $full_path . '.tmp.' . getmypid();
+
+			// Forced overwrite of a drifted file: keep the current on-disk
+			// copy alongside it as <filename>.old so the edits aren't lost.
+			if ($force && isset($drifted_set[$filename]) && file_exists($full_path)) {
+				@copy($full_path, $full_path . '.old');
+				@chmod($full_path . '.old', 0666);
+			}
 
 			if (file_put_contents($tmp_path, $content) === false) {
 				throw new AgentFileException('Failed to write temp file for "'.$filename.'".');

@@ -404,7 +404,7 @@ upgrade.php (client instance)
 
 ## Related Documentation
 - **System Overview:** See CLAUDE.md for architecture
-- **Upgrade System Comparison:** See specs/upgrade_system.md for full feature comparison with deploy.sh
+- **Upgrade System Comparison:** See specs/upgrade_system.md for full feature comparison with build_dev_from_source.sh
 - **Admin Pages Guide:** See docs/admin_pages.md for admin page patterns
 - **Plugin Developer Guide:** See docs/plugin_developer_guide.md for architecture patterns
 

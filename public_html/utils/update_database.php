@@ -738,10 +738,18 @@
 
 			$agent_written_count = 0;
 			$agent_failed_count  = 0;
+			$agent_skipped_count = 0;
 			foreach ($agent_files as $agent_file) {
 				try {
+					// Unattended context: never force. A drifted file (edited
+					// on disk since the last write) is skipped, not clobbered.
 					$agent_file->write_to_disk();
 					$agent_written_count++;
+				} catch (AgentFileDriftException $e) {
+					$agent_skipped_count++;
+					echo "  ⚠ Skipped agent file '" . htmlspecialchars($agent_file->get('agf_name') ?? '') . "': "
+						. htmlspecialchars($e->getMessage())
+						. " On-disk edits left intact — resolve via /admin/admin_agent_files.<br>\n";
 				} catch (\Throwable $e) {
 					$agent_failed_count++;
 					echo "  ⚠ Failed to write agent file '" . htmlspecialchars($agent_file->get('agf_name') ?? '') . "': "
@@ -749,10 +757,11 @@
 				}
 			}
 
-			if ($agent_written_count === 0 && $agent_failed_count === 0) {
+			if ($agent_written_count === 0 && $agent_failed_count === 0 && $agent_skipped_count === 0) {
 				echo "✓ Agent files: nothing to write (no rows flushed to disk yet)<br>\n";
 			} else {
 				echo "✓ Agent files: {$agent_written_count} written"
+					. ($agent_skipped_count > 0 ? ", {$agent_skipped_count} skipped (on-disk edits preserved)" : '')
 					. ($agent_failed_count > 0 ? ", {$agent_failed_count} failed" : '')
 					. "<br>\n";
 			}

@@ -830,7 +830,7 @@ Note: ControlD admin pages (admin_ctld_account, admin_ctld_accounts) were remove
 
 ### 20.2 Deployment
 - [ ] Installation scripts (`install_tools/`)
-- [ ] Deployment scripts (`deploy.sh`)
+- [ ] Deployment scripts (`build_dev_from_source.sh`)
 - [ ] Database backup and restore (`sysadmin_tools/`)
 - [ ] Upgrade server system
 - [ ] Remote archive refresh

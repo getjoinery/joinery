@@ -22,7 +22,7 @@ Manage agent files as admin-managed content in the database, not as in-git artif
 ## Non-goals
 
 - Install-time seeding via `update_database` or migrations. Schema is created automatically from the class spec; rows are seeded only via the bootstrap SQL (see Phase 2) or admin UI. Dev-environment seeding lives in `dev_setup_install_script.md`.
-- Conflict-detection or merge logic for files edited directly on disk. The db row is authoritative; disk edits are overwritten on the next regenerate.
+- Merge logic for files edited directly on disk — the db row is authoritative and on-disk editing is not a supported workflow. (A drift *guard* that detects out-of-band edits and prevents *silent* overwrites was added after implementation — see the Amendment at the end of this spec — but there is still no content merging.)
 - Per-plugin contributions to agent file content.
 - Fragment composition. Deferred until a third variant or audience emerges to justify the assembly machinery.
 - Customer `*.local.md` overlay convention. Customers edit their row directly.
@@ -70,7 +70,7 @@ Permission gate: superadmin only (level 10). Agent files affect agent behavior a
 
 ### Source of truth
 
-The db row is authoritative. The on-disk file is output, like a generated theme asset. Direct edits to the file on disk are overwritten on the next write-to-disk; the disk-sync indicator surfaces divergence but the system takes no automatic action. This is the intended model and is stated in the admin page help text.
+The db row is authoritative. The on-disk file is output, like a generated theme asset. Editing the file directly on disk is not a supported workflow — the db row is where changes are made. This is the intended model and is stated in the admin page help text. (A drift guard added after implementation keeps an accidental disk edit from being *silently* destroyed — see the Amendment at the end of this spec.)
 
 ### Lifecycle
 
@@ -158,3 +158,21 @@ After install the row is the customer's like any other — standard soft-delete,
 ### Content authoring
 
 The customer-facing content lives at `maintenance_scripts/install_tools/default_agents_template.md` — alongside the rest of the install-time templates. Updates to it ride through the existing bootstrap-SQL regeneration process (the same one that refreshes the rest of `joinery-install.sql.gz`); no new tooling. Audit on every revision for leaks: no admin credentials, no internal hostnames, no memory-file pointers, no references to our specific infrastructure.
+
+---
+
+## Amendment (2026-05-16): On-disk drift guard
+
+The original design (see Non-goals and "Source of truth" above) had the regenerate step overwrite the on-disk file unconditionally. In practice that silently destroyed work: an agent file edited directly on disk lost those edits, with no warning, on the next `update_database` run.
+
+A drift guard was added. The db row is still the single source of truth and editing files on disk is still not a supported workflow — the guard exists only to make an accidental disk edit *visible* instead of *silently lost*.
+
+**Detection.** `AgentFile::get_drifted_targets()` returns the target files whose on-disk sha256 no longer matches `agf_last_written_hash` (the hash recorded at the last write) — i.e. files edited out of band.
+
+**Guard.** `AgentFile::write_to_disk($force = false)` runs the detector first. If a target has drifted and `$force` is false, it throws `AgentFileDriftException` (carrying the drifted filenames) instead of writing.
+
+**Unattended caller** — the `update_database` regenerate step never forces. A drifted row is skipped, a warning is logged ("skipped … on-disk edits preserved"), and the on-disk file is left untouched. The operator resolves it deliberately through the admin UI.
+
+**Interactive callers** — the admin "Write to disk" and "Save & Write to disk" actions catch the exception and redirect to a confirmation prompt on the agent files list, naming the drifted files. On confirm, `write_to_disk(true)` runs: before overwriting each drifted file it copies the current on-disk copy to `<filename>.old`, then writes the db content. `<filename>.old` holds only the most recent pre-overwrite copy (replaced on each forced overwrite).
+
+**Git.** `CLAUDE.md`, `GEMINI.md`, `AGENTS.md`, and `*.md.old` are git-ignored, and the previously tracked `CLAUDE.md`/`GEMINI.md` were removed from the index — they are db-managed generated artifacts and no longer belong in the tree (completing the Migration step above).

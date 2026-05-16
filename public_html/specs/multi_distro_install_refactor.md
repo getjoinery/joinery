@@ -2,7 +2,7 @@
 
 ## Goal
 
-Refactor the install scripts (`install.sh`, `_site_init.sh`, `deploy.sh`, `fix_permissions.sh`, `Dockerfile.base`, `Dockerfile.template`) so that a single codebase can install and run Joinery on any mainstream Linux distribution, with minimal per-distro branching.
+Refactor the install scripts (`install.sh`, `_site_init.sh`, `build_dev_from_source.sh`, `fix_permissions.sh`, `Dockerfile.base`, `Dockerfile.template`) so that a single codebase can install and run Joinery on any mainstream Linux distribution, with minimal per-distro branching.
 
 ## Non-Goals
 
@@ -58,7 +58,7 @@ Introduce a `distros/` directory inside `install_tools/`. Each profile is a sour
 maintenance_scripts/install_tools/
 ├── install.sh                     # Orchestrator (no distro-specific code)
 ├── _site_init.sh                  # Site initializer (no distro-specific code)
-├── deploy.sh                      # Dev deploy (minimal changes needed)
+├── build_dev_from_source.sh        # Dev deploy (minimal changes needed)
 ├── fix_permissions.sh             # Uses $WEB_USER / $WEB_GROUP
 ├── Dockerfile.base                # Stays Ubuntu; distro work is bare-metal only
 ├── Dockerfile.template            # Stays Ubuntu
@@ -346,9 +346,9 @@ This script hardcodes `www-data:user1`. After the refactor it should source `_de
 
 ---
 
-## deploy.sh
+## build_dev_from_source.sh
 
-`deploy.sh` is a Git-based dev tool and has fewer distro dependencies. Changes needed:
+`build_dev_from_source.sh` is a Git-based dev tool and has fewer distro dependencies. Changes needed:
 
 - Replace hardcoded `/usr/bin/php` with `$(command -v php)` 
 - Replace `www-data` with `$WEB_USER` sourced from `_detect.sh`
