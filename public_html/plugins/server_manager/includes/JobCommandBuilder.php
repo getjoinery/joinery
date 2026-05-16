@@ -906,7 +906,7 @@ class JobCommandBuilder {
 	 * Build an SSH command prefix for local-type steps that SSH to a remote host.
 	 * Used by discover_nodes which runs before a node record exists.
 	 */
-	private static function ssh_prefix($host, $ssh_user, $ssh_key_path, $ssh_port = 22) {
+	public static function ssh_prefix($host, $ssh_user, $ssh_key_path, $ssh_port = 22) {
 		$port_flag = ($ssh_port != 22) ? "-p {$ssh_port} " : '';
 		return "ssh -i " . escapeshellarg($ssh_key_path)
 			 . " -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes "
