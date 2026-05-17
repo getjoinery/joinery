@@ -142,9 +142,12 @@ class PageContent extends SystemBase {
 	 * pag_component_layout. Used by the admin panel's shared-entity
 	 * disclosure to warn admins that a test here will affect multiple pages.
 	 *
+	 * @param int|null $exclude_page_id Page id to omit from the result (e.g. the
+	 *                                  page currently being deleted, so its own
+	 *                                  exclusive components aren't counted as shared).
 	 * @return array [ ['label' => Page title, 'url' => deep-link], ... ]
 	 */
-	function get_test_contexts() {
+	function get_test_contexts($exclude_page_id = NULL) {
 		if (!$this->key) return [];
 		$dblink = DbConnector::get_instance()->get_db_link();
 		try {
@@ -152,10 +155,15 @@ class PageContent extends SystemBase {
 					  FROM pag_pages
 					 WHERE pag_component_layout IS NOT NULL
 					   AND pag_component_layout::jsonb @> to_jsonb(?::int)
-					   AND pag_delete_time IS NULL
-					 ORDER BY pag_title ASC";
+					   AND pag_delete_time IS NULL";
+			$params = [(int)$this->key];
+			if ($exclude_page_id !== NULL) {
+				$sql .= " AND pag_page_id <> ?";
+				$params[] = (int)$exclude_page_id;
+			}
+			$sql .= " ORDER BY pag_title ASC";
 			$q = $dblink->prepare($sql);
-			$q->execute([(int)$this->key]);
+			$q->execute($params);
 			$rows = $q->fetchAll(PDO::FETCH_ASSOC);
 		} catch (\Throwable $e) {
 			error_log('PageContent::get_test_contexts error: ' . $e->getMessage());
