@@ -29,21 +29,10 @@ echo $formwriter->begin_form();
 echo '<fieldset><h4>Confirm Permanent Delete</h4>';
 echo '<div class="fields full">';
 
-echo '<p><strong>Warning:</strong> This action cannot be undone. The following page will be permanently deleted:</p>';
-
-echo '<ul>';
-echo '<li><strong>Title:</strong> ' . htmlspecialchars($page->get('pag_title')) . '</li>';
-if ($page->get('pag_link')) {
-	echo '<li><strong>Slug:</strong> /' . htmlspecialchars($page->get('pag_link')) . '</li>';
-}
-if ($page->get('pag_fil_file_id')) {
-	echo '<li><strong>Attached file:</strong> will be unlinked from this page</li>';
-}
-echo '</ul>';
+echo '<p><strong>Warning:</strong> Permanently deleting <strong>' . htmlspecialchars($page->get('pag_title')) . '</strong> cannot be undone.</p>';
 
 if (!empty($will_delete)) {
-	echo '<h5>Components that will be permanently deleted</h5>';
-	echo '<p>These components are used only by this page and will be removed:</p>';
+	echo '<p>The following components are used only by this page and will also be deleted:</p>';
 	echo '<ul>';
 	foreach ($will_delete as $component) {
 		$label = $component->get('pac_title') ?: $component->get('pac_location_name');
@@ -53,8 +42,7 @@ if (!empty($will_delete)) {
 }
 
 if (!empty($will_keep)) {
-	echo '<h5>Components that will be kept</h5>';
-	echo '<p>These components are shared with other pages and will not be deleted:</p>';
+	echo '<p>The following components are shared with other pages and will be kept:</p>';
 	echo '<ul>';
 	foreach ($will_keep as $entry) {
 		$label = $entry['component']->get('pac_title') ?: $entry['component']->get('pac_location_name');
@@ -64,10 +52,6 @@ if (!empty($will_keep)) {
 		echo '<li>' . htmlspecialchars($label) . ' — also on: ' . implode(', ', $page_links) . '</li>';
 	}
 	echo '</ul>';
-}
-
-if (empty($will_delete) && empty($will_keep)) {
-	echo '<p>This page has no components in its layout.</p>';
 }
 
 $formwriter->hiddeninput('confirm', '', ['value' => 1]);

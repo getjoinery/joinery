@@ -30,7 +30,7 @@ function admin_page_permanent_delete_logic($get_vars, $post_vars) {
 		foreach ($layout as $pac_id) {
 			$component = new PageContent((int)$pac_id, TRUE);
 			if (!$component->key) continue;
-			$contexts = $component->get_test_contexts();
+			$contexts = $component->get_test_contexts($pag_page_id);
 			if (empty($contexts)) {
 				$component->permanent_delete();
 			}
@@ -56,7 +56,7 @@ function admin_page_permanent_delete_logic($get_vars, $post_vars) {
 	foreach ($layout as $pac_id) {
 		$component = new PageContent((int)$pac_id, TRUE);
 		if (!$component->key) continue;
-		$contexts = $component->get_test_contexts();
+		$contexts = $component->get_test_contexts($pag_page_id);
 		if (empty($contexts)) {
 			$will_delete[] = $component;
 		} else {
