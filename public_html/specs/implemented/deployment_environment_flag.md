@@ -1,6 +1,6 @@
 # Deployment Environment Flag
 
-**Status:** Proposal — recommended in favour (§5); all §6 decisions resolved. Implementation-ready.
+**Status:** Implemented 2026-05-17. (Was: Proposal — recommended in favour, all §6 decisions resolved.)
 **Author:** Analysis prepared 2026-05-17; revised 2026-05-17 after a call-site inventory.
 **Informal name:** "the docker boolean"
 **Origin:** Surfaced during the Email Forwarding install unification work
@@ -49,12 +49,14 @@ already disagree**: `resolveHost()` checks only `/.dockerenv`, while
 non-Docker container (podman, cgroup v2) they can return different answers
 right now. That is the concrete bug this flag removes.
 
-Of the six, **four become flag customers** — the two PHP sites, plus
-`backup_project.sh` and `manage_domain.sh`, which act on an already-installed
-site and can read its `Globalvars_site.php`. The other two cannot and do not:
-`install.sh` runs *before* a site exists (it is the installer — it has no flag
-file to read, and decides the mode itself), and `server_setup.sh` is archived
-dead code. Both keep their own install-time host detection.
+Of the six, **three become flag customers** — the two PHP sites, plus
+`backup_project.sh`, which runs within an already-installed site and can read
+its `Globalvars_site.php`. The other three do not. `install.sh` runs *before* a
+site exists (it is the installer — no flag file to read, and it decides the
+mode itself), and `server_setup.sh` is archived dead code; both keep their own
+install-time host detection. `manage_domain.sh`'s `is_docker_site()` already
+queries the Docker daemon directly (`docker ps`) — that is authoritative, not a
+heuristic, so it is left as-is.
 
 **Not a customer:** `server_manager` (`JobCommandBuilder`, `install_node_form`)
 branches on `$node->get('mgn_container_name')` — a value *stored per node*,
@@ -109,9 +111,9 @@ paths): set once at install, corrected by editing the file if ever wrong.
 Existing deployments are backfilled once (§6, decision 4).
 
 *Access from bash:* the file cannot be `source`-d (it is PHP) nor `require`-d
-standalone (it needs the Globalvars object context). The bash scripts that act
-on an already-installed site — `backup_project.sh`, `manage_domain.sh` — read
-the value by `grep`-ing that one fixed-format line:
+standalone (it needs the Globalvars object context). `backup_project.sh`, which
+runs within an already-installed site, reads the value by `grep`-ing that one
+fixed-format line:
 
 ```bash
 DEPLOY_ENV="$(grep -oP "settings\['deployment_environment'\]\s*=\s*'\K[^']+" \
@@ -121,15 +123,16 @@ DEPLOY_ENV="$(grep -oP "settings\['deployment_environment'\]\s*=\s*'\K[^']+" \
 `install.sh` and the archived `server_setup.sh` are host-bootstrap scripts that
 run *while creating* a deployment — they already hold `$MODE` / `$DOCKER_MODE`
 and have no installed site to read a flag from, so they keep their own
-install-time logic. No new storage file is introduced: one `$this->settings`
-entry, read by the two PHP sites via `get_setting()` and by the two
-site-operating bash scripts via `grep`.
+install-time logic. `manage_domain.sh` already asks the Docker daemon directly
+and is left untouched. No new storage file is introduced: one `$this->settings`
+entry, read by the two PHP sites via `get_setting()` and by `backup_project.sh`
+via `grep`.
 
 ---
 
 ## 3. Arguments FOR
 
-1. **Single source of truth.** One value, set once, read by all four flag
+1. **Single source of truth.** One value, set once, read by all three flag
    customers (§1a) — instead of scattered heuristics that *already* disagree
    (the two PHP sites can return different answers under a non-Docker container
    today).
@@ -151,7 +154,7 @@ site-operating bash scripts via `grep`.
 The first draft listed six objections. The §1a inventory and a closer look
 dismiss four of them:
 
-- *YAGNI* — dismissed. Six detection sites today, four of them flag customers,
+- *YAGNI* — dismissed. Six detection sites today, three of them flag customers,
   and the two PHP ones **already disagree** (§1a). The need is demonstrated,
   not speculative.
 - *Detection is still heuristic, just moved* — dismissed. The installer does
@@ -184,15 +187,15 @@ right:
 ## 5. Recommendation
 
 **In favour.** The §1a inventory removed the one doubt that mattered (YAGNI):
-six detection sites today, four of them flag customers, with a demonstrated
+six detection sites today, three of them flag customers, with a demonstrated
 live inconsistency between the two PHP ones. Adopt it, with *all* of:
 
 - File-based storage in `Globalvars_site.php`, never `stg_settings` (§2).
 - A string enum, not a bare boolean.
-- PHP reads through the existing `Globalvars::get_setting()`; the two
-  site-operating bash scripts read by `grep` (§2). No new accessor. No
-  `/.dockerenv` checks survive in the running application — `install.sh` keeps
-  host-bootstrap detection only because it runs before any site exists.
+- PHP reads through the existing `Globalvars::get_setting()`; `backup_project.sh`
+  reads by `grep` (§2). No new accessor. No `/.dockerenv` checks survive in the
+  running application — `install.sh` keeps host-bootstrap detection only because
+  it runs before any site exists.
 
 The flag is the single source of truth. The staleness caveat (§4.1) is
 accepted: it is the same property every other `Globalvars_site.php` value has,

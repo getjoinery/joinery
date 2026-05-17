@@ -5,7 +5,7 @@
  * Handles task discovery, activation, deactivation, configuration,
  * and run-now functionality.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
@@ -134,9 +134,9 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 		$cron_is_active = $diff_seconds < 1800; // 30 minutes
 	}
 
-	// Detect Docker vs bare-metal so the warning shows the right cron setup instructions
-	$is_docker = file_exists('/.dockerenv')
-		|| (is_readable('/proc/1/cgroup') && strpos(@file_get_contents('/proc/1/cgroup'), 'docker') !== false);
+	// Deployment environment flag (recorded at install, single source of truth)
+	// drives which cron setup instructions the warning shows.
+	$is_docker = $settings->get_setting('deployment_environment', true, true) === 'docker';
 
 	// Load mailing lists for config field dropdowns
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));

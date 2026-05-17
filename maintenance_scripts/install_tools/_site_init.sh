@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 2.0 - Add sequence synchronization after clone to prevent duplicate key errors
+# VERSION: 2.1 - Record deployment_environment in Globalvars_site.php from $DOCKER_MODE
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -153,6 +153,9 @@ create_config_file() {
     sed -i "s/{{PASSWORD}}/${ESCAPED_PASSWORD}/g" "$SITE_ROOT/config/Globalvars_site.php"
     sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "$SITE_ROOT/config/Globalvars_site.php"
     sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "$SITE_ROOT/config/Globalvars_site.php"
+    # Record the deployment environment — single source of truth (spec deployment_environment_flag)
+    if [ "$DOCKER_MODE" = true ]; then DEPLOY_ENV=docker; else DEPLOY_ENV=baremetal; fi
+    sed -i "s/{{DEPLOYMENT_ENVIRONMENT}}/${DEPLOY_ENV}/g" "$SITE_ROOT/config/Globalvars_site.php"
     # Also handle the legacy pattern with empty password
     sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
     # Restrict config file — contains database credentials
