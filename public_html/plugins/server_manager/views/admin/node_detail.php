@@ -746,9 +746,14 @@ if ($tab === 'overview') {
 
 	if ($is_fqdn && $ssl_card_state !== 'active' && $install_state !== 'installing') {
 		$host_ip     = $node->get('mgn_host');
-		$resolved_ip = gethostbyname($ssl_card_domain);
-		$dns_resolves    = ($resolved_ip && $resolved_ip !== $ssl_card_domain);
-		$dns_matches     = $dns_resolves && (!$host_ip || $resolved_ip === $host_ip);
+		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
+		try {
+			$resolved_ips = DnsResolver::getA($ssl_card_domain);
+		} catch (DnsLookupException $e) {
+			$resolved_ips = [];
+		}
+		$dns_resolves    = !empty($resolved_ips);
+		$dns_matches     = $dns_resolves && (!$host_ip || in_array($host_ip, $resolved_ips, true));
 		$no_host_ip      = !$host_ip;
 		$can_provision   = ($dns_matches || $no_host_ip) && $ssl_card_state !== 'pending';
 

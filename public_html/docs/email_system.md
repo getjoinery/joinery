@@ -549,6 +549,27 @@ The email system provides:
 
 Use EmailMessage + EmailSender for all email development. Direct EmailTemplate usage is only for specialized template processing needs.
 
+## Email Authentication Checks (DnsAuthChecker)
+
+`includes/DnsAuthChecker.php` is the one place to check a domain's SPF, DKIM,
+and DMARC records. Use it — do not hand-roll `dns_get_record()` TXT parsing.
+`adm/admin_settings_email.php` and the `utils/email_setup_check.php` deep-dive
+tool both build on it, and the `email_forwarding` plugin's domain status badges
+do too.
+
+```php
+require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
+
+$spf = DnsAuthChecker::checkSPF('example.com');   // ['status'=>'pass|warn|fail', 'detail'=>…, 'record'=>…]
+$all = DnsAuthChecker::quickCheck('example.com'); // ['spf'=>…, 'dkim'=>…, 'dmarc'=>…]
+```
+
+Its lookups go through `DnsResolver` (the platform's single raw-DNS
+chokepoint — see [Validation › DNS Lookups](/docs/validation.md#dns-lookups-dnsresolver)),
+so a resolver failure is handled cleanly and the checks are unit-testable via
+`DnsResolver::setBackend()`. `DnsAuthChecker`'s own public static API is
+unchanged by that — callers and the `EmailAuthChecker` subclass are unaffected.
+
 ## Email Service Provider Interface
 
 The email system uses a provider abstraction so that new email services can be added without modifying core code.

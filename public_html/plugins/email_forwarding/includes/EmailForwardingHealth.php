@@ -9,10 +9,11 @@
  * rethrows any failure as ProvisioningCheckFailed with a clean message. It
  * must be side-effect-free, time-bounded, and cheap to run.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/includes/EmailForwarder.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
 
@@ -83,23 +84,27 @@ class EmailForwardingHealth {
             $name = $domain->get('efd_domain');
             $issues = [];
 
-            $mx = @dns_get_record($name, DNS_MX);
-            if (empty($mx)) {
-                $issues[] = 'missing MX';
-            }
+            try {
+                if (empty(DnsResolver::getMx($name))) {
+                    $issues[] = 'missing MX';
+                }
 
-            $spf_found = false;
-            $txt = @dns_get_record($name, DNS_TXT);
-            if (!empty($txt)) {
-                foreach ($txt as $record) {
-                    if (stripos($record['txt'] ?? '', 'v=spf1') !== false) {
+                $spf_found = false;
+                foreach (DnsResolver::getTxt($name) as $txt) {
+                    if (stripos($txt, 'v=spf1') !== false) {
                         $spf_found = true;
                         break;
                     }
                 }
-            }
-            if (!$spf_found) {
-                $issues[] = 'missing SPF';
+                if (!$spf_found) {
+                    $issues[] = 'missing SPF';
+                }
+            } catch (DnsLookupException $e) {
+                // Resolver failure for this domain — fail-open (kind 2). A
+                // transient DNS error is the checking host's problem, not the
+                // domain's misconfiguration; skip it rather than report a
+                // false "not configured".
+                $issues = [];
             }
 
             if ($issues) {

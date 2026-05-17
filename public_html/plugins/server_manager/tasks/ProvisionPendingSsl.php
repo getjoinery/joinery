@@ -10,6 +10,7 @@
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 
 class ProvisionPendingSsl implements ScheduledTaskInterface {
 
@@ -91,8 +92,12 @@ class ProvisionPendingSsl implements ScheduledTaskInterface {
 			}
 
 			// DNS check: domain must resolve to the host IP
-			$resolved = gethostbyname($domain);
-			if ($resolved === $domain || $resolved !== $host_ip) {
+			try {
+				$resolved_ips = DnsResolver::getA($domain);
+			} catch (DnsLookupException $e) {
+				$resolved_ips = []; // resolver failure — skip, retry next run
+			}
+			if (!in_array($host_ip, $resolved_ips, true)) {
 				$skipped++;
 				continue;
 			}

@@ -5,8 +5,13 @@
  * Provides basic SPF/DKIM/DMARC record checks that can be used from
  * admin settings, test suites, and the comprehensive email_setup_check tool.
  *
- * @version 1.0
+ * Lookups go through DnsResolver — the single raw-DNS chokepoint — so this
+ * class is fully unit-testable via DnsResolver::setBackend().
+ *
+ * @version 1.1
  */
+
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 
 class DnsAuthChecker {
 
@@ -42,9 +47,13 @@ class DnsAuthChecker {
 			'record' => '',
 		];
 
-		$txtRecords = @dns_get_record($domain, DNS_TXT);
+		try {
+			$txtRecords = DnsResolver::getTxt($domain);
+		} catch (DnsLookupException $e) {
+			$txtRecords = []; // fail-open: a resolver failure reads as "no record"
+		}
 
-		if (!$txtRecords) {
+		if (empty($txtRecords)) {
 			$result['detail'] = 'No TXT records found';
 			return $result;
 		}
@@ -52,9 +61,9 @@ class DnsAuthChecker {
 		$spfRecord = null;
 		$spfCount = 0;
 
-		foreach ($txtRecords as $record) {
-			if (isset($record['txt']) && strpos($record['txt'], 'v=spf1') === 0) {
-				$spfRecord = $record['txt'];
+		foreach ($txtRecords as $txt) {
+			if (strpos($txt, 'v=spf1') === 0) {
+				$spfRecord = $txt;
 				$spfCount++;
 			}
 		}
@@ -121,36 +130,40 @@ class DnsAuthChecker {
 			$dkimDomain = $selector . '._domainkey.' . $domain;
 
 			// Check TXT records
-			$txtRecords = @dns_get_record($dkimDomain, DNS_TXT);
-			if ($txtRecords) {
-				foreach ($txtRecords as $record) {
-					if (isset($record['txt']) && self::isDKIMRecord($record['txt'])) {
-						$result['status'] = 'pass';
-						$result['detail'] = 'DKIM found (selector: ' . $selector . ')';
-						$result['selector'] = $selector;
-						$result['record'] = $record['txt'];
-						return $result;
-					}
+			try {
+				$txtRecords = DnsResolver::getTxt($dkimDomain);
+			} catch (DnsLookupException $e) {
+				$txtRecords = [];
+			}
+			foreach ($txtRecords as $txt) {
+				if (self::isDKIMRecord($txt)) {
+					$result['status'] = 'pass';
+					$result['detail'] = 'DKIM found (selector: ' . $selector . ')';
+					$result['selector'] = $selector;
+					$result['record'] = $txt;
+					return $result;
 				}
 			}
 
 			// Check CNAME records (common for hosted email services)
-			$cnameRecords = @dns_get_record($dkimDomain, DNS_CNAME);
-			if ($cnameRecords) {
-				foreach ($cnameRecords as $record) {
-					if (isset($record['target'])) {
-						$targetTxtRecords = @dns_get_record($record['target'], DNS_TXT);
-						if ($targetTxtRecords) {
-							foreach ($targetTxtRecords as $txtRecord) {
-								if (isset($txtRecord['txt']) && self::isDKIMRecord($txtRecord['txt'])) {
-									$result['status'] = 'pass';
-									$result['detail'] = 'DKIM found via CNAME (selector: ' . $selector . ')';
-									$result['selector'] = $selector;
-									$result['record'] = $txtRecord['txt'];
-									return $result;
-								}
-							}
-						}
+			try {
+				$cnameTarget = DnsResolver::getCname($dkimDomain);
+			} catch (DnsLookupException $e) {
+				$cnameTarget = null;
+			}
+			if ($cnameTarget) {
+				try {
+					$targetTxtRecords = DnsResolver::getTxt($cnameTarget);
+				} catch (DnsLookupException $e) {
+					$targetTxtRecords = [];
+				}
+				foreach ($targetTxtRecords as $txt) {
+					if (self::isDKIMRecord($txt)) {
+						$result['status'] = 'pass';
+						$result['detail'] = 'DKIM found via CNAME (selector: ' . $selector . ')';
+						$result['selector'] = $selector;
+						$result['record'] = $txt;
+						return $result;
 					}
 				}
 			}
@@ -175,17 +188,21 @@ class DnsAuthChecker {
 		];
 
 		$dmarcDomain = '_dmarc.' . $domain;
-		$txtRecords = @dns_get_record($dmarcDomain, DNS_TXT);
+		try {
+			$txtRecords = DnsResolver::getTxt($dmarcDomain);
+		} catch (DnsLookupException $e) {
+			$txtRecords = []; // fail-open: a resolver failure reads as "no record"
+		}
 
-		if (!$txtRecords) {
+		if (empty($txtRecords)) {
 			$result['detail'] = 'No DMARC record found';
 			return $result;
 		}
 
 		$dmarcRecord = null;
-		foreach ($txtRecords as $record) {
-			if (isset($record['txt']) && strpos($record['txt'], 'v=DMARC1') === 0) {
-				$dmarcRecord = $record['txt'];
+		foreach ($txtRecords as $txt) {
+			if (strpos($txt, 'v=DMARC1') === 0) {
+				$dmarcRecord = $txt;
 				break;
 			}
 		}
