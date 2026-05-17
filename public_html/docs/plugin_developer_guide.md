@@ -740,7 +740,7 @@ Declare runtime dependencies as a `provisioners` array in `plugin.json`, alongsi
 
 **`probe` check** — `{ "type": "probe", "probe": "tcp", "host": "...", "port": N }`. Use this for a dependency that *pushes into* your plugin rather than being acquired by it (an inbound mail server that pipes mail to a script — your code never connects to it, so a `code` check is structurally blind to it). The system opens a TCP connection within a 5-second enforced timeout. A `probe` passing yields the weaker `reachable` state — it proves something is listening, not that it is the right software or correctly configured.
 
-`probe` is `tcp` in v1. `host` may be a literal IP/hostname or the token **`host-gateway`**, which resolves to the Docker bridge gateway inside a container and to `127.0.0.1` on bare metal — the portable way to say "reach a service on my host."
+`probe` is `tcp` in v1. `host` may be a literal IP/hostname or the token **`host-gateway`**, which resolves to the Docker bridge gateway inside a container and to `127.0.0.1` on bare metal — the portable way to say "reach a service on my host." Container-vs-bare-metal is decided by the `deployment_environment` flag recorded in `Globalvars_site.php` at install time (a reliable stored value, not a runtime heuristic).
 
 ### The `code` check contract
 

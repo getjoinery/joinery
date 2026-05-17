@@ -83,7 +83,11 @@ metal — so it is **out of scope** for unification. Only the *install* differs.
 - **`ProvisioningCheckFailed.php`** — marker exception. A check method catches
   the real acquisition error and rethrows it as this, with a clean message.
 - `resolveHost()` — maps the `host-gateway` token to the Docker bridge gateway
-  inside a container (via `/proc/net/route`) or `127.0.0.1` on bare metal.
+  inside a container (via `/proc/net/route`) or `127.0.0.1` on bare metal. It
+  decides container-vs-bare-metal by reading the `deployment_environment` flag
+  in `Globalvars_site.php` (single source of truth, recorded at install) — not
+  a runtime `/.dockerenv` check. See
+  `specs/implemented/deployment_environment_flag.md`.
 
 Result states roll up to a per-plugin badge on the admin Plugins page:
 `verified` → green "Setup complete", `reachable` → teal, `unmet` → amber
