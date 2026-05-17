@@ -1,8 +1,8 @@
 # Email Forwarding — Install Path Unification
 
-**Status:** Proposal — Option C selected; scope fixed to one site per host (2026-05-17). Implementation-ready (§9 decisions all resolved).
+**Status:** Implemented 2026-05-17. (Was: Proposal — Option C selected; scope fixed to one site per host. §9 decisions all resolved.)
 **Author:** Analysis prepared 2026-05-17
-**Plugin:** `plugins/email_forwarding/` (v1.3.1)
+**Plugin:** `plugins/email_forwarding/` (v1.4.0)
 
 ---
 
