@@ -38,7 +38,7 @@ failure semantics (§3).
 | File | Symbol | DNS operation |
 |---|---|---|
 | `includes/DnsAuthChecker.php` | `quickCheck`, `checkSPF`, `checkDKIM`, `checkDMARC` | TXT/CNAME — SPF/DKIM/DMARC verification |
-| `includes/LibraryFunctions.php` | `isValidEmail()` | MX, A (fallback) — email-domain validity |
+| `includes/LibraryFunctions.php` | `IsValidEmail()` | MX, A (fallback) — email-domain validity |
 | `includes/SystemBase.php` | email form-validation rule | MX, A (fallback) — duplicate of the above |
 | `utils/email_setup_check.php` | `EmailAuthChecker` (extends `DnsAuthChecker`) | TXT/MX/AAAA — deep-dive email-auth tool |
 
@@ -89,30 +89,43 @@ bakes in a failure mode.
 
 ### 4.1 New core primitive — `DnsResolver`
 
-`includes/DnsResolver.php`. A small instance class that is the *only* place raw
-DNS functions are called.
+`includes/DnsResolver.php`. A small **static** class that is the *only* place
+raw DNS functions are called.
 
 - **Methods** return normalized shapes: `getMx()` → `[['host'=>…,'pri'=>…], …]`;
   `getA()` / `getAaaa()` → `['1.2.3.4', …]`; `getTxt()` → `['v=spf1 …', …]`;
   `getCname()` → `?string`; `resolveHostIps()` → all A **and** AAAA combined
-  (for SSRF).
+  (for SSRF). `domainAcceptsMail()` (the validation helper, §4.3) lives here
+  too — it is just a lookup, not its own file.
 - **Error vs empty is preserved.** A genuine "no such record" returns `[]`. A
   *resolver failure* throws `DnsLookupException`. This is the mechanism that
   lets one primitive serve both failure modes: kinds 1–3 catch the exception
   and treat it as fail-open; kind 4 catches it and treats it as fail-closed.
   The primitive itself takes no policy stance.
-- **Injectable backend.** The constructor accepts an optional backend; the
-  default does real DNS, tests pass a fixture backend. This is the single
-  change that makes every DNS-dependent check unit-testable for the first time.
-- **Per-request cache.** Lookups are memoised for the request — the admin
-  domains page alone checks MX + SPF + DKIM for each domain, three calls that
-  collapse to the records actually needed.
+- **One test seam.** A static `DnsResolver::setBackend($double)` swaps the raw
+  DNS layer for tests; the default path does real DNS, so production code never
+  touches it. `setBackend()` accepts any duck-typed double — there is **no
+  `DnsBackend` interface and no named `SystemDnsBackend`/`FixtureDnsBackend`
+  classes**; the "real" path is simply `DnsResolver`'s default code. Tests reset
+  the backend in teardown. Because the seam sits at the bottom of the stack,
+  one `setBackend()` call makes `DnsResolver`, `DnsAuthChecker`,
+  `domainAcceptsMail()`, and the SSRF path all testable — there is no per-class
+  seam above it.
+- **No per-request cache in v1.** Memoisation is deliberately deferred (§8.3):
+  its real hit rate is low (callers query different names/record types) and it
+  is the sole source of mid-request staleness. It is internal to `DnsResolver`,
+  so it can be added later with zero API change *if* a real latency problem
+  appears.
 
 ### 4.2 Email-auth — consolidate onto `DnsAuthChecker`
 
-- `DnsAuthChecker` is refactored to perform its lookups through `DnsResolver`.
-  Its **public static API stays byte-for-byte stable** — `EmailAuthChecker`
-  extends it and `admin_settings_email` calls it, so the surface must not move.
+- `DnsAuthChecker` is refactored to call `DnsResolver` statically for its
+  lookups. Its **public static API stays byte-for-byte stable** —
+  `EmailAuthChecker` extends it and `admin_settings_email` calls it, so no
+  signature may move. It needs **no seam of its own**: because `DnsResolver`
+  carries the single `setBackend()` test seam (§4.1), a test that swaps the
+  backend automatically makes `DnsAuthChecker` testable too. The signatures are
+  untouched and no new public method is added.
 - `EmailForwardingHealth::checkDomainDns()` and the
   `admin_email_forwarding_domains` badges drop their hand-rolled
   `dns_get_record()` SPF/MX parsing and call `DnsAuthChecker` / `DnsResolver`.
@@ -120,12 +133,23 @@ DNS functions are called.
   does not have today (see §8.4 for the semantics decision).
 - `EmailForwarder`'s inbound-DKIM TXT lookup moves to `DnsResolver::getTxt()`.
 
-### 4.3 Validation lookups — de-duplicate
+### 4.3 Validation lookups — share the DNS tail only
 
-The MX/A email-domain check is currently copied into both `SystemBase` and
-`LibraryFunctions`. Both call one shared method (on `DnsResolver`, or a thin
-validation helper that wraps it). Behaviour is unchanged — fail-open, MX with
-an A-record fallback per RFC 5321.
+`SystemBase`'s email rule and `LibraryFunctions::IsValidEmail()` are *not* two
+copies of one function — they are two different email validators that happen to
+share a DNS tail. Their **format** checks differ: `SystemBase` uses
+`filter_var(…, FILTER_VALIDATE_EMAIL)`; `IsValidEmail()` uses a hand-rolled
+regex that, among other things, hard-caps the TLD at 2–10 letters and rejects
+IP-literal domains. The two accept different sets of addresses.
+
+Only the **DNS portion** is genuinely identical — fail-open, MX with an
+A-record fallback per RFC 5321 — and only that portion is shared here. Each
+caller keeps its own format gate and, on passing it, calls the shared
+`DnsResolver::domainAcceptsMail()` method (§4.1). Behaviour is unchanged
+because no caller's format gate moves.
+
+Unifying the *format* validation as well is a separate, behaviour-changing
+decision — see §8.6 — deliberately not folded into this phase.
 
 ### 4.4 SSRF — keep the policy, share the lookup
 
@@ -139,11 +163,24 @@ Note this also fixes a latent gap: `scan_url.php` currently uses
 multiple A records, or any AAAA record, can today resolve past the private-IP
 block. `resolveHostIps()` (all A + all AAAA) closes that.
 
+**This does not, on its own, close DNS rebinding.** The SSRF pattern is
+*resolve → classify → (later) fetch*, and the fetch re-resolves through the
+system resolver — an attacker who flips the record between the two steps still
+lands the connection on a private IP. Sharing the lookup does not fix that
+TOCTOU; it has to be closed deliberately, and with no per-request cache (§4.1)
+nothing here even attempts to. The only real fix is to make the validated
+result and the actual connection the **same** resolution: the HTTP client must
+connect to the validated IP (connect-by-IP / pinned host) rather than
+re-resolving. That connect-by-IP change lives in the caller's HTTP client, not
+in any file this spec touches — see §8.5. Until it is done, the kind-4 callers
+remain DNS-rebinding-vulnerable, and that is stated here plainly rather than
+letting the lookup change imply the hole is closed.
+
 ### 4.5 `server_manager` A-record checks
 
 `ProvisionPendingSsl`, `JobCommandBuilder`, and `node_detail.php` switch their
-`gethostbyname()` calls to `DnsResolver::getA()`. Behaviour is unchanged;
-they gain the cache and the test seam.
+`gethostbyname()` calls to `DnsResolver::getA()`. Behaviour is unchanged; they
+gain the test seam (and the cache, if §8.3 ever adds it).
 
 ### 4.6 Explicitly NOT in scope — `dns_filtering` as a service
 
@@ -158,8 +195,8 @@ its `scan_url.php` SSRF check (§4.4) is touched.
 
 Each phase is independently shippable; nothing forces a big-bang change.
 
-1. **Build `DnsResolver` + `DnsLookupException`** with a fixture backend and
-   unit tests. No consumer changes — zero risk.
+1. **Build `DnsResolver` + `DnsLookupException`** — two files — with a
+   `setBackend()` test seam and unit tests. No consumer changes — zero risk.
 2. **Refactor `DnsAuthChecker`** to use `DnsResolver` internally; public API
    unchanged. Covered by existing email-auth callers + new tests.
 3. **Migrate `email_forwarding`** — `checkDomainDns()`, the admin domain
@@ -175,16 +212,18 @@ Each phase is independently shippable; nothing forces a big-bang change.
 
 - **No true per-lookup timeout.** PHP's `dns_get_record()` uses the system
   resolver and has no per-call timeout; a real timeout knob would require
-  shelling to `dig +time=`. The primitive standardises *result shape, caching,
-  fail-mode signalling, and testability* — not a literal timeout. See §8.2.
+  shelling to `dig +time=`. The primitive standardises *result shape, fail-mode
+  signalling, and testability* — not a literal timeout. See §8.2.
 - **`DnsAuthChecker` public surface is load-bearing.** `EmailAuthChecker`
   extends it; the refactor must not move a single public signature.
 - **Failure-mode regressions.** Every migrated caller must consciously pick
   fail-open or fail-closed (§3). This is a mandatory code-review checklist item,
   not something the primitive can enforce.
-- **Per-request cache staleness.** A domain's DNS could change mid-request;
-  acceptable — request lifetimes are seconds, and every current caller already
-  tolerates a slightly stale answer.
+- **DNS rebinding stays open.** Consolidating the lookup does not close the
+  *resolve → classify → fetch* TOCTOU for kind-4 callers (§4.4). The real fix —
+  connect-by-IP in the caller's HTTP client — is outside every file this spec
+  touches and is tracked as §8.5. This work must not be read as "SSRF solved";
+  it is "SSRF lookup made multi-IP and testable."
 - **Behaviour change risk in `checkDomainDns()`** if it adopts weak-policy
   detection rather than presence-only — see §8.4.
 
@@ -204,23 +243,46 @@ Per project convention, developer docs go into existing `/docs/` files:
 
 ## 8. Open questions / decisions
 
-1. **`DnsResolver` API shape.** Instance class with an injectable backend
-   (recommended — it is what makes tests possible) versus a static facade
-   matching `DnsAuthChecker`'s existing style. The two can coexist: an instance
-   primitive with `DnsAuthChecker` keeping its static methods on top.
+1. **`DnsResolver` API shape — decided.** `DnsResolver` is a **static** class
+   with a single `setBackend()` test seam at the bottom of the stack (§4.1).
+   `DnsAuthChecker` stays static and calls it statically, with no seam of its
+   own. Rejected alternative: an *instance* `DnsResolver` with constructor
+   injection. That is the textbook-DI choice, but `DnsAuthChecker` must stay
+   static (load-bearing public API), so its own seam would be static mutable
+   state regardless — the instance form pays for instance plumbing and *still*
+   ends up with a static seam. The all-static form is simpler, matches the
+   platform's existing utility style, and lets one seam serve every layer.
 2. **Timeouts.** Accept the system resolver's behaviour (recommended for now —
    simple, no new dependency) or shell to `dig` for a hard per-lookup timeout.
    Revisit only if a slow-DNS incident actually occurs.
-3. **Per-request cache.** Include it in `DnsResolver` from the start
-   (recommended) or add later.
+3. **Per-request cache — decided: deferred.** Not built in v1 (§4.1). Low hit
+   rate (callers query different names/record types), and it is the only
+   source of mid-request staleness. It is internal to `DnsResolver`, so it can
+   be added with zero API change if a measured DNS-latency problem actually
+   appears. Until then, every lookup is fresh.
 4. **`checkDomainDns()` semantics.** Keep it presence-only (just "is there an
    SPF record") and only share the *lookup* — recommended for this round — or
    upgrade it to also flag weak `+all` / `?all` policies now that
    `DnsAuthChecker` makes that free. The latter is a user-visible behaviour
    change to a provisioning check and deserves its own call.
-5. **The `scan_url.php` SSRF fix.** Ship it inside this work (recommended — it
-   is a one-liner once `resolveHostIps()` exists and closes a real gap) or
-   split it into a standalone security fix.
+5. **SSRF: two separate fixes, two separate decisions.**
+   (a) *The multi-IP fix* — `scan_url.php`'s single `gethostbyname()` →
+   `resolveHostIps()` — ships inside this work (recommended; a one-liner once
+   `resolveHostIps()` exists, and it closes a real gap).
+   (b) *The DNS-rebinding fix* — connect-by-IP / host-pinning in the caller's
+   HTTP client (§4.4) — is **not** in any phase of this spec; it lives in the
+   HTTP-fetch code of `UrlSafetyValidator`'s and `scan_url.php`'s callers, none
+   of which this spec touches. Decide explicitly: scope it as a follow-up
+   security spec (recommended) or pull it in here as a sixth phase. Until (b)
+   is done, both kind-4 callers stay DNS-rebinding-vulnerable, and §6 says so.
+
+6. **Email *format*-validation unification.** §4.3 shares only the DNS tail;
+   `SystemBase` and `IsValidEmail()` keep their differing format gates
+   (`filter_var` vs hand-rolled regex). Unifying those onto one format check is
+   a separate, user-visible behaviour change — deferred, and not recommended
+   for this round. `IsValidEmail()` is confirmed still in live use (callers in
+   `adm/`, `logic/`, and `data/users_class.php`), so §4.3's dedup stays
+   relevant — it does not collapse to the `SystemBase` path alone.
 
 ---
 
