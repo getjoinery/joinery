@@ -2,10 +2,13 @@
 #
 # install_email.sh - host installer + base configurator for Email Forwarding.
 #
-# Version: 2.0 - Option C (spec email_forwarding_install_unification): Postfix
-#                resolves the forwarding-domain list live from the database via
-#                a pgsql map, and opendkim static config + the milter are now
-#                part of this fixed base install.
+# Version: 2.1 - The pgsql map authenticates as a dedicated least-privilege
+#                PostgreSQL role, not the application's superuser account
+#                (spec email_forwarding_pgsql_credential).
+#                2.0 - Option C (spec email_forwarding_install_unification):
+#                Postfix resolves the forwarding-domain list live from the
+#                database via a pgsql map; opendkim static config and the
+#                milter became part of this fixed base install.
 #
 # Installs the mail software the plugin needs and applies the FIXED Postfix and
 # opendkim configuration so inbound mail is piped to the forwarder. Fully
@@ -26,6 +29,10 @@
 #                 active forwarding domain, so adding or removing a domain in
 #                 the admin UI takes effect immediately - no host action, no
 #                 drift. /etc/postfix/joinery-domains.cf is the pgsql map.
+#   - postgres  : a dedicated least-privilege role the pgsql map authenticates
+#                 as - SELECT on the forwarding-domains table only, never the
+#                 application's superuser. Its password lives only in the map
+#                 file; re-running this script rotates it.
 #   - opendkim  : inet socket localhost:8891, empty key/signing tables, and the
 #                 Postfix milter (milter_default_action = accept, so a keyless
 #                 or down opendkim never blocks or defers mail).
@@ -75,6 +82,21 @@ if [[ ! -f "${PIPE_SCRIPT}" ]]; then
 fi
 if [[ ! -f "${RENDER_SCRIPT}" ]]; then
     echo "ERROR: pgsql map renderer not found at ${RENDER_SCRIPT}" >&2
+    exit 1
+fi
+
+# The site config sits alongside public_html, four levels up from provisioning/.
+# Only the database name is read from it here — it names the dedicated role and
+# the database to grant in.
+SITE_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+    echo "ERROR: site config not found at ${CONFIG_FILE}" >&2
+    exit 1
+fi
+DBNAME="$(grep -oP "settings\['dbname'\]\s*=\s*'\K[^']+" "${CONFIG_FILE}" | head -1)"
+if [[ -z "${DBNAME}" ]]; then
+    echo "ERROR: could not read dbname from ${CONFIG_FILE}" >&2
     exit 1
 fi
 
@@ -156,13 +178,57 @@ fi
 postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, reject_rbl_client b.barracudacentral.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, permit"
 echo "main.cf: smtpd_recipient_restrictions set (RBL clients)"
 
-# --- 4. pgsql domain map: Postfix reads the live domain list -----------------
-# Render the map from the site's own DB credentials, then install it with
-# locked-down permissions. The map necessarily holds the DB password; it is
-# never printed to the terminal.
+# --- 4. dedicated DB role + pgsql domain map ---------------------------------
+# Postfix authenticates to PostgreSQL as a dedicated least-privilege role, not
+# the application's superuser account. The role can do exactly one thing: read
+# the forwarding-domain list. Its password lives only in the map file written
+# below; re-running this script rotates it.
+DB_PSQL=(psql -U postgres -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
+
+# The role's GRANT needs the domains table, which update_database creates after
+# the plugin is activated. Fail clearly rather than half-configure.
+TABLE_CHECK="$("${DB_PSQL[@]}" -c "SELECT to_regclass('public.efd_email_forwarding_domains') IS NOT NULL" 2>&1)" || {
+    echo "ERROR: could not query PostgreSQL database '${DBNAME}': ${TABLE_CHECK}" >&2
+    exit 1
+}
+if [[ "${TABLE_CHECK}" != "t" ]]; then
+    echo "ERROR: table efd_email_forwarding_domains does not exist in database '${DBNAME}'." >&2
+    echo "       Activate the Email Forwarding plugin and run update_database, then re-run this script." >&2
+    exit 1
+fi
+
+# Role name carries the database name so multiple sites on one PostgreSQL
+# cluster never collide on a shared role.
+DB_ROLE="efwd_map_$(printf '%s' "${DBNAME}" | tr -cd 'a-z0-9_')"
+
+# 48 hex chars of randomness. od reads a fixed count and exits cleanly, so the
+# pipe raises no SIGPIPE under `set -o pipefail`.
+ROLE_PW="$(od -An -tx1 -N24 /dev/urandom | tr -dc 'a-f0-9')"
+if [[ ${#ROLE_PW} -ne 48 ]]; then
+    echo "ERROR: failed to generate a role password." >&2
+    exit 1
+fi
+
+# Create the role once; (re)assert its attributes, password and grants every
+# run, so a re-run is a clean rotation.
+if [[ "$("${DB_PSQL[@]}" -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_ROLE}'")" != "1" ]]; then
+    "${DB_PSQL[@]}" -c "CREATE ROLE \"${DB_ROLE}\" LOGIN"
+    echo "postgres: created role ${DB_ROLE}"
+fi
+# The password is set over stdin, never argv, so it stays out of the process list.
+"${DB_PSQL[@]}" <<SQL
+ALTER ROLE "${DB_ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD '${ROLE_PW}';
+GRANT CONNECT ON DATABASE "${DBNAME}" TO "${DB_ROLE}";
+GRANT USAGE ON SCHEMA public TO "${DB_ROLE}";
+GRANT SELECT ON efd_email_forwarding_domains TO "${DB_ROLE}";
+SQL
+echo "postgres: role ${DB_ROLE} configured (SELECT on efd_email_forwarding_domains only)"
+
+# Render the map and install it locked down. The password reaches the renderer
+# through the environment, never argv or the terminal.
 MAP_TMP="$(mktemp)"
 trap 'rm -f "${MAP_TMP}"' EXIT
-if "${PHP_BIN}" "${RENDER_SCRIPT}" > "${MAP_TMP}"; then
+if EFWD_MAP_PASSWORD="${ROLE_PW}" "${PHP_BIN}" "${RENDER_SCRIPT}" "${DB_ROLE}" "${CONFIG_FILE}" > "${MAP_TMP}"; then
     install -m 640 -o root -g postfix "${MAP_TMP}" "${MAP_FILE}"
     echo "postfix: wrote pgsql domain map ${MAP_FILE} (640 root:postfix)"
 else

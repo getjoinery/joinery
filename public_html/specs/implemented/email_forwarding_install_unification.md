@@ -4,6 +4,13 @@
 **Author:** Analysis prepared 2026-05-17
 **Plugin:** `plugins/email_forwarding/` (v1.4.0)
 
+> **Follow-up (2026-05-17):** the pgsql map's database-credential handling (§6.2,
+> §7.2) was revised after implementation — the map now authenticates as a
+> dedicated least-privilege role, not the application's `postgres` superuser.
+> See `specs/implemented/email_forwarding_pgsql_credential.md`. That spec's §1a
+> also corrects §7.8 below: `smtpd` / `trivial-rewrite` are *not* shipped
+> un-chrooted by default on Ubuntu 24.04.
+
 ---
 
 ## 1. Background
