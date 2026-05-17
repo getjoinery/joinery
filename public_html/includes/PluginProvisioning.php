@@ -19,7 +19,7 @@
  * See specs/implemented/plugin_provisioning_checks.md and the
  * "Declaring host provisioners" section of docs/plugin_developer_guide.md.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/PathHelper.php');
@@ -189,8 +189,10 @@ class PluginProvisioning {
             return $host;
         }
 
-        // Bare metal: services on the host are simply localhost.
-        if (!file_exists('/.dockerenv')) {
+        // Bare metal: services on the host are simply localhost. The deployment
+        // environment is recorded once at install time (spec
+        // deployment_environment_flag) — no runtime container detection.
+        if (Globalvars::get_instance()->get_setting('deployment_environment', true, true) !== 'docker') {
             return '127.0.0.1';
         }
 

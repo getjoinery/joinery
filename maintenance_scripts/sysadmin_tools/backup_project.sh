@@ -44,13 +44,11 @@
 set -euo pipefail
 
 # Version information
-SCRIPT_VERSION="2.1.0"
+SCRIPT_VERSION="2.2.0"
 
-# Auto-detect environment (Docker or bare metal)
+# Deployment environment (Docker or bare metal) — read from the project's
+# Globalvars_site.php once PROJECT_DIR is known (spec deployment_environment_flag).
 IS_DOCKER=false
-if [ -f "/.dockerenv" ] || grep -q 'docker\|lxc' /proc/1/cgroup 2>/dev/null; then
-    IS_DOCKER=true
-fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -183,6 +181,11 @@ PROJECT_DIR="/var/www/html/${PROJECT_NAME}"
 if [ ! -d "$PROJECT_DIR" ]; then
     print_error "Project directory does not exist: $PROJECT_DIR"
     exit 1
+fi
+
+# Read the deployment environment flag from the project's config (single source of truth)
+if [ "$(grep -oP "settings\['deployment_environment'\]\s*=\s*'\K[^']+" "$PROJECT_DIR/config/Globalvars_site.php" 2>/dev/null)" = docker ]; then
+    IS_DOCKER=true
 fi
 
 # Find Apache virtualhost configuration

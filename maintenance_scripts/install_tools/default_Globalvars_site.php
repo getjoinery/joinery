@@ -1,5 +1,5 @@
 <?php
-//Version 1.05
+//Version 1.06
 //SITE: {{SITE_NAME}}
 
 // ============================================================
@@ -16,6 +16,7 @@
 $this->settings['baseDir'] = '/var/www/html/';  //PATH FROM ROOT TO INSTALLATION DIRECTORY (/)
 $this->settings['site_template'] = '{{SITE_NAME}}'; //SITE INSTALLATION DIRECTORY NAME — maps to /var/www/html/{site_template}/public_html/. This is NOT the visual theme; it is the site identifier used to locate files and the database. Change only if relocating the entire installation.
 $this->settings['webDir'] = '{{DOMAIN_NAME}}';	//DOMAIN NAME OF THE WEBSITE (no protocol, no trailing slash)
+$this->settings['deployment_environment'] = '{{DEPLOYMENT_ENVIRONMENT}}';  //DEPLOYMENT ENVIRONMENT: 'docker' or 'baremetal' — set by the installer; single source of truth, see spec deployment_environment_flag
 
 //DEFAULT DIRECTORIES — DO NOT CHANGE THESE
 $this->settings['siteDir'] = $this->settings['baseDir'] . $this->settings['site_template']. '/public_html';  //PATH FROM COMPUTER ROOT DIRECTORY TO LOCATION OF WEB ROOT (/), LEAVE OFF THE FINAL SLASH
