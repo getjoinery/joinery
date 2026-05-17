@@ -2,7 +2,7 @@
 /**
  * Email Forwarding - Domain Management
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -45,6 +45,9 @@ if (isset($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
 }
 
+// Path to the base mail installer — the single fix for missing host components.
+$installer_path = PathHelper::getIncludePath('plugins/email_forwarding/provisioning/install_email.sh');
+
 // --- Server Status Panel ---
 $pageoptions_status = array('title' => 'Server Status');
 $page->begin_box($pageoptions_status);
@@ -73,6 +76,20 @@ if ($transport_configured) {
 	echo '<span class="badge bg-warning text-dark">Joinery Transport</span> Not found in Postfix config<br>';
 }
 
+// Check virtual_mailbox_domains is wired to the live pgsql database map.
+// Under Option C the database IS Postfix's domain source — what can be wrong
+// is the plumbing, not an individual domain. (No credentials: postconf -h
+// prints only the setting value, and the map path is world-readable.)
+$vmd_output = array();
+exec('postconf -h virtual_mailbox_domains 2>/dev/null', $vmd_output);
+$vmd_line = trim(implode('', $vmd_output));
+$vmd_ok = (strpos($vmd_line, 'pgsql:') !== false && strpos($vmd_line, 'joinery-domains.cf') !== false);
+if ($vmd_ok) {
+	echo '<span class="badge bg-success">Domain Map</span> Postfix reads forwarding domains live from the database<br>';
+} else {
+	echo '<span class="badge bg-warning text-dark">Domain Map</span> <code>virtual_mailbox_domains</code> is not wired to the database map<br>';
+}
+
 // Check opendkim
 exec('which opendkim 2>/dev/null', $dk_output, $dk_exit);
 $opendkim_installed = ($dk_exit === 0);
@@ -87,20 +104,17 @@ if ($opendkim_installed && $opendkim_running) {
 	echo '<span class="badge bg-secondary">opendkim</span> Not installed &mdash; outbound DKIM signing disabled<br>';
 }
 
-// Check for mydestination conflict
+// Capture mydestination for the per-domain conflict check below.
 $mydest_output = array();
 exec('postconf -h mydestination 2>/dev/null', $mydest_output);
 $mydest_line = implode('', $mydest_output);
-$mydest_conflict = false;
 if ($mydest_line) {
-	// Check later when we have the domain list
 	$mydest_conflict_check = $mydest_line;
 }
 
-if (!$postfix_installed || !$transport_configured || !$opendkim_installed) {
-	$script_path_display = PathHelper::getIncludePath('plugins/email_forwarding/setup_email_forwarding.sh');
-	echo '<p class="mt-2">Run the setup script to fix missing components:</p>';
-	echo '<pre class="bg-light p-2"><code>sudo bash ' . htmlspecialchars($script_path_display) . '</code></pre>';
+if (!$postfix_installed || !$transport_configured || !$vmd_ok || !$opendkim_installed) {
+	echo '<p class="mt-2">Run the base mail installer to fix missing components:</p>';
+	echo '<pre class="bg-light p-2"><code>sudo bash ' . htmlspecialchars($installer_path) . '</code></pre>';
 }
 
 $page->end_box();
@@ -181,13 +195,7 @@ if ($edit_domain) {
 		}
 	}
 
-	// Check Postfix
-	$ed_vmd_output = array();
-	exec('postconf virtual_mailbox_domains 2>/dev/null', $ed_vmd_output);
-	$ed_vmd_line = implode('', $ed_vmd_output);
-	$ed_in_postfix = (strpos($ed_vmd_line, $ed_domain_name) !== false);
-
-	echo '<h6 class="mt-3">DNS & Server Status for ' . htmlspecialchars($ed_domain_name) . '</h6>';
+	echo '<h6 class="mt-3">DNS &amp; Server Status for ' . htmlspecialchars($ed_domain_name) . '</h6>';
 	echo '<table class="table table-sm" style="max-width:500px">';
 	echo '<tr><td><strong>MX Record</strong></td><td>';
 	if ($ed_mx_ok) {
@@ -202,16 +210,14 @@ if ($edit_domain) {
 	echo '<tr><td><strong>DKIM Record</strong></td><td>';
 	echo $ed_dkim_ok ? '<span class="badge bg-success">OK</span>' : '<span class="badge bg-secondary">Not found</span>';
 	echo '</td></tr>';
-	echo '<tr><td><strong>Postfix</strong></td><td>';
-	echo $ed_in_postfix ? '<span class="badge bg-success">Configured</span>' : '<span class="badge bg-warning text-dark">Domain not in Postfix</span>';
-	echo '</td></tr>';
 
-	// Check mydestination conflict
+	// Check mydestination conflict — a forwarding domain in mydestination
+	// outranks virtual_mailbox_domains and breaks virtual forwarding.
 	$ed_mydest_conflict = isset($mydest_conflict_check) && strpos($mydest_conflict_check, $ed_domain_name) !== false;
 	if ($ed_mydest_conflict) {
 		echo '<tr><td><strong>mydestination</strong></td><td>';
 		echo '<span class="badge bg-danger">Conflict</span> Domain is in Postfix <code>mydestination</code> — virtual forwarding will not work.';
-		echo '<br><pre class="bg-light p-2 mt-1"><code>sudo bash ' . htmlspecialchars(PathHelper::getIncludePath('plugins/email_forwarding/setup_email_forwarding.sh')) . '</code></pre>';
+		echo '<br><pre class="bg-light p-2 mt-1"><code>sudo bash ' . htmlspecialchars($installer_path) . '</code></pre>';
 		echo '</td></tr>';
 	}
 
@@ -219,7 +225,6 @@ if ($edit_domain) {
 
 	// Only show instructions for items that are missing
 	$missing = array();
-	if (!$ed_in_postfix) $missing[] = 'postfix';
 	if (!$ed_mx_ok) $missing[] = 'mx';
 	if (!$ed_spf_ok) $missing[] = 'spf';
 	if (!$ed_dkim_ok) $missing[] = 'dkim';
@@ -227,45 +232,38 @@ if ($edit_domain) {
 	if (!empty($missing)) {
 		echo '<h6>Setup Required</h6>';
 
-		if (in_array('postfix', $missing)) {
-			echo '<p>Run the setup script to add this domain to Postfix:</p>';
-			echo '<pre class="bg-light p-2"><code>sudo bash ' . htmlspecialchars(PathHelper::getIncludePath('plugins/email_forwarding/setup_email_forwarding.sh')) . '</code></pre>';
+		echo '<p>Add these DNS records for <strong>' . htmlspecialchars($ed_domain_name) . '</strong>:</p>';
+		echo '<table class="table table-sm table-bordered" style="max-width:700px">';
+		echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th></tr></thead><tbody>';
+
+		if (in_array('mx', $missing)) {
+			$mx_value = htmlspecialchars($ed_hostname) . '.';
+			echo '<tr><td>MX</td><td>@</td><td><input type="text" class="form-control form-control-sm" readonly style="cursor:pointer;background:#fff" value="' . $mx_value . '" onclick="this.select()"> <small>Priority: 10</small></td></tr>';
 		}
-
-		if (in_array('mx', $missing) || in_array('spf', $missing) || in_array('dkim', $missing)) {
-			echo '<p>Add these DNS records for <strong>' . htmlspecialchars($ed_domain_name) . '</strong>:</p>';
-			echo '<table class="table table-sm table-bordered" style="max-width:700px">';
-			echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th></tr></thead><tbody>';
-
-			if (in_array('mx', $missing)) {
-				$mx_value = htmlspecialchars($ed_hostname) . '.';
-				echo '<tr><td>MX</td><td>@</td><td><input type="text" class="form-control form-control-sm" readonly style="cursor:pointer;background:#fff" value="' . $mx_value . '" onclick="this.select()"> <small>Priority: 10</small></td></tr>';
-			}
-			if (in_array('spf', $missing)) {
-				$spf_value = 'v=spf1 ip4:' . htmlspecialchars($ed_server_ip) . ' -all';
-				echo '<tr><td>TXT</td><td>@</td><td><input type="text" class="form-control form-control-sm" readonly style="cursor:pointer;background:#fff" value="' . htmlspecialchars($spf_value) . '" onclick="this.select()"></td></tr>';
-			}
-			if (in_array('dkim', $missing)) {
-				$dkim_key_file = '/etc/opendkim/keys/' . $ed_domain_name . '/mail.txt';
-				$dkim_pub_key = '';
-				if (is_readable($dkim_key_file)) {
-					$dkim_raw = file_get_contents($dkim_key_file);
-					if (preg_match('/p=([A-Za-z0-9+\/=\s]+)/', $dkim_raw, $dkim_match)) {
-						$dkim_pub_key = preg_replace('/\s+/', '', $dkim_match[1]);
-					}
-				}
-				if ($dkim_pub_key) {
-					$dkim_value = 'v=DKIM1; k=rsa; p=' . $dkim_pub_key;
-					echo '<tr><td>TXT</td><td>mail._domainkey</td><td><input type="text" class="form-control form-control-sm" readonly style="cursor:pointer;background:#fff" value="' . htmlspecialchars($dkim_value) . '" onclick="this.select()"></td></tr>';
-				} else {
-					echo '<tr><td>TXT</td><td>mail._domainkey</td><td><small class="text-muted">DKIM key not yet generated. Run the setup script first, then reload.</small></td></tr>';
+		if (in_array('spf', $missing)) {
+			$spf_value = 'v=spf1 ip4:' . htmlspecialchars($ed_server_ip) . ' -all';
+			echo '<tr><td>TXT</td><td>@</td><td><input type="text" class="form-control form-control-sm" readonly style="cursor:pointer;background:#fff" value="' . htmlspecialchars($spf_value) . '" onclick="this.select()"></td></tr>';
+		}
+		if (in_array('dkim', $missing)) {
+			$dkim_key_file = '/etc/opendkim/keys/' . $ed_domain_name . '/mail.txt';
+			$dkim_pub_key = '';
+			if (is_readable($dkim_key_file)) {
+				$dkim_raw = file_get_contents($dkim_key_file);
+				if (preg_match('/p=([A-Za-z0-9+\/=\s]+)/', $dkim_raw, $dkim_match)) {
+					$dkim_pub_key = preg_replace('/\s+/', '', $dkim_match[1]);
 				}
 			}
-
-			echo '</tbody></table>';
+			if ($dkim_pub_key) {
+				$dkim_value = 'v=DKIM1; k=rsa; p=' . $dkim_pub_key;
+				echo '<tr><td>TXT</td><td>mail._domainkey</td><td><input type="text" class="form-control form-control-sm" readonly style="cursor:pointer;background:#fff" value="' . htmlspecialchars($dkim_value) . '" onclick="this.select()"></td></tr>';
+			} else {
+				echo '<tr><td>TXT</td><td>mail._domainkey</td><td><small class="text-muted">No DKIM key for this domain yet. Generate one with <code>opendkim-genkey</code>, add it to <code>/etc/opendkim/key.table</code> and <code>signing.table</code>, then reload &mdash; see the Email Forwarding plugin docs. Forwarding works without it; only outbound DKIM signing is affected.</small></td></tr>';
+			}
 		}
+
+		echo '</tbody></table>';
 	} else {
-		echo '<div class="alert alert-success mt-2">All DNS records and server configuration are in place for this domain.</div>';
+		echo '<div class="alert alert-success mt-2">All DNS records are in place for this domain.</div>';
 	}
 	}
 
@@ -280,45 +278,6 @@ $show_deleted = ($session->get_permission() >= 10);
 $domain_filters = $show_deleted ? [] : ['deleted' => false];
 $domains = new MultiEmailForwardingDomain($domain_filters, array('efd_delete_time' => 'ASC', 'efd_domain' => 'ASC'));
 $domains->load();
-
-// Get Postfix virtual_mailbox_domains for stale config detection
-$vmd_output = array();
-exec('postconf virtual_mailbox_domains 2>/dev/null', $vmd_output);
-$vmd_line = implode('', $vmd_output);
-
-// Check for stale postfix config — active domains not in postfix
-$active_domains = new MultiEmailForwardingDomain(['deleted' => false], []);
-$active_domains->load();
-$stale_domains = [];
-foreach ($active_domains as $ad) {
-	if (strpos($vmd_line, $ad->get('efd_domain')) === false) {
-		$stale_domains[] = $ad->get('efd_domain');
-	}
-}
-// Also check for deleted domains still in postfix
-$deleted_in_postfix = [];
-if ($show_deleted) {
-	$deleted_domains = new MultiEmailForwardingDomain(['deleted' => true], []);
-	$deleted_domains->load();
-	foreach ($deleted_domains as $dd) {
-		if (strpos($vmd_line, $dd->get('efd_domain')) !== false) {
-			$deleted_in_postfix[] = $dd->get('efd_domain');
-		}
-	}
-}
-
-if (!empty($stale_domains) || !empty($deleted_in_postfix)) {
-	echo '<div class="alert alert-warning" style="margin-bottom: 1rem;">';
-	echo '<strong>Postfix configuration is out of sync.</strong> ';
-	if (!empty($stale_domains)) {
-		echo 'Active domain(s) not in Postfix: <strong>' . htmlspecialchars(implode(', ', $stale_domains)) . '</strong>. ';
-	}
-	if (!empty($deleted_in_postfix)) {
-		echo 'Deleted domain(s) still in Postfix: <strong>' . htmlspecialchars(implode(', ', $deleted_in_postfix)) . '</strong>. ';
-	}
-	echo 'Re-run the setup script in the Server Status section above to update.';
-	echo '</div>';
-}
 
 $headers = array('Domain', 'Status', 'Catch-All', 'Aliases', 'DNS', 'Actions');
 $altlinks = array('Add Domain' => '/plugins/email_forwarding/admin/admin_email_forwarding_domains?action=add');
@@ -354,10 +313,7 @@ foreach ($domains as $d) {
 				if (strpos($txt['txt'] ?? '', 'v=DKIM1') !== false) { $dkim_found = true; break; }
 			}
 		}
-		$dns_status .= $dkim_found ? '<span class="badge bg-success">DKIM</span> ' : '<span class="badge bg-secondary">DKIM</span> ';
-
-		$in_postfix = (strpos($vmd_line, $domain_name) !== false);
-		$dns_status .= $in_postfix ? '<span class="badge bg-success">Postfix</span>' : '<span class="badge bg-warning text-dark">Postfix</span>';
+		$dns_status .= $dkim_found ? '<span class="badge bg-success">DKIM</span>' : '<span class="badge bg-secondary">DKIM</span>';
 	} else {
 		$dns_status = '<span class="text-muted">-</span>';
 	}
@@ -412,116 +368,6 @@ foreach ($domains as $d) {
 }
 
 $page->endtable();
-
-// --- Generate setup script silently (used by per-domain edit view) ---
-$hostname = gethostname();
-$site_path = rtrim(PathHelper::getBasePath(), '/');
-$pipe_script = $site_path . '/plugins/email_forwarding/utils/email_forwarder.php';
-
-$all_domain_names = array();
-foreach ($active_domains as $d) {
-	$all_domain_names[] = $d->get('efd_domain');
-}
-$domain_list = implode(' ', $all_domain_names) ?: 'example.com';
-
-$script_path = PathHelper::getIncludePath('plugins/email_forwarding/setup_email_forwarding.sh');
-$script = "#!/bin/bash\n";
-$script .= "# Email Forwarding Setup Script\n";
-$script .= "# Generated " . date('Y-m-d H:i:s') . "\n";
-$script .= "# Run with: sudo bash $script_path\n\n";
-$script .= "set -e\n\n";
-
-if (!$postfix_installed) {
-	$script .= "echo '=== Installing Postfix ==='\n";
-	$script .= "debconf-set-selections <<< \"postfix postfix/mailname string " . $hostname . "\"\n";
-	$script .= "debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\"\n";
-	$script .= "apt install -y postfix\n\n";
-}
-
-if (!$transport_configured || !$postfix_installed) {
-	$script .= "echo '=== Configuring Postfix ==='\n";
-	$script .= "postconf -e \"virtual_transport = joinery\"\n";
-	$script .= "postconf -e \"virtual_mailbox_domains = " . $domain_list . "\"\n";
-	$script .= "postconf -e \"smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, reject_rbl_client b.barracudacentral.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, permit\"\n\n";
-	// Remove forwarding domains from mydestination (virtual transport only works if domain is NOT in mydestination)
-	$script .= "echo '=== Ensuring forwarding domains are not in mydestination ==='\n";
-	$script .= "postconf -e \"mydestination = localhost, localhost.localdomain\"\n\n";
-	$script .= "echo '=== Adding pipe transport to master.cf ==='\n";
-	$script .= "if ! grep -q '^joinery' /etc/postfix/master.cf; then\n";
-	$script .= "  cat >> /etc/postfix/master.cf << 'MASTEREOF'\n";
-	$script .= "joinery   unix  -       n       n       -       5       pipe\n";
-	$script .= "  flags=DRhu user=www-data\n";
-	$script .= '  argv=/usr/bin/php ' . $pipe_script . ' ${recipient}' . "\n";
-	$script .= "MASTEREOF\n";
-	$script .= "  echo 'Added joinery transport to master.cf'\n";
-	$script .= "else\n";
-	$script .= "  echo 'joinery transport already exists in master.cf'\n";
-	$script .= "fi\n\n";
-	$script .= "postfix reload\n\n";
-} else {
-	$needs_update = false;
-	foreach ($all_domain_names as $dn) {
-		if (strpos($vmd_line, $dn) === false) {
-			$needs_update = true;
-			break;
-		}
-	}
-	if ($needs_update) {
-		$script .= "echo '=== Updating Postfix domain list ==='\n";
-		$script .= "postconf -e \"virtual_mailbox_domains = " . $domain_list . "\"\n";
-		$script .= "postconf -e \"mydestination = localhost, localhost.localdomain\"\n";
-		$script .= "postfix reload\n\n";
-	}
-}
-
-// Always check for mydestination conflict — forwarding domains must not be in mydestination
-$mydest_has_conflict = false;
-$mydest_raw = '';
-exec('postconf -h mydestination 2>/dev/null', $mydest_raw_arr);
-$mydest_raw = implode('', $mydest_raw_arr ?? []);
-foreach ($all_domain_names as $dn) {
-	if (strpos($mydest_raw, $dn) !== false) {
-		$mydest_has_conflict = true;
-		break;
-	}
-}
-if ($mydest_has_conflict) {
-	$script .= "echo '=== Fixing mydestination conflict ==='\n";
-	$script .= "postconf -e \"mydestination = localhost, localhost.localdomain\"\n";
-	$script .= "postfix reload\n\n";
-}
-
-if (!$opendkim_installed) {
-	$script .= "echo '=== Installing opendkim ==='\n";
-	$script .= "apt install -y opendkim opendkim-tools\n";
-	$script .= "postconf -e \"milter_default_action = accept\"\n";
-	$script .= "postconf -e \"smtpd_milters = inet:localhost:8891\"\n";
-	$script .= "postconf -e \"non_smtpd_milters = inet:localhost:8891\"\n\n";
-}
-
-// Generate DKIM keys for any domain that doesn't have one yet
-$dkim_keys_generated = false;
-foreach ($all_domain_names as $dn) {
-	$key_file = '/etc/opendkim/keys/' . $dn . '/mail.private';
-	if (!file_exists($key_file)) {
-		$script .= "echo '=== Generating DKIM keys for " . $dn . " ==='\n";
-		$script .= "mkdir -p /etc/opendkim/keys/" . $dn . "\n";
-		$script .= "opendkim-genkey -s mail -d " . $dn . " -D /etc/opendkim/keys/" . $dn . "\n";
-		$script .= "chown opendkim:opendkim /etc/opendkim/keys/" . $dn . "/mail.private\n";
-		$script .= "chmod 644 /etc/opendkim/keys/" . $dn . "/mail.txt\n\n";
-		$dkim_keys_generated = true;
-	}
-}
-if ($dkim_keys_generated || !$opendkim_installed) {
-	$script .= "systemctl restart opendkim\n\n";
-}
-
-$script .= "echo '=== Opening firewall port 25 ==='\n";
-$script .= "ufw allow 25\n\n";
-$script .= "echo '=== Setup complete ==='\n";
-
-file_put_contents($script_path, $script);
-chmod($script_path, 0755);
 
 $page->admin_footer();
 ?>
