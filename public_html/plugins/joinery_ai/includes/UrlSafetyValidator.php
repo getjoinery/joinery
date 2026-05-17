@@ -21,6 +21,8 @@
  * checker. See WebSearchTool / FetchUrlTool for the canonical setup.
  */
 
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
+
 class UnsafeUrlException extends Exception {}
 
 class UrlSafetyValidator {
@@ -129,21 +131,13 @@ class UrlSafetyValidator {
      * Resolve hostname to all IPv4 + IPv6 addresses.
      */
     private static function resolveAll(string $host): array {
-        $ips = [];
-
-        $v4 = gethostbynamel($host);
-        if (is_array($v4)) {
-            $ips = array_merge($ips, $v4);
+        try {
+            return DnsResolver::resolveHostIps($host);
+        } catch (DnsLookupException $e) {
+            // SSRF guard: a resolver failure means the host's addresses
+            // cannot be enumerated. Fail closed — refuse the URL.
+            throw new UnsafeUrlException("Could not resolve '$host' — refusing to fetch.");
         }
-
-        $v6_records = @dns_get_record($host, DNS_AAAA);
-        if (is_array($v6_records)) {
-            foreach ($v6_records as $rec) {
-                if (!empty($rec['ipv6'])) $ips[] = $rec['ipv6'];
-            }
-        }
-
-        return array_values(array_unique($ips));
     }
 
     private static function ipInCidr(string $ip, string $cidr): bool {

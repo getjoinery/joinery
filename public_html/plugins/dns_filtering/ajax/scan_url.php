@@ -9,6 +9,7 @@
 
 header('Content-Type: application/json');
 
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/dns_filtering/data/devices_class.php'));
 
 $session  = SessionControl::get_instance();
@@ -45,24 +46,45 @@ if (!$host) {
 	exit;
 }
 
-// SSRF protection: resolve hostname and reject private/loopback IPv4 ranges
-$resolved_ip = gethostbyname($host);
-if ($resolved_ip !== $host) {
-	$long = ip2long($resolved_ip);
-	if ($long !== false) {
-		$private_ranges = array(
-			array(0x7F000000, 0xFF000000), // 127.0.0.0/8 loopback
-			array(0x0A000000, 0xFF000000), // 10.0.0.0/8
-			array(0xAC100000, 0xFFF00000), // 172.16.0.0/12
-			array(0xC0A80000, 0xFFFF0000), // 192.168.0.0/16
-			array(0xA9FE0000, 0xFFFF0000), // 169.254.0.0/16 link-local
-		);
-		foreach ($private_ranges as $range) {
-			if (($long & $range[1]) === $range[0]) {
-				echo json_encode(array('success' => false, 'message' => 'URL resolves to a private or reserved address.'));
-				exit;
+// SSRF protection: resolve the host to ALL of its IPs (every A and AAAA
+// record) and reject any that fall in a private/loopback/reserved range.
+// A resolver failure fails closed (block); a host with no records resolves
+// to nothing and is left for the fetch below to fail naturally.
+try {
+	$resolved_ips = DnsResolver::resolveHostIps($host);
+} catch (DnsLookupException $e) {
+	echo json_encode(array('success' => false, 'message' => 'URL host could not be resolved.'));
+	exit;
+}
+$private_ranges = array(
+	array(0x7F000000, 0xFF000000), // 127.0.0.0/8 loopback
+	array(0x0A000000, 0xFF000000), // 10.0.0.0/8
+	array(0xAC100000, 0xFFF00000), // 172.16.0.0/12
+	array(0xC0A80000, 0xFFFF0000), // 192.168.0.0/16
+	array(0xA9FE0000, 0xFFFF0000), // 169.254.0.0/16 link-local
+);
+foreach ($resolved_ips as $ip) {
+	$blocked = false;
+	if (strpos($ip, ':') !== false) {
+		// IPv6 — reject private (fc00::/7) and reserved (::1, fe80::/10,
+		// ::ffff:0:0/96, …) ranges. PHP's filter is reliable for v6.
+		if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+			$blocked = true;
+		}
+	} else {
+		$long = ip2long($ip);
+		if ($long !== false) {
+			foreach ($private_ranges as $range) {
+				if (($long & $range[1]) === $range[0]) {
+					$blocked = true;
+					break;
+				}
 			}
 		}
+	}
+	if ($blocked) {
+		echo json_encode(array('success' => false, 'message' => 'URL resolves to a private or reserved address.'));
+		exit;
 	}
 }
 

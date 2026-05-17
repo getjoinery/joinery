@@ -1,10 +1,25 @@
 # DNS Functionality Consolidation
 
-**Status:** Proposal — undecided. Presents the inventory and a layered plan;
-open decisions are in §8.
+**Status:** Implemented 2026-05-17. All five phases shipped. The §8 decisions
+were resolved as recommended: system-resolver timeout behaviour accepted (§8.2);
+`checkDomainDns()` kept presence-only (§8.4); the `scan_url.php` multi-IP fix
+shipped inside this work (§8.5a). Two items remain deliberately open as
+follow-ups: the DNS-rebinding / connect-by-IP fix (§8.5b) and email
+*format*-validation unification (§8.6).
 **Author:** Analysis prepared 2026-05-17
 **Origin:** Surfaced during the Email Forwarding install unification work
 (`specs/email_forwarding_install_unification.md`).
+
+> **Implementation notes (2026-05-17).**
+> - `DnsResolver` shipped as 2 files — `includes/DnsResolver.php` and
+>   `includes/DnsLookupException.php` — plus `tests/unit/dns_resolver_test.php`.
+> - One intentional behaviour refinement in `checkDomainDns()`: the old code
+>   conflated a resolver failure with "no record" and so flagged every domain
+>   when the local resolver hiccupped. It now distinguishes the two and
+>   fails **open** on a `DnsLookupException` (kind 2, per §3) — a transient DNS
+>   error no longer produces a false "DNS not configured" report.
+> - `scan_url.php` gained IPv6 classification (private/reserved ranges) so the
+>   multi-IP fix genuinely covers AAAA records, not just multiple A records.
 
 ---
 

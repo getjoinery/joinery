@@ -5,9 +5,10 @@
  * Parses raw email, looks up alias, verifies DKIM, checks rate limits,
  * and forwards via SmtpMailer. Handles SRS bounce processing.
  *
- * @version 1.1
+ * @version 1.2
  */
 
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_log_class.php'));
@@ -483,14 +484,17 @@ class EmailForwarder {
 
 			// DNS lookup for public key
 			$dns_name = $selector . '._domainkey.' . $domain;
-			$dns_records = @dns_get_record($dns_name, DNS_TXT);
-			if (!$dns_records || empty($dns_records)) {
+			try {
+				$dns_txt = DnsResolver::getTxt($dns_name);
+			} catch (DnsLookupException $e) {
 				return 'none'; // DNS error — fail open
+			}
+			if (empty($dns_txt)) {
+				return 'none';
 			}
 
 			$public_key_data = '';
-			foreach ($dns_records as $record) {
-				$txt = $record['txt'] ?? '';
+			foreach ($dns_txt as $txt) {
 				if (strpos($txt, 'p=') !== false) {
 					$public_key_data = $txt;
 					break;

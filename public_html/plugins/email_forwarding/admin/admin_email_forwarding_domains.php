@@ -2,11 +2,12 @@
 /**
  * Email Forwarding - Domain Management
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/email_forwarding/logic/admin_email_forwarding_domains_logic.php'));
 
@@ -161,37 +162,43 @@ if ($edit_domain) {
 	$ed_hostname = gethostname();
 	$ed_server_ip = @file_get_contents('https://api.ipify.org') ?: 'YOUR_SERVER_IP';
 
-	// DNS checks
-	$ed_mx_records = @dns_get_record($ed_domain_name, DNS_MX);
+	// DNS checks — lookups via DnsResolver. A resolver failure reads as
+	// "not found" here: this is an informational status panel, not a gate.
 	$ed_mx_ok = false;
 	$ed_mx_target = '';
-	if ($ed_mx_records) {
-		foreach ($ed_mx_records as $mx) {
-			$ed_mx_target = $mx['target'] ?? '';
-			$ed_mx_ok = true;
+	try {
+		$ed_mx_records = DnsResolver::getMx($ed_domain_name);
+	} catch (DnsLookupException $e) {
+		$ed_mx_records = [];
+	}
+	if (!empty($ed_mx_records)) {
+		$ed_mx_target = $ed_mx_records[0]['host'];
+		$ed_mx_ok = true;
+	}
+
+	$ed_spf_ok = false;
+	try {
+		$ed_txt_records = DnsResolver::getTxt($ed_domain_name);
+	} catch (DnsLookupException $e) {
+		$ed_txt_records = [];
+	}
+	foreach ($ed_txt_records as $txt) {
+		if (strpos($txt, 'v=spf1') !== false && strpos($txt, $ed_server_ip) !== false) {
+			$ed_spf_ok = true;
 			break;
 		}
 	}
 
-	$ed_txt_records = @dns_get_record($ed_domain_name, DNS_TXT);
-	$ed_spf_ok = false;
-	if ($ed_txt_records) {
-		foreach ($ed_txt_records as $txt) {
-			if (strpos($txt['txt'] ?? '', 'v=spf1') !== false && strpos($txt['txt'] ?? '', $ed_server_ip) !== false) {
-				$ed_spf_ok = true;
-				break;
-			}
-		}
-	}
-
-	$ed_dkim_records = @dns_get_record('mail._domainkey.' . $ed_domain_name, DNS_TXT);
 	$ed_dkim_ok = false;
-	if ($ed_dkim_records) {
-		foreach ($ed_dkim_records as $txt) {
-			if (strpos($txt['txt'] ?? '', 'v=DKIM1') !== false) {
-				$ed_dkim_ok = true;
-				break;
-			}
+	try {
+		$ed_dkim_records = DnsResolver::getTxt('mail._domainkey.' . $ed_domain_name);
+	} catch (DnsLookupException $e) {
+		$ed_dkim_records = [];
+	}
+	foreach ($ed_dkim_records as $txt) {
+		if (strpos($txt, 'v=DKIM1') !== false) {
+			$ed_dkim_ok = true;
+			break;
 		}
 	}
 

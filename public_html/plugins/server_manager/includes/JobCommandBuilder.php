@@ -5,8 +5,10 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
- * @version 1.1
+ * @version 1.2
  */
+
+require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 
 class JobCommandBuilder {
 
@@ -1206,19 +1208,22 @@ class JobCommandBuilder {
 	}
 
 	private static function is_cloudflare_domain($domain) {
-		$ip = gethostbyname($domain);
-		if ($ip === $domain) {
+		try {
+			$ips = DnsResolver::getA($domain);
+		} catch (DnsLookupException $e) {
 			return false; // DNS resolution failed
 		}
-		$ip_long = ip2long($ip);
-		if ($ip_long === false) {
-			return false;
-		}
-		foreach (self::get_cloudflare_ip_ranges() as $cidr) {
-			[$subnet, $bits] = explode('/', $cidr);
-			$mask = -1 << (32 - (int)$bits);
-			if (($ip_long & $mask) === (ip2long($subnet) & $mask)) {
-				return true;
+		foreach ($ips as $ip) {
+			$ip_long = ip2long($ip);
+			if ($ip_long === false) {
+				continue;
+			}
+			foreach (self::get_cloudflare_ip_ranges() as $cidr) {
+				[$subnet, $bits] = explode('/', $cidr);
+				$mask = -1 << (32 - (int)$bits);
+				if (($ip_long & $mask) === (ip2long($subnet) & $mask)) {
+					return true;
+				}
 			}
 		}
 		return false;

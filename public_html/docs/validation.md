@@ -653,6 +653,13 @@ $rules['field_name']['required']['value'] = 'true';
 
 ### Format Validation
 
+The `email` rule does two things: a format check, then a fail-open DNS check
+that the domain can receive mail (an MX record, or an A record as the RFC 5321
+fallback). The DNS half is shared with `LibraryFunctions::IsValidEmail()` via
+`DnsResolver::domainAcceptsMail()` — see [DNS Lookups](#dns-lookups-dnsresolver)
+below. A transient DNS failure never rejects an address; only a domain that
+definitively has neither MX nor A is failed.
+
 ```php
 'email' => array(
     'type' => 'varchar(255)',
@@ -882,7 +889,51 @@ try {
 
 ---
 
+## DNS Lookups (DnsResolver)
+
+`includes/DnsResolver.php` is the single place the platform performs raw DNS
+lookups. Any code that needs DNS — email-domain validation, SPF/DKIM/DMARC
+checks, SSRF guards, provisioning checks — should go through it rather than
+calling `dns_get_record()` / `gethostby*()` directly.
+
+It is a static, policy-free class. Each method returns a normalized shape and
+distinguishes "no such record" from "the lookup failed":
+
+| Method | Returns |
+|---|---|
+| `getMx($domain)` | `[['host'=>…,'pri'=>…], …]`, lowest priority first |
+| `getA($host)` / `getAaaa($host)` | array of IP strings |
+| `getTxt($name)` | array of TXT strings |
+| `getCname($name)` | the target string, or `null` |
+| `resolveHostIps($host)` | every A **and** AAAA address, de-duplicated |
+| `domainAcceptsMail($domain)` | `bool` — MX, or A as RFC 5321 fallback |
+
+**Error vs. empty.** A genuine "no record" returns an empty array. A *resolver*
+failure (timeout, SERVFAIL, network error) throws `DnsLookupException`. This is
+deliberate: the class takes no fail-open / fail-closed stance — each caller
+catches `DnsLookupException` and applies its own policy. Validation, email-auth
+and provisioning checks catch it and fail **open**; SSRF guards catch it and
+fail **closed**.
+
+**Testability.** `DnsResolver::setBackend($double)` swaps the raw-DNS layer for
+a test double (`clearBackend()` restores it in teardown). The seam sits at the
+bottom of the stack, so one `setBackend()` call also makes every consumer —
+including `DnsAuthChecker` — testable. See `tests/unit/dns_resolver_test.php`.
+
+```php
+// Production code just calls it — no setup needed:
+if (!DnsResolver::domainAcceptsMail($domain)) { /* reject */ }
+
+// Tests inject canned records:
+DnsResolver::setBackend($fakeBackend);   // $fakeBackend->getRecords($name, $type)
+// … exercise code that resolves DNS …
+DnsResolver::clearBackend();
+```
+
+---
+
 ## Related Documentation
 
 - [Admin Pages Guide](/docs/admin_pages.md) - Form patterns and validation integration
 - [Logic Architecture](/docs/logic_architecture.md) - Business logic validation
+- [Email System](/docs/email_system.md) - `DnsAuthChecker` SPF/DKIM/DMARC checks, built on `DnsResolver`
