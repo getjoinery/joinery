@@ -62,7 +62,7 @@ sudo ./install.sh site mysite mysite.com 8080   # Docker (with port)
 sudo ./install.sh site mysite mysite.com        # Bare-metal (no port)
 ```
 
-The presence of a port signals Docker mode; omitting it signals bare-metal. To force either explicitly, use `--docker` or `--bare-metal`.
+The presence of a port signals Docker mode; omitting it signals bare-metal. To force either explicitly, use `--docker` or `--bare-metal`. The resolved mode is recorded in the site's `Globalvars_site.php` as `deployment_environment` (`docker` or `baremetal`) — the single source of truth the platform reads instead of probing for a container at runtime.
 
 ## Prerequisites
 
