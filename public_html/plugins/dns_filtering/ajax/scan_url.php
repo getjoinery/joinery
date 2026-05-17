@@ -4,7 +4,7 @@
  * Fetches a web page, extracts all external domains from HTML resource references,
  * and checks each one against the ScrollDaddy DNS filter.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 header('Content-Type: application/json');
@@ -33,59 +33,90 @@ if (!preg_match('/^https?:\/\//i', $raw_url)) {
 	$raw_url = 'https://' . $raw_url;
 }
 
-// Validate scheme
-$scheme = strtolower(parse_url($raw_url, PHP_URL_SCHEME));
-if (!in_array($scheme, array('http', 'https'))) {
-	echo json_encode(array('success' => false, 'message' => 'Invalid URL scheme. Only http and https are supported.'));
-	exit;
-}
-
+// Initial host, used only as the page-domain fallback below. Scheme and host
+// are validated inside scan_url_validate_target() before any fetch happens.
 $host = parse_url($raw_url, PHP_URL_HOST);
-if (!$host) {
-	echo json_encode(array('success' => false, 'message' => 'Invalid URL: could not parse hostname.'));
-	exit;
-}
 
-// SSRF protection: resolve the host to ALL of its IPs (every A and AAAA
-// record) and reject any that fall in a private/loopback/reserved range.
-// A resolver failure fails closed (block); a host with no records resolves
-// to nothing and is left for the fetch below to fail naturally.
-try {
-	$resolved_ips = DnsResolver::resolveHostIps($host);
-} catch (DnsLookupException $e) {
-	echo json_encode(array('success' => false, 'message' => 'URL host could not be resolved.'));
-	exit;
-}
-$private_ranges = array(
-	array(0x7F000000, 0xFF000000), // 127.0.0.0/8 loopback
-	array(0x0A000000, 0xFF000000), // 10.0.0.0/8
-	array(0xAC100000, 0xFFF00000), // 172.16.0.0/12
-	array(0xC0A80000, 0xFFFF0000), // 192.168.0.0/16
-	array(0xA9FE0000, 0xFFFF0000), // 169.254.0.0/16 link-local
-);
-foreach ($resolved_ips as $ip) {
-	$blocked = false;
-	if (strpos($ip, ':') !== false) {
-		// IPv6 — reject private (fc00::/7) and reserved (::1, fe80::/10,
-		// ::ffff:0:0/96, …) ranges. PHP's filter is reliable for v6.
-		if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-			$blocked = true;
-		}
+/**
+ * SSRF guard for a single URL. Rejects non-http(s) schemes and any host that
+ * resolves to a private/loopback/reserved address. On any failure it emits a
+ * JSON error and exits — there is no safe return value.
+ *
+ * On success returns the data needed to pin the connection:
+ *   ['host' => string, 'port' => int, 'ips' => string[]]
+ * Pinning the fetch to these exact IPs (CURLOPT_RESOLVE) closes the
+ * resolve-then-fetch DNS-rebinding window; calling this for every redirect
+ * hop closes redirect-to-internal SSRF. 'ips' is empty for an IP-literal
+ * host — no DNS happens, so there is nothing to pin.
+ */
+function scan_url_validate_target($url) {
+	$scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+	if (!in_array($scheme, array('http', 'https'), true)) {
+		echo json_encode(array('success' => false, 'message' => 'URL uses an unsupported scheme. Only http and https are allowed.'));
+		exit;
+	}
+	$host = parse_url($url, PHP_URL_HOST);
+	if (!$host) {
+		echo json_encode(array('success' => false, 'message' => 'Invalid URL: could not parse hostname.'));
+		exit;
+	}
+	$port = parse_url($url, PHP_URL_PORT);
+	$port = $port ? (int)$port : ($scheme === 'https' ? 443 : 80);
+
+	// An IP-literal host needs no DNS lookup (and no pin); a hostname is
+	// resolved to every A/AAAA address. A resolver failure fails closed.
+	$host_for_ip = trim($host, '[]');
+	if (filter_var($host_for_ip, FILTER_VALIDATE_IP)) {
+		$ips = array($host_for_ip);
+		$pin_ips = array();
 	} else {
-		$long = ip2long($ip);
-		if ($long !== false) {
-			foreach ($private_ranges as $range) {
-				if (($long & $range[1]) === $range[0]) {
-					$blocked = true;
-					break;
+		try {
+			$ips = DnsResolver::resolveHostIps($host);
+		} catch (DnsLookupException $e) {
+			echo json_encode(array('success' => false, 'message' => 'URL host could not be resolved.'));
+			exit;
+		}
+		if (empty($ips)) {
+			echo json_encode(array('success' => false, 'message' => 'URL host does not resolve.'));
+			exit;
+		}
+		$pin_ips = $ips;
+	}
+
+	// Reject any address in a private/loopback/reserved range. IPv4 uses
+	// explicit ranges (PHP's filter misses 127/8); IPv6 uses PHP's filter,
+	// which reliably covers ::1, fe80::/10, fc00::/7 and ::ffff:0:0/96.
+	$private_ranges = array(
+		array(0x7F000000, 0xFF000000), // 127.0.0.0/8 loopback
+		array(0x0A000000, 0xFF000000), // 10.0.0.0/8
+		array(0xAC100000, 0xFFF00000), // 172.16.0.0/12
+		array(0xC0A80000, 0xFFFF0000), // 192.168.0.0/16
+		array(0xA9FE0000, 0xFFFF0000), // 169.254.0.0/16 link-local
+	);
+	foreach ($ips as $ip) {
+		$blocked = false;
+		if (strpos($ip, ':') !== false) {
+			if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+				$blocked = true;
+			}
+		} else {
+			$long = ip2long($ip);
+			if ($long !== false) {
+				foreach ($private_ranges as $range) {
+					if (($long & $range[1]) === $range[0]) {
+						$blocked = true;
+						break;
+					}
 				}
 			}
 		}
+		if ($blocked) {
+			echo json_encode(array('success' => false, 'message' => 'URL resolves to a private or reserved address.'));
+			exit;
+		}
 	}
-	if ($blocked) {
-		echo json_encode(array('success' => false, 'message' => 'URL resolves to a private or reserved address.'));
-		exit;
-	}
+
+	return array('host' => $host, 'port' => $port, 'ips' => $pin_ips);
 }
 
 // Load device and verify ownership
@@ -106,20 +137,52 @@ if (!$resolver_uid) {
 	exit;
 }
 
-// Fetch the page
-$ch = curl_init($raw_url);
-curl_setopt_array($ch, array(
-	CURLOPT_RETURNTRANSFER => true,
-	CURLOPT_TIMEOUT        => 15,
-	CURLOPT_FOLLOWLOCATION => true,
-	CURLOPT_MAXREDIRS      => 5,
-	CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-	CURLOPT_HTTPHEADER     => array('Accept: text/html,application/xhtml+xml'),
-));
-$html      = curl_exec($ch);
-$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$final_url = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
-curl_close($ch);
+// Fetch the page. Redirects are walked manually (curl's own FOLLOWLOCATION is
+// off) so every hop — the initial URL and each redirect target — is run
+// through scan_url_validate_target() and the connection is pinned to the IPs
+// it just validated. This closes both DNS rebinding and redirect-to-internal
+// SSRF: curl never re-resolves a host on its own.
+$current_url   = $raw_url;
+$final_url     = $raw_url;
+$html          = false;
+$http_code     = 0;
+$max_redirects = 5;
+
+for ($hop = 0; $hop <= $max_redirects; $hop++) {
+	$target = scan_url_validate_target($current_url); // emits JSON + exits if unsafe
+	$final_url = $current_url;
+
+	$curl_opts = array(
+		CURLOPT_RETURNTRANSFER => true,
+		CURLOPT_TIMEOUT        => 15,
+		CURLOPT_FOLLOWLOCATION => false, // walk redirects manually — see above
+		CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+		CURLOPT_HTTPHEADER     => array('Accept: text/html,application/xhtml+xml'),
+	);
+	if (!empty($target['ips'])) {
+		$curl_opts[CURLOPT_RESOLVE] = array(
+			$target['host'] . ':' . $target['port'] . ':' . implode(',', $target['ips']),
+		);
+	}
+
+	$ch = curl_init($current_url);
+	curl_setopt_array($ch, $curl_opts);
+	$body        = curl_exec($ch);
+	$http_code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+	$redirect_to = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+	curl_close($ch);
+
+	if ($body === false) {
+		echo json_encode(array('success' => false, 'message' => 'Could not fetch the page. The server may be unavailable or blocking automated requests.'));
+		exit;
+	}
+	if ($http_code >= 300 && $http_code < 400 && $redirect_to) {
+		$current_url = $redirect_to;
+		continue;
+	}
+	$html = $body;
+	break;
+}
 
 if ($html === false || $http_code < 200 || $http_code >= 300) {
 	echo json_encode(array('success' => false, 'message' => 'Could not fetch the page. The server may be unavailable or blocking automated requests.'));

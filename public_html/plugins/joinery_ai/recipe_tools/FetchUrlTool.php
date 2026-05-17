@@ -75,15 +75,31 @@ class FetchUrlTool implements RecipeToolInterface {
         $current_url = $url;
         $hops = 0;
         while ($hops <= self::MAX_REDIRECTS) {
-            UrlSafetyValidator::check($current_url);
+            // Validate the URL and capture the exact IPs it resolved to.
+            $pin = UrlSafetyValidator::checkAndResolve($current_url);
+
+            $request_opts = [
+                'headers' => [
+                    'User-Agent' => 'Joinery AI Recipe Runner / fetch_url',
+                    'Accept' => 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+                ],
+            ];
+            // Pin the connection to the IPs just validated, so the fetch
+            // cannot be DNS-rebound onto a private address between the
+            // safety check and the connect. Curl still uses the real
+            // hostname for SNI, the Host header, and certificate checks.
+            // Requires the curl handler — Guzzle's default when ext-curl
+            // is present.
+            if (!empty($pin['ips'])) {
+                $request_opts['curl'] = [
+                    CURLOPT_RESOLVE => [
+                        $pin['host'] . ':' . $pin['port'] . ':' . implode(',', $pin['ips']),
+                    ],
+                ];
+            }
 
             try {
-                $response = $http->get($current_url, [
-                    'headers' => [
-                        'User-Agent' => 'Joinery AI Recipe Runner / fetch_url',
-                        'Accept' => 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
-                    ],
-                ]);
+                $response = $http->get($current_url, $request_opts);
             } catch (RequestException $e) {
                 throw new Exception('HTTP error: ' . $e->getMessage());
             }
