@@ -3,9 +3,9 @@
 **Status:** Implemented 2026-05-17. All five phases shipped. The §8 decisions
 were resolved as recommended: system-resolver timeout behaviour accepted (§8.2);
 `checkDomainDns()` kept presence-only (§8.4); the `scan_url.php` multi-IP fix
-shipped inside this work (§8.5a). Two items remain deliberately open as
-follow-ups: the DNS-rebinding / connect-by-IP fix (§8.5b) and email
-*format*-validation unification (§8.6).
+shipped inside this work (§8.5a). The DNS-rebinding fix (§8.5b) is now
+**complete** for both kind-4 callers — see the §8.5b update below. Only email
+*format*-validation unification (§8.6) remains deliberately open as a follow-up.
 **Author:** Analysis prepared 2026-05-17
 **Origin:** Surfaced during the Email Forwarding install unification work
 (`specs/email_forwarding_install_unification.md`).
@@ -20,6 +20,26 @@ follow-ups: the DNS-rebinding / connect-by-IP fix (§8.5b) and email
 >   error no longer produces a false "DNS not configured" report.
 > - `scan_url.php` gained IPv6 classification (private/reserved ranges) so the
 >   multi-IP fix genuinely covers AAAA records, not just multiple A records.
+>
+> **DNS-rebinding follow-up — §8.5b update (2026-05-17).** Closed for both
+> kind-4 callers.
+> - **`FetchUrlTool` (joinery_ai) — done.** `UrlSafetyValidator` gained
+>   `checkAndResolve()`, which validates the URL and returns the exact
+>   resolved IPs; `check()` is now a thin wrapper over it. `FetchUrlTool`
+>   pins the Guzzle connection to those IPs via `CURLOPT_RESOLVE`, so the
+>   fetch cannot be rebound between the safety check and the connect. Because
+>   the tool already re-validates every redirect hop, every hop is now pinned
+>   too. Covered by `tests/unit/url_safety_validator_test.php`.
+> - **`scan_url.php` (dns_filtering) — done.** It does not reuse
+>   `UrlSafetyValidator` (that would couple the plugin to `joinery_ai`); it
+>   keeps its own inline guard, `scan_url_validate_target()`, built on the core
+>   `DnsResolver`. Curl's `CURLOPT_FOLLOWLOCATION` is now off and redirects are
+>   walked manually — every hop, initial and redirect, is validated and the
+>   connection pinned via `CURLOPT_RESOLVE`. This closes both initial-host
+>   rebinding and the previously-unguarded redirect-to-internal SSRF path.
+>   (An earlier note here scoped this out as "not small"; that was a
+>   mis-analysis — the rebinding pin is small, and the redirect rewrite, while
+>   moderate, was the right call and was done.)
 
 ---
 
@@ -290,6 +310,9 @@ Per project convention, developer docs go into existing `/docs/` files:
    of which this spec touches. Decide explicitly: scope it as a follow-up
    security spec (recommended) or pull it in here as a sixth phase. Until (b)
    is done, both kind-4 callers stay DNS-rebinding-vulnerable, and §6 says so.
+   **Update (2026-05-17): (b) is now done for both `FetchUrlTool` and
+   `scan_url.php` — see the §8.5b follow-up note near the top of this
+   document.**
 
 6. **Email *format*-validation unification.** §4.3 shares only the DNS tail;
    `SystemBase` and `IsValidEmail()` keep their differing format gates

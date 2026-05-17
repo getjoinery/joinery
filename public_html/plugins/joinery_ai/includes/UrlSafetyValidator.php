@@ -42,10 +42,19 @@ class UrlSafetyValidator {
     ];
 
     /**
-     * Throws UnsafeUrlException if $url should not be fetched.
-     * Otherwise returns silently.
+     * Validate $url and, on success, return the data needed to pin the
+     * connection to an already-validated IP.
+     *
+     * Returning the resolved IPs is what actually closes DNS rebinding: the
+     * caller must connect to one of these exact addresses (via CURLOPT_RESOLVE
+     * — see FetchUrlTool) rather than letting the HTTP client re-resolve the
+     * hostname, which would re-open the resolve→fetch TOCTOU window.
+     *
+     * @return array{host:string,port:int,ips:string[]}  `ips` is empty when
+     *         the URL host is an IP literal — no DNS happens, nothing to pin.
+     * @throws UnsafeUrlException if $url should not be fetched.
      */
-    public static function check(string $url): void {
+    public static function checkAndResolve(string $url): array {
         $parts = parse_url($url);
         if ($parts === false || empty($parts['scheme']) || empty($parts['host'])) {
             throw new UnsafeUrlException('URL is malformed or missing scheme/host: ' . $url);
@@ -56,7 +65,7 @@ class UrlSafetyValidator {
             throw new UnsafeUrlException("Scheme '$scheme' is not allowed (only http/https).");
         }
 
-        $port = $parts['port'] ?? ($scheme === 'https' ? 443 : 80);
+        $port = (int)($parts['port'] ?? ($scheme === 'https' ? 443 : 80));
         if (!in_array($port, self::$allowed_ports, true)) {
             throw new UnsafeUrlException("Port $port is not allowed (only 80, 443).");
         }
@@ -66,16 +75,17 @@ class UrlSafetyValidator {
             throw new UnsafeUrlException("Hostname '$host' is blocked.");
         }
 
-        // If the host is an IP literal, validate it directly. Otherwise
-        // resolve all A and AAAA records and validate each. parse_url
-        // wraps IPv6 hosts in brackets, e.g. "[::1]"; strip them before
-        // the IP-literal check.
+        // If the host is an IP literal, validate it directly. No DNS lookup
+        // happens, so there is no rebinding window and nothing to pin.
+        // parse_url wraps IPv6 hosts in brackets, e.g. "[::1]"; strip them.
         $host_for_ip = trim($host, '[]');
         if (filter_var($host_for_ip, FILTER_VALIDATE_IP)) {
             self::checkIp($host_for_ip);
-            return;
+            return ['host' => $host, 'port' => $port, 'ips' => []];
         }
 
+        // Hostname: resolve once, validate every A/AAAA address, and return
+        // that exact set for the caller to pin the connection to.
         $ips = self::resolveAll($host);
         if (empty($ips)) {
             throw new UnsafeUrlException("Hostname '$host' does not resolve.");
@@ -83,6 +93,20 @@ class UrlSafetyValidator {
         foreach ($ips as $ip) {
             self::checkIp($ip);
         }
+        return ['host' => $host, 'port' => $port, 'ips' => $ips];
+    }
+
+    /**
+     * Throws UnsafeUrlException if $url should not be fetched; returns
+     * silently otherwise.
+     *
+     * This is a thin wrapper over checkAndResolve() for callers that do not
+     * pin the connection. Note that without pinning, DNS rebinding between
+     * this check and the actual fetch is NOT closed — prefer
+     * checkAndResolve() fed into CURLOPT_RESOLVE.
+     */
+    public static function check(string $url): void {
+        self::checkAndResolve($url);
     }
 
     /**
