@@ -21,6 +21,11 @@
 #   - DNS records (MX, SPF, DKIM).
 #   - Per-domain opendkim DKIM keys (see the plugin overview doc).
 #
+# Docker: run this INSIDE the same container as the app — Postfix must be
+# co-located with the PHP forwarder it pipes to. The container also has to
+# publish port 25 (e.g. docker run -p 25:25) and (re)start Postfix on boot,
+# since a container usually has no systemd to do that for it.
+#
 # Usage:  sudo bash install_email.sh
 #
 set -euo pipefail
@@ -45,6 +50,16 @@ if [[ ! -f "${PIPE_SCRIPT}" ]]; then
     echo "Run this script from inside the email_forwarding plugin directory." >&2
     exit 1
 fi
+
+# Resolve the PHP CLI binary. The official php Docker images ship it at
+# /usr/local/bin/php, not /usr/bin/php — hard-coding the path bakes a broken
+# pipe transport into master.cf, and inbound mail then fails silently.
+PHP_BIN="$(command -v php || true)"
+if [[ -z "${PHP_BIN}" ]]; then
+    echo "ERROR: no 'php' executable found on PATH; cannot wire the Postfix pipe transport." >&2
+    exit 1
+fi
+echo "PHP CLI: ${PHP_BIN}"
 
 # --- 1. install packages -----------------------------------------------------
 PACKAGES=(postfix opendkim opendkim-tools)
@@ -74,11 +89,21 @@ systemctl start postfix  >/dev/null 2>&1 || true
 # Append-once guard: only add the service if no `joinery` service already
 # exists, so repeated runs never accumulate duplicate blocks.
 if postconf -M 2>/dev/null | grep -q '^joinery'; then
-    echo "master.cf: joinery transport already defined - leaving it."
+    # An entry exists. Make sure it still points at a usable php binary — a
+    # transport baked with the wrong path (e.g. after moving between a bare-
+    # metal host and a container) fails silently for every inbound message.
+    existing_php="$(postconf -M 2>/dev/null | grep '^joinery' | grep -oE 'argv=[^ ]+' | head -1 | cut -d= -f2)"
+    if [[ -n "${existing_php}" && ! -x "${existing_php}" ]]; then
+        echo "WARNING: existing joinery transport runs '${existing_php}', not executable here." >&2
+        echo "         Edit the joinery service in /etc/postfix/master.cf to use '${PHP_BIN}'," >&2
+        echo "         then run 'postfix reload'." >&2
+    else
+        echo "master.cf: joinery transport already defined - leaving it."
+    fi
 else
-    printf '\njoinery   unix  -       n       n       -       5       pipe\n  flags=DRhu user=www-data\n  argv=/usr/bin/php %s ${recipient}\n' \
-        "${PIPE_SCRIPT}" >> /etc/postfix/master.cf
-    echo "master.cf: added joinery pipe transport -> ${PIPE_SCRIPT}"
+    printf '\njoinery   unix  -       n       n       -       5       pipe\n  flags=DRhu user=www-data\n  argv=%s %s ${recipient}\n' \
+        "${PHP_BIN}" "${PIPE_SCRIPT}" >> /etc/postfix/master.cf
+    echo "master.cf: added joinery pipe transport -> ${PHP_BIN} ${PIPE_SCRIPT}"
 fi
 
 # --- 3. main.cf: fixed settings (postconf -e is idempotent) ------------------
@@ -102,9 +127,15 @@ if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: a
 fi
 
 # --- 5. validate + reload ----------------------------------------------------
+# Prefer systemd when it is PID 1, but fall back to the `postfix` command so
+# the script also works in containers that do not run systemd.
 if postfix check; then
-    systemctl reload-or-restart postfix
-    echo "Postfix configuration validated and reloaded."
+    if command -v systemctl >/dev/null 2>&1 && systemctl reload-or-restart postfix 2>/dev/null; then
+        echo "Postfix configuration validated and reloaded (systemd)."
+    else
+        postfix reload 2>/dev/null || postfix start
+        echo "Postfix configuration validated and (re)started."
+    fi
 else
     echo "WARNING: 'postfix check' reported problems - NOT reloading. Review above." >&2
     exit 1
