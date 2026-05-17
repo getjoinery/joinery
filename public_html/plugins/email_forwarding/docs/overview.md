@@ -14,7 +14,7 @@ Postfix receives inbound mail, pipes it to a PHP script, which looks up the alia
 
 Postfix and opendkim are installed automatically by `install.sh server`. For Docker, Postfix must also run on the host (see Docker setup below).
 
-> **Setup status on the Plugins page.** Once activated, this plugin declares two provisioners, so the admin Plugins page (`/admin/admin_plugins`) reports whether its runtime dependencies are working: a missing inbound mail server shows **Needs setup** with the `provisioning/install_email.sh` fix command, and a down or misconfigured outbound relay shows **Needs setup** with the reason. See the "Declaring Host Provisioners" section of `docs/plugin_developer_guide.md`.
+> **Setup status on the Plugins page.** Once activated, this plugin declares three provisioners, so the admin Plugins page (`/admin/admin_plugins`) reports whether its runtime dependencies are working: a missing inbound mail server shows **Needs setup** with the `provisioning/install_email.sh` fix command; a down or misconfigured outbound relay shows **Needs setup** with the reason; and missing MX/SPF DNS records on any enabled forwarding domain show **Needs setup** listing the affected domains. See the "Declaring Host Provisioners" section of `docs/plugin_developer_guide.md`.
 
 ### Enabling
 
