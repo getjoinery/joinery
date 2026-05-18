@@ -27,19 +27,41 @@ be a Docker container or bare metal.
 
 1. Activate the plugin in **Admin > System > Plugins**
 2. Run **update_database** from admin utilities to create tables and run migrations
-3. Set `inbound_email_enabled` to `1` in **Admin > Settings > Email**
-4. Set `inbound_email_srs_secret` to a random string, then enable SRS
-5. **Incoming** appears under **Emails** in the admin sidebar
+3. **Incoming** appears under **Emails** in the admin sidebar — it opens on the
+   **Setup** tab
+
+### Guided Setup (recommended)
+
+The **Setup** tab (`Emails > Incoming > Setup`) is a guided checklist and the
+recommended way to configure the plugin. Enter the email address you want to
+receive mail at; the tab then:
+
+- autodetects the host state — Postfix, the pipe transport, the domain map,
+  opendkim, port 25;
+- verifies this server's mail identity — `myhostname`, the mail host's A
+  record, and forward-confirmed reverse DNS (PTR);
+- verifies every per-domain DNS record (MX, SPF, DKIM, DMARC) for
+  *correctness*, not just presence — e.g. that the MX target actually resolves
+  to this server;
+- shows copy-ready DNS records and exact fix commands for anything failing;
+- offers one-click actions to enable the plugin and register the domain;
+- runs an end-to-end test — send a real message to the address and watch it
+  land in the logs.
+
+It cannot create DNS records or set reverse DNS for you (those live with your
+registrar / VPS provider) — it detects, instructs, and verifies.
+
+Set the **mail server hostname** on the Setup tab once: the FQDN of this server
+(`inbound_email_mail_hostname`), used as the MX target, HELO name, and PTR
+name. Everything else is autodetected.
 
 ### Adding a Domain
 
-1. Go to **Emails > Incoming > Domains** tab
-2. Add the domain and save — Postfix picks it up immediately. The inbound
-   domain list is read live from the database, so there is no host command to
-   run and no Postfix config to edit per domain.
-3. Publish the DNS records shown on the domain edit page (MX, SPF, and — once a
-   DKIM key exists for the domain — DKIM)
-4. Check the DNS validation badges turn green
+The Setup tab registers a domain for you as part of the guided flow. To manage
+domains directly: go to **Emails > Incoming > Domains**, add the domain and
+save — Postfix picks it up immediately (the inbound domain list is read live
+from the database; no host command, no per-domain Postfix config). Then use
+the Setup tab to verify and publish the domain's DNS records.
 
 ### Adding an Alias
 
@@ -184,6 +206,8 @@ yours to maintain; RBL checks would happen on the host relay only.
 | Setting | Default | Description |
 |---|---|---|
 | `inbound_email_enabled` | `0` | Master switch |
+| `inbound_email_mail_hostname` | (empty) | FQDN of this mail server — MX target, HELO, PTR (set on the Setup tab) |
+| `inbound_email_public_ip` | (empty) | Optional public-IP override; empty = autodetect |
 | `inbound_email_srs_enabled` | `0` | SRS envelope rewriting (recommended) |
 | `inbound_email_srs_secret` | (empty) | Required before SRS can be enabled |
 | `inbound_email_forwarding_max_destinations` | `10` | Max destinations per alias |
@@ -202,10 +226,11 @@ yours to maintain; RBL checks would happen on the host relay only.
 /plugins/inbound_email/
 ├── plugin.json
 ├── data/          — Domain, Alias, Log models (auto-create tables)
-├── includes/      — InboundEmailRouter (processing), InboundEmailHealth, SRSRewriter
+├── includes/      — InboundEmailRouter (processing), InboundEmailHealth,
+│                    InboundEmailSetupCheck (guided-setup verification engine), SRSRewriter
 ├── utils/         — Postfix pipe script (inbound_email_handler.php)
 ├── provisioning/  — Host setup: install_email.sh, render_pgsql_map.php
-├── admin/         — Admin pages (aliases, alias edit, domains, logs)
+├── admin/         — Admin pages (setup, aliases, alias edit, domains, logs)
 ├── logic/         — Logic files for admin pages
 ├── tasks/         — PurgeOldInboundEmailLogs scheduled task
 └── migrations/    — Settings and menu entry
