@@ -1,17 +1,17 @@
 <?php
 /**
- * Email Forwarding - Domain Management
+ * Inbound Email - Domain Management
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/logic/admin_email_forwarding_domains_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/logic/admin_inbound_email_domains_logic.php'));
 
-$page_vars = process_logic(admin_email_forwarding_domains_logic(array_merge($_GET, $_POST, $params ?? [])));
+$page_vars = process_logic(admin_inbound_email_domains_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
 $page = new AdminPage();
@@ -19,7 +19,7 @@ $page->admin_header(
 	array(
 		'menu-id' => 'incoming',
 		'breadcrumbs' => array(
-			'Email Forwarding' => '/plugins/email_forwarding/admin/admin_email_forwarding',
+			'Inbound Email' => '/plugins/inbound_email/admin/admin_inbound_email',
 			'Domains' => '',
 		),
 		'session' => $session,
@@ -28,13 +28,13 @@ $page->admin_header(
 
 // Tab navigation
 echo '<ul class="nav nav-tabs mb-3">';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/email_forwarding/admin/admin_email_forwarding">Forwarding Aliases</a></li>';
-echo '<li class="nav-item"><a class="nav-link active" href="/plugins/email_forwarding/admin/admin_email_forwarding_domains">Domains</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/email_forwarding/admin/admin_email_forwarding_logs">Logs</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
+echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
 echo '</ul>';
 
 // Display session messages
-$display_messages = $session->get_messages('/plugins\/email_forwarding\/admin\//');
+$display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
 if (!empty($display_messages)) {
 	foreach ($display_messages as $msg) {
 		echo '<div class="alert alert-success">' . htmlspecialchars($msg->message) . '</div>';
@@ -47,7 +47,7 @@ if (isset($error)) {
 }
 
 // Path to the base mail installer — the single fix for missing host components.
-$installer_path = PathHelper::getIncludePath('plugins/email_forwarding/provisioning/install_email.sh');
+$installer_path = PathHelper::getIncludePath('plugins/inbound_email/provisioning/install_email.sh');
 
 // --- Server Status Panel ---
 $pageoptions_status = array('title' => 'Server Status');
@@ -86,7 +86,7 @@ exec('postconf -h virtual_mailbox_domains 2>/dev/null', $vmd_output);
 $vmd_line = trim(implode('', $vmd_output));
 $vmd_ok = (strpos($vmd_line, 'pgsql:') !== false && strpos($vmd_line, 'joinery-domains.cf') !== false);
 if ($vmd_ok) {
-	echo '<span class="badge bg-success">Domain Map</span> Postfix reads forwarding domains live from the database<br>';
+	echo '<span class="badge bg-success">Domain Map</span> Postfix reads inbound domains live from the database<br>';
 } else {
 	echo '<span class="badge bg-warning text-dark">Domain Map</span> <code>virtual_mailbox_domains</code> is not wired to the database map<br>';
 }
@@ -124,7 +124,7 @@ $page->end_box();
 $show_form = $edit_domain || (isset($_GET['action']) && $_GET['action'] === 'add');
 
 if ($show_form) {
-	$form_domain = $edit_domain ?: new EmailForwardingDomain(NULL);
+	$form_domain = $edit_domain ?: new InboundEmailDomain(NULL);
 	$form_title = $edit_domain ? 'Edit Domain' : 'Add Domain';
 
 	$pageoptions_form = array('title' => $form_title);
@@ -137,18 +137,18 @@ if ($show_form) {
 
 	echo $formwriter->begin_form();
 
-	$formwriter->textinput('efd_domain', 'Domain Name', [
+	$formwriter->textinput('ied_domain', 'Domain Name', [
 		'validation' => ['required' => true],
 		'help_text' => 'e.g., example.com',
 	]);
 
-	$formwriter->checkboxinput('efd_is_enabled', 'Enabled', []);
+	$formwriter->checkboxinput('ied_is_enabled', 'Enabled', []);
 
-	$formwriter->textinput('efd_catch_all_address', 'Catch-All Address', [
+	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', [
 		'help_text' => 'Optional: receive all unmatched mail for this domain at this address',
 	]);
 
-	$formwriter->checkboxinput('efd_reject_unmatched', 'Reject Unmatched', [
+	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', [
 		'help_text' => 'Reject mail to non-existent aliases (when no catch-all). If unchecked, unmatched mail is silently discarded.',
 	]);
 
@@ -158,7 +158,7 @@ if ($show_form) {
 
 // Show per-domain DNS status and instructions when editing an existing domain
 if ($edit_domain) {
-	$ed_domain_name = $edit_domain->get('efd_domain');
+	$ed_domain_name = $edit_domain->get('ied_domain');
 	$ed_hostname = gethostname();
 	$ed_server_ip = @file_get_contents('https://api.ipify.org') ?: 'YOUR_SERVER_IP';
 
@@ -218,12 +218,12 @@ if ($edit_domain) {
 	echo $ed_dkim_ok ? '<span class="badge bg-success">OK</span>' : '<span class="badge bg-secondary">Not found</span>';
 	echo '</td></tr>';
 
-	// Check mydestination conflict — a forwarding domain in mydestination
-	// outranks virtual_mailbox_domains and breaks virtual forwarding.
+	// Check mydestination conflict — an inbound domain in mydestination
+	// outranks virtual_mailbox_domains and breaks virtual delivery.
 	$ed_mydest_conflict = isset($mydest_conflict_check) && strpos($mydest_conflict_check, $ed_domain_name) !== false;
 	if ($ed_mydest_conflict) {
 		echo '<tr><td><strong>mydestination</strong></td><td>';
-		echo '<span class="badge bg-danger">Conflict</span> Domain is in Postfix <code>mydestination</code> — virtual forwarding will not work.';
+		echo '<span class="badge bg-danger">Conflict</span> Domain is in Postfix <code>mydestination</code> — virtual delivery will not work.';
 		echo '<br><pre class="bg-light p-2 mt-1"><code>sudo bash ' . htmlspecialchars($installer_path) . '</code></pre>';
 		echo '</td></tr>';
 	}
@@ -264,7 +264,7 @@ if ($edit_domain) {
 				$dkim_value = 'v=DKIM1; k=rsa; p=' . $dkim_pub_key;
 				echo '<tr><td>TXT</td><td>mail._domainkey</td><td><input type="text" class="form-control form-control-sm" readonly style="cursor:pointer;background:#fff" value="' . htmlspecialchars($dkim_value) . '" onclick="this.select()"></td></tr>';
 			} else {
-				echo '<tr><td>TXT</td><td>mail._domainkey</td><td><small class="text-muted">No DKIM key for this domain yet. Generate one with <code>opendkim-genkey</code>, add it to <code>/etc/opendkim/key.table</code> and <code>signing.table</code>, then reload &mdash; see the Email Forwarding plugin docs. Forwarding works without it; only outbound DKIM signing is affected.</small></td></tr>';
+				echo '<tr><td>TXT</td><td>mail._domainkey</td><td><small class="text-muted">No DKIM key for this domain yet. Generate one with <code>opendkim-genkey</code>, add it to <code>/etc/opendkim/key.table</code> and <code>signing.table</code>, then reload &mdash; see the Inbound Email plugin docs. Forwarding works without it; only outbound DKIM signing is affected.</small></td></tr>';
 			}
 		}
 
@@ -278,22 +278,22 @@ if ($edit_domain) {
 } // end show_form
 
 // --- Domain List ---
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 
 // Show deleted domains to superadmins
 $show_deleted = ($session->get_permission() >= 10);
 $domain_filters = $show_deleted ? [] : ['deleted' => false];
-$domains = new MultiEmailForwardingDomain($domain_filters, array('efd_delete_time' => 'ASC', 'efd_domain' => 'ASC'));
+$domains = new MultiInboundEmailDomain($domain_filters, array('ied_delete_time' => 'ASC', 'ied_domain' => 'ASC'));
 $domains->load();
 
 $headers = array('Domain', 'Status', 'Catch-All', 'Aliases', 'DNS', 'Actions');
-$altlinks = array('Add Domain' => '/plugins/email_forwarding/admin/admin_email_forwarding_domains?action=add');
-$table_options = array('title' => 'Forwarding Domains', 'altlinks' => $altlinks);
+$altlinks = array('Add Domain' => '/plugins/inbound_email/admin/admin_inbound_email_domains?action=add');
+$table_options = array('title' => 'Inbound Domains', 'altlinks' => $altlinks);
 $page->tableheader($headers, $table_options);
 
 foreach ($domains as $d) {
-	$domain_name = $d->get('efd_domain');
-	$is_deleted = !empty($d->get('efd_delete_time'));
+	$domain_name = $d->get('ied_domain');
+	$is_deleted = !empty($d->get('ied_delete_time'));
 	$alias_count = $is_deleted ? 0 : $d->get_alias_count();
 
 	// DNS checks (skip for deleted domains)
@@ -329,7 +329,7 @@ foreach ($domains as $d) {
 	$status_parts = [];
 	if ($is_deleted) {
 		$status_parts[] = '<span class="badge bg-dark">Deleted</span>';
-	} else if ($d->get('efd_is_enabled')) {
+	} else if ($d->get('ied_is_enabled')) {
 		$status_parts[] = '<span class="badge bg-success">Enabled</span>';
 	} else {
 		$status_parts[] = '<span class="badge bg-secondary">Disabled</span>';
@@ -340,7 +340,7 @@ foreach ($domains as $d) {
 	$rowvalues = [];
 	$rowvalues[] = htmlspecialchars($domain_name);
 	$rowvalues[] = $status_display;
-	$rowvalues[] = htmlspecialchars($d->get('efd_catch_all_address') ?: '-');
+	$rowvalues[] = htmlspecialchars($d->get('ied_catch_all_address') ?: '-');
 	$rowvalues[] = $is_deleted ? '-' : $alias_count;
 	$rowvalues[] = $dns_status;
 
@@ -348,23 +348,23 @@ foreach ($domains as $d) {
 	$actions = '';
 	if ($is_deleted) {
 		// Undelete
-		$actions .= PublicPageBase::action_button('Restore', '/plugins/email_forwarding/admin/admin_email_forwarding_domains', [
-			'hidden' => ['action' => 'undelete', 'efd_email_forwarding_domain_id' => $d->key],
+		$actions .= PublicPageBase::action_button('Restore', '/plugins/inbound_email/admin/admin_inbound_email_domains', [
+			'hidden' => ['action' => 'undelete', 'ied_inbound_email_domain_id' => $d->key],
 			'confirm' => 'Restore this domain and its aliases?',
 			'class' => 'btn btn-sm btn-outline-success',
 		]);
 		// Permanent delete (permission 10 only)
 		if ($session->get_permission() >= 10) {
-			$actions .= ' ' . PublicPageBase::action_button('Permanent Delete', '/plugins/email_forwarding/admin/admin_email_forwarding_domains', [
-				'hidden' => ['action' => 'permanent_delete', 'efd_email_forwarding_domain_id' => $d->key],
+			$actions .= ' ' . PublicPageBase::action_button('Permanent Delete', '/plugins/inbound_email/admin/admin_inbound_email_domains', [
+				'hidden' => ['action' => 'permanent_delete', 'ied_inbound_email_domain_id' => $d->key],
 				'confirm' => 'PERMANENTLY delete this domain and all its aliases? This cannot be undone.',
 				'class' => 'btn btn-sm btn-outline-danger',
 			]);
 		}
 	} else {
-		$actions .= '<a href="/plugins/email_forwarding/admin/admin_email_forwarding_domains?efd_email_forwarding_domain_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
-		$actions .= PublicPageBase::action_button('Delete', '/plugins/email_forwarding/admin/admin_email_forwarding_domains', [
-			'hidden' => ['action' => 'delete', 'efd_email_forwarding_domain_id' => $d->key],
+		$actions .= '<a href="/plugins/inbound_email/admin/admin_inbound_email_domains?ied_inbound_email_domain_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
+		$actions .= PublicPageBase::action_button('Delete', '/plugins/inbound_email/admin/admin_inbound_email_domains', [
+			'hidden' => ['action' => 'delete', 'ied_inbound_email_domain_id' => $d->key],
 			'confirm' => 'Delete this domain and all its aliases?',
 			'class' => 'btn btn-sm btn-outline-danger',
 		]);

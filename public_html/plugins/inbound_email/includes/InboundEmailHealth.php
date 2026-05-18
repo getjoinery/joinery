@@ -1,6 +1,6 @@
 <?php
 /**
- * EmailForwardingHealth - provisioning check methods for the Email Forwarding
+ * InboundEmailHealth - provisioning check methods for the Inbound Email
  * plugin's runtime dependencies.
  *
  * Each public static method here is a `code` provisioning check (see the
@@ -9,31 +9,31 @@
  * rethrows any failure as ProvisioningCheckFailed with a clean message. It
  * must be side-effect-free, time-bounded, and cheap to run.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/includes/EmailForwarder.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailRouter.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 
-class EmailForwardingHealth {
+class InboundEmailHealth {
 
     /** Connection timeout, in seconds, applied to the relay check. */
     const RELAY_TIMEOUT = 5;
 
     /**
      * Verify the outbound SMTP relay used to forward mail can be reached and
-     * authenticated. This calls EmailForwarder::createMailer() — the same
-     * routine the forwarder itself uses to acquire its relay — then connects
+     * authenticated. This calls InboundEmailRouter::createMailer() — the same
+     * routine the router itself uses to acquire its relay — then connects
      * and immediately closes. It sends nothing: it verifies acquisition, not
      * delivery.
      *
      * @throws ProvisioningCheckFailed if the relay cannot be acquired.
      */
     public static function checkForwardingRelay() {
-        $forwarder = new EmailForwarder();
-        $mailer = $forwarder->createMailer();
+        $router = new InboundEmailRouter();
+        $mailer = $router->createMailer();
 
         // Bound the connection so a dead relay cannot hang the check — the
         // provisioning system cannot forcibly interrupt blocked PHP I/O.
@@ -57,7 +57,7 @@ class EmailForwardingHealth {
     }
 
     /**
-     * Verify DNS records for every enabled forwarding domain.
+     * Verify DNS records for every enabled inbound domain.
      *
      * For each enabled, non-deleted domain it confirms an MX record exists and
      * an SPF (v=spf1) TXT record is published. DKIM is intentionally not checked
@@ -72,16 +72,16 @@ class EmailForwardingHealth {
      * @throws ProvisioningCheckFailed if any enabled domain is missing MX or SPF.
      */
     public static function checkDomainDns() {
-        $domains = new MultiEmailForwardingDomain(['enabled' => true, 'deleted' => false]);
+        $domains = new MultiInboundEmailDomain(['enabled' => true, 'deleted' => false]);
         $domains->load();
 
         if (count($domains) === 0) {
-            return; // No forwarding domains configured — nothing to verify.
+            return; // No inbound domains configured — nothing to verify.
         }
 
         $problems = [];
         foreach ($domains as $domain) {
-            $name = $domain->get('efd_domain');
+            $name = $domain->get('ied_domain');
             $issues = [];
 
             try {
@@ -115,7 +115,7 @@ class EmailForwardingHealth {
         if ($problems) {
             throw new ProvisioningCheckFailed(
                 'DNS not configured for ' . count($problems) . ' of ' . count($domains)
-                . ' forwarding domain(s): ' . implode('; ', $problems)
+                . ' inbound domain(s): ' . implode('; ', $problems)
             );
         }
     }

@@ -8,7 +8,7 @@ The email system consists of three focused classes that provide clear separation
 - **EmailTemplate**: Template processing (conditionals, variables)
 - **EmailSender**: All sending logic with service selection and fallback
 
-**Inbound email forwarding** is handled by the Email Forwarding plugin — see [Email Forwarding Plugin](/plugins/email_forwarding/docs/overview.md) for setup, admin usage, and server configuration.
+**Inbound email** is handled by the Inbound Email plugin — see [Inbound Email Plugin](/plugins/inbound_email/docs/overview.md) for setup, admin usage, and server configuration.
 
 ## Architecture
 
@@ -554,7 +554,7 @@ Use EmailMessage + EmailSender for all email development. Direct EmailTemplate u
 `includes/DnsAuthChecker.php` is the one place to check a domain's SPF, DKIM,
 and DMARC records. Use it — do not hand-roll `dns_get_record()` TXT parsing.
 `adm/admin_settings_email.php` and the `utils/email_setup_check.php` deep-dive
-tool both build on it, and the `email_forwarding` plugin's domain status badges
+tool both build on it, and the `inbound_email` plugin's domain status badges
 do too.
 
 ```php

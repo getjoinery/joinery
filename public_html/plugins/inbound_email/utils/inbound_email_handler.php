@@ -1,25 +1,27 @@
 #!/usr/bin/php
 <?php
 /**
- * Postfix pipe script for email forwarding.
+ * Postfix pipe script for inbound email.
  * Receives raw email on stdin, envelope recipient as $argv[1].
+ *
+ * Handles all inbound mail (forward and store), not just forwarding.
  *
  * Exit codes (per Postfix pipe conventions):
  *   0  = success
  *   67 = unknown user (permanent rejection)
  *   75 = temporary failure (Postfix will retry)
  *
- * @version 1.0
+ * @version 1.1
  */
 
 // Bootstrap Joinery (outside normal web request)
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/includes/EmailForwarder.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailRouter.php'));
 
 // Check master switch
 $settings = Globalvars::get_instance();
-if (!$settings->get_setting('email_forwarding_enabled')) {
+if (!$settings->get_setting('inbound_email_enabled')) {
 	exit(0); // Accept silently when disabled
 }
 
@@ -37,10 +39,10 @@ if (empty($raw_email)) {
 
 // Process — wrapped in try/catch so PHP errors return temp failure instead of crashing
 try {
-	$forwarder = new EmailForwarder();
-	$exit_code = $forwarder->processEmail($raw_email, $envelope_recipient);
+	$router = new InboundEmailRouter();
+	$exit_code = $router->processEmail($raw_email, $envelope_recipient);
 	exit($exit_code);
 } catch (Exception $e) {
-	error_log('EmailForwarder fatal: ' . $e->getMessage());
+	error_log('InboundEmailRouter fatal: ' . $e->getMessage());
 	exit(75); // Temp failure — Postfix will retry
 }

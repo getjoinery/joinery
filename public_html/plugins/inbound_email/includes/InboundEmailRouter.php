@@ -1,20 +1,20 @@
 <?php
 /**
- * EmailForwarder - Core email forwarding logic.
+ * InboundEmailRouter - Core inbound email routing logic.
  *
  * Parses raw email, looks up alias, verifies DKIM, checks rate limits,
  * and forwards via SmtpMailer. Handles SRS bounce processing.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_log_class.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/includes/SRSRewriter.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/SRSRewriter.php'));
 
-class EmailForwarder {
+class InboundEmailRouter {
 
 	private $settings;
 
@@ -34,7 +34,7 @@ class EmailForwarder {
 		$parsed = $this->parseEmail($raw_email);
 
 		// 1. SRS bounce check
-		if ($this->settings->get_setting('email_forwarding_srs_enabled') && SRSRewriter::isSRSAddress($envelope_recipient)) {
+		if ($this->settings->get_setting('inbound_email_srs_enabled') && SRSRewriter::isSRSAddress($envelope_recipient)) {
 			return $this->handleSRSBounce($parsed, $raw_email, $envelope_recipient);
 		}
 
@@ -47,8 +47,8 @@ class EmailForwarder {
 		$domain_name = $parts[1];
 
 		// Look up domain
-		$domain = EmailForwardingDomain::GetByDomain($domain_name);
-		if (!$domain || !$domain->get('efd_is_enabled')) {
+		$domain = InboundEmailDomain::GetByDomain($domain_name);
+		if (!$domain || !$domain->get('ied_is_enabled')) {
 			return 67;
 		}
 
@@ -56,18 +56,18 @@ class EmailForwarder {
 		$alias = $this->lookupAlias($local_part, $domain);
 		if (!$alias) {
 			// Check catch-all
-			$catch_all = $domain->get('efd_catch_all_address');
+			$catch_all = $domain->get('ied_catch_all_address');
 			if ($catch_all) {
 				// Create a virtual alias for logging/forwarding
 				return $this->forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all);
 			}
 
 			// No match
-			if ($domain->get('efd_reject_unmatched')) {
-				$this->logTransaction($parsed, null, EmailForwardingLog::STATUS_REJECTED, $envelope_recipient, null, 'No matching alias');
+			if ($domain->get('ied_reject_unmatched')) {
+				$this->logTransaction($parsed, null, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'No matching alias');
 				return 67; // Reject
 			} else {
-				$this->logTransaction($parsed, null, EmailForwardingLog::STATUS_DISCARDED, $envelope_recipient);
+				$this->logTransaction($parsed, null, InboundEmailLog::STATUS_DISCARDED, $envelope_recipient);
 				return 0; // Discard silently
 			}
 		}
@@ -76,26 +76,26 @@ class EmailForwarder {
 		$dkim_result = $this->verifyDKIM($raw_email, $parsed);
 		if ($dkim_result === 'fail') {
 			// Log the failure but don't reject — DKIM verification is still being refined
-			error_log('EmailForwarder: DKIM verification failed for ' . $envelope_recipient . ' from ' . ($parsed['from_email'] ?? 'unknown'));
+			error_log('InboundEmailRouter: DKIM verification failed for ' . $envelope_recipient . ' from ' . ($parsed['from_email'] ?? 'unknown'));
 		}
 
 		// 4. Rate limiting
 		if (!$this->checkAliasRateLimit($alias->key)) {
-			$this->logTransaction($parsed, $alias, EmailForwardingLog::STATUS_RATE_LIMITED, $envelope_recipient);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient);
 			return 0;
 		}
 		if (!$this->checkDomainRateLimit($domain->key)) {
-			$this->logTransaction($parsed, $alias, EmailForwardingLog::STATUS_RATE_LIMITED, $envelope_recipient);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient);
 			return 0;
 		}
 
 		// 5. Basic header checks
 		if (empty($parsed['from'])) {
-			$this->logTransaction($parsed, $alias, EmailForwardingLog::STATUS_REJECTED, $envelope_recipient, null, 'Missing From header');
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Missing From header');
 			return 0;
 		}
 		if (strlen($raw_email) > 25 * 1024 * 1024) {
-			$this->logTransaction($parsed, $alias, EmailForwardingLog::STATUS_REJECTED, $envelope_recipient, null, 'Message too large');
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Message too large');
 			return 0;
 		}
 
@@ -108,7 +108,7 @@ class EmailForwarder {
 		$dest_str = implode(',', $destinations);
 
 		if ($all_success) {
-			$this->logTransaction($parsed, $alias, EmailForwardingLog::STATUS_FORWARDED, $envelope_recipient, $dest_str);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_FORWARDED, $envelope_recipient, $dest_str);
 			$alias->record_forward();
 		} else {
 			$failed = array();
@@ -117,7 +117,7 @@ class EmailForwarder {
 					$failed[] = $dest;
 				}
 			}
-			$this->logTransaction($parsed, $alias, EmailForwardingLog::STATUS_ERROR, $envelope_recipient, $dest_str, 'Failed to deliver to: ' . implode(', ', $failed));
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $dest_str, 'Failed to deliver to: ' . implode(', ', $failed));
 		}
 
 		return 0;
@@ -187,11 +187,11 @@ class EmailForwarder {
 	 * Look up an alias for the given local part and domain.
 	 *
 	 * @param string $local_part Local part of the address
-	 * @param EmailForwardingDomain $domain Domain object
-	 * @return EmailForwardingAlias|null
+	 * @param InboundEmailDomain $domain Domain object
+	 * @return InboundEmailAlias|null
 	 */
 	public function lookupAlias($local_part, $domain) {
-		$results = new MultiEmailForwardingAlias(array(
+		$results = new MultiInboundEmailAlias(array(
 			'domain_id' => $domain->key,
 			'alias' => strtolower($local_part),
 			'deleted' => false
@@ -200,7 +200,7 @@ class EmailForwarder {
 
 		if (count($results)) {
 			$alias = $results->get(0);
-			if ($alias->get('efa_is_enabled')) {
+			if ($alias->get('iea_is_enabled')) {
 				return $alias;
 			}
 		}
@@ -213,8 +213,8 @@ class EmailForwarder {
 	 *
 	 * @param string $raw_email Raw email content
 	 * @param array $parsed Parsed email data
-	 * @param EmailForwardingAlias $alias Alias object
-	 * @param EmailForwardingDomain $domain Domain object
+	 * @param InboundEmailAlias $alias Alias object
+	 * @param InboundEmailDomain $domain Domain object
 	 * @param array $destinations Array of destination email addresses
 	 * @return array ['destination' => bool success]
 	 */
@@ -222,12 +222,12 @@ class EmailForwarder {
 		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
 
 		$results = array();
-		$forwarding_domain = $domain->get('efd_domain');
-		$alias_address = $alias->get('efa_alias') . '@' . $forwarding_domain;
+		$forwarding_domain = $domain->get('ied_domain');
+		$alias_address = $alias->get('iea_alias') . '@' . $forwarding_domain;
 
 		// SRS rewrite envelope sender
 		$envelope_sender = $parsed['from_email'];
-		if ($this->settings->get_setting('email_forwarding_srs_enabled')) {
+		if ($this->settings->get_setting('inbound_email_srs_enabled')) {
 			$srs = new SRSRewriter();
 			$envelope_sender = $srs->rewrite($parsed['from_email'], $forwarding_domain);
 		}
@@ -237,7 +237,7 @@ class EmailForwarder {
 		// - Add Reply-To with original sender
 		// - Add forwarding headers
 		$default_from = $this->settings->get_setting('defaultemail');
-		$default_from_name = $this->settings->get_setting('defaultemailname') ?: 'Email Forwarding';
+		$default_from_name = $this->settings->get_setting('defaultemailname') ?: 'Inbound Email';
 		$original_sender_name = $this->extractName($parsed['from']);
 		$from_display = $original_sender_name ? ($original_sender_name . ' via ' . $default_from_name) : ('Forwarded via ' . $default_from_name);
 
@@ -263,7 +263,7 @@ class EmailForwarder {
 		$extra_headers = "Reply-To: " . $parsed['from_email'] . "\n";
 		$extra_headers .= "X-Original-To: " . $alias_address . "\n";
 		$extra_headers .= "X-Forwarded-For: " . $alias_address . "\n";
-		$extra_headers .= "X-Forwarded-By: Joinery Email Forwarder";
+		$extra_headers .= "X-Forwarded-By: Joinery Inbound Email";
 
 		$header_block = trim($header_block) . "\n" . $extra_headers;
 
@@ -301,7 +301,7 @@ class EmailForwarder {
 
 				$results[$destination] = true;
 			} catch (Exception $e) {
-				error_log('EmailForwarder: Failed to forward to ' . $destination . ': ' . $e->getMessage());
+				error_log('InboundEmailRouter: Failed to forward to ' . $destination . ': ' . $e->getMessage());
 				$results[$destination] = false;
 			}
 		}
@@ -315,17 +315,17 @@ class EmailForwarder {
 	private function forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all_address) {
 		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
 
-		$forwarding_domain = $domain->get('efd_domain');
+		$forwarding_domain = $domain->get('ied_domain');
 
 		$envelope_sender = $parsed['from_email'];
-		if ($this->settings->get_setting('email_forwarding_srs_enabled')) {
+		if ($this->settings->get_setting('inbound_email_srs_enabled')) {
 			$srs = new SRSRewriter();
 			$envelope_sender = $srs->rewrite($parsed['from_email'], $forwarding_domain);
 		}
 
 		// Use site's verified from address; original sender in Reply-To
 		$default_from = $this->settings->get_setting('defaultemail');
-		$default_from_name = $this->settings->get_setting('defaultemailname') ?: 'Email Forwarding';
+		$default_from_name = $this->settings->get_setting('defaultemailname') ?: 'Inbound Email';
 		$original_sender_name = $this->extractName($parsed['from']);
 		$from_display = $original_sender_name ? ($original_sender_name . ' via ' . $default_from_name) : ('Forwarded via ' . $default_from_name);
 
@@ -344,10 +344,10 @@ class EmailForwarder {
 			}
 
 			$success = $mailer->send();
-			$status = $success ? EmailForwardingLog::STATUS_FORWARDED : EmailForwardingLog::STATUS_ERROR;
+			$status = $success ? InboundEmailLog::STATUS_FORWARDED : InboundEmailLog::STATUS_ERROR;
 			$this->logTransaction($parsed, null, $status, $envelope_recipient, $catch_all_address, $success ? null : 'Catch-all delivery failed');
 		} catch (Exception $e) {
-			$this->logTransaction($parsed, null, EmailForwardingLog::STATUS_ERROR, $envelope_recipient, $catch_all_address, $e->getMessage());
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $catch_all_address, $e->getMessage());
 		}
 
 		return 0;
@@ -360,7 +360,7 @@ class EmailForwarder {
 		$srs = new SRSRewriter();
 
 		if (!$srs->validate($envelope_recipient)) {
-			$this->logTransaction($parsed, null, EmailForwardingLog::STATUS_DISCARDED, $envelope_recipient, null, 'Invalid/expired SRS address');
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_DISCARDED, $envelope_recipient, null, 'Invalid/expired SRS address');
 			return 0;
 		}
 
@@ -384,10 +384,10 @@ class EmailForwarder {
 			$mailer->isHTML(false);
 
 			$mailer->send();
-			$this->logTransaction($parsed, null, EmailForwardingLog::STATUS_BOUNCE_FORWARDED, $envelope_recipient, $original_sender);
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_BOUNCE_FORWARDED, $envelope_recipient, $original_sender);
 		} catch (Exception $e) {
-			error_log('EmailForwarder: Failed to forward bounce to ' . $original_sender . ': ' . $e->getMessage());
-			$this->logTransaction($parsed, null, EmailForwardingLog::STATUS_ERROR, $envelope_recipient, $original_sender, $e->getMessage());
+			error_log('InboundEmailRouter: Failed to forward bounce to ' . $original_sender . ': ' . $e->getMessage());
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $original_sender, $e->getMessage());
 		}
 
 		return 0;
@@ -397,7 +397,7 @@ class EmailForwarder {
 	 * Create a SmtpMailer instance with forwarding-specific settings (or fallback to main).
 	 *
 	 * This is the single outbound-relay acquisition routine: it is called both
-	 * by the forwarder itself and by EmailForwardingHealth::checkForwardingRelay(),
+	 * by the router itself and by InboundEmailHealth::checkForwardingRelay(),
 	 * so the provisioning check exercises the exact relay the feature uses.
 	 */
 	public function createMailer() {
@@ -406,11 +406,11 @@ class EmailForwarder {
 		$mailer = new SmtpMailer();
 
 		// Override with forwarding-specific SMTP settings if configured
-		$fwd_host = $this->settings->get_setting('email_forwarding_smtp_host');
+		$fwd_host = $this->settings->get_setting('inbound_email_forwarding_smtp_host');
 		if ($fwd_host) {
 			$mailer->Host = $fwd_host;
 		}
-		$fwd_port = $this->settings->get_setting('email_forwarding_smtp_port');
+		$fwd_port = $this->settings->get_setting('inbound_email_forwarding_smtp_port');
 		if ($fwd_port) {
 			$mailer->Port = intval($fwd_port);
 			// Re-detect encryption for new port
@@ -427,12 +427,12 @@ class EmailForwarder {
 					break;
 			}
 		}
-		$fwd_user = $this->settings->get_setting('email_forwarding_smtp_username');
+		$fwd_user = $this->settings->get_setting('inbound_email_forwarding_smtp_username');
 		if ($fwd_user) {
 			$mailer->SMTPAuth = true;
 			$mailer->Username = $fwd_user;
 		}
-		$fwd_pass = $this->settings->get_setting('email_forwarding_smtp_password');
+		$fwd_pass = $this->settings->get_setting('inbound_email_forwarding_smtp_password');
 		if ($fwd_pass) {
 			$mailer->Password = $fwd_pass;
 		}
@@ -574,7 +574,7 @@ class EmailForwarder {
 			}
 
 		} catch (Exception $e) {
-			error_log('EmailForwarder DKIM error: ' . $e->getMessage());
+			error_log('InboundEmailRouter DKIM error: ' . $e->getMessage());
 			return 'none'; // Error — fail open
 		}
 	}
@@ -627,17 +627,17 @@ class EmailForwarder {
 	}
 
 	/**
-	 * Check per-alias rate limit using the forwarding log table.
+	 * Check per-alias rate limit using the inbound email log table.
 	 */
 	private function checkAliasRateLimit($alias_id) {
 		$db = DbConnector::get_instance()->get_db_link();
-		$window = intval($this->settings->get_setting('email_forwarding_rate_limit_window')) ?: 3600;
-		$max = intval($this->settings->get_setting('email_forwarding_rate_limit_per_alias')) ?: 50;
+		$window = intval($this->settings->get_setting('inbound_email_forwarding_rate_limit_window')) ?: 3600;
+		$max = intval($this->settings->get_setting('inbound_email_forwarding_rate_limit_per_alias')) ?: 50;
 
-		$sql = "SELECT COUNT(*) as cnt FROM efl_email_forwarding_logs
-				WHERE efl_efa_email_forwarding_alias_id = ?
-				AND efl_status = 'forwarded'
-				AND efl_create_time > NOW() - INTERVAL '" . intval($window) . " seconds'";
+		$sql = "SELECT COUNT(*) as cnt FROM iel_inbound_email_logs
+				WHERE iel_iea_inbound_email_alias_id = ?
+				AND iel_status = 'forwarded'
+				AND iel_create_time > NOW() - INTERVAL '" . intval($window) . " seconds'";
 		$stmt = $db->prepare($sql);
 		$stmt->execute([$alias_id]);
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -646,18 +646,18 @@ class EmailForwarder {
 	}
 
 	/**
-	 * Check per-domain rate limit using the forwarding log table.
+	 * Check per-domain rate limit using the inbound email log table.
 	 */
 	private function checkDomainRateLimit($domain_id) {
 		$db = DbConnector::get_instance()->get_db_link();
-		$window = intval($this->settings->get_setting('email_forwarding_rate_limit_window')) ?: 3600;
-		$max = intval($this->settings->get_setting('email_forwarding_rate_limit_per_domain')) ?: 200;
+		$window = intval($this->settings->get_setting('inbound_email_forwarding_rate_limit_window')) ?: 3600;
+		$max = intval($this->settings->get_setting('inbound_email_forwarding_rate_limit_per_domain')) ?: 200;
 
-		$sql = "SELECT COUNT(*) as cnt FROM efl_email_forwarding_logs efl
-				JOIN efa_email_forwarding_aliases efa ON efa.efa_email_forwarding_alias_id = efl.efl_efa_email_forwarding_alias_id
-				WHERE efa.efa_efd_email_forwarding_domain_id = ?
-				AND efl.efl_status = 'forwarded'
-				AND efl.efl_create_time > NOW() - INTERVAL '" . intval($window) . " seconds'";
+		$sql = "SELECT COUNT(*) as cnt FROM iel_inbound_email_logs iel
+				JOIN iea_inbound_email_aliases iea ON iea.iea_inbound_email_alias_id = iel.iel_iea_inbound_email_alias_id
+				WHERE iea.iea_ied_inbound_email_domain_id = ?
+				AND iel.iel_status = 'forwarded'
+				AND iel.iel_create_time > NOW() - INTERVAL '" . intval($window) . " seconds'";
 		$stmt = $db->prepare($sql);
 		$stmt->execute([$domain_id]);
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -666,10 +666,10 @@ class EmailForwarder {
 	}
 
 	/**
-	 * Log a forwarding transaction.
+	 * Log an inbound email transaction.
 	 */
 	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null) {
-		EmailForwardingLog::CreateEntry(
+		InboundEmailLog::CreateEntry(
 			$parsed['from'] ?? '',
 			$to_address,
 			$parsed['subject'] ?? '',

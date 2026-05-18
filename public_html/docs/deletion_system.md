@@ -333,16 +333,16 @@ Declare on the **child** model what happens when its parent is permanently delet
 
 ```php
 // Child model — alias belongs to a domain
-class EmailForwardingAlias extends SystemBase {
+class InboundEmailAlias extends SystemBase {
     protected static $foreign_key_actions = [
-        'efa_efd_email_forwarding_domain_id' => ['action' => 'cascade'],
+        'iea_ied_inbound_email_domain_id' => ['action' => 'cascade'],
     ];
 }
 
 // Grandchild model — log references an alias, preserve for auditing
-class EmailForwardingLog extends SystemBase {
+class InboundEmailLog extends SystemBase {
     protected static $foreign_key_actions = [
-        'efl_efa_email_forwarding_alias_id' => ['action' => 'null'],
+        'iel_iea_inbound_email_alias_id' => ['action' => 'null'],
     ];
 }
 ```
@@ -355,7 +355,7 @@ class EmailForwardingLog extends SystemBase {
 // In admin logic — soft-delete domain cascades to aliases
 $domain->soft_delete();
 
-$aliases = new MultiEmailForwardingAlias([
+$aliases = new MultiInboundEmailAlias([
     'domain_id' => $domain->key,
     'deleted' => false,
 ]);
