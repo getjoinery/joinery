@@ -1,7 +1,7 @@
 {
     "name": "Inbound Email",
     "description": "Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -13,11 +13,10 @@
         {
             "slug": "incoming",
             "title": "Incoming",
-            "url": "/plugins/inbound_email/admin/admin_inbound_email",
+            "url": "/plugins/inbound_email/admin/admin_inbound_email_setup",
             "parent": "emails",
             "permission": 5,
-            "order": 10,
-            "settingActivate": "inbound_email_enabled"
+            "order": 10
         }
     ],
     "provisioners": [
@@ -50,6 +49,8 @@
         { "name": "inbound_email_forwarding_rate_limit_window", "default": "3600" },
         { "name": "inbound_email_srs_enabled", "default": "0" },
         { "name": "inbound_email_srs_secret", "default": "" },
+        { "name": "inbound_email_mail_hostname", "default": "" },
+        { "name": "inbound_email_public_ip", "default": "" },
         { "name": "inbound_email_forwarding_smtp_host", "default": "" },
         { "name": "inbound_email_forwarding_smtp_port", "default": "" },
         { "name": "inbound_email_forwarding_smtp_username", "default": "" },

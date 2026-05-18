@@ -8,7 +8,7 @@ The email system consists of three focused classes that provide clear separation
 - **EmailTemplate**: Template processing (conditionals, variables)
 - **EmailSender**: All sending logic with service selection and fallback
 
-**Inbound email** is handled by the Inbound Email plugin — see [Inbound Email Plugin](/plugins/inbound_email/docs/overview.md) for setup, admin usage, and server configuration.
+**Inbound email** is handled by the Inbound Email plugin — see [Inbound Email Plugin](/plugins/inbound_email/docs/overview.md) for setup, admin usage, and server configuration. Its guided **Setup** tab verifies MX, SPF, DKIM, and forward-confirmed reverse DNS (PTR) for each inbound domain, using `DnsResolver` (including `DnsResolver::getPtr()` for reverse lookups).
 
 ## Architecture
 

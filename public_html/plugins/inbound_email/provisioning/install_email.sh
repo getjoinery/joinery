@@ -2,7 +2,10 @@
 #
 # install_email.sh - host installer + base configurator for Inbound Email.
 #
-# Version: 2.2 - Renamed for the Inbound Email plugin (spec inbound_email_rename):
+# Version: 2.3 - Sets a fallback Postfix myhostname (spec inbound_email_guided_setup)
+#                when it is unset/localhost, so the mail server has a FQDN HELO
+#                name; the Setup tab verifies and refines it.
+#                2.2 - Renamed for the Inbound Email plugin (spec inbound_email_rename):
 #                the pipe transport runs utils/inbound_email_handler.php and the
 #                pgsql map reads ied_inbound_email_domains.
 #                2.1 - The pgsql map authenticates as a dedicated least-privilege
@@ -180,6 +183,31 @@ fi
 # RBL spam filtering at RCPT time (fixed config).
 postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rbl_client bl.spamcop.net, reject_rbl_client b.barracudacentral.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, permit"
 echo "main.cf: smtpd_recipient_restrictions set (RBL clients)"
+
+# myhostname: a mail server needs a fully-qualified HELO name. If Postfix has
+# only a bare or localhost name, fall back to the system FQDN as a sane
+# default. The Inbound Email Setup tab verifies this and offers an exact
+# command to set a specific name (e.g. mail.example.com).
+CURRENT_MYHOSTNAME="$(postconf -h myhostname 2>/dev/null || true)"
+case "${CURRENT_MYHOSTNAME}" in
+    ""|localhost|localhost.localdomain)
+        SYS_FQDN="$(hostname -f 2>/dev/null || true)"
+        if [[ "${SYS_FQDN}" == *.* && "${SYS_FQDN}" != localhost* ]]; then
+            postconf -e "myhostname = ${SYS_FQDN}"
+            echo "main.cf: myhostname = ${SYS_FQDN} (was '${CURRENT_MYHOSTNAME:-unset}')"
+        else
+            echo "main.cf: myhostname is '${CURRENT_MYHOSTNAME:-unset}' and no system FQDN is available -" >&2
+            echo "         set it on the Inbound Email Setup tab." >&2
+        fi
+        ;;
+    *.*)
+        echo "main.cf: myhostname already a FQDN (${CURRENT_MYHOSTNAME})."
+        ;;
+    *)
+        echo "main.cf: myhostname is '${CURRENT_MYHOSTNAME}' (not a FQDN) -" >&2
+        echo "         set it on the Inbound Email Setup tab." >&2
+        ;;
+esac
 
 # --- 4. dedicated DB role + pgsql domain map ---------------------------------
 # Postfix authenticates to PostgreSQL as a dedicated least-privilege role, not

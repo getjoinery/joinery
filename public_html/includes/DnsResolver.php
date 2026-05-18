@@ -14,7 +14,7 @@
  * DnsAuthChecker and every other consumer testable. Production code never
  * touches it.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsLookupException.php'));
@@ -112,6 +112,53 @@ class DnsResolver {
     public static function getCname($name) {
         foreach (self::rawLookup($name, DNS_CNAME) as $r) {
             if (!empty($r['target'])) { return $r['target']; }
+        }
+        return null;
+    }
+
+    /**
+     * Reverse-DNS (PTR) hostnames for an IP address.
+     *
+     * Accepts an IPv4 or IPv6 literal, builds the in-addr.arpa / ip6.arpa
+     * name and looks up its PTR records. Trailing dots are stripped. An empty
+     * array means "no PTR record" (or the argument was not a valid IP); a
+     * resolver failure throws, like the forward-lookup methods.
+     *
+     * @param string $ip IPv4 or IPv6 address literal.
+     * @return string[]
+     * @throws DnsLookupException on resolver failure.
+     */
+    public static function getPtr($ip) {
+        $reverse = self::reverseName($ip);
+        if ($reverse === null) {
+            return [];
+        }
+        $names = [];
+        foreach (self::rawLookup($reverse, DNS_PTR) as $r) {
+            if (!empty($r['target'])) {
+                $names[] = rtrim($r['target'], '.');
+            }
+        }
+        return $names;
+    }
+
+    /**
+     * Build the reverse-DNS name (in-addr.arpa / ip6.arpa) for an IP, or null
+     * if the string is not a valid IPv4 or IPv6 address.
+     *
+     * @param string $ip
+     * @return string|null
+     */
+    private static function reverseName($ip) {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return implode('.', array_reverse(explode('.', $ip))) . '.in-addr.arpa';
+        }
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $packed = @inet_pton($ip);
+            if ($packed === false) {
+                return null;
+            }
+            return implode('.', array_reverse(str_split(bin2hex($packed)))) . '.ip6.arpa';
         }
         return null;
     }

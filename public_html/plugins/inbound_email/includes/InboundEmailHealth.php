@@ -57,65 +57,36 @@ class InboundEmailHealth {
     }
 
     /**
-     * Verify DNS records for every enabled inbound domain.
+     * Verify DNS and host setup for every enabled inbound domain.
      *
-     * For each enabled, non-deleted domain it confirms an MX record exists and
-     * an SPF (v=spf1) TXT record is published. DKIM is intentionally not checked
-     * here — DKIM keys are generated per domain and are optional; the Domains
-     * page surfaces DKIM separately.
+     * Delegates to InboundEmailSetupCheck — the single verification engine the
+     * Setup tab also uses — and fails the provisioner if any required
+     * per-domain check (MX exists / not a CNAME / resolves / points here, SPF
+     * exists / authorizes, no mydestination conflict) is failing. Recommended
+     * items (DKIM, DMARC) surface on the Setup tab but never fail this check.
      *
-     * Lookups go through the system resolver, so with many domains this is the
-     * slowest of the plugin's checks; it stays a quick check (two lookups per
-     * domain, no DKIM selector scanning) and the async Plugins-page UI absorbs
-     * the latency.
+     * Scoped to the per-domain layer only, so it does not pay for the host or
+     * outbound-relay checks — those are separate provisioners.
      *
-     * @throws ProvisioningCheckFailed if any enabled domain is missing MX or SPF.
+     * @throws ProvisioningCheckFailed if any enabled domain has a required failure.
      */
     public static function checkDomainDns() {
-        $domains = new MultiInboundEmailDomain(['enabled' => true, 'deleted' => false]);
-        $domains->load();
+        require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailSetupCheck.php'));
 
-        if (count($domains) === 0) {
-            return; // No inbound domains configured — nothing to verify.
-        }
+        $checker = new InboundEmailSetupCheck();
+        $results = $checker->runDomainChecks();
 
         $problems = [];
-        foreach ($domains as $domain) {
-            $name = $domain->get('ied_domain');
-            $issues = [];
-
-            try {
-                if (empty(DnsResolver::getMx($name))) {
-                    $issues[] = 'missing MX';
-                }
-
-                $spf_found = false;
-                foreach (DnsResolver::getTxt($name) as $txt) {
-                    if (stripos($txt, 'v=spf1') !== false) {
-                        $spf_found = true;
-                        break;
-                    }
-                }
-                if (!$spf_found) {
-                    $issues[] = 'missing SPF';
-                }
-            } catch (DnsLookupException $e) {
-                // Resolver failure for this domain — fail-open (kind 2). A
-                // transient DNS error is the checking host's problem, not the
-                // domain's misconfiguration; skip it rather than report a
-                // false "not configured".
-                $issues = [];
-            }
-
-            if ($issues) {
-                $problems[] = $name . ' (' . implode(', ', $issues) . ')';
+        foreach ($results as $r) {
+            if ($r['severity'] === InboundEmailSetupCheck::REQUIRED
+                && $r['status'] === InboundEmailSetupCheck::FAIL) {
+                $problems[] = $r['scope'] . ' — ' . $r['summary'];
             }
         }
 
         if ($problems) {
             throw new ProvisioningCheckFailed(
-                'DNS not configured for ' . count($problems) . ' of ' . count($domains)
-                . ' inbound domain(s): ' . implode('; ', $problems)
+                count($problems) . ' inbound-domain setup problem(s): ' . implode('; ', $problems)
             );
         }
     }
