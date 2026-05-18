@@ -1,5 +1,7 @@
 # Joinery Base Image
-# VERSION 1.0
+# VERSION 1.1 - do_server_setup now bakes in the inbound mail stack (postfix,
+#               postfix-pgsql, opendkim, opendkim-tools). Contents change only
+#               via install.sh server. See spec mail_stack_container_persistence.
 #
 # Builds the shared OS/runtime layer used by all site images.
 # Contains: Ubuntu 24.04 + Apache + PHP 8.3 + PostgreSQL + Composer + Cron

@@ -2,7 +2,12 @@
 /**
  * Inbound Email - Guided Setup & Verification
  *
- * @version 1.0
+ * Presents InboundEmailSetupCheck's results as an ordered, focused wizard:
+ * the engine's layers are grouped into five dependency-ordered steps, only the
+ * first unfinished step is expanded ("Do this next"), and the rest collapse to
+ * a one-line summary.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -61,8 +66,8 @@ $formwriter->textinput('mail_hostname', 'Mail server hostname', [
 ]);
 
 $formwriter->textinput('public_ip', 'Public IP override', [
-	'value'       => $public_ip,
-	'placeholder' => $public_ip !== '' ? $public_ip : 'auto-detected',
+	'value'       => $configured_public_ip,
+	'placeholder' => $public_ip !== '' ? 'auto-detected: ' . $public_ip : 'auto-detected',
 	'help_text'   => 'Leave blank to auto-detect. Set this only if the server is behind NAT and auto-detection finds a private address.',
 ]);
 
@@ -70,7 +75,9 @@ $formwriter->submitbutton('btn_save', 'Save & Run Checks');
 echo $formwriter->end_form();
 
 if ($public_ip !== '') {
-	echo '<p class="text-muted mb-0"><small>Detected/!configured server IP: <code>' . htmlspecialchars($public_ip) . '</code>';
+	echo '<p class="text-muted mb-0"><small>Server IP ('
+		. ($configured_public_ip !== '' ? 'configured override' : 'auto-detected')
+		. '): <code>' . htmlspecialchars($public_ip) . '</code>';
 	if ($public_ip_private) {
 		echo ' &mdash; <span class="text-warning">this is a private address; set a public IP override above.</span>';
 	}
@@ -79,32 +86,7 @@ if ($public_ip !== '') {
 
 $page->end_box();
 
-// --- Summary banner ---
-$fail = $counts[InboundEmailSetupCheck::FAIL];
-$warn = $counts[InboundEmailSetupCheck::WARN];
-$unknown = $counts[InboundEmailSetupCheck::UNKNOWN];
-
-if ($fail === 0 && $unknown === 0) {
-	$banner_class = 'alert-success';
-	$banner_text = $warn > 0
-		? 'All required checks pass. ' . $warn . ' recommended improvement(s) remain.'
-		: 'Setup is complete — all checks pass.';
-} elseif ($fail === 0) {
-	$banner_class = 'alert-warning';
-	$banner_text = 'All required checks pass, but ' . $unknown . ' check(s) could not be evaluated (try Re-check).';
-} else {
-	$banner_class = 'alert-danger';
-	$banner_text = $fail . ' required item(s) need attention'
-		. ($warn > 0 ? ', plus ' . $warn . ' recommended improvement(s)' : '') . '.';
-}
-echo '<div class="alert ' . $banner_class . ' d-flex justify-content-between align-items-center">';
-echo '<span>' . htmlspecialchars($banner_text) . '</span>';
-$recheck_url = '/plugins/inbound_email/admin/admin_inbound_email_setup'
-	. ($address !== '' ? '?address=' . urlencode($address) : '');
-echo '<a href="' . htmlspecialchars($recheck_url) . '" class="btn btn-sm btn-outline-secondary">Re-check</a>';
-echo '</div>';
-
-// --- Checklist ---
+// --- Shared check-row renderers ---
 $status_badge = function ($status) {
 	switch ($status) {
 		case InboundEmailSetupCheck::PASS:    return '<span class="badge bg-success">PASS</span>';
@@ -171,41 +153,118 @@ $render_check = function ($c) use ($status_badge, $render_fix) {
 	echo '</div></div>';
 };
 
-$layer_titles = array(
-	'host'     => 'Mail server software',
-	'mailhost' => "This server's mail identity",
-	'domain'   => 'DNS records',
-	'plugin'   => 'Plugin configuration',
-	'address'  => 'Delivery target',
-	'e2e'      => 'End-to-end test',
+// --- Step model: group the engine's layers into ordered setup steps ---
+$steps = array(
+	array('key' => 'host',     'title' => 'Mail server software',       'layers' => array('host')),
+	array('key' => 'mailhost', 'title' => "This server's mail identity", 'layers' => array('mailhost')),
+	array('key' => 'domain',   'title' => 'DNS for your domain',         'layers' => array('domain')),
+	array('key' => 'plugin',   'title' => 'Plugin configuration',        'layers' => array('plugin')),
+	array('key' => 'delivery', 'title' => 'Delivery target & test',      'layers' => array('address', 'e2e')),
 );
 
-foreach ($layer_titles as $layer => $title) {
-	$rows = array_values(array_filter($results, function ($r) use ($layer) {
-		return $r['layer'] === $layer;
+foreach ($steps as &$step) {
+	$rows = array_values(array_filter($results, function ($r) use ($step) {
+		return in_array($r['layer'], $step['layers'], true);
 	}));
-	if (empty($rows)) { continue; }
-
-	if ($layer === 'domain') {
-		// Group domain-layer rows under a heading per domain.
-		$by_scope = array();
-		foreach ($rows as $r) { $by_scope[$r['scope']][] = $r; }
-		foreach ($by_scope as $scope => $scope_rows) {
-			$page->begin_box(array('title' => 'DNS records for ' . $scope));
-			foreach ($scope_rows as $r) { $render_check($r); }
-			$page->end_box();
+	$req_fail = 0; $req_unknown = 0; $recommend_open = 0; $pass = 0;
+	foreach ($rows as $r) {
+		if ($r['status'] === InboundEmailSetupCheck::PASS) { $pass++; }
+		if ($r['severity'] === InboundEmailSetupCheck::REQUIRED) {
+			if ($r['status'] === InboundEmailSetupCheck::FAIL)    { $req_fail++; }
+			if ($r['status'] === InboundEmailSetupCheck::UNKNOWN) { $req_unknown++; }
+		} elseif ($r['status'] !== InboundEmailSetupCheck::PASS) {
+			$recommend_open++;
 		}
-		continue;
 	}
+	$step['rows']           = $rows;
+	$step['needs_address']  = empty($rows);
+	$step['done']           = (!empty($rows) && $req_fail === 0 && $req_unknown === 0);
+	$step['req_open']       = $req_fail + $req_unknown;
+	$step['recommend_open'] = $recommend_open;
+	$step['pass']           = $pass;
+	$step['total']          = count($rows);
+}
+unset($step);
 
-	$page->begin_box(array('title' => $title));
-	foreach ($rows as $r) { $render_check($r); }
-	$page->end_box();
+// The active step is the first one that is not done.
+$active = null;
+foreach ($steps as $i => $step) {
+	if (!$step['done']) { $active = $i; break; }
 }
 
-if ($address === '' && $focus_domain === '') {
-	echo '<p class="text-muted"><small>Enter an email address above to also check its delivery target '
-		. 'and run the end-to-end test.</small></p>';
+$recheck_url = '/plugins/inbound_email/admin/admin_inbound_email_setup'
+	. ($address !== '' ? '?address=' . urlencode($address) : '');
+
+// --- Progress strip ---
+echo '<div class="card mb-3"><div class="card-body py-2">';
+echo '<div class="d-flex flex-wrap" style="gap:1.5rem">';
+foreach ($steps as $i => $step) {
+	if ($step['done']) {
+		$marker = '<span class="badge bg-success">&#10003;</span>';
+		$cls = 'text-success';
+	} elseif ($i === $active) {
+		$marker = '<span class="badge bg-primary">' . ($i + 1) . '</span>';
+		$cls = 'fw-bold';
+	} else {
+		$marker = '<span class="badge bg-light text-dark border">' . ($i + 1) . '</span>';
+		$cls = 'text-muted';
+	}
+	echo '<span class="' . $cls . '">' . $marker . ' ' . htmlspecialchars($step['title']) . '</span>';
+}
+echo '</div>';
+echo '<div class="d-flex justify-content-between align-items-center mt-2">';
+if ($active === null) {
+	echo '<span class="text-success"><strong>All five steps complete</strong> — inbound email is fully set up.</span>';
+} else {
+	echo '<span>Step ' . ($active + 1) . ' of ' . count($steps) . ': <strong>'
+		. htmlspecialchars($steps[$active]['title']) . '</strong> &mdash; see the highlighted panel below.</span>';
+}
+echo '<a href="' . htmlspecialchars($recheck_url) . '" class="btn btn-sm btn-outline-secondary">Re-check</a>';
+echo '</div>';
+echo '</div></div>';
+
+// --- Step panels ---
+foreach ($steps as $i => $step) {
+	$is_active = ($i === $active);
+
+	if ($step['done']) {
+		$head_class = 'bg-success text-white';
+		$state_text = 'all required checks pass'
+			. ($step['recommend_open'] > 0 ? ' · ' . $step['recommend_open'] . ' optional improvement(s)' : '');
+	} elseif ($is_active) {
+		$head_class = 'bg-primary text-white';
+		$state_text = $step['needs_address']
+			? 'enter the email address above to run this step'
+			: $step['req_open'] . ' required item(s) to address'
+				. ($step['recommend_open'] > 0 ? ' · ' . $step['recommend_open'] . ' optional' : '');
+	} else {
+		$head_class = 'bg-light text-muted';
+		$state_text = $step['needs_address'] ? 'waiting on the email address above' : 'not started';
+	}
+
+	echo '<details class="card mb-2"' . ($is_active ? ' open' : '') . '>';
+	echo '<summary class="card-header ' . $head_class . '" style="cursor:pointer">';
+	echo '<strong>Step ' . ($i + 1) . ' &middot; ' . htmlspecialchars($step['title']) . '</strong>';
+	echo ' &mdash; ' . htmlspecialchars($state_text);
+	if ($is_active) { echo ' <span class="badge bg-white text-primary ms-1">Do this next</span>'; }
+	echo '</summary>';
+	echo '<div class="card-body">';
+
+	if ($step['needs_address']) {
+		echo '<p class="mb-0 text-muted">This step checks the domain of the address you are setting up. '
+			. 'Enter that address in the form above and press "Save &amp; Run Checks".</p>';
+	} elseif ($step['key'] === 'domain') {
+		$by_scope = array();
+		foreach ($step['rows'] as $r) { $by_scope[$r['scope']][] = $r; }
+		foreach ($by_scope as $scope => $scope_rows) {
+			echo '<h6 class="text-muted">' . htmlspecialchars($scope) . '</h6>';
+			foreach ($scope_rows as $r) { $render_check($r); }
+		}
+	} else {
+		foreach ($step['rows'] as $r) { $render_check($r); }
+	}
+
+	echo '</div></details>';
 }
 
 $page->admin_footer();

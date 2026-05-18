@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 2.20 - Bake the inbound mail stack (postfix, postfix-pgsql, opendkim,
+#               opendkim-tools) into the base image via do_server_setup, so it
+#               survives container rebuilds (spec mail_stack_container_persistence).
+#               BASE_IMAGE_VERSION bumped to 1.1.
 #VERSION 2.19 - Fix domain argument parsing: when no password is given and DOMAIN_NAME is already
 #               set, a port-like arg (all digits) now correctly goes to PORT instead of
 #               overwriting DOMAIN_NAME (bug: ./install.sh -y site foo 1.2.3.4 8080 set webDir=8080).
@@ -67,7 +71,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # joinery-base image tag. Bump when Dockerfile.base or do_server_setup changes
 # (Ubuntu version, PHP version, new apt packages, new system config, etc.).
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
-BASE_IMAGE_VERSION="1.0"
+BASE_IMAGE_VERSION="1.1"
 
 #==============================================================================
 # GLOBAL FLAGS (parsed before command dispatch)
@@ -1400,6 +1404,18 @@ EOF
     # Install PostgreSQL Database
     print_step "Installing PostgreSQL server..."
     apt install -y postgresql postgresql-contrib
+
+    # Install the inbound mail stack (Postfix + opendkim). Baked into the base
+    # image so it survives container rebuilds; the Inbound Email plugin's
+    # install_email.sh only configures it. DEBIAN_FRONTEND keeps postfix's
+    # debconf prompt from blocking a bare-metal run. See spec
+    # mail_stack_container_persistence.
+    print_step "Installing mail stack (Postfix, opendkim)..."
+    DEBIAN_FRONTEND=noninteractive apt install -y \
+        postfix \
+        postfix-pgsql \
+        opendkim \
+        opendkim-tools
 
     # Start and enable PostgreSQL
     service_start postgresql
