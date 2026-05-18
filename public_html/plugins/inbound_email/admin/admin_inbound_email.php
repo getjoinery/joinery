@@ -1,22 +1,22 @@
 <?php
 /**
- * Email Forwarding - Aliases List
+ * Inbound Email - Aliases List
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
-require_once(PathHelper::getIncludePath('plugins/email_forwarding/logic/admin_email_forwarding_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/logic/admin_inbound_email_logic.php'));
 
-$page_vars = process_logic(admin_email_forwarding_logic(array_merge($_GET, $_POST, $params ?? [])));
+$page_vars = process_logic(admin_inbound_email_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
 
 $numperpage = 30;
 $offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-$sort = LibraryFunctions::fetch_variable('sort', 'efa_email_forwarding_alias_id', 0, '');
+$sort = LibraryFunctions::fetch_variable('sort', 'iea_inbound_email_alias_id', 0, '');
 $sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
 $filter_domain = LibraryFunctions::fetch_variable('domain_id', '', 0, '');
 
@@ -25,7 +25,7 @@ $page->admin_header(
 	array(
 		'menu-id' => 'incoming',
 		'breadcrumbs' => array(
-			'Email Forwarding' => '',
+			'Inbound Email' => '',
 		),
 		'session' => $session,
 	)
@@ -33,13 +33,13 @@ $page->admin_header(
 
 // Tab navigation
 echo '<ul class="nav nav-tabs mb-3">';
-echo '<li class="nav-item"><a class="nav-link active" href="/plugins/email_forwarding/admin/admin_email_forwarding">Forwarding Aliases</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/email_forwarding/admin/admin_email_forwarding_domains">Domains</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/email_forwarding/admin/admin_email_forwarding_logs">Logs</a></li>';
+echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
 echo '</ul>';
 
 // Display session messages
-$display_messages = $session->get_messages('/plugins\/email_forwarding\/admin\//');
+$display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
 if (!empty($display_messages)) {
 	foreach ($display_messages as $msg) {
 		echo '<div class="alert alert-success">' . htmlspecialchars($msg->message) . '</div>';
@@ -53,7 +53,7 @@ if ($filter_domain) {
 	$search_criteria['domain_id'] = $filter_domain;
 }
 
-$aliases = new MultiEmailForwardingAlias(
+$aliases = new MultiInboundEmailAlias(
 	$search_criteria,
 	array($sort => $sdirection),
 	$numperpage,
@@ -65,11 +65,11 @@ $aliases->load();
 // Preload domains for display
 $domain_cache = array();
 foreach ($domains as $d) {
-	$domain_cache[$d->key] = $d->get('efd_domain');
+	$domain_cache[$d->key] = $d->get('ied_domain');
 }
 
 $headers = array('Alias', 'Destinations', 'Description', 'Enabled', 'Forwards', 'Last Forward', 'Actions');
-$altlinks = array('New Alias' => '/plugins/email_forwarding/admin/admin_email_forwarding_alias');
+$altlinks = array('New Alias' => '/plugins/inbound_email/admin/admin_inbound_email_alias');
 $pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage));
 $table_options = array(
 	'altlinks' => $altlinks,
@@ -78,27 +78,27 @@ $table_options = array(
 $page->tableheader($headers, $table_options, $pager);
 
 foreach ($aliases as $alias) {
-	$domain_name = $domain_cache[$alias->get('efa_efd_email_forwarding_domain_id')] ?? '?';
-	$full_address = $alias->get('efa_alias') . '@' . $domain_name;
+	$domain_name = $domain_cache[$alias->get('iea_ied_inbound_email_domain_id')] ?? '?';
+	$full_address = $alias->get('iea_alias') . '@' . $domain_name;
 
 	$rowvalues = array();
-	array_push($rowvalues, '<a href="/plugins/email_forwarding/admin/admin_email_forwarding_alias?efa_email_forwarding_alias_id=' . $alias->key . '">' . htmlspecialchars($full_address) . '</a>');
-	array_push($rowvalues, htmlspecialchars($alias->get('efa_destinations')));
-	array_push($rowvalues, htmlspecialchars($alias->get('efa_description')));
-	array_push($rowvalues, $alias->get('efa_is_enabled') ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>');
-	array_push($rowvalues, intval($alias->get('efa_forward_count')));
+	array_push($rowvalues, '<a href="/plugins/inbound_email/admin/admin_inbound_email_alias?iea_inbound_email_alias_id=' . $alias->key . '">' . htmlspecialchars($full_address) . '</a>');
+	array_push($rowvalues, htmlspecialchars($alias->get('iea_destinations')));
+	array_push($rowvalues, htmlspecialchars($alias->get('iea_description')));
+	array_push($rowvalues, $alias->get('iea_is_enabled') ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>');
+	array_push($rowvalues, intval($alias->get('iea_forward_count')));
 
-	$last_forward = $alias->get('efa_last_forward_time');
+	$last_forward = $alias->get('iea_last_forward_time');
 	array_push($rowvalues, $last_forward ? LibraryFunctions::convert_time($last_forward, 'UTC', $session->get_timezone(), 'M j, Y g:i A') : '-');
 
 	$actions = '<form method="post" style="display:inline">'
 		. '<input type="hidden" name="action" value="toggle_enabled">'
-		. '<input type="hidden" name="efa_email_forwarding_alias_id" value="' . $alias->key . '">'
-		. '<button type="submit" class="btn btn-sm btn-outline-secondary">' . ($alias->get('efa_is_enabled') ? 'Disable' : 'Enable') . '</button>'
+		. '<input type="hidden" name="iea_inbound_email_alias_id" value="' . $alias->key . '">'
+		. '<button type="submit" class="btn btn-sm btn-outline-secondary">' . ($alias->get('iea_is_enabled') ? 'Disable' : 'Enable') . '</button>'
 		. '</form> '
 		. '<form method="post" style="display:inline" onsubmit="return confirm(\'Delete this alias?\')">'
 		. '<input type="hidden" name="action" value="delete">'
-		. '<input type="hidden" name="efa_email_forwarding_alias_id" value="' . $alias->key . '">'
+		. '<input type="hidden" name="iea_inbound_email_alias_id" value="' . $alias->key . '">'
 		. '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>'
 		. '</form>';
 	array_push($rowvalues, $actions);

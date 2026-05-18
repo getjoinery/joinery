@@ -121,8 +121,8 @@ require_once(__DIR__ . '/../../includes/Globalvars.php');
 Plugin directory names appear directly in user-facing URLs (`/{pluginname}/*`, `/profile/{pluginname}/*`, `/admin/{pluginname}/*`), so choose them carefully:
 
 - **Must be distinctive** — avoid generic names like `events`, `billing`, `users`
-- **Use the product or brand name** — e.g. `scrolldaddy`, `email_forwarding`
-- **Short, lowercase, underscores for multi-word** — e.g. `email_forwarding` not `EmailForwarding`
+- **Use the product or brand name** — e.g. `scrolldaddy`, `inbound_email`
+- **Short, lowercase, underscores for multi-word** — e.g. `inbound_email` not `InboundEmail`
 - **Must not match a reserved system segment** — the following names are rejected at activation:
   `profile`, `admin`, `login`, `ajax`, `api`, `assets`, `theme`, `plugins`, `views`, `uploads`, `utils`, `tests`, `docs`, `specs`, `migrations`, `data`, `includes`, `logic`, `adm`
 - **Must not clash with existing base view filenames** — if `views/profile/billing.php` exists, a plugin named `billing` is rejected
@@ -401,11 +401,11 @@ Children inherit the parent's `permission` unless they override it.
     {
       "slug": "incoming",
       "title": "Incoming",
-      "url": "/plugins/email_forwarding/admin/admin_email_forwarding",
+      "url": "/plugins/inbound_email/admin/admin_inbound_email",
       "parent": "emails",
       "permission": 5,
       "order": 10,
-      "settingActivate": "email_forwarding_enabled"
+      "settingActivate": "inbound_email_enabled"
     }
   ]
 }
@@ -721,7 +721,7 @@ Declare runtime dependencies as a `provisioners` array in `plugin.json`, alongsi
     "key": "outbound_forwarding_relay",
     "label": "Outbound mail relay for forwarding",
     "details": "Forwarded messages are relayed out through this SMTP server.",
-    "check": { "type": "code", "call": "EmailForwardingHealth::checkForwardingRelay" }
+    "check": { "type": "code", "call": "InboundEmailHealth::checkForwardingRelay" }
   }
 ]
 ```

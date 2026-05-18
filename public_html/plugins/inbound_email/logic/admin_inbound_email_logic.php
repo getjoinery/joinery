@@ -1,11 +1,11 @@
 <?php
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
 
-function admin_email_forwarding_logic(array $input): LogicResult {
+function admin_inbound_email_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_alias_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/email_forwarding/data/email_forwarding_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -13,29 +13,29 @@ function admin_email_forwarding_logic(array $input): LogicResult {
 
 	// Handle delete action
 	if ($input && isset($input['action']) && $input['action'] === 'delete') {
-		$alias = new EmailForwardingAlias($input['efa_email_forwarding_alias_id'], TRUE);
+		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
 		$alias->soft_delete();
 
 		$session->save_message(new DisplayMessage(
 			'Alias deleted.',
 			'Deleted',
-			'/plugins/email_forwarding/admin/',
+			'/plugins/inbound_email/admin/',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
-		return LogicResult::redirect('/plugins/email_forwarding/admin/admin_email_forwarding');
+		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email');
 	}
 
 	// Handle enable/disable toggle
 	if ($input && isset($input['action']) && $input['action'] === 'toggle_enabled') {
-		$alias = new EmailForwardingAlias($input['efa_email_forwarding_alias_id'], TRUE);
-		$alias->set('efa_is_enabled', $alias->get('efa_is_enabled') ? false : true);
+		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->set('iea_is_enabled', $alias->get('iea_is_enabled') ? false : true);
 		$alias->save();
-		return LogicResult::redirect('/plugins/email_forwarding/admin/admin_email_forwarding');
+		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email');
 	}
 
 	// Load domains for filter dropdown
-	$domains = new MultiEmailForwardingDomain(array('deleted' => false), array('efd_domain' => 'ASC'));
+	$domains = new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC'));
 	$domains->load();
 
 	return LogicResult::render(array(

@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 #
-# install_email.sh - host installer + base configurator for Email Forwarding.
+# install_email.sh - host installer + base configurator for Inbound Email.
 #
-# Version: 2.1 - The pgsql map authenticates as a dedicated least-privilege
+# Version: 2.2 - Renamed for the Inbound Email plugin (spec inbound_email_rename):
+#                the pipe transport runs utils/inbound_email_handler.php and the
+#                pgsql map reads ied_inbound_email_domains.
+#                2.1 - The pgsql map authenticates as a dedicated least-privilege
 #                PostgreSQL role, not the application's superuser account
 #                (spec email_forwarding_pgsql_credential).
 #                2.0 - Option C (spec email_forwarding_install_unification):
-#                Postfix resolves the forwarding-domain list live from the
+#                Postfix resolves the inbound-domain list live from the
 #                database via a pgsql map; opendkim static config and the
 #                milter became part of this fixed base install.
 #
 # Installs the mail software the plugin needs and applies the FIXED Postfix and
-# opendkim configuration so inbound mail is piped to the forwarder. Fully
+# opendkim configuration so inbound mail is piped to the handler. Fully
 # idempotent: re-running adds nothing twice and is safe.
 #
 # What it configures (fixed, deployment-independent):
@@ -21,16 +24,16 @@
 #   - main.cf   : inet_interfaces = all - with one site per host, this site's
 #                 Postfix IS the host's mail server.
 #   - main.cf   : mydestination = localhost, localhost.localdomain
-#                 (forwarding domains must NOT appear here, or Postfix rejects
+#                 (inbound domains must NOT appear here, or Postfix rejects
 #                  them with "User unknown in local recipient table").
 #   - main.cf   : smtpd_recipient_restrictions with RBL clients.
 #   - main.cf   : virtual_mailbox_domains = pgsql:/etc/postfix/joinery-domains.cf
 #                 Postfix asks the database whether a recipient domain is an
-#                 active forwarding domain, so adding or removing a domain in
+#                 active inbound domain, so adding or removing a domain in
 #                 the admin UI takes effect immediately - no host action, no
 #                 drift. /etc/postfix/joinery-domains.cf is the pgsql map.
 #   - postgres  : a dedicated least-privilege role the pgsql map authenticates
-#                 as - SELECT on the forwarding-domains table only, never the
+#                 as - SELECT on the inbound-domains table only, never the
 #                 application's superuser. Its password lives only in the map
 #                 file; re-running this script rotates it.
 #   - opendkim  : inet socket localhost:8891, empty key/signing tables, and the
@@ -39,16 +42,16 @@
 #   - Opens port 25 if ufw is active.
 #
 # What it does NOT do (genuinely per-deployment - handled elsewhere):
-#   - The forwarding-domain list: NOT installed at all - Postfix reads it live
+#   - The inbound-domain list: NOT installed at all - Postfix reads it live
 #     from the database (see above). Manage domains under
 #     Admin > Emails > Incoming > Domains.
 #   - DNS records (MX, SPF, DKIM).
 #   - Per-domain opendkim DKIM keys: opendkim-genkey, two lines into
 #     key.table / signing.table, and a DNS TXT record. opendkim runs keyless
-#     (signing nothing) until then. See plugins/email_forwarding/docs/overview.md.
+#     (signing nothing) until then. See plugins/inbound_email/docs/overview.md.
 #
 # Docker: run this INSIDE the same container as the app - Postfix must be
-# co-located with the PHP forwarder it pipes to, and reads the app's own
+# co-located with the PHP handler it pipes to, and reads the app's own
 # database. The container also has to publish port 25 (e.g. docker run -p 25:25)
 # and (re)start Postfix on boot, since a container usually has no systemd.
 #
@@ -71,13 +74,13 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PIPE_SCRIPT="${PLUGIN_DIR}/utils/email_forwarder.php"
+PIPE_SCRIPT="${PLUGIN_DIR}/utils/inbound_email_handler.php"
 RENDER_SCRIPT="${SCRIPT_DIR}/render_pgsql_map.php"
 MAP_FILE="/etc/postfix/joinery-domains.cf"
 
 if [[ ! -f "${PIPE_SCRIPT}" ]]; then
-    echo "ERROR: forwarder script not found at ${PIPE_SCRIPT}" >&2
-    echo "Run this script from inside the email_forwarding plugin directory." >&2
+    echo "ERROR: inbound email handler not found at ${PIPE_SCRIPT}" >&2
+    echo "Run this script from inside the inbound_email plugin directory." >&2
     exit 1
 fi
 if [[ ! -f "${RENDER_SCRIPT}" ]]; then
@@ -181,25 +184,25 @@ echo "main.cf: smtpd_recipient_restrictions set (RBL clients)"
 # --- 4. dedicated DB role + pgsql domain map ---------------------------------
 # Postfix authenticates to PostgreSQL as a dedicated least-privilege role, not
 # the application's superuser account. The role can do exactly one thing: read
-# the forwarding-domain list. Its password lives only in the map file written
+# the inbound-domain list. Its password lives only in the map file written
 # below; re-running this script rotates it.
 DB_PSQL=(psql -U postgres -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
 
 # The role's GRANT needs the domains table, which update_database creates after
 # the plugin is activated. Fail clearly rather than half-configure.
-TABLE_CHECK="$("${DB_PSQL[@]}" -c "SELECT to_regclass('public.efd_email_forwarding_domains') IS NOT NULL" 2>&1)" || {
+TABLE_CHECK="$("${DB_PSQL[@]}" -c "SELECT to_regclass('public.ied_inbound_email_domains') IS NOT NULL" 2>&1)" || {
     echo "ERROR: could not query PostgreSQL database '${DBNAME}': ${TABLE_CHECK}" >&2
     exit 1
 }
 if [[ "${TABLE_CHECK}" != "t" ]]; then
-    echo "ERROR: table efd_email_forwarding_domains does not exist in database '${DBNAME}'." >&2
-    echo "       Activate the Email Forwarding plugin and run update_database, then re-run this script." >&2
+    echo "ERROR: table ied_inbound_email_domains does not exist in database '${DBNAME}'." >&2
+    echo "       Activate the Inbound Email plugin and run update_database, then re-run this script." >&2
     exit 1
 fi
 
 # Role name carries the database name so multiple sites on one PostgreSQL
 # cluster never collide on a shared role.
-DB_ROLE="efwd_map_$(printf '%s' "${DBNAME}" | tr -cd 'a-z0-9_')"
+DB_ROLE="iemap_$(printf '%s' "${DBNAME}" | tr -cd 'a-z0-9_')"
 
 # 48 hex chars of randomness. od reads a fixed count and exits cleanly, so the
 # pipe raises no SIGPIPE under `set -o pipefail`.
@@ -220,15 +223,15 @@ fi
 ALTER ROLE "${DB_ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD '${ROLE_PW}';
 GRANT CONNECT ON DATABASE "${DBNAME}" TO "${DB_ROLE}";
 GRANT USAGE ON SCHEMA public TO "${DB_ROLE}";
-GRANT SELECT ON efd_email_forwarding_domains TO "${DB_ROLE}";
+GRANT SELECT ON ied_inbound_email_domains TO "${DB_ROLE}";
 SQL
-echo "postgres: role ${DB_ROLE} configured (SELECT on efd_email_forwarding_domains only)"
+echo "postgres: role ${DB_ROLE} configured (SELECT on ied_inbound_email_domains only)"
 
 # Render the map and install it locked down. The password reaches the renderer
 # through the environment, never argv or the terminal.
 MAP_TMP="$(mktemp)"
 trap 'rm -f "${MAP_TMP}"' EXIT
-if EFWD_MAP_PASSWORD="${ROLE_PW}" "${PHP_BIN}" "${RENDER_SCRIPT}" "${DB_ROLE}" "${CONFIG_FILE}" > "${MAP_TMP}"; then
+if IEMAP_PASSWORD="${ROLE_PW}" "${PHP_BIN}" "${RENDER_SCRIPT}" "${DB_ROLE}" "${CONFIG_FILE}" > "${MAP_TMP}"; then
     install -m 640 -o root -g postfix "${MAP_TMP}" "${MAP_FILE}"
     echo "postfix: wrote pgsql domain map ${MAP_FILE} (640 root:postfix)"
 else
@@ -286,7 +289,7 @@ if ! grep -q 'inet:8891@localhost' /etc/opendkim.conf 2>/dev/null; then
     [[ -f /etc/opendkim.conf && ! -f /etc/opendkim.conf.pre-joinery ]] && \
         cp /etc/opendkim.conf /etc/opendkim.conf.pre-joinery
     cat > /etc/opendkim.conf <<'OPENDKIMCONF'
-# Managed by email_forwarding/provisioning/install_email.sh — DKIM for
+# Managed by inbound_email/provisioning/install_email.sh — DKIM for
 # outbound forwarding. Per-domain keys are added to the tables below by hand.
 Syslog                  yes
 SyslogSuccess           yes
@@ -367,9 +370,9 @@ fi
 # --- summary -----------------------------------------------------------------
 echo
 echo "Base mail setup complete."
-echo "  - Forwarding domains are read live from the database; add them under"
+echo "  - Inbound domains are read live from the database; add them under"
 echo "    Admin > Emails > Incoming > Domains. No host action is needed per domain."
 echo "  - Publish DNS per domain: MX -> this server, plus SPF and DKIM TXT records."
 echo "  - For outbound DKIM signing, generate a per-domain key:"
 echo "    opendkim-genkey, add two lines to /etc/opendkim/{key,signing}.table,"
-echo "    and publish the DKIM TXT record. See plugins/email_forwarding/docs/overview.md"
+echo "    and publish the DKIM TXT record. See plugins/inbound_email/docs/overview.md"

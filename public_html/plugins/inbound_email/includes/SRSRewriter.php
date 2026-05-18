@@ -18,7 +18,7 @@ class SRSRewriter {
 	function __construct($secret = null) {
 		if ($secret === null) {
 			$settings = Globalvars::get_instance();
-			$this->secret = $settings->get_setting('email_forwarding_srs_secret');
+			$this->secret = $settings->get_setting('inbound_email_srs_secret');
 		} else {
 			$this->secret = $secret;
 		}

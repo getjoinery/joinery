@@ -1,6 +1,6 @@
 <?php
 /**
- * Email Forwarding Plugin Migrations
+ * Inbound Email Plugin Migrations
  *
  * Tables are created automatically from data class field specifications.
  * Admin menus are managed declaratively via plugin.json adminMenu.

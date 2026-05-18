@@ -1,12 +1,16 @@
-# Email Forwarding
+# Inbound Email
 
 ## Overview
 
-The Email Forwarding plugin (`/plugins/email_forwarding/`) provides self-hosted email forwarding. Admins create aliases (e.g., `info@example.com`) that forward incoming email to real addresses.
+The Inbound Email plugin (`/plugins/inbound_email/`) is the platform's
+inbound email subsystem — the receiving counterpart to outbound sending
+(`SystemMailer`). Its first feature is **forwarding**: admins create aliases
+(e.g., `info@example.com`) that forward incoming email to real addresses.
 
-Postfix receives inbound mail, pipes it to a PHP script, which looks up the alias and forwards via SMTP.
+Postfix receives inbound mail, pipes it to a PHP handler, which looks up the
+alias and forwards via SMTP.
 
-**Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound DKIM verification, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, forwarding logs with admin viewer, live DNS validation.
+**Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound DKIM verification, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
 
 ## Installation
 
@@ -17,20 +21,20 @@ configured by `provisioning/install_email.sh` — run it once per deployment
 (see Server Setup below). It assumes one Joinery site per host; that host may
 be a Docker container or bare metal.
 
-> **Setup status on the Plugins page.** Once activated, this plugin declares three provisioners, so the admin Plugins page (`/admin/admin_plugins`) reports whether its runtime dependencies are working: a missing inbound mail server shows **Needs setup** with the `provisioning/install_email.sh` fix command; a down or misconfigured outbound relay shows **Needs setup** with the reason; and missing MX/SPF DNS records on any enabled forwarding domain show **Needs setup** listing the affected domains. See the "Declaring Host Provisioners" section of `docs/plugin_developer_guide.md`.
+> **Setup status on the Plugins page.** Once activated, this plugin declares three provisioners, so the admin Plugins page (`/admin/admin_plugins`) reports whether its runtime dependencies are working: a missing inbound mail server shows **Needs setup** with the `provisioning/install_email.sh` fix command; a down or misconfigured outbound relay shows **Needs setup** with the reason; and missing MX/SPF DNS records on any enabled inbound domain show **Needs setup** listing the affected domains. See the "Declaring Host Provisioners" section of `docs/plugin_developer_guide.md`.
 
 ### Enabling
 
 1. Activate the plugin in **Admin > System > Plugins**
 2. Run **update_database** from admin utilities to create tables and run migrations
-3. Set `email_forwarding_enabled` to `1` in **Admin > Settings > Email**
-4. Set `email_forwarding_srs_secret` to a random string, then enable SRS
+3. Set `inbound_email_enabled` to `1` in **Admin > Settings > Email**
+4. Set `inbound_email_srs_secret` to a random string, then enable SRS
 5. **Incoming** appears under **Emails** in the admin sidebar
 
 ### Adding a Domain
 
 1. Go to **Emails > Incoming > Domains** tab
-2. Add the domain and save — Postfix picks it up immediately. The forwarding
+2. Add the domain and save — Postfix picks it up immediately. The inbound
    domain list is read live from the database, so there is no host command to
    run and no Postfix config to edit per domain.
 3. Publish the DNS records shown on the domain edit page (MX, SPF, and — once a
@@ -53,15 +57,15 @@ deployment. It installs Postfix, `postfix-pgsql`, and opendkim and applies the
 - `virtual_transport = joinery`, `inet_interfaces = all`, a safe
   `mydestination`, and RBL `smtpd_recipient_restrictions`;
 - `virtual_mailbox_domains` wired to a PostgreSQL map (see below) so Postfix
-  reads the live forwarding-domain list straight from the database;
+  reads the live inbound-domain list straight from the database;
 - opendkim static config — inet socket on `localhost:8891`, empty key/signing
   tables — and the Postfix milter (`milter_default_action = accept`, so a
   keyless or down opendkim never blocks mail).
 
 The only genuinely per-deployment work left is DNS, and per-domain DKIM keys.
-Adding or removing a forwarding domain needs **no host action** — see below.
+Adding or removing an inbound domain needs **no host action** — see below.
 
-### The forwarding-domain list is live, never "installed"
+### The inbound-domain list is live, never "installed"
 
 `install_email.sh` writes `/etc/postfix/joinery-domains.cf`, a `postfix-pgsql`
 map (`640 root:postfix`), and sets:
@@ -71,10 +75,10 @@ virtual_mailbox_domains = pgsql:/etc/postfix/joinery-domains.cf
 ```
 
 For every inbound recipient, Postfix asks the database whether that domain is
-an active forwarding domain. Adding, removing, enabling, or disabling a domain
+an active inbound domain. Adding, removing, enabling, or disabling a domain
 in the admin UI is therefore effective immediately — no SSH, no root, no
 re-run, and no drift. `install_email.sh` creates a dedicated least-privilege
-PostgreSQL role for the map — it can `SELECT` the forwarding-domain list and
+PostgreSQL role for the map — it can `SELECT` the inbound-domain list and
 nothing else, never the application's superuser — and writes the map. The
 role's password lives only in the map file; re-running `install_email.sh`
 rotates it.
@@ -113,19 +117,19 @@ smtpd_recipient_restrictions =
 
 `/etc/postfix/joinery-domains.cf` (the pgsql map). `install_email.sh` creates
 the dedicated role and writes this file automatically; on a non-apt system,
-create the role by hand — `CREATE ROLE "efwd_map_<dbname>" LOGIN PASSWORD '...';`
-then `GRANT SELECT ON efd_email_forwarding_domains` to it — and write the map as
+create the role by hand — `CREATE ROLE "iemap_<dbname>" LOGIN PASSWORD '...';`
+then `GRANT SELECT ON ied_inbound_email_domains` to it — and write the map as
 that role:
 
 ```
 hosts    = localhost
-user     = efwd_map_<dbname>
+user     = iemap_<dbname>
 password = <the role's password — lives only in this file>
 dbname   = <db name>
-query    = SELECT efd_domain FROM efd_email_forwarding_domains
-           WHERE lower(efd_domain) = '%s'
-             AND efd_is_enabled = true
-             AND efd_delete_time IS NULL
+query    = SELECT ied_domain FROM ied_inbound_email_domains
+           WHERE lower(ied_domain) = '%s'
+             AND ied_is_enabled = true
+             AND ied_delete_time IS NULL
 ```
 
 Add to `/etc/postfix/master.cf`:
@@ -133,7 +137,7 @@ Add to `/etc/postfix/master.cf`:
 ```
 joinery   unix  -  n  n  -  5  pipe
   flags=DRhu user=www-data
-  argv=/usr/bin/php /var/www/html/SITENAME/public_html/plugins/email_forwarding/utils/email_forwarder.php ${recipient}
+  argv=/usr/bin/php /var/www/html/SITENAME/public_html/plugins/inbound_email/utils/inbound_email_handler.php ${recipient}
 ```
 
 (Use the PHP CLI path for your system — `install_email.sh` resolves it
@@ -179,35 +183,35 @@ yours to maintain; RBL checks would happen on the host relay only.
 
 | Setting | Default | Description |
 |---|---|---|
-| `email_forwarding_enabled` | `0` | Master switch |
-| `email_forwarding_srs_enabled` | `0` | SRS envelope rewriting (recommended) |
-| `email_forwarding_srs_secret` | (empty) | Required before SRS can be enabled |
-| `email_forwarding_max_destinations` | `10` | Max destinations per alias |
-| `email_forwarding_rate_limit_per_alias` | `50` | Per-alias limit per window |
-| `email_forwarding_rate_limit_per_domain` | `200` | Per-domain limit per window |
-| `email_forwarding_rate_limit_window` | `3600` | Rate limit window (seconds) |
-| `email_forwarding_log_retention_days` | `30` | Log cleanup threshold |
-| `email_forwarding_smtp_host` | (empty) | Optional dedicated SMTP for forwarding (falls back to main) |
-| `email_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
-| `email_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
-| `email_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
+| `inbound_email_enabled` | `0` | Master switch |
+| `inbound_email_srs_enabled` | `0` | SRS envelope rewriting (recommended) |
+| `inbound_email_srs_secret` | (empty) | Required before SRS can be enabled |
+| `inbound_email_forwarding_max_destinations` | `10` | Max destinations per alias |
+| `inbound_email_forwarding_rate_limit_per_alias` | `50` | Per-alias limit per window |
+| `inbound_email_forwarding_rate_limit_per_domain` | `200` | Per-domain limit per window |
+| `inbound_email_forwarding_rate_limit_window` | `3600` | Rate limit window (seconds) |
+| `inbound_email_log_retention_days` | `30` | Log cleanup threshold |
+| `inbound_email_forwarding_smtp_host` | (empty) | Optional dedicated SMTP for forwarding (falls back to main) |
+| `inbound_email_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
+| `inbound_email_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
+| `inbound_email_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
 
 ## Plugin Structure
 
 ```
-/plugins/email_forwarding/
-├── plugin.json, uninstall.php
+/plugins/inbound_email/
+├── plugin.json
 ├── data/          — Domain, Alias, Log models (auto-create tables)
-├── includes/      — EmailForwarder (processing), EmailForwardingHealth, SRSRewriter
-├── utils/         — Postfix pipe script (email_forwarder.php)
+├── includes/      — InboundEmailRouter (processing), InboundEmailHealth, SRSRewriter
+├── utils/         — Postfix pipe script (inbound_email_handler.php)
 ├── provisioning/  — Host setup: install_email.sh, render_pgsql_map.php
 ├── admin/         — Admin pages (aliases, alias edit, domains, logs)
 ├── logic/         — Logic files for admin pages
-├── tasks/         — PurgeOldForwardingLogs scheduled task
+├── tasks/         — PurgeOldInboundEmailLogs scheduled task
 └── migrations/    — Settings and menu entry
 ```
 
-**Tables:** `efd_email_forwarding_domains`, `efa_email_forwarding_aliases`, `efl_email_forwarding_logs`
+**Tables:** `ied_inbound_email_domains`, `iea_inbound_email_aliases`, `iel_inbound_email_logs`
 
 **How forwarded emails appear to recipients:**
 - **From:** `"Original Sender via Site Name" <info@your-verified-domain.com>` — uses the site's verified sending address for deliverability
@@ -218,20 +222,20 @@ This approach is required because SMTP services (Mailgun, SendGrid, etc.) requir
 
 ## Testing
 
-Test without Postfix by piping raw email to the script:
+Test without Postfix by piping raw email to the handler:
 
 ```bash
 echo "From: alice@gmail.com
 To: info@example.com
 Subject: Test
 
-Hello" | php plugins/email_forwarding/utils/email_forwarder.php info@example.com
+Hello" | php plugins/inbound_email/utils/inbound_email_handler.php info@example.com
 echo $?   # 0 = success, 67 = unknown alias, 75 = temp failure
 ```
 
 ## Troubleshooting
 
-**Email not arriving:** Check forwarding logs (Incoming > Logs tab), verify alias and domain are enabled, check SMTP settings, check `error.log`.
+**Email not arriving:** Check inbound email logs (Incoming > Logs tab), verify alias and domain are enabled, check SMTP settings, check `error.log`.
 
 **Email not reaching Postfix:** Verify MX records (`dig MX domain`), port 25 open, Postfix running. Confirm `virtual_mailbox_domains` is wired to the pgsql map (`postconf -h virtual_mailbox_domains` should show `pgsql:/etc/postfix/joinery-domains.cf`); the Domains page Server Status panel reports this. If a pgsql lookup fails because the database is down, Postfix returns a temporary error and the sender retries — mail is deferred, not lost.
 

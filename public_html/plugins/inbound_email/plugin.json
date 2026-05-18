@@ -1,30 +1,30 @@
 {
-    "name": "Email Forwarding",
-    "description": "Self-hosted email forwarding with virtual mailboxes, SRS, and DKIM verification",
-    "version": "1.4.1",
+    "name": "Inbound Email",
+    "description": "Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS",
+    "version": "1.5.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
     "requires": {
         "php": ">=8.0"
     },
-    "tags": ["email", "forwarding", "smtp"],
+    "tags": ["email", "inbound", "forwarding", "smtp"],
     "adminMenu": [
         {
             "slug": "incoming",
             "title": "Incoming",
-            "url": "/plugins/email_forwarding/admin/admin_email_forwarding",
+            "url": "/plugins/inbound_email/admin/admin_inbound_email",
             "parent": "emails",
             "permission": 5,
             "order": 10,
-            "settingActivate": "email_forwarding_enabled"
+            "settingActivate": "inbound_email_enabled"
         }
     ],
     "provisioners": [
         {
             "key": "inbound_mail_server",
             "label": "Inbound mail server (Postfix) running",
-            "details": "Postfix, co-located with the app, receives inbound mail and pipes it to the forwarder script.",
+            "details": "Postfix, co-located with the app, receives inbound mail and pipes it to the inbound email handler.",
             "check": { "type": "probe", "probe": "tcp", "host": "127.0.0.1", "port": 25 },
             "script": "provisioning/install_email.sh"
         },
@@ -32,27 +32,27 @@
             "key": "outbound_forwarding_relay",
             "label": "Outbound mail relay for forwarding",
             "details": "Forwarded messages are relayed out through this SMTP server.",
-            "check": { "type": "code", "call": "EmailForwardingHealth::checkForwardingRelay" }
+            "check": { "type": "code", "call": "InboundEmailHealth::checkForwardingRelay" }
         },
         {
             "key": "domain_dns_records",
-            "label": "DNS records for forwarding domains",
-            "details": "Each enabled forwarding domain needs an MX record pointing here and an SPF record.",
-            "check": { "type": "code", "call": "EmailForwardingHealth::checkDomainDns" }
+            "label": "DNS records for inbound domains",
+            "details": "Each enabled inbound domain needs an MX record pointing here and an SPF record.",
+            "check": { "type": "code", "call": "InboundEmailHealth::checkDomainDns" }
         }
     ],
     "settings": [
-        { "name": "email_forwarding_enabled", "default": "0" },
-        { "name": "email_forwarding_log_retention_days", "default": "30" },
-        { "name": "email_forwarding_max_destinations", "default": "10" },
-        { "name": "email_forwarding_rate_limit_per_alias", "default": "50" },
-        { "name": "email_forwarding_rate_limit_per_domain", "default": "200" },
-        { "name": "email_forwarding_rate_limit_window", "default": "3600" },
-        { "name": "email_forwarding_srs_enabled", "default": "0" },
-        { "name": "email_forwarding_srs_secret", "default": "" },
-        { "name": "email_forwarding_smtp_host", "default": "" },
-        { "name": "email_forwarding_smtp_port", "default": "" },
-        { "name": "email_forwarding_smtp_username", "default": "" },
-        { "name": "email_forwarding_smtp_password", "default": "" }
+        { "name": "inbound_email_enabled", "default": "0" },
+        { "name": "inbound_email_log_retention_days", "default": "30" },
+        { "name": "inbound_email_forwarding_max_destinations", "default": "10" },
+        { "name": "inbound_email_forwarding_rate_limit_per_alias", "default": "50" },
+        { "name": "inbound_email_forwarding_rate_limit_per_domain", "default": "200" },
+        { "name": "inbound_email_forwarding_rate_limit_window", "default": "3600" },
+        { "name": "inbound_email_srs_enabled", "default": "0" },
+        { "name": "inbound_email_srs_secret", "default": "" },
+        { "name": "inbound_email_forwarding_smtp_host", "default": "" },
+        { "name": "inbound_email_forwarding_smtp_port", "default": "" },
+        { "name": "inbound_email_forwarding_smtp_username", "default": "" },
+        { "name": "inbound_email_forwarding_smtp_password", "default": "" }
     ]
 }
