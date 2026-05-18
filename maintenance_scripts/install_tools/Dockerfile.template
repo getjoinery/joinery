@@ -1,4 +1,8 @@
 # Joinery Docker Template
+# VERSION 3.9 - Re-assert the Inbound Email mail stack on every container start
+#               via _mail_stack_start.sh - postfix/opendkim have no systemd here,
+#               so the CMD is what brings them back after a stop/start or rebuild.
+#               BASE_IMAGE_VERSION default bumped to 1.1. Spec mail_stack_container_persistence.
 # VERSION 3.8 - Extend chown to cover cache/ so static_pages subdirectory created by
 #               _site_init.sh is owned by www-data (was root, disabling static page cache).
 # VERSION 3.7 - Rename _reconcile_stock_assets.sh -> _reconcile_upgradable_assets.sh
@@ -20,7 +24,7 @@
 #
 # Usage:
 #   docker build \
-#     --build-arg BASE_IMAGE_VERSION=1.0 \
+#     --build-arg BASE_IMAGE_VERSION=1.1 \
 #     --build-arg SITENAME=clientsite \
 #     --build-arg POSTGRES_PASSWORD=secure_password \
 #     --build-arg DOMAIN_NAME=client.example.com \
@@ -39,7 +43,7 @@
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
 # Default matches the version install.sh always passes via --build-arg; the
 # default only exists to satisfy BuildKit's static-evaluation check.
-ARG BASE_IMAGE_VERSION=1.0
+ARG BASE_IMAGE_VERSION=1.1
 FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)
@@ -134,4 +138,5 @@ CMD set +H && \
     sed "s|{{SITE_ROOT}}|/var/www/html/${SITENAME}|g" "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/logrotate_joinery.conf" > "/etc/logrotate.d/joinery-${SITENAME}" && \
     chmod 644 "/etc/logrotate.d/joinery-${SITENAME}" && \
     service cron start && \
+    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_mail_stack_start.sh" "${SITENAME}" || true && \
     apache2ctl -D FOREGROUND

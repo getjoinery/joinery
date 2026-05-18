@@ -192,6 +192,25 @@ Forwarding works without a DKIM key; only outbound DKIM signing is affected.
 `install_email.sh` runs `ufw allow 25/tcp` when ufw is active. Bare metal or a
 container, the site's Postfix owns port 25 on its host.
 
+### Container persistence
+
+On a **systemd host**, `install_email.sh` runs `systemctl enable`, so Postfix
+and opendkim restart on boot automatically — nothing else is needed.
+
+A **Docker container** has no systemd; its `CMD` is the init. The Joinery site
+image handles the mail stack the same way it handles PostgreSQL and cron — by
+(re)starting it on every container start. When the Inbound Email plugin is
+active, the `CMD` runs `_mail_stack_start.sh`, which re-applies the Postfix /
+opendkim configuration and starts both daemons (via the idempotent
+`install_email.sh`). The mail packages themselves are baked into the base
+image. So in a container the mail stack survives a `docker stop`/`start` and
+an image rebuild with no manual step.
+
+This applies to images built from base image version 1.1 or later. An older
+container keeps relying on a manual `install_email.sh` run until it is rebuilt
+and redeployed — base-image changes do not travel through the code-upgrade
+pipeline. See the `mail_stack_container_persistence` spec.
+
 ### Advanced: multi-site host relay (manual, not installed)
 
 A more complex topology — several sites behind one IP, with a host front-relay

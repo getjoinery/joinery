@@ -2,7 +2,11 @@
 #
 # install_email.sh - host installer + base configurator for Inbound Email.
 #
-# Version: 2.3 - Sets a fallback Postfix myhostname (spec inbound_email_guided_setup)
+# Version: 2.4 - Reuse the existing pgsql-map role password when the map file is
+#                intact instead of rotating it every run (spec
+#                mail_stack_container_persistence) - the container CMD calls
+#                this script on every start.
+#                2.3 - Sets a fallback Postfix myhostname (spec inbound_email_guided_setup)
 #                when it is unset/localhost, so the mail server has a FQDN HELO
 #                name; the Setup tab verifies and refines it.
 #                2.2 - Renamed for the Inbound Email plugin (spec inbound_email_rename):
@@ -213,7 +217,8 @@ esac
 # Postfix authenticates to PostgreSQL as a dedicated least-privilege role, not
 # the application's superuser account. The role can do exactly one thing: read
 # the inbound-domain list. Its password lives only in the map file written
-# below; re-running this script rotates it.
+# below; re-running this script preserves it (a fresh one is generated only
+# when the map file is missing or unreadable).
 DB_PSQL=(psql -U postgres -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
 
 # The role's GRANT needs the domains table, which update_database creates after
@@ -232,12 +237,24 @@ fi
 # cluster never collide on a shared role.
 DB_ROLE="iemap_$(printf '%s' "${DBNAME}" | tr -cd 'a-z0-9_')"
 
-# 48 hex chars of randomness. od reads a fixed count and exits cleanly, so the
-# pipe raises no SIGPIPE under `set -o pipefail`.
-ROLE_PW="$(od -An -tx1 -N24 /dev/urandom | tr -dc 'a-f0-9')"
-if [[ ${#ROLE_PW} -ne 48 ]]; then
-    echo "ERROR: failed to generate a role password." >&2
-    exit 1
+# Reuse the existing map password when the map file is intact, so the
+# every-container-start re-assert (spec mail_stack_container_persistence) is
+# not a needless credential rotation. A fresh 48-hex-char password is generated
+# only when the map is missing or unreadable. od reads a fixed count and exits
+# cleanly, so the pipe raises no SIGPIPE under `set -o pipefail`.
+ROLE_PW=""
+if [[ -r "${MAP_FILE}" ]]; then
+    ROLE_PW="$(grep -oP '^password = \K.*' "${MAP_FILE}" 2>/dev/null | head -1 || true)"
+fi
+if [[ -z "${ROLE_PW}" ]]; then
+    ROLE_PW="$(od -An -tx1 -N24 /dev/urandom | tr -dc 'a-f0-9')"
+    if [[ ${#ROLE_PW} -ne 48 ]]; then
+        echo "ERROR: failed to generate a role password." >&2
+        exit 1
+    fi
+    echo "postfix: generated a new pgsql-map role password"
+else
+    echo "postfix: reusing the existing pgsql-map role password"
 fi
 
 # Create the role once; (re)assert its attributes, password and grants every

@@ -90,6 +90,9 @@ function admin_inbound_email_setup_logic(array $input): LogicResult {
 		'mail_hostname'     => $checker->getMailHostname(),
 		'public_ip'         => $checker->getPublicIp(),
 		'public_ip_private' => $checker->publicIpIsPrivate(),
+		// The raw setting (empty = autodetect) — distinct from the detected IP
+		// above, so the form field shows the override state, not the result.
+		'configured_public_ip' => trim((string)$settings->get_setting('inbound_email_public_ip')),
 	));
 }
 
