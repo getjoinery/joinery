@@ -2,7 +2,7 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
- * @version 1.1
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -45,8 +45,9 @@ $page->begin_box($pageoptions);
 $domain_options = array();
 $domains->load();
 foreach ($domains as $d) {
-	$domain_options[$d->get('ied_domain')] = $d->key;
+	$domain_options[$d->key] = $d->get('ied_domain');
 }
+$example_domain = !empty($domain_options) ? reset($domain_options) : 'example.com';
 
 $formwriter = $page->getFormWriter('form1', [
 	'model' => $alias,
@@ -60,20 +61,23 @@ $formwriter->dropinput('iea_ied_inbound_email_domain_id', 'Domain', [
 	'validation' => ['required' => true],
 ]);
 
-$formwriter->textinput('iea_alias', 'Alias (local part)', [
+$formwriter->textinput('iea_alias', 'Mailbox', [
 	'validation' => ['required' => true],
-	'help_text' => 'The part before the @ sign (e.g., "info" for info@example.com)',
+	'placeholder' => 'info',
+	'helptext' => 'The name before the @ — for example, "info" creates the mailbox info@' . $example_domain . '.',
 ]);
 
 $formwriter->textbox('iea_destinations', 'Destination Addresses', [
 	'rows' => 4,
 	'htmlmode' => 'no',
 	'validation' => ['required' => true],
-	'help_text' => 'One email address per line, or comma-separated',
+	'helptext' => 'Where mail to this mailbox is forwarded. Enter one full email address per line, '
+		. 'or separate them with commas — for example, you@gmail.com. Every address is validated when you save.',
 ]);
 
-$formwriter->textinput('iea_description', 'Description', [
-	'help_text' => 'Optional note (e.g., "Main contact form inbox")',
+$formwriter->textinput('iea_description', 'Notes', [
+	'helptext' => 'Optional. A private label so you remember what this mailbox is for '
+		. '(e.g. "Main contact form inbox"). Never shown to anyone sending mail.',
 ]);
 
 $formwriter->checkboxinput('iea_is_enabled', 'Enabled', []);

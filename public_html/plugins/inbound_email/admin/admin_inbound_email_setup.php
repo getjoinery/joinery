@@ -7,7 +7,7 @@
  * first unfinished step is expanded ("Do this next"), and the rest collapse to
  * a one-line summary.
  *
- * @version 1.1
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -38,6 +38,12 @@ echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admi
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
 echo '</ul>';
 
+// The per-check "Details & how to fix" disclosure reads as a link, not a field.
+echo '<style>'
+	. 'summary.fix-toggle{cursor:pointer;color:#6c757d}'
+	. 'summary.fix-toggle:hover{color:#0d6efd;text-decoration:underline}'
+	. '</style>';
+
 // Session messages
 $display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
 if (!empty($display_messages)) {
@@ -65,7 +71,11 @@ $formwriter->textinput('mail_hostname', 'Mail server hostname', [
 	'help_text'   => 'The fully-qualified name of THIS mail server — the target of your MX records, its HELO name, and its reverse-DNS name. One per server, separate from the mail domains it serves.',
 ]);
 
-$formwriter->textinput('public_ip', 'Public IP override', [
+if ($public_ip_private) {
+	$formwriter->addError('public_ip',
+		'Auto-detection found ' . $public_ip . ', a private address. Enter this server\'s public IP here.');
+}
+$formwriter->textinput('public_ip', 'Mail server public IP', [
 	'value'       => $configured_public_ip,
 	'placeholder' => $public_ip !== '' ? 'auto-detected: ' . $public_ip : 'auto-detected',
 	'help_text'   => 'Leave blank to auto-detect. Set this only if the server is behind NAT and auto-detection finds a private address.',
@@ -74,16 +84,6 @@ $formwriter->textinput('public_ip', 'Public IP override', [
 $formwriter->submitbutton('btn_save', 'Save & Run Checks');
 echo $formwriter->end_form();
 
-if ($public_ip !== '') {
-	echo '<p class="text-muted mb-0"><small>Server IP ('
-		. ($configured_public_ip !== '' ? 'configured override' : 'auto-detected')
-		. '): <code>' . htmlspecialchars($public_ip) . '</code>';
-	if ($public_ip_private) {
-		echo ' &mdash; <span class="text-warning">this is a private address; set a public IP override above.</span>';
-	}
-	echo '</small></p>';
-}
-
 $page->end_box();
 
 // --- Shared check-row renderers ---
@@ -91,7 +91,7 @@ $status_badge = function ($status) {
 	switch ($status) {
 		case InboundEmailSetupCheck::PASS:    return '<span class="badge bg-success">PASS</span>';
 		case InboundEmailSetupCheck::FAIL:    return '<span class="badge bg-danger">FAIL</span>';
-		case InboundEmailSetupCheck::WARN:    return '<span class="badge bg-warning text-dark">CHECK</span>';
+		case InboundEmailSetupCheck::WARN:    return '<span class="badge bg-warning text-dark">WARN</span>';
 		default:                              return '<span class="badge bg-secondary">UNKNOWN</span>';
 	}
 };
@@ -142,7 +142,7 @@ $render_check = function ($c) use ($status_badge, $render_fix) {
 	echo '</div>';
 	echo '<div class="mt-1">' . htmlspecialchars($c['summary']) . '</div>';
 	if (!empty($c['detail']) || !empty($c['fix'])) {
-		echo '<details class="mt-1"><summary class="text-muted small">Details &amp; how to fix</summary>';
+		echo '<details class="mt-1"><summary class="fix-toggle small">Details &amp; how to fix</summary>';
 		echo '<div class="mt-2">';
 		if (!empty($c['detail'])) {
 			echo '<p class="text-muted small mb-2">' . htmlspecialchars($c['detail']) . '</p>';
