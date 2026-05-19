@@ -17,6 +17,15 @@ $formwriter->dropinput('inbound_email_enabled', 'Inbound email enabled', [
     'value'    => $settings->get_setting('inbound_email_enabled'),
     'helptext' => 'Master switch. Disabling this stops all inbound processing without removing mailbox configuration.',
 ]);
+
+$formwriter->dropinput('inbound_email_from_show_via', 'Add "via <site name>" to forwarded From line', [
+    'options'  => $yes_no,
+    'value'    => $settings->get_setting('inbound_email_from_show_via'),
+    'helptext' => 'When on, a forwarded message shows the sender as "Original Name via '
+        . htmlspecialchars($settings->get_setting('defaultemailname') ?: 'Inbound Email') . '". '
+        . 'Turn off to show just the original sender name. Either way the From address is the site '
+        . 'address — that part is required for deliverability.',
+]);
 ?>
 
 <h4>Outbound SMTP Relay</h4>

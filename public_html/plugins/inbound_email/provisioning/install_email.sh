@@ -2,7 +2,12 @@
 #
 # install_email.sh - host installer + base configurator for Inbound Email.
 #
-# Version: 2.5 - Per-domain DKIM keys now have a one-command helper
+# Version: 2.6 - The joinery pipe transport is now asserted with `postconf -Me`
+#                every run instead of an append-once guard. The old guard only
+#                checked the php binary, so a stale handler PATH (e.g. after a
+#                plugin rename) survived re-runs and bounced every inbound
+#                message; the assert is self-repairing.
+#                2.5 - Per-domain DKIM keys now have a one-command helper
 #                (provision_dkim.sh); the summary and notes below point at it
 #                instead of spelling out the manual opendkim-genkey steps.
 #                2.4 - Reuse the existing pgsql-map role password when the map file is
@@ -147,25 +152,25 @@ fi
 systemctl enable postfix >/dev/null 2>&1 || true
 systemctl start postfix  >/dev/null 2>&1 || true
 
-# --- 2. master.cf: joinery pipe transport (append once) ----------------------
-# Append-once guard: only add the service if no `joinery` service already
-# exists, so repeated runs never accumulate duplicate blocks.
-if postconf -M 2>/dev/null | grep -q '^joinery'; then
-    # An entry exists. Make sure it still points at a usable php binary — a
-    # transport baked with the wrong path (e.g. after moving between a bare-
-    # metal host and a container) fails silently for every inbound message.
-    existing_php="$(postconf -M 2>/dev/null | grep '^joinery' | grep -oE 'argv=[^ ]+' | head -1 | cut -d= -f2)"
-    if [[ -n "${existing_php}" && ! -x "${existing_php}" ]]; then
-        echo "WARNING: existing joinery transport runs '${existing_php}', not executable here." >&2
-        echo "         Edit the joinery service in /etc/postfix/master.cf to use '${PHP_BIN}'," >&2
-        echo "         then run 'postfix reload'." >&2
-    else
-        echo "master.cf: joinery transport already defined - leaving it."
-    fi
-else
-    printf '\njoinery   unix  -       n       n       -       5       pipe\n  flags=DRhu user=www-data\n  argv=%s %s ${recipient}\n' \
-        "${PHP_BIN}" "${PIPE_SCRIPT}" >> /etc/postfix/master.cf
+# --- 2. master.cf: joinery pipe transport (assert, self-repairing) -----------
+# The transport must run the CURRENT handler with a usable php binary. Asserting
+# the whole service definition with `postconf -Me` every run is idempotent (it
+# replaces the one service, never accumulates duplicates) AND self-repairing: a
+# stale entry — an old handler path left behind by a plugin rename, or a php
+# path baked on a different host — is corrected in place instead of silently
+# bouncing every inbound message. \${recipient} stays literal for Postfix to
+# expand at delivery time.
+JOINERY_ARGV="argv=${PHP_BIN} ${PIPE_SCRIPT} \${recipient}"
+JOINERY_DEF="joinery unix - n n - 5 pipe flags=DRhu user=www-data ${JOINERY_ARGV}"
+existing_joinery="$(postconf -M joinery/unix 2>/dev/null | tr -s ' \t' ' ' | tr -d '\n' || true)"
+if [[ -z "${existing_joinery}" ]]; then
+    postconf -Me "joinery/unix=${JOINERY_DEF}"
     echo "master.cf: added joinery pipe transport -> ${PHP_BIN} ${PIPE_SCRIPT}"
+elif [[ "${existing_joinery}" == *"${JOINERY_ARGV} "* || "${existing_joinery}" == *"${JOINERY_ARGV}" ]]; then
+    echo "master.cf: joinery transport already correct - leaving it."
+else
+    postconf -Me "joinery/unix=${JOINERY_DEF}"
+    echo "master.cf: repaired stale joinery pipe transport -> ${PHP_BIN} ${PIPE_SCRIPT}"
 fi
 
 # --- 3. main.cf: fixed settings (postconf -e is idempotent) ------------------

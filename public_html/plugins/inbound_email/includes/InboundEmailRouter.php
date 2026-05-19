@@ -5,7 +5,7 @@
  * Parses raw email, looks up alias, verifies DKIM, checks rate limits,
  * and forwards via SmtpMailer. Handles SRS bounce processing.
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -237,9 +237,8 @@ class InboundEmailRouter {
 		// - Add Reply-To with original sender
 		// - Add forwarding headers
 		$default_from = $this->settings->get_setting('defaultemail');
-		$default_from_name = $this->settings->get_setting('defaultemailname') ?: 'Inbound Email';
 		$original_sender_name = $this->extractName($parsed['from']);
-		$from_display = $original_sender_name ? ($original_sender_name . ' via ' . $default_from_name) : ('Forwarded via ' . $default_from_name);
+		$from_display = $this->forwardedFromDisplay($original_sender_name);
 
 		$normalized = str_replace("\r\n", "\n", $raw_email);
 
@@ -325,9 +324,8 @@ class InboundEmailRouter {
 
 		// Use site's verified from address; original sender in Reply-To
 		$default_from = $this->settings->get_setting('defaultemail');
-		$default_from_name = $this->settings->get_setting('defaultemailname') ?: 'Inbound Email';
 		$original_sender_name = $this->extractName($parsed['from']);
-		$from_display = $original_sender_name ? ($original_sender_name . ' via ' . $default_from_name) : ('Forwarded via ' . $default_from_name);
+		$from_display = $this->forwardedFromDisplay($original_sender_name);
 
 		try {
 			$mailer = $this->createMailer();
@@ -678,6 +676,23 @@ class InboundEmailRouter {
 			$alias ? $alias->key : null,
 			$error
 		);
+	}
+
+	/**
+	 * Build the From-header display name for a forwarded message. The original
+	 * sender's address is replaced with the site's verified address for
+	 * deliverability, so the display name is what carries who the mail is
+	 * really from. The mailing-list style "via <site>" suffix can be turned
+	 * off with the inbound_email_from_show_via setting.
+	 */
+	private function forwardedFromDisplay($original_sender_name) {
+		$site = $this->settings->get_setting('defaultemailname') ?: 'Inbound Email';
+		if ((string)$this->settings->get_setting('inbound_email_from_show_via') === '0') {
+			return $original_sender_name ? $original_sender_name : 'Forwarded';
+		}
+		return $original_sender_name
+			? $original_sender_name . ' via ' . $site
+			: 'Forwarded via ' . $site;
 	}
 
 	/**
