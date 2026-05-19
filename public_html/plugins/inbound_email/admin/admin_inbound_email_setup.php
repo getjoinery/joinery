@@ -7,7 +7,7 @@
  * first unfinished step is expanded ("Do this next"), and the rest collapse to
  * a one-line summary.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -123,8 +123,9 @@ $render_fix = function ($fix) use ($address) {
 			echo '<input type="hidden" name="domain" value="' . htmlspecialchars($act['domain']) . '">';
 		}
 		echo '<input type="hidden" name="address" value="' . htmlspecialchars($address) . '">';
-		$label = $act['action'] === 'enable_plugin' ? 'Enable inbound email'
-			: ($act['action'] === 'add_domain' ? 'Add this domain' : 'Apply fix');
+		$label = !empty($act['label']) ? $act['label']
+			: ($act['action'] === 'enable_plugin' ? 'Enable inbound email'
+			: ($act['action'] === 'add_domain' ? 'Add this domain' : 'Apply fix'));
 		echo '<button type="submit" class="btn btn-sm btn-primary">' . htmlspecialchars($label) . '</button>';
 		echo '</form>';
 	}

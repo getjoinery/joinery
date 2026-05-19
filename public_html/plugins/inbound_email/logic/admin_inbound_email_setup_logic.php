@@ -47,6 +47,17 @@ function admin_inbound_email_setup_logic(array $input): LogicResult {
 			return LogicResult::redirect($redirect_url);
 		}
 
+		if ($input['action'] === 'enable_srs') {
+			inbound_email_setup_write_setting('inbound_email_srs_enabled', '1');
+			// Generate a signing secret only if one is not already set, so
+			// re-running the fix never rotates a live secret.
+			if (trim((string)$settings->get_setting('inbound_email_srs_secret')) === '') {
+				inbound_email_setup_write_setting('inbound_email_srs_secret', bin2hex(random_bytes(24)));
+			}
+			$announce('SRS is now enabled with a signing secret.', 'Enabled');
+			return LogicResult::redirect($redirect_url);
+		}
+
 		if ($input['action'] === 'add_domain') {
 			$domain_name = strtolower(trim($input['domain'] ?? ''));
 			if ($domain_name !== '') {

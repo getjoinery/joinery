@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.2
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -338,81 +338,39 @@ class InboundEmailSetupCheck {
 			$out[] = $this->mxResult($domain, strtolower(rtrim($mx[0]['host'], '.')), $mx[0]['pri']);
 		}
 
-		// SPF
+		// SPF — one check covering both that a v=spf1 record exists and that it
+		// authorizes this server. The first unmet condition wins.
 		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
+		$spfValue = 'v=spf1 ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP') . ' -all';
 		if (!$txtOk) {
-			$out[] = $this->r('domain.spf_exists', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
+			$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
 				'DNS TXT lookup for ' . $domain . ' failed — try again.');
 		} else {
 			$spf = '';
 			foreach ($txt as $t) {
 				if (stripos($t, 'v=spf1') === 0) { $spf = $t; break; }
 			}
-			$spfValue = 'v=spf1 ip4:' . ($this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP') . ' -all';
 			if ($spf === '') {
-				$out[] = $this->r('domain.spf_exists', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
+				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
 					$domain . ' has no SPF (v=spf1) record.', '', $this->dnsFix('TXT', $domain, $spfValue));
 			} else {
-				$out[] = $this->r('domain.spf_exists', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
-					'SPF record present.');
-				$spfEval = $this->spfAuthorizes($spf, $domain);
-				if ($this->publicIp === '') {
-					$out[] = $this->r('domain.spf_authorizes', $domain, 'domain', 'SPF authorizes this server', self::REQUIRED, self::UNKNOWN,
-						'Cannot check — the server public IP could not be determined.');
-				} elseif ($spfEval === 'pass') {
-					$out[] = $this->r('domain.spf_authorizes', $domain, 'domain', 'SPF authorizes this server', self::REQUIRED, self::PASS,
-						'SPF authorizes ' . $this->publicIp . '.');
-				} elseif ($spfEval === 'include') {
-					$out[] = $this->r('domain.spf_authorizes', $domain, 'domain', 'SPF authorizes this server', self::REQUIRED, self::WARN,
-						'SPF uses include:/redirect mechanisms — could not fully verify ' . $this->publicIp . '.',
-						'Record: ' . $spf,
-						array('text' => 'Confirm the included policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
-				} else {
-					$out[] = $this->r('domain.spf_authorizes', $domain, 'domain', 'SPF authorizes this server', self::REQUIRED, self::FAIL,
-						'SPF does not authorize ' . $this->publicIp . '.',
-						'Record: ' . $spf,
-						$this->dnsFix('TXT', $domain, $spfValue));
-				}
+				$out[] = $this->spfResult($domain, $spf, $spfValue);
 			}
 		}
 
-		// DKIM
+		// DKIM — one check covering both that a signing key exists on this
+		// server and that the matching record is published in DNS. The first
+		// unmet condition wins.
 		$keyFile = '/etc/opendkim/keys/' . $domain . '/mail.txt';
 		$localKey = $this->readDkimKey($keyFile);
 		if ($localKey === '') {
-			$out[] = $this->r('domain.dkim_key', $domain, 'domain', 'DKIM signing key', self::RECOMMENDED, self::WARN,
+			$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
 				'No DKIM key has been generated for ' . $domain . ' on this server.',
-				'Forwarding works without DKIM; generating a key improves outbound deliverability.',
-				array('text' => 'On the server: opendkim-genkey -s mail -d ' . $domain
-					. ' — then add it to /etc/opendkim/{key,signing}.table and reload opendkim. See the plugin docs.'));
+				'Forwarding works without DKIM; generating a key improves outbound deliverability. '
+				. 'The command below generates the key, wires opendkim, and prints the DNS record to publish.',
+				$this->dkimFix($domain));
 		} else {
-			$out[] = $this->r('domain.dkim_key', $domain, 'domain', 'DKIM signing key', self::RECOMMENDED, self::PASS,
-				'A DKIM key exists for ' . $domain . ' on this server.');
-			list($dkimTxt, $dkimOk) = $this->dns(function () use ($domain) {
-				return DnsResolver::getTxt('mail._domainkey.' . $domain);
-			});
-			if (!$dkimOk) {
-				$out[] = $this->r('domain.dkim_published', $domain, 'domain', 'DKIM record published', self::RECOMMENDED, self::UNKNOWN,
-					'DNS lookup for mail._domainkey.' . $domain . ' failed — try again.');
-			} else {
-				$published = '';
-				foreach ($dkimTxt as $t) {
-					if (stripos($t, 'v=DKIM1') !== false || strpos($t, 'p=') !== false) { $published .= $t; }
-				}
-				$pubP = $this->extractDkimP($published);
-				if ($pubP === '') {
-					$out[] = $this->r('domain.dkim_published', $domain, 'domain', 'DKIM record published', self::RECOMMENDED, self::WARN,
-						'No DKIM record is published at mail._domainkey.' . $domain . '.', '',
-						$this->dnsFix('TXT', 'mail._domainkey.' . $domain, $localKey));
-				} elseif ($pubP === $this->extractDkimP($localKey)) {
-					$out[] = $this->r('domain.dkim_published', $domain, 'domain', 'DKIM record published', self::RECOMMENDED, self::PASS,
-						'The published DKIM record matches the local key.');
-				} else {
-					$out[] = $this->r('domain.dkim_published', $domain, 'domain', 'DKIM record published', self::RECOMMENDED, self::WARN,
-						'The published DKIM record does not match the local key.', '',
-						$this->dnsFix('TXT', 'mail._domainkey.' . $domain, $localKey));
-				}
-			}
+			$out[] = $this->dkimResult($domain, $localKey);
 		}
 
 		// DMARC
@@ -470,18 +428,24 @@ class InboundEmailSetupCheck {
 
 		$srsOn = ((string)$this->settings->get_setting('inbound_email_srs_enabled') === '1');
 		$srsSecret = trim((string)$this->settings->get_setting('inbound_email_srs_secret'));
+		$srsLabel = 'SRS (Sender Rewriting Scheme)';
+		$srsWhat = 'SRS rewrites the envelope sender of forwarded mail so it still passes SPF '
+			. 'at the final destination — without it, forwarded mail is often rejected or marked as spam.';
 		if (!$srsOn) {
-			$out[] = $this->r('plugin.srs_secret', '', 'plugin', 'SRS secret', self::RECOMMENDED, self::WARN,
-				'SRS is disabled — forwarded mail may fail SPF at the final destination.',
-				'Enabling SRS (with a secret) is recommended whenever the forwarding feature is used.',
-				array('text' => 'Set an SRS secret and enable SRS in Settings.'));
+			$out[] = $this->r('plugin.srs_secret', '', 'plugin', $srsLabel, self::RECOMMENDED, self::WARN,
+				'SRS is turned off.',
+				$srsWhat . ' Enabling it is recommended whenever the forwarding feature is used.',
+				array('text' => 'Press the button below — it turns SRS on and generates a signing secret in one step.',
+				      'action' => array('action' => 'enable_srs', 'label' => 'Enable SRS')));
 		} elseif ($srsSecret === '') {
-			$out[] = $this->r('plugin.srs_secret', '', 'plugin', 'SRS secret', self::REQUIRED, self::FAIL,
-				'SRS is enabled but no secret is set — SRS addresses cannot be signed.',
-				'', array('text' => 'Set inbound_email_srs_secret in Settings.'));
+			$out[] = $this->r('plugin.srs_secret', '', 'plugin', $srsLabel, self::REQUIRED, self::FAIL,
+				'SRS is on but no signing secret is set — SRS addresses cannot be signed.',
+				$srsWhat,
+				array('text' => 'Press the button below to generate the SRS signing secret.',
+				      'action' => array('action' => 'enable_srs', 'label' => 'Generate SRS secret')));
 		} else {
-			$out[] = $this->r('plugin.srs_secret', '', 'plugin', 'SRS secret', self::REQUIRED, self::PASS,
-				'SRS is enabled and a secret is set.');
+			$out[] = $this->r('plugin.srs_secret', '', 'plugin', $srsLabel, self::REQUIRED, self::PASS,
+				'SRS is on and a signing secret is set.');
 		}
 
 		// Outbound relay reachability.
@@ -642,6 +606,66 @@ class InboundEmailSetupCheck {
 			$lead . ' → ' . $this->publicIp . ' — a plain hostname resolving to this server.');
 	}
 
+	/**
+	 * Evaluate an existing SPF record and return a single 'domain.spf' result:
+	 * whether it authorizes this server's public IP. Called when the domain
+	 * already has a v=spf1 record.
+	 */
+	private function spfResult($domain, $spf, $spfValue) {
+		if ($this->publicIp === '') {
+			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
+				'SPF record present, but cannot confirm it authorizes this server — the public IP could not be determined.');
+		}
+		$spfEval = $this->spfAuthorizes($spf, $domain);
+		if ($spfEval === 'pass') {
+			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::PASS,
+				'SPF record present and authorizes ' . $this->publicIp . '.');
+		}
+		if ($spfEval === 'include') {
+			return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
+				'SPF record present, but it uses include:/redirect mechanisms — could not fully verify ' . $this->publicIp . '.',
+				'Record: ' . $spf,
+				array('text' => 'Confirm the included policy covers ' . $this->publicIp . ', or add ip4:' . $this->publicIp . ' directly.'));
+		}
+		return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::FAIL,
+			'SPF record present, but it does not authorize ' . $this->publicIp . '.',
+			'Record: ' . $spf,
+			$this->dnsFix('TXT', $domain, $spfValue));
+	}
+
+	/**
+	 * Evaluate DKIM for a domain that already has a local signing key: is the
+	 * matching record published in DNS and does it match. Returns a single
+	 * 'domain.dkim' result.
+	 */
+	private function dkimResult($domain, $localKey) {
+		$rrName = 'mail._domainkey.' . $domain;
+		list($dkimTxt, $dkimOk) = $this->dns(function () use ($rrName) {
+			return DnsResolver::getTxt($rrName);
+		});
+		if (!$dkimOk) {
+			return $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::UNKNOWN,
+				'A DKIM key exists on this server, but the DNS lookup for ' . $rrName . ' failed — try again.');
+		}
+		$published = '';
+		foreach ($dkimTxt as $t) {
+			if (stripos($t, 'v=DKIM1') !== false || strpos($t, 'p=') !== false) { $published .= $t; }
+		}
+		$pubP = $this->extractDkimP($published);
+		if ($pubP === '') {
+			return $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
+				'A DKIM key exists on this server, but no record is published at ' . $rrName . '.', '',
+				$this->dnsFix('TXT', $rrName, $localKey));
+		}
+		if ($pubP === $this->extractDkimP($localKey)) {
+			return $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::PASS,
+				'A DKIM key exists on this server and the published record matches it.');
+		}
+		return $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
+			'A DKIM key exists on this server, but the published record does not match the local key.', '',
+			$this->dnsFix('TXT', $rrName, $localKey));
+	}
+
 	private function installerFix() {
 		return array(
 			'text' => 'Run the base mail installer on the server as root.',
@@ -654,6 +678,15 @@ class InboundEmailSetupCheck {
 		return array(
 			'text' => 'Set the Postfix HELO hostname on the server as root.',
 			'command' => 'sudo postconf -e "myhostname=' . $target . '" && sudo postfix reload',
+		);
+	}
+
+	private function dkimFix($domain) {
+		return array(
+			'text' => 'Generate a DKIM signing key for ' . $domain . ' on the server as root.',
+			'command' => 'sudo bash '
+				. PathHelper::getIncludePath('plugins/inbound_email/provisioning/provision_dkim.sh')
+				. ' ' . $domain,
 		);
 	}
 

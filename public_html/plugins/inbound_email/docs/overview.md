@@ -173,18 +173,21 @@ opendkim then runs from first install — keyless, signing nothing — and
 `milter_default_action = accept` guarantees a keyless or down opendkim never
 blocks or defers mail.
 
-Generating a key is a genuinely **per-domain, manual** step (a key file on disk
-plus a DNS record cannot be a database lookup):
+Generating a key is a **per-domain** step (a key file on disk plus a DNS record
+cannot be a database lookup). `provisioning/provision_dkim.sh` does the whole
+host side in one idempotent command:
 
 ```bash
-mkdir -p /etc/opendkim/keys/example.com
-opendkim-genkey -s mail -d example.com -D /etc/opendkim/keys/example.com
-chown opendkim:opendkim /etc/opendkim/keys/example.com/mail.private
+sudo bash plugins/inbound_email/provisioning/provision_dkim.sh example.com
 ```
 
-Then add one line each to `/etc/opendkim/key.table` and
-`/etc/opendkim/signing.table` for the domain, reload opendkim, and publish the
-public key from `mail.txt` as a DNS TXT record at `mail._domainkey.example.com`.
+It runs `opendkim-genkey`, appends the `key.table` / `signing.table` lines
+(only if absent), restarts opendkim, and prints the DNS TXT record to publish
+at `mail._domainkey.example.com`. Re-running for a domain that already has a
+key is a no-op that just reprints the record. The Setup tab's "DKIM signing
+key" check offers this exact command as its fix, and the following "DKIM record
+published" check then hands you the TXT record as a copy-paste DNS fix.
+
 Forwarding works without a DKIM key; only outbound DKIM signing is affected.
 
 ### Firewall
