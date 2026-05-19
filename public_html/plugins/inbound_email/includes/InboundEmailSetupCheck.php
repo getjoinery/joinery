@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.6
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -135,13 +135,13 @@ class InboundEmailSetupCheck {
 				'', $this->installerFix());
 		}
 
+		// The transport must not only exist — its argv must run an existing
+		// inbound_email handler with a usable php binary. A stale path (e.g.
+		// left by a plugin rename) bounces every inbound message, so verify
+		// where it actually points, not just that the line is present.
 		$t = array();
 		exec('postconf -M joinery/unix 2>/dev/null', $t);
-		$out[] = !empty($t)
-			? $this->r('host.transport', '', 'host', 'Joinery pipe transport', self::REQUIRED, self::PASS,
-				'The joinery pipe transport is configured.')
-			: $this->r('host.transport', '', 'host', 'Joinery pipe transport', self::REQUIRED, self::FAIL,
-				'The joinery pipe transport is missing from master.cf.', '', $this->installerFix());
+		$out[] = $this->transportResult(trim(implode(' ', $t)));
 
 		$vmd = array();
 		exec('postconf -h virtual_mailbox_domains 2>/dev/null', $vmd);
@@ -664,6 +664,50 @@ class InboundEmailSetupCheck {
 		return $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
 			'A DKIM key exists on this server, but the published record does not match the local key.', '',
 			$this->dnsFix('TXT', $rrName, $localKey));
+	}
+
+	/**
+	 * Evaluate the joinery pipe transport: it must exist, run an existing
+	 * inbound_email handler script, and use an executable php binary. Returns
+	 * a single 'host.transport' result; the first unmet condition wins.
+	 */
+	private function transportResult($transportLine) {
+		$label = 'Joinery pipe transport';
+		if ($transportLine === '') {
+			return $this->r('host.transport', '', 'host', $label, self::REQUIRED, self::FAIL,
+				'The joinery pipe transport is missing from master.cf.', '', $this->installerFix());
+		}
+		$argvPhp = '';
+		$argvScript = '';
+		if (preg_match('/argv=(\S+)\s+(\S+)/', $transportLine, $m)) {
+			$argvPhp = $m[1];
+			$argvScript = $m[2];
+		}
+		$suffix = 'plugins/inbound_email/utils/inbound_email_handler.php';
+		if ($argvScript === '') {
+			return $this->r('host.transport', '', 'host', $label, self::REQUIRED, self::FAIL,
+				'The joinery pipe transport has no runnable command (argv) in master.cf.',
+				'Found: ' . $transportLine, $this->installerFix());
+		}
+		if (substr($argvScript, -strlen($suffix)) !== $suffix) {
+			return $this->r('host.transport', '', 'host', $label, self::REQUIRED, self::FAIL,
+				'The joinery pipe transport runs the wrong handler — inbound mail is piped to a path '
+				. 'that is not this plugin (often a stale path left by a plugin rename).',
+				'Runs: ' . $argvScript, $this->installerFix());
+		}
+		if (!is_file($argvScript)) {
+			return $this->r('host.transport', '', 'host', $label, self::REQUIRED, self::FAIL,
+				'The joinery pipe transport points at a handler script that does not exist — '
+				. 'every inbound message bounces.',
+				'Missing: ' . $argvScript, $this->installerFix());
+		}
+		if ($argvPhp !== '' && !is_executable($argvPhp)) {
+			return $this->r('host.transport', '', 'host', $label, self::REQUIRED, self::FAIL,
+				'The joinery pipe transport runs a php binary that is not executable here.',
+				'php: ' . $argvPhp, $this->installerFix());
+		}
+		return $this->r('host.transport', '', 'host', $label, self::REQUIRED, self::PASS,
+			'The joinery pipe transport runs the inbound email handler.');
 	}
 
 	private function installerFix() {
