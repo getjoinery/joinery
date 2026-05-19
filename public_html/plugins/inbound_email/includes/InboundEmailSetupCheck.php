@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.0
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -259,9 +259,11 @@ class InboundEmailSetupCheck {
 			} elseif (empty($ptr)) {
 				$out[] = $this->r('mailhost.ptr', '', 'mailhost', 'Reverse DNS (PTR)', self::REQUIRED, self::FAIL,
 					$this->publicIp . ' has no PTR record.',
-					'Set reverse DNS in your server/VPS provider control panel.',
-					array('text' => 'Set the PTR record for ' . $this->publicIp . ' to '
-						. ($canonical !== '' ? $canonical : 'your mail hostname') . '.'));
+					'Reverse DNS is set by whoever owns the IP — for Linode nodes, in the Cloud Manager, not your DNS provider.',
+					array('text' => 'In the Linode Cloud Manager, open the Linode for this server, go to the Network tab, '
+						. 'and set Reverse DNS (RDNS) for ' . $this->publicIp . ' to '
+						. ($canonical !== '' ? $canonical : 'your mail hostname') . '. '
+						. 'Linode only accepts a name that already has an A record pointing back to ' . $this->publicIp . '.'));
 			} else {
 				$ptrName = strtolower($ptr[0]);
 				// FCrDNS: the PTR name should forward-resolve back to the same IP.
@@ -286,7 +288,9 @@ class InboundEmailSetupCheck {
 						: $this->r('mailhost.ptr_matches', '', 'mailhost', 'PTR matches mail hostname', self::RECOMMENDED, self::WARN,
 							'PTR (' . $ptrName . ') differs from the mail hostname (' . $canonical . ').',
 							'Aligning HELO name and PTR improves deliverability of forwarded mail.',
-							array('text' => 'Set the PTR for ' . $this->publicIp . ' to ' . $canonical . '.'));
+							array('text' => 'In the Linode Cloud Manager, open the Linode for this server, go to the Network tab, '
+								. 'and set Reverse DNS (RDNS) for ' . $this->publicIp . ' to ' . $canonical . '. '
+								. 'Linode only accepts ' . $canonical . ' if it already has an A record pointing to ' . $this->publicIp . '.'));
 				}
 			}
 		}
@@ -319,57 +323,19 @@ class InboundEmailSetupCheck {
 				      'action' => array('action' => 'add_domain', 'domain' => $domain)));
 		}
 
-		// MX
+		// MX — one check covering all four conditions: an MX record exists,
+		// its target is not a CNAME, the target resolves, and the target's A
+		// record points to this server. The first unmet condition wins.
 		list($mx, $mxOk) = $this->dns(function () use ($domain) { return DnsResolver::getMx($domain); });
-		$mxTarget = '';
 		if (!$mxOk) {
-			$out[] = $this->r('domain.mx_exists', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
+			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
 				'DNS lookup for ' . $domain . ' MX failed — try again.');
 		} elseif (empty($mx)) {
-			$out[] = $this->r('domain.mx_exists', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
+			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
 				$domain . ' has no MX record.', '',
 				$this->dnsFix('MX', $domain, '10 ' . $canonical));
 		} else {
-			$mxTarget = strtolower(rtrim($mx[0]['host'], '.'));
-			$out[] = $this->r('domain.mx_exists', $domain, 'domain', 'MX record', self::REQUIRED, self::PASS,
-				$domain . ' MX → ' . $mxTarget . ' (priority ' . $mx[0]['pri'] . ').');
-		}
-
-		if ($mxTarget !== '') {
-			// MX target must not be a CNAME.
-			list($cname, $cnameOk) = $this->dns(function () use ($mxTarget) { return DnsResolver::getCname($mxTarget); });
-			if (!$cnameOk) {
-				$out[] = $this->r('domain.mx_not_cname', $domain, 'domain', 'MX target is not a CNAME', self::REQUIRED, self::UNKNOWN,
-					'DNS lookup for ' . $mxTarget . ' failed — try again.');
-			} elseif ($cname !== null) {
-				$out[] = $this->r('domain.mx_not_cname', $domain, 'domain', 'MX target is not a CNAME', self::REQUIRED, self::FAIL,
-					'The MX target ' . $mxTarget . ' is a CNAME (' . $cname . ') — RFC 2181 forbids this.', '',
-					array('text' => 'Point the MX at a hostname that has its own A record, not a CNAME.'));
-			} else {
-				$out[] = $this->r('domain.mx_not_cname', $domain, 'domain', 'MX target is not a CNAME', self::REQUIRED, self::PASS,
-					'The MX target is a plain hostname.');
-			}
-
-			// MX target must resolve, and resolve to this server.
-			list($mxA, $mxAOk) = $this->dns(function () use ($mxTarget) { return DnsResolver::getA($mxTarget); });
-			if (!$mxAOk) {
-				$out[] = $this->r('domain.mx_resolves', $domain, 'domain', 'MX target resolves', self::REQUIRED, self::UNKNOWN,
-					'DNS lookup for ' . $mxTarget . ' failed — try again.');
-				$out[] = $this->r('domain.mx_points_here', $domain, 'domain', 'MX target points to this server', self::REQUIRED, self::UNKNOWN,
-					'DNS lookup for ' . $mxTarget . ' failed — try again.');
-			} elseif (empty($mxA)) {
-				$out[] = $this->r('domain.mx_resolves', $domain, 'domain', 'MX target resolves', self::REQUIRED, self::FAIL,
-					'The MX target ' . $mxTarget . ' has no A record.', '',
-					$this->dnsFix('A', $mxTarget, $this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
-				$out[] = $this->r('domain.mx_points_here', $domain, 'domain', 'MX target points to this server', self::REQUIRED, self::FAIL,
-					'The MX target does not resolve, so it cannot point here.', '',
-					$this->dnsFix('A', $mxTarget, $this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
-			} else {
-				$out[] = $this->r('domain.mx_resolves', $domain, 'domain', 'MX target resolves', self::REQUIRED, self::PASS,
-					$mxTarget . ' → ' . implode(', ', $mxA) . '.');
-				$out[] = $this->ipMatchResult('domain.mx_points_here', $domain, 'domain', 'MX target points to this server',
-					$mxA, 'the MX target ' . $mxTarget);
-			}
+			$out[] = $this->mxResult($domain, strtolower(rtrim($mx[0]['host'], '.')), $mx[0]['pri']);
 		}
 
 		// SPF
@@ -625,6 +591,55 @@ class InboundEmailSetupCheck {
 		return $this->r($id, $scope, $layer, $label, self::REQUIRED, self::FAIL,
 			ucfirst($what) . ' resolves to ' . implode(', ', $ips) . ', not this server (' . $this->publicIp . ').',
 			'', array('text' => 'Point it at ' . $this->publicIp . '.'));
+	}
+
+	/**
+	 * Evaluate an MX target through the CNAME / resolves / points-here chain
+	 * and return a single 'domain.mx' result. Called when the domain has an MX;
+	 * the first unmet condition determines the status.
+	 */
+	private function mxResult($domain, $mxTarget, $mxPri) {
+		$lead = $domain . ' MX → ' . $mxTarget . ' (priority ' . $mxPri . ')';
+
+		// MX target must not be a CNAME (RFC 2181).
+		list($cname, $cnameOk) = $this->dns(function () use ($mxTarget) { return DnsResolver::getCname($mxTarget); });
+		if (!$cnameOk) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
+				$lead . '. DNS lookup for ' . $mxTarget . ' failed — try again.');
+		}
+		if ($cname !== null) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
+				$lead . ', but ' . $mxTarget . ' is a CNAME (' . $cname . ') — RFC 2181 forbids an MX target that is a CNAME.',
+				'', array('text' => 'Point the MX at a hostname that has its own A record, not a CNAME.'));
+		}
+
+		// MX target must resolve, and resolve to this server.
+		list($mxA, $mxAOk) = $this->dns(function () use ($mxTarget) { return DnsResolver::getA($mxTarget); });
+		if (!$mxAOk) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
+				$lead . '. DNS lookup for ' . $mxTarget . ' failed — try again.');
+		}
+		if (empty($mxA)) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
+				$lead . ', but ' . $mxTarget . ' has no A record.', '',
+				$this->dnsFix('A', $mxTarget, $this->publicIp !== '' ? $this->publicIp : 'YOUR_SERVER_IP'));
+		}
+		if ($this->publicIp === '') {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
+				$lead . ' → ' . implode(', ', $mxA) . '. Cannot confirm it points here — the server public IP could not be determined.');
+		}
+		if (!in_array($this->publicIp, $mxA, true)) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
+				$lead . ' → ' . implode(', ', $mxA) . ', not this server (' . $this->publicIp . ').', '',
+				$this->dnsFix('A', $mxTarget, $this->publicIp));
+		}
+		if ($this->publicIpIsPrivate) {
+			return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::WARN,
+				$lead . ' → ' . $this->publicIp . ', this server.',
+				'Note: ' . $this->publicIp . ' is a private address — set inbound_email_public_ip to the real public IP if this server is behind NAT.');
+		}
+		return $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::PASS,
+			$lead . ' → ' . $this->publicIp . ' — a plain hostname resolving to this server.');
 	}
 
 	private function installerFix() {

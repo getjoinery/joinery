@@ -25,7 +25,16 @@ function admin_inbound_email_alias_logic(array $input): LogicResult {
 		$editable_fields = array('iea_ied_inbound_email_domain_id', 'iea_alias', 'iea_destinations', 'iea_description');
 		foreach ($editable_fields as $field) {
 			if (isset($input[$field])) {
-				$alias->set($field, $input[$field]);
+				$value = $input[$field];
+				// People often paste the whole address into the mailbox field;
+				// keep only the local part before the @.
+				if ($field === 'iea_alias') {
+					$at = strpos($value, '@');
+					if ($at !== false) {
+						$value = substr($value, 0, $at);
+					}
+				}
+				$alias->set($field, $value);
 			}
 		}
 
@@ -58,6 +67,12 @@ function admin_inbound_email_alias_logic(array $input): LogicResult {
 	// Load domains for dropdown
 	$domains = new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC'));
 	$domains->load();
+
+	// A new alias defaults to enabled — the common case, so the operator does
+	// not have to remember to tick the box.
+	if (!$alias->key) {
+		$alias->set('iea_is_enabled', true);
+	}
 
 	return LogicResult::render(array(
 		'alias' => $alias,
