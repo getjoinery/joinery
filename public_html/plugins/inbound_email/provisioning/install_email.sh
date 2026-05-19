@@ -2,7 +2,10 @@
 #
 # install_email.sh - host installer + base configurator for Inbound Email.
 #
-# Version: 2.4 - Reuse the existing pgsql-map role password when the map file is
+# Version: 2.5 - Per-domain DKIM keys now have a one-command helper
+#                (provision_dkim.sh); the summary and notes below point at it
+#                instead of spelling out the manual opendkim-genkey steps.
+#                2.4 - Reuse the existing pgsql-map role password when the map file is
 #                intact instead of rotating it every run (spec
 #                mail_stack_container_persistence) - the container CMD calls
 #                this script on every start.
@@ -53,9 +56,9 @@
 #     from the database (see above). Manage domains under
 #     Admin > Emails > Incoming > Domains.
 #   - DNS records (MX, SPF, DKIM).
-#   - Per-domain opendkim DKIM keys: opendkim-genkey, two lines into
-#     key.table / signing.table, and a DNS TXT record. opendkim runs keyless
-#     (signing nothing) until then. See plugins/inbound_email/docs/overview.md.
+#   - Per-domain opendkim DKIM keys and their DNS TXT record. opendkim runs
+#     keyless (signing nothing) until a key is added; run provision_dkim.sh
+#     <domain> for each domain. See plugins/inbound_email/docs/overview.md.
 #
 # Docker: run this INSIDE the same container as the app - Postfix must be
 # co-located with the PHP handler it pipes to, and reads the app's own
@@ -418,6 +421,6 @@ echo "Base mail setup complete."
 echo "  - Inbound domains are read live from the database; add them under"
 echo "    Admin > Emails > Incoming > Domains. No host action is needed per domain."
 echo "  - Publish DNS per domain: MX -> this server, plus SPF and DKIM TXT records."
-echo "  - For outbound DKIM signing, generate a per-domain key:"
-echo "    opendkim-genkey, add two lines to /etc/opendkim/{key,signing}.table,"
-echo "    and publish the DKIM TXT record. See plugins/inbound_email/docs/overview.md"
+echo "  - For outbound DKIM signing, generate a per-domain key with:"
+echo "    sudo bash plugins/inbound_email/provisioning/provision_dkim.sh <domain>"
+echo "    then publish the DKIM TXT record it prints. See the Setup tab."
