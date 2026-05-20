@@ -576,9 +576,10 @@ The email system uses a provider abstraction so that new email services can be a
 
 ### Architecture
 
-- **`EmailServiceProvider`** — interface in `includes/EmailServiceProvider.php` that all providers implement
+- **`EmailServiceProvider`** — interface in `includes/EmailServiceProvider.php` that all outbound providers implement
+- **`InboundEmailProvider`** — sibling interface in `includes/InboundEmailProvider.php` for inbound transports (Postfix, Mailgun webhook, etc.). A single provider class may implement both interfaces; the Inbound Email plugin discovers inbound providers via `InboundProviderRegistry`. See [Inbound Email Plugin](../plugins/inbound_email/docs/overview.md#inbound-providers) for the inbound side.
 - **Provider classes** — live in `includes/email_providers/` (e.g., `MailgunProvider.php`, `SmtpProvider.php`, `SendGridProvider.php`)
-- **Auto-discovery** — `EmailSender` scans `includes/email_providers/` for classes implementing the interface; no manual registration needed
+- **Auto-discovery** — `EmailSender` scans `includes/email_providers/` for classes implementing `EmailServiceProvider`; `InboundProviderRegistry` walks the same directory for classes implementing `InboundEmailProvider`. No manual registration needed in either case.
 
 ### Built-in Providers
 

@@ -1,7 +1,7 @@
 {
     "name": "Inbound Email",
     "description": "Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -22,9 +22,9 @@
     "provisioners": [
         {
             "key": "inbound_mail_server",
-            "label": "Inbound mail server (Postfix) running",
-            "details": "Postfix, co-located with the app, receives inbound mail and pipes it to the inbound email handler.",
-            "check": { "type": "probe", "probe": "tcp", "host": "127.0.0.1", "port": 25 },
+            "label": "Inbound mail server",
+            "details": "Provider-specific. For Postfix, verifies port 25 is listening locally. For webhook providers (Mailgun, etc.) this is informational — the provider's own infrastructure handles MX.",
+            "check": { "type": "code", "call": "InboundEmailHealth::checkInboundMailServer" },
             "script": "provisioning/install_email.sh"
         },
         {
@@ -55,6 +55,9 @@
         { "name": "inbound_email_forwarding_smtp_host", "default": "" },
         { "name": "inbound_email_forwarding_smtp_port", "default": "" },
         { "name": "inbound_email_forwarding_smtp_username", "default": "" },
-        { "name": "inbound_email_forwarding_smtp_password", "default": "" }
+        { "name": "inbound_email_forwarding_smtp_password", "default": "" },
+        { "name": "inbound_email_mailbox_retention_days", "default": "14" },
+        { "name": "inbound_email_mailbox_max_per_window", "default": "500" },
+        { "name": "inbound_email_provider", "default": "postfix" }
     ]
 }

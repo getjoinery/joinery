@@ -289,3 +289,109 @@ echo $?   # 0 = success, 67 = unknown alias, 75 = temp failure
 **"User unknown in local recipient table":** The domain is in Postfix's `mydestination` setting, which takes priority over `virtual_mailbox_domains`. The admin domain edit page detects this conflict and shows a red "Conflict" badge. Run `install_email.sh` to fix — it sets `mydestination = localhost, localhost.localdomain`.
 
 **Landing in spam:** Enable SRS, verify opendkim running and a DKIM key generated and its DNS record published, check SPF includes server IP, verify rDNS/PTR record, check IP at mxtoolbox.com.
+
+## Delivery Modes
+
+Each alias has a **delivery mode** (`iea_delivery_mode`):
+
+- **`forward`** (default) — relay to one or more destination addresses; no copy is kept locally.
+- **`store`** — persist the message to `iem_inbound_email_messages` for inspection in the admin Mailbox tab. Nothing is relayed. Destinations are not required.
+- **`forward_and_store`** — relay AND keep a faithful copy of the original message.
+
+Each domain also has a **catch-all mode** (`ied_catch_all_mode`):
+
+- **`forward`** — send unmatched recipients to `ied_catch_all_address` (or reject/discard, per `ied_reject_unmatched`).
+- **`store`** — persist every unmatched recipient on the domain to the local mailbox. This is the equivalent of a Mailgun wildcard `forward()` route. `ied_reject_unmatched` is ignored when catch-all mode is `store`.
+
+## Local Mailbox
+
+The **Mailbox** tab (`Emails > Incoming > Mailbox`) lists locally-stored
+inbound messages with filters for recipient, sender, and domain. Each row
+links to a detail view that shows the parsed plain-text body, a sandboxed
+iframe rendering of the HTML body (no scripts, no top-nav), and the original
+raw MIME with a `.eml` download.
+
+Stored bodies are fully attacker-controlled — admins should never paste a
+captured token into a non-admin page or feed an untrusted body to an AI
+agent without the platform's untrusted-input markers (see
+`specs/implemented/joinery_ai_untrusted_input_markers.md`).
+
+**Settings:**
+- `inbound_email_mailbox_retention_days` (default `14`) — age after which the `PurgeOldMailboxMessages` scheduled task hard-deletes a stored message.
+- `inbound_email_mailbox_max_per_window` (default `500`, `0` disables) — max non-deleted stored messages per domain inside the forwarding rate-limit window. Stores above the cap are dropped with status `store_capped`.
+
+A `store`-only deployment does not need the outbound forwarding relay
+provisioner — the `outbound_forwarding_relay` check may legitimately
+report "Needs setup" without actually preventing inbound mail from being
+captured.
+
+**Test workflow:**
+
+1. Add an inbound domain (e.g. `inbox.dev.getjoinery.com`) with catch-all mode **store**.
+2. Publish its MX record pointing at this host and an SPF record; let the Setup tab confirm them green.
+3. The test sends application mail to `whoever@inbox.dev.getjoinery.com`.
+4. The test queries the store:
+   ```sql
+   SELECT * FROM iem_inbound_email_messages
+   WHERE iem_recipient LIKE '%whoever%'
+   ORDER BY iem_received_time DESC LIMIT 1;
+   ```
+5. Tests extract links / verify content from `iem_body_plain` / `iem_body_html`.
+6. The retention task handles cleanup — no manual DELETE needed.
+
+Dedup is enforced at the DB layer by a UNIQUE constraint on
+`(iem_message_id_header, iem_recipient)`. A retry with the same Message-ID
+header succeeds silently (no duplicate row). Messages with no Message-ID
+header are always inserted (NULLs are distinct in Postgres unique
+constraints).
+
+## Inbound Providers
+
+Inbound mail is **provider-based** and composes with the platform's
+outbound `EmailServiceProvider` model. A single provider class may
+implement both `EmailServiceProvider` and `InboundEmailProvider`
+interfaces — Mailgun is the canonical example.
+
+```
+includes/email_providers/MailgunProvider.php
+    implements EmailServiceProvider, InboundEmailProvider
+
+includes/email_providers/SmtpProvider.php
+    implements EmailServiceProvider       (outbound only)
+
+includes/email_providers/PostfixProvider.php
+    implements InboundEmailProvider       (inbound only)
+```
+
+One inbound provider is active at a time, selected by the
+`inbound_email_provider` setting. All providers feed the same
+`InboundEmailRouter::processEmail()`, so delivery modes, dedup, rate
+limits, and the Mailbox tab all work identically regardless of which
+front door let the message in.
+
+### Shipping providers
+
+- **PostfixProvider** (default, `postfix`) — local Postfix accepts mail
+  via MX and pipes it to `utils/inbound_email_handler.php`. The Setup
+  tab's Host / Mail-host / per-domain DNS checks come from this provider.
+- **MailgunProvider** (`mailgun`) — Mailgun accepts mail via MX and
+  POSTs to `ajax/inbound_email_webhook.php?provider=mailgun`. Reuses
+  the outbound Mailgun settings (`mailgun_api_key`, `mailgun_domain`,
+  `mailgun_eu_api_link`) and adds an inbound-only
+  `mailgun_webhook_signing_key`. Configure a Mailgun route with
+  `match_recipient(".*@your-domain")` → `forward("https://.../ajax/inbound_email_webhook?provider=mailgun")`,
+  set to deliver `body-mime` (raw MIME).
+
+### Adding a provider
+
+Adding inbound support to an existing outbound provider is one diff to
+one class — append `, InboundEmailProvider` to its `implements` clause
+and add the interface methods (`getInboundSettingsFields()`,
+`getSetupChecks()`, `getDnsRecords()`, `isWebhook()`, `handleInbound()`).
+
+Adding a new HTTP-based provider is one new file in
+`includes/email_providers/` implementing `InboundEmailProvider`.
+`isWebhook()` returns true; `handleInbound()` verifies the request and
+returns `['raw_mime' => ..., 'recipient' => ...]`. No router changes, no
+Setup-tab changes, no new endpoints — the generic dispatcher handles
+routing via `?provider=<key>`.

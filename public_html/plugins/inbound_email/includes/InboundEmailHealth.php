@@ -9,15 +9,44 @@
  * rethrows any failure as ProvisioningCheckFailed with a clean message. It
  * must be side-effect-free, time-bounded, and cheap to run.
  *
- * @version 1.3
+ * The inbound_mail_server and domain DNS checks are provider-aware:
+ * they consult InboundProviderRegistry::active() and dispatch accordingly.
+ *
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundProviderRegistry.php'));
 
 class InboundEmailHealth {
+
+    /**
+     * Verify the inbound mail server / receiving infrastructure.
+     *
+     * For Postfix: same as before — port 25 must be listening locally.
+     * For webhook providers (Mailgun): not applicable; passes silently
+     * because the provider's own infrastructure handles MX.
+     */
+    public static function checkInboundMailServer() {
+        $provider = InboundProviderRegistry::active();
+        if ($provider::isWebhook()) {
+            // Webhook-based providers don't run a local mail server. The provider's
+            // own DNS / signing key are checked by checkDomainDns + the Setup tab.
+            return;
+        }
+
+        // Postfix-style: local SMTP port 25 must be accepting connections.
+        $sock = @stream_socket_client('tcp://127.0.0.1:25', $errno, $errstr, 2);
+        if (!$sock) {
+            throw new ProvisioningCheckFailed(
+                'Local SMTP (port 25) is not accepting connections: ' . ($errstr ?: 'connection refused')
+            );
+        }
+        @fclose($sock);
+    }
 
     /** Connection timeout, in seconds, applied to the relay check. */
     const RELAY_TIMEOUT = 5;
@@ -73,14 +102,23 @@ class InboundEmailHealth {
     public static function checkDomainDns() {
         require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailSetupCheck.php'));
 
-        $checker = new InboundEmailSetupCheck();
-        $results = $checker->runDomainChecks();
+        $provider = InboundProviderRegistry::active();
+
+        $multi = new MultiInboundEmailDomain(array('deleted' => false, 'enabled' => true), array('ied_domain' => 'ASC'));
+        $multi->load();
 
         $problems = [];
-        foreach ($results as $r) {
-            if ($r['severity'] === InboundEmailSetupCheck::REQUIRED
-                && $r['status'] === InboundEmailSetupCheck::FAIL) {
-                $problems[] = $r['scope'] . ' — ' . $r['summary'];
+        foreach ($multi as $d) {
+            foreach ($provider::getSetupChecks($d->get('ied_domain')) as $r) {
+                // Only per-domain layers count toward this provisioner; the
+                // host / mailhost layers belong to checkInboundMailServer().
+                if ($r['layer'] !== 'domain') {
+                    continue;
+                }
+                if ($r['severity'] === InboundEmailSetupCheck::REQUIRED
+                    && $r['status'] === InboundEmailSetupCheck::FAIL) {
+                    $problems[] = $r['scope'] . ' — ' . $r['summary'];
+                }
             }
         }
 

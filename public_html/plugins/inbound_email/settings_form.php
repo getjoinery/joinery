@@ -87,6 +87,59 @@ $formwriter->textinput('inbound_email_forwarding_rate_limit_window', 'Rate limit
 ]);
 ?>
 
+<h4>Local Mailbox (stored messages)</h4>
+
+<?php
+$formwriter->textinput('inbound_email_mailbox_retention_days', 'Mailbox retention (days)', [
+    'value'   => $settings->get_setting('inbound_email_mailbox_retention_days'),
+    'helptext' => 'Stored inbound messages older than this are purged by the PurgeOldMailboxMessages scheduled task. Default 14.',
+]);
+
+$formwriter->textinput('inbound_email_mailbox_max_per_window', 'Mailbox store volume cap (per domain, per window)', [
+    'value'   => $settings->get_setting('inbound_email_mailbox_max_per_window'),
+    'helptext' => 'Max messages stored per domain inside the forwarding rate-limit window. Stores above this are dropped with status "store_capped". 0 disables the cap.',
+]);
+?>
+
+<h4>Inbound Provider</h4>
+
+<?php
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundProviderRegistry.php'));
+$provider_options = [];
+foreach (InboundProviderRegistry::all() as $key => $class) {
+    $provider_options[$key] = $class::getLabel();
+}
+$formwriter->dropinput('inbound_email_provider', 'Active inbound provider', [
+    'options'  => $provider_options,
+    'value'    => $settings->get_setting('inbound_email_provider'),
+    'helptext' => 'Selects how the platform receives inbound mail. Postfix (self-hosted) handles MX locally; webhook providers (Mailgun, etc.) deliver via HTTP POST.',
+]);
+
+// Render the active provider's inbound-only settings inline so the admin
+// configures them in context.
+$active_key = trim((string)$settings->get_setting('inbound_email_provider'));
+if ($active_key === '') { $active_key = 'postfix'; }
+$active_class = InboundProviderRegistry::get($active_key);
+if ($active_class !== null) {
+    $inbound_fields = $active_class::getInboundSettingsFields();
+    foreach ($inbound_fields as $field) {
+        $key = $field['key'] ?? '';
+        if ($key === '') continue;
+        $label = $field['label'] ?? $key;
+        $type = $field['type'] ?? 'text';
+        $opts = [
+            'value'    => $settings->get_setting($key),
+            'helptext' => $field['helptext'] ?? '',
+        ];
+        if ($type === 'password') {
+            $formwriter->passwordinput($key, $label, $opts);
+        } else {
+            $formwriter->textinput($key, $label, $opts);
+        }
+    }
+}
+?>
+
 <h4>Housekeeping</h4>
 
 <?php

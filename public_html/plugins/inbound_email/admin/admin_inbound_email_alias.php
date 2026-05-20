@@ -32,6 +32,7 @@ echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admi
 echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_mailbox">Mailbox</a></li>';
 echo '</ul>';
 
 if (isset($error)) {
@@ -67,12 +68,22 @@ $formwriter->textinput('iea_alias', 'Mailbox', [
 	'helptext' => 'The name before the @ — for example, "info" creates the mailbox info@' . $example_domain . '.',
 ]);
 
+$formwriter->dropinput('iea_delivery_mode', 'Delivery Mode', [
+	'options' => [
+		'forward'           => 'Forward to destination address(es)',
+		'store'             => 'Store locally (no forwarding)',
+		'forward_and_store' => 'Forward and store a copy',
+	],
+	'helptext' => 'Forward mode requires at least one destination. Store mode persists messages '
+		. 'to the local mailbox (visible on the Mailbox tab) and does not forward.',
+]);
+
 $formwriter->textbox('iea_destinations', 'Destination Addresses', [
 	'rows' => 4,
 	'htmlmode' => 'no',
-	'validation' => ['required' => true],
-	'helptext' => 'Where mail to this mailbox is forwarded. Enter one full email address per line, '
-		. 'or separate them with commas — for example, you@gmail.com. Every address is validated when you save.',
+	'helptext' => 'Required for Forward / Forward and store modes. Enter one full email address per line, '
+		. 'or separate them with commas — for example, you@gmail.com. Every address is validated when you save. '
+		. 'Leave empty for "Store locally" mode.',
 ]);
 
 $formwriter->textinput('iea_description', 'Notes', [
@@ -87,5 +98,36 @@ $formwriter->submitbutton('btn_submit', 'Save Alias');
 echo $formwriter->end_form();
 
 $page->end_box();
+
+// Lightweight toggle: hide the destinations row when "store" is selected.
+// Server-side validation in InboundEmailAlias::prepare() is the source of truth.
+?>
+<script>
+(function () {
+	var modeSel = document.querySelector('[name="iea_delivery_mode"]');
+	var destField = document.querySelector('[name="iea_destinations"]');
+	if (!modeSel || !destField) return;
+
+	function row(el) {
+		var r = el;
+		while (r && r !== document.body && !(r.classList && (r.classList.contains('mb-3') || r.classList.contains('form-group')))) {
+			r = r.parentElement;
+		}
+		return r || el.parentElement;
+	}
+	var destRow = row(destField);
+
+	function refresh() {
+		if (modeSel.value === 'store') {
+			if (destRow) destRow.style.display = 'none';
+		} else {
+			if (destRow) destRow.style.display = '';
+		}
+	}
+	modeSel.addEventListener('change', refresh);
+	refresh();
+})();
+</script>
+<?php
 $page->admin_footer();
 ?>

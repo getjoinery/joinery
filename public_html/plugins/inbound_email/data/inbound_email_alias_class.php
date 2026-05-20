@@ -1,8 +1,9 @@
 <?php
 /**
- * InboundEmailAlias - Virtual mailbox aliases that forward to real addresses.
+ * InboundEmailAlias - Virtual mailbox aliases that forward to real addresses
+ * or store the message locally.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -14,6 +15,11 @@ class InboundEmailAlias extends SystemBase {
 	public static $tablename = 'iea_inbound_email_aliases';
 	public static $pkey_column = 'iea_inbound_email_alias_id';
 
+	// Delivery mode values
+	const MODE_FORWARD = 'forward';
+	const MODE_STORE = 'store';
+	const MODE_FORWARD_AND_STORE = 'forward_and_store';
+
 	protected static $foreign_key_actions = [
 		'iea_ied_inbound_email_domain_id' => ['action' => 'cascade'],
 	];
@@ -22,7 +28,8 @@ class InboundEmailAlias extends SystemBase {
 		'iea_inbound_email_alias_id'      => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'iea_ied_inbound_email_domain_id' => array('type'=>'int4', 'is_nullable'=>false),
 		'iea_alias'              => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
-		'iea_destinations'       => array('type'=>'text', 'required'=>true, 'is_nullable'=>false),
+		'iea_destinations'       => array('type'=>'text'),
+		'iea_delivery_mode'      => array('type'=>'varchar(20)', 'default'=>'forward', 'is_nullable'=>false),
 		'iea_description'        => array('type'=>'varchar(500)'),
 		'iea_is_enabled'         => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
 		'iea_forward_count'      => array('type'=>'int4', 'default'=>'0'),
@@ -42,28 +49,44 @@ class InboundEmailAlias extends SystemBase {
 			throw new InboundEmailAliasException('Alias must be alphanumeric (dots, hyphens, underscores allowed).');
 		}
 
-		// Validate destinations
+		// Validate delivery mode
+		$mode = $this->get('iea_delivery_mode');
+		if (!$mode) {
+			$mode = self::MODE_FORWARD;
+			$this->set('iea_delivery_mode', $mode);
+		}
+		if (!in_array($mode, [self::MODE_FORWARD, self::MODE_STORE, self::MODE_FORWARD_AND_STORE], true)) {
+			throw new InboundEmailAliasException('Invalid delivery mode: ' . htmlspecialchars($mode));
+		}
+
+		$forwards = ($mode === self::MODE_FORWARD || $mode === self::MODE_FORWARD_AND_STORE);
+
+		// Destinations rules depend on delivery mode.
 		$destinations = $this->get('iea_destinations');
 		$dest_list = $this->parse_destinations($destinations);
 
-		if (empty($dest_list)) {
-			throw new InboundEmailAliasException('At least one destination email address is required.');
-		}
-
-		$settings = Globalvars::get_instance();
-		$max_destinations = intval($settings->get_setting('inbound_email_forwarding_max_destinations')) ?: 10;
-		if (count($dest_list) > $max_destinations) {
-			throw new InboundEmailAliasException('Maximum ' . $max_destinations . ' destinations allowed.');
-		}
-
-		foreach ($dest_list as $dest) {
-			if (!filter_var($dest, FILTER_VALIDATE_EMAIL)) {
-				throw new InboundEmailAliasException('Invalid destination email address: ' . htmlspecialchars($dest));
+		if ($forwards) {
+			if (empty($dest_list)) {
+				throw new InboundEmailAliasException('At least one destination email address is required when forwarding.');
 			}
-		}
 
-		// Store normalized comma-separated
-		$this->set('iea_destinations', implode(',', $dest_list));
+			$settings = Globalvars::get_instance();
+			$max_destinations = intval($settings->get_setting('inbound_email_forwarding_max_destinations')) ?: 10;
+			if (count($dest_list) > $max_destinations) {
+				throw new InboundEmailAliasException('Maximum ' . $max_destinations . ' destinations allowed.');
+			}
+
+			foreach ($dest_list as $dest) {
+				if (!filter_var($dest, FILTER_VALIDATE_EMAIL)) {
+					throw new InboundEmailAliasException('Invalid destination email address: ' . htmlspecialchars($dest));
+				}
+			}
+
+			$this->set('iea_destinations', implode(',', $dest_list));
+		} else {
+			// Pure store: destinations are ignored / cleared.
+			$this->set('iea_destinations', '');
+		}
 
 		// Check for duplicate alias within domain
 		$domain_id = $this->get('iea_ied_inbound_email_domain_id');
@@ -178,6 +201,10 @@ class MultiInboundEmailAlias extends SystemMultiBase {
 
 		if (isset($this->options['alias'])) {
 			$filters['iea_alias'] = [$this->options['alias'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['delivery_mode'])) {
+			$filters['iea_delivery_mode'] = [$this->options['delivery_mode'], PDO::PARAM_STR];
 		}
 
 		if (isset($this->options['enabled'])) {

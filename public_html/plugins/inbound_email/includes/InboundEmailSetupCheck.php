@@ -16,12 +16,13 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.7
+ * @version 1.8
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundProviderRegistry.php'));
 
 class InboundEmailSetupCheck {
 
@@ -65,17 +66,27 @@ class InboundEmailSetupCheck {
 	public function run($domain = null, $address = null) {
 		$results = array();
 
-		foreach ($this->checkHost() as $r)     { $results[] = $r; }
-		foreach ($this->checkMailHost() as $r) { $results[] = $r; }
+		// Provider-supplied checks: Host / Mail-host / per-domain DNS.
+		// PostfixProvider returns the same Host + Mail-host + per-domain layers
+		// that used to live here; MailgunProvider returns its own catalogue.
+		$provider = InboundProviderRegistry::active();
 
 		$domain = $domain ? strtolower(trim($domain)) : null;
 		if ($domain) {
-			foreach ($this->checkDomain($domain, true) as $r) { $results[] = $r; }
+			foreach ($provider::getSetupChecks($domain) as $r) { $results[] = $r; }
 		} else {
+			// Provider-wide checks (host/mailhost) — pass once with null domain.
+			foreach ($provider::getSetupChecks(null) as $r) { $results[] = $r; }
 			$multi = new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC'));
 			$multi->load();
 			foreach ($multi as $d) {
-				foreach ($this->checkDomain($d->get('ied_domain'), false) as $r) { $results[] = $r; }
+				foreach ($provider::getSetupChecks($d->get('ied_domain')) as $r) {
+					// Drop duplicate host/mailhost layers when iterating multiple domains.
+					if ($r['layer'] === 'host' || $r['layer'] === 'mailhost') {
+						continue;
+					}
+					$results[] = $r;
+				}
 			}
 		}
 
@@ -106,6 +117,17 @@ class InboundEmailSetupCheck {
 			foreach ($this->checkDomain($d->get('ied_domain'), false) as $r) { $results[] = $r; }
 		}
 		return $results;
+	}
+
+	// Public access to the legacy host/mailhost layers so the PostfixProvider's
+	// getSetupChecks() can delegate without resorting to reflection at runtime.
+	// These remain provider-specific implementations of the layer; the active
+	// provider chooses whether to expose them.
+	public function checkHostLayer() {
+		return $this->checkHost();
+	}
+	public function checkMailHostLayer() {
+		return $this->checkMailHost();
 	}
 
 	/** Roll a result list up into a one-line summary: counts per status (required only for fail). */
@@ -473,17 +495,30 @@ class InboundEmailSetupCheck {
 
 		$alias = InboundEmailAlias::GetByAddress($address);
 		$catchAll = false;
+		$catchAllMode = 'forward';
 		$parts = explode('@', $address, 2);
 		if (count($parts) === 2) {
 			$domain = InboundEmailDomain::GetByDomain($parts[1]);
-			if ($domain && $domain->get('ied_catch_all_address')) { $catchAll = true; }
+			if ($domain) {
+				$catchAllMode = $domain->get('ied_catch_all_mode') ?: 'forward';
+				if ($catchAllMode === 'store') {
+					// Store catch-all captures every recipient on the domain.
+					$catchAll = true;
+				} elseif ($domain->get('ied_catch_all_address')) {
+					$catchAll = true;
+				}
+			}
 		}
 		if ($alias) {
+			$mode = $alias->get('iea_delivery_mode') ?: 'forward';
+			$label = ($mode === 'store') ? ' (store-only)'
+				: (($mode === 'forward_and_store') ? ' (forward + store)' : '');
 			$out[] = $this->r('address.alias', $address, 'address', 'Delivery target exists', self::REQUIRED, self::PASS,
-				$address . ' resolves to an enabled alias.');
+				$address . ' resolves to an enabled alias' . $label . '.');
 		} elseif ($catchAll) {
+			$label = ($catchAllMode === 'store') ? ' (store catch-all)' : '';
 			$out[] = $this->r('address.alias', $address, 'address', 'Delivery target exists', self::REQUIRED, self::PASS,
-				$address . ' is covered by the domain catch-all.');
+				$address . ' is covered by the domain catch-all' . $label . '.');
 		} else {
 			$out[] = $this->r('address.alias', $address, 'address', 'Delivery target exists', self::REQUIRED, self::FAIL,
 				$address . ' has no alias and the domain has no catch-all — mail to it would be rejected.',
