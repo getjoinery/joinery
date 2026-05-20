@@ -1093,10 +1093,17 @@ class PluginManager extends AbstractExtensionManager {
     public function sync(array $options = array()) {
         $result = parent::sync($options);
 
-        // Update database tables and run migrations for all active plugins
+        // Update database tables and run migrations for all active plugins.
+        //
+        // DatabaseUpdater is instantiated with upgrade=true so unique
+        // constraints declared via `unique` / `unique_with` in plugin data
+        // classes are created automatically — the core update_database
+        // pipeline excludes plugin classes, so without this step a plugin
+        // table's unique constraints are never created. New plugin tables
+        // are empty so the upgrade gating is safe.
         require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
         require_once(PathHelper::getIncludePath('data/plugins_class.php'));
-        $database_updater = new DatabaseUpdater();
+        $database_updater = new DatabaseUpdater(false, true /* upgrade */, false);
         $active_plugins = new MultiPlugin(['plg_active' => 1]);
         $active_plugins->load();
         $table_messages = [];
@@ -1108,6 +1115,24 @@ class PluginManager extends AbstractExtensionManager {
             $table_result = $database_updater->runPluginTablesOnly($plugin_name);
             if (!empty($table_result['messages'])) {
                 $table_messages = array_merge($table_messages, $table_result['messages']);
+            }
+
+            // Add unique constraints declared via `unique` / `unique_with`
+            // on plugin classes. Discover classes the same way
+            // runPluginTablesOnly does and run constraint sync against them.
+            try {
+                $plugin_classes = LibraryFunctions::discover_model_classes([
+                    'require_tablename' => true,
+                    'require_field_specifications' => true,
+                    'include_plugins' => true,
+                    'plugin_filter' => $plugin_name,
+                ]);
+                $constraint_result = $database_updater->manageUniqueConstraints($plugin_classes);
+                if (!empty($constraint_result['messages'])) {
+                    $table_messages = array_merge($table_messages, $constraint_result['messages']);
+                }
+            } catch (Exception $e) {
+                $table_messages[] = "$plugin_name: unique-constraint sync error - " . $e->getMessage();
             }
 
             // Run pending migrations

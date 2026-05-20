@@ -37,6 +37,7 @@ echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admi
 echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_mailbox">Mailbox</a></li>';
 echo '</ul>';
 
 // Display session messages
@@ -69,7 +70,7 @@ foreach ($domains as $d) {
 	$domain_cache[$d->key] = $d->get('ied_domain');
 }
 
-$headers = array('Alias', 'Destinations', 'Description', 'Enabled', 'Forwards', 'Last Forward', 'Actions');
+$headers = array('Alias', 'Mode', 'Destinations', 'Description', 'Enabled', 'Forwards', 'Last Forward', 'Actions');
 $altlinks = array('New Alias' => '/plugins/inbound_email/admin/admin_inbound_email_alias');
 $pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage));
 $table_options = array(
@@ -82,9 +83,17 @@ foreach ($aliases as $alias) {
 	$domain_name = $domain_cache[$alias->get('iea_ied_inbound_email_domain_id')] ?? '?';
 	$full_address = $alias->get('iea_alias') . '@' . $domain_name;
 
+	$mode = $alias->get('iea_delivery_mode') ?: 'forward';
+	$mode_label = $mode;
+	$mode_class = 'bg-secondary';
+	if ($mode === 'forward') { $mode_label = 'Forward'; $mode_class = 'bg-primary'; }
+	elseif ($mode === 'store') { $mode_label = 'Store'; $mode_class = 'bg-info text-dark'; }
+	elseif ($mode === 'forward_and_store') { $mode_label = 'Forward + Store'; $mode_class = 'bg-success'; }
+
 	$rowvalues = array();
 	array_push($rowvalues, '<a href="/plugins/inbound_email/admin/admin_inbound_email_alias?iea_inbound_email_alias_id=' . $alias->key . '">' . htmlspecialchars($full_address) . '</a>');
-	array_push($rowvalues, htmlspecialchars($alias->get('iea_destinations')));
+	array_push($rowvalues, '<span class="badge ' . $mode_class . '">' . htmlspecialchars($mode_label) . '</span>');
+	array_push($rowvalues, htmlspecialchars($alias->get('iea_destinations') ?: '-'));
 	array_push($rowvalues, htmlspecialchars($alias->get('iea_description')));
 	array_push($rowvalues, $alias->get('iea_is_enabled') ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>');
 	array_push($rowvalues, intval($alias->get('iea_forward_count')));

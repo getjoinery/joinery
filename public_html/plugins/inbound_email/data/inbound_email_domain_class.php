@@ -2,7 +2,7 @@
 /**
  * InboundEmailDomain - Tracks domains that accept inbound mail.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -14,10 +14,15 @@ class InboundEmailDomain extends SystemBase {
 	public static $tablename = 'ied_inbound_email_domains';
 	public static $pkey_column = 'ied_inbound_email_domain_id';
 
+	// Catch-all mode values
+	const CATCHALL_FORWARD = 'forward';
+	const CATCHALL_STORE = 'store';
+
 	public static $field_specifications = array(
 		'ied_inbound_email_domain_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'ied_domain'            => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
 		'ied_is_enabled'        => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
+		'ied_catch_all_mode'    => array('type'=>'varchar(20)', 'default'=>'forward', 'is_nullable'=>false),
 		'ied_catch_all_address' => array('type'=>'varchar(500)'),
 		'ied_reject_unmatched'  => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
 		'ied_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -35,10 +40,25 @@ class InboundEmailDomain extends SystemBase {
 			throw new InboundEmailDomainException('Invalid domain format.');
 		}
 
-		// Validate catch-all address if provided
-		$catch_all = $this->get('ied_catch_all_address');
-		if ($catch_all && !filter_var($catch_all, FILTER_VALIDATE_EMAIL)) {
-			throw new InboundEmailDomainException('Invalid catch-all email address.');
+		// Validate catch-all mode
+		$mode = $this->get('ied_catch_all_mode');
+		if (!$mode) {
+			$mode = self::CATCHALL_FORWARD;
+			$this->set('ied_catch_all_mode', $mode);
+		}
+		if (!in_array($mode, [self::CATCHALL_FORWARD, self::CATCHALL_STORE], true)) {
+			throw new InboundEmailDomainException('Invalid catch-all mode: ' . htmlspecialchars($mode));
+		}
+
+		if ($mode === self::CATCHALL_STORE) {
+			// In store mode the address is ignored — clear it for consistency.
+			$this->set('ied_catch_all_address', '');
+		} else {
+			// Validate catch-all address if provided (forward mode)
+			$catch_all = $this->get('ied_catch_all_address');
+			if ($catch_all && !filter_var($catch_all, FILTER_VALIDATE_EMAIL)) {
+				throw new InboundEmailDomainException('Invalid catch-all email address.');
+			}
 		}
 
 		// Check for duplicate domain

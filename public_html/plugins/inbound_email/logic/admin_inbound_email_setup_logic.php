@@ -58,6 +58,18 @@ function admin_inbound_email_setup_logic(array $input): LogicResult {
 			return LogicResult::redirect($redirect_url);
 		}
 
+		if ($input['action'] === 'set_provider') {
+			$key = trim((string)($input['provider'] ?? ''));
+			if ($key !== '') {
+				require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundProviderRegistry.php'));
+				if (InboundProviderRegistry::get($key) !== null) {
+					inbound_email_setup_write_setting('inbound_email_provider', $key);
+					$announce('Inbound provider switched to ' . $key . '.', 'Provider');
+				}
+			}
+			return LogicResult::redirect($redirect_url);
+		}
+
 		if ($input['action'] === 'add_domain') {
 			$domain_name = strtolower(trim($input['domain'] ?? ''));
 			if ($domain_name !== '') {
@@ -91,6 +103,34 @@ function admin_inbound_email_setup_logic(array $input): LogicResult {
 		$address !== '' ? $address : null
 	);
 
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundProviderRegistry.php'));
+	$provider_classes = InboundProviderRegistry::all();
+	$provider_options = [];
+	foreach ($provider_classes as $key => $class) {
+		$provider_options[$key] = $class::getLabel();
+	}
+	$active_provider_key = trim((string)$settings->get_setting('inbound_email_provider'));
+	if ($active_provider_key === '') {
+		$active_provider_key = 'postfix';
+	}
+	$active_provider_class = $provider_classes[$active_provider_key] ?? null;
+	$active_provider_is_webhook = $active_provider_class ? $active_provider_class::isWebhook() : false;
+
+	$dns_records = [];
+	if ($active_provider_class && $focus_domain !== '') {
+		$dns_records = $active_provider_class::getDnsRecords($focus_domain);
+	}
+
+	// Webhook URL — used when isWebhook() is true.
+	$webhook_url = '';
+	if ($active_provider_is_webhook) {
+		$scheme = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+		$host = $_SERVER['HTTP_HOST'] ?? '';
+		if ($host !== '') {
+			$webhook_url = $scheme . '://' . $host . '/ajax/inbound_email_webhook?provider=' . rawurlencode($active_provider_key);
+		}
+	}
+
 	return LogicResult::render(array(
 		'session'           => $session,
 		'settings'          => $settings,
@@ -104,6 +144,11 @@ function admin_inbound_email_setup_logic(array $input): LogicResult {
 		// The raw setting (empty = autodetect) — distinct from the detected IP
 		// above, so the form field shows the override state, not the result.
 		'configured_public_ip' => trim((string)$settings->get_setting('inbound_email_public_ip')),
+		'provider_options'  => $provider_options,
+		'active_provider_key' => $active_provider_key,
+		'active_provider_is_webhook' => $active_provider_is_webhook,
+		'webhook_url'       => $webhook_url,
+		'dns_records'       => $dns_records,
 	));
 }
 

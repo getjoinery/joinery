@@ -22,7 +22,7 @@ function admin_inbound_email_alias_logic(array $input): LogicResult {
 
 	// Process form submission
 	if ($input && isset($input['iea_alias'])) {
-		$editable_fields = array('iea_ied_inbound_email_domain_id', 'iea_alias', 'iea_destinations', 'iea_description');
+		$editable_fields = array('iea_ied_inbound_email_domain_id', 'iea_alias', 'iea_destinations', 'iea_description', 'iea_delivery_mode');
 		foreach ($editable_fields as $field) {
 			if (isset($input[$field])) {
 				$value = $input[$field];

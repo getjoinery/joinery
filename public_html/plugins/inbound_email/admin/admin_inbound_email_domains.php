@@ -34,6 +34,7 @@ echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admi
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
 echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_mailbox">Mailbox</a></li>';
 echo '</ul>';
 
 // Display session messages
@@ -76,12 +77,20 @@ if ($show_form) {
 
 	$formwriter->checkboxinput('ied_is_enabled', 'Enabled', []);
 
+	$formwriter->dropinput('ied_catch_all_mode', 'Catch-All Mode', [
+		'options' => [
+			'forward' => 'Forward to an address',
+			'store'   => 'Store locally (every unmatched recipient)',
+		],
+		'helptext' => 'Store mode supersedes "reject unmatched" — every unmatched recipient is captured.',
+	]);
+
 	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', [
-		'help_text' => 'Optional: receive all unmatched mail for this domain at this address',
+		'help_text' => 'Used only in Forward mode: receive all unmatched mail for this domain at this address.',
 	]);
 
 	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', [
-		'help_text' => 'Reject mail to non-existent aliases (when no catch-all). If unchecked, unmatched mail is silently discarded.',
+		'help_text' => 'Reject mail to non-existent aliases (Forward mode only, when no catch-all address is set). If unchecked, unmatched mail is silently discarded.',
 	]);
 
 	$formwriter->submitbutton('btn_submit', $edit_domain ? 'Update Domain' : 'Add Domain');
@@ -129,7 +138,15 @@ foreach ($domains as $d) {
 	$rowvalues = [];
 	$rowvalues[] = htmlspecialchars($domain_name);
 	$rowvalues[] = $status_display;
-	$rowvalues[] = htmlspecialchars($d->get('ied_catch_all_address') ?: '-');
+	$catch_all_mode = $d->get('ied_catch_all_mode') ?: 'forward';
+	if ($catch_all_mode === 'store') {
+		$catch_all_display = '<span class="badge bg-info text-dark">Store locally</span>';
+	} elseif ($d->get('ied_catch_all_address')) {
+		$catch_all_display = htmlspecialchars($d->get('ied_catch_all_address'));
+	} else {
+		$catch_all_display = '-';
+	}
+	$rowvalues[] = $catch_all_display;
 	$rowvalues[] = $is_deleted ? '-' : $alias_count;
 
 	// Action buttons

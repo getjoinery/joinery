@@ -3,7 +3,7 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -22,14 +22,18 @@ class InboundEmailLog extends SystemBase {
 	const STATUS_RATE_LIMITED = 'rate_limited';
 	const STATUS_BOUNCE_FORWARDED = 'bounce_forwarded';
 	const STATUS_ERROR = 'error';
+	const STATUS_STORED = 'stored';
+	const STATUS_STORE_CAPPED = 'store_capped';
 
 	protected static $foreign_key_actions = [
-		'iel_iea_inbound_email_alias_id' => ['action' => 'null'],
+		'iel_iea_inbound_email_alias_id'  => ['action' => 'null'],
+		'iel_ied_inbound_email_domain_id' => ['action' => 'null'],
 	];
 
 	public static $field_specifications = array(
-		'iel_inbound_email_log_id'        => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'iel_iea_inbound_email_alias_id'  => array('type'=>'int4'),
+		'iel_inbound_email_log_id'         => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'iel_iea_inbound_email_alias_id'   => array('type'=>'int4'),
+		'iel_ied_inbound_email_domain_id'  => array('type'=>'int4'),
 		'iel_from_address'     => array('type'=>'varchar(500)'),
 		'iel_to_address'       => array('type'=>'varchar(500)'),
 		'iel_subject'          => array('type'=>'varchar(1000)'),
@@ -42,8 +46,13 @@ class InboundEmailLog extends SystemBase {
 
 	/**
 	 * Create a log entry from inbound email data.
+	 *
+	 * @param mixed $alias_id Alias id (int) or null. Catch-all stores have no alias.
+	 * @param mixed $domain_id Domain id (int) or null. Populated for every transaction
+	 *                         so the domain_id filter and per-domain rate limits work
+	 *                         without joining through the alias table.
 	 */
-	static function CreateEntry($from, $to, $subject, $destinations, $status, $alias_id = null, $error = null) {
+	static function CreateEntry($from, $to, $subject, $destinations, $status, $alias_id = null, $error = null, $domain_id = null) {
 		$log = new InboundEmailLog(NULL);
 		$log->set('iel_from_address', substr($from, 0, 500));
 		$log->set('iel_to_address', substr($to, 0, 500));
@@ -52,6 +61,9 @@ class InboundEmailLog extends SystemBase {
 		$log->set('iel_status', $status);
 		if ($alias_id) {
 			$log->set('iel_iea_inbound_email_alias_id', $alias_id);
+		}
+		if ($domain_id) {
+			$log->set('iel_ied_inbound_email_domain_id', $domain_id);
 		}
 		if ($error) {
 			$log->set('iel_error_message', $error);
@@ -76,8 +88,7 @@ class MultiInboundEmailLog extends SystemMultiBase {
 		}
 
 		if (isset($this->options['domain_id'])) {
-			// Join through alias table to filter by domain
-			$filters['iel_iea_inbound_email_alias_id'] = "IN (SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id = " . intval($this->options['domain_id']) . ")";
+			$filters['iel_ied_inbound_email_domain_id'] = [$this->options['domain_id'], PDO::PARAM_INT];
 		}
 
 		if (isset($this->options['deleted'])) {

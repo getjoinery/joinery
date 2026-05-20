@@ -3,15 +3,17 @@
  * InboundEmailRouter - Core inbound email routing logic.
  *
  * Parses raw email, looks up alias, verifies DKIM, checks rate limits,
- * and forwards via SmtpMailer. Handles SRS bounce processing.
+ * and either forwards via SmtpMailer or stores locally (or both, depending
+ * on the alias / catch-all delivery mode). Handles SRS bounce processing.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/SRSRewriter.php'));
 
 class InboundEmailRouter {
@@ -52,63 +54,79 @@ class InboundEmailRouter {
 			return 67;
 		}
 
+		// 3. Size cap applies to every path (forward, store, catch-all)
+		if (strlen($raw_email) > 25 * 1024 * 1024) {
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Message too large', $domain->key);
+			return 0;
+		}
+
 		// Look up alias
 		$alias = $this->lookupAlias($local_part, $domain);
 		if (!$alias) {
-			// Check catch-all
+			// Catch-all branch
+			$catch_all_mode = $domain->get('ied_catch_all_mode') ?: InboundEmailDomain::CATCHALL_FORWARD;
+
+			if ($catch_all_mode === InboundEmailDomain::CATCHALL_STORE) {
+				// Store every unmatched recipient — supersedes ied_reject_unmatched.
+				return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, null);
+			}
+
 			$catch_all = $domain->get('ied_catch_all_address');
 			if ($catch_all) {
-				// Create a virtual alias for logging/forwarding
 				return $this->forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all);
 			}
 
 			// No match
 			if ($domain->get('ied_reject_unmatched')) {
-				$this->logTransaction($parsed, null, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'No matching alias');
+				$this->logTransaction($parsed, null, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'No matching alias', $domain->key);
 				return 67; // Reject
 			} else {
-				$this->logTransaction($parsed, null, InboundEmailLog::STATUS_DISCARDED, $envelope_recipient);
+				$this->logTransaction($parsed, null, InboundEmailLog::STATUS_DISCARDED, $envelope_recipient, null, null, $domain->key);
 				return 0; // Discard silently
 			}
 		}
 
-		// 3. DKIM verification
+		// 4. DKIM verification (informational — we record the result either way)
 		$dkim_result = $this->verifyDKIM($raw_email, $parsed);
 		if ($dkim_result === 'fail') {
-			// Log the failure but don't reject — DKIM verification is still being refined
 			error_log('InboundEmailRouter: DKIM verification failed for ' . $envelope_recipient . ' from ' . ($parsed['from_email'] ?? 'unknown'));
 		}
 
-		// 4. Rate limiting
+		$mode = $alias->get('iea_delivery_mode') ?: InboundEmailAlias::MODE_FORWARD;
+		$forwards = ($mode === InboundEmailAlias::MODE_FORWARD || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
+		$stores = ($mode === InboundEmailAlias::MODE_STORE || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
+
+		// Pure-store mode skips forwarding-side gates (rate limit, From-header check)
+		// because they only apply to relay attempts.
+		if (!$forwards) {
+			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $dkim_result);
+		}
+
+		// 5. Rate limiting (gates the forward path only)
 		if (!$this->checkAliasRateLimit($alias->key)) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient, null, null, $domain->key);
 			return 0;
 		}
 		if (!$this->checkDomainRateLimit($domain->key)) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_RATE_LIMITED, $envelope_recipient, null, null, $domain->key);
 			return 0;
 		}
 
-		// 5. Basic header checks
+		// 6. Basic header checks (forward path requires a usable From header)
 		if (empty($parsed['from'])) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Missing From header');
-			return 0;
-		}
-		if (strlen($raw_email) > 25 * 1024 * 1024) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Message too large');
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_REJECTED, $envelope_recipient, null, 'Missing From header', $domain->key);
 			return 0;
 		}
 
-		// 6. Forward
+		// 7. Forward
 		$destinations = $alias->get_destinations_array();
 		$results = $this->forwardEmail($raw_email, $parsed, $alias, $domain, $destinations);
 
-		// 7. Log
 		$all_success = !in_array(false, $results, true);
 		$dest_str = implode(',', $destinations);
 
 		if ($all_success) {
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_FORWARDED, $envelope_recipient, $dest_str);
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_FORWARDED, $envelope_recipient, $dest_str, null, $domain->key);
 			$alias->record_forward();
 		} else {
 			$failed = array();
@@ -117,10 +135,146 @@ class InboundEmailRouter {
 					$failed[] = $dest;
 				}
 			}
-			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $dest_str, 'Failed to deliver to: ' . implode(', ', $failed));
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $dest_str, 'Failed to deliver to: ' . implode(', ', $failed), $domain->key);
+		}
+
+		// 8. forward_and_store — best-effort copy after the forward. A failure
+		// here is logged but does NOT change the exit code, because the forward
+		// already happened and retrying would double-forward.
+		if ($stores) {
+			try {
+				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $dkim_result);
+			} catch (\Throwable $e) {
+				error_log('InboundEmailRouter: store after forward failed: ' . $e->getMessage());
+				$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store after forward failed: ' . $e->getMessage(), $domain->key);
+			}
 		}
 
 		return 0;
+	}
+
+	/**
+	 * Pure-store path: persist the message and return success/temp-fail.
+	 * Used by alias-store mode AND domain catch-all-store mode (alias=null).
+	 *
+	 * Exit code: 0 on success or successful dedup; 75 on transient DB
+	 * failure so Postfix retries. The dedup mechanism is the UNIQUE
+	 * constraint on (iem_message_id_header, iem_recipient).
+	 */
+	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $dkim_result = null) {
+		if ($dkim_result === null) {
+			$dkim_result = $this->verifyDKIM($raw_email, $parsed);
+		}
+
+		// Volume cap (per-domain stores within forwarding window)
+		$cap = intval($this->settings->get_setting('inbound_email_mailbox_max_per_window'));
+		if ($cap > 0) {
+			$window = intval($this->settings->get_setting('inbound_email_forwarding_rate_limit_window')) ?: 3600;
+			$count = $this->countStoresInWindow($domain->key, $window);
+			if ($count >= $cap) {
+				$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_STORE_CAPPED, $envelope_recipient, null, 'Store volume cap reached (' . $cap . ')', $domain->key);
+				return 0;
+			}
+		}
+
+		try {
+			$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $dkim_result);
+			$this->logTransaction(
+				$parsed,
+				$alias,
+				InboundEmailLog::STATUS_STORED,
+				$envelope_recipient,
+				$saved['dedup'] ? 'duplicate (Message-ID already stored)' : null,
+				null,
+				$domain->key
+			);
+			return 0;
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: store failed: ' . $e->getMessage());
+			// No alias.record_forward() etc — and DO NOT log here because
+			// returning 75 will cause Postfix to retry; logging would create
+			// noise rows for transient failures. The retry succeeds via the
+			// DB unique constraint.
+			return 75;
+		}
+	}
+
+	/**
+	 * Persist a message to iem_inbound_email_messages.
+	 *
+	 * Returns ['message' => InboundEmailMessage|null, 'dedup' => bool].
+	 * On unique-violation (SQLSTATE 23505), treats the store as a successful
+	 * retry — returns dedup=true with message=null. Other PDO errors propagate.
+	 *
+	 * Always stores the ORIGINAL raw_email (never the header-rewritten copy
+	 * forwardEmail() builds for relay), so forward_and_store preserves the
+	 * faithful message.
+	 */
+	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $dkim_result = null) {
+		$bodies = $this->extractBodies($raw_email, $parsed);
+
+		$message_id_header = isset($parsed['headers']['message-id'])
+			? (is_array($parsed['headers']['message-id'])
+				? $parsed['headers']['message-id'][0]
+				: $parsed['headers']['message-id'])
+			: '';
+		$message_id_header = trim((string)$message_id_header);
+		if ($message_id_header === '') {
+			$message_id_header = null;
+		} else {
+			$message_id_header = substr($message_id_header, 0, 255);
+		}
+
+		$subject_raw = $parsed['subject'] ?? '';
+		$subject = $this->decodeMimeHeader($subject_raw);
+
+		$row = [
+			'iem_ied_inbound_email_domain_id' => $domain->key,
+			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
+			'iem_sender'      => substr($parsed['from_email'] ?? ($parsed['from'] ?? ''), 0, 500),
+			'iem_recipient'   => substr($envelope_recipient, 0, 500),
+			'iem_subject'     => substr($subject, 0, 1000),
+			'iem_body_plain'  => $bodies['plain'],
+			'iem_body_html'   => $bodies['html'],
+			'iem_raw_message' => $raw_email,
+			'iem_message_id_header' => $message_id_header,
+			'iem_dkim_result' => $dkim_result ?: 'none',
+			'iem_size_bytes'  => strlen($raw_email),
+			'iem_received_time' => gmdate('Y-m-d H:i:s'),
+		];
+
+		try {
+			$msg = InboundEmailMessage::CreateEntry($row);
+			return ['message' => $msg, 'dedup' => false];
+		} catch (PDOException $e) {
+			if ($e->getCode() === '23505') {
+				return ['message' => null, 'dedup' => true];
+			}
+			throw $e;
+		} catch (\Throwable $e) {
+			// Some SystemBase implementations may wrap the PDOException.
+			$prev = $e->getPrevious();
+			if ($prev instanceof PDOException && $prev->getCode() === '23505') {
+				return ['message' => null, 'dedup' => true];
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Count non-deleted store rows for a domain in the given window
+	 * (seconds back from now). Used by the volume cap.
+	 */
+	private function countStoresInWindow($domain_id, $window_seconds) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$sql = "SELECT COUNT(*) AS cnt FROM iem_inbound_email_messages
+				WHERE iem_ied_inbound_email_domain_id = ?
+				AND iem_delete_time IS NULL
+				AND iem_received_time > NOW() - INTERVAL '" . intval($window_seconds) . " seconds'";
+		$stmt = $db->prepare($sql);
+		$stmt->execute([$domain_id]);
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		return intval($row['cnt'] ?? 0);
 	}
 
 	/**
@@ -343,9 +497,9 @@ class InboundEmailRouter {
 
 			$success = $mailer->send();
 			$status = $success ? InboundEmailLog::STATUS_FORWARDED : InboundEmailLog::STATUS_ERROR;
-			$this->logTransaction($parsed, null, $status, $envelope_recipient, $catch_all_address, $success ? null : 'Catch-all delivery failed');
+			$this->logTransaction($parsed, null, $status, $envelope_recipient, $catch_all_address, $success ? null : 'Catch-all delivery failed', $domain->key);
 		} catch (Exception $e) {
-			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $catch_all_address, $e->getMessage());
+			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $catch_all_address, $e->getMessage(), $domain->key);
 		}
 
 		return 0;
@@ -645,17 +799,20 @@ class InboundEmailRouter {
 
 	/**
 	 * Check per-domain rate limit using the inbound email log table.
+	 *
+	 * Uses iel_ied_inbound_email_domain_id directly — populated on every
+	 * transaction since the local-mailbox change, so catch-all stores are
+	 * also visible to per-domain counting without joining the alias table.
 	 */
 	private function checkDomainRateLimit($domain_id) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$window = intval($this->settings->get_setting('inbound_email_forwarding_rate_limit_window')) ?: 3600;
 		$max = intval($this->settings->get_setting('inbound_email_forwarding_rate_limit_per_domain')) ?: 200;
 
-		$sql = "SELECT COUNT(*) as cnt FROM iel_inbound_email_logs iel
-				JOIN iea_inbound_email_aliases iea ON iea.iea_inbound_email_alias_id = iel.iel_iea_inbound_email_alias_id
-				WHERE iea.iea_ied_inbound_email_domain_id = ?
-				AND iel.iel_status = 'forwarded'
-				AND iel.iel_create_time > NOW() - INTERVAL '" . intval($window) . " seconds'";
+		$sql = "SELECT COUNT(*) as cnt FROM iel_inbound_email_logs
+				WHERE iel_ied_inbound_email_domain_id = ?
+				AND iel_status = 'forwarded'
+				AND iel_create_time > NOW() - INTERVAL '" . intval($window) . " seconds'";
 		$stmt = $db->prepare($sql);
 		$stmt->execute([$domain_id]);
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -665,8 +822,13 @@ class InboundEmailRouter {
 
 	/**
 	 * Log an inbound email transaction.
+	 *
+	 * $domain_id is recorded directly on the log row so the Logs viewer's
+	 * domain filter and the per-domain rate-limit query work without a
+	 * join through the alias table — and so catch-all stores (alias null)
+	 * remain visible to the domain filter.
 	 */
-	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null) {
+	public function logTransaction($parsed, $alias, $status, $to_address, $destinations = null, $error = null, $domain_id = null) {
 		InboundEmailLog::CreateEntry(
 			$parsed['from'] ?? '',
 			$to_address,
@@ -674,8 +836,188 @@ class InboundEmailRouter {
 			$destinations,
 			$status,
 			$alias ? $alias->key : null,
-			$error
+			$error,
+			$domain_id
 		);
+	}
+
+	/**
+	 * Decode an RFC 2047 encoded-word header value (Subject, display names)
+	 * to readable UTF-8. Returns the input unchanged if mb_decode_mimeheader
+	 * is unavailable.
+	 */
+	private function decodeMimeHeader($value) {
+		if ($value === '' || $value === null) {
+			return '';
+		}
+		if (function_exists('mb_decode_mimeheader')) {
+			return mb_decode_mimeheader($value);
+		}
+		return $value;
+	}
+
+	/**
+	 * Split a raw MIME message into best-effort plain and html bodies.
+	 *
+	 * Handles multipart/alternative and multipart/mixed (one level deep),
+	 * decodes quoted-printable and base64 transfer encodings, and converts
+	 * each part to UTF-8 from its declared charset. The original
+	 * raw_email is always preserved separately (iem_raw_message), so
+	 * imperfect decoding never loses data.
+	 *
+	 * Returns ['plain' => string, 'html' => string].
+	 */
+	public function extractBodies($raw_email, $parsed) {
+		$result = ['plain' => '', 'html' => ''];
+
+		$headers = $parsed['headers'] ?? [];
+		$ct_raw = $headers['content-type'] ?? '';
+		if (is_array($ct_raw)) { $ct_raw = $ct_raw[0]; }
+		$cte = $headers['content-transfer-encoding'] ?? '';
+		if (is_array($cte)) { $cte = $cte[0]; }
+
+		// Get the full message body (everything after the first blank line)
+		$normalized = str_replace("\r\n", "\n", $raw_email);
+		$split_pos = strpos($normalized, "\n\n");
+		$body = ($split_pos !== false) ? substr($normalized, $split_pos + 2) : $normalized;
+
+		// Single-part: no multipart, treat as html or plain by content-type
+		if (stripos($ct_raw, 'multipart/') === false) {
+			$decoded = $this->decodePartBody($body, $cte);
+			$charset = $this->extractCharset($ct_raw);
+			$decoded = $this->toUtf8($decoded, $charset);
+			if (stripos($ct_raw, 'text/html') !== false) {
+				$result['html'] = $decoded;
+			} else {
+				$result['plain'] = $decoded;
+			}
+			return $result;
+		}
+
+		// Multipart — extract boundary
+		if (!preg_match('/boundary\s*=\s*"?([^";\s]+)"?/i', $ct_raw, $bm)) {
+			$result['plain'] = $body;
+			return $result;
+		}
+		$boundary = $bm[1];
+
+		$parts = $this->splitMultipart($body, $boundary);
+		foreach ($parts as $part) {
+			$p = $this->parseMimePart($part);
+			$p_ct = $p['headers']['content-type'] ?? '';
+			$p_cte = $p['headers']['content-transfer-encoding'] ?? '';
+			$decoded = $this->decodePartBody($p['body'], $p_cte);
+			$charset = $this->extractCharset($p_ct);
+			$decoded = $this->toUtf8($decoded, $charset);
+
+			if (stripos($p_ct, 'multipart/') !== false) {
+				// Nested multipart — recurse one level by re-running extract on this part
+				if (preg_match('/boundary\s*=\s*"?([^";\s]+)"?/i', $p_ct, $nb)) {
+					$sub_parts = $this->splitMultipart($p['body'], $nb[1]);
+					foreach ($sub_parts as $sub) {
+						$sp = $this->parseMimePart($sub);
+						$sp_ct = $sp['headers']['content-type'] ?? '';
+						$sp_cte = $sp['headers']['content-transfer-encoding'] ?? '';
+						$sd = $this->toUtf8(
+							$this->decodePartBody($sp['body'], $sp_cte),
+							$this->extractCharset($sp_ct)
+						);
+						if (stripos($sp_ct, 'text/html') !== false && $result['html'] === '') {
+							$result['html'] = $sd;
+						} elseif (stripos($sp_ct, 'text/plain') !== false && $result['plain'] === '') {
+							$result['plain'] = $sd;
+						}
+					}
+				}
+				continue;
+			}
+
+			if (stripos($p_ct, 'text/html') !== false && $result['html'] === '') {
+				$result['html'] = $decoded;
+			} elseif (stripos($p_ct, 'text/plain') !== false && $result['plain'] === '') {
+				$result['plain'] = $decoded;
+			}
+		}
+
+		return $result;
+	}
+
+	private function splitMultipart($body, $boundary) {
+		$delim = '--' . $boundary;
+		$end = '--' . $boundary . '--';
+		// Strip off everything before the first boundary and the closing terminator
+		$pos = strpos($body, $delim);
+		if ($pos === false) {
+			return [];
+		}
+		$body = substr($body, $pos);
+		$end_pos = strpos($body, $end);
+		if ($end_pos !== false) {
+			$body = substr($body, 0, $end_pos);
+		}
+		// Split on the boundary delimiter
+		$raw_parts = preg_split('/(^|\n)--' . preg_quote($boundary, '/') . '\r?\n/', $body);
+		$parts = [];
+		foreach ($raw_parts as $rp) {
+			$rp = trim($rp);
+			if ($rp !== '' && substr($rp, 0, 2) !== '--') {
+				$parts[] = $rp;
+			}
+		}
+		return $parts;
+	}
+
+	private function parseMimePart($part) {
+		$normalized = str_replace("\r\n", "\n", $part);
+		$split_pos = strpos($normalized, "\n\n");
+		if ($split_pos === false) {
+			return ['headers' => [], 'body' => $normalized];
+		}
+		$header_block = substr($normalized, 0, $split_pos);
+		$body = substr($normalized, $split_pos + 2);
+		$headers = [];
+		$current = null;
+		foreach (explode("\n", $header_block) as $line) {
+			if (preg_match('/^\s+/', $line) && $current !== null) {
+				$headers[$current] .= ' ' . trim($line);
+			} elseif (preg_match('/^([^:]+):\s*(.*)$/', $line, $m)) {
+				$current = strtolower(trim($m[1]));
+				$headers[$current] = trim($m[2]);
+			}
+		}
+		return ['headers' => $headers, 'body' => $body];
+	}
+
+	private function decodePartBody($body, $encoding) {
+		$encoding = strtolower(trim($encoding));
+		if ($encoding === 'quoted-printable') {
+			return quoted_printable_decode($body);
+		}
+		if ($encoding === 'base64') {
+			return base64_decode($body) ?: '';
+		}
+		// 7bit / 8bit / binary / unspecified
+		return $body;
+	}
+
+	private function extractCharset($content_type) {
+		if (preg_match('/charset\s*=\s*"?([^";\s]+)"?/i', $content_type, $m)) {
+			return strtoupper(trim($m[1]));
+		}
+		return '';
+	}
+
+	private function toUtf8($text, $charset) {
+		if ($text === '' || $text === null) {
+			return '';
+		}
+		if (!function_exists('mb_convert_encoding')) {
+			return $text;
+		}
+		$charset = $charset !== '' ? $charset : 'UTF-8';
+		// mb_convert_encoding tolerates unknown charsets by falling back to UTF-8
+		$converted = @mb_convert_encoding($text, 'UTF-8', $charset);
+		return $converted !== false ? $converted : $text;
 	}
 
 	/**

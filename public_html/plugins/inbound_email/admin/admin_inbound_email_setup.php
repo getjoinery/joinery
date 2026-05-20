@@ -36,6 +36,7 @@ echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_ema
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
 echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
+echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_mailbox">Mailbox</a></li>';
 echo '</ul>';
 
 // The per-check "Details & how to fix" disclosure reads as a link, not a field.
@@ -53,7 +54,29 @@ if (!empty($display_messages)) {
 	$session->clear_clearable_messages();
 }
 
-// --- Setup form: the address being set up + the mail-server identity ---
+// --- Step 1: Inbound provider picker ---
+$page->begin_box(array('title' => 'Inbound provider'));
+echo '<p class="mb-2">Choose how this site receives inbound mail. Switching is a single setting change — '
+	. 'the same domain, alias and store machinery runs underneath.</p>';
+echo '<form method="post" class="d-inline-block">';
+echo '<input type="hidden" name="action" value="set_provider">';
+echo '<div class="d-flex gap-2 align-items-center">';
+echo '<select name="provider" class="form-select form-select-sm">';
+foreach ($provider_options as $key => $label) {
+	$sel = ($key === $active_provider_key) ? ' selected' : '';
+	echo '<option value="' . htmlspecialchars($key) . '"' . $sel . '>' . htmlspecialchars($label) . '</option>';
+}
+echo '</select>';
+echo '<button type="submit" class="btn btn-sm btn-primary">Use this provider</button>';
+echo '</div>';
+echo '</form>';
+if ($active_provider_is_webhook && $webhook_url !== '') {
+	echo '<p class="mt-3 mb-0"><strong>Webhook URL.</strong> Configure your provider to POST inbound mail to:<br>';
+	echo '<code style="word-break:break-all">' . htmlspecialchars($webhook_url) . '</code></p>';
+}
+$page->end_box();
+
+// --- Step 2: address + mail-server identity ---
 $page->begin_box(array('title' => 'What are you setting up?'));
 
 $formwriter = $page->getFormWriter('setup_form');
@@ -85,6 +108,26 @@ $formwriter->submitbutton('btn_save', 'Save & Run Checks');
 echo $formwriter->end_form();
 
 $page->end_box();
+
+// --- Provider-supplied DNS records for the focused domain ---
+if (!empty($dns_records) && $focus_domain !== '') {
+	$page->begin_box(array('title' => 'DNS records to publish for ' . htmlspecialchars($focus_domain)));
+	echo '<p class="mb-2">Copy these into your DNS provider for <code>' . htmlspecialchars($focus_domain) . '</code>:</p>';
+	echo '<table class="table table-sm table-bordered" style="max-width:900px">';
+	echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Note</th></tr></thead><tbody>';
+	foreach ($dns_records as $rec) {
+		echo '<tr>';
+		echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
+		echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
+		echo '<td><input type="text" class="form-control form-control-sm" readonly '
+			. 'style="cursor:pointer;background:#fff" value="' . htmlspecialchars($rec['value'])
+			. '" onclick="this.select()"></td>';
+		echo '<td class="text-muted small">' . htmlspecialchars($rec['note'] ?? '') . '</td>';
+		echo '</tr>';
+	}
+	echo '</tbody></table>';
+	$page->end_box();
+}
 
 // --- Shared check-row renderers ---
 $status_badge = function ($status) {
