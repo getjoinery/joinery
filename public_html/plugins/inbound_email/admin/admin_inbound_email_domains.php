@@ -50,10 +50,6 @@ if (isset($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
 }
 
-echo '<div class="alert alert-info">Server status and per-domain DNS verification (MX, SPF, DKIM, '
-	. 'reverse DNS) now live on the <a href="/plugins/inbound_email/admin/admin_inbound_email_setup">Setup tab</a>, '
-	. 'which checks every record for correctness and tells you exactly what to publish.</div>';
-
 // --- Add/Edit Domain Form (only shown when editing or adding) ---
 $show_form = $edit_domain || (isset($_GET['action']) && $_GET['action'] === 'add');
 
@@ -83,6 +79,10 @@ if ($show_form) {
 			'store'   => 'Store locally (every unmatched recipient)',
 		],
 		'helptext' => 'Store mode supersedes "reject unmatched" — every unmatched recipient is captured.',
+		'visibility_rules' => [
+			'forward' => ['show' => ['ied_catch_all_address', 'ied_reject_unmatched'], 'hide' => []],
+			'store'   => ['show' => [], 'hide' => ['ied_catch_all_address', 'ied_reject_unmatched']],
+		],
 	]);
 
 	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', [
@@ -96,12 +96,6 @@ if ($show_form) {
 	$formwriter->submitbutton('btn_submit', $edit_domain ? 'Update Domain' : 'Add Domain');
 
 	echo $formwriter->end_form();
-
-	if ($edit_domain) {
-		$ed_domain_name = $edit_domain->get('ied_domain');
-		echo '<p class="mt-3 mb-0">Verify DNS and server setup for this domain on the '
-			. '<a href="/plugins/inbound_email/admin/admin_inbound_email_setup">Setup tab</a>.</p>';
-	}
 
 	$page->end_box();
 } // end show_form

@@ -972,12 +972,18 @@ abstract class PublicPageBase {
 		$options = isset($this->current_table_options) ? $this->current_table_options : array();
 
 		if($pager->num_records()){
+			// `in_card` tells the renderer whether the surrounding container
+			// has no horizontal padding and the pager must supply its own.
+			// `endtable()` is always invoked for a table box, whose card-body
+			// uses `p-0` so the table can run edge-to-edge — so the pager
+			// always needs padding here, regardless of the caller's `card`
+			// option.
 			$pagination_data = [
 				'num_records'   => $pager->num_records(),
 				'current_page'  => $pager->current_page(),
 				'total_pages'   => $pager->total_pages(),
 				'show_controls' => ($pager->num_records() > $pager->num_per_page()),
-				'in_card'       => (isset($options['card']) && $options['card'] === true),
+				'in_card'       => true,
 				'prev_10_url'   => null,
 				'next_10_url'   => null,
 				'pages'         => [],
