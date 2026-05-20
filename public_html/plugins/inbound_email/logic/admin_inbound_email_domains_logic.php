@@ -23,7 +23,8 @@ function admin_inbound_email_domains_logic(array $input): LogicResult {
 
 		$domain->set('ied_domain', $input['ied_domain']);
 		$domain->set('ied_is_enabled', isset($input['ied_is_enabled']) ? true : false);
-		$domain->set('ied_catch_all_address', $input['ied_catch_all_address'] ?: null);
+		$domain->set('ied_catch_all_mode', $input['ied_catch_all_mode'] ?? 'forward');
+		$domain->set('ied_catch_all_address', $input['ied_catch_all_address'] ?? '');
 		$domain->set('ied_reject_unmatched', isset($input['ied_reject_unmatched']) ? true : false);
 
 		try {

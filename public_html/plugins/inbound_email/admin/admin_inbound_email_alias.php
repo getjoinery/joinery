@@ -76,6 +76,11 @@ $formwriter->dropinput('iea_delivery_mode', 'Delivery Mode', [
 	],
 	'helptext' => 'Forward mode requires at least one destination. Store mode persists messages '
 		. 'to the local mailbox (visible on the Mailbox tab) and does not forward.',
+	'visibility_rules' => [
+		'forward'           => ['show' => ['iea_destinations'], 'hide' => []],
+		'store'             => ['show' => [], 'hide' => ['iea_destinations']],
+		'forward_and_store' => ['show' => ['iea_destinations'], 'hide' => []],
+	],
 ]);
 
 $formwriter->textbox('iea_destinations', 'Destination Addresses', [
@@ -98,36 +103,5 @@ $formwriter->submitbutton('btn_submit', 'Save Alias');
 echo $formwriter->end_form();
 
 $page->end_box();
-
-// Lightweight toggle: hide the destinations row when "store" is selected.
-// Server-side validation in InboundEmailAlias::prepare() is the source of truth.
-?>
-<script>
-(function () {
-	var modeSel = document.querySelector('[name="iea_delivery_mode"]');
-	var destField = document.querySelector('[name="iea_destinations"]');
-	if (!modeSel || !destField) return;
-
-	function row(el) {
-		var r = el;
-		while (r && r !== document.body && !(r.classList && (r.classList.contains('mb-3') || r.classList.contains('form-group')))) {
-			r = r.parentElement;
-		}
-		return r || el.parentElement;
-	}
-	var destRow = row(destField);
-
-	function refresh() {
-		if (modeSel.value === 'store') {
-			if (destRow) destRow.style.display = 'none';
-		} else {
-			if (destRow) destRow.style.display = '';
-		}
-	}
-	modeSel.addEventListener('change', refresh);
-	refresh();
-})();
-</script>
-<?php
 $page->admin_footer();
 ?>
