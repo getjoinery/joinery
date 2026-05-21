@@ -35,7 +35,7 @@ if (!empty($will_delete)) {
 	echo '<p>The following components are used only by this page and will also be deleted:</p>';
 	echo '<ul>';
 	foreach ($will_delete as $component) {
-		$label = $component->get('pac_title') ?: $component->get('pac_location_name');
+		$label = $component->get('pac_title') ?: $component->get('pac_location_name') ?: 'Component #' . $component->key;
 		echo '<li>' . htmlspecialchars($label) . '</li>';
 	}
 	echo '</ul>';

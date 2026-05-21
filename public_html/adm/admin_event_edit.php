@@ -196,7 +196,11 @@ foreach ($all_tiers_list as $tier) {
 }
 $formwriter->dropinput('evt_tier_min_level', 'Minimum Tier Required', [
 	'options' => $tier_options,
-	'helptext' => 'Restrict this event to users with this subscription tier or higher'
+	'helptext' => 'Restrict this event to users with this subscription tier or higher',
+	'visibility_rules' => [
+		'' => ['show' => [], 'hide' => ['evt_tier_public_after_hours']],
+		'default' => ['show' => ['evt_tier_public_after_hours'], 'hide' => []]
+	]
 ]);
 
 $early_access_options = ['' => 'Never (permanent)', '1' => '1 hour', '3' => '3 hours', '12' => '12 hours', '24' => '1 day', '72' => '3 days', '168' => '7 days', '336' => '14 days', '720' => '30 days', '2160' => '90 days'];
