@@ -2750,11 +2750,11 @@ document.addEventListener("DOMContentLoaded", function() {
      */
     protected function parseTimeValue($value) {
         $hour = '';
-        $minute = '';
+        $minute = '00';
         $ampm = 'AM';
 
         if (!$value) {
-            return ['hour' => $hour, 'minute' => $minute, 'ampm' => $ampm];
+            return ['hour' => $hour, 'minute' => $minute, 'ampm' => 'PM'];
         }
 
         // If value is a datetime string ("Y-m-d H:i:s" — e.g. produced by
@@ -3641,7 +3641,7 @@ document.addEventListener("DOMContentLoaded", function() {
         $ampm_field = $field_name . '_timeinput_ampm';
 
         // Check if the required fields are present
-        if(empty($post_vars[$date_field]) || !isset($post_vars[$hour_field])){
+        if(empty($post_vars[$date_field]) || empty($post_vars[$hour_field])){
             return NULL;
         }
 

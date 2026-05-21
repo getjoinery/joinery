@@ -19,31 +19,34 @@ function admin_file_logic($get_vars, $post_vars) {
 	$user = new User($file->get('fil_usr_user_id'), TRUE);
 
 	// Handle actions
-	if($post_vars['action'] == 'remove'){
+	$post_action = $post_vars['action'] ?? null;
+	$get_action = $get_vars['action'] ?? null;
+
+	if($post_action == 'remove'){
 		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$file->permanent_delete();
 
 		return LogicResult::redirect('/admin/admin_files');
 	}
-	else if($post_vars['action'] == 'fileremove'){
+	else if($post_action == 'fileremove'){
 		$event_session = new EventSession($post_vars['evs_event_session_id'], TRUE);
 		$event_session->remove_file($post_vars['fil_file_id']);
 
 		return LogicResult::redirect('/admin/admin_file?fil_file_id='.$file->key);
 	}
-	else if($post_vars['action'] == 'fileadd'){
+	else if($post_action == 'fileadd'){
 		$event_session = new EventSession($post_vars['evs_event_session_id'], TRUE);
 		$event_session->add_file($post_vars['fil_file_id']);
 
 		return LogicResult::redirect('/admin/admin_file?fil_file_id='.$file->key);
 	}
-	else if($get_vars['action'] == 'delete'){
+	else if($get_action == 'delete'){
 		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$file->soft_delete();
 
 		return LogicResult::redirect('/admin/admin_files');
 	}
-	else if($get_vars['action'] == 'undelete'){
+	else if($get_action == 'undelete'){
 		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$file->undelete();
 

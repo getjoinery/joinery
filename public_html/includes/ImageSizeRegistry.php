@@ -26,10 +26,10 @@ class ImageSizeRegistry {
 
 		$sizes = [];
 
-		// 1. Start with Falcon sizes (admin theme, always loaded)
-		$falcon_sizes = ThemeHelper::config('image_sizes', [], 'falcon');
-		if (is_array($falcon_sizes)) {
-			$sizes = $falcon_sizes;
+		// 1. Start with joinery-system sizes (admin theme, always loaded)
+		$admin_sizes = ThemeHelper::config('image_sizes', [], 'joinery-system');
+		if (is_array($admin_sizes)) {
+			$sizes = $admin_sizes;
 		}
 
 		// 2. Merge active public theme sizes (wins on key conflicts)
