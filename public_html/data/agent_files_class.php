@@ -36,15 +36,24 @@ class AgentFile extends SystemBase {
 	public static $ai_readable    = true;
 	public static $ai_description = 'Agent instruction files (CLAUDE.md, GEMINI.md, etc.) managed in the database; written to disk on demand.';
 
+	const CUSTOMER_BASELINE_NAME = 'Customer baseline';
+	const TEMPLATE_PATH = 'maintenance_scripts/install_tools/default_agents_template.md';
+
+	protected static $foreign_key_actions = array(
+		'agf_candidate_for' => array('action' => 'cascade'),
+	);
+
 	public static $field_specifications = array(
-		'agf_agent_file_id'     => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'agf_name'              => array('type'=>'varchar(255)', 'required'=>true),
-		'agf_target_filenames'  => array('type'=>'jsonb'),
-		'agf_content'           => array('type'=>'text'),
-		'agf_last_written_time' => array('type'=>'timestamp(6)'),
-		'agf_last_written_hash' => array('type'=>'varchar(64)'),
-		'agf_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'agf_delete_time'       => array('type'=>'timestamp(6)'),
+		'agf_agent_file_id'           => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'agf_name'                    => array('type'=>'varchar(255)', 'required'=>true),
+		'agf_target_filenames'        => array('type'=>'jsonb'),
+		'agf_content'                 => array('type'=>'text'),
+		'agf_last_written_time'       => array('type'=>'timestamp(6)'),
+		'agf_last_written_hash'       => array('type'=>'varchar(64)'),
+		'agf_template_baseline_hash'  => array('type'=>'varchar(64)'),
+		'agf_candidate_for'           => array('type'=>'int4'),
+		'agf_create_time'             => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'agf_delete_time'             => array('type'=>'timestamp(6)'),
 	);
 
 	public static $json_vars = array('agf_target_filenames');
@@ -311,6 +320,116 @@ class AgentFile extends SystemBase {
 			);
 		}
 	}
+
+	// ------------------------------------------------------------------
+	// Template upgrade machinery (see specs/agent_files_upgrade_strategy.md)
+	// ------------------------------------------------------------------
+
+	/**
+	 * Normalize content for hashing: trim trailing whitespace on each line
+	 * and force `\n` endings. Keeps `\r\n` vs `\n` content from hashing
+	 * differently when the bytes are semantically identical.
+	 */
+	public static function normalize_content($content) {
+		$content = (string)$content;
+		// Collapse \r\n and lone \r to \n
+		$content = str_replace("\r\n", "\n", $content);
+		$content = str_replace("\r", "\n", $content);
+		// Trim trailing whitespace per line
+		$lines = explode("\n", $content);
+		foreach ($lines as $i => $line) {
+			$lines[$i] = rtrim($line, " \t");
+		}
+		return implode("\n", $lines);
+	}
+
+	/** SHA-256 of normalized content. */
+	public static function hash_content($content) {
+		return hash('sha256', self::normalize_content($content));
+	}
+
+	/** True iff content hash matches baseline hash (i.e. unedited). */
+	public function is_unmodified_from_baseline() {
+		$baseline = $this->get('agf_template_baseline_hash');
+		if (!$baseline) {
+			return false; // legacy / unknown state — treat as edited
+		}
+		return self::hash_content($this->get('agf_content')) === $baseline;
+	}
+
+	/** Pending candidate for this active row, or null. */
+	public function current_candidate() {
+		if (!$this->key) {
+			return null;
+		}
+		$results = new MultiAgentFile(array(
+			'deleted' => false,
+			'candidate_for' => (int)$this->key,
+		));
+		$results->load();
+		if (count($results)) {
+			return $results->get(0);
+		}
+		return null;
+	}
+
+	/**
+	 * Promote a candidate row: move target filenames from this active row
+	 * to the candidate, archive the previously-active row, write the new
+	 * active row to disk.
+	 *
+	 * Calling row must be the active row (i.e. has targets). The candidate
+	 * row must be this row's current_candidate(). Throws otherwise.
+	 */
+	public function switch_to_candidate() {
+		$candidate = $this->current_candidate();
+		if (!$candidate) {
+			throw new AgentFileException('No candidate to switch to.');
+		}
+
+		$old_targets = $this->get_target_filenames_array();
+
+		// Move targets onto the candidate; clear them on the previously-active row.
+		$candidate->set('agf_target_filenames', json_encode(array_values($old_targets)));
+		$candidate->set('agf_candidate_for', null);
+		$candidate->save();
+
+		// Archive the previously-active row.
+		$archive_name = $this->get('agf_name');
+		if (strpos($archive_name, 'Archived — ') !== 0) {
+			$archive_name = 'Archived — ' . $archive_name;
+		}
+		$this->set('agf_name', $archive_name);
+		$this->set('agf_target_filenames', json_encode(array()));
+		$this->save();
+
+		// The candidate already has the on-disk hash logic for its targets via write_to_disk(),
+		// which detects drift against the disk's old content (written by the prev active row).
+		// We force here because the on-disk file is intentionally being replaced by the new
+		// content the admin chose to switch to.
+		$candidate->write_to_disk(true);
+
+		return $candidate;
+	}
+
+	/**
+	 * Load the template file from disk and return [content, sha256_hash].
+	 * Returns [null, null] if the template file is missing or unreadable.
+	 *
+	 * The template lives at maintenance_scripts/install_tools/, which is
+	 * outside public_html — anchor to site root, not project root.
+	 */
+	public static function load_shipped_template() {
+		$path = PathHelper::getSiteRoot() . '/' . self::TEMPLATE_PATH;
+		if (!is_readable($path)) {
+			return array(null, null);
+		}
+		$content = @file_get_contents($path);
+		if ($content === false) {
+			return array(null, null);
+		}
+		return array($content, self::hash_content($content));
+	}
 }
 
 class MultiAgentFile extends SystemMultiBase {
@@ -329,6 +448,14 @@ class MultiAgentFile extends SystemMultiBase {
 
 		if (isset($this->options['name'])) {
 			$filters['agf_name'] = array($this->options['name'], PDO::PARAM_STR);
+		}
+
+		if (isset($this->options['candidate_for'])) {
+			$filters['agf_candidate_for'] = array((int)$this->options['candidate_for'], PDO::PARAM_INT);
+		}
+
+		if (isset($this->options['candidates_only'])) {
+			$filters['agf_candidate_for'] = $this->options['candidates_only'] ? 'IS NOT NULL' : 'IS NULL';
 		}
 
 		return $this->_get_resultsv2('agf_agent_files', $filters, $this->order_by, $only_count, $debug);

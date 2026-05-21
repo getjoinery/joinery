@@ -26,6 +26,17 @@ function admin_agent_files_logic($get_vars, $post_vars) {
 		}
 	}
 
+	// Action: switch to a pending upgrade candidate
+	if (isset($post_vars['action']) && $post_vars['action'] === 'switch_to_candidate' && !empty($post_vars['agf_agent_file_id'])) {
+		try {
+			$active = new AgentFile((int)$post_vars['agf_agent_file_id'], TRUE);
+			$active->switch_to_candidate();
+			return LogicResult::redirect('/admin/admin_agent_files?switched=' . (int)$post_vars['agf_agent_file_id']);
+		} catch (\Throwable $e) {
+			return LogicResult::redirect('/admin/admin_agent_files?error=' . urlencode($e->getMessage()));
+		}
+	}
+
 	$numperpage = 50;
 	$offset     = LibraryFunctions::fetch_variable_local($get_vars, 'offset', 0);
 	$sort       = LibraryFunctions::fetch_variable_local($get_vars, 'sort', 'agent_file_id');
@@ -61,6 +72,7 @@ function admin_agent_files_logic($get_vars, $post_vars) {
 		'numrecords'  => $numrecords,
 		'numperpage'  => $numperpage,
 		'written'     => isset($get_vars['written']) ? $get_vars['written'] : null,
+		'switched'    => isset($get_vars['switched']) ? $get_vars['switched'] : null,
 		'error'       => isset($get_vars['error']) ? $get_vars['error'] : null,
 		'confirm_row' => $confirm_row,
 	);
