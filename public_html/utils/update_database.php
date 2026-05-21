@@ -726,6 +726,98 @@
 			// Non-fatal — admin can run "Scan now" from /admin/admin_seo_pages
 		}
 
+		// Step: Agent Files Template Check
+		// Reconcile customer-baseline rows against the shipped template
+		// (`maintenance_scripts/install_tools/default_agents_template.md`).
+		// See specs/agent_files_upgrade_strategy.md for the detection rules.
+		echo "<br>\n<strong>Agent Files Template Check</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('data/agent_files_class.php'));
+
+			list($template_content, $template_hash) = AgentFile::load_shipped_template();
+			if ($template_hash === null) {
+				echo "  ⚠ Template file missing or unreadable — skipping check<br>\n";
+			} else {
+				$baseline_rows = new MultiAgentFile(array(
+					'deleted' => false,
+					'name'    => AgentFile::CUSTOMER_BASELINE_NAME,
+					'candidates_only' => false, // active rows only
+				));
+				$baseline_rows->load();
+
+				$auto_upgraded = 0;
+				$baseline_bumped = 0;
+				$candidates_created = 0;
+				$candidates_rolled = 0;
+				$skipped_legacy = 0;
+				$skipped_in_sync = 0;
+
+				foreach ($baseline_rows as $row) {
+					$row_baseline = $row->get('agf_template_baseline_hash');
+					$content_hash = AgentFile::hash_content($row->get('agf_content'));
+
+					// 1. Legacy row (no baseline tracking) — skip.
+					if (!$row_baseline) {
+						$skipped_legacy++;
+						continue;
+					}
+
+					// 2. Template unchanged since this row's baseline.
+					if ($template_hash === $row_baseline) {
+						$skipped_in_sync++;
+						continue;
+					}
+
+					// 3. Content already matches the new template byte-for-byte
+					//    (admin pasted in the template manually). Just bump baseline.
+					if ($template_hash === $content_hash) {
+						$row->set('agf_template_baseline_hash', $template_hash);
+						$row->save();
+						$baseline_bumped++;
+						continue;
+					}
+
+					// 4. Content matches baseline — admin hasn't edited.
+					//    Replace content with new template; bump baseline.
+					if ($content_hash === $row_baseline) {
+						$row->set('agf_content', $template_content);
+						$row->set('agf_template_baseline_hash', $template_hash);
+						$row->save();
+						$auto_upgraded++;
+						continue;
+					}
+
+					// 5. Edited + new template — rolling candidate.
+					$candidate = $row->current_candidate();
+					if ($candidate) {
+						$candidate->set('agf_content', $template_content);
+						$candidate->set('agf_template_baseline_hash', $template_hash);
+						$candidate->save();
+						$candidates_rolled++;
+					} else {
+						$new = new AgentFile(NULL);
+						$new->set('agf_name', 'Upgrade candidate for #' . (int)$row->key);
+						$new->set('agf_target_filenames', json_encode(array()));
+						$new->set('agf_content', $template_content);
+						$new->set('agf_template_baseline_hash', $template_hash);
+						$new->set('agf_candidate_for', (int)$row->key);
+						$new->save();
+						$candidates_created++;
+					}
+				}
+
+				echo "✓ Agent template check: "
+					. $auto_upgraded . " auto-upgraded, "
+					. $candidates_created . " candidate(s) created, "
+					. $candidates_rolled . " candidate(s) rolled forward, "
+					. $baseline_bumped . " baseline(s) bumped, "
+					. $skipped_legacy . " legacy row(s) skipped, "
+					. $skipped_in_sync . " already in sync<br>\n";
+			}
+		} catch (\Throwable $e) {
+			echo "⚠️  Agent template check failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Step: Regenerate agent files (CLAUDE.md, etc.) from the database.
 		// agf_agent_files is the source of truth — re-write any row that has been
 		// previously flushed to disk so post-upgrade the on-disk files match the DB.

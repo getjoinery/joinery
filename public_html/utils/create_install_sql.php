@@ -319,17 +319,30 @@ if (file_exists($agent_template_path)) {
     if ($agent_template_content === false) {
         echo "   WARNING: Could not read default_agents_template.md — skipping agent file seed\n";
     } else {
+        // Compute normalized SHA-256 so the upgrade template-check step can
+        // recognise this row as in-sync with the shipping template on day one.
+        // Normalization here must match AgentFile::normalize_content() exactly.
+        $normalized = str_replace(array("\r\n", "\r"), "\n", $agent_template_content);
+        $lines = explode("\n", $normalized);
+        foreach ($lines as $i => $line) {
+            $lines[$i] = rtrim($line, " \t");
+        }
+        $normalized = implode("\n", $lines);
+        $baseline_hash = hash('sha256', $normalized);
+
         $agent_file_sql = "-- Customer baseline agent file row.\n"
             . "-- agf_last_written_time is NULL — upgrade regenerate skips never-written rows,\n"
             . "-- so the customer must explicitly click 'Write to disk' in admin to opt in.\n"
-            . "INSERT INTO public.agf_agent_files (agf_name, agf_target_filenames, agf_content, agf_create_time)\n"
+            . "-- agf_template_baseline_hash records which template version seeded this row,\n"
+            . "-- so update_database can detect later upgrades and surface them as candidates.\n"
+            . "INSERT INTO public.agf_agent_files (agf_name, agf_target_filenames, agf_content, agf_template_baseline_hash, agf_create_time)\n"
             . "VALUES ('Customer baseline', '[\"CLAUDE.md\"]'::jsonb, \$agf\$"
             . $agent_template_content
-            . "\$agf\$, now());\n\n";
+            . "\$agf\$, '" . $baseline_hash . "', now());\n\n";
 
         $agent_file = $temp_dir . '/agent_file.sql';
         file_put_contents($agent_file, $agent_file_sql);
-        echo "   Generated agent file row (" . strlen($agent_template_content) . " bytes from template)\n";
+        echo "   Generated agent file row (" . strlen($agent_template_content) . " bytes from template, baseline_hash=" . substr($baseline_hash, 0, 12) . "...)\n";
     }
 } else {
     echo "   WARNING: default_agents_template.md not found at $agent_template_path — skipping agent file seed\n";
