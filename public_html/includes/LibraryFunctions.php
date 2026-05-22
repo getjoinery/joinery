@@ -1346,6 +1346,16 @@ class LibraryFunctions {
 
 		return $functions;
 	}
+
+	// Rewrite YouTube embed URLs to use youtube-nocookie.com so iframes play
+	// without third-party cookies — required for Safari and other privacy browsers.
+	public static function rewrite_youtube_embeds($html) {
+		return str_replace(
+			'https://www.youtube.com/embed/',
+			'https://www.youtube-nocookie.com/embed/',
+			$html
+		);
+	}
 }
 
 /**

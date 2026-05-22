@@ -29,7 +29,7 @@
 				</div>
 			</header>
 			<div class="entry-content">
-				<?php echo $post->get('pst_body'); ?>
+				<?php echo LibraryFunctions::rewrite_youtube_embeds($post->get('pst_body')); ?>
 			</div>
 		</article>
 	</div>
