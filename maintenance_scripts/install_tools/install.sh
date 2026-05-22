@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-#VERSION 2.20 - Bake the inbound mail stack (postfix, postfix-pgsql, opendkim,
-#               opendkim-tools) into the base image via do_server_setup, so it
-#               survives container rebuilds (spec mail_stack_container_persistence).
-#               BASE_IMAGE_VERSION bumped to 1.1.
+#VERSION 2.21 - Add www redirect vhost to all generated proxy configs so that
+#               www.domain requests redirect to https://domain instead of
+#               falling through to the default vhost (wrong site).
+#               Extracted write_proxy_conf() helper to avoid duplicating the
+#               vhost template across three code paths.
 #VERSION 2.19 - Fix domain argument parsing: when no password is given and DOMAIN_NAME is already
 #               set, a port-like arg (all digits) now correctly goes to PORT instead of
 #               overwriting DOMAIN_NAME (bug: ./install.sh -y site foo 1.2.3.4 8080 set webDir=8080).
@@ -269,6 +270,36 @@ setup_ssl_baremetal() {
     fi
 }
 
+# Write {sitename}-proxy.conf with a main proxy vhost and a www redirect vhost.
+# Args: sitename, domain, port, x_forwarded_proto ("http" or "https")
+write_proxy_conf() {
+    local sitename="$1"
+    local domain="$2"
+    local port="$3"
+    local proto="$4"
+
+    cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
+<VirtualHost *:80>
+    ServerName ${domain}
+
+    ProxyPreserveHost On
+    ProxyRequests Off
+    ProxyPass / http://127.0.0.1:${port}/
+    ProxyPassReverse / http://127.0.0.1:${port}/
+
+    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
+    RequestHeader set X-Forwarded-Proto "${proto}"
+</VirtualHost>
+
+<VirtualHost *:80>
+    ServerName www.${domain}
+    RewriteEngine On
+    RewriteRule ^(.*)$ https://${domain}\$1 [R=301,L]
+</VirtualHost>
+EOF
+}
+
 # Set up reverse proxy with SSL for Docker site
 setup_ssl_docker_proxy() {
     local sitename="$1"
@@ -292,20 +323,7 @@ setup_ssl_docker_proxy() {
         print_info "Creating HTTP proxy for Cloudflare origin connection..."
 
         # Create HTTP proxy config for Cloudflare
-        cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
-<VirtualHost *:80>
-    ServerName ${domain}
-
-    ProxyPreserveHost On
-    ProxyRequests Off
-    ProxyPass / http://127.0.0.1:${port}/
-    ProxyPassReverse / http://127.0.0.1:${port}/
-
-    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-Proto "https"
-</VirtualHost>
-EOF
+        write_proxy_conf "$sitename" "$domain" "$port" "https"
 
         a2ensite "${sitename}-proxy.conf" > /dev/null
         systemctl reload apache2
@@ -327,20 +345,7 @@ EOF
         print_info "Creating HTTP-only proxy for now"
 
         # Create HTTP-only proxy config
-        cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
-<VirtualHost *:80>
-    ServerName ${domain}
-
-    ProxyPreserveHost On
-    ProxyRequests Off
-    ProxyPass / http://127.0.0.1:${port}/
-    ProxyPassReverse / http://127.0.0.1:${port}/
-
-    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-Proto "http"
-</VirtualHost>
-EOF
+        write_proxy_conf "$sitename" "$domain" "$port" "http"
 
         a2ensite "${sitename}-proxy.conf" > /dev/null
         systemctl reload apache2
@@ -350,20 +355,7 @@ EOF
     fi
 
     # Create proxy config (certbot will add SSL)
-    cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
-<VirtualHost *:80>
-    ServerName ${domain}
-
-    ProxyPreserveHost On
-    ProxyRequests Off
-    ProxyPass / http://127.0.0.1:${port}/
-    ProxyPassReverse / http://127.0.0.1:${port}/
-
-    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-Proto "http"
-</VirtualHost>
-EOF
+    write_proxy_conf "$sitename" "$domain" "$port" "http"
 
     a2ensite "${sitename}-proxy.conf" > /dev/null
     systemctl reload apache2
