@@ -229,6 +229,14 @@ class SubscriptionTier extends SystemBase {
                 );
             } catch (Exception $e) { /* notification system not available */ }
 
+            // Admin alert: a subscription lapsed.
+            require_once(PathHelper::getIncludePath('includes/Notify.php'));
+            Notify::fire('subscription.expired', array(
+                'title' => 'Subscription expired',
+                'body'  => 'A ' . $current_tier->get('sbt_name') . ' subscription has expired.',
+                'link'  => '/admin/admin_subscription_tiers',
+            ));
+
             self::clearUserCache($user_id);
         }
     }

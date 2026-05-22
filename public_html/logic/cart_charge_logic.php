@@ -342,6 +342,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$order->set('ord_status', Order::STATUS_ERROR);
 				$order->set('ord_error', substr($e->getMessage(), 0, 250));
 				$order->save();
+
+				require_once(PathHelper::getIncludePath('includes/Notify.php'));
+				Notify::fire('payment.failed', array(
+					'title' => 'Checkout payment failed',
+					'body'  => 'A card charge failed at checkout (Order #' . $order->key . '): '
+						. substr($e->getMessage(), 0, 160),
+					'link'  => '/admin/admin_orders',
+				));
+
 				return _checkout_error($e->getMessage());
 			}
 			catch (StripeHelperException $e) {
@@ -761,6 +770,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 						null
 					);
 				} catch (Exception $e) { /* notification system not available */ }
+
+				//Admin alert: event registration.
+				require_once(PathHelper::getIncludePath('includes/Notify.php'));
+				Notify::fire('event.registered', array(
+					'title' => 'Event registration',
+					'body'  => $billing_user->display_name() . ' registered for ' . $product->get('pro_name') . '.',
+					'link'  => '/admin/admin_events',
+					'source_user_id' => $user->key,
+				));
 			}
 
 			if($product_version->is_subscription()){
@@ -776,30 +794,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					);
 				} catch (Exception $e) { /* notification system not available */ }
 
-				//Operator notification email for new subscription.
-				if($settings->get_setting('subscription_notification_emails')){
-					$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
-					foreach($notify_emails as $notify_email){
-						$notify_email = trim($notify_email);
-						if(!$notify_email) continue;
-						try {
-							$notify_user = User::GetByEmail($notify_email);
-							if(!$notify_user) continue;
-							$sub_id = isset($summary['subscription_result']['id']) ? $summary['subscription_result']['id'] : '';
-							$body = 'Subscription '.$sub_id.' (Order '.$order->key.') was started by '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
-							$email_inner_template = $settings->get_setting('individual_email_inner_template');
-							EmailSender::sendTemplate($email_inner_template,
-								$notify_user->get('usr_email'),
-								[
-									'subject' => 'New Subscription',
-									'body' => $body,
-									'recipient' => $notify_user->export_as_array()
-								]
-							);
-						}
-						catch (Exception $e) { /* DO NOTHING */ }
-					}
-				}
+				//Admin alert: new subscription.
+				require_once(PathHelper::getIncludePath('includes/Notify.php'));
+				Notify::fire('subscription.started', array(
+					'title' => 'New subscription: ' . $product->get('pro_name'),
+					'body'  => $billing_user->display_name() . ' (' . $billing_user->get('usr_email')
+						. ') started a subscription — Order #' . $order->key . '.',
+					'link'  => '/admin/admin_orders',
+					'source_user_id' => $user->key,
+				));
 			}
 			else{
 				//In-app notification: purchase confirmed.
@@ -814,29 +817,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					);
 				} catch (Exception $e) { /* notification system not available */ }
 
-				//Operator notification email for single purchase.
-				if($settings->get_setting('single_purchase_notification_emails')){
-					$notify_emails = explode(',', $settings->get_setting('single_purchase_notification_emails'));
-					foreach($notify_emails as $notify_email){
-						$notify_email = trim($notify_email);
-						if(!$notify_email) continue;
-						try {
-							$notify_user = User::GetByEmail($notify_email);
-							if(!$notify_user) continue;
-							$body = 'Order '.$order->key.' was charged - user: '.$billing_user->display_name().' '.$billing_user->get('usr_email').'.';
-							$email_inner_template = $settings->get_setting('individual_email_inner_template');
-							EmailSender::sendTemplate($email_inner_template,
-								$notify_user->get('usr_email'),
-								[
-									'subject' => 'Order Charged',
-									'body' => $body,
-									'recipient' => $notify_user->export_as_array()
-								]
-							);
-						}
-						catch (Exception $e) { /* DO NOTHING */ }
-					}
-				}
+				//Admin alert: completed sale.
+				require_once(PathHelper::getIncludePath('includes/Notify.php'));
+				Notify::fire('purchase.completed', array(
+					'title' => 'Sale completed: ' . $product->get('pro_name'),
+					'body'  => $billing_user->display_name() . ' (' . $billing_user->get('usr_email')
+						. ') completed a purchase — Order #' . $order->key . '.',
+					'link'  => '/admin/admin_orders',
+					'source_user_id' => $user->key,
+				));
 			}
 		}
 

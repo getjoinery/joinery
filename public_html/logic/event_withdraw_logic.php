@@ -39,6 +39,14 @@ function event_withdraw_logic(array $input): LogicResult {
 				));
 				$event_registrant->remove();
 
+				require_once(PathHelper::getIncludePath('includes/Notify.php'));
+				Notify::fire('event.withdrawn', array(
+					'title' => 'Event withdrawal: ' . $event->get('evt_name'),
+					'body'  => 'A registrant withdrew from ' . $event->get('evt_name') . '.',
+					'link'  => '/admin/admin_events',
+					'source_user_id' => $event_registrant->get('evr_usr_user_id'),
+				));
+
 				$msgtxt = 'You have now withdrawn from ' . $event->get('evt_name') . '.';
 				$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/account/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
 				$session->save_message($message);

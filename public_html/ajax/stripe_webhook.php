@@ -118,6 +118,13 @@ try {
                 $order_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
                 $order_item->save();
 
+                require_once(PathHelper::getIncludePath('includes/Notify.php'));
+                Notify::fire('subscription.cancelled', array(
+                    'title' => 'Subscription cancelled',
+                    'body'  => 'A subscription was cancelled (Stripe subscription ' . $subscription_id . ').',
+                    'link'  => '/admin/admin_subscription_tiers',
+                ));
+
                 // Handle tier expiration
                 $user_id = $order_item->get('odi_usr_user_id');
                 if ($user_id) {
@@ -169,6 +176,13 @@ try {
                     $order_item = $order_items->get(0);
                     $order_item->set('odi_subscription_status', 'past_due');
                     $order_item->save();
+
+                    require_once(PathHelper::getIncludePath('includes/Notify.php'));
+                    Notify::fire('subscription.payment_failed', array(
+                        'title' => 'Subscription payment failed',
+                        'body'  => 'A recurring subscription payment failed (Stripe subscription ' . $subscription_id . ').',
+                        'link'  => '/admin/admin_stripe_orders',
+                    ));
 
                     // Send payment failure email (with dedup)
                     $user_id = $order_item->get('odi_usr_user_id');
