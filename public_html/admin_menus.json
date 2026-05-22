@@ -447,6 +447,14 @@
             "order": 6,
             "permission": 5,
             "parent": "statistics"
+        },
+        {
+            "slug": "notification-preferences",
+            "title": "Notification Prefs",
+            "url": "admin_notification_preferences",
+            "order": 8,
+            "permission": 9,
+            "parent": "system"
         }
     ],
     "profileMenu": [
