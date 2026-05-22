@@ -2,8 +2,6 @@
 function post_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailTemplate.php'));
-	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 	require_once(PathHelper::getIncludePath('data/posts_class.php'));
 	require_once(PathHelper::getIncludePath('data/comments_class.php'));
 
@@ -54,30 +52,15 @@ function post_logic(array $input): LogicResult {
 			$new_comment->save();
 		}
 
-		//SEND NOTIFICATION
-		if($settings->get_setting('comment_notification_emails')){
-			$notify_emails = explode(',', $settings->get_setting('comment_notification_emails'));
-			foreach($notify_emails as $notify_email){
-				try {
-					$notify_user = User::GetByEmail($notify_email);
-					$body = '<p>Comment '.$new_comment->key.' was added by "'.htmlspecialchars($new_comment->get('cmt_author_name')).'".</p>';
-					$body .= '<p>Link: <a href="'. LibraryFunctions::get_absolute_url($post->get_url()).'">' . LibraryFunctions::get_absolute_url($post->get_url()).'</a>';
-					$email_inner_template = $settings->get_setting('individual_email_inner_template');
-					EmailSender::sendTemplate($email_inner_template,
-						$notify_user->get('usr_email'),
-						[
-							'subject' => 'New Comment',
-							'body' => $body,
-							'recipient' => $notify_user->export_as_array()
-						]
-					);
-				}					
-				catch (Exception $e) {
-					//DO NOTHING
-					$error = "";
-				}
-			}
-		}
+		// Notify admins subscribed to the comment.posted hook point.
+		require_once(PathHelper::getIncludePath('includes/Notify.php'));
+		Notify::fire('comment.posted', array(
+			'title' => 'New comment by ' . $new_comment->get('cmt_author_name'),
+			'body'  => 'On "' . $post->get('pst_title') . '": '
+				. mb_substr(strip_tags((string)$new_comment->get('cmt_body')), 0, 180),
+			'link'  => $post->get_url(),
+			'source_user_id' => $new_comment->get('cmt_usr_user_id'),
+		));
 
 		return LogicResult::redirect($_SERVER['REQUEST_URI']);
 	}

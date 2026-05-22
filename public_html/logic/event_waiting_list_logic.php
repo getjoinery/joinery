@@ -98,6 +98,15 @@ function event_waiting_list_logic(array $input): LogicResult {
 		}
 		else{
 			$waiting_list->save();
+
+			require_once(PathHelper::getIncludePath('includes/Notify.php'));
+			Notify::fire('event.waitlisted', array(
+				'title' => 'Waiting list join: ' . $event->get('evt_name'),
+				'body'  => 'Someone joined the waiting list for ' . $event->get('evt_name') . '.',
+				'link'  => '/admin/admin_events',
+				'source_user_id' => $user->key,
+			));
+
 			$page_vars['display_message'] = 'You have been added to the '.$event->get('evt_name').' waiting list.';
 			$page_vars['message_type'] = 'success';
 		}

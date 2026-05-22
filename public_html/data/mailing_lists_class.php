@@ -171,6 +171,15 @@ function get_subscribed_users($return='object'){
 			
 			$status = $this->sync_subscribe($usr_user_id);
 		}
+
+		require_once(PathHelper::getIncludePath('includes/Notify.php'));
+		Notify::fire('newsletter.signup', array(
+			'title' => 'Newsletter signup: ' . $this->get('mlt_name'),
+			'body'  => 'A user subscribed to the "' . $this->get('mlt_name') . '" mailing list.',
+			'link'  => '/admin/admin_mailing_lists',
+			'source_user_id' => $usr_user_id,
+		));
+
 		return $status;
 	}
 

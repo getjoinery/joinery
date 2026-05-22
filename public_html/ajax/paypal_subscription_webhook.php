@@ -127,6 +127,13 @@ try {
             $order_item->set('odi_subscription_cancel_at_period_end', true);
             $order_item->save();
 
+            require_once(PathHelper::getIncludePath('includes/Notify.php'));
+            Notify::fire('subscription.cancelled', array(
+                'title' => 'Subscription cancelled',
+                'body'  => 'A PayPal subscription was cancelled (subscription ' . $subscription_id . ').',
+                'link'  => '/admin/admin_subscription_tiers',
+            ));
+
             // Trigger tier validation
             $user_id = $order_item->get('odi_usr_user_id');
             if ($user_id) {
@@ -178,6 +185,13 @@ try {
             $order_item->set('odi_subscription_status', 'past_due');
             $order_item->save();
             error_log("PayPal webhook: subscription $subscription_id payment failed");
+
+            require_once(PathHelper::getIncludePath('includes/Notify.php'));
+            Notify::fire('subscription.payment_failed', array(
+                'title' => 'Subscription payment failed',
+                'body'  => 'A recurring PayPal subscription payment failed (subscription ' . $subscription_id . ').',
+                'link'  => '/admin/admin_orders',
+            ));
 
             // Send payment failure email (with dedup) and admin notification
             $user_id = $order_item->get('odi_usr_user_id');
