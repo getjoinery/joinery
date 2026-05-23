@@ -325,7 +325,7 @@ Nominatim accepts any combination of these. It returns the best match for whatev
 
 **Required headers:**
 ```
-User-Agent: Joinery/1.0 (https://joinerytest.site; admin@joinerytest.site)
+User-Agent: Joinery/1.0 (https://dev.getjoinery.com; admin@dev.getjoinery.com)
 ```
 Nominatim requires a valid User-Agent identifying the application. Requests without one may be blocked.
 

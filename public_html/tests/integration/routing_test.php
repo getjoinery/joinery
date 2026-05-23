@@ -104,7 +104,7 @@ class HttpTester {
             self::$base_url = $protocol . '://' . $_SERVER['HTTP_HOST'];
         } else {
             // Try to get from settings or use fallback
-            $host = $settings->get_setting('site_domain') ?? 'joinerytest.site';
+            $host = $settings->get_setting('site_domain') ?? 'dev.getjoinery.com';
             self::$base_url = 'https://' . $host;
         }
         

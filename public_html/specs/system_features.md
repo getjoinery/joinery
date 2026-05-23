@@ -432,7 +432,7 @@ This inventory is the master checklist for system testing coverage. Each feature
 - [ ] Mailgun inbound webhook processing
 - [ ] HMAC signature validation
 - [ ] Email storage in `iem_inbound_emails`
-- [ ] Testing via `*@inbox.joinerytest.site`
+- [ ] Testing via `*@inbox.dev.getjoinery.com`
 
 ### 6.8 Email Analytics
 - [ ] Email statistics dashboard

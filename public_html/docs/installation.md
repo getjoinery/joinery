@@ -29,7 +29,7 @@ Docker:
 
 ```bash
 mkdir -p /tmp/joinery && \
-  curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
+  curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh docker && \
   sudo ./install.sh site mysite example.com 8080
@@ -39,7 +39,7 @@ Bare-metal:
 
 ```bash
 mkdir -p /tmp/joinery && \
-  curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
+  curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh server && \
   sudo ./install.sh site mysite example.com

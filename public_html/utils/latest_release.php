@@ -6,8 +6,8 @@
  * Used by one-liner install commands to fetch the latest version.
  *
  * Usage:
- *   curl -sL https://joinerytest.site/utils/latest_release | tar xz
- *   curl -LO https://joinerytest.site/utils/latest_release
+ *   curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz
+ *   curl -LO https://dev.getjoinery.com/utils/latest_release
  *
  * @version 1.0
  */

@@ -428,7 +428,7 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 | `baseDir` | Base directory (e.g., `/var/www/html/`) |
 | `site_template` | Site directory name (e.g., `joinerytest`) |
 | `system_version` | Current version (e.g., `3.25`) |
-| `upgrade_source` | URL of upgrade server to download from (e.g., `https://joinerytest.site`) |
+| `upgrade_source` | URL of upgrade server to download from (e.g., `https://dev.getjoinery.com`) |
 | `composerAutoLoad` | Composer vendor path |
 
 **Note:** A site acts as an upgrade server when the **Server Manager** plugin is active. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
