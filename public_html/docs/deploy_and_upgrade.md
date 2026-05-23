@@ -370,6 +370,27 @@ After migrations and plugin sync, `update_database` regenerates DB-managed agent
 
 A drift guard protects out-of-band edits: if a target file on disk was changed since it was last written (its sha256 no longer matches `agf_last_written_hash`), the row is **skipped with a warning** rather than overwritten. Resolve a skipped row from `/admin/admin_agent_files` — writing from there prompts for confirmation and backs the on-disk copy up as `<filename>.old` before overwriting. See `specs/implemented/agent_files_management.md` for the full design.
 
+### Agent File Upgrades (Customer Baseline)
+
+The `default_agents_template.md` file ships inside the upgrade tarball. When `update_database` runs it compares the template's normalized SHA-256 against each Customer baseline row's `agf_template_baseline_hash`:
+
+| Row state | Result |
+|---|---|
+| Baseline hash is null (pre-feature install) | Skipped — no surprise updates |
+| Hash matches template | Already up to date, no action |
+| Row content matches new template | Admin hand-applied the update; baseline hash bumped silently |
+| Row content unchanged from its baseline | **Auto-upgraded** in place; new content and hash written; regeneration step picks it up |
+| Row edited *and* template changed | A **candidate row** is created (or rolled forward if one already exists) |
+
+The candidate appears in `/admin/admin_agent_files` with a **"Candidate for #N"** badge and an inline panel:
+
+> **An updated agent template is available.** [Compare] [Switch to new version]
+
+- **Compare** opens a read-only side-by-side view of the current content vs the candidate.
+- **Switch to new version** moves target filenames from the active row to the candidate, archives the previously-active row (name prefixed `Archived — `, target filenames cleared), and writes the new content to disk.
+
+There is at most one candidate per active row. Subsequent template versions roll the same candidate forward — the admin always sees "the latest upgrade is available," never a backlog.
+
 ---
 
 ## DeploymentHelper API
