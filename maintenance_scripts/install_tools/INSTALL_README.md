@@ -28,14 +28,14 @@ This guide covers deploying Joinery on both Docker containers and bare-metal ser
 ```bash
 # Docker - download and install latest version (auto-generates secure password)
 mkdir -p /tmp/joinery && \
-  curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
+  curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh docker && \
   sudo ./install.sh site mysite example.com 8080
 
 # Bare-metal - download and install latest version (auto-generates secure password)
 mkdir -p /tmp/joinery && \
-  curl -sL https://joinerytest.site/utils/latest_release | tar xz -C /tmp/joinery && \
+  curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
   sudo ./install.sh server && \
   sudo ./install.sh site mysite example.com
@@ -367,7 +367,7 @@ By default, fresh installations include only the core application. Use `--themes
 ```
 
 The `--themes` flag:
-- Downloads theme/plugin archives from the `upgrade_source` URL (default: `https://joinerytest.site`)
+- Downloads theme/plugin archives from the `upgrade_source` URL (default: `https://dev.getjoinery.com`)
 - Installs all stock themes (falcon, phillyzouk, etc.)
 - Installs all stock plugins (bookings, controld, etc.)
 - Uses the same distribution system as `upgrade.php`

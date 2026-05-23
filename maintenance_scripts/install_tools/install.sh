@@ -571,7 +571,7 @@ deploy_application_code() {
 #==============================================================================
 
 # Default upgrade server (can be overridden via --upgrade-server)
-UPGRADE_SERVER="${UPGRADE_SERVER:-https://joinerytest.site}"
+UPGRADE_SERVER="${UPGRADE_SERVER:-https://dev.getjoinery.com}"
 
 # Download themes and plugins from distribution server
 # Usage: download_themes_and_plugins TARGET_DIR [THEMES_LIST]

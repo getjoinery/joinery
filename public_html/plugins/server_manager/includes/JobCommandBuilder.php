@@ -1282,7 +1282,7 @@ class JobCommandBuilder {
 		// Control plane URL — where the target fetches the Joinery release tarball from.
 		// Uses the webDir config setting (our site's own hostname).
 		$settings = Globalvars::get_instance();
-		$webdir = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'] ?? 'joinerytest.site';
+		$webdir = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'] ?? 'dev.getjoinery.com';
 		$release_url = "https://{$webdir}/utils/latest_release";
 		$release_url_esc = escapeshellarg($release_url);
 
