@@ -239,68 +239,188 @@ check_dns_points_here() {
     return 1
 }
 
-# Set up SSL for bare-metal site
+# Set up SSL for bare-metal site.
+# The bare-metal vhost template (default_virtualhost.conf v2+) already declares
+# the :443 vhost pointing at /etc/letsencrypt/live/${domain}/. We just need a
+# cert at that path. provision_origin_cert handles all three cases (LE HTTP-01,
+# LE DNS-01, self-signed fallback) and never fails the install.
 setup_ssl_baremetal() {
     local domain="$1"
 
-    # Skip certbot if behind Cloudflare proxy (Cloudflare handles SSL)
-    if [ "$CLOUDFLARE_PROXY" -eq 1 ]; then
-        print_info "Skipping Let's Encrypt - Cloudflare provides edge SSL"
-        print_info "Configure Cloudflare SSL/TLS settings for origin encryption if needed"
-        return 0
-    fi
+    print_step "Provisioning origin SSL certificate for $domain..."
 
-    print_step "Setting up SSL certificate for $domain..."
+    provision_origin_cert "$domain"
 
-    # Check DNS first
-    if ! check_dns_points_here "$domain"; then
-        print_warning "Skipping SSL - DNS not configured"
-        print_info "Run 'sudo certbot --apache -d $domain' once DNS is pointing to this server"
-        return 1
-    fi
-
-    # Run certbot
-    if certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email; then
-        print_success "SSL certificate installed for $domain"
-        return 0
+    # Reload Apache so the :443 vhost picks up the new cert.
+    if apache2ctl configtest > /dev/null 2>&1; then
+        systemctl reload apache2 || true
     else
-        print_warning "SSL setup failed - site will work over HTTP"
-        print_info "Run 'sudo certbot --apache -d $domain' to retry"
-        return 1
+        print_warning "apache2ctl configtest failed — review the vhost manually"
     fi
 }
 
-# Write {sitename}-proxy.conf with a main proxy vhost and a www redirect vhost.
-# Args: sitename, domain, port, x_forwarded_proto ("http" or "https")
-write_proxy_conf() {
+#==============================================================================
+# UNIVERSAL VHOST + CERT PROVISIONING
+#
+# Every site installed by install.sh ends up with the same Apache vhost shape:
+# port 80 with a CF-Visitor-guarded HTTP->HTTPS redirect, port 443 with SSL
+# pointing at a fixed cert path. Whatever cert exists at that path (LE via
+# HTTP challenge, LE via DNS challenge, or self-signed fallback) makes the
+# vhost load cleanly. See specs/implemented/universal_apache_vhost.md.
+#==============================================================================
+
+# Emit the universal vhost into a named conf file by sed-substituting one of
+# the template files in install_tools/ (single source of truth per mode):
+#
+#   default_virtualhost.conf  — bare-metal sites (DocumentRoot + Directory)
+#   default_proxy_vhost.conf  — Docker reverse-proxy sites (ProxyPass)
+#
+# Args:
+#   $1 sitename       (filename base; conf is written to sites-available/${sitename}.conf)
+#   $2 domain         (ServerName, cert filename)
+#   $3 mode           ("baremetal" or "proxy")
+#   $4 mode_argument  (baremetal: ignored (template uses {{SITE_NAME}}); proxy: localhost port)
+write_universal_vhost() {
     local sitename="$1"
     local domain="$2"
-    local port="$3"
-    local proto="$4"
+    local mode="$3"
+    local mode_arg="$4"
 
-    cat > "/etc/apache2/sites-available/${sitename}-proxy.conf" << EOF
-<VirtualHost *:80>
-    ServerName ${domain}
+    local conf="/etc/apache2/sites-available/${sitename}.conf"
+    local template
 
-    ProxyPreserveHost On
-    ProxyRequests Off
-    ProxyPass / http://127.0.0.1:${port}/
-    ProxyPassReverse / http://127.0.0.1:${port}/
+    case "$mode" in
+        baremetal)
+            template="${SCRIPT_DIR:-${BASH_SOURCE%/*}}/default_virtualhost.conf"
+            ;;
+        proxy)
+            template="${SCRIPT_DIR:-${BASH_SOURCE%/*}}/default_proxy_vhost.conf"
+            ;;
+        *)
+            print_error "write_universal_vhost: unknown mode '$mode'"
+            return 1
+            ;;
+    esac
 
-    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-Proto "${proto}"
-</VirtualHost>
+    if [ ! -f "$template" ]; then
+        print_error "write_universal_vhost: template not found at $template"
+        return 1
+    fi
 
-<VirtualHost *:80>
-    ServerName www.${domain}
-    RewriteEngine On
-    RewriteRule ^(.*)$ https://${domain}\$1 [R=301,L]
-</VirtualHost>
-EOF
+    # Substitute placeholders into the template.
+    local server_ip
+    server_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -z "$server_ip" ] && server_ip="*"
+
+    sed -e "s|{{DOMAIN_NAME}}|${domain}|g" \
+        -e "s|{{SITE_NAME}}|${sitename}|g" \
+        -e "s|{{SERVER_IP}}|${server_ip}|g" \
+        -e "s|{{PORT}}|${mode_arg}|g" \
+        "$template" > "$conf"
+
+    # Enable required modules for both modes; idempotent.
+    a2enmod ssl headers rewrite > /dev/null 2>&1 || true
+    if [ "$mode" = "proxy" ]; then
+        a2enmod proxy proxy_http > /dev/null 2>&1 || true
+    fi
+
+    a2ensite "${sitename}.conf" > /dev/null 2>&1 || true
 }
 
-# Set up reverse proxy with SSL for Docker site
+# Detect the DNS provider for a domain by inspecting its zone NS records.
+# Echoes a short provider tag (cloudflare/route53/linode/digitalocean) or
+# nothing if the provider isn't recognised.
+detect_dns_provider() {
+    local domain="$1"
+    # Walk up to the registrable zone if needed; `dig +short NS` on a subdomain
+    # often returns nothing, so try the apex two-label form as a fallback.
+    local ns
+    ns=$(dig +short NS "$domain" @1.1.1.1 2>/dev/null | head -1)
+    if [ -z "$ns" ]; then
+        local apex
+        apex=$(echo "$domain" | awk -F. '{print $(NF-1)"."$NF}')
+        ns=$(dig +short NS "$apex" @1.1.1.1 2>/dev/null | head -1)
+    fi
+    [ -z "$ns" ] && return 0
+
+    case "$ns" in
+        *.ns.cloudflare.com.|*.ns.cloudflare.com)   echo "cloudflare" ;;
+        *awsdns*)                                   echo "route53" ;;
+        ns[1-5].linode.com.|ns[1-5].linode.com)     echo "linode" ;;
+        ns[1-3].digitalocean.com.|ns[1-3].digitalocean.com) echo "digitalocean" ;;
+        *) ;;
+    esac
+}
+
+# Provision an origin LE cert. Two-step decision tree:
+#
+#   1. Domain resolves to this server -> certbot --apache HTTP-01.
+#   2. Domain resolves elsewhere -> DNS-01 via auto-detected provider plugin
+#      (if credentials are present at /etc/letsencrypt/<provider>.ini).
+#
+# If neither path issues a cert, the function exits silently. The vhost
+# template's <IfFile> guard means the :443 vhost simply doesn't activate,
+# and any TLS-terminating proxy in front (e.g. Cloudflare) handles HTTPS at
+# the edge. Origin SSL is opt-in: drop a credential file and re-run
+# `sysadmin_tools/setup_ssl.sh <domain>` whenever you want it.
+provision_origin_cert() {
+    local domain="$1"
+
+    # Ensure certbot is available (HTTP-01 path needs it; DNS-01 plugins extend it).
+    if ! command -v certbot &> /dev/null; then
+        print_info "Installing certbot..."
+        apt-get install -y -qq certbot python3-certbot-apache
+    fi
+
+    local server_ip dns_ip
+    server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+    dns_ip=$(dig +short "$domain" @1.1.1.1 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+
+    # Step 1: direct-to-origin -> HTTP-01.
+    if [ -n "$server_ip" ] && [ -n "$dns_ip" ] && [ "$server_ip" = "$dns_ip" ]; then
+        print_step "Domain ${domain} points at this server — using LE HTTP-01 challenge"
+        if certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --no-redirect; then
+            print_success "Issued LE certificate for ${domain} (HTTP-01)"
+            return 0
+        fi
+        print_warning "HTTP-01 failed; trying DNS-01"
+    fi
+
+    # Step 2: DNS-01 via detected provider.
+    local provider
+    provider=$(detect_dns_provider "$domain")
+    if [ -n "$provider" ]; then
+        local plugin="certbot-dns-${provider}"
+        local cred="/etc/letsencrypt/${provider}.ini"
+        if [ -r "$cred" ]; then
+            if ! dpkg -s "python3-${plugin}" >/dev/null 2>&1 && ! pip3 show "$plugin" >/dev/null 2>&1; then
+                print_info "Installing ${plugin}..."
+                apt-get install -y -qq "python3-${plugin}" 2>/dev/null \
+                    || pip3 install --quiet "$plugin" 2>/dev/null \
+                    || print_warning "Could not auto-install ${plugin}; skipping DNS-01"
+            fi
+            print_step "Domain ${domain} resolves to ${provider}; using DNS-01"
+            if certbot certonly --non-interactive --agree-tos --register-unsafely-without-email \
+                    "--dns-${provider}" "--dns-${provider}-credentials" "$cred" \
+                    -d "$domain"; then
+                print_success "Issued LE certificate for ${domain} (DNS-01 via ${provider})"
+                return 0
+            fi
+            print_warning "DNS-01 via ${provider} failed"
+        else
+            print_info "No origin cert issued for ${domain}."
+            print_info "  Drop credentials at ${cred} and re-run sysadmin_tools/setup_ssl.sh ${domain} to enable origin SSL via DNS-01."
+        fi
+    else
+        print_info "No origin cert issued for ${domain} (no LE challenge path available)."
+    fi
+    return 0
+}
+
+# Set up Docker-container reverse-proxy vhost with SSL.
+# Single code path regardless of front-end posture (CF / direct / other):
+# write the universal proxy vhost (80 + 443, guard, fixed cert path),
+# provision_origin_cert puts whatever cert it can at that path, reload Apache.
 setup_ssl_docker_proxy() {
     local sitename="$1"
     local domain="$2"
@@ -308,66 +428,32 @@ setup_ssl_docker_proxy() {
 
     print_step "Setting up reverse proxy for $domain..."
 
-    # Check if Apache is installed on host
+    # Ensure Apache + required modules are installed/enabled.
     if ! command -v apache2 &> /dev/null; then
-        print_info "Installing Apache for reverse proxy..."
+        print_info "Installing Apache..."
         apt-get update -qq
         apt-get install -y -qq apache2
     fi
-
-    # Enable required modules
     a2enmod proxy proxy_http ssl headers rewrite > /dev/null 2>&1 || true
 
-    # Handle Cloudflare proxy - create HTTP proxy only (Cloudflare handles SSL)
-    if [ "$CLOUDFLARE_PROXY" -eq 1 ]; then
-        print_info "Creating HTTP proxy for Cloudflare origin connection..."
+    # Write the vhost in proxy mode (file: ${sitename}.conf).
+    write_universal_vhost "$sitename" "$domain" "proxy" "$port"
 
-        # Create HTTP proxy config for Cloudflare
-        write_proxy_conf "$sitename" "$domain" "$port" "https"
+    # Apache needs to be running with the vhost loaded before provision_origin_cert
+    # attempts the HTTP-01 challenge. Reload now; the HTTPS half of the vhost will
+    # fail to load (no cert yet) — that's fine, we'll reload again after the cert.
+    apache2ctl configtest > /dev/null 2>&1 || true
+    systemctl reload apache2 2>/dev/null || true
 
-        a2ensite "${sitename}-proxy.conf" > /dev/null
-        systemctl reload apache2
+    # Provision the cert — never fails the install; falls back to self-signed if
+    # neither HTTP-01 nor DNS-01 work.
+    provision_origin_cert "$domain"
 
-        print_success "HTTP proxy configured for Cloudflare origin"
-        print_info "Cloudflare handles SSL at the edge"
-        return 0
-    fi
-
-    # Check if certbot is installed on host (only needed for non-Cloudflare)
-    if ! command -v certbot &> /dev/null; then
-        print_info "Installing Certbot for SSL certificates..."
-        apt-get install -y -qq certbot python3-certbot-apache
-    fi
-
-    # Check DNS first
-    if ! check_dns_points_here "$domain"; then
-        print_warning "Skipping SSL - DNS not configured"
-        print_info "Creating HTTP-only proxy for now"
-
-        # Create HTTP-only proxy config
-        write_proxy_conf "$sitename" "$domain" "$port" "http"
-
-        a2ensite "${sitename}-proxy.conf" > /dev/null
-        systemctl reload apache2
-
-        print_info "Run 'sudo certbot --apache -d $domain' once DNS is pointing to this server"
-        return 1
-    fi
-
-    # Create proxy config (certbot will add SSL)
-    write_proxy_conf "$sitename" "$domain" "$port" "http"
-
-    a2ensite "${sitename}-proxy.conf" > /dev/null
-    systemctl reload apache2
-
-    # Run certbot to add SSL
-    if certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email; then
-        print_success "Reverse proxy with SSL configured for $domain"
-        return 0
+    if apache2ctl configtest > /dev/null 2>&1; then
+        systemctl reload apache2 || true
+        print_success "Reverse proxy + SSL configured for $domain"
     else
-        print_warning "SSL setup failed - proxy will work over HTTP only"
-        print_info "Run 'sudo certbot --apache -d $domain' to retry"
-        return 1
+        print_warning "apache2ctl configtest failed — review the vhost manually"
     fi
 }
 
@@ -2798,6 +2884,12 @@ show_help() {
 #==============================================================================
 # MAIN DISPATCHER
 #==============================================================================
+
+# Allow other scripts (e.g., scripts/setup_ssl.sh) to source this file just to
+# pick up the helper functions, without running the install dispatcher.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+    return 0
+fi
 
 # Parse global flags first (before command)
 while [[ $# -gt 0 ]]; do
