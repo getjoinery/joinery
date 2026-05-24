@@ -32,6 +32,7 @@ class ManagedNode extends SystemBase {
 		'mgn_container_user'      => array('type'=>'varchar(50)'),
 		'mgn_web_root'            => array('type'=>'varchar(500)'),
 		'mgn_site_url'            => array('type'=>'varchar(500)'),
+		'mgn_health_check_url'    => array('type'=>'varchar(500)'),
 		'mgn_joinery_version'     => array('type'=>'varchar(20)'),
 		'mgn_last_status_check'   => array('type'=>'timestamp(6)'),
 		'mgn_last_status_data'    => array('type'=>'jsonb'),

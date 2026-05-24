@@ -24,7 +24,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	$editable_fields = [
 		'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 		'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
-		'mgn_site_url', 'mgn_notes', 'mgn_enabled', 'mgn_skip_joinery_checks',
+		'mgn_site_url', 'mgn_health_check_url', 'mgn_notes', 'mgn_enabled', 'mgn_skip_joinery_checks',
 		'mgn_uptime_enabled', 'mgn_uptime_check_type',
 	];
 
@@ -404,6 +404,12 @@ $formwriter->textinput('mgn_web_root', 'Web Root Path', [
 
 $formwriter->textinput('mgn_site_url', 'Site URL', [
 	'placeholder' => 'e.g., https://empoweredhealthtn.com',
+	'validation' => ['maxlength' => 500],
+]);
+
+$formwriter->textinput('mgn_health_check_url', 'Health check URL', [
+	'placeholder' => 'e.g., https://dns.scrolldaddy.app/health',
+	'helptext' => 'Optional. Absolute URL probed for uptime checks instead of the site root. Use for non-Joinery nodes or services that expose a dedicated health endpoint.',
 	'validation' => ['maxlength' => 500],
 ]);
 

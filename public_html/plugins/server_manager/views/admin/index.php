@@ -325,7 +325,7 @@ function render_node_row($node, $db, $session) {
 		}
 	}
 
-	$api_refreshable = JobCommandBuilder::has_api_creds($node)
+	$api_refreshable = !empty($node->get('mgn_site_url'))
 		&& !in_array($install_state, ['installing', 'install_failed'], true);
 
 	$ssl_state = $node->get('mgn_ssl_state');

@@ -39,35 +39,82 @@ try {
 	exit;
 }
 
-if (!JobCommandBuilder::has_api_creds($node)) {
-	echo json_encode([
-		'ok' => false, 'message' => 'No API credentials configured', 'reason' => 'config',
-	]);
-	exit;
-}
+$use_api = JobCommandBuilder::has_api_creds($node) && !$node->get('mgn_skip_joinery_checks');
 
-$result = JobCommandBuilder::fetch_status_via_api($node, 5);
+if ($use_api) {
+	$result = JobCommandBuilder::fetch_status_via_api($node, 5);
 
-$response = [
-	'ok'         => $result['ok'],
-	'elapsed_ms' => $result['elapsed_ms'],
-	'message'    => $result['message'],
-	'reason'     => $result['reason'],
-];
+	$response = [
+		'ok'         => $result['ok'],
+		'elapsed_ms' => $result['elapsed_ms'],
+		'message'    => $result['message'],
+		'reason'     => $result['reason'],
+	];
 
-if ($result['ok']) {
-	$data = $result['data'];
-	$response['status_color'] = JobCommandBuilder::status_color_for_node($node, $data);
-	$response['version']      = $data['joinery_version'] ?? null;
-	$response['last_check']   = LibraryFunctions::time_ago_or_time(
-		$node->get('mgn_last_status_check'), 'UTC', $session->get_timezone(), 'M j, g:i A'
-	);
+	if ($result['ok']) {
+		$data = $result['data'];
+		$response['status_color'] = JobCommandBuilder::status_color_for_node($node, $data);
+		$response['version']      = $data['joinery_version'] ?? null;
+		$response['last_check']   = LibraryFunctions::time_ago_or_time(
+			$node->get('mgn_last_status_check'), 'UTC', $session->get_timezone(), 'M j, g:i A'
+		);
 
-	$cp_version = LibraryFunctions::get_joinery_version();
-	$response['cp_version']  = $cp_version;
-	$response['version_cmp'] = null;
-	if ($response['version'] && $cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $response['version'])) {
-		$response['version_cmp'] = version_compare($response['version'], $cp_version);
+		$cp_version = LibraryFunctions::get_joinery_version();
+		$response['cp_version']  = $cp_version;
+		$response['version_cmp'] = null;
+		if ($response['version'] && $cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $response['version'])) {
+			$response['version_cmp'] = version_compare($response['version'], $cp_version);
+		}
+	}
+} else {
+	// No API creds or skip_joinery_checks: fall back to plain HTTP status check.
+	$health_url = trim((string)$node->get('mgn_health_check_url'));
+	if ($health_url === '') {
+		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
+		$health_url = $site_url !== '' ? $site_url . '/' : '';
+	}
+	$response = ['ok' => false, 'message' => 'No site URL configured', 'reason' => 'config'];
+
+	if ($health_url !== '') {
+		$start = microtime(true);
+		$ch = curl_init($health_url);
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_NOBODY         => true,
+			CURLOPT_CONNECTTIMEOUT => 5,
+			CURLOPT_TIMEOUT        => 5,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_MAXREDIRS      => 5,
+			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
+			CURLOPT_SSL_VERIFYHOST => $node->get('mgn_tls_insecure') ? 0 : 2,
+		]);
+		curl_exec($ch);
+		$errno      = curl_errno($ch);
+		$errmsg     = curl_error($ch);
+		$status     = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$elapsed_ms = intval(round((microtime(true) - $start) * 1000));
+		curl_close($ch);
+
+		$is_up = !$errno && $status >= 200 && $status < 400;
+		if ($is_up) {
+			$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
+			$node->save();
+			$response = [
+				'ok'           => true,
+				'elapsed_ms'   => $elapsed_ms,
+				'status_color' => 'success',
+				'last_check'   => LibraryFunctions::time_ago_or_time(
+					$node->get('mgn_last_status_check'), 'UTC', $session->get_timezone(), 'M j, g:i A'
+				),
+			];
+		} else {
+			$response = [
+				'ok'         => false,
+				'elapsed_ms' => $elapsed_ms,
+				'message'    => $errno ? ($errmsg ?: 'transport failure') : 'HTTP ' . $status,
+				'reason'     => $errno ? 'transport' : 'status',
+			];
+		}
 	}
 }
 
