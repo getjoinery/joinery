@@ -1,6 +1,8 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+if (!class_exists('PublicPage')) {
+    require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
+}
 
 $settings     = Globalvars::get_instance();
 $page         = new PublicPage();
