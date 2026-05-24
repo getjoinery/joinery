@@ -438,6 +438,41 @@ sudo chmod -R 775 /var/www/html/joinerytest/public_html
 - Manually restore from backup
 - Fix permissions after restore
 
+**Infinite Redirect Loop (site behind Cloudflare):**
+If a site sits behind Cloudflare and the CF SSL/TLS mode is set to **Flexible**, Cloudflare proxies to origin over plain HTTP. A naive certbot HTTP→HTTPS redirect would bounce forever between CF and origin, taking the site down.
+
+The Joinery vhost bakes a `RewriteCond %{HTTP:CF-Visitor} !"scheme":"https"` guard into the redirect rule, so it cannot loop in any CF SSL mode (or with no CF at all). The admin Settings page also surfaces a yellow warning banner whenever the platform detects it's being served from Flexible-mode CF — so the misconfig is visible without needing to read logs.
+
+---
+
+## Apache Vhost
+
+Every site installed by `install.sh` has the same Apache vhost shape, regardless of whether it sits behind Cloudflare, behind another CDN, or is exposed directly to the public internet, and regardless of whether the origin has its own TLS certificate.
+
+**Shape.** Defined by template files in `maintenance_scripts/install_tools/` (single source of truth per deployment mode) — `default_proxy_vhost.conf` for Docker reverse-proxy sites, `default_virtualhost.conf` for bare-metal sites. `install.sh write_universal_vhost` substitutes the placeholders (`{{DOMAIN_NAME}}`, `{{SITE_NAME}}`, `{{PORT}}`, `{{SERVER_IP}}`) and writes the result to `/etc/apache2/sites-available/${sitename}.conf`.
+
+- **Port 80** — proxies/serves traffic, plus a `RewriteRule` that redirects to HTTPS. The redirect carries a `CF-Visitor` guard so it cannot loop under CF Flexible mode and is a no-op when no CF is in front.
+- **Port 443** — wrapped in `<IfFile /etc/letsencrypt/live/${domain}/fullchain.pem>`. Apache evaluates `<IfFile>` at config-parse time: if the cert exists, the `:443` vhost activates; if not, Apache silently skips the block. Sites with no origin cert just serve port 80, and whatever's in front (Cloudflare etc.) handles TLS at the edge.
+
+**Origin SSL is opt-in.** `install.sh` runs `provision_origin_cert` once during install:
+
+1. **Domain resolves to this server** → Let's Encrypt HTTP-01 challenge via `certbot --apache --no-redirect`.
+2. **Domain resolves elsewhere** (Cloudflare, other CDN) and a matching DNS-API credentials file exists at `/etc/letsencrypt/<provider>.ini` → LE DNS-01 with the matching certbot plugin. Plugin map:
+
+   | NS pattern                | certbot plugin              | credentials file                          |
+   |---------------------------|-----------------------------|-------------------------------------------|
+   | `*.ns.cloudflare.com`     | `certbot-dns-cloudflare`    | `/etc/letsencrypt/cloudflare.ini`         |
+   | `awsdns-*`                | `certbot-dns-route53`       | `/etc/letsencrypt/route53.ini`            |
+   | `ns[1-5].linode.com`      | `certbot-dns-linode`        | `/etc/letsencrypt/linode.ini`             |
+   | `ns[1-3].digitalocean.com`| `certbot-dns-digitalocean`  | `/etc/letsencrypt/digitalocean.ini`       |
+
+   Each plugin reads its credential file in its own standard format; certbot's docs cover the schemas.
+3. **Neither path produces a cert** → install proceeds without origin SSL. The `:443` vhost stays dormant via the `<IfFile>` guard; CF or another front-end handles TLS.
+
+**Adding a new DNS provider.** Edit `detect_dns_provider` in `install.sh` — add one `case` clause mapping the provider's NS-record signature to its tag, and document the plugin package + credential file format in the table above.
+
+**Enabling origin SSL later** (e.g. after dropping a CF API token in place to switch a CF zone to Full strict): `sudo /var/www/html/<site>/maintenance_scripts/sysadmin_tools/setup_ssl.sh <domain>`. The script re-enters the decision tree; the `:443` vhost begins serving on the next Apache reload because the `<IfFile>` guard sees the new cert.
+
 ---
 
 ## Configuration

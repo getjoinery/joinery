@@ -40,6 +40,24 @@
 	$pageoptions['title'] = "Settings";
 	$page->begin_box($pageoptions);
 
+	// Cloudflare Flexible SSL detection — if CF is terminating SSL at the edge
+	// but proxying to origin over HTTP, surface a warning. The Apache vhost has
+	// a CF-Visitor guard that prevents the redirect loop, but CF<->origin
+	// traffic is unencrypted and the operator probably wants to know.
+	$cf_visitor    = $_SERVER['HTTP_CF_VISITOR'] ?? '';
+	$cf_says_https = $cf_visitor !== '' && strpos($cf_visitor, '"scheme":"https"') !== false;
+	$origin_is_http = empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off';
+	if ($cf_says_https && $origin_is_http) {
+		echo '<div class="alert alert-warning" role="alert">'
+		   . '<strong>Cloudflare is in Flexible SSL mode.</strong> '
+		   . 'Cloudflare is serving HTTPS to visitors but talking to this origin over plain HTTP. '
+		   . 'The site keeps running thanks to a compatibility guard in the Apache vhost, '
+		   . 'but Cloudflare&harr;origin traffic is unencrypted and a missing guard would cause an infinite redirect loop. '
+		   . 'Recommended fix: in the Cloudflare dashboard for this zone, set <strong>SSL/TLS &rarr; Overview</strong> to '
+		   . '<strong>Full (strict)</strong>. The origin already has a valid Let&rsquo;s Encrypt certificate, so the switch should be immediate.'
+		   . '</div>';
+	}
+
 	// Tab menu for settings pages
 	$tab_menus = array(
 		'General Settings' => '/admin/admin_settings',

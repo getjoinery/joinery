@@ -1,0 +1,6 @@
+{
+    "name": "Run Node Uptime Checks",
+    "description": "For each managed node with uptime monitoring enabled, runs the configured check (api or http_status) and updates live status. Fires an email alert on up->down and down->up transitions. One alert per transition; no re-alerting while still down.",
+    "default_frequency": "every_run",
+    "config_fields": {}
+}

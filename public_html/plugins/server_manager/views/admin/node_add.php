@@ -25,12 +25,13 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 		'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 		'mgn_site_url', 'mgn_notes', 'mgn_enabled', 'mgn_skip_joinery_checks',
+		'mgn_uptime_enabled', 'mgn_uptime_check_type',
 	];
 
 	foreach ($editable_fields as $field) {
 		if (isset($_POST[$field])) {
 			$value = trim($_POST[$field]);
-			if ($field === 'mgn_enabled' || $field === 'mgn_skip_joinery_checks') {
+			if ($field === 'mgn_enabled' || $field === 'mgn_skip_joinery_checks' || $field === 'mgn_uptime_enabled') {
 				$value = isset($_POST[$field]) ? true : false;
 			}
 			if ($field === 'mgn_ssh_port' && $value === '') {
@@ -45,6 +46,9 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	}
 	if (!isset($_POST['mgn_skip_joinery_checks'])) {
 		$node->set('mgn_skip_joinery_checks', false);
+	}
+	if (!isset($_POST['mgn_uptime_enabled'])) {
+		$node->set('mgn_uptime_enabled', false);
 	}
 
 	try {
@@ -405,6 +409,22 @@ $formwriter->textinput('mgn_site_url', 'Site URL', [
 
 $formwriter->checkboxinput('mgn_enabled', 'Enabled', [
 	'checked' => true,
+]);
+
+echo '<h6 class="text-muted mt-4 mb-3">Uptime Monitoring</h6>';
+
+$formwriter->checkboxinput('mgn_uptime_enabled', 'Monitor uptime', [
+	'checked' => true,
+	'helptext' => 'When checked, the site is polled on every cron tick (~15 min). Down/recovered transitions trigger an email alert.',
+]);
+
+$formwriter->dropinput('mgn_uptime_check_type', 'Check type', [
+	'options' => [
+		'api'         => 'API probe (authenticated /api/v1/management/stats)',
+		'http_status' => 'HTTP status (plain GET, any 2xx/3xx is up)',
+	],
+	'value'    => 'api',
+	'helptext' => 'API probe gives richer info but requires API keys. When "Skip Joinery-specific checks" is on, http_status is forced regardless of this setting.',
 ]);
 
 $formwriter->textbox('mgn_notes', 'Notes', ['rows' => 3]);

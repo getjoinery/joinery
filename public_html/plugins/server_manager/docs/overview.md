@@ -485,6 +485,52 @@ Configured storage target for backups. Key fields:
 
 Single-row table tracking agent liveness. Updated every 30 seconds by the Go agent. The dashboard checks `ahb_last_heartbeat` to show online/offline status.
 
+## Uptime Monitoring
+
+A lightweight per-node uptime check runs on each scheduled-task tick (~15 min). It updates live state on `mgn_managed_nodes` and emails an admin on up→down and down→up transitions. One alert per transition; no re-alerting while still down.
+
+**Augmented `mgn_managed_nodes` fields:**
+
+- `mgn_uptime_enabled` (bool, default true) — per-node on/off
+- `mgn_uptime_check_type` (varchar, default `'api'`) — which check method to use (see below)
+- `mgn_uptime_last_status` (varchar) — `'up'` / `'down'` / null (never checked)
+- `mgn_uptime_consecutive_failures` (int) — streak counter for threshold logic
+- `mgn_uptime_down_since` (timestamp) — when current outage started, null when up
+
+"Last checked at" reuses the existing `mgn_last_status_check` — both check types update it.
+
+**Check types** (extensible via a single dispatch switch in `RunNodeUptimeChecks::run_check()`):
+
+| Value | Behavior |
+|-------|----------|
+| `api` | Reuses `JobCommandBuilder::fetch_status_via_api($node)`. `reason='transport'` (DNS/connect/timeout) counts as down. **3xx responses also count as down** — the API endpoint should never redirect, so a 3xx means the request never reached the API handler (typical cause: infrastructure-level HTTP→HTTPS redirect, possibly looping if Cloudflare is in Flexible mode). Auth (401/403), body errors, and non-3xx non-200 statuses all mean the server responded → up. `reason='config'` (missing API keys) is a misconfiguration: logged to error log and skipped, no false down alert. |
+| `http_status` | Plain curl GET to `mgn_site_url`. Success = HTTP status in 2xx or 3xx. Forced when `mgn_skip_joinery_checks=true` regardless of stored check type. |
+
+Add more types by adding a method to `RunNodeUptimeChecks` and a `case` to the dispatch — no schema change needed.
+
+**Tick logic** (`plugins/server_manager/tasks/RunNodeUptimeChecks.php`):
+
+1. Iterate non-deleted nodes where `mgn_enabled` and `mgn_uptime_enabled` are true and `mgn_site_url` is set.
+2. Dispatch on `mgn_uptime_check_type` (with `mgn_skip_joinery_checks` overriding to `http_status`).
+3. Apply state machine:
+   - On success: clear failure counter and `down_since`, set status `'up'`. Fire **recovered** alert on down→up transition.
+   - On failure: increment `consecutive_failures`. Once it reaches `FAILURE_THRESHOLD` (default 2) and prior status wasn't `'down'`, set status `'down'`, set `down_since=now()`, fire **down** alert.
+
+Constants on the class: `TIMEOUT_SECONDS=10`, `FAILURE_THRESHOLD=2`. The cron tick interval (~15 min) is the natural rate limiter.
+
+**Alert email recipient** is resolved per tick via a fallback chain — no new setting:
+
+1. `server_manager_provisioning_admin_alert_email` (existing plugin setting)
+2. `webmaster_email` (existing core setting)
+3. The first permission-10 user's email
+
+If none resolve, the send is logged and skipped; the state machine still advances so the same transition isn't re-attempted on the next tick. Emails are sent via `EmailSender::quickSend()` with hard-coded plain-text bodies — no template editor in v1.
+
+**UI:**
+
+- Node edit form (`node_detail` overview tab and `node_add`): a "Monitor uptime" checkbox and a "Check type" dropdown. When `mgn_skip_joinery_checks` is on, the runtime forces `http_status` regardless of the stored value (so picking `api` here is harmless for non-Joinery nodes).
+- Node detail overview tab: a one-line uptime status under "Last checked" — `Up`, `Down since X`, `disabled`, or `not yet checked`.
+
 ## Safety Constraints
 
 1. **Auto-backup before destructive operations** -- `copy_database`, `restore_database`, and `restore_project` automatically prepend backup steps. `restore_project` snapshots both the current database (`auto_pre_project_restore_*.sql.gz`) and the current project tree (`auto_pre_project_restore_*.tar.gz`) to `/backups/` before overwriting; either can be skipped if the corresponding component is unchecked in the form. If any pre-backup step fails, the destructive steps never run.

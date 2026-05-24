@@ -355,8 +355,9 @@ if ($_POST && isset($_POST['action'])) {
 			'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
 			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
+			'mgn_uptime_enabled', 'mgn_uptime_check_type',
 		];
-		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks'];
+		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks', 'mgn_uptime_enabled'];
 		foreach ($editable_fields as $field) {
 			if (in_array($field, $bool_fields, true)) {
 				$node->set($field, !empty($_POST[$field]));
@@ -555,6 +556,25 @@ if ($tab === 'overview') {
 	} elseif (!$status_data) {
 		echo '<small class="text-muted">No status check has been run yet.</small>';
 	}
+
+	// Uptime monitoring status
+	$uptime_enabled = $node->get('mgn_uptime_enabled');
+	$uptime_status  = $node->get('mgn_uptime_last_status');
+	$uptime_down    = $node->get('mgn_uptime_down_since');
+	echo '<div class="mt-1"><small>';
+	if (!$uptime_enabled) {
+		echo '<span class="text-muted">Uptime monitoring: disabled</span>';
+	} elseif ($uptime_status === 'down') {
+		$down_display = $uptime_down
+			? LibraryFunctions::convert_time($uptime_down, 'UTC', $session->get_timezone(), 'M j, g:i A')
+			: 'unknown';
+		echo '<span class="text-danger"><strong>Uptime: Down since ' . htmlspecialchars($down_display) . '</strong></span>';
+	} elseif ($uptime_status === 'up') {
+		echo '<span class="text-success">Uptime: Up</span>';
+	} else {
+		echo '<span class="text-muted">Uptime: not yet checked</span>';
+	}
+	echo '</small></div>';
 
 	echo '</div>';
 
@@ -1022,6 +1042,23 @@ if ($tab === 'overview') {
 
 	$formwriter->checkboxinput('mgn_enabled', 'Enabled', [
 		'checked' => $node->get('mgn_enabled'),
+	]);
+
+	echo '<h6 class="text-muted mt-4 mb-3">Uptime Monitoring</h6>';
+
+	$formwriter->checkboxinput('mgn_uptime_enabled', 'Monitor uptime', [
+		'checked' => $node->get('mgn_uptime_enabled'),
+		'helptext' => 'When checked, the site is polled on every cron tick (~15 min). Down/recovered transitions trigger an email alert.',
+	]);
+
+	$uptime_check_type = $node->get('mgn_uptime_check_type') ?: 'api';
+	$formwriter->dropinput('mgn_uptime_check_type', 'Check type', [
+		'options' => [
+			'api'         => 'API probe (authenticated /api/v1/management/stats)',
+			'http_status' => 'HTTP status (plain GET, any 2xx/3xx is up)',
+		],
+		'value'    => $uptime_check_type,
+		'helptext' => 'API probe gives richer info but requires API keys. When "Skip Joinery-specific checks" is on, http_status is forced regardless of this setting.',
 	]);
 
 	$formwriter->textbox('mgn_notes', 'Notes', ['rows' => 3]);
