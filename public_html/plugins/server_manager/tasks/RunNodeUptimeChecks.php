@@ -128,8 +128,12 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * Records mgn_last_status_check so the dashboard stays consistent.
 	 */
 	private function check_http_status($node): array {
-		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
-		$ch = curl_init($site_url . '/');
+		$health_url = trim((string)$node->get('mgn_health_check_url'));
+		if ($health_url === '') {
+			$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
+			$health_url = $site_url . '/';
+		}
+		$ch = curl_init($health_url);
 		curl_setopt_array($ch, [
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_NOBODY         => true,
