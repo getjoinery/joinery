@@ -170,46 +170,51 @@ $routes = [
             return false;
         },
         
-        // Homepage with complex alternate logic
+        // Homepage with alternate-homepage routing
+        // The alternate_loggedin_homepage / alternate_homepage settings can hold:
+        //   - "/blog"          -> render blog view here
+        //   - "/page/{slug}"   -> render that page's contents here
+        //   - any other URL    -> 302 redirect to it (so the front controller routes it normally)
         '/' => function($params, $settings, $session, $template_directory) {
-            $alternate_page = $settings->get_setting('alternate_loggedin_homepage');
-            if($alternate_page && $session->is_logged_in()){
-                // Complex homepage logic for logged-in users
+            $alternate_page = '';
+            if($session->is_logged_in()){
+                $alternate_page = (string)$settings->get_setting('alternate_loggedin_homepage');
+            }
+            if($alternate_page === ''){
+                $alternate_page = (string)$settings->get_setting('alternate_homepage');
+            }
+
+            $template_file = '';
+            $base_file = '';
+
+            if($alternate_page !== ''){
                 $page_pieces = explode('/', $alternate_page);
-                if($page_pieces[1] == 'blog'){
+                $first_segment = $page_pieces[1] ?? '';
+                if($first_segment === 'blog'){
                     $template_file = $template_directory.'/views/blog.php';
                     $base_file = PathHelper::getIncludePath('views/blog.php');
-                } else if($page_pieces[1] == 'page'){
-                    require_once(PathHelper::getIncludePath('data/pages_class.php'));
-                    $page = Page::get_by_link($page_pieces[2], true);
-                    $template_file = $template_directory.'/views/page.php';
-                    $base_file = PathHelper::getIncludePath('views/page.php');
-                } else {
-                    $template_file = $template_directory.$alternate_page;
-                    $base_file = PathHelper::getRootDir().$alternate_page;
-                }
-            } else if($alternate_page = $settings->get_setting('alternate_homepage')) {
-                // Complex homepage logic for non-logged-in users
-                $page_pieces = explode('/', $alternate_page);
-                if($page_pieces[1] == 'blog'){
-                    $template_file = $template_directory.'/views/blog.php';
-                    $base_file = PathHelper::getIncludePath('views/blog.php');
-                } else if($page_pieces[1] == 'page'){
-                    if($settings->get_setting('page_contents_active')){
+                } else if($first_segment === 'page'){
+                    if($session->is_logged_in() || $settings->get_setting('page_contents_active')){
                         require_once(PathHelper::getIncludePath('data/pages_class.php'));
-                        $page = Page::get_by_link($page_pieces[2], true);
+                        $page = Page::get_by_link($page_pieces[2] ?? '', true);
                         $template_file = $template_directory.'/views/page.php';
                         $base_file = PathHelper::getIncludePath('views/page.php');
                     }
-                } else {
-                    $template_file = $template_directory.$alternate_page;
-                    $base_file = PathHelper::getRootDir().$alternate_page;
+                } else if($alternate_page !== '/' && $alternate_page[0] === '/'){
+                    header('Location: '.$alternate_page, true, 302);
+                    return true;
                 }
-            } else {
+            }
+
+            // Default homepage: also used as fallback when the alternate settings
+            // don't resolve to a real file (prevents silent blank 200 responses).
+            if($template_file === '' || !file_exists($template_file)){
                 $template_file = $template_directory.'/views/index.php';
+            }
+            if($base_file === '' || !file_exists($base_file)){
                 $base_file = PathHelper::getIncludePath('views/index.php');
             }
-            
+
             // RouteHelper automatically sets $is_valid_page = true when a route matches
 
             if(file_exists($template_file)){

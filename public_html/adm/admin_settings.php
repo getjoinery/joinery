@@ -397,7 +397,7 @@
 			'helptext' => 'Controls protocol for generated URLs and redirect behavior'
 		]);
 
-		$formwriter->checkboxinput('Enable HSTS Security Header', 'enable_hsts', NULL, 'normal', 1, $settings->get_setting('enable_hsts') ? 1 : 0, 'Strict-Transport-Security header forces HTTPS-only connections for 24 hours. Only enable on production sites with stable HTTPS configuration. Disable for test/development environments.');
+		$formwriter->checkboxinput('Enable HSTS Security Header', 'enable_hsts', NULL, 'normal', 1, $settings->get_setting('enable_hsts') ? 1 : 0, 'Strict-Transport-Security header tells browsers to use HTTPS only for this domain (max-age 1 year). Recommended for any production site with stable HTTPS. Disable for dev environments where you need plain HTTP.');
 
 		$formwriter->checkboxinput('Enable X-Frame-Options Header', 'enable_x_frame_options', NULL, 'normal', 1, $settings->get_setting('enable_x_frame_options') ? 1 : 0, 'Prevents your site from being embedded in iframes on other websites (clickjacking protection). Safe to enable on all sites.');
 

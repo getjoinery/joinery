@@ -62,7 +62,7 @@ abstract class PublicPageBase {
 
 			// Only set HSTS if explicitly enabled in settings
 			if ($settings->get_setting('enable_hsts', false, true)) {
-				header('Strict-Transport-Security: max-age=86400; includeSubDomains');
+				header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 			}
 		}
 		// X-Content-Type-Options is always sent (prevents MIME sniffing)
@@ -671,7 +671,7 @@ abstract class PublicPageBase {
 
 			// Only set HSTS if explicitly enabled in settings
 			if ($settings->get_setting('enable_hsts', false, true)) {
-				header('Strict-Transport-Security: max-age=86400; includeSubDomains');
+				header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 			}
 		}
 		// X-Content-Type-Options is always sent (prevents MIME sniffing)
