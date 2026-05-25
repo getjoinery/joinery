@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_seo_pages_logic($get_vars, $post_vars) {
+function admin_seo_pages_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -12,8 +12,8 @@ function admin_seo_pages_logic($get_vars, $post_vars) {
 	$session->set_return();
 
 	// Actions
-	if (isset($post_vars['action'])) {
-		if ($post_vars['action'] === 'scan_now') {
+	if (isset($input['action'])) {
+		if ($input['action'] === 'scan_now') {
 			try {
 				$result = SeoPageMetadata::sync_inventory();
 				$summary = sprintf(
@@ -29,9 +29,9 @@ function admin_seo_pages_logic($get_vars, $post_vars) {
 				return LogicResult::redirect('/admin/admin_seo_pages?error=' . urlencode($e->getMessage()));
 			}
 		}
-		if ($post_vars['action'] === 'soft_delete' && !empty($post_vars['spm_id'])) {
+		if ($input['action'] === 'soft_delete' && !empty($input['spm_id'])) {
 			try {
-				$row = new SeoPageMetadata((int)$post_vars['spm_id'], TRUE);
+				$row = new SeoPageMetadata((int)$input['spm_id'], TRUE);
 				$row->soft_delete();
 				return LogicResult::redirect('/admin/admin_seo_pages?notice=' . urlencode('Row soft-deleted.'));
 			} catch (\Throwable $e) {
@@ -40,7 +40,7 @@ function admin_seo_pages_logic($get_vars, $post_vars) {
 		}
 	}
 
-	$view = LibraryFunctions::fetch_variable_local($get_vars, 'view', 'list');
+	$view = LibraryFunctions::fetch_variable_local($input, 'view', 'list');
 
 	if ($view === 'orphans') {
 		$orphans = SeoPageMetadata::find_orphans();
@@ -48,17 +48,17 @@ function admin_seo_pages_logic($get_vars, $post_vars) {
 			'session'  => $session,
 			'view'     => 'orphans',
 			'orphans'  => $orphans,
-			'notice'   => $get_vars['notice'] ?? null,
-			'error'    => $get_vars['error'] ?? null,
+			'notice'   => $input['notice'] ?? null,
+			'error'    => $input['error'] ?? null,
 		));
 	}
 
 	$numperpage = 50;
-	$offset     = LibraryFunctions::fetch_variable_local($get_vars, 'offset', 0);
-	$sort       = LibraryFunctions::fetch_variable_local($get_vars, 'sort', 'path');
-	$sdirection = LibraryFunctions::fetch_variable_local($get_vars, 'sdirection', 'ASC');
-	$searchterm = LibraryFunctions::fetch_variable_local($get_vars, 'searchterm', '');
-	$filter     = LibraryFunctions::fetch_variable_local($get_vars, 'filter', 'all');
+	$offset     = LibraryFunctions::fetch_variable_local($input, 'offset', 0);
+	$sort       = LibraryFunctions::fetch_variable_local($input, 'sort', 'path');
+	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'ASC');
+	$searchterm = LibraryFunctions::fetch_variable_local($input, 'searchterm', '');
+	$filter     = LibraryFunctions::fetch_variable_local($input, 'filter', 'all');
 
 	$search_criteria = array();
 	if ($searchterm !== '') {
@@ -84,8 +84,8 @@ function admin_seo_pages_logic($get_vars, $post_vars) {
 		'numperpage' => $numperpage,
 		'searchterm' => $searchterm,
 		'filter'     => $filter,
-		'notice'     => $get_vars['notice'] ?? null,
-		'error'      => $get_vars['error'] ?? null,
+		'notice'     => $input['notice'] ?? null,
+		'error'      => $input['error'] ?? null,
 	));
 }
 ?>

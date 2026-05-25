@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_file_upload_process_logic($get, $post) {
+function admin_file_upload_process_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -212,8 +212,8 @@ function admin_file_upload_process_logic($get, $post) {
 		// Add the file ID to the response object
 		$thisfile->file_id = $file->key;
 
-		if(isset($get['evs_event_session_id']) || isset($post['evs_event_session_id'])){
-			$evs_event_session_id = isset($get['evs_event_session_id']) ? $get['evs_event_session_id'] : $post['evs_event_session_id'];
+		if(isset($input['evs_event_session_id']) || isset($input['evs_event_session_id'])){
+			$evs_event_session_id = isset($input['evs_event_session_id']) ? $input['evs_event_session_id'] : $input['evs_event_session_id'];
 			//ATTACH THE FILE TO AN EVENT SESSION
 			$event_session = new EventSession($evs_event_session_id, TRUE);
 			$event_session->add_file($file->key);
@@ -232,7 +232,7 @@ function admin_file_upload_process_logic($get, $post) {
 	header('Content-Type: application/json; charset=utf-8');
 	echo json_encode($response);
 
-	if(isset($get['fallback']) || isset($post['fallback'])){
+	if(isset($input['fallback']) || isset($input['fallback'])){
 		return LogicResult::render(array(
 			'file' => $file,
 			'show_fallback' => true

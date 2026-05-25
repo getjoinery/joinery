@@ -7,22 +7,22 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/questions_class.php'));
 require_once(PathHelper::getIncludePath('data/question_options_class.php'));
 
-function admin_question_logic($get_vars, $post_vars) {
+function admin_question_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
 
 	// Get question ID from GET or POST (POST when form is submitted)
-	$question_id = $get_vars['qst_question_id'] ?? $post_vars['qst_question_id'] ?? null;
+	$question_id = $input['qst_question_id'] ?? $input['qst_question_id'] ?? null;
 	$question = new Question($question_id, TRUE);
 
-	if($get_vars['action'] == 'delete'){
+	if($input['action'] == 'delete'){
 		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$question->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_questions");
 	}
-	else if($get_vars['action'] == 'undelete'){
+	else if($input['action'] == 'undelete'){
 		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$question->soft_delete();
 
@@ -30,8 +30,8 @@ function admin_question_logic($get_vars, $post_vars) {
 	}
 
 	$valid = '';
-	if($post_vars){
-		$valid = $question->validate_answers($post_vars['question_'.$question->key]);
+	if($input){
+		$valid = $question->validate_answers($input['question_'.$question->key]);
 	}
 
 	$page_vars = array(

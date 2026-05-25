@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_settings_logic($get, $post) {
+function admin_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -16,12 +16,12 @@ function admin_settings_logic($get, $post) {
 	$settings = Globalvars::get_instance();
 
 	// Check if validation should run (performance optimization)
-	$run_validation = isset($get['run_validation']) && $get['run_validation'] == '1';
+	$run_validation = isset($input['run_validation']) && $input['run_validation'] == '1';
 
-	if($post){
+	if($input){
 
 		// Validate: plugin theme requires a plugin to be selected
-		if (isset($post['theme_template']) && $post['theme_template'] === 'plugin' && empty($post['active_theme_plugin'])) {
+		if (isset($input['theme_template']) && $input['theme_template'] === 'plugin' && empty($input['active_theme_plugin'])) {
 			return LogicResult::render(array(
 				'run_validation' => $run_validation,
 				'error_message' => 'You must select an Active Theme Plugin when using "Plugin Provided Theme".'
@@ -31,8 +31,8 @@ function admin_settings_logic($get, $post) {
 		// Validate: terms_url and privacy_url must be empty, a relative path,
 		// or an http(s) URL — never a javascript: or data: scheme.
 		foreach (['terms_url', 'privacy_url'] as $url_field) {
-			if (!isset($post[$url_field])) continue;
-			$candidate = trim($post[$url_field]);
+			if (!isset($input[$url_field])) continue;
+			$candidate = trim($input[$url_field]);
 			if ($candidate === '') continue;
 			if (!preg_match('#^(/|https?://)#i', $candidate)) {
 				return LogicResult::render(array(
@@ -43,9 +43,9 @@ function admin_settings_logic($get, $post) {
 		}
 
 		// Validate: new theme's required plugins must all be active (only when theme is changing)
-		if (isset($post['theme_template']) && $post['theme_template'] !== 'plugin'
-			&& $post['theme_template'] !== $settings->get_setting('theme_template')) {
-			$new_theme_name = $post['theme_template'];
+		if (isset($input['theme_template']) && $input['theme_template'] !== 'plugin'
+			&& $input['theme_template'] !== $settings->get_setting('theme_template')) {
+			$new_theme_name = $input['theme_template'];
 			try {
 				$new_theme = ThemeHelper::getInstance($new_theme_name);
 				$required_plugins = $new_theme->get('requires_plugins', []);
@@ -68,7 +68,7 @@ function admin_settings_logic($get, $post) {
 			}
 		}
 
-		if($settings->get_setting('preview_image') != $post['preview_image']){
+		if($settings->get_setting('preview_image') != $input['preview_image']){
 			//AUTO INCREMENT THE PREVIEW IMAGE INDEX IF IT HAS CHANGED
 			$search_criteria = array();
 			$search_criteria['setting_name'] = 'preview_image_increment';
@@ -102,8 +102,8 @@ function admin_settings_logic($get, $post) {
 		$user_settings->load();
 
 		foreach($user_settings as $user_setting) {
-			if(isset($post[$user_setting->get('stg_name')])){
-				$value = $post[$user_setting->get('stg_name')];
+			if(isset($input[$user_setting->get('stg_name')])){
+				$value = $input[$user_setting->get('stg_name')];
 				if ($user_setting->get('stg_name') === 'webDir') {
 					$value = rtrim(preg_replace('#^https?://#i', '', $value), '/');
 				}
@@ -122,7 +122,7 @@ function admin_settings_logic($get, $post) {
 		}
 
 		// Auto-create any missing settings that were submitted
-		foreach($post as $setting_name => $setting_value) {
+		foreach($input as $setting_name => $setting_value) {
 			// Skip if already processed (already exists in database)
 			if(in_array($setting_name, $processed_settings)) continue;
 
@@ -145,13 +145,13 @@ function admin_settings_logic($get, $post) {
 		}
 
 		// Invalidate homepage cache if homepage-routing settings changed
-		if (isset($post['alternate_homepage']) || isset($post['alternate_loggedin_homepage'])) {
+		if (isset($input['alternate_homepage']) || isset($input['alternate_loggedin_homepage'])) {
 			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 			StaticPageCache::invalidateUrl('/');
 		}
 
 		// Flush entire cache if active theme changed
-		if (isset($post['active_theme'])) {
+		if (isset($input['active_theme'])) {
 			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 			StaticPageCache::clearAll();
 		}

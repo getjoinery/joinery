@@ -6,35 +6,35 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
-function admin_api_key_logic($get_vars, $post_vars) {
+function admin_api_key_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
 
-	$api_key = new ApiKey($get_vars['apk_api_key_id'], TRUE);
+	$api_key = new ApiKey($input['apk_api_key_id'], TRUE);
 
-	if($get_vars['action'] == 'soft_delete'){
+	if($input['action'] == 'soft_delete'){
 		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$api_key->soft_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
-	if($get_vars['action'] == 'undelete'){
+	if($input['action'] == 'undelete'){
 		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$api_key->undelete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
-	if($get_vars['action'] == 'permanent_delete'){
+	if($input['action'] == 'permanent_delete'){
 		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$api_key->permanent_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
-	if($get_vars['action'] == 'regenerate_secret'){
+	if($input['action'] == 'regenerate_secret'){
 		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 
 		// Generate new secret

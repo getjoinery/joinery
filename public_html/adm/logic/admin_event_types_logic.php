@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_event_types_logic($get_vars, $post_vars) {
+function admin_event_types_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/event_types_class.php'));
 

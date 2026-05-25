@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_product_edit_logic($get_vars, $post_vars) {
+function admin_product_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
@@ -24,31 +24,31 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 
 	// Load or create product
 	// CRITICAL: Check edit_primary_key_value (form submission first), fallback to GET
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$product = new Product($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['pro_product_id'])) {
-		$product = new Product($get_vars['pro_product_id'], TRUE);
-	} elseif (isset($get_vars['p'])) {
+	if (isset($input['edit_primary_key_value'])) {
+		$product = new Product($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['pro_product_id'])) {
+		$product = new Product($input['pro_product_id'], TRUE);
+	} elseif (isset($input['p'])) {
 		// Backward compatibility: old URL parameter 'p'
-		$product = new Product($get_vars['p'], TRUE);
+		$product = new Product($input['p'], TRUE);
 	} else {
 		$product = new Product(NULL);
 	}
 
 	// Photo action handlers (early return — skip full product save)
-	if ($product->key && isset($post_vars['action']) && $post_vars['action'] == 'set_primary_photo') {
-		$product->set_primary_photo((int)$post_vars['photo_id']);
+	if ($product->key && isset($input['action']) && $input['action'] == 'set_primary_photo') {
+		$product->set_primary_photo((int)$input['photo_id']);
 		return LogicResult::redirect('/admin/admin_product_edit?pro_product_id='.$product->key);
 	}
 
-	if ($product->key && isset($post_vars['action']) && $post_vars['action'] == 'clear_primary_photo') {
+	if ($product->key && isset($input['action']) && $input['action'] == 'clear_primary_photo') {
 		$product->clear_primary_photo();
 		return LogicResult::redirect('/admin/admin_product_edit?pro_product_id='.$product->key);
 	}
 
 	// Process POST actions
 	// CRITICAL: Check for POST submission
-	if ($post_vars) {
+	if ($input) {
 		// Add-only logic
 		if (!$product->key) {
 			$product->set('pro_created_by', $session->get_user_id());
@@ -58,15 +58,15 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 		$requirement_specs = [];
 
 		// System requirements (Tier 2 — class_name directly)
-		if (!empty($post_vars['system_requirements']) && is_array($post_vars['system_requirements'])) {
-			foreach ($post_vars['system_requirements'] as $class_name) {
+		if (!empty($input['system_requirements']) && is_array($input['system_requirements'])) {
+			foreach ($input['system_requirements'] as $class_name) {
 				$requirement_specs[] = ['class_name' => $class_name, 'config' => []];
 			}
 		}
 
 		// Question requirements (Tier 1 — QuestionRequirement with question_id config)
-		if (!empty($post_vars['question_requirements']) && is_array($post_vars['question_requirements'])) {
-			foreach ($post_vars['question_requirements'] as $question_id) {
+		if (!empty($input['question_requirements']) && is_array($input['question_requirements'])) {
+			foreach ($input['question_requirements'] as $question_id) {
 				$requirement_specs[] = [
 					'class_name' => 'QuestionRequirement',
 					'config' => ['question_id' => intval($question_id)],
@@ -74,49 +74,49 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 			}
 		}
 
-		if($post_vars['pro_evt_event_id'] == '' || $post_vars['pro_evt_event_id'] == 0){
+		if($input['pro_evt_event_id'] == '' || $input['pro_evt_event_id'] == 0){
 			$product->set('pro_evt_event_id', NULL);
 
 		}
 		else{
-			$product->set('pro_evt_event_id', intval($post_vars['pro_evt_event_id']));
+			$product->set('pro_evt_event_id', intval($input['pro_evt_event_id']));
 		}
 
 		//MUST BE INTEGER
-		$product->set('pro_expires', (int)$post_vars['pro_expires']);
-		$product->set('pro_prg_product_group_id', (int)$post_vars['pro_prg_product_group_id']);
+		$product->set('pro_expires', (int)$input['pro_expires']);
+		$product->set('pro_prg_product_group_id', (int)$input['pro_prg_product_group_id']);
 
 		//PRICE MUST BE INTEGER
-		if($post_vars['pro_grp_group_id']){
-			$post_vars['pro_grp_group_id'] = (int)$post_vars['pro_grp_group_id'];
+		if($input['pro_grp_group_id']){
+			$input['pro_grp_group_id'] = (int)$input['pro_grp_group_id'];
 		}
 		else{
-			$post_vars['pro_grp_group_id'] = NULL;
+			$input['pro_grp_group_id'] = NULL;
 		}
 
 		// Handle subscription tier ID
-		if($post_vars['pro_sbt_subscription_tier_id']){
-			$post_vars['pro_sbt_subscription_tier_id'] = (int)$post_vars['pro_sbt_subscription_tier_id'];
+		if($input['pro_sbt_subscription_tier_id']){
+			$input['pro_sbt_subscription_tier_id'] = (int)$input['pro_sbt_subscription_tier_id'];
 		}
 		else{
-			$post_vars['pro_sbt_subscription_tier_id'] = NULL;
+			$input['pro_sbt_subscription_tier_id'] = NULL;
 		}
 
 		//STORE THE PRODUCT SCRIPTS
 		$product->set('pro_product_scripts', NULL);
-		if(is_array($post_vars['product_scripts'])){
-			$product->set('pro_product_scripts', implode(',', $post_vars['product_scripts']));
+		if(is_array($input['product_scripts'])){
+			$product->set('pro_product_scripts', implode(',', $input['product_scripts']));
 		}
 
 		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description', 'pro_emt_receipt_template_id');
 
 		foreach($editable_fields as $field) {
-			$product->set($field, $post_vars[$field]);
+			$product->set($field, $input[$field]);
 		}
 
 		if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
-			if($post_vars['pro_link']){
-				$product->set('pro_link', $product->create_url($post_vars['pro_link']));
+			if($input['pro_link']){
+				$product->set('pro_link', $product->create_url($input['pro_link']));
 			}
 			else{
 				$product->set('pro_link', $product->create_url($product->get('pro_name')));
@@ -162,27 +162,27 @@ function admin_product_edit_logic($get_vars, $post_vars) {
 	}
 
 	// Handle GET actions for version management
-	if ($get_vars['action'] == 'new_version') {
+	if ($input['action'] == 'new_version') {
 		$product_version = new ProductVersion(NULL);
 		$product_version->set('prv_pro_product_id', $product->key);
-		$product_version->set('prv_version_name', $get_vars['version_name']);
-		$product_version->set('prv_version_price', $get_vars['version_price']);
-		$product_version->set('prv_price_type', $get_vars['prv_price_type']);
-		$product_version->set('prv_trial_period_days', $get_vars['prv_trial_period_days']);
+		$product_version->set('prv_version_name', $input['version_name']);
+		$product_version->set('prv_version_price', $input['version_price']);
+		$product_version->set('prv_price_type', $input['prv_price_type']);
+		$product_version->set('prv_trial_period_days', $input['prv_trial_period_days']);
 		$product_version->set('prv_status', 1);
 		$product_version->prepare();
 		$product_version->save();
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
-	else if ($get_vars['action'] == 'remove_version') {
-		$product_version = new ProductVersion($get_vars['v'], TRUE);
+	else if ($input['action'] == 'remove_version') {
+		$product_version = new ProductVersion($input['v'], TRUE);
 		$product_version->set('prv_status', 0);
 		$product_version->prepare();
 		$product_version->save();
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
-	else if ($get_vars['action'] == 'activate_version') {
-		$product_version = new ProductVersion($get_vars['v'], TRUE);
+	else if ($input['action'] == 'activate_version') {
+		$product_version = new ProductVersion($input['v'], TRUE);
 		$product_version->set('prv_status', 1);
 		$product_version->prepare();
 		$product_version->save();

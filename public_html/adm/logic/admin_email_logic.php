@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_email_logic($get_vars, $post_vars) {
+function admin_email_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
@@ -13,10 +13,10 @@ function admin_email_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 	$session->set_return();
 
-	$email = new Email($get_vars['eml_email_id'], TRUE);
+	$email = new Email($input['eml_email_id'], TRUE);
 
 	// Handle actions
-	if($get_vars['action'] == 'delete'){
+	if($input['action'] == 'delete'){
 		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		//REMOVE THE RECIPIENTS
 		EmailRecipient::DeleteAll($email->key);
@@ -24,13 +24,13 @@ function admin_email_logic($get_vars, $post_vars) {
 
 		return LogicResult::redirect('/admin/admin_emails');
 	}
-	else if($get_vars['action'] == 'undelete'){
+	else if($input['action'] == 'undelete'){
 		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$email->undelete();
 
 		return LogicResult::redirect('/admin/admin_emails');
 	}
-	else if($get_vars['action'] == 'unqueue'){
+	else if($input['action'] == 'unqueue'){
 		$email->set('eml_status', Email::EMAIL_CREATED);
 		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$email->save();
@@ -40,21 +40,21 @@ function admin_email_logic($get_vars, $post_vars) {
 		return LogicResult::redirect('/admin/admin_emails');
 	}
 
-	if($get_vars['action'] == 'addgroup'){
+	if($input['action'] == 'addgroup'){
 		//ADD GROUP TO EMAIL
-		$email->add_recipient_group(NULL, $post_vars['grp_group_id']);
+		$email->add_recipient_group(NULL, $input['grp_group_id']);
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}
-	else if($get_vars['action'] == 'remove'){
-		$email_recipient_group = new EmailRecipientGroup($post_vars['erg_email_recipient_group_id'], TRUE);
+	else if($input['action'] == 'remove'){
+		$email_recipient_group = new EmailRecipientGroup($input['erg_email_recipient_group_id'], TRUE);
 		$email_recipient_group->permanent_delete();
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}
-	else if($get_vars['action'] == 'addevent'){
+	else if($input['action'] == 'addevent'){
 		//ADD GROUP TO EMAIL
-		$email->add_recipient_group($post_vars['evt_event_id'], NULL);
+		$email->add_recipient_group($input['evt_event_id'], NULL);
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}

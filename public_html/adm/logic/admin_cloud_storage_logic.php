@@ -10,7 +10,7 @@
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_cloud_storage_logic($get, $post) {
+function admin_cloud_storage_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 	require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
@@ -25,17 +25,17 @@ function admin_cloud_storage_logic($get, $post) {
 	$test_results = null;
 	$errors = array();
 
-	if ($post && isset($post['action'])) {
-		$action = $post['action'];
+	if ($input && isset($input['action'])) {
+		$action = $input['action'];
 
 		if ($action === 'save') {
 			$opts = array(
-				'endpoint'        => trim($post['cloud_storage_endpoint'] ?? ''),
-				'region'          => trim($post['cloud_storage_region'] ?? ''),
-				'bucket'          => trim($post['cloud_storage_bucket'] ?? ''),
-				'access_key'      => trim($post['cloud_storage_access_key'] ?? ''),
-				'secret_key'      => trim($post['cloud_storage_secret_key'] ?? ''),
-				'public_base_url' => trim($post['cloud_storage_public_base_url'] ?? ''),
+				'endpoint'        => trim($input['cloud_storage_endpoint'] ?? ''),
+				'region'          => trim($input['cloud_storage_region'] ?? ''),
+				'bucket'          => trim($input['cloud_storage_bucket'] ?? ''),
+				'access_key'      => trim($input['cloud_storage_access_key'] ?? ''),
+				'secret_key'      => trim($input['cloud_storage_secret_key'] ?? ''),
+				'public_base_url' => trim($input['cloud_storage_public_base_url'] ?? ''),
 			);
 
 			// Required-field check before touching the network.
@@ -86,11 +86,11 @@ function admin_cloud_storage_logic($get, $post) {
 			));
 			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
-		elseif ($action === 'retry_stuck' && isset($post['fil_file_id'])) {
+		elseif ($action === 'retry_stuck' && isset($input['fil_file_id'])) {
 			$dbconnector = DbConnector::get_instance();
 			$dblink = $dbconnector->get_db_link();
 			$q = $dblink->prepare("UPDATE fil_files SET fil_sync_failed_count = 0 WHERE fil_file_id = ?");
-			$q->execute([(int)$post['fil_file_id']]);
+			$q->execute([(int)$input['fil_file_id']]);
 			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
 	}
@@ -98,8 +98,8 @@ function admin_cloud_storage_logic($get, $post) {
 	// On a failed save, repopulate from POST so the admin doesn't lose what
 	// they just typed. (We only reach this branch when test_results is set,
 	// i.e. the request was a POST that didn't redirect.)
-	$pick = function($key) use ($post, $settings) {
-		if (isset($post[$key])) return $post[$key];
+	$pick = function($key) use ($input, $settings) {
+		if (isset($input[$key])) return $input[$key];
 		return $settings->get_setting($key);
 	};
 

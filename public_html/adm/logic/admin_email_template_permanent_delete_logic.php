@@ -5,11 +5,11 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * Logic for admin_email_template_permanent_delete
  * Handles permanent deletion of email templates with confirmation
  *
- * @param array $get_vars GET variables
- * @param array $post_vars POST variables
+ * @param array $input GET variables
+ * @param array $input POST variables
  * @return LogicResult
  */
-function admin_email_template_permanent_delete_logic($get_vars, $post_vars) {
+function admin_email_template_permanent_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
@@ -20,9 +20,9 @@ function admin_email_template_permanent_delete_logic($get_vars, $post_vars) {
 	$page_vars = array();
 
 	// Handle POST - Process deletion
-	if (!empty($post_vars['confirm'])) {
-		$emt_email_template_id = LibraryFunctions::fetch_variable('emt_email_template_id', NULL, 1, 'You must provide a email_template to delete here.', $post_vars);
-		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $post_vars);
+	if (!empty($input['confirm'])) {
+		$emt_email_template_id = LibraryFunctions::fetch_variable('emt_email_template_id', NULL, 1, 'You must provide a email_template to delete here.', $input);
+		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $input);
 
 		if ($confirm) {
 			$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
@@ -36,7 +36,7 @@ function admin_email_template_permanent_delete_logic($get_vars, $post_vars) {
 	}
 
 	// Handle GET - Display confirmation page
-	$emt_email_template_id = LibraryFunctions::fetch_variable('emt_email_template_id', NULL, 1, 'You must provide a email_template to edit.', $get_vars);
+	$emt_email_template_id = LibraryFunctions::fetch_variable('emt_email_template_id', NULL, 1, 'You must provide a email_template to edit.', $input);
 
 	$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
 

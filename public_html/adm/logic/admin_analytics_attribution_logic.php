@@ -9,7 +9,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * Treatment: implicit last-touch (the session UTM at the moment the event fired).
  * Multi-touch models are out of scope — see FUTURE_attribution_models.md.
  */
-function admin_analytics_attribution_logic($get_vars, $post_vars) {
+function admin_analytics_attribution_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));

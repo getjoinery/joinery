@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_user_login_as_logic($get_vars, $post_vars) {
+function admin_user_login_as_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -10,7 +10,7 @@ function admin_user_login_as_logic($get_vars, $post_vars) {
 	$session->check_permission(10);
 
 	// Validate user ID is a positive integer
-	$usr_user_id = (int) LibraryFunctions::fetch_variable_local($get_vars, 'usr_user_id', 0);
+	$usr_user_id = (int) LibraryFunctions::fetch_variable_local($input, 'usr_user_id', 0);
 	if ($usr_user_id <= 0) {
 		return LogicResult::error('Invalid user ID.');
 	}

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_users_message_logic($get, $post) {
+function admin_users_message_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
@@ -62,9 +62,9 @@ function admin_users_message_logic($get, $post) {
 
 	$numrecipients = 0;
 
-	if($post){
+	if($input){
 
-		$post['eml_message'] = nl2br($post['eml_message']);
+		$input['eml_message'] = nl2br($input['eml_message']);
 
 		$settings = Globalvars::get_instance();
 		$sitename = $settings->get_setting('site_name');
@@ -75,11 +75,11 @@ function admin_users_message_logic($get, $post) {
 		$email_record->set('eml_usr_user_id', $sender->key);
 		$email_record->set('eml_from_address', $fromaddress);
 		$email_record->set('eml_from_name', $fromname);
-		$email_record->set('eml_subject', $post['eml_subject']);
+		$email_record->set('eml_subject', $input['eml_subject']);
 		$email_record->set('eml_reply_to', $fromaddress);
 		//$email_record->set('eml_message_template_plain', NULL);
-		$email_record->set('eml_message_html', $post['eml_message']);
-		$email_record->set('eml_message_plain', LibraryFunctions::htmlToText($post['eml_message']));
+		$email_record->set('eml_message_html', $input['eml_message']);
+		$email_record->set('eml_message_plain', LibraryFunctions::htmlToText($input['eml_message']));
 		$email_record->set('eml_scheduled_time', 'now()');
 		$email_record->set('eml_sent_time', 'now()');
 		$email_record->set('eml_status', 5);
@@ -93,12 +93,12 @@ function admin_users_message_logic($get, $post) {
 			$message->set('msg_usr_user_id_sender', $sender->key);
 			$message->set('msg_usr_user_id_recipient', NULL);
 			$message->set('msg_evt_event_id', $event->key);
-			$message->set('msg_body', $post['eml_message']);
+			$message->set('msg_body', $input['eml_message']);
 			$message->set('msg_sent_time', 'now()');
 			$message->save();
 
 			//REGISTRANTS OR WAITING LIST
-			if(isset($get['waiting_list']) || isset($post['waiting_list'])){
+			if(isset($input['waiting_list']) || isset($input['waiting_list'])){
 				$event_registrants = new MultiWaitingList(array('event_id' => $event->key), NULL);
 				$event_registrants->load();
 			}
@@ -120,7 +120,7 @@ function admin_users_message_logic($get, $post) {
 			foreach ($event_registrants as $event_registrant){
 				// Using new EmailMessage system instead
 
-				if(isset($get['waiting_list']) || isset($post['waiting_list'])){
+				if(isset($input['waiting_list']) || isset($input['waiting_list'])){
 					$recipient_user = new User($event_registrant->get('ewl_usr_user_id'), TRUE);
 					// Template variables handled in new system below
 				}
@@ -135,7 +135,7 @@ function admin_users_message_logic($get, $post) {
 				if($event){
 					$message->set('msg_evt_event_id', $event->key);
 				}
-				$message->set('msg_body', $post['eml_message']);
+				$message->set('msg_body', $input['eml_message']);
 				$message->set('msg_sent_time', 'now()');
 				$message->save();
 
@@ -146,7 +146,7 @@ function admin_users_message_logic($get, $post) {
 						$recipient_user->key,
 						'message',
 						$ntf_title,
-						substr(strip_tags($post['eml_message']), 0, 100),
+						substr(strip_tags($input['eml_message']), 0, 100),
 						null,
 						$sender->key
 					);
@@ -163,13 +163,13 @@ function admin_users_message_logic($get, $post) {
 				$numrecipients++;
 				// Create and send using new system
 			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => $post['eml_subject'],
-				'body' => $post['eml_message'],
+				'subject' => $input['eml_subject'],
+				'body' => $input['eml_message'],
 				'utm_medium' => 'email',
-				'utm_content' => urlencode($post['eml_subject']),
+				'utm_content' => urlencode($input['eml_subject']),
 				'recipient' => $recipient_user->export_as_array()
 			]);
-			$message_obj->subject($post['eml_subject'])
+			$message_obj->subject($input['eml_subject'])
 					   ->to($recipient_user->get('usr_email'), $recipient_user->display_name());
 			$sender_obj = new EmailSender();
 			$result = $sender_obj->send($message_obj);
@@ -183,20 +183,20 @@ function admin_users_message_logic($get, $post) {
 			}
 
 			//SEND ONE TO LEADER
-			if(!(isset($get['waiting_list']) || isset($post['waiting_list']))){
+			if(!(isset($input['waiting_list']) || isset($input['waiting_list']))){
 				if($event->get('evt_usr_user_id_leader')){
 					$leader = new User($event->get('evt_usr_user_id_leader'), TRUE);
 					// Using new EmailMessage system instead
 					// Template variables handled in new system below
 					// Create and send using new system
 			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => 'COPY: '.$post['eml_subject'],
-				'body' => $post['eml_message'],
+				'subject' => 'COPY: '.$input['eml_subject'],
+				'body' => $input['eml_message'],
 				'utm_medium' => 'email',
-				'utm_content' => urlencode($post['eml_subject']),
+				'utm_content' => urlencode($input['eml_subject']),
 				'recipient' => $leader->export_as_array()
 			]);
-			$message_obj->subject('COPY: '.$post['eml_subject'])
+			$message_obj->subject('COPY: '.$input['eml_subject'])
 					   ->to($leader->get('usr_email'), $leader->display_name());
 			$sender_obj = new EmailSender();
 			$result = $sender_obj->send($message_obj);
@@ -211,7 +211,7 @@ function admin_users_message_logic($get, $post) {
 			$message->set('msg_usr_user_id_sender', $sender->key);
 			$message->set('msg_usr_user_id_recipient', NULL);
 			$message->set('msg_evt_event_id', $event->key);
-			$message->set('msg_body', $post['eml_message']);
+			$message->set('msg_body', $input['eml_message']);
 			$message->set('msg_sent_time', 'now()');
 			$message->save();
 
@@ -248,7 +248,7 @@ function admin_users_message_logic($get, $post) {
 				if($event){
 					$message->set('msg_evt_event_id', $event->key);
 				}
-				$message->set('msg_body', $post['eml_message']);
+				$message->set('msg_body', $input['eml_message']);
 				$message->set('msg_sent_time', 'now()');
 				$message->save();
 
@@ -259,7 +259,7 @@ function admin_users_message_logic($get, $post) {
 						$recipient_user->key,
 						'message',
 						$ntf_title,
-						substr(strip_tags($post['eml_message']), 0, 100),
+						substr(strip_tags($input['eml_message']), 0, 100),
 						null,
 						$sender->key
 					);
@@ -278,13 +278,13 @@ function admin_users_message_logic($get, $post) {
 			}
 			// Create and send using new system
 			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => $post['eml_subject'],
-				'body' => $post['eml_message'],
+				'subject' => $input['eml_subject'],
+				'body' => $input['eml_message'],
 				'utm_medium' => 'email',
-				'utm_content' => urlencode($post['eml_subject']),
+				'utm_content' => urlencode($input['eml_subject']),
 				'recipient' => $recipient_user->export_as_array()
 			]);
-			$message_obj->subject($post['eml_subject'])
+			$message_obj->subject($input['eml_subject'])
 					   ->to($recipient_user->get('usr_email'), $recipient_user->display_name());
 			$sender_obj = new EmailSender();
 			$result = $sender_obj->send($message_obj);
@@ -303,13 +303,13 @@ function admin_users_message_logic($get, $post) {
 			// Template variables handled in new system below
 			// Create and send using new system
 			$message_obj = EmailMessage::fromTemplate($email_inner_template, [
-				'subject' => $post['eml_subject'],
-				'body' => $post['eml_message'],
+				'subject' => $input['eml_subject'],
+				'body' => $input['eml_message'],
 				'utm_medium' => 'email',
-				'utm_content' => urlencode($post['eml_subject']),
+				'utm_content' => urlencode($input['eml_subject']),
 				'recipient' => $recipient->export_as_array()
 			]);
-			$message_obj->subject($post['eml_subject'])
+			$message_obj->subject($input['eml_subject'])
 					   ->to($recipient->get('usr_email'), $recipient->display_name());
 			$sender_obj = new EmailSender();
 			$result = $sender_obj->send($message_obj);
@@ -323,7 +323,7 @@ function admin_users_message_logic($get, $post) {
 				if($event){
 					$message->set('msg_evt_event_id', $event->key);
 				}
-				$message->set('msg_body', $post['eml_message']);
+				$message->set('msg_body', $input['eml_message']);
 				$message->set('msg_sent_time', 'now()');
 				$message->save();
 
@@ -333,7 +333,7 @@ function admin_users_message_logic($get, $post) {
 						$recipient->key,
 						'message',
 						'New message from ' . $sender->display_name(),
-						substr(strip_tags($post['eml_message']), 0, 100),
+						substr(strip_tags($input['eml_message']), 0, 100),
 						null,
 						$sender->key
 					);
@@ -364,10 +364,10 @@ function admin_users_message_logic($get, $post) {
 		$result = EmailSender::sendTemplate($email_inner_template,
 			$sender->get('usr_email'),
 			[
-				'subject' => 'COPY: '.$post['eml_subject'],
-				'body' => $post['eml_message'],
+				'subject' => 'COPY: '.$input['eml_subject'],
+				'body' => $input['eml_message'],
 				'utm_medium' => 'email',
-				'utm_content' => urlencode($post['eml_subject']),
+				'utm_content' => urlencode($input['eml_subject']),
 				'recipient' => $sender->export_as_array()
 			]
 		);

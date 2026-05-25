@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_user_add_logic($get, $post) {
+function admin_user_add_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
@@ -11,9 +11,9 @@ function admin_user_add_logic($get, $post) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if ($post){
+	if ($input){
 
-		$user = User::CreateCompleteNew($post, $post['send_activation_email'], false, false);
+		$user = User::CreateCompleteNew($input, $input['send_activation_email'], false, false);
 
 		//NOW REDIRECT
 		$session = SessionControl::get_instance();

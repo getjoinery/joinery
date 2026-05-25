@@ -5,11 +5,11 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * Logic for admin_users_permanent_delete
  * Handles cascading deletion of users with dry-run preview and confirmation
  *
- * @param array $get_vars GET variables
- * @param array $post_vars POST variables
+ * @param array $input GET variables
+ * @param array $input POST variables
  * @return LogicResult
  */
-function admin_users_permanent_delete_logic($get_vars, $post_vars) {
+function admin_users_permanent_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -20,9 +20,9 @@ function admin_users_permanent_delete_logic($get_vars, $post_vars) {
 	$page_vars = array();
 
 	// Handle POST - Process deletion
-	if (!empty($post_vars)) {
-		$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to delete here.', $post_vars);
-		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $post_vars);
+	if (!empty($input)) {
+		$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to delete here.', $input);
+		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $input);
 
 		if ($confirm) {
 			$user = new User($usr_user_id, TRUE);
@@ -36,7 +36,7 @@ function admin_users_permanent_delete_logic($get_vars, $post_vars) {
 	}
 
 	// Handle GET - Display confirmation page with dry-run preview
-	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.', $get_vars);
+	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.', $input);
 
 	$user = new User($usr_user_id, TRUE);
 

@@ -5,11 +5,11 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * Logic for admin_order_delete
  * Handles administrative deletion of orders (no refund processing)
  *
- * @param array $get_vars GET variables
- * @param array $post_vars POST variables
+ * @param array $input GET variables
+ * @param array $input POST variables
  * @return LogicResult
  */
-function admin_order_delete_logic($get_vars, $post_vars) {
+function admin_order_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/orders_class.php'));
@@ -21,9 +21,9 @@ function admin_order_delete_logic($get_vars, $post_vars) {
 	$page_vars = array();
 
 	// Handle POST - Process deletion
-	if (!empty($post_vars)) {
-		$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to delete here.', $post_vars);
-		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $post_vars);
+	if (!empty($input)) {
+		$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to delete here.', $input);
+		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $input);
 
 		if ($confirm) {
 			$order = new Order($ord_order_id, TRUE);
@@ -37,7 +37,7 @@ function admin_order_delete_logic($get_vars, $post_vars) {
 	}
 
 	// Handle GET - Display confirmation page
-	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to edit.', $get_vars);
+	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to edit.', $input);
 
 	$order = new Order($ord_order_id, TRUE);
 

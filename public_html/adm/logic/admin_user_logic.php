@@ -4,7 +4,7 @@
 // so they don't get automatic PathHelper loading.
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_user_logic($get_vars, $post_vars) {
+function admin_user_logic(array $input): LogicResult {
 	// Required includes (PathHelper is now available from the require above)
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -46,51 +46,51 @@ function admin_user_logic($get_vars, $post_vars) {
 	$page_vars['session'] = $session;
 
 	// Check if "show all" is enabled
-	$show_all = isset($get_vars['show_all']) && $get_vars['show_all'] == '1';
+	$show_all = isset($input['show_all']) && $input['show_all'] == '1';
 	$list_limit = $show_all ? NULL : 10;
 
 	// Get user
-	$user = new User($get_vars['usr_user_id'], TRUE);
+	$user = new User($input['usr_user_id'], TRUE);
 	include(PathHelper::getAbsolutePath('/utils/registrant_maintenance.php'));
 	include(PathHelper::getAbsolutePath('/utils/order_maintenance.php'));
 
 	// Process actions
-	$action = $get_vars['action'] ?? $post_vars['action'] ?? null;
+	$action = $input['action'] ?? $input['action'] ?? null;
 
 	// Handle GET actions
-	if(isset($get_vars['action']) && $get_vars['action'] == 'delete'){
+	if(isset($input['action']) && $input['action'] == 'delete'){
 		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$user->soft_delete();
 		return LogicResult::redirect('/admin/admin_users');
 	}
-	else if(isset($get_vars['action']) && $get_vars['action'] == 'undelete'){
+	else if(isset($input['action']) && $input['action'] == 'undelete'){
 		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$user->undelete();
 		return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 	}
 
 	// Handle POST actions
-	if($post_vars){
+	if($input){
 
-		if($post_vars['action'] == 'add_to_group'){
+		if($input['action'] == 'add_to_group'){
 			//ADD THE USER TO A GROUP
-			$group = new Group($post_vars['grp_group_id'], TRUE);
+			$group = new Group($input['grp_group_id'], TRUE);
 			$groupmember = $group->add_member($user->key);
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
-		else if($post_vars['action'] == 'remove_from_group'){
-			$groupmember = new GroupMember($post_vars['grm_group_member_id'], TRUE);
+		else if($input['action'] == 'remove_from_group'){
+			$groupmember = new GroupMember($input['grm_group_member_id'], TRUE);
 			$groupmember->remove();
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
-		else if($post_vars['action'] == 'add_to_event'){
+		else if($input['action'] == 'add_to_event'){
 			//ADD THE USER TO AN EVENT
-			$event = new Event($post_vars['evt_event_id'], TRUE);
+			$event = new Event($input['evt_event_id'], TRUE);
 			$event->add_registrant($user->key);
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
-		else if($post_vars['action'] == 'remove_from_event'){
-			$event = new Event($post_vars['evt_event_id'], TRUE);
+		else if($input['action'] == 'remove_from_event'){
+			$event = new Event($input['evt_event_id'], TRUE);
 			$event->remove_registrant($user->key);
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}

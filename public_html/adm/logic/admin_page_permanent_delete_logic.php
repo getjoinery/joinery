@@ -7,7 +7,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * components used only by this page are permanently deleted;
  * components shared with other active pages are left intact.
  */
-function admin_page_permanent_delete_logic($get_vars, $post_vars) {
+function admin_page_permanent_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
@@ -19,8 +19,8 @@ function admin_page_permanent_delete_logic($get_vars, $post_vars) {
 	$page_vars = array();
 
 	// Handle POST - process deletion
-	if (!empty($post_vars['confirm'])) {
-		$pag_page_id = LibraryFunctions::fetch_variable('pag_page_id', NULL, 1, 'You must provide a page to delete.', $post_vars);
+	if (!empty($input['confirm'])) {
+		$pag_page_id = LibraryFunctions::fetch_variable('pag_page_id', NULL, 1, 'You must provide a page to delete.', $input);
 
 		$page = new Page($pag_page_id, TRUE);
 		$page->authenticate_write(['current_user_id' => $session->get_user_id(), 'current_user_permission' => $session->get_permission()]);
@@ -42,7 +42,7 @@ function admin_page_permanent_delete_logic($get_vars, $post_vars) {
 	}
 
 	// Handle GET - display confirmation
-	$pag_page_id = LibraryFunctions::fetch_variable('pag_page_id', NULL, 1, 'You must provide a page to delete.', $get_vars);
+	$pag_page_id = LibraryFunctions::fetch_variable('pag_page_id', NULL, 1, 'You must provide a page to delete.', $input);
 
 	$page = new Page($pag_page_id, TRUE);
 

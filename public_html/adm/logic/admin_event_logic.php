@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_event_logic($get_vars, $post_vars) {
+function admin_event_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
@@ -26,17 +26,17 @@ function admin_event_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 	$session->set_return();
 
-	$evt_event_id = !empty($get_vars['evt_event_id']) ? $get_vars['evt_event_id'] : (!empty($post_vars['evt_event_id']) ? $post_vars['evt_event_id'] : null);
+	$evt_event_id = !empty($input['evt_event_id']) ? $input['evt_event_id'] : (!empty($input['evt_event_id']) ? $input['evt_event_id'] : null);
 	$event = new Event($evt_event_id, TRUE);
 
 	// Handle actions
-	if($get_vars['action'] == 'delete'){
+	if($input['action'] == 'delete'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->soft_delete();
 
 		return LogicResult::redirect('/admin/admin_events');
 	}
-	else if($get_vars['action'] == 'undelete'){
+	else if($input['action'] == 'undelete'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->undelete();
 
@@ -44,46 +44,46 @@ function admin_event_logic($get_vars, $post_vars) {
 	}
 
 	// Recurring event actions
-	if($post_vars['action'] == 'cancel_instance'){
+	if($input['action'] == 'cancel_instance'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$instance = $event->materialize_instance($post_vars['instance_date']);
+		$instance = $event->materialize_instance($input['instance_date']);
 		$instance->set('evt_status', Event::STATUS_CANCELED);
 		$instance->save();
 		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($post_vars['action'] == 'end_series'){
+	if($input['action'] == 'end_series'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->end_series();
 		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($post_vars['action'] == 'remove_from_event'){
+	if($input['action'] == 'remove_from_event'){
 
-		$eventregistrant = new EventRegistrant($post_vars['evr_event_registrant_id'], TRUE);
+		$eventregistrant = new EventRegistrant($input['evr_event_registrant_id'], TRUE);
 		$eventregistrant->remove();
 
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}
 
-	if($post_vars['action'] == 'remove_from_waiting_list'){
+	if($input['action'] == 'remove_from_waiting_list'){
 
-		$waiting_list = new WaitingList($post_vars['ewl_waiting_list_id'], TRUE);
+		$waiting_list = new WaitingList($input['ewl_waiting_list_id'], TRUE);
 		$waiting_list->remove();
 
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}
 
-	if($post_vars['action'] == 'set_primary_photo'){
+	if($input['action'] == 'set_primary_photo'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$event->set_primary_photo((int)$post_vars['photo_id']);
+		$event->set_primary_photo((int)$input['photo_id']);
 
 		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($post_vars['action'] == 'clear_primary_photo'){
+	if($input['action'] == 'clear_primary_photo'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->clear_primary_photo();
 

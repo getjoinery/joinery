@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_api_key_edit_logic($get_vars, $post_vars) {
+function admin_api_key_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
@@ -11,30 +11,30 @@ function admin_api_key_edit_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 	$settings = Globalvars::get_instance();
 
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$api_key = new ApiKey($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['apk_api_key_id'])) {
-		$api_key = new ApiKey($get_vars['apk_api_key_id'], TRUE);
+	if (isset($input['edit_primary_key_value'])) {
+		$api_key = new ApiKey($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['apk_api_key_id'])) {
+		$api_key = new ApiKey($input['apk_api_key_id'], TRUE);
 	}
 	else {
 		$api_key = new ApiKey(NULL);
 	}
 
-	if($post_vars){
+	if($input){
 
 		$editable_fields = array('apk_name','apk_is_active','apk_permission', 'apk_ip_restriction');
 
 		foreach($editable_fields as $field) {
-			$api_key->set($field, $post_vars[$field]);
+			$api_key->set($field, $input[$field]);
 		}
 
 		// Process datetime fields using FormWriter V2 helper
-		$start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'apk_start_time', true);
+		$start_time = FormWriterV2Base::process_datetimeinput($input, 'apk_start_time', true);
 		if($start_time !== NULL){
 			$api_key->set('apk_start_time', $start_time);
 		}
 
-		$expires_time = FormWriterV2Base::process_datetimeinput($post_vars, 'apk_expires_time', true);
+		$expires_time = FormWriterV2Base::process_datetimeinput($input, 'apk_expires_time', true);
 		if($expires_time !== NULL){
 			$api_key->set('apk_expires_time', $expires_time);
 		}

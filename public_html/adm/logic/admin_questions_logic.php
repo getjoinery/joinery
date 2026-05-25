@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_questions_logic($get_vars, $post_vars) {
+function admin_questions_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -12,9 +12,9 @@ function admin_questions_logic($get_vars, $post_vars) {
 	$session->set_return();
 
 	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable_local($get_vars, 'offset', 0);
-	$sort = LibraryFunctions::fetch_variable_local($get_vars, 'sort', 'question_id');
-	$sdirection = LibraryFunctions::fetch_variable_local($get_vars, 'sdirection', 'DESC');
+	$offset = LibraryFunctions::fetch_variable_local($input, 'offset', 0);
+	$sort = LibraryFunctions::fetch_variable_local($input, 'sort', 'question_id');
+	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'DESC');
 
 	$search_criteria = array();
 	if($session->get_permission() < 10){

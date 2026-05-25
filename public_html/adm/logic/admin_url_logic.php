@@ -5,28 +5,28 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/urls_class.php'));
 
-function admin_url_logic($get_vars, $post_vars) {
+function admin_url_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
 
-	$url = new Url($get_vars['url_url_id'], TRUE);
+	$url = new Url($input['url_url_id'], TRUE);
 
-	if($get_vars['action'] == 'soft_delete'){
+	if($input['action'] == 'soft_delete'){
 		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->soft_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_urls");
 	}
-	if($get_vars['action'] == 'undelete'){
+	if($input['action'] == 'undelete'){
 		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->undelete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_urls");
 	}
-	if($get_vars['action'] == 'permanent_delete'){
+	if($input['action'] == 'permanent_delete'){
 		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$url->permanent_delete();
 

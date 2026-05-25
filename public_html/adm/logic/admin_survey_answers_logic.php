@@ -8,7 +8,7 @@ require_once(PathHelper::getIncludePath('data/questions_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
 
-function admin_survey_answers_logic($get_vars, $post_vars) {
+function admin_survey_answers_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_email_edit_logic($get_vars, $post_vars) {
+function admin_email_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));
@@ -14,25 +14,25 @@ function admin_email_edit_logic($get_vars, $post_vars) {
 	$settings = Globalvars::get_instance();
 
 	// Load or create email
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$email = new Email($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['eml_email_id'])) {
-		$email = new Email($get_vars['eml_email_id'], TRUE);
+	if (isset($input['edit_primary_key_value'])) {
+		$email = new Email($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['eml_email_id'])) {
+		$email = new Email($input['eml_email_id'], TRUE);
 	} else {
 		$email = new Email(NULL);
 	}
 
 	// Process POST actions
-	if($post_vars){
+	if($input){
 
-		if($post_vars['eml_mlt_mailing_list_id'] == ''){
-			$post_vars['eml_mlt_mailing_list_id'] = NULL;
+		if($input['eml_mlt_mailing_list_id'] == ''){
+			$input['eml_mlt_mailing_list_id'] = NULL;
 		}
 
 		$editable_fields = array('eml_description', 'eml_subject', 'eml_from_address', 'eml_from_name', 'eml_message_html', 'eml_preview_text', 'eml_ctt_contact_type_id', 'eml_mlt_mailing_list_id');
 
 		foreach($editable_fields as $field) {
-			$email->set($field, $post_vars[$field]);
+			$email->set($field, $input[$field]);
 		}
 
 		if(!$email->key){
@@ -40,8 +40,8 @@ function admin_email_edit_logic($get_vars, $post_vars) {
 			$email->set('eml_status', Email::EMAIL_CREATED);
 		}
 
-		$email->set('eml_reply_to',$post_vars['eml_from_address']);
-		$email->set('eml_message_template_html', $post_vars['eml_message_template_html']);
+		$email->set('eml_reply_to',$input['eml_from_address']);
+		$email->set('eml_message_template_html', $input['eml_message_template_html']);
 		$email->set('eml_type', Email::TYPE_MARKETING);
 
 		$email->prepare();

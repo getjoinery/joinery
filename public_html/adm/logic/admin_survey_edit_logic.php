@@ -7,14 +7,14 @@
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('data/surveys_class.php'));
 
-function admin_survey_edit_logic($get, $post) {
+function admin_survey_edit_logic(array $input): LogicResult {
     // Permission check
     $session = SessionControl::get_instance();
     $session->check_permission(10);
 
     // Load or create survey
-    if (isset($get['svy_survey_id']) || isset($post['edit_primary_key_value'])) {
-        $survey_id = isset($post['edit_primary_key_value']) ? $post['edit_primary_key_value'] : $get['svy_survey_id'];
+    if (isset($input['svy_survey_id']) || isset($input['edit_primary_key_value'])) {
+        $survey_id = isset($input['edit_primary_key_value']) ? $input['edit_primary_key_value'] : $input['svy_survey_id'];
         try {
             $survey = new Survey($survey_id, TRUE);
             if (!$survey || $survey->get('svy_delete_time')) {
@@ -28,13 +28,13 @@ function admin_survey_edit_logic($get, $post) {
     }
 
     // Process POST
-    if ($post) {
+    if ($input) {
         try {
             $editable_fields = array('svy_name');
 
             foreach ($editable_fields as $field) {
-                if (isset($post[$field])) {
-                    $survey->set($field, $post[$field]);
+                if (isset($input[$field])) {
+                    $survey->set($field, $input[$field]);
                 }
             }
 
