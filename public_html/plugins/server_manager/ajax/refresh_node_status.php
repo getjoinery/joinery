@@ -9,7 +9,7 @@
  *
  * Requires superadmin (level 10) — same gate as the Server Manager admin UI.
  *
- * @version 1.0
+ * @version 1.1
  */
 header('Content-Type: application/json');
 
@@ -77,6 +77,7 @@ if ($use_api) {
 
 	if ($health_url !== '') {
 		$start = microtime(true);
+		$node_version_from_header = null;
 		$ch = curl_init($health_url);
 		curl_setopt_array($ch, [
 			CURLOPT_RETURNTRANSFER => true,
@@ -88,6 +89,13 @@ if ($use_api) {
 			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
 			CURLOPT_SSL_VERIFYHOST => $node->get('mgn_tls_insecure') ? 0 : 2,
 		]);
+		curl_setopt($ch, CURLOPT_HEADERFUNCTION, function($curl, $header) use (&$node_version_from_header) {
+			if (stripos($header, 'X-Joinery-Version:') === 0) {
+				$v = trim(substr($header, strlen('X-Joinery-Version:')));
+				if ($v !== '') $node_version_from_header = $v;
+			}
+			return strlen($header);
+		});
 		curl_exec($ch);
 		$errno      = curl_errno($ch);
 		$errmsg     = curl_error($ch);
@@ -98,6 +106,9 @@ if ($use_api) {
 		$is_up = !$errno && $status >= 200 && $status < 400;
 		if ($is_up) {
 			$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
+			if ($node_version_from_header) {
+				$node->set('mgn_joinery_version', $node_version_from_header);
+			}
 			$node->save();
 			$response = [
 				'ok'           => true,
@@ -107,6 +118,14 @@ if ($use_api) {
 					$node->get('mgn_last_status_check'), 'UTC', $session->get_timezone(), 'M j, g:i A'
 				),
 			];
+			if ($node_version_from_header) {
+				$cp_version = LibraryFunctions::get_joinery_version();
+				$response['version']     = $node_version_from_header;
+				$response['cp_version']  = $cp_version;
+				$response['version_cmp'] = ($cp_version !== '' && preg_match('/^\d+\.\d+\.\d+$/', $node_version_from_header))
+					? version_compare($node_version_from_header, $cp_version)
+					: null;
+			}
 		} else {
 			$response = [
 				'ok'         => false,
