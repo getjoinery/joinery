@@ -10,37 +10,37 @@ require_once(PathHelper::getIncludePath('data/surveys_class.php'));
 require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));
 require_once(PathHelper::getIncludePath('data/questions_class.php'));
 
-function admin_survey_logic($get, $post) {
+function admin_survey_logic(array $input): LogicResult {
     // Permission check
     $session = SessionControl::get_instance();
     $session->check_permission(5);
     $session->set_return();
 
     // Handle POST actions
-    if ($post) {
-        if (isset($post['action'])) {
-            switch ($post['action']) {
+    if ($input) {
+        if (isset($input['action'])) {
+            switch ($input['action']) {
                 case 'addquestion':
                     $survey_question = new SurveyQuestion(NULL);
-                    $survey_question->set('srq_svy_survey_id', $post['svy_survey_id']);
-                    $survey_question->set('srq_qst_question_id', $post['qst_question_id']);
+                    $survey_question->set('srq_svy_survey_id', $input['svy_survey_id']);
+                    $survey_question->set('srq_qst_question_id', $input['qst_question_id']);
                     $survey_question->prepare();
                     $survey_question->save();
-                    return LogicResult::redirect('/admin/admin_survey?svy_survey_id=' . $post['svy_survey_id']);
+                    return LogicResult::redirect('/admin/admin_survey?svy_survey_id=' . $input['svy_survey_id']);
                     break;
 
                 case 'removequestion':
-                    $survey_question = new SurveyQuestion($post['srq_survey_question_id'], TRUE);
+                    $survey_question = new SurveyQuestion($input['srq_survey_question_id'], TRUE);
                     $survey_question->authenticate_write([
                         'current_user_id' => $session->get_user_id(),
                         'current_user_permission' => $session->get_permission()
                     ]);
                     $survey_question->permanent_delete();
-                    return LogicResult::redirect('/admin/admin_survey?svy_survey_id=' . $post['svy_survey_id']);
+                    return LogicResult::redirect('/admin/admin_survey?svy_survey_id=' . $input['svy_survey_id']);
                     break;
 
                 case 'removesurvey':
-                    $survey = new Survey($post['svy_survey_id'], TRUE);
+                    $survey = new Survey($input['svy_survey_id'], TRUE);
                     $survey->authenticate_write([
                         'current_user_id' => $session->get_user_id(),
                         'current_user_permission' => $session->get_permission()
@@ -53,11 +53,11 @@ function admin_survey_logic($get, $post) {
     }
 
     // Handle GET actions
-    if (isset($get['action'])) {
-        $svy_survey_id = $get['svy_survey_id'] ?? 0;
+    if (isset($input['action'])) {
+        $svy_survey_id = $input['svy_survey_id'] ?? 0;
         $survey = new Survey($svy_survey_id, TRUE);
 
-        switch ($get['action']) {
+        switch ($input['action']) {
             case 'delete':
                 $survey->authenticate_write([
                     'current_user_id' => $session->get_user_id(),

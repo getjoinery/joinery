@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_themes_logic($get, $post) {
+function admin_themes_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -17,13 +17,13 @@ function admin_themes_logic($get, $post) {
 	$error = '';
 
 	// Handle form submissions and GET actions
-	$action = isset($post['action']) ? $post['action'] : (isset($get['action']) ? $get['action'] : null);
-	if ($action || $post) {
+	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : null);
+	if ($action || $input) {
 		try {
 			if ($action) {
 				switch ($action) {
 					case 'activate':
-						$theme_name = $post['theme_name'];
+						$theme_name = $input['theme_name'];
 
 						// Gate activation on theme's requires.joinery (if any). Fail closed with
 						// a clear error that matches the badge format on the themes list page.
@@ -63,7 +63,7 @@ function admin_themes_logic($get, $post) {
 						break;
 
 					case 'mark_upgradable':
-						$theme_name = $post['theme_name'];
+						$theme_name = $input['theme_name'];
 						$theme = Theme::get_by_theme_name($theme_name);
 						if ($theme) {
 							$theme->set('thm_receives_upgrades', true);
@@ -75,7 +75,7 @@ function admin_themes_logic($get, $post) {
 						break;
 
 					case 'mark_preserved':
-						$theme_name = $post['theme_name'];
+						$theme_name = $input['theme_name'];
 						$theme = Theme::get_by_theme_name($theme_name);
 						if ($theme) {
 							$theme->set('thm_receives_upgrades', false);
@@ -96,7 +96,7 @@ function admin_themes_logic($get, $post) {
 						break;
 
 					case 'delete':
-						$theme_name = $post['theme_name'];
+						$theme_name = $input['theme_name'];
 						// Use ThemeManager::deleteTheme() which handles files AND database record
 						// It also enforces system theme protection and active theme checks
 						$theme_manager->deleteTheme($theme_name);

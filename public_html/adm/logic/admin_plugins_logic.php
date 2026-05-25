@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_plugins_logic($get, $post) {
+function admin_plugins_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -39,9 +39,9 @@ function admin_plugins_logic($get, $post) {
 	}
 
 	// Handle form submissions and GET actions
-	$action = isset($post['action']) ? $post['action'] : (isset($get['action']) ? $get['action'] : '');
-	$plugin_name = isset($post['plugin_name']) ? $post['plugin_name'] : (isset($get['plugin_name']) ? $get['plugin_name'] : '');
-	if ($action || $post) {
+	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : '');
+	$plugin_name = isset($input['plugin_name']) ? $input['plugin_name'] : (isset($input['plugin_name']) ? $input['plugin_name'] : '');
+	if ($action || $input) {
 
 		// Handle upload action separately as it doesn't require plugin_name
 		if ($action === 'upload') {

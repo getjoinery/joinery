@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_softdelete_logic($get_vars, $post_vars) {
+function admin_softdelete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
@@ -9,7 +9,7 @@ function admin_softdelete_logic($get_vars, $post_vars) {
 	$session->check_permission(9);
 	$session->set_return('/admin/admin_users');
 
-	$usr_user_id = LibraryFunctions::fetch_variable_local($get_vars, 'usr_user_id', NULL);
+	$usr_user_id = LibraryFunctions::fetch_variable_local($input, 'usr_user_id', NULL);
 	$user = new User($usr_user_id, TRUE);
 
 	$page_vars = array();

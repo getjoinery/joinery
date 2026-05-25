@@ -8,14 +8,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('data/product_details_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
-function admin_shadow_session_edit_logic($get, $post) {
+function admin_shadow_session_edit_logic(array $input): LogicResult {
     // Permission check
     $session = SessionControl::get_instance();
     $session->check_permission(5);
 
     // Load or create product detail
-    if (isset($get['prd_product_detail_id']) || isset($post['edit_primary_key_value'])) {
-        $product_detail_id = isset($post['edit_primary_key_value']) ? $post['edit_primary_key_value'] : $get['prd_product_detail_id'];
+    if (isset($input['prd_product_detail_id']) || isset($input['edit_primary_key_value'])) {
+        $product_detail_id = isset($input['edit_primary_key_value']) ? $input['edit_primary_key_value'] : $input['prd_product_detail_id'];
         try {
             $product_detail = new ProductDetail($product_detail_id, TRUE);
             if (!$product_detail || $product_detail->get('prd_delete_time')) {
@@ -35,15 +35,15 @@ function admin_shadow_session_edit_logic($get, $post) {
     }
 
     // Process POST
-    if ($post) {
+    if ($input) {
         try {
             // Define editable fields
             $editable_fields = array('prd_num_used', 'prd_notes');
 
             // Set fields from POST
             foreach ($editable_fields as $field) {
-                if (isset($post[$field])) {
-                    $product_detail->set($field, $post[$field]);
+                if (isset($input[$field])) {
+                    $product_detail->set($field, $input[$field]);
                 }
             }
 

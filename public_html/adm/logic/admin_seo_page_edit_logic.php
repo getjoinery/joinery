@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_seo_page_edit_logic($get_vars, $post_vars) {
+function admin_seo_page_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
@@ -9,9 +9,9 @@ function admin_seo_page_edit_logic($get_vars, $post_vars) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
-	$spm_id = $get_vars['spm_id'] ?? null;
-	if (isset($post_vars['edit_primary_key_value']) && $post_vars['edit_primary_key_value']) {
-		$spm = new SeoPageMetadata((int)$post_vars['edit_primary_key_value'], TRUE);
+	$spm_id = $input['spm_id'] ?? null;
+	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
+		$spm = new SeoPageMetadata((int)$input['edit_primary_key_value'], TRUE);
 	} elseif ($spm_id) {
 		$spm = new SeoPageMetadata((int)$spm_id, TRUE);
 	} else {
@@ -20,26 +20,26 @@ function admin_seo_page_edit_logic($get_vars, $post_vars) {
 
 	$error = null;
 
-	if ($post_vars) {
-		if (isset($post_vars['btn_delete']) && $spm->key) {
+	if ($input) {
+		if (isset($input['btn_delete']) && $spm->key) {
 			$spm->soft_delete();
 			return LogicResult::redirect('/admin/admin_seo_pages?notice=' . urlencode('SEO row soft-deleted.'));
 		}
 
 		try {
 			if (!$spm->key) {
-				$path = SeoPageMetadata::canonicalize_path($post_vars['spm_path'] ?? '');
-				if ($path === '/' && trim($post_vars['spm_path'] ?? '') !== '/') {
+				$path = SeoPageMetadata::canonicalize_path($input['spm_path'] ?? '');
+				if ($path === '/' && trim($input['spm_path'] ?? '') !== '/') {
 					throw new SystemDisplayableError('Path is required.');
 				}
 				$spm->set('spm_path', $path);
 			}
 
 			foreach (array('spm_title', 'spm_meta_description', 'spm_og_title', 'spm_og_description', 'spm_preview_image_url', 'spm_og_type') as $field) {
-				$val = isset($post_vars[$field]) ? trim($post_vars[$field]) : '';
+				$val = isset($input[$field]) ? trim($input[$field]) : '';
 				$spm->set($field, $val === '' ? null : $val);
 			}
-			$spm->set('spm_noindex', !empty($post_vars['spm_noindex']));
+			$spm->set('spm_noindex', !empty($input['spm_noindex']));
 
 			$spm->save();
 			return LogicResult::redirect('/admin/admin_seo_page_edit?spm_id=' . $spm->key . '&notice=' . urlencode('Saved.'));
@@ -116,7 +116,7 @@ function admin_seo_page_edit_logic($get_vars, $post_vars) {
 		'spm'               => $spm,
 		'placeholders'      => $placeholders,
 		'entity_edit_link'  => $entity_edit_link,
-		'notice'            => $get_vars['notice'] ?? null,
+		'notice'            => $input['notice'] ?? null,
 		'error'             => $error,
 	));
 }

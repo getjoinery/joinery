@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_users_edit_logic($get_vars, $post_vars) {
+function admin_users_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('/includes/Activation.php'));
@@ -15,14 +15,14 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 
 	// Load or create user
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
-	if (isset($post_vars['edit_primary_key_value'])) {
+	if (isset($input['edit_primary_key_value'])) {
 		// Verify POST user ID matches GET parameter to prevent cross-user form submission
-		if (isset($get_vars['usr_user_id']) && (int)$post_vars['edit_primary_key_value'] !== (int)$get_vars['usr_user_id']) {
+		if (isset($input['usr_user_id']) && (int)$input['edit_primary_key_value'] !== (int)$input['usr_user_id']) {
 			return LogicResult::error('User ID mismatch.');
 		}
-		$user = new User($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['usr_user_id'])) {
-		$user = new User($get_vars['usr_user_id'], TRUE);
+		$user = new User($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['usr_user_id'])) {
+		$user = new User($input['usr_user_id'], TRUE);
 	} else {
 		return LogicResult::error('User ID is required for editing');
 	}
@@ -35,11 +35,11 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 	$mailing_lists->load();
 
 	// Process POST actions
-	if ($post_vars) {
+	if ($input) {
 
 		// Admin 2FA reset — clears the user's TOTP state so they can re-enroll.
 		// Logged via ChangeTracking so the action is auditable.
-		if (isset($post_vars['action']) && $post_vars['action'] === 'reset_2fa') {
+		if (isset($input['action']) && $input['action'] === 'reset_2fa') {
 			require_once(PathHelper::getIncludePath('data/change_tracking_class.php'));
 			$previous_enabled_time = $user->get('usr_totp_enabled_time');
 			$user->disable_totp();
@@ -54,38 +54,38 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 			return LogicResult::redirect('/admin/admin_users_edit?usr_user_id=' . $user->key);
 		}
 
-		$user->set('usr_calendly_uri', trim($post_vars['usr_calendly_uri']));
-		$user->set('usr_first_name', trim($post_vars['usr_first_name']));
-		$user->set('usr_last_name', trim($post_vars['usr_last_name']));
-		$user->set('usr_password_recovery_disabled', (bool)$post_vars['usr_password_recovery_disabled']);
-		$user->set('usr_timezone', $post_vars['usr_timezone']);
-		$user->set('usr_nickname', trim($post_vars['usr_nickname']));
+		$user->set('usr_calendly_uri', trim($input['usr_calendly_uri']));
+		$user->set('usr_first_name', trim($input['usr_first_name']));
+		$user->set('usr_last_name', trim($input['usr_last_name']));
+		$user->set('usr_password_recovery_disabled', (bool)$input['usr_password_recovery_disabled']);
+		$user->set('usr_timezone', $input['usr_timezone']);
+		$user->set('usr_nickname', trim($input['usr_nickname']));
 
-		if($post_vars['usr_organization_name']){
-			$user->set('usr_organization_name', trim($post_vars['usr_organization_name']));
+		if($input['usr_organization_name']){
+			$user->set('usr_organization_name', trim($input['usr_organization_name']));
 		}
 
-		if(isset($post_vars['usr_email_new']) && $post_vars['usr_email_new'] != $user->get('usr_email')) {
+		if(isset($input['usr_email_new']) && $input['usr_email_new'] != $user->get('usr_email')) {
 
-			if (User::GetByEmail(trim($post_vars['usr_email_new']))) {
-				return LogicResult::error('An account has already been registered with the email address '. htmlspecialchars($post_vars['usr_email_new']) .'.');
+			if (User::GetByEmail(trim($input['usr_email_new']))) {
+				return LogicResult::error('An account has already been registered with the email address '. htmlspecialchars($input['usr_email_new']) .'.');
 			} else {
 				if($_SESSION['permission'] == 0){
-					Activation::email_change_send($user->key, trim($post_vars['usr_email_new']));
+					Activation::email_change_send($user->key, trim($input['usr_email_new']));
 				}
 				else{
-					$user->set('usr_email', trim($post_vars['usr_email_new']));
+					$user->set('usr_email', trim($input['usr_email_new']));
 				}
 			}
 		}
 
 		if($_SESSION['permission'] == 10){
-			$user->set('usr_permission', $post_vars['usr_permission']);
+			$user->set('usr_permission', $input['usr_permission']);
 		}
 
 		// Handle allowed IPs - convert newline-separated list to JSON array
-		if (isset($post_vars['usr_allowed_ips'])) {
-			$allowed_ips_input = trim($post_vars['usr_allowed_ips']);
+		if (isset($input['usr_allowed_ips'])) {
+			$allowed_ips_input = trim($input['usr_allowed_ips']);
 			if (empty($allowed_ips_input)) {
 				$user->set('usr_allowed_ips', null);
 			} else {
@@ -102,7 +102,7 @@ function admin_users_edit_logic($get_vars, $post_vars) {
 		$user->save();
 
 		//HANDLE THE USERS'S MAILING LISTS
-		$messages = $user->add_user_to_mailing_lists($post_vars['new_list_subscribes']);
+		$messages = $user->add_user_to_mailing_lists($input['new_list_subscribes']);
 
 		//NOW REDIRECT
 		return LogicResult::redirect("/admin/admin_user?usr_user_id=$user->key");

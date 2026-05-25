@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_product_version_edit_logic($get_vars, $post_vars) {
+function admin_product_version_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/StripeHelper.php'));
 	require_once(PathHelper::getIncludePath('data/products_class.php'));
@@ -16,18 +16,18 @@ function admin_product_version_edit_logic($get_vars, $post_vars) {
 	$currency_symbol = Product::$currency_symbols[strtolower($currency_code)] ?? '$';
 
 	// Load product
-	if (!isset($get_vars['product_id']) && !isset($post_vars['product_id'])) {
+	if (!isset($input['product_id']) && !isset($input['product_id'])) {
 		return LogicResult::redirect('/admin/admin_products');
 	}
-	$product_id = isset($post_vars['product_id']) ? $post_vars['product_id'] : $get_vars['product_id'];
+	$product_id = isset($input['product_id']) ? $input['product_id'] : $input['product_id'];
 	$product = new Product($product_id, TRUE);
 
 	// Load or create product version
 	// CRITICAL: Check edit_primary_key_value (form submission first), fallback to GET
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$product_version = new ProductVersion($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['product_version_id'])) {
-		$product_version = new ProductVersion($get_vars['product_version_id'], TRUE);
+	if (isset($input['edit_primary_key_value'])) {
+		$product_version = new ProductVersion($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['product_version_id'])) {
+		$product_version = new ProductVersion($input['product_version_id'], TRUE);
 	} else {
 		$product_version = new ProductVersion(NULL);
 	}
@@ -44,19 +44,19 @@ function admin_product_version_edit_logic($get_vars, $post_vars) {
 
 	// Process POST actions
 	// CRITICAL: Check for POST submission
-	if ($post_vars) {
-		$product_version->set('prv_version_name', $post_vars['version_name']);
+	if ($input) {
+		$product_version->set('prv_version_name', $input['version_name']);
 
-		if(isset($post_vars['prv_display_priority'])){
-			$product_version->set('prv_display_priority', $post_vars['prv_display_priority']);
+		if(isset($input['prv_display_priority'])){
+			$product_version->set('prv_display_priority', $input['prv_display_priority']);
 		}
 
 		// Set price fields for new versions, or existing versions with no orders
-		if((!$product_version->key || !$has_orders) && isset($post_vars['version_price'])){
+		if((!$product_version->key || !$has_orders) && isset($input['version_price'])){
 			$product_version->set('prv_pro_product_id', $product->key);
-			$product_version->set('prv_version_price', $post_vars['version_price']);
-			$product_version->set('prv_price_type', $post_vars['prv_price_type']);
-			$product_version->set('prv_trial_period_days', $post_vars['prv_trial_period_days']);
+			$product_version->set('prv_version_price', $input['version_price']);
+			$product_version->set('prv_price_type', $input['prv_price_type']);
+			$product_version->set('prv_trial_period_days', $input['prv_trial_period_days']);
 			if(!$product_version->key){
 				$product_version->set('prv_status', 1);
 			}
@@ -79,15 +79,15 @@ function admin_product_version_edit_logic($get_vars, $post_vars) {
 	}
 
 	// Handle GET actions for version management
-	if ($get_vars['action'] == 'remove_version') {
-		$product_version = new ProductVersion($get_vars['product_version_id'], TRUE);
+	if ($input['action'] == 'remove_version') {
+		$product_version = new ProductVersion($input['product_version_id'], TRUE);
 		$product_version->set('prv_status', 0);
 		$product_version->prepare();
 		$product_version->save();
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
-	else if ($get_vars['action'] == 'activate_version') {
-		$product_version = new ProductVersion($get_vars['product_version_id'], TRUE);
+	else if ($input['action'] == 'activate_version') {
+		$product_version = new ProductVersion($input['product_version_id'], TRUE);
 		$product_version->set('prv_status', 1);
 		$product_version->prepare();
 		$product_version->save();

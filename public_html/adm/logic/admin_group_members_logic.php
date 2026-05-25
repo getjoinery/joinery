@@ -6,19 +6,19 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/groups_class.php'));
 require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
-function admin_group_members_logic($get_vars, $post_vars) {
+function admin_group_members_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
 
-	if($post_vars['action'] == 'add_to_group'){
+	if($input['action'] == 'add_to_group'){
 		//ADD THE USER TO A GROUP
-		$group = new Group($post_vars['grp_group_id'], TRUE);
+		$group = new Group($input['grp_group_id'], TRUE);
 		$group->add_member($user->key);
 		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$group->key);
 	}
-	else if($post_vars['action'] == 'remove_from_group'){
-		$groupmember = new GroupMember($post_vars['grm_group_member_id'], TRUE);
+	else if($input['action'] == 'remove_from_group'){
+		$groupmember = new GroupMember($input['grm_group_member_id'], TRUE);
 		$groupmember->remove();
 		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$groupmember->get('grm_grp_group_id'));
 	}

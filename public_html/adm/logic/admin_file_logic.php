@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_file_logic($get_vars, $post_vars) {
+function admin_file_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -15,12 +15,12 @@ function admin_file_logic($get_vars, $post_vars) {
 
 	$settings = Globalvars::get_instance();
 
-	$file = new File($get_vars['fil_file_id'], TRUE);
+	$file = new File($input['fil_file_id'], TRUE);
 	$user = new User($file->get('fil_usr_user_id'), TRUE);
 
 	// Handle actions
-	$post_action = $post_vars['action'] ?? null;
-	$get_action = $get_vars['action'] ?? null;
+	$post_action = $input['action'] ?? null;
+	$get_action = $input['action'] ?? null;
 
 	if($post_action == 'remove'){
 		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -29,14 +29,14 @@ function admin_file_logic($get_vars, $post_vars) {
 		return LogicResult::redirect('/admin/admin_files');
 	}
 	else if($post_action == 'fileremove'){
-		$event_session = new EventSession($post_vars['evs_event_session_id'], TRUE);
-		$event_session->remove_file($post_vars['fil_file_id']);
+		$event_session = new EventSession($input['evs_event_session_id'], TRUE);
+		$event_session->remove_file($input['fil_file_id']);
 
 		return LogicResult::redirect('/admin/admin_file?fil_file_id='.$file->key);
 	}
 	else if($post_action == 'fileadd'){
-		$event_session = new EventSession($post_vars['evs_event_session_id'], TRUE);
-		$event_session->add_file($post_vars['fil_file_id']);
+		$event_session = new EventSession($input['evs_event_session_id'], TRUE);
+		$event_session->add_file($input['fil_file_id']);
 
 		return LogicResult::redirect('/admin/admin_file?fil_file_id='.$file->key);
 	}

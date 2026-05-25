@@ -11,7 +11,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/DocsScanner.php'));
 
-function admin_help_logic($get_vars, $post_vars) {
+function admin_help_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
@@ -23,7 +23,7 @@ function admin_help_logic($get_vars, $post_vars) {
 
 	$doc_tree = DocsScanner::scan_all($docs_dir);
 
-	$selected_doc = isset($get_vars['doc']) ? $get_vars['doc'] : '';
+	$selected_doc = isset($input['doc']) ? $input['doc'] : '';
 	$rendered_html = '';
 	$page_title = 'Documentation';
 	$error = '';

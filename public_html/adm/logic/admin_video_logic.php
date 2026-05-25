@@ -8,15 +8,15 @@ require_once(PathHelper::getIncludePath('data/videos_class.php'));
 require_once(PathHelper::getIncludePath('data/groups_class.php'));
 require_once(PathHelper::getIncludePath('data/events_class.php'));
 
-function admin_video_logic($get_vars, $post_vars) {
+function admin_video_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
 
-	$video = new Video($get_vars['vid_video_id'], TRUE);
+	$video = new Video($input['vid_video_id'], TRUE);
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
 
-	if($get_vars['action'] == 'remove'){
+	if($input['action'] == 'remove'){
 		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->permanent_delete();
 
@@ -24,13 +24,13 @@ function admin_video_logic($get_vars, $post_vars) {
 		return LogicResult::redirect("/admin/admin_videos");
 	}
 
-	if($get_vars['action'] == 'delete'){
+	if($input['action'] == 'delete'){
 		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_videos");
 	}
-	else if($get_vars['action'] == 'undelete'){
+	else if($input['action'] == 'undelete'){
 		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$video->undelete();
 

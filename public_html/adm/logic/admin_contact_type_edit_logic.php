@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_contact_type_edit_logic($get_vars, $post_vars) {
+function admin_contact_type_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/contact_types_class.php'));
@@ -9,20 +9,20 @@ function admin_contact_type_edit_logic($get_vars, $post_vars) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$contact_type = new ContactType($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['ctt_contact_type_id'])) {
-		$contact_type = new ContactType($get_vars['ctt_contact_type_id'], TRUE);
+	if (isset($input['edit_primary_key_value'])) {
+		$contact_type = new ContactType($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['ctt_contact_type_id'])) {
+		$contact_type = new ContactType($input['ctt_contact_type_id'], TRUE);
 	} else {
 		$contact_type = new ContactType(NULL);
 	}
 
-	if($post_vars){
+	if($input){
 
 		$editable_fields = array('ctt_description', 'ctt_provider_list_id', 'ctt_name');
 
 		foreach($editable_fields as $field) {
-			$contact_type->set($field, $post_vars[$field]);
+			$contact_type->set($field, $input[$field]);
 		}
 
 		$contact_type->prepare();

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_users_logic($get_vars, $post_vars) {
+function admin_users_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -12,10 +12,10 @@ function admin_users_logic($get_vars, $post_vars) {
 	$session->set_return();
 
 	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '', $get_vars);
-	$sort = LibraryFunctions::fetch_variable('sort', 'user_id', 0, '', $get_vars);
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '', $get_vars);
-	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '', $get_vars);
+	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '', $input);
+	$sort = LibraryFunctions::fetch_variable('sort', 'user_id', 0, '', $input);
+	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '', $input);
+	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '', $input);
 
 	$search_criteria = array();
 	if(strstr($searchterm, '@')){

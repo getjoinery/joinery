@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_agent_files_logic($get_vars, $post_vars) {
+function admin_agent_files_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
@@ -12,35 +12,35 @@ function admin_agent_files_logic($get_vars, $post_vars) {
 	$session->set_return();
 
 	// Action: write-to-disk on an existing row
-	if (isset($post_vars['action']) && $post_vars['action'] === 'write_to_disk' && !empty($post_vars['agf_agent_file_id'])) {
-		$force = !empty($post_vars['force']);
+	if (isset($input['action']) && $input['action'] === 'write_to_disk' && !empty($input['agf_agent_file_id'])) {
+		$force = !empty($input['force']);
 		try {
-			$agent_file = new AgentFile((int)$post_vars['agf_agent_file_id'], TRUE);
+			$agent_file = new AgentFile((int)$input['agf_agent_file_id'], TRUE);
 			$agent_file->write_to_disk($force);
 			return LogicResult::redirect('/admin/admin_agent_files?written=' . $agent_file->key);
 		} catch (AgentFileDriftException $e) {
 			// On-disk edits would be lost — bounce to a confirmation prompt.
-			return LogicResult::redirect('/admin/admin_agent_files?confirm_overwrite=' . (int)$post_vars['agf_agent_file_id']);
+			return LogicResult::redirect('/admin/admin_agent_files?confirm_overwrite=' . (int)$input['agf_agent_file_id']);
 		} catch (\Throwable $e) {
 			return LogicResult::redirect('/admin/admin_agent_files?error=' . urlencode($e->getMessage()));
 		}
 	}
 
 	// Action: switch to a pending upgrade candidate
-	if (isset($post_vars['action']) && $post_vars['action'] === 'switch_to_candidate' && !empty($post_vars['agf_agent_file_id'])) {
+	if (isset($input['action']) && $input['action'] === 'switch_to_candidate' && !empty($input['agf_agent_file_id'])) {
 		try {
-			$active = new AgentFile((int)$post_vars['agf_agent_file_id'], TRUE);
+			$active = new AgentFile((int)$input['agf_agent_file_id'], TRUE);
 			$active->switch_to_candidate();
-			return LogicResult::redirect('/admin/admin_agent_files?switched=' . (int)$post_vars['agf_agent_file_id']);
+			return LogicResult::redirect('/admin/admin_agent_files?switched=' . (int)$input['agf_agent_file_id']);
 		} catch (\Throwable $e) {
 			return LogicResult::redirect('/admin/admin_agent_files?error=' . urlencode($e->getMessage()));
 		}
 	}
 
 	$numperpage = 50;
-	$offset     = LibraryFunctions::fetch_variable_local($get_vars, 'offset', 0);
-	$sort       = LibraryFunctions::fetch_variable_local($get_vars, 'sort', 'agent_file_id');
-	$sdirection = LibraryFunctions::fetch_variable_local($get_vars, 'sdirection', 'ASC');
+	$offset     = LibraryFunctions::fetch_variable_local($input, 'offset', 0);
+	$sort       = LibraryFunctions::fetch_variable_local($input, 'sort', 'agent_file_id');
+	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'ASC');
 
 	$search_criteria = array();
 	if ($session->get_permission() < 10) {
@@ -55,9 +55,9 @@ function admin_agent_files_logic($get_vars, $post_vars) {
 	// row only if it still actually has on-disk drift (the user may have
 	// already resolved it), so a stale link just shows the normal list.
 	$confirm_row = null;
-	if (!empty($get_vars['confirm_overwrite'])) {
+	if (!empty($input['confirm_overwrite'])) {
 		try {
-			$candidate = new AgentFile((int)$get_vars['confirm_overwrite'], TRUE);
+			$candidate = new AgentFile((int)$input['confirm_overwrite'], TRUE);
 			if (!empty($candidate->get_drifted_targets())) {
 				$confirm_row = $candidate;
 			}
@@ -71,9 +71,9 @@ function admin_agent_files_logic($get_vars, $post_vars) {
 		'agent_files' => $agent_files,
 		'numrecords'  => $numrecords,
 		'numperpage'  => $numperpage,
-		'written'     => isset($get_vars['written']) ? $get_vars['written'] : null,
-		'switched'    => isset($get_vars['switched']) ? $get_vars['switched'] : null,
-		'error'       => isset($get_vars['error']) ? $get_vars['error'] : null,
+		'written'     => isset($input['written']) ? $input['written'] : null,
+		'switched'    => isset($input['switched']) ? $input['switched'] : null,
+		'error'       => isset($input['error']) ? $input['error'] : null,
 		'confirm_row' => $confirm_row,
 	);
 

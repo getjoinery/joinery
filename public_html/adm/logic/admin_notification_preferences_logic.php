@@ -13,7 +13,7 @@
  * @version 1.1
  */
 
-function admin_notification_preferences_logic($get_vars, $post_vars) {
+function admin_notification_preferences_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/Notify.php'));
 	require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
@@ -31,11 +31,11 @@ function admin_notification_preferences_logic($get_vars, $post_vars) {
 
 	$user_id = $session->get_user_id();
 
-	if (isset($post_vars['action']) && $post_vars['action'] === 'save') {
-		$subscribed = (isset($post_vars['subscribe']) && is_array($post_vars['subscribe']))
-			? $post_vars['subscribe'] : array();
-		$emails = (isset($post_vars['notify_email']) && is_array($post_vars['notify_email']))
-			? $post_vars['notify_email'] : array();
+	if (isset($input['action']) && $input['action'] === 'save') {
+		$subscribed = (isset($input['subscribe']) && is_array($input['subscribe']))
+			? $input['subscribe'] : array();
+		$emails = (isset($input['notify_email']) && is_array($input['notify_email']))
+			? $input['notify_email'] : array();
 		notification_preferences_save($user_id, $subscribed, $emails);
 		return LogicResult::redirect('/admin/admin_notification_preferences');
 	}

@@ -10,7 +10,7 @@
 
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_scheduled_tasks_logic($get_vars, $post_vars) {
+function admin_scheduled_tasks_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 
@@ -20,41 +20,41 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 	$page_regex = '/\/admin\/admin_scheduled_tasks/';
 
 	// Handle POST actions
-	if ($post_vars && isset($post_vars['action'])) {
-		$action = $post_vars['action'];
+	if ($input && isset($input['action'])) {
+		$action = $input['action'];
 		$message = null;
 		$error = null;
 
 		if ($action === 'activate') {
-			$result = _handle_activate($post_vars);
+			$result = _handle_activate($input);
 			$message = $result['message'] ?? null;
 			$error = $result['error'] ?? null;
 		}
-		elseif ($action === 'pause' && isset($post_vars['sct_scheduled_task_id'])) {
-			$task = new ScheduledTask($post_vars['sct_scheduled_task_id'], true);
+		elseif ($action === 'pause' && isset($input['sct_scheduled_task_id'])) {
+			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
 			$task->set('sct_is_active', false);
 			$task->save();
 			$message = 'Task "' . $task->get('sct_name') . '" paused.';
 		}
-		elseif ($action === 'resume' && isset($post_vars['sct_scheduled_task_id'])) {
-			$task = new ScheduledTask($post_vars['sct_scheduled_task_id'], true);
+		elseif ($action === 'resume' && isset($input['sct_scheduled_task_id'])) {
+			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
 			$task->set('sct_is_active', true);
 			$task->save();
 			$message = 'Task "' . $task->get('sct_name') . '" resumed.';
 		}
-		elseif ($action === 'deactivate' && isset($post_vars['sct_scheduled_task_id'])) {
-			$task = new ScheduledTask($post_vars['sct_scheduled_task_id'], true);
+		elseif ($action === 'deactivate' && isset($input['sct_scheduled_task_id'])) {
+			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
 			$name = $task->get('sct_name');
 			$task->soft_delete();
 			$message = 'Task "' . $name . '" deactivated and removed. It can be re-activated from Available Tasks.';
 		}
-		elseif ($action === 'run_now' && isset($post_vars['sct_scheduled_task_id'])) {
-			$result = _handle_run_now($post_vars['sct_scheduled_task_id']);
+		elseif ($action === 'run_now' && isset($input['sct_scheduled_task_id'])) {
+			$result = _handle_run_now($input['sct_scheduled_task_id']);
 			$message = $result['message'] ?? null;
 			$error = $result['error'] ?? null;
 		}
-		elseif ($action === 'dry_run' && isset($post_vars['sct_scheduled_task_id'])) {
-			$result = _handle_dry_run($post_vars['sct_scheduled_task_id']);
+		elseif ($action === 'dry_run' && isset($input['sct_scheduled_task_id'])) {
+			$result = _handle_dry_run($input['sct_scheduled_task_id']);
 			if (isset($result['html'])) {
 				// Dry run with HTML preview — don't redirect, render inline
 				$session->save_message(new DisplayMessage(
@@ -71,8 +71,8 @@ function admin_scheduled_tasks_logic($get_vars, $post_vars) {
 			$message = $result['message'] ?? null;
 			$error = $result['error'] ?? null;
 		}
-		elseif ($action === 'save' && isset($post_vars['sct_scheduled_task_id'])) {
-			$result = _handle_save($post_vars);
+		elseif ($action === 'save' && isset($input['sct_scheduled_task_id'])) {
+			$result = _handle_save($input);
 			$message = $result['message'] ?? null;
 			$error = $result['error'] ?? null;
 		}
@@ -251,8 +251,8 @@ function _discover_tasks() {
 /**
  * Handle task activation.
  */
-function _handle_activate($post_vars) {
-	$class_name = $post_vars['task_class'] ?? null;
+function _handle_activate($input) {
+	$class_name = $input['task_class'] ?? null;
 	if (!$class_name) {
 		return array('error' => 'No task class specified.');
 	}
@@ -296,8 +296,8 @@ function _handle_activate($post_vars) {
 	$config = array();
 	$config_fields = $json_data['config_fields'] ?? array();
 	foreach ($config_fields as $field_name => $field_def) {
-		if (isset($post_vars['config_' . $field_name])) {
-			$config[$field_name] = $post_vars['config_' . $field_name];
+		if (isset($input['config_' . $field_name])) {
+			$config[$field_name] = $input['config_' . $field_name];
 		}
 	}
 	if (!empty($config)) {
@@ -409,25 +409,25 @@ function _handle_dry_run($task_id) {
 /**
  * Handle saving schedule and config changes.
  */
-function _handle_save($post_vars) {
-	$task = new ScheduledTask($post_vars['sct_scheduled_task_id'], true);
+function _handle_save($input) {
+	$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
 
 	// Update schedule
-	if (isset($post_vars['sct_frequency'])) {
+	if (isset($input['sct_frequency'])) {
 		$valid_frequencies = array('every_run', 'hourly', 'daily', 'weekly');
-		$freq = $post_vars['sct_frequency'];
+		$freq = $input['sct_frequency'];
 		if (in_array($freq, $valid_frequencies)) {
 			$task->set('sct_frequency', $freq);
 		}
 	}
 
-	if (isset($post_vars['sct_schedule_day_of_week'])) {
-		$dow = $post_vars['sct_schedule_day_of_week'];
+	if (isset($input['sct_schedule_day_of_week'])) {
+		$dow = $input['sct_schedule_day_of_week'];
 		$task->set('sct_schedule_day_of_week', ($dow === '' || $dow === 'daily') ? null : (int)$dow);
 	}
 
-	if (isset($post_vars['sct_schedule_time'])) {
-		$task->set('sct_schedule_time', $post_vars['sct_schedule_time']);
+	if (isset($input['sct_schedule_time'])) {
+		$task->set('sct_schedule_time', $input['sct_schedule_time']);
 	}
 
 	// Update task config
@@ -440,8 +440,8 @@ function _handle_save($post_vars) {
 
 	$config = $task->get_task_config();
 	foreach ($config_fields as $field_name => $field_def) {
-		if (isset($post_vars['config_' . $field_name])) {
-			$config[$field_name] = $post_vars['config_' . $field_name];
+		if (isset($input['config_' . $field_name])) {
+			$config[$field_name] = $input['config_' . $field_name];
 		}
 	}
 	$task->set('sct_task_config', json_encode($config));

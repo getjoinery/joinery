@@ -6,14 +6,14 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/coupon_codes_class.php'));
 require_once(PathHelper::getIncludePath('data/products_class.php'));
 
-function admin_coupon_code_logic($get_vars, $post_vars) {
+function admin_coupon_code_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 	$session->set_return();
 
-	$coupon_code = new CouponCode($get_vars['ccd_coupon_code_id'], TRUE);
+	$coupon_code = new CouponCode($input['ccd_coupon_code_id'], TRUE);
 
-	if($get_vars['action'] == 'remove'){
+	if($input['action'] == 'remove'){
 		$coupon_code->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$coupon_code->permanent_delete();
 

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_address_edit_logic($get_vars, $post_vars) {
+function admin_address_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/address_class.php'));
 
@@ -9,10 +9,10 @@ function admin_address_edit_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 
 	// Load or create address first
-	if (isset($post_vars['edit_primary_key_value'])) {
-		$address = new Address($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['usa_address_id'])) {
-		$address = new Address($get_vars['usa_address_id'], TRUE);
+	if (isset($input['edit_primary_key_value'])) {
+		$address = new Address($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['usa_address_id'])) {
+		$address = new Address($input['usa_address_id'], TRUE);
 	} else {
 		$address = new Address(NULL);
 	}
@@ -23,10 +23,10 @@ function admin_address_edit_logic($get_vars, $post_vars) {
 		$user_id = $address->get('usa_usr_user_id');
 	} else {
 		// Creating new address - get user_id from POST (hidden field) or GET (initial load)
-		if($post_vars){
-			$user_id = $post_vars['usr_user_id'] ?? NULL;
+		if($input){
+			$user_id = $input['usr_user_id'] ?? NULL;
 		} else {
-			$user_id = $get_vars['usr_user_id'] ?? NULL;
+			$user_id = $input['usr_user_id'] ?? NULL;
 		}
 	}
 
@@ -34,7 +34,7 @@ function admin_address_edit_logic($get_vars, $post_vars) {
 		return LogicResult::error('User ID is required');
 	}
 
-	if($post_vars){
+	if($input){
 		// Add-only logic - set user_id and defaults when creating new address
 		if (!$address->key) {
 			$address->set('usa_usr_user_id', $user_id);
@@ -53,8 +53,8 @@ function admin_address_edit_logic($get_vars, $post_vars) {
 		);
 
 		foreach($editable_fields as $field) {
-			if(isset($post_vars[$field])){
-				$address->set($field, $post_vars[$field]);
+			if(isset($input[$field])){
+				$address->set($field, $input[$field]);
 			}
 		}
 
@@ -63,7 +63,7 @@ function admin_address_edit_logic($get_vars, $post_vars) {
 		$address->load();
 
 		// If this is a new address and user has no default, make it default
-		if(!isset($post_vars['edit_primary_key_value']) || !$post_vars['edit_primary_key_value']){
+		if(!isset($input['edit_primary_key_value']) || !$input['edit_primary_key_value']){
 			$address->set('usa_is_default', TRUE);
 			$address->save();
 		}

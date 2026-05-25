@@ -7,26 +7,26 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php'));
 
-function admin_mailing_list_logic($get_vars, $post_vars) {
+function admin_mailing_list_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	$mailing_list = new MailingList($get_vars['mlt_mailing_list_id'], TRUE);
+	$mailing_list = new MailingList($input['mlt_mailing_list_id'], TRUE);
 
-	if($get_vars['action'] == 'delete'){
+	if($input['action'] == 'delete'){
 		$mailing_list->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$mailing_list->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_mailing_lists");
 	}
-	else if($get_vars['action'] == 'undelete'){
+	else if($input['action'] == 'undelete'){
 		$mailing_list->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$mailing_list->undelete();
 
 		return LogicResult::redirect("/admin/admin_mailing_lists");
 	}
-	else if($get_vars['action'] == 'removeregistrant'){
-		$registrant = new MailingListRegistrant($get_vars['mlr_mailing_list_registrant_id'], TRUE);
+	else if($input['action'] == 'removeregistrant'){
+		$registrant = new MailingListRegistrant($input['mlr_mailing_list_registrant_id'], TRUE);
 		$mailing_list->remove_registrant($registrant->get('mlr_usr_user_id'));
 		return LogicResult::redirect("/admin/admin_mailing_list?mlt_mailing_list_id=".$mailing_list->key);
 	}

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_events_logic($get_vars, $post_vars) {
+function admin_events_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -16,11 +16,11 @@ function admin_events_logic($get_vars, $post_vars) {
 
 	$searches = array();
 	$numperpage = 30;
-	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '', $get_vars);
-	$sort = LibraryFunctions::fetch_variable('sort', 'end_time', 0, '', $get_vars);
-	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '', $get_vars);
-	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '', $get_vars);
-	$filter = LibraryFunctions::fetch_variable('filter', 'active', 0, '', $get_vars);
+	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '', $input);
+	$sort = LibraryFunctions::fetch_variable('sort', 'end_time', 0, '', $input);
+	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '', $input);
+	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '', $input);
+	$filter = LibraryFunctions::fetch_variable('filter', 'active', 0, '', $input);
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
 	if($_SESSION['permission'] < 10){

@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_product_logic($get_vars, $post_vars) {
+function admin_product_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -19,24 +19,24 @@ function admin_product_logic($get_vars, $post_vars) {
 	$settings = Globalvars::get_instance();
 	$currency_symbol = Product::$currency_symbols[$settings->get_setting('site_currency')];
 
-	$product = new Product($get_vars['pro_product_id'], TRUE);
+	$product = new Product($input['pro_product_id'], TRUE);
 	$orders = new MultiOrderItem(array('product_id' => $product->key));
 
 	// Handle actions
-	if($get_vars['action'] == 'delete'){
+	if($input['action'] == 'delete'){
 		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$product->soft_delete();
 
 		return LogicResult::redirect('/admin/admin_products');
 	}
-	else if($get_vars['action'] == 'undelete'){
+	else if($input['action'] == 'undelete'){
 		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$product->undelete();
 
 		return LogicResult::redirect('/admin/admin_products');
 	}
 
-	if($get_vars['action'] == 'permanent_delete'){
+	if($input['action'] == 'permanent_delete'){
 		if($orders->count_all()){
 			return LogicResult::error('You cannot delete a product with orders.');
 		}

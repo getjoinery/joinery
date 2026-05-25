@@ -8,14 +8,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 require_once(PathHelper::getIncludePath('data/change_tracking_class.php'));
 
-function admin_subscription_tier_edit_logic($get, $post) {
+function admin_subscription_tier_edit_logic(array $input): LogicResult {
     // Permission check
     $session = SessionControl::get_instance();
     $session->check_permission(5);
 
     // Load or create tier
-    if (isset($get['id']) || isset($post['edit_primary_key_value'])) {
-        $tier_id = isset($post['edit_primary_key_value']) ? $post['edit_primary_key_value'] : $get['id'];
+    if (isset($input['id']) || isset($input['edit_primary_key_value'])) {
+        $tier_id = isset($input['edit_primary_key_value']) ? $input['edit_primary_key_value'] : $input['id'];
         try {
             $tier = new SubscriptionTier($tier_id, TRUE);
             if (!$tier || $tier->get('sbt_delete_time')) {
@@ -31,13 +31,13 @@ function admin_subscription_tier_edit_logic($get, $post) {
     }
 
     // Process POST actions
-    if($post){
+    if($input){
         try {
             // Process features
             $features = array();
             $available_features = SubscriptionTier::getAllAvailableFeatures();
-            if (isset($post['features']) && is_array($post['features'])) {
-                foreach ($post['features'] as $key => $value) {
+            if (isset($input['features']) && is_array($input['features'])) {
+                foreach ($input['features'] as $key => $value) {
                     // Get feature definition to check type
                     $definition = isset($available_features[$key]) ? $available_features[$key] : null;
 
@@ -56,11 +56,11 @@ function admin_subscription_tier_edit_logic($get, $post) {
 
             if ($tier && $tier->key) {
                 // Update existing tier
-                $tier->set('sbt_name', $post['sbt_name']);
-                $tier->set('sbt_display_name', $post['sbt_display_name']);
-                $tier->set('sbt_tier_level', $post['sbt_tier_level']);
-                $tier->set('sbt_description', $post['sbt_description']);
-                $tier->set('sbt_is_active', isset($post['sbt_is_active']) ? true : false);
+                $tier->set('sbt_name', $input['sbt_name']);
+                $tier->set('sbt_display_name', $input['sbt_display_name']);
+                $tier->set('sbt_tier_level', $input['sbt_tier_level']);
+                $tier->set('sbt_description', $input['sbt_description']);
+                $tier->set('sbt_is_active', isset($input['sbt_is_active']) ? true : false);
                 $tier->setFeatures($features);
                 $tier->save();
 
@@ -79,11 +79,11 @@ function admin_subscription_tier_edit_logic($get, $post) {
             } else {
                 // Create new tier
                 $tier = new SubscriptionTier(NULL);
-                $tier->set('sbt_name', $post['sbt_name']);
-                $tier->set('sbt_display_name', $post['sbt_display_name']);
-                $tier->set('sbt_tier_level', $post['sbt_tier_level']);
-                $tier->set('sbt_description', $post['sbt_description']);
-                $tier->set('sbt_is_active', isset($post['sbt_is_active']) ? true : false);
+                $tier->set('sbt_name', $input['sbt_name']);
+                $tier->set('sbt_display_name', $input['sbt_display_name']);
+                $tier->set('sbt_tier_level', $input['sbt_tier_level']);
+                $tier->set('sbt_description', $input['sbt_description']);
+                $tier->set('sbt_is_active', isset($input['sbt_is_active']) ? true : false);
                 $tier->setFeatures($features);
                 $tier->save();
 

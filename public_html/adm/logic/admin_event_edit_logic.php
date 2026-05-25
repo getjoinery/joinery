@@ -1,7 +1,7 @@
 <?php
 require_once(__DIR__ . '/../../includes/PathHelper.php');
 
-function admin_event_edit_logic($get_vars, $post_vars) {
+function admin_event_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -17,17 +17,17 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 	$session->check_permission(8);
 
 	// Detect virtual instance editing (parent_event_id + instance_date)
-	$parent_event_id = isset($post_vars['parent_event_id']) ? $post_vars['parent_event_id'] : (isset($get_vars['parent_event_id']) ? $get_vars['parent_event_id'] : null);
-	$instance_date = isset($post_vars['instance_date']) ? $post_vars['instance_date'] : (isset($get_vars['instance_date']) ? $get_vars['instance_date'] : null);
+	$parent_event_id = isset($input['parent_event_id']) ? $input['parent_event_id'] : (isset($input['parent_event_id']) ? $input['parent_event_id'] : null);
+	$instance_date = isset($input['instance_date']) ? $input['instance_date'] : (isset($input['instance_date']) ? $input['instance_date'] : null);
 	$is_virtual_edit = ($parent_event_id && $instance_date);
 
 	// Load or create event
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
-	if (isset($post_vars['edit_primary_key_value']) && $post_vars['edit_primary_key_value']) {
-		$event = new Event($post_vars['edit_primary_key_value'], TRUE);
-	} elseif (isset($get_vars['evt_event_id'])) {
-		$event = new Event($get_vars['evt_event_id'], TRUE);
-	} elseif ($is_virtual_edit && !$post_vars) {
+	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
+		$event = new Event($input['edit_primary_key_value'], TRUE);
+	} elseif (isset($input['evt_event_id'])) {
+		$event = new Event($input['evt_event_id'], TRUE);
+	} elseif ($is_virtual_edit && !$input) {
 		// GET request for editing a virtual instance: pre-populate from parent
 		$parent = new Event($parent_event_id, TRUE);
 		$parent->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -78,72 +78,72 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 	}
 
 	// Process POST actions
-	if($post_vars){
+	if($input){
 
 		// If editing a virtual instance, materialize it first
-		if ($is_virtual_edit && !$post_vars['edit_primary_key_value']) {
+		if ($is_virtual_edit && !$input['edit_primary_key_value']) {
 			$parent = new Event($parent_event_id, TRUE);
 			$parent->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 			$event = $parent->materialize_instance($instance_date);
 		}
 
-		if($post_vars['evt_short_description']){
-				$post_vars['evt_short_description'] = $post_vars['evt_short_description'];
+		if($input['evt_short_description']){
+				$input['evt_short_description'] = $input['evt_short_description'];
 		}
 
-		if($post_vars['evt_description']){
-				$post_vars['evt_description'] = $post_vars['evt_description'];
+		if($input['evt_description']){
+				$input['evt_description'] = $input['evt_description'];
 		}
 
-		if($post_vars['evt_fil_file_id']){
-			$event->set('evt_fil_file_id', (int)$post_vars['evt_fil_file_id']);
+		if($input['evt_fil_file_id']){
+			$event->set('evt_fil_file_id', (int)$input['evt_fil_file_id']);
 		}
-		else if(empty($post_vars['evt_fil_file_id'])){
+		else if(empty($input['evt_fil_file_id'])){
 			$event->set('evt_fil_file_id', NULL);
 		}
 
-		if($post_vars['evt_usr_user_id_leader']){
-			$event->set('evt_usr_user_id_leader', $post_vars['evt_usr_user_id_leader']);
+		if($input['evt_usr_user_id_leader']){
+			$event->set('evt_usr_user_id_leader', $input['evt_usr_user_id_leader']);
 		}
 		else{
 			$event->set('evt_usr_user_id_leader', NULL);
 		}
 
-		if($post_vars['evt_max_signups'] == '' || $post_vars['evt_max_signups'] == 0 || $post_vars['evt_max_signups'] == NULL){
+		if($input['evt_max_signups'] == '' || $input['evt_max_signups'] == 0 || $input['evt_max_signups'] == NULL){
 			$event->set('evt_max_signups', NULL);
 		}
 		else{
-			$event->set('evt_max_signups', (int)$post_vars['evt_max_signups']);
+			$event->set('evt_max_signups', (int)$input['evt_max_signups']);
 		}
 
-		if($post_vars['evt_is_accepting_signups'] && !$post_vars['evt_external_register_link']){
+		if($input['evt_is_accepting_signups'] && !$input['evt_external_register_link']){
 			//CHECK THAT THERE IS AN ASSOCIATED PRODUCT
 			$products = new MultiProduct(array('event_id'=> $event->key));
 			$numproducts = $products->count_all();
 			if(!$numproducts){
-				$post_vars['evt_is_accepting_signups'] = 0;
+				$input['evt_is_accepting_signups'] = 0;
 			}
 		}
 
-		if($post_vars['evt_loc_location_id'] == ''){
-			$post_vars['evt_loc_location_id'] = NULL;
+		if($input['evt_loc_location_id'] == ''){
+			$input['evt_loc_location_id'] = NULL;
 		}
 
 		// Handle start time using FormWriterV2Base helper
-		$start_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_start_time', true);
+		$start_time = FormWriterV2Base::process_datetimeinput($input, 'evt_start_time', true);
 		if($start_time !== NULL){
 			$event->set('evt_start_time', $start_time);
 		}
 
 		// Handle end time using FormWriterV2Base helper
-		$end_time = FormWriterV2Base::process_datetimeinput($post_vars, 'evt_end_time', true);
+		$end_time = FormWriterV2Base::process_datetimeinput($input, 'evt_end_time', true);
 		if($end_time !== NULL){
 			$event->set('evt_end_time', $end_time);
 		}
 
 		// Handle recurrence fields (only if not editing a materialized instance)
 		if (!$event->is_instance()) {
-			$rec_type = isset($post_vars['evt_recurrence_type']) ? $post_vars['evt_recurrence_type'] : '';
+			$rec_type = isset($input['evt_recurrence_type']) ? $input['evt_recurrence_type'] : '';
 			if ($rec_type === '') {
 				// "None" selected — clear all recurrence fields
 				$event->set('evt_recurrence_type', NULL);
@@ -153,13 +153,13 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 				$event->set('evt_recurrence_end_date', NULL);
 			} else {
 				$event->set('evt_recurrence_type', $rec_type);
-				$event->set('evt_recurrence_interval', max(1, (int)($post_vars['evt_recurrence_interval'] ?? 1)));
+				$event->set('evt_recurrence_interval', max(1, (int)($input['evt_recurrence_interval'] ?? 1)));
 
 				// Days of week (weekly only)
 				if ($rec_type === 'weekly') {
 					$selected_days = [];
 					for ($i = 0; $i <= 6; $i++) {
-						if (isset($post_vars['recurrence_dow_' . $i])) {
+						if (isset($input['recurrence_dow_' . $i])) {
 							$selected_days[] = $i;
 						}
 					}
@@ -169,16 +169,16 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 				}
 
 				// Week of month (monthly only)
-				if ($rec_type === 'monthly' && isset($post_vars['monthly_type']) && $post_vars['monthly_type'] === 'by_week') {
-					$wom = isset($post_vars['evt_recurrence_week_of_month']) ? (int)$post_vars['evt_recurrence_week_of_month'] : NULL;
+				if ($rec_type === 'monthly' && isset($input['monthly_type']) && $input['monthly_type'] === 'by_week') {
+					$wom = isset($input['evt_recurrence_week_of_month']) ? (int)$input['evt_recurrence_week_of_month'] : NULL;
 					$event->set('evt_recurrence_week_of_month', $wom);
 				} else {
 					$event->set('evt_recurrence_week_of_month', NULL);
 				}
 
 				// End date
-				if (isset($post_vars['recurrence_end_type']) && $post_vars['recurrence_end_type'] === 'on_date' && !empty($post_vars['evt_recurrence_end_date'])) {
-					$event->set('evt_recurrence_end_date', $post_vars['evt_recurrence_end_date']);
+				if (isset($input['recurrence_end_type']) && $input['recurrence_end_type'] === 'on_date' && !empty($input['evt_recurrence_end_date'])) {
+					$event->set('evt_recurrence_end_date', $input['evt_recurrence_end_date']);
 				} else {
 					$event->set('evt_recurrence_end_date', NULL);
 				}
@@ -189,7 +189,7 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 		$integer_fields = array('evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_loc_location_id');
 
 		foreach($editable_fields as $field) {
-			$value = $post_vars[$field];
+			$value = $input[$field];
 			// Convert empty strings to NULL for integer fields
 			if(in_array($field, $integer_fields) && $value === '') {
 				$value = NULL;
@@ -198,8 +198,8 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 		}
 
 		if(!$event->get('evt_link') || $_SESSION['permission'] == 10){
-			if($post_vars['evt_link']){
-				$event->set('evt_link', $event->create_url($post_vars['evt_link']));
+			if($input['evt_link']){
+				$event->set('evt_link', $event->create_url($input['evt_link']));
 			}
 			else{
 				$event->set('evt_link', $event->create_url($event->get('evt_name')));
@@ -226,8 +226,8 @@ function admin_event_edit_logic($get_vars, $post_vars) {
 	$title = $event->get('evt_name');
 	$content = $event->get('evt_description');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($get_vars['cnv_content_version_id']){
-		$content_version = new ContentVersion($get_vars['cnv_content_version_id'], TRUE);
+	if($input['cnv_content_version_id']){
+		$content_version = new ContentVersion($input['cnv_content_version_id'], TRUE);
 		$content = $content_version->get('cnv_content');
 		$title = $content_version->get('cnv_title');
 	}

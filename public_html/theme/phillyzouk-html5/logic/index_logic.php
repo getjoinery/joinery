@@ -1,6 +1,6 @@
 <?php
 
-function index_logic($get_vars, $post_vars) {
+function index_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getIncludePath('data/posts_class.php'));
