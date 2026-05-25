@@ -8,6 +8,7 @@
     { "name": "comments_unregistered_users", "default": "0" },
     { "name": "coupons_active", "default": "1" },
     { "name": "emails_active", "default": "1" },
+    { "name": "enable_hsts", "default": "1" },
     { "name": "events_active", "default": "1" },
     { "name": "files_active", "default": "1" },
     { "name": "mailing_lists_active", "default": "1" },

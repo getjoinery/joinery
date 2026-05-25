@@ -34,6 +34,8 @@ class MethodExistenceTest {
     private $defined_methods = [];
     private $constructors = [];
     private $variable_types = []; // Track variable => class name mappings
+    private $current_class_name = ''; // Name of the class currently being parsed (for self::/static:: resolution)
+    private $current_parent_class = ''; // Name of the parent class (for parent:: resolution)
 
     // Whitelist of common methods by class
     private $common_methods = [
@@ -246,10 +248,39 @@ class MethodExistenceTest {
             $token_value = $token[1];
             $line_number = $token[2];
 
-            // Track when we enter a class
+            // Track when we enter a class — capture the class name and (if present) parent class
+            // so self::, static::, and parent:: calls can be resolved later.
             if ($token_type === T_CLASS) {
                 $in_class = true;
                 $class_depth = $brace_depth + 1;
+                // Look ahead for the class name (next T_STRING after whitespace)
+                for ($k = $i + 1; $k < $count; $k++) {
+                    $tk = $this->tokens[$k];
+                    if (is_array($tk) && $tk[0] === T_WHITESPACE) continue;
+                    if (is_array($tk) && $tk[0] === T_STRING) {
+                        $this->current_class_name = $tk[1];
+                    }
+                    break;
+                }
+                // Look ahead for `extends ParentName`
+                $this->current_parent_class = '';
+                for ($k = $i + 1; $k < $count; $k++) {
+                    $tk = $this->tokens[$k];
+                    if (!is_array($tk)) {
+                        if ($tk === '{') break; // class body started, no extends found
+                        continue;
+                    }
+                    if ($tk[0] === T_EXTENDS) {
+                        for ($m = $k + 1; $m < $count; $m++) {
+                            $pt = $this->tokens[$m];
+                            if (is_array($pt) && $pt[0] === T_WHITESPACE) continue;
+                            if (is_array($pt) && $pt[0] === T_STRING) {
+                                $this->current_parent_class = $pt[1];
+                            }
+                            break 2;
+                        }
+                    }
+                }
             }
 
             // Track namespace
@@ -970,6 +1001,15 @@ class MethodExistenceTest {
      * Resolve class name using namespace and use statements
      */
     private function resolveClassName($class_name) {
+        // Handle self/static — refer to the class currently being parsed.
+        if ($class_name === 'self' || $class_name === 'static') {
+            return $this->current_class_name !== '' ? $this->current_class_name : $class_name;
+        }
+        // Handle parent — refer to the parent class captured at class declaration.
+        if ($class_name === 'parent') {
+            return $this->current_parent_class !== '' ? $this->current_parent_class : $class_name;
+        }
+
         // If fully qualified, return as-is
         if ($class_name[0] === '\\') {
             return substr($class_name, 1);

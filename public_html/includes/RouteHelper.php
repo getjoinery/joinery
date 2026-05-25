@@ -1165,7 +1165,35 @@ class RouteHelper {
                         return;
                     }
 
-                    if ($handler($params, $settings, $session, $template_directory)) {
+                    // Defense in depth: wrap handler invocation in an output buffer
+                    // so we can detect handlers that return true but produced no output
+                    // and no redirect (a silent failure mode — see specs/homepage_route_blank_response_fix.md).
+                    ob_start();
+                    $handler_returned = $handler($params, $settings, $session, $template_directory);
+                    $handler_output = ob_get_clean();
+
+                    if ($handler_returned) {
+                        $sent_redirect = false;
+                        foreach (headers_list() as $hdr) {
+                            if (stripos($hdr, 'Location:') === 0) {
+                                $sent_redirect = true;
+                                break;
+                            }
+                        }
+                        if (trim($handler_output) === '' && !$sent_redirect) {
+                            error_log("ROUTING ERROR: custom route handler for pattern '{$pattern}' returned true but produced no output and no redirect. Path: {$full_path}. Refusing to serve empty 200; falling back to 500.");
+                            self::debugLog('handler_execution', "Handler returned true with empty output and no redirect — treating as bug", [
+                                'pattern' => $pattern,
+                                'path' => $full_path,
+                            ]);
+                            http_response_code(500);
+                            header('Content-Type: text/html; charset=utf-8');
+                            echo "<!doctype html><title>500</title><h1>Server Error</h1><p>A handler claimed to handle this request but produced no output. Please check the server logs.</p>";
+                            exit();
+                        }
+
+                        // Replay buffered output to the response (or to the outer cache buffer).
+                        echo $handler_output;
                         self::debugLog('handler_execution', "Handler succeeded, exiting");
                         // Save cache before exiting
                         if ($cache_buffer_started && $cache_result === false) {
@@ -1180,6 +1208,8 @@ class RouteHelper {
                         }
                         exit();
                     } else {
+                        // Replay any partial output before show404 (so debug content isn't lost).
+                        echo $handler_output;
                         self::show404('Custom route handler failed', [
                             'pattern' => $pattern,
                             'path' => $full_path
