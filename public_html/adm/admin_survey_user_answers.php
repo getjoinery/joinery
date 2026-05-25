@@ -9,7 +9,7 @@ $session = SessionControl::get_instance();
 $session->check_permission(5);
 $session->set_return();
 
-$page_vars = process_logic(admin_survey_user_answers_logic($_GET, $_POST));
+$page_vars = process_logic(admin_survey_user_answers_logic(array_merge($_GET, $_POST)));
 
 $page = new AdminPage();
 $page->admin_header(

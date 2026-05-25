@@ -7,7 +7,7 @@
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_file_upload_logic.php'));
 
-	$page_vars = process_logic(admin_file_upload_logic($_GET, $_POST));
+	$page_vars = process_logic(admin_file_upload_logic(array_merge($_GET, $_POST)));
 
 	$session = SessionControl::get_instance();
 

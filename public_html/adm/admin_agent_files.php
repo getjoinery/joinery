@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_agent_files_logic.php')
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-$page_vars = process_logic(admin_agent_files_logic($_GET, $_POST));
+$page_vars = process_logic(admin_agent_files_logic(array_merge($_GET, $_POST)));
 
 $session     = $page_vars['session'];
 $agent_files = $page_vars['agent_files'];

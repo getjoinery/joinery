@@ -38,7 +38,7 @@
                 'action' => '/password-reset-2',
             ]);
             $formwriter->begin_form();
-            $formwriter->hiddeninput('act_code', $page_vars['act_code']);
+            $formwriter->hiddeninput('act_code', '', ['value' => $page_vars['act_code']]);
             ?>
 
             <div class="form-group">

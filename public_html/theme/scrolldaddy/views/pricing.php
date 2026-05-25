@@ -4,7 +4,7 @@
 	// PathHelper is already loaded
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
-	$page_vars = process_logic(pricing_logic($_GET, $_POST));
+	$page_vars = process_logic(pricing_logic(array_merge($_GET, $_POST)));
 	$tier_display_data = $page_vars['tier_display_data'];
 	$page_choice = $page_vars['page_choice'];
 

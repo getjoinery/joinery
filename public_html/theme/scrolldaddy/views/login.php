@@ -4,8 +4,9 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('login_logic.php', 'logic'));
 
-	$page_vars = process_logic(login_logic($_GET, $_POST));
+	$page_vars = process_logic(login_logic(array_merge($_GET, $_POST)));
 
+	$email = $page_vars['email'] ?? '';
 	if ($email) {
 		$forgot_link = '/password-reset-1?e=' . rawurlencode(htmlspecialchars($email));
 	} else {

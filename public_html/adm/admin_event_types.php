@@ -3,7 +3,7 @@
 require_once(PathHelper::getIncludePath('adm/logic/admin_event_types_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-$page_vars = process_logic(admin_event_types_logic($_GET, $_POST));
+$page_vars = process_logic(admin_event_types_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $event_types = $page_vars['event_types'];

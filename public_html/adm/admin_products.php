@@ -7,7 +7,7 @@
 	require_once(PathHelper::getIncludePath('data/events_class.php'));
 	require_once(PathHelper::getIncludePath('adm/logic/admin_products_logic.php'));
 
-	$page_vars = process_logic(admin_products_logic($_GET, $_POST));
+	$page_vars = process_logic(admin_products_logic(array_merge($_GET, $_POST)));
 	extract($page_vars);
 
 	$page = new AdminPage();

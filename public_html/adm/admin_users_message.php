@@ -14,7 +14,7 @@
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_users_message_logic.php'));
 
-	$page_vars = process_logic(admin_users_message_logic($_GET, $_POST));
+	$page_vars = process_logic(admin_users_message_logic(array_merge($_GET, $_POST)));
 
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();

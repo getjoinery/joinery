@@ -2,7 +2,7 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('index_logic.php', 'logic'));
 
-$page_vars = process_logic(index_logic($_GET, $_POST));
+$page_vars = process_logic(index_logic(array_merge($_GET, $_POST)));
 $page = new PublicPage();
 $page->public_header(array(
     'title' => 'Home - Phillyzouk Modern Blog',

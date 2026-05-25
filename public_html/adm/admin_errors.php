@@ -10,7 +10,7 @@ $session = SessionControl::get_instance();
 $session->check_permission(9); // Admin permission level 9
 $session->set_return();
 
-$page_vars = process_logic(admin_errors_logic($_GET, $_POST));
+$page_vars = process_logic(admin_errors_logic(array_merge($_GET, $_POST)));
 
 $page = new AdminPage();
 $settings = Globalvars::get_instance();

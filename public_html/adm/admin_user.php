@@ -9,7 +9,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 // Process the logic and get page variables
-$page_vars = process_logic(admin_user_logic($_GET, $_POST));
+$page_vars = process_logic(admin_user_logic(array_merge($_GET, $_POST)));
 
 // Extract commonly used variables for convenience
 $session = $page_vars['session'];

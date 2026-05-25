@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_groups_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-$page_vars = process_logic(admin_groups_logic($_GET, $_POST));
+$page_vars = process_logic(admin_groups_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $groups = $page_vars['groups'];

@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_seo_pages_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-$page_vars = process_logic(admin_seo_pages_logic($_GET, $_POST));
+$page_vars = process_logic(admin_seo_pages_logic(array_merge($_GET, $_POST)));
 extract($page_vars);
 
 $page = new AdminPage();

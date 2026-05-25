@@ -10,7 +10,7 @@
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_settings_logic.php'));
 
-	$page_vars = process_logic(admin_settings_logic($_GET, $_POST));
+	$page_vars = process_logic(admin_settings_logic(array_merge($_GET, $_POST)));
 
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();

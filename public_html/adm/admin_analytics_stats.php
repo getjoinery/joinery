@@ -6,7 +6,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_analytics_stats_logic.p
 $session = SessionControl::get_instance();
 $session->check_permission(5);
 
-$page_vars = process_logic(admin_analytics_stats_logic($_GET, $_POST));
+$page_vars = process_logic(admin_analytics_stats_logic(array_merge($_GET, $_POST)));
 
 $page = new AdminPage();
 $page->admin_header(

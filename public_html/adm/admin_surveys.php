@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_surveys_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('data/survey_questions_class.php'));
 
-$page_vars = process_logic(admin_surveys_logic($_GET, $_POST));
+$page_vars = process_logic(admin_surveys_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $surveys = $page_vars['surveys'];

@@ -11,7 +11,7 @@
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_survey_answers_logic.php'));
 
-	$page_vars = process_logic(admin_survey_answers_logic($_GET, $_POST));
+	$page_vars = process_logic(admin_survey_answers_logic(array_merge($_GET, $_POST)));
 
 	extract($page_vars);
 
