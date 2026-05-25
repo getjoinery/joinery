@@ -3,7 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.6
+ * @version 1.7
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -368,10 +368,6 @@ function render_node_row($node, $db, $session) {
 				<?php endif; ?>
 			</div>
 		</div>
-		<form method="post" action="/admin/server_manager/node_detail?mgn_id=<?php echo $node->key; ?>" style="flex-shrink:0">
-			<input type="hidden" name="action" value="check_status">
-			<button type="submit" class="btn btn-sm btn-outline-primary">Check</button>
-		</form>
 	</div>
 	<?php
 	return ob_get_clean();

@@ -5,7 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
@@ -253,37 +253,11 @@ class JobResultProcessor {
 	}
 
 	/**
-	 * Post-process apply_update: on successful completion, auto-enqueue a
-	 * check_status job so the dashboard's badge/version/last-check reflect the
-	 * post-upgrade state without requiring the user to click Check Status.
-	 * build_check_status picks the API transport when available, SSH otherwise.
+	 * Post-process apply_update: no-op — version tracking is now handled by
+	 * the X-Joinery-Version header on dashboard refresh, so a chained
+	 * check_status job is no longer needed.
 	 */
 	private static function process_apply_update($job) {
-		if ($job->get('mjb_status') !== 'completed') return;
-		$node_id = $job->get('mjb_mgn_node_id');
-		if (!$node_id) return;
-
-		try {
-			$node = new ManagedNode($node_id, TRUE);
-		} catch (Exception $e) { return; }
-
-		// Don't chain against soft-deleted nodes — the host may be gone.
-		if ($node->get('mgn_delete_time')) return;
-
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		$chained_id = null;
-		try {
-			$steps = JobCommandBuilder::build_check_status($node);
-			$chained = ManagementJob::createJob($node->key, 'check_status', $steps, null, $job->get('mjb_created_by'));
-			$chained_id = $chained ? $chained->key : null;
-		} catch (Exception $e) {
-			// node has neither API nor SSH configured — record the skip and move on
-		}
-
-		$job->set('mjb_result', json_encode([
-			'chained_check_status_job_id' => $chained_id,
-		]));
-		$job->save();
 	}
 
 	/**

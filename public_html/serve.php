@@ -425,5 +425,14 @@ $routes = [
     ],
 ];
 
+// Emit Joinery version header so HTTP health checks can detect upgrade availability
+// without needing a full API or SSH check. Read directly from VERSION to avoid loading
+// LibraryFunctions before it's needed.
+$_vjv_file = __DIR__ . '/VERSION';
+if (is_file($_vjv_file) && ($v = trim(@file_get_contents($_vjv_file))) !== '') {
+    header('X-Joinery-Version: ' . $v);
+}
+unset($_vjv_file, $v);
+
 // ROUTE PROCESSING - All logic moved to RouteHelper::processRoutes()
 RouteHelper::processRoutes($routes, $_REQUEST['__route'] ?? '');

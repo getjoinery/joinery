@@ -6,7 +6,7 @@
  * Consolidated node management page with tabs:
  * Overview, Backups, Database, Updates, Jobs
  *
- * @version 1.3 - Show SSL detection method in tile; HTTPS probe fallback for Cloudflare/edge SSL
+ * @version 1.4
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -540,7 +540,6 @@ if ($tab === 'overview') {
 	<div class="btn-group" style="position:relative">
 		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
 		<ul class="dropdown-menu dropdown-menu-end" style="display:none;position:absolute;right:0;top:100%">
-			<li><a class="dropdown-item" href="javascript:void(0)" onclick="document.getElementById('nodeActionCheckStatus').submit()">Check Status</a></li>
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
 			<?php if (!$node->get('mgn_delete_time')): ?>
 				<li><hr class="dropdown-divider"></li>
@@ -551,17 +550,20 @@ if ($tab === 'overview') {
 	<?php
 	echo '</div>';
 
+	echo '<div class="d-flex align-items-center gap-2 ps-3 mt-1">';
 	if ($last_check) {
 		echo '<small class="text-muted">Last checked: ' . LibraryFunctions::convert_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A') . '</small>';
 	} elseif (!$status_data) {
 		echo '<small class="text-muted">No status check has been run yet.</small>';
 	}
+	echo '<button type="submit" form="nodeActionCheckStatus" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem">Check Status</button>';
+	echo '</div>';
 
 	// Uptime monitoring status
 	$uptime_enabled = $node->get('mgn_uptime_enabled');
 	$uptime_status  = $node->get('mgn_uptime_last_status');
 	$uptime_down    = $node->get('mgn_uptime_down_since');
-	echo '<div class="mt-1"><small>';
+	echo '<div class="mt-1 ps-3"><small>';
 	if (!$uptime_enabled) {
 		echo '<span class="text-muted">Uptime monitoring: disabled</span>';
 	} elseif ($uptime_status === 'down') {
