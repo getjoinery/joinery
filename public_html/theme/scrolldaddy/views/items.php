@@ -4,7 +4,7 @@
 
 	require_once(PathHelper::getIncludePath('plugins/items/logic/items_logic.php'));
 
-	$page_vars = process_logic(items_logic($_GET, $_POST));
+	$page_vars = process_logic(items_logic(array_merge($_GET, $_POST)));
 
 	$page = new PublicPage();
 	$hoptions = array(

@@ -9,7 +9,7 @@ require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_plugins_logic.php'));
 
-$page_vars = process_logic(admin_plugins_logic($_GET, $_POST));
+$page_vars = process_logic(admin_plugins_logic(array_merge($_GET, $_POST)));
 
 $session = SessionControl::get_instance();
 

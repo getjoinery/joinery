@@ -11,7 +11,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_help_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/DocsScanner.php'));
 
-$page_vars = process_logic(admin_help_logic($_GET, $_POST));
+$page_vars = process_logic(admin_help_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $doc_tree = $page_vars['doc_tree'];

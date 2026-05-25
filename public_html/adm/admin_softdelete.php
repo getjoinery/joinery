@@ -3,7 +3,7 @@
 require_once(PathHelper::getIncludePath('adm/logic/admin_softdelete_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-$page_vars = process_logic(admin_softdelete_logic($_GET, $_POST));
+$page_vars = process_logic(admin_softdelete_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $user = $page_vars['user'];

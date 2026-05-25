@@ -8,7 +8,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_user_add_logic.php'));
 
-$page_vars = process_logic(admin_user_add_logic($_GET, $_POST));
+$page_vars = process_logic(admin_user_add_logic(array_merge($_GET, $_POST)));
 
 $settings = Globalvars::get_instance();
 $session = SessionControl::get_instance();

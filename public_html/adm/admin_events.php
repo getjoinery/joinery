@@ -8,7 +8,7 @@
 	require_once(PathHelper::getIncludePath('data/event_waiting_lists_class.php'));
 	require_once(PathHelper::getIncludePath('adm/logic/admin_events_logic.php'));
 
-	$page_vars = process_logic(admin_events_logic($_GET, $_POST));
+	$page_vars = process_logic(admin_events_logic(array_merge($_GET, $_POST)));
 	extract($page_vars);
 
 	$page = new AdminPage();

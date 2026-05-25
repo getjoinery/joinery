@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_coupon_codes_logic.php'
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-$page_vars = process_logic(admin_coupon_codes_logic($_GET, $_POST));
+$page_vars = process_logic(admin_coupon_codes_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $coupon_codes = $page_vars['coupon_codes'];

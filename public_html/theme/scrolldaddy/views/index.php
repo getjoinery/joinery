@@ -7,7 +7,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	require_once(PathHelper::getIncludePath('logic/pricing_logic.php'));
 
-	$page_vars = process_logic(pricing_logic($_GET, $_POST));
+	$page_vars = process_logic(pricing_logic(array_merge($_GET, $_POST)));
 	$page_choice = $page_vars['page_choice'];
 	$tier_display_data = $page_vars['tier_display_data'];
 	

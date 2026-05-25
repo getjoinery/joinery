@@ -5,7 +5,7 @@ require_once(PathHelper::getIncludePath('adm/logic/admin_subscription_tier_edit_
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
 // Process logic
-$page_vars = process_logic(admin_subscription_tier_edit_logic($_GET, $_POST));
+$page_vars = process_logic(admin_subscription_tier_edit_logic(array_merge($_GET, $_POST)));
 extract($page_vars);
 
 $page = new AdminPage();

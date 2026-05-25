@@ -7,7 +7,7 @@
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_file_upload_process_logic.php'));
 
-	$page_vars = process_logic(admin_file_upload_process_logic($_GET, $_POST));
+	$page_vars = process_logic(admin_file_upload_process_logic(array_merge($_GET, $_POST)));
 
 	if(isset($page_vars['show_fallback']) && $page_vars['show_fallback']){
 		$file = $page_vars['file'];

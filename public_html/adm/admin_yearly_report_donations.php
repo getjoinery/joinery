@@ -7,7 +7,7 @@ $session = SessionControl::get_instance();
 $session->check_permission(10);
 $session->set_return();
 
-$page_vars = process_logic(admin_yearly_report_donations_logic($_GET, $_POST));
+$page_vars = process_logic(admin_yearly_report_donations_logic(array_merge($_GET, $_POST)));
 
 $page = new AdminPage();
 $page->admin_header(

@@ -11,7 +11,7 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_scheduled_tasks_logic.php'));
 
-$page_vars = process_logic(admin_scheduled_tasks_logic($_GET, $_POST));
+$page_vars = process_logic(admin_scheduled_tasks_logic(array_merge($_GET, $_POST)));
 extract($page_vars);
 
 $page = new AdminPage();

@@ -4,7 +4,7 @@
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('checkout_logic.php', 'logic'));
 
-	$page_vars = process_logic(checkout_logic($_GET, $_POST));
+	$page_vars = process_logic(checkout_logic(array_merge($_GET, $_POST)));
 	$cart = $page_vars['cart'];
 	$currency_symbol = $page_vars['currency_symbol'];
 	$currency_code = $page_vars['currency_code'];

@@ -3,7 +3,7 @@
 require_once(PathHelper::getIncludePath('adm/logic/admin_mailing_lists_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
-$page_vars = process_logic(admin_mailing_lists_logic($_GET, $_POST));
+$page_vars = process_logic(admin_mailing_lists_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $mailing_lists = $page_vars['mailing_lists'];
