@@ -3,7 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
- * @version 1.5
+ * @version 1.6
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -406,7 +406,11 @@ function render_node_row($node, $db, $session) {
 					badge.classList.add('bg-' + j.status_color);
 				}
 
-				if (versionSpan) {
+				// Only update the version badge when the response includes definitive
+				// version data. HTTP-only checks omit version_cmp entirely; API checks
+				// without a joinery_version return null. In both cases, preserve the
+				// server-rendered badge rather than clearing it.
+				if (versionSpan && 'version_cmp' in j && j.version_cmp !== null) {
 					versionSpan.innerHTML = '';
 					if (j.version_cmp === -1) {
 						versionSpan.innerHTML = ' <span class="badge bg-warning ms-1" title="Control plane is at ' +
