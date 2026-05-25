@@ -10,13 +10,14 @@
  *
  * See specs/notification_hooks.md.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function admin_notification_preferences_logic($get_vars, $post_vars) {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/Notify.php'));
 	require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
+	require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$session  = SessionControl::get_instance();
@@ -41,6 +42,19 @@ function admin_notification_preferences_logic($get_vars, $post_vars) {
 
 	$page_vars['hook_points'] = Notify::hook_points();
 	$page_vars['prefs']       = notification_preferences_load($user_id);
+
+	// Check whether the email delivery pipeline is operational.
+	$send_queued = new MultiScheduledTask(array('task_class' => 'SendQueuedEmails', 'active' => true, 'deleted' => false));
+	$page_vars['send_queued_active'] = $send_queued->count_all() > 0;
+
+	$last_cron_run = $settings->get_setting('scheduled_tasks_last_cron_run');
+	$cron_is_active = false;
+	if ($last_cron_run) {
+		$last_run_dt = new DateTime($last_cron_run, new DateTimeZone('UTC'));
+		$now_dt      = new DateTime('now', new DateTimeZone('UTC'));
+		$cron_is_active = ($now_dt->getTimestamp() - $last_run_dt->getTimestamp()) < 1800;
+	}
+	$page_vars['cron_is_active'] = $cron_is_active;
 
 	return LogicResult::render($page_vars);
 }
