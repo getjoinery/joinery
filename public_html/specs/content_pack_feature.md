@@ -69,11 +69,17 @@ exported from each named table. Tables not listed are excluded entirely.
 **`settings_include`** — allowlist of `stg_name` values, required when `stg_settings`
 appears in `tables`. Settings whose name isn't on this list are not exported.
 `stg_settings` mixes credentials with marketing copy, so the operator must enumerate
-what travels (see "Content scope").
+what travels (see "Content scope"). A name listed in `settings_include` that doesn't
+exist in the source's `stg_settings` fails export with a clear error naming the missing
+key — silently shipping a partial allowlist is the worse failure mode than aborting,
+since the typical cause is a typo or a renamed setting.
 
 **`fk_pins`** — map of `<table>.<column>` → literal target PK, for FK columns whose
 target row isn't in the pack. The typical use is attaching pack content to the
 install-pinned admin (`usr_user_id=1`), which is stable across all Joinery installs.
+At apply time, the importer verifies each pinned row exists on the target before any
+inserts run; a missing pin target aborts the apply with a clear error rather than
+producing FK violations row-by-row.
 
 **Export-time enforcement.** The exporter walks every FK column on every included row.
 A reference is either resolved to an `_export_id` (target is in the pack), pinned via
@@ -93,23 +99,42 @@ A pack cannot be produced in a knowingly-broken state.
 
 Built-in rules — nothing to configure per table:
 
-- **`stg_settings`** — upserts by `stg_name`. Pack values overwrite target values when
-  the name matches; new rows insert otherwise. This is how pack-shipped marketing copy
-  replaces the factory defaults seeded by the install SQL.
-- **All other tables** — hash-dedup, skip on match (see "Row identity and references").
-  Rows whose content hash already exists in the target are skipped; everything else is
-  inserted.
+- **Hash-dedup, skip on match.** If a pack row's content hash matches an existing
+  target row's hash, the importer skips the insert and maps the row's `_export_id` to
+  that target row's PK. See "Row identity and references."
+- **Unique-constraint overwrite.** If the INSERT hits a unique-constraint violation,
+  the importer rolls back to a per-row savepoint, parses the violated constraint name
+  from the PG error, and UPDATEs the conflicting target row with the pack row's
+  content (every column the pack carries — PK, audit, and generated columns are
+  already excluded at export, so they don't appear in the SET clause). The target
+  row's PK is preserved, so target-side FK references that point at it (comments,
+  attachments, likes, etc.) survive the apply. The pack row's `_export_id` maps to the
+  preserved target PK.
+- **`stg_settings`** is a specific instance of the overwrite rule, since `stg_name` is
+  its only meaningful unique constraint. Pack-shipped marketing copy overwrites the
+  factory defaults the install SQL just inserted.
 - **Soft-deleted rows** — excluded at export when the table has a `delete_time` column.
 - **Generated columns** — excluded at export. PG-`GENERATED ALWAYS AS ... STORED`
   columns reject any non-DEFAULT INSERT value, so the exporter detects them via
   `information_schema.columns.is_generated` and omits them from the pack. The target
   recomputes via its own generation expression on insert. (Identity-on-PK columns are
   already covered by the auto-PK assignment rule.)
+- **Audit columns** — `*_created_time`, `*_updated_time`, and `*_delete_time` are
+  excluded at export. The target's column defaults populate them at INSERT
+  (`created_time = NOW()`, `updated_time = NOW()`), and the UPDATE path naturally has
+  nothing to set. Source-side audit history is not preserved — audit timestamps on the
+  target reflect when the apply happened, not when the source row was originally
+  written. Audit metadata is operational state, not content.
 
-These rules cover the v1 use cases: install bootstrap (empty target) and site-to-site
-copy (empty or wiped target). Applying onto a live target with overlapping unique
-constraints will fail the transaction cleanly — handling that case needs the deferred
-filter / identity-matching capabilities.
+**Tables with multiple unique constraints.** If a pack INSERT collides on one unique
+constraint and the resulting UPDATE collides on a *different* constraint (against a
+different target row), the secondary violation bubbles up and aborts the apply. Rare
+for content tables — most have a single natural-key constraint — but worth knowing if
+it happens.
+
+These rules cover both v1 use cases: install bootstrap (empty target, INSERT path
+always succeeds, overwrite never fires) and prod→dev content pulls (overlapping rows
+overwrite in place, preserving target-side FK references).
 
 ### Type encoding
 
@@ -153,12 +178,50 @@ captures the new auto-PK assigned by the target DB and adds an entry to an
 references are resolved through this map; pin markers are emitted as the pinned literal
 PK; NULLs are emitted as NULL.
 
+**Row JSON format.** Each row in a pack's table file is a JSON object keyed by column
+name. The row carries its own `_export_id` (a string assigned at export time) as a
+top-level key. FK columns use type-tagged objects so reference semantics are
+unambiguous; all other columns hold their values directly per "Type encoding" below.
+
+```json
+{
+  "_export_id": "abc123",
+  "pag_slug": "about-us",
+  "pag_title": "About Us",
+  "pag_body": "<p>...</p>",
+  "pag_author_user_id": {"_ref": "xyz789"},
+  "pag_category_id": {"_pin": 1},
+  "pag_template_id": null
+}
+```
+
+The four FK-column cases:
+
+- `{"_ref": "<export_id>"}` — link to another row in the same pack; resolved via the
+  export-id map at apply time.
+- `{"_pin": <literal_pk>}` — link to an external row whose PK is fixed by `fk_pins`.
+- `null` — link is empty (column is nullable, target is external, no pin).
+- Any other value is rejected — FK columns may only carry one of the three forms above.
+
+Non-FK columns hold their values directly (string, number, boolean, JSON, etc.) per
+"Type encoding." Type-tagged objects keep link semantics structurally distinct from
+content, so a content column may hold any string — including ones that look like
+`"_ref:..."` or `"_pin:..."` — with no collision risk.
+
 This keeps the pack format self-contained: no schema changes, no required natural-key columns
 on underlying tables, works on any table the seeder supports.
 
 **Duplicate prevention.** Before inserting a row, the importer hashes its content and
 checks whether the target already has a row in the same table with an identical content
 hash. If so, the existing row's PK is added to the export-id map and the insert is skipped.
+
+Dedup serves two distinct roles. For tables with a unique constraint (most content
+tables — `pag_slug`, `pro_sku`, `stg_name`, etc.), it's an *optimization*: without it, a
+byte-identical INSERT would just hit the unique constraint and trigger a redundant
+UPDATE via the overwrite path. For tables without any unique constraint other than PK,
+it's a *correctness requirement*: without it, every re-apply creates fresh duplicates
+of every row. Both roles are needed in v1 — dedup is not a feature that can be quietly
+dropped once overwrite is in place.
 
 The content hash is computed over a canonical serialization that:
 - Excludes the primary key column.
@@ -175,20 +238,19 @@ The content hash is computed over a canonical serialization that:
   or whitespace drift (especially for `json` columns, which preserve insertion order
   verbatim).
 
-Dedup is per-target, not per-pack-history — the importer does not record "this hash came
-from that pack." If a row was hand-edited in the target between applies, the next apply
-sees a hash mismatch and inserts a parallel row. For v1, the operator's escape valve is
-to wipe the target (or the affected table) before re-applying. Identity matching by
-column for non-`stg_settings` tables is deferred.
+Dedup and overwrite are both keyed on the target's *current* state — neither pack-apply
+history nor source-side row identity is tracked. Two consequences worth knowing:
 
-Content-hash dedup does not track logical identity across edits: if the source renames a row
-between exports, a target dedup'd by hash sees the new version as a new row alongside the old
-one. This is an accepted limitation for hash-dedup tables — content packs do not promise
-change tracking. Tables that need stable identity (e.g., `stg_settings`, whose `stg_name` is
-unique and where pack-side values should overwrite target-side values) declare an
-`identity_column` in their `tables` entry in `pack.json` — see "Pack specification." The
-importer then matches by that column and applies `on_conflict` semantics on match. No model
-or schema impact; just configuration in the pack manifest.
+- **Target hand-edits are clobbered on re-apply.** If a target row was hand-edited
+  between applies, the next apply sees a hash mismatch, INSERTs, hits the unique
+  constraint, and overwrites the row with pack content. The hand-edit is lost.
+  Operators who want to preserve local changes should treat pack-managed rows as
+  read-only in the target.
+- **Source renames produce parallel rows.** If a row's natural key changes between
+  source exports (e.g., a slug renamed from "about" to "about-us"), the new export
+  looks like a brand-new row to the target — the INSERT succeeds against the new key,
+  and the target ends up with both old and new versions. Stable identity across source
+  edits would require deterministic export IDs (see "Future enhancement" below).
 
 **Future enhancement: deterministic export IDs.** If stable identity across re-exports of the
 same source ever becomes a requirement (e.g., to keep target-side FK references from non-pack
@@ -210,6 +272,31 @@ These two CLI scripts are the entire interface. No admin UI; no auto-discovery; 
 "installed pack" registry. Operators run them by hand, the same way they run backup
 and restore scripts.
 
+**Apply output.** On success, the apply CLI prints a per-table summary showing
+inserted / overwritten / skipped counts:
+
+```
+Applied orgcontent.pack.zip
+  stg_settings:  3 inserted, 2 overwritten, 4 skipped (identical)
+  pag_pages:    12 inserted, 1 overwritten, 0 skipped
+  pro_products:  4 inserted, 0 overwritten, 0 skipped
+```
+
+If any overwrites happened, a WARNING line follows the summary noting that pre-existing
+target rows with matching unique keys were replaced. Overwrite is potentially
+destructive on a live target (clobbers local edits on rows the pack also touches), so
+the operator gets explicit acknowledgement that it occurred.
+
+`--verbose` lists the specific rows overwritten — e.g., `pag_pages: overwrote
+pag_slug='about-us' (id=12)` — so the operator can audit changes and, if needed,
+recover from a pre-apply backup.
+
+**Error reporting.** PG errors raised during apply are caught and re-raised with
+context: table name, the row's `_export_id`, the operation stage (INSERT or UPDATE),
+and the violated constraint name if applicable. A raw PG error without context forces
+the operator to dig through logs to map "constraint violation" back to "which row in
+which table" — the wrapper does that mapping at the source.
+
 **Soft-deleted rows.** When an included table has a `delete_time` column, the exporter
 filters out rows where `delete_time IS NOT NULL`. Operators who want soft-deleted rows
 in a pack should restore them in the source DB before exporting.
@@ -219,11 +306,22 @@ in a pack should restore them in the source DB before exporting.
 The entire apply runs inside a single PostgreSQL transaction with FK constraints set
 `DEFERRED`. Either the whole pack lands or none of it does.
 
-Deferring FK constraints also handles **cyclic and self-referencing FKs**: a row pointing
-at another row inserted later in the same pack (or at itself) is inserted with the FK
-column populated normally; the constraint isn't checked until COMMIT. This covers
-tree-shaped tables like `cat_categories.cat_parent_id` and mutual references between
-rows in the same pack.
+Within the outer transaction, each row's INSERT is wrapped in a `SAVEPOINT` so a
+unique-constraint violation can be recovered from (rolled back to the savepoint, then
+UPDATEd in place per the overwrite rule). Any other error during row processing
+escapes the savepoint and rolls back the whole apply.
+
+Deferring FK constraints handles **self-referencing trees with NULL at the root** —
+tables like `cat_categories.cat_parent_id` where the root row has no parent. Roots
+insert first, children insert in dependency order, and the per-row FK check is
+postponed until COMMIT.
+
+Dependency order is computed at apply time by topologically sorting the included
+tables on their FK relationships in the target schema. Within a table that has a
+self-referencing FK, rows are further sorted parent-first.
+
+Genuine reference loops between rows (row A links to row B, B links back to A) are
+not supported — see Known limitations.
 
 The single-transaction approach holds locks and buffers for the duration of the apply.
 Acceptable for v1; chunked or resumable applies are deferred.
@@ -233,6 +331,10 @@ Acceptable for v1; chunked or resumable applies are deferred.
 A pack does not embed a Joinery version. At apply time, the importer compares pack columns
 to the target schema:
 
+- Table listed in pack but missing on target → apply fails with a clear error naming
+  the table. Typical cause: a plugin-owned table whose plugin hasn't been installed on
+  the target (see "Plugin and theme activation are out of pack scope" in Known
+  limitations).
 - Column present in pack but missing in target → apply fails with a clear error naming
   the table and column. Operator either upgrades the target or removes the column from
   the pack.
@@ -258,9 +360,10 @@ pack if one is present in `maintenance_scripts/install_tools/`. A vanilla Joiner
 release may ship no pack at all; a branded deployment (e.g., getjoinery.com pivot,
 sister-brand site) ships a pack containing its content.
 
-Setting overrides in a pack upsert by `stg_name` (built-in behavior for `stg_settings`)
-to overwrite the defaults the install SQL just inserted — that's how marketing copy and
-branding travel between sites without duplicating rows.
+Setting overrides in a pack overwrite the defaults the install SQL just inserted via
+the general unique-constraint overwrite path (`stg_name` is the unique constraint that
+fires). That's how marketing copy and branding travel between sites without duplicating
+rows.
 
 Once installed, the pack is not retained or tracked in the running system. It is an
 install-time artifact, like the install SQL file itself.
@@ -329,11 +432,6 @@ breaking the v1 format:
   pulled — it added attack surface (arbitrary SQL running against the target DB at apply
   time) without serving the v1 use cases, since both bootstrap and site-to-site copy land
   on the install-pinned admin at `usr_user_id=1`.
-- **Identity matching on non-`stg_settings` tables.** v1 dedups by content hash for
-  everything except `stg_settings` (which always upserts by `stg_name`). Per-table
-  `identity_column` / `on_conflict` configuration was considered and pulled — for
-  bootstrap and site-to-site onto an empty or wiped target, hash dedup is sufficient.
-  Adding it back is a localized change to `pack.json` and the apply logic.
 - **Composite primary keys and PK-less tables.** v1 only supports tables with a single
   auto-increment primary key. The exporter fails with a clear error on other shapes.
 - **Unsupported column types.** Geometric, range, enum, and custom-domain columns are
@@ -366,19 +464,11 @@ understood before reaching for content packs in adjacent scenarios (live-target 
 incremental sync, etc.). Cross-references to "Deferred for v1" mark items reachable
 without breaking the pack format.
 
-**Updates to existing content on a live target fail.** When a pack row has the same
-natural key as a target row (e.g., same `pag_slug`) but different content, the importer
-issues an INSERT, the unique constraint rejects it, and the transaction rolls back.
-`stg_settings` is the exception — it always upserts by `stg_name`. For other tables,
-operators wipe conflicting rows in target before re-applying, or accept that
-already-present content stays untouched. *Fix path*: per-table `identity_column` +
-`on_conflict` config (Deferred).
-
-**Hash dedup is per-target, not per-pack-history.** The importer doesn't record "this
-hash came from that pack." A row hand-edited on the target after an earlier apply sees
-a hash mismatch on the next apply and creates a parallel row (or fails the unique
-constraint, depending on the table). No fix planned — tracking pack apply history is a
-larger architectural change.
+**Pack apply history is not tracked.** The importer doesn't record "this hash came
+from that pack." A target row hand-edited after an earlier apply is treated like any
+other target row on re-apply — hash dedup may match (no-op) or the unique-constraint
+overwrite path may fire (clobbering the hand-edit). No fix planned — tracking pack
+apply history is a larger architectural change.
 
 **Text columns are copied byte-for-byte.** References embedded in TEXT/HTML
 columns — a hardcoded link like `<a href="/user/10">`, an absolute path to
@@ -386,6 +476,12 @@ columns — a hardcoded link like `<a href="/user/10">`, an absolute path to
 parse or rewrite column contents, so deployment-specific references will keep pointing
 at the source after apply. Files themselves are out of scope by design (see Content
 scope); operators sync uploads separately.
+
+**`json`-typed columns are canonicalized on apply.** PostgreSQL's `json` type
+preserves insertion order and whitespace; the importer re-serializes from canonical
+form, so the target ends up storing the canonical version rather than the source's
+original byte sequence. Required for reliable hash-dedup; `jsonb` is unaffected
+(PG normalizes server-side). The semantic value is preserved either way.
 
 **Sequence values diverge between source and target.** Auto-PKs assigned during apply
 have no relationship to source PKs. External systems holding cached source PKs are not
@@ -397,18 +493,22 @@ directly. PostgreSQL-level features still fire — CHECK constraints, FK constra
 denormalization, etc.). PHP-level application lifecycle does *not* fire — `prepare()`
 validation, `SystemBase::save()`, plugin event hooks, post-purchase hooks, notification
 senders, search-indexers, and cache invalidators are all bypassed. This is
-*intentional* for bulk apply (no notification flood when seeding 200 pages) but means
-anything downstream that depends on the PHP lifecycle running needs a manual post-apply
-step (cache flush, search reindex, counter recalc). Two concrete instances worth
-calling out separately:
+*intentional* for bulk apply (no notification flood when seeding 200 pages), with two
+concrete consequences worth calling out:
 
 - **Settings caches don't auto-invalidate.** `Globalvars` caches settings in-process. A
   mid-life apply that updates `stg_settings` won't be visible to a running PHP-FPM
-  worker until the worker restarts or the cache is otherwise cleared.
+  worker until the worker restarts or the cache is otherwise cleared. After any apply
+  that touches `stg_settings`, reload PHP-FPM (`systemctl reload php8.x-fpm`).
 - **DB triggers fire per-row, not per-batch.** If a target table has a trigger written
   for transactional inserts (one row at a time from the app), a pack apply with
   hundreds of rows fires it hundreds of times. Plugin-authored triggers especially —
   they may be unaware of pack apply as a bulk-insert path.
+
+Operators applying a pack to a live (post-install) site should treat denormalized
+counters, search indexes, and similar materialized state as potentially stale until
+the platform-specific recalc paths are run. None exist in core today — this is a
+forward-looking note for plugins that maintain such state.
 
 **Soft-deleted rows are excluded with no per-pack override.** Operators restore them in
 the source before exporting if they need them in the pack. *Fix path*: per-table row
@@ -422,15 +522,25 @@ compatibility layer (see "Schema compatibility").
 Geometric, range, enum, and custom-domain columns fail with a clear error. Operators
 omit the table or wait for type support (Deferred).
 
+**Reference loops between pack rows are not supported.** The importer inserts rows in
+dependency order and resolves links through the export-id map as it goes, so a row
+needs its target to be inserted first. Self-referencing trees with empty roots work;
+genuine loops (A → B → A) do not. Out of scope, not deferred — loops are a schema
+shape Joinery's content tables don't have, and would be a schema-level fix if they
+ever appeared.
+
 **Apply is all-or-nothing.** The single-transaction model holds locks and buffers for
 the duration of the apply. Large packs (tens of thousands of rows across many tables)
 work but tax the target DB during the apply window. *Fix path*: chunked or resumable
 applies (Deferred).
 
-**Hash-dedup scans target candidates.** For each pack row inserted into a non-settings
-table, the importer hashes existing target rows to look for a match. Cost is O(target
-rows × pack rows) per table. Acceptable for the v1 use cases (target empty or small);
-problematic for big-table overlays.
+**Hash-dedup adds an upfront scan per table.** Target rows are hashed once into a
+PHP-side set when the importer enters a table; each pack row is then looked up in O(1).
+Total cost is O(target rows + pack rows) per table — not O(target rows × pack rows). For
+prod→dev pulls onto a target with a few thousand rows in some content table, this is the
+difference between "fast" and "noticeable wait." Tables with very large row counts still
+pay the upfront hashing cost; if that ever becomes prohibitive, a stored-hash column with
+an index would be the fix.
 
 **No dry-run.** Operators see what an apply would do by running it inside a transaction
 and rolling back, or by trial-and-error. *Fix path*: preview mode (Deferred).
