@@ -345,6 +345,93 @@ header succeeds silently (no duplicate row). Messages with no Message-ID
 header are always inserted (NULLs are distinct in Postgres unique
 constraints).
 
+## Mailbox Reader
+
+The **Mailbox** tab is a Gmail-style reader over the stored messages —
+conversation list, reading pane, threading, read/unread, star, and search —
+replacing the old flat table. It is `admin_inbound_email_reader.php`, a vanilla-JS
+client (`assets/mailbox_reader.js` + `.css`) talking to four scoped AJAX
+endpoints. The single-message detail page is kept for raw MIME / `.eml` download
+and deep links.
+
+### Mailbox-per-address model
+
+**A mailbox IS an address (alias).** `beth@` and `legal@` are two mailboxes
+because they are two aliases — there is no separate container entity. Because the
+router stores **one `iem` row per (message, recipient)**, every stored row
+belongs to exactly one mailbox via `iem_iea_inbound_email_alias_id`.
+
+### Grants and the switcher
+
+Access is an explicit **grant** of a user to an alias, stored in
+`ieg_inbound_email_mailbox_grants` (`InboundEmailMailboxGrant`). One alias can be
+granted to several users (a shared team `legal@`); one user can hold several
+mailboxes. Grants are managed on the **alias editor** ("Users with access"); on
+save the editor calls `InboundEmailMailboxGrant::sync_for_alias($alias_id, $user_ids)`,
+which diffs the set (insert added, delete removed). Grants cascade-delete with
+either the alias or the user.
+
+The reader's **left rail** is a switcher over the addresses the viewer has been
+granted, each independently badged with its unread count. Selecting one scopes
+the whole reader to that mailbox; below the switcher are All / Unread / Starred
+filters and a debounced search box.
+
+### Threading and shared state
+
+Threading is by `iem_thread_key`, computed at store time by
+`InboundEmailRouter::computeThreadKey()` (References first token → In-Reply-To →
+own Message-ID → null; a null key is a singleton, keyed client-side as `m:<id>`).
+Subject-based grouping for header-less mail is a deliberate non-goal.
+
+Read/star state lives **on the message row** (`iem_is_read`, `iem_is_starred`,
+`iem_read_time`) — not in a per-viewer table. On a shared mailbox this means read
+state is **shared** among everyone with access (team-inbox semantics: you see
+what a colleague already handled). Opening a thread marks it read for everyone on
+that mailbox. (Per-person read state would require reintroducing a per-(message,
+user) state table — explicitly deferred.)
+
+### The viewer seam
+
+`MailboxViewer` (`includes/MailboxViewer.php`) answers *who is looking and what
+may they touch*:
+
+- `accessibleAliasIds()` — for a permission-10 superadmin, **every** alias
+  (all-access oversight: every mailbox plus a merged "All mail" view that also
+  surfaces unmatched NULL-alias mail); otherwise the aliases the viewer holds a
+  grant for.
+- `scopeAliasIds(?int $aliasId)` — the **single** place audience becomes a query
+  filter: an accessible alias → `[id]`; a null selection → the full accessible
+  set; a non-accessible alias → `[]` (matches nothing). The superadmin "All mail"
+  unconstrained case is handled in `MailboxService`, gated by `isAllAccess()`.
+
+`MailboxService` funnels **every** read and mutation through the viewer's scope,
+so a crafted id/thread/alias for an un-granted mailbox returns nothing and mutates
+nothing. `MailboxViewer::forUser($user_id, $permission)` builds a viewer
+independent of the session — used by tests and by the deferred member-mount.
+
+### Permissions
+
+The reader, its endpoints, and grant management are **permission-5 (staff)** in
+v1; grants partition which mailboxes each staff member sees. Permission-10
+superadmins are all-access. **Opening the reader to non-admin members later needs
+no schema change or migration** — the grant table, per-row state, and the
+viewer/scope seam are keyed on the user generically. It is purely additive code:
+relax the endpoint permission gate (currently `get_permission() < 5` in each
+`ajax/mailbox_*.php`) and add a member-area mount. `MailboxViewer::canCompose()`
+is the seam for a future compose/reply.
+
+### Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/ajax/mailbox_mailboxes` | GET | switcher: accessible mailboxes + unread |
+| `/ajax/mailbox_list` | GET | thread list (`alias_id`, filters, `page`) |
+| `/ajax/mailbox_thread` | GET | messages in a `thread_key` (with bodies) |
+| `/ajax/mailbox_action` | POST | mark read/unread, star/unstar, delete — CSRF-protected, accepts `ids[]` or a `thread_key` expanded server-side |
+
+HTML bodies stay sandboxed (`<iframe sandbox="">`, no `allow-scripts`) exactly as
+the detail page does — stored mail is fully attacker-controlled.
+
 ## Inbound Providers
 
 Inbound mail is **provider-based** and composes with the platform's
