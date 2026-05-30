@@ -624,10 +624,9 @@ class RouteHelper {
      * @return never This method always exits
      */
     private static function show404($reason = 'Route not found', $debug_context = []) {
-        // Log the 404 with reason
-        error_log("RouteHelper 404: " . $reason);
-        
-        // Add debug logging if enabled
+        // 404s are normal HTTP events (recorded in access.log with their status code),
+        // not server errors — don't spam error.log. Routing 404 detail is available via
+        // RouteHelper debug logging when explicitly enabled.
         self::debugLog('fallback_logic', "Showing 404: {$reason}", $debug_context);
         
         // Load LibraryFunctions if not already loaded
