@@ -17,7 +17,7 @@ function admin_contact_type_edit_logic(array $input): LogicResult {
 		$contact_type = new ContactType(NULL);
 	}
 
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		$editable_fields = array('ctt_description', 'ctt_provider_list_id', 'ctt_name');
 

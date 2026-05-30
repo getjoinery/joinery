@@ -35,7 +35,7 @@ function admin_users_edit_logic(array $input): LogicResult {
 	$mailing_lists->load();
 
 	// Process POST actions
-	if ($input) {
+	if (LibraryFunctions::isFormSubmission()) {
 
 		// Admin 2FA reset — clears the user's TOTP state so they can re-enroll.
 		// Logged via ChangeTracking so the action is auditable.

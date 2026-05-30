@@ -35,20 +35,25 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$product = new Product(NULL);
 	}
 
-	// Photo action handlers (early return — skip full product save)
+	// Photo action handlers (early return — skip full product save).
+	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
 	if ($product->key && isset($input['action']) && $input['action'] == 'set_primary_photo') {
-		$product->set_primary_photo((int)$input['photo_id']);
+		SystemBase::$allow_get_mutation = true;
+		try { $product->set_primary_photo((int)$input['photo_id']); }
+		finally { SystemBase::$allow_get_mutation = false; }
 		return LogicResult::redirect('/admin/admin_product_edit?pro_product_id='.$product->key);
 	}
 
 	if ($product->key && isset($input['action']) && $input['action'] == 'clear_primary_photo') {
-		$product->clear_primary_photo();
+		SystemBase::$allow_get_mutation = true;
+		try { $product->clear_primary_photo(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 		return LogicResult::redirect('/admin/admin_product_edit?pro_product_id='.$product->key);
 	}
 
 	// Process POST actions
 	// CRITICAL: Check for POST submission
-	if ($input) {
+	if (LibraryFunctions::isFormSubmission()) {
 		// Add-only logic
 		if (!$product->key) {
 			$product->set('pro_created_by', $session->get_user_id());
@@ -161,8 +166,9 @@ function admin_product_edit_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
 
-	// Handle GET actions for version management
-	if ($input['action'] == 'new_version') {
+	// Handle GET actions for version management.
+	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
+	if (($input['action'] ?? '') == 'new_version') {
 		$product_version = new ProductVersion(NULL);
 		$product_version->set('prv_pro_product_id', $product->key);
 		$product_version->set('prv_version_name', $input['version_name']);
@@ -170,22 +176,25 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$product_version->set('prv_price_type', $input['prv_price_type']);
 		$product_version->set('prv_trial_period_days', $input['prv_trial_period_days']);
 		$product_version->set('prv_status', 1);
-		$product_version->prepare();
-		$product_version->save();
+		SystemBase::$allow_get_mutation = true;
+		try { $product_version->prepare(); $product_version->save(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
-	else if ($input['action'] == 'remove_version') {
+	else if (($input['action'] ?? '') == 'remove_version') {
 		$product_version = new ProductVersion($input['v'], TRUE);
 		$product_version->set('prv_status', 0);
-		$product_version->prepare();
-		$product_version->save();
+		SystemBase::$allow_get_mutation = true;
+		try { $product_version->prepare(); $product_version->save(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
-	else if ($input['action'] == 'activate_version') {
+	else if (($input['action'] ?? '') == 'activate_version') {
 		$product_version = new ProductVersion($input['v'], TRUE);
 		$product_version->set('prv_status', 1);
-		$product_version->prepare();
-		$product_version->save();
+		SystemBase::$allow_get_mutation = true;
+		try { $product_version->prepare(); $product_version->save(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 		return LogicResult::redirect('/admin/admin_product?pro_product_id='. $product->key);
 	}
 

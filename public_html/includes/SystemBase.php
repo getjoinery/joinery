@@ -44,6 +44,12 @@ abstract class SystemBase {
 	static $required_user = array();
 	static $permanent_delete_actions = array();
 
+	/**
+	 * Set true only around an intentional GET-action mutation (e.g. a delete link).
+	 * See assert_not_get_mutation(). Always reset in a finally{} block.
+	 */
+	public static $allow_get_mutation = false;
+
 	function __construct($key, $and_load=FALSE) {
 		$this->key = $key;
 		$this->data = new StdClass;
@@ -722,6 +728,7 @@ abstract class SystemBase {
 	}
 
 	function soft_delete(){
+		self::assert_not_get_mutation('soft_delete');
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', 'now()');
@@ -863,6 +870,7 @@ abstract class SystemBase {
 	 * Perform the actual permanent deletion
 	 */
 	public function permanent_delete($debug=false) {
+		self::assert_not_get_mutation('permanent_delete');
 		$db = DbConnector::get_instance()->get_db_link();
 
 		$this_transaction = false;
@@ -1041,11 +1049,43 @@ abstract class SystemBase {
 	}
 	
 	
+	/**
+	 * GET-is-read-only invariant. A GET request must never persist data — that is
+	 * always either a misfired submission guard (see LibraryFunctions::isFormSubmission)
+	 * or an intentional GET-action link that must opt in via self::$allow_get_mutation.
+	 *
+	 * Enforced at the single chokepoint every mutation passes through (save /
+	 * soft_delete / permanent_delete), so it catches the whole bug class — including
+	 * plugin, dynamic, and non-`if($input)` code a text lint can't see.
+	 *
+	 * CLI/cron/scheduled contexts (no REQUEST_METHOD) are exempt. Currently
+	 * log-only everywhere while the GET-mutation worklist is burned down; once the
+	 * logs are clean the dev (`debug` setting) throw below is re-enabled.
+	 */
+	private static function assert_not_get_mutation(string $op): void {
+		if (PHP_SAPI === 'cli' || !isset($_SERVER['REQUEST_METHOD']))  return;
+		if (self::$allow_get_mutation)                                 return;
+		if ($_SERVER['REQUEST_METHOD'] !== 'GET')                      return;
+
+		$msg = "GET-request mutation ({$op} on " . static::class . ') at '
+		     . ($_SERVER['REQUEST_URI'] ?? '?') . ' — a GET must not persist data. '
+		     . 'Guard the save with LibraryFunctions::isFormSubmission(), or, for an '
+		     . 'intentional GET action, set SystemBase::$allow_get_mutation = true.';
+		error_log('[GET_MUTATION] ' . $msg . "\n" . (new Exception())->getTraceAsString());
+
+		// LOG-ONLY ROLLOUT: throw is intentionally disabled until the log-only
+		// burndown is clean (spec rollout step 5). To flip dev to throw, uncomment:
+		// if (Globalvars::get_instance()->get_setting('debug')) {
+		//     throw new SystemBaseException($msg);
+		// }
+	}
+
 	// And to save it to the database
 	function save($debug=false) {
+		self::assert_not_get_mutation('save');
 		if ($this->data === NULL) {
 			throw new SystemBaseException('This '.static::$tablename.' object has no data.');
-		}		
+		}
 		
 		// EXACT SAME BEHAVIOR AS CURRENT - just reading from field_specifications instead of separate arrays
 		

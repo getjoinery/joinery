@@ -11,7 +11,7 @@ function admin_user_add_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(8);
 
-	if ($input){
+	if (LibraryFunctions::isFormSubmission()){
 
 		$user = User::CreateCompleteNew($input, $input['send_activation_email'], false, false);
 

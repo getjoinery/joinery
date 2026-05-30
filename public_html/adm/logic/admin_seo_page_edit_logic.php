@@ -20,7 +20,7 @@ function admin_seo_page_edit_logic(array $input): LogicResult {
 
 	$error = null;
 
-	if ($input) {
+	if (LibraryFunctions::isFormSubmission()) {
 		if (isset($input['btn_delete']) && $spm->key) {
 			$spm->soft_delete();
 			return LogicResult::redirect('/admin/admin_seo_pages?notice=' . urlencode('SEO row soft-deleted.'));

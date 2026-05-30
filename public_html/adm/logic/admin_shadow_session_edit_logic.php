@@ -35,7 +35,7 @@ function admin_shadow_session_edit_logic(array $input): LogicResult {
     }
 
     // Process POST
-    if ($input) {
+    if (LibraryFunctions::isFormSubmission()) {
         try {
             // Define editable fields
             $editable_fields = array('prd_num_used', 'prd_notes');

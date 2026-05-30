@@ -23,7 +23,7 @@ function admin_email_edit_logic(array $input): LogicResult {
 	}
 
 	// Process POST actions
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		if($input['eml_mlt_mailing_list_id'] == ''){
 			$input['eml_mlt_mailing_list_id'] = NULL;

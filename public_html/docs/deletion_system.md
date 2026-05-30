@@ -4,6 +4,8 @@
 
 The deletion system manages cascading deletes, foreign key constraints, and referential integrity when records are permanently deleted from the database. It uses a **child-centric, declarative approach** where dependent models declare their own behavior when parent records are deleted.
 
+> **GET-is-read-only:** `soft_delete()` and `permanent_delete()` (like `save()`) refuse to run on a GET request — a GET must not mutate data. A legitimate GET-action delete link must wrap the call in `SystemBase::$allow_get_mutation = true; try { … } finally { SystemBase::$allow_get_mutation = false; }`. See [Logic Architecture — GET-is-read-only invariant](logic_architecture.md#get-is-read-only-invariant-enforced-at-the-write-boundary).
+
 ### Key Concepts
 
 - **Child-Centric**: Child models declare how they should be handled when their parent is deleted (not the other way around)

@@ -23,18 +23,14 @@ function admin_phone_edit_logic(array $input): LogicResult {
 		$user_id = $phone_number->get('phn_usr_user_id');
 	} else {
 		// Creating new phone - get user_id from POST (hidden field) or GET (initial load)
-		if($input){
-			$user_id = $input['usr_user_id'] ?? NULL;
-		} else {
-			$user_id = $input['usr_user_id'] ?? NULL;
-		}
+		$user_id = $input['usr_user_id'] ?? NULL;
 	}
 
 	if(!$user_id){
 		return LogicResult::error('User ID is required');
 	}
 
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 		// Add-only logic - set user_id when creating new phone number
 		if (!$phone_number->key) {
 			$phone_number->set('phn_usr_user_id', $user_id);

@@ -18,7 +18,10 @@ function admin_settings_email_logic(array $input): LogicResult {
 	// Check if validation should run (performance optimization)
 	$run_validation = isset($input['run_validation']) && $input['run_validation'] == '1';
 
-	if($input){
+	// Only run the save handler on an actual form POST — see admin_settings_logic
+	// for why `if($input)` looped ($input is never empty on a GET).
+	// See LibraryFunctions::isFormSubmission().
+	if(LibraryFunctions::isFormSubmission()){
 		$errors = array();
 
 		// Validate email services before saving

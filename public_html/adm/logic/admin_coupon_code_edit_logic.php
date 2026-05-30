@@ -26,7 +26,7 @@ function admin_coupon_code_edit_logic(array $input): LogicResult {
 		$coupon_code = new CouponCode(NULL);
 	}
 
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 		// Handle start time using FormWriterV2Base helper
 		$start_time = FormWriterV2Base::process_datetimeinput($input, 'ccd_start_time', true);
 		if($start_time !== NULL){

@@ -20,7 +20,7 @@ function admin_api_key_edit_logic(array $input): LogicResult {
 		$api_key = new ApiKey(NULL);
 	}
 
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		$editable_fields = array('apk_name','apk_is_active','apk_permission', 'apk_ip_restriction');
 

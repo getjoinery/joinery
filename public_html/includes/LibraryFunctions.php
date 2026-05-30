@@ -8,6 +8,19 @@ require_once('DnsResolver.php');
 class LibraryFunctions {
 
 	/**
+	 * True only on an actual form POST. Use this — never `if($input)` — to guard
+	 * a logic function's save/mutate/redirect handler.
+	 *
+	 * `$input` (array_merge($_GET, $_POST)) is never empty on a GET: the Apache
+	 * rewrite leaves `__route` in $_GET, and edit pages also carry the record id,
+	 * so `if($input)` fires the save path on mere page-open. The correct "was the
+	 * form submitted" signal is the HTTP method.
+	 */
+	public static function isFormSubmission(): bool {
+		return ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST';
+	}
+
+	/**
 	 * Returns the installed Joinery release version in major.minor.patch form.
 	 *
 	 * Authoritative source is `public_html/VERSION` (baked into the release tarball by

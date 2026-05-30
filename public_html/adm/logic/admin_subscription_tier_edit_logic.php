@@ -31,7 +31,7 @@ function admin_subscription_tier_edit_logic(array $input): LogicResult {
     }
 
     // Process POST actions
-    if($input){
+    if(LibraryFunctions::isFormSubmission()){
         try {
             // Process features
             $features = array();

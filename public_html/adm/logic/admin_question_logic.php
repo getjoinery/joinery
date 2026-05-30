@@ -16,21 +16,26 @@ function admin_question_logic(array $input): LogicResult {
 	$question_id = $input['qst_question_id'] ?? $input['qst_question_id'] ?? null;
 	$question = new Question($question_id, TRUE);
 
-	if($input['action'] == 'delete'){
+	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
+	if(($input['action'] ?? '') == 'delete'){
 		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$question->soft_delete();
+		SystemBase::$allow_get_mutation = true;
+		try { $question->soft_delete(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 
 		return LogicResult::redirect("/admin/admin_questions");
 	}
-	else if($input['action'] == 'undelete'){
+	else if(($input['action'] ?? '') == 'undelete'){
 		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$question->soft_delete();
+		SystemBase::$allow_get_mutation = true;
+		try { $question->soft_delete(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 
 		return LogicResult::redirect("/admin/admin_questions");
 	}
 
 	$valid = '';
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 		$valid = $question->validate_answers($input['question_'.$question->key]);
 	}
 

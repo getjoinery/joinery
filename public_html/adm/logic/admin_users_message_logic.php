@@ -62,7 +62,7 @@ function admin_users_message_logic(array $input): LogicResult {
 
 	$numrecipients = 0;
 
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		$input['eml_message'] = nl2br($input['eml_message']);
 

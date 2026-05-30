@@ -862,6 +862,13 @@ class RouteHelper {
      */
     public static function processRoutes($routes, $request_path) {
 
+        // __route is routing metadata injected by the Apache rewrite
+        // (RewriteRule ^(.*)$ serve.php?__route=$1). It must not reach page logic
+        // ($input = array_merge($_GET, $_POST)) — otherwise `if($input)` style
+        // submission guards misfire on every GET. The route value is already in
+        // $request_path, so strip it from the request superglobals at dispatch entry.
+        unset($_GET['__route'], $_POST['__route'], $_REQUEST['__route']);
+
         // Auto-enable debugging if requested via URL parameter or header
         $debug_enabled = self::autoEnableDebug();
         if ($debug_enabled) {

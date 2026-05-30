@@ -18,7 +18,12 @@ function admin_settings_logic(array $input): LogicResult {
 	// Check if validation should run (performance optimization)
 	$run_validation = isset($input['run_validation']) && $input['run_validation'] == '1';
 
-	if($input){
+	// Only run the save handler on an actual form POST. Guarding on `if($input)`
+	// fired the save+redirect on every GET (producing an infinite redirect to
+	// /admin/admin_settings), because `$input` is never empty on a GET — edit
+	// pages carry a record id, and historically the `__route` rewrite param too.
+	// See LibraryFunctions::isFormSubmission().
+	if(LibraryFunctions::isFormSubmission()){
 
 		// Validate: plugin theme requires a plugin to be selected
 		if (isset($input['theme_template']) && $input['theme_template'] === 'plugin' && empty($input['active_theme_plugin'])) {
