@@ -611,6 +611,39 @@ abstract class PublicPageBase {
 		$session = SessionControl::get_instance();
 		$settings = Globalvars::get_instance();
 		
+		// SECURITY HEADERS — must run before ANY output below (the admin-bar
+		// <style>/<script> echoed for admins), or header() warns "headers already sent".
+		// Check protocol_mode for HTTPS redirect (duplicate check for safety)
+		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
+		if($protocol_mode === 'https_redirect'){
+			require_once('LibraryFunctions.php');
+			if(!LibraryFunctions::isSecure()){
+				$location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+				header('HTTP/1.1 301 Moved Permanently');
+				header('Location: ' . $location);
+				exit;
+			}
+
+			// Only set HSTS if explicitly enabled in settings
+			if ($settings->get_setting('enable_hsts', false, true)) {
+				header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+			}
+		}
+		// X-Content-Type-Options is always sent (prevents MIME sniffing)
+		header('X-Content-Type-Options: nosniff');
+		// X-Permitted-Cross-Domain-Policies is always sent (prevents Flash/PDF cross-domain requests)
+		header('X-Permitted-Cross-Domain-Policies: none');
+
+		// X-Frame-Options only if enabled in settings (prevents clickjacking)
+		if ($settings->get_setting('enable_x_frame_options', false, true)) {
+			header('X-Frame-Options: SAMEORIGIN');
+		}
+
+		// Referrer-Policy only if enabled in settings (controls URL leakage)
+		if ($settings->get_setting('enable_referrer_policy', false, true)) {
+			header('Referrer-Policy: strict-origin-when-cross-origin');
+		}
+
 		// Auto-inject admin bar CSS in head
 		if ($this->should_show_admin_bar()) {
 			$this->render_admin_bar_css();
@@ -657,36 +690,6 @@ abstract class PublicPageBase {
 				};
 			});
 			</script>';
-		}
-		// Check protocol_mode for HTTPS redirect (duplicate check for safety)
-		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true
-		if($protocol_mode === 'https_redirect'){
-			require_once('LibraryFunctions.php');
-			if(!LibraryFunctions::isSecure()){
-				$location = 'https://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
-				header('HTTP/1.1 301 Moved Permanently');
-				header('Location: ' . $location);
-				exit;
-			}
-
-			// Only set HSTS if explicitly enabled in settings
-			if ($settings->get_setting('enable_hsts', false, true)) {
-				header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
-			}
-		}
-		// X-Content-Type-Options is always sent (prevents MIME sniffing)
-		header('X-Content-Type-Options: nosniff');
-		// X-Permitted-Cross-Domain-Policies is always sent (prevents Flash/PDF cross-domain requests)
-		header('X-Permitted-Cross-Domain-Policies: none');
-
-		// X-Frame-Options only if enabled in settings (prevents clickjacking)
-		if ($settings->get_setting('enable_x_frame_options', false, true)) {
-			header('X-Frame-Options: SAMEORIGIN');
-		}
-
-		// Referrer-Policy only if enabled in settings (controls URL leakage)
-		if ($settings->get_setting('enable_referrer_policy', false, true)) {
-			header('Referrer-Policy: strict-origin-when-cross-origin');
 		}
 
 		// NOTE: Do not default $options['title'] / $options['meta_description'] here.
