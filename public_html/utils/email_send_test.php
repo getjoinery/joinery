@@ -1,742 +1,370 @@
 <?php
+/**
+ * Email Self-Test — outbound + (optional) inbound round-trip checker.
+ *
+ * Rewritten (v2): the old version required a Gmail App Password and polled
+ * Gmail over IMAP to read authentication headers. That dependency is gone.
+ * Because this platform now self-hosts inbound mail (inbound_email plugin),
+ * the default test is a credential-free LOOPBACK:
+ *
+ *   send via the configured provider  →  to a local inbound address  →
+ *   the message is received + stored (and DKIM-verified) by InboundEmailRouter →
+ *   this page polls iem_inbound_email_messages and shows the result.
+ *
+ * That single action exercises outbound (provider), inbound (receive/store),
+ * and the platform's own DKIM verdict — with no external mailbox, no IMAP, no
+ * app password. A second mode sends to any external address for a manual
+ * deliverability spot-check (open the message and use "Show original").
+ *
+ * @version 2.0
+ */
+
 require_once(__DIR__ . '/../includes/PathHelper.php');
-require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 
-$session = SessionControl::get_instance();
-$session->check_permission(5);
-
-// Determine the base path based on how the script is being run
-if (!defined('GLOBALVARS_INCLUDED')) {
-    // Running standalone - need to include files
-    $base_path = dirname(__DIR__);
-    require_once($base_path . '/includes/Globalvars.php');
-    require_once($base_path . '/includes/EmailTemplate.php');
-    require_once($base_path . '/includes/EmailSender.php');
-    
-    // Try to load Mailgun dependencies if they exist
-    $autoload_path = PathHelper::getComposerAutoloadPath();
-    if (file_exists($autoload_path)) {
-        require_once($autoload_path);
+if (method_exists('PathHelper', 'getComposerAutoloadPath')) {
+    $autoload = PathHelper::getComposerAutoloadPath();
+    if ($autoload && is_file($autoload)) {
+        require_once($autoload);
     }
 }
 
-$page = new AdminPage();
+$session = SessionControl::get_instance();
+$session->check_permission(5);
 $settings = Globalvars::get_instance();
+$db = DbConnector::get_instance()->get_db_link();
 
-// Process form submission
-$run_test = false;
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $run_test = true;
+// ---------------------------------------------------------------- helpers
+
+/** Pick an enabled inbound domain for the loopback, preferring a store catch-all. */
+function est_pick_loopback_domain($db) {
+    $sql = "SELECT ied_domain FROM ied_inbound_email_domains
+            WHERE ied_is_enabled = true AND ied_delete_time IS NULL
+            ORDER BY (ied_catch_all_mode = 'store') DESC, ied_domain ASC LIMIT 1";
+    $val = $db->query($sql)->fetchColumn();
+    return $val ?: null;
 }
 
-// Configuration
-$config = [
-    'test_email' => $_POST['test_email'] ?? 'joineryemailtests@gmail.com',
-    'imap_username' => $_POST['imap_username'] ?? 'joineryemailtests@gmail.com',
-    'imap_password' => $_POST['imap_password'] ?? '',
-    'imap_host' => '{imap.gmail.com:993/imap/ssl}INBOX',
-    'email_subject' => 'Email Authentication Test - ' . date('Y-m-d H:i:s'),
-    'wait_time' => 10, // Seconds to wait after sending before checking
-];
+/**
+ * Pull the most recent provider "Send failed: <reason>" lines from the error
+ * log so a failed send can show what the provider actually said (e.g. a Mailgun
+ * "Your credentials are incorrect."), instead of a generic message. Read-only,
+ * guarded; returns up to 3 recent reasons or null.
+ */
+function est_recent_send_error() {
+    $log = realpath(__DIR__ . '/../../logs/error.log');
+    if (!$log || !is_readable($log)) {
+        return null;
+    }
+    // Read only the tail — the error log can be enormous, so never file() it.
+    $fh = @fopen($log, 'rb');
+    if (!$fh) {
+        return null;
+    }
+    $size = @filesize($log);
+    $want = 65536;
+    if ($size && $size > $want) {
+        @fseek($fh, -$want, SEEK_END);
+    }
+    $chunk = @fread($fh, $want);
+    @fclose($fh);
+    if ($chunk === false || $chunk === '') {
+        return null;
+    }
+    $lines = preg_split('/\r?\n/', $chunk);
+    $hits = [];
+    foreach (array_slice($lines, -80) as $l) {
+        if (preg_match('/\[([A-Za-z0-9]+Provider|EmailSender)\][^:]*:\s*(.+?)(?:,\s*referer:|$)/', $l, $m)) {
+            $reason = trim($m[2]);
+            if ($reason !== '' && stripos($reason, 'trying fallback') === false) {
+                $hits[] = $m[1] . ': ' . $reason;
+            }
+        }
+    }
+    return $hits ? array_values(array_slice($hits, -3)) : null;
+}
 
-// Admin header
+/**
+ * Whether the message carries a DKIM-Signature, and its signing domain/selector.
+ * This is a FACT we can read off the header — unlike a pass/fail verdict, which
+ * the self-hosted inbound path can't compute reliably (see note in the UI).
+ */
+function est_dkim_info($raw) {
+    $info = ['signed' => false, 'domain' => null, 'selector' => null];
+    if (!preg_match('/^DKIM-Signature:(.*(?:\n[ \t].*)*)/im', (string)$raw, $m)) {
+        return $info;
+    }
+    $info['signed'] = true;
+    $sig = preg_replace('/\s+/', '', $m[1]);
+    foreach (explode(';', $sig) as $pair) {
+        if (strpos($pair, '=') === false) { continue; }
+        list($k, $v) = explode('=', $pair, 2);
+        if ($k === 'd') { $info['domain'] = $v; }
+        if ($k === 's') { $info['selector'] = $v; }
+    }
+    return $info;
+}
+
+/** Extract spf/dkim/dmarc result tokens from a raw message's Authentication-Results header. */
+function est_parse_auth($raw) {
+    $out = ['spf' => null, 'dkim' => null, 'dmarc' => null];
+    foreach (['spf', 'dkim', 'dmarc'] as $k) {
+        if (preg_match('/Authentication-Results:.*?\b' . $k . '=([a-z]+)/is', (string)$raw, $m)) {
+            $out[$k] = strtolower($m[1]);
+        }
+    }
+    return $out;
+}
+
+// ------------------------------------------------ JSON poll endpoint (?check=)
+
+if (isset($_GET['check']) && $_GET['check'] !== '') {
+    header('Content-Type: application/json');
+    $token = preg_replace('/[^a-z0-9]/i', '', (string)$_GET['check']);
+    if ($token === '') { echo json_encode(['found' => false]); exit; }
+
+    $like = '%' . $token . '%';
+    $stmt = $db->prepare(
+        "SELECT iem_inbound_email_message_id, iem_sender, iem_subject, iem_received_time,
+                iem_dkim_result, iem_raw_message
+         FROM iem_inbound_email_messages
+         WHERE iem_recipient ILIKE ? OR iem_subject ILIKE ?
+         ORDER BY iem_received_time DESC LIMIT 1"
+    );
+    $stmt->execute([$like, $like]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) { echo json_encode(['found' => false]); exit; }
+
+    echo json_encode([
+        'found'       => true,
+        'id'          => (int)$row['iem_inbound_email_message_id'],
+        'sender'      => $row['iem_sender'],
+        'subject'     => $row['iem_subject'],
+        'received'    => $row['iem_received_time'],
+        'dkim'        => est_dkim_info($row['iem_raw_message']),
+        'auth'        => est_parse_auth($row['iem_raw_message']),
+        'reader_url'  => '/plugins/inbound_email/admin/admin_inbound_email_message?iem_inbound_email_message_id=' . (int)$row['iem_inbound_email_message_id'],
+    ]);
+    exit;
+}
+
+// ------------------------------------------------------------ handle a send
+
+$result = null; // ['mode','ok','error','to','token','subject']
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $mode  = ($_POST['mode'] ?? 'loopback') === 'external' ? 'external' : 'loopback';
+    $token = 'est' . bin2hex(random_bytes(5));
+
+    if ($mode === 'external') {
+        $to = trim((string)($_POST['external_email'] ?? ''));
+        if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            $result = ['mode' => $mode, 'ok' => false, 'error' => 'Enter a valid email address.', 'to' => $to, 'token' => $token];
+        }
+    } else {
+        $domain = est_pick_loopback_domain($db);
+        if (!$domain || (string)$settings->get_setting('inbound_email_enabled') !== '1') {
+            $result = ['mode' => $mode, 'ok' => false, 'token' => $token, 'to' => '',
+                'error' => 'Loopback needs inbound email enabled with an inbound domain (ideally a store catch-all). Use "Send to an external address" instead.'];
+        } else {
+            $to = 'emailtest-' . $token . '@' . $domain;
+        }
+    }
+
+    if ($result === null) {
+        $subject = 'Joinery email self-test ' . $token;
+        $body = "Automated email self-test.\nMode: $mode\nToken: $token\nSent (UTC): " . gmdate('c') . "\n";
+        $ok = false; $err = null;
+        // Buffer the send so any stray provider output can't trip a later
+        // "headers already sent" when admin_header runs.
+        ob_start();
+        try {
+            $message = EmailMessage::create($to, $subject, $body);
+            $sender  = new EmailSender();
+            // queue_on_failure=false: this is a diagnostic, and the retry-queue
+            // insert requires a recipient name we don't set (would error noisily).
+            $ok = (bool)$sender->send($message, false);
+        } catch (\Throwable $e) {
+            $err = $e->getMessage();
+        }
+        ob_end_clean();
+
+        if (!$ok && !$err) {
+            $log_errs = est_recent_send_error();
+            $err = $log_errs ? implode("\n", $log_errs) : 'The configured provider rejected the message (no detail captured).';
+        }
+        $result = ['mode' => $mode, 'ok' => $ok, 'error' => $err, 'to' => $to, 'token' => $token, 'subject' => $subject];
+    }
+}
+
+// --------------------------------------------------------------- render
+
+$page = new AdminPage();
 $page->admin_header([
-    'title' => 'Email Authentication Test',
-    'menu-id' => 'email-tools',
-    'readable_title' => 'Email Authentication Test'
+    'title'          => 'Email Self-Test',
+    'menu-id'        => 'email-deliverability',
+    'readable_title' => 'Email Self-Test',
+    'session'        => $session,
 ]);
 
-// Debug output
-echo '<!-- DEBUG: REQUEST_METHOD = ' . ($_SERVER['REQUEST_METHOD'] ?? 'NOT SET') . ' -->';
-echo '<!-- DEBUG: POST data: ' . htmlspecialchars(print_r($_POST, true)) . ' -->';
-echo '<!-- DEBUG: REQUEST data: ' . htmlspecialchars(print_r($_REQUEST, true)) . ' -->';
-echo '<!-- DEBUG: $run_test = ' . ($run_test ? 'true' : 'false') . ' -->';
+// Context: what the platform will actually do.
+$svc = $settings->get_setting('email_service') ?: '(unset)';
+$dry = (string)$settings->get_setting('email_dry_run') === '1';
+$tst = (string)$settings->get_setting('email_test_mode') === '1';
+echo '<div class="card mb-3"><div class="card-body py-2">';
+echo '<strong>Mailer:</strong> service <code>' . htmlspecialchars($svc) . '</code>';
+$mgd = $settings->get_setting('mailgun_domain');
+if ($svc === 'mailgun' && $mgd) { echo ' &middot; domain <code>' . htmlspecialchars($mgd) . '</code>'; }
+echo ' &middot; from <code>' . htmlspecialchars($settings->get_setting('defaultemail') ?: '-') . '</code>';
+if ($dry) { echo ' &middot; <span class="badge bg-warning text-dark">DRY RUN — nothing actually sends</span>'; }
+if ($tst) { echo ' &middot; <span class="badge bg-warning text-dark">TEST MODE on</span>'; }
+echo '</div></div>';
 
-// Handle web interface
-if (!$run_test) {
-    ?>
-    
-    <div class="row">
-        <div class="col-12">
-            
-            <!-- Information Section -->
-            <div class="alert alert-info">
-                <h6 class="alert-heading mb-2">📧 Email Authentication Test Tool</h6>
-                <p class="mb-2"><strong>What this tool does:</strong></p>
-                <ul class="mb-2">
-                    <li>Sends a test email using your EmailTemplate system</li>
-                    <li>Connects to Gmail via IMAP to retrieve the sent email</li>
-                    <li>Analyzes SPF, DKIM, and DMARC authentication headers</li>
-                    <li>Provides detailed interpretation of authentication results</li>
-                </ul>
-            </div>
-            
-            <!-- Requirements Alert -->
-            <div class="alert alert-warning">
-                <h6 class="alert-heading mb-2">⚠️ Important Requirements:</h6>
-                <ul class="mb-2">
-                    <li>You need a <strong>Gmail App Password</strong>, not your regular password</li>
-                    <li>IMAP must be enabled in your Gmail account settings</li>
-                    <li>Two-factor authentication must be enabled on your Google account</li>
-                </ul>
-                <p class="mb-0"><a href="https://support.google.com/accounts/answer/185833" target="_blank" class="text-decoration-none">📖 Learn how to create a Gmail App Password</a></p>
-            </div>
-            
-            <!-- Test Form -->
-            <h5 class="mb-3">Run Authentication Test</h5>
-            
-            <?php
-            $formwriter = $page->getFormWriter('email_test_form', ['action' => '/utils/email_send_test', 'method' => 'POST']);
-            $formwriter->begin_form();
+if ($result === null) {
+    // ---- the form ----
+    echo '<div class="alert alert-info"><strong>Two ways to test:</strong> '
+        . '<em>Loopback</em> sends to a local inbox and reads the result back automatically — outbound + inbound + DKIM in one click, no credentials. '
+        . '<em>External</em> sends to any address so you can eyeball deliverability with "Show original".</div>';
 
-            echo '<div class="row g-3 mb-4">';
-            echo '<div class="col-md-6">';
-            echo $formwriter->textinput('test_email', 'Gmail address to send test email to', ['value' => 'joineryemailtests@gmail.com', 'placeholder' => 'email@gmail.com', 'maxlength' => 255, 'type' => 'email']);
-            echo '</div>';
+    $loop_domain = est_pick_loopback_domain($db);
+    $inbound_on  = (string)$settings->get_setting('inbound_email_enabled') === '1';
 
-            echo '<div class="col-md-6">';
-            echo $formwriter->textinput('imap_username', 'Gmail username for IMAP access', ['value' => 'joineryemailtests@gmail.com', 'placeholder' => 'email@gmail.com', 'maxlength' => 255]);
-            echo '</div>';
+    $formwriter = $page->getFormWriter('email_selftest_form', ['action' => '/utils/email_send_test', 'method' => 'POST']);
+    echo $formwriter->begin_form();
 
-            echo '<div class="col-12">';
-            echo $formwriter->passwordinput('imap_password', 'Gmail App Password', ['placeholder' => '16-character app-specific password from Google Account settings']);
-            echo '</div>';
+    if ($inbound_on && $loop_domain) {
+        echo '<p class="text-muted mb-2">Loopback target: <code>emailtest-&lt;token&gt;@' . htmlspecialchars($loop_domain) . '</code> '
+            . '(auto-generated; captured by the inbound store and shown in the Mailbox reader).</p>';
+        $mode_options = ['loopback' => 'Loopback self-test (recommended)', 'external' => 'Send to an external address'];
+    } else {
+        echo '<div class="alert alert-warning">Inbound email isn\'t enabled with a usable domain, so loopback is unavailable — only external send is offered.</div>';
+        $mode_options = ['external' => 'Send to an external address'];
+    }
 
-            echo '<div class="col-12">';
-            echo $formwriter->submitbutton('btn_submit', '<i class="fas fa-paper-plane"></i> Run Authentication Test', ['class' => 'btn btn-primary']);
-            echo '</div>';
-            echo '</div>';
+    $formwriter->dropinput('mode', 'Test type', [
+        'options' => $mode_options,
+        'visibility_rules' => [
+            'loopback' => ['show' => [], 'hide' => ['external_email']],
+            'external' => ['show' => ['external_email'], 'hide' => []],
+        ],
+    ]);
 
-            echo $formwriter->end_form();
-            ?>
-            
-            <script>
-            // Form submission with loading state
-            document.addEventListener('DOMContentLoaded', function() {
-                const form = document.getElementById('email_test_form');
-                const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
-                
-                if (form && submitBtn) {
-                    form.addEventListener('submit', function(e) {
-                        // Disable the submit button
-                        submitBtn.disabled = true;
-                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running Test...';
-                        
-                        // Show loading status
-                        const loadingHtml = `
-                            <div id="loading-status" class="alert alert-primary mt-3">
-                                <div class="d-flex align-items-center">
-                                    <div class="spinner-border spinner-border-sm me-3" role="status">
-                                        <span class="visually-hidden">Loading...</span>
-                                    </div>
-                                    <div>
-                                        <strong>Running Email Authentication Test...</strong><br>
-                                        <small class="text-muted">This may take 10-15 seconds. Please wait while we send the email and analyze the results.</small>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                        
-                        // Insert loading status after the form
-                        form.insertAdjacentHTML('afterend', loadingHtml);
-                        
-                        // Scroll to loading indicator
-                        document.getElementById('loading-status').scrollIntoView({ behavior: 'smooth' });
-                    });
-                }
-            });
-            </script>
-            
-            <!-- Setup Instructions -->
-            <div class="card">
-                <div class="card-header bg-body-tertiary">
-                    <h6 class="mb-0">ℹ️ How to Setup Gmail App Password</h6>
-                </div>
-                <div class="card-body">
-                    <ol>
-                        <li>Go to your <a href="https://myaccount.google.com/" target="_blank" class="text-decoration-none">Google Account settings</a></li>
-                        <li>Click "Security" in the left sidebar</li>
-                        <li>Under "Signing in to Google," click "2-Step Verification" (must be enabled)</li>
-                        <li>At the bottom, click "App passwords"</li>
-                        <li>Select "Mail" and "Other (custom name)" - enter "Email Auth Test"</li>
-                        <li>Copy the 16-character password and use it in the form above</li>
-                    </ol>
-                </div>
-            </div>
-            
-        </div>
-    </div>
-    
-    <?php
+    $formwriter->textinput('external_email', 'External email address', [
+        'placeholder' => 'you@example.com',
+        'helptext'    => 'Where to send the deliverability test. After it arrives, open it and use your mail client\'s "Show original" to read SPF / DKIM / DMARC.',
+    ]);
+
+    $formwriter->submitbutton('btn_submit', 'Run test');
+    echo $formwriter->end_form();
+
     $page->admin_footer();
     exit;
 }
 
-// If we get here, $run_test is true - process the form submission
-echo '<div class="row"><div class="col-12">';
-echo '<h4>Running Email Authentication Test...</h4>';
+// ---- result of a send ----
+if (!$result['ok']) {
+    echo '<div class="alert alert-danger"><strong>Send failed.</strong><br><pre class="mb-0" style="white-space:pre-wrap">'
+        . htmlspecialchars((string)$result['error']) . '</pre></div>';
 
-try {
-    // Step 1: Send test email
-    echo '<div class="alert alert-info"><strong>Step 1:</strong> Sending test email...</div>';
-    
-    $test_timestamp = date('Y-m-d H:i:s');
-    $test_id = uniqid('test_', true);
-    
-    // Create email content
-    $email_html = '
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background-color: #2c5aa0; color: white; padding: 20px; text-align: center;">
-            <h1>Email Authentication Test</h1>
-            <p>Test ID: ' . $test_id . '</p>
-        </div>
-        <div style="padding: 20px; background-color: #f8f9fa;">
-            <h2>Test Results</h2>
-            <p><strong>Timestamp:</strong> ' . $test_timestamp . '</p>
-            <p><strong>From:</strong> ' . $settings->get_setting('defaultemail') . '</p>
-            <p><strong>To:</strong> ' . htmlspecialchars($config['test_email']) . '</p>
-            <p><strong>Subject:</strong> ' . htmlspecialchars($config['email_subject']) . '</p>
-            
-            <div style="margin: 20px 0; padding: 15px; background-color: white; border-left: 4px solid #007bff;">
-                <h3>What to expect:</h3>
-                <ul>
-                    <li>This email tests your server\'s email authentication setup</li>
-                    <li>The system will analyze SPF, DKIM, and DMARC headers</li>
-                    <li>Results will be displayed in the admin panel</li>
-                </ul>
-            </div>
-        </div>
-        <div style="background-color: #6c757d; color: white; padding: 10px; text-align: center; font-size: 12px;">
-            Generated by Email Authentication Test Tool
-        </div>
-    </div>';
+    // Targeted hint for the most common cause — provider auth failure.
+    $e = strtolower((string)$result['error']);
+    if (strpos($e, 'credential') !== false || strpos($e, 'incorrect') !== false
+        || strpos($e, 'forbidden') !== false || strpos($e, 'unauthor') !== false || strpos($e, '401') !== false) {
+        $mgd = $settings->get_setting('mailgun_domain');
+        echo '<div class="alert alert-warning">This is an <strong>authentication failure from the provider</strong>, not a problem with this page. '
+            . 'For Mailgun, update <code>mailgun_api_key</code> to a key valid for '
+            . '<code>' . htmlspecialchars($mgd ?: '(unset)') . '</code> (and confirm that domain is <em>Verified</em> in the Mailgun account) on the '
+            . '<a href="/admin/admin_settings_email">Email settings</a> page, then re-run this test.</div>';
+    }
 
-    // Try to use new EmailSender system
-    try {
-        $success = EmailSender::quickSend(
-            $config['test_email'],
-            'Email Service Test - ' . date('Y-m-d H:i:s'),
-            '<p>This is a test email sent at ' . date('Y-m-d H:i:s') . '</p>'
-        );
-        
-        if ($success) {
-            echo '<div class="alert alert-success"><strong>✅ EmailSender send succeeded</strong></div>';
-        } else {
-            echo '<div class="alert alert-warning"><strong>❌ EmailSender send failed (queued for retry)</strong></div>';
-        }
-    } catch (Exception $e) {
-        echo '<div class="alert alert-danger"><strong>❌ EmailSender error:</strong> ' . $e->getMessage() . '</div>';
-    }
-    
-    // Step 2: Wait before checking
-    echo '<div class="alert alert-info"><strong>Step 2:</strong> Waiting ' . $config['wait_time'] . ' seconds for email delivery...</div>';
-    echo '<script>
-        let countdown = ' . $config['wait_time'] . ';
-        const timer = setInterval(function() {
-            document.getElementById("countdown").textContent = countdown;
-            countdown--;
-            if (countdown < 0) {
-                clearInterval(timer);
-                document.getElementById("countdown-container").innerHTML = "<strong>✓ Wait complete!</strong>";
-            }
-        }, 1000);
-    </script>';
-    echo '<div id="countdown-container" class="alert alert-primary">Waiting <span id="countdown">' . $config['wait_time'] . '</span> seconds...</div>';
-    
-    // Force output to browser immediately
-    if (ob_get_level()) {
-        ob_flush();
-    }
-    flush();
-    
-    // Actually wait
-    sleep($config['wait_time']);
-    
-    // Step 3: Connect to IMAP and retrieve email
-    echo '<div class="alert alert-info"><strong>Step 3:</strong> Connecting to Gmail IMAP...</div>';
-    
-    if (!function_exists('imap_open')) {
-        throw new Exception('IMAP extension is not installed. Please install php-imap extension.');
-    }
-    
-    // Connect to Gmail IMAP
-    $imap = imap_open($config['imap_host'], $config['imap_username'], $config['imap_password']);
-    
-    if (!$imap) {
-        throw new Exception('Failed to connect to Gmail IMAP: ' . imap_last_error());
-    }
-    
-    echo '<div class="alert alert-success"><strong>✓ Connected to Gmail IMAP successfully!</strong></div>';
-    
-    // Search for our test email
-    $search_criteria = 'SUBJECT "' . $config['email_subject'] . '"';
-    $emails = imap_search($imap, $search_criteria);
-    
-    if (!$emails) {
-        echo '<div class="alert alert-warning"><strong>⚠ Test email not found</strong> in inbox. It may be in spam, or delivery may be delayed.</div>';
-        echo '<div class="alert alert-info">Try checking your spam folder, or run the test again in a few minutes.</div>';
-    } else {
-        echo '<div class="alert alert-success"><strong>✓ Found test email!</strong> Analyzing headers...</div>';
-        
-        // Get the most recent matching email
-        $latest_email = end($emails);
-        $header = imap_fetchheader($imap, $latest_email);
-        
-        // Parse authentication headers
-        $results = parseEmailAuthHeaders($header);
-        
-        // Display results
-        displayAuthResults($results, $header, $settings);
-    }
-    
-    imap_close($imap);
-    
-} catch (Exception $e) {
-    echo '<div class="alert alert-danger"><strong>Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</div>';
-    echo '<div class="alert alert-info">
-        <strong>Troubleshooting tips:</strong>
-        <ul>
-            <li>Verify your Gmail App Password is correct (16 characters, no spaces)</li>
-            <li>Ensure IMAP is enabled in your Gmail settings</li>
-            <li>Check that 2-factor authentication is enabled on your Google account</li>
-            <li>Try generating a new App Password if the current one doesn\'t work</li>
-        </ul>
-    </div>';
+    echo '<p class="mt-2"><a class="btn btn-sm btn-outline-secondary" href="/utils/email_send_test">Back</a> '
+        . '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_debug_email_logs">Email debug logs</a></p>';
+    $page->admin_footer();
+    exit;
 }
 
-echo '</div></div>';
-$page->admin_footer();
+echo '<div class="alert alert-success"><strong>✓ Sent</strong> to <code>' . htmlspecialchars($result['to']) . '</code> via the <code>'
+    . htmlspecialchars($svc) . '</code> service.</div>';
 
-// Helper functions
-function parseEmailAuthHeaders($header) {
-    $results = [
-        'spf' => ['status' => 'not found', 'result' => '', 'details' => '', 'domain' => ''],
-        'dkim' => ['status' => 'not found', 'result' => '', 'details' => '', 'domain' => '', 'selector' => ''],
-        'dmarc' => ['status' => 'not found', 'result' => '', 'details' => '', 'domain' => '']
-    ];
-    
-    // Parse Authentication-Results header for SPF
-    if (preg_match('/Authentication-Results:.*?spf=([^;\\s]+)([^\\r\\n]*)/i', $header, $matches)) {
-        $results['spf']['status'] = 'found';
-        $results['spf']['result'] = trim($matches[1]);
-        $results['spf']['details'] = trim($matches[2]);
-        
-        // Extract SPF domain
-        if (preg_match('/smtp\\.mailfrom=([^\\s;]+)/i', $matches[2], $domain_matches)) {
-            $results['spf']['domain'] = trim($domain_matches[1]);
-        }
-    }
-    
-    // Parse Authentication-Results header for DKIM with more detail
-    if (preg_match('/Authentication-Results:.*?dkim=([^;\\s]+)([^\\r\\n]*)/i', $header, $matches)) {
-        $results['dkim']['status'] = 'found';
-        $results['dkim']['result'] = trim($matches[1]);
-        $results['dkim']['details'] = trim($matches[2]);
-        
-        // Extract DKIM domain (header.d)
-        if (preg_match('/header\\.d=([^\\s;]+)/i', $matches[2], $domain_matches)) {
-            $results['dkim']['domain'] = trim($domain_matches[1]);
-        }
-        
-        // Extract DKIM selector (header.s)
-        if (preg_match('/header\\.s=([^\\s;]+)/i', $matches[2], $selector_matches)) {
-            $results['dkim']['selector'] = trim($selector_matches[1]);
-        }
-    }
-    
-    // Parse Authentication-Results header for DMARC
-    if (preg_match('/Authentication-Results:.*?dmarc=([^;\\s]+)([^\\r\\n]*)/i', $header, $matches)) {
-        $results['dmarc']['status'] = 'found';
-        $results['dmarc']['result'] = trim($matches[1]);
-        $results['dmarc']['details'] = trim($matches[2]);
-        
-        // Extract DMARC domain
-        if (preg_match('/header\\.from=([^\\s;]+)/i', $matches[2], $domain_matches)) {
-            $results['dmarc']['domain'] = trim($domain_matches[1]);
-        }
-    }
-    
-    return $results;
-}
-
-function displayAuthResults($results, $header, $settings) {
-    // Extract domain from default email settings
-    $defaultEmail = $settings->get_setting('defaultemail');
-    $domain = '';
-    if ($defaultEmail && strpos($defaultEmail, '@') !== false) {
-        $domain = substr($defaultEmail, strpos($defaultEmail, '@') + 1);
-    }
-    if (empty($domain)) {
-        $domain = 'yourdomain.com'; // fallback
-    }
-    echo '<div class="card mt-4">';
-    echo '<div class="card-header bg-primary text-white">';
-    echo '<h5 class="mb-0">📊 Authentication Results for <code>' . htmlspecialchars($domain) . '</code></h5>';
-    echo '<small class="text-light">Testing email authentication from ' . htmlspecialchars($defaultEmail) . '</small>';
-    echo '</div>';
-    echo '<div class="card-body">';
-    
-    // SPF Results
-    $spf = $results['spf'];
-    echo '<div class="row mb-4">';
-    echo '<div class="col-md-6">';
-    echo '<h6>SPF (Sender Policy Framework)</h6>';
-    
-    if ($spf['status'] === 'found') {
-        $badge_class = getSPFBadgeClass($spf['result']);
-        echo '<span class="badge ' . $badge_class . ' mb-2">' . strtoupper($spf['result']) . '</span><br>';
-        if ($spf['details']) {
-            echo '<small class="text-muted">' . htmlspecialchars($spf['details']) . '</small><br>';
-        }
-        echo '<div class="mt-2">' . getSPFExplanation($spf['result']) . '</div>';
-    } else {
-        echo '<span class="badge bg-danger mb-2">NOT FOUND</span><br>';
-        echo '<div class="alert alert-warning mt-2 p-2">';
-        echo '<strong>⚠️ Missing SPF Record for ' . htmlspecialchars($domain) . '</strong><br>';
-        echo 'Gmail could not verify that your server is authorized to send email for <strong>' . htmlspecialchars($domain) . '</strong>.';
-        echo '</div>';
-    }
-    
-    echo '</div>';
-    echo '<div class="col-md-6">';
-    echo '<div class="bg-light p-3 rounded">';
-    echo '<h6 class="text-primary">What SPF Should Show:</h6>';
-    echo '<ul class="mb-2" style="font-size: 0.9em;">';
-    echo '<li><strong>PASS:</strong> Server is authorized to send</li>';
-    echo '<li><strong>FAIL:</strong> Server is NOT authorized</li>';
-    echo '<li><strong>SOFTFAIL:</strong> Server probably not authorized</li>';
-    echo '<li><strong>NEUTRAL:</strong> No policy or inconclusive</li>';
-    echo '</ul>';
-    echo '<strong>Expected:</strong> <code>spf=pass</code><br>';
-    echo '<strong>Fix:</strong> Add SPF record to <strong>' . htmlspecialchars($domain) . '</strong> DNS:<br>';
-    echo '<code style="font-size: 0.8em;">v=spf1 ip4:YOUR_SERVER_IP ~all</code>';
-    echo '</div>';
-    echo '</div>';
-    echo '</div>';
-    
-    // DKIM Results
-    $dkim = $results['dkim'];
-    echo '<div class="row mb-4">';
-    echo '<div class="col-md-6">';
-    echo '<h6>DKIM (DomainKeys Identified Mail)</h6>';
-    
-    if ($dkim['status'] === 'found') {
-        $badge_class = getDKIMBadgeClass($dkim['result']);
-        echo '<span class="badge ' . $badge_class . ' mb-2">' . strtoupper($dkim['result']) . '</span><br>';
-        
-        // Show DKIM domain and alignment
-        if ($dkim['domain']) {
-            $is_aligned = (strtolower($dkim['domain']) === strtolower($domain));
-            echo '<div class="mt-2 mb-2">';
-            echo '<strong>DKIM Signing Domain:</strong> <code>' . htmlspecialchars($dkim['domain']) . '</code> ';
-            if ($is_aligned) {
-                echo '<span class="badge bg-success">ALIGNED</span>';
-            } else {
-                echo '<span class="badge bg-warning">NOT ALIGNED</span>';
-                echo '<br><small class="text-warning">⚠️ DKIM signed by <strong>' . htmlspecialchars($dkim['domain']) . '</strong> but email claims to be from <strong>' . htmlspecialchars($domain) . '</strong></small>';
-            }
-            echo '</div>';
-            
-            if ($dkim['selector']) {
-                echo '<small class="text-muted">Selector: ' . htmlspecialchars($dkim['selector']) . '</small><br>';
-            }
-        }
-        
-        if ($dkim['details']) {
-            echo '<small class="text-muted">' . htmlspecialchars($dkim['details']) . '</small><br>';
-        }
-        
-        // Enhanced explanation based on alignment
-        if ($dkim['domain'] && strtolower($dkim['domain']) !== strtolower($domain)) {
-            echo '<div class="alert alert-warning mt-2 p-2">';
-            echo '<strong>🔍 Domain Alignment Issue Detected</strong><br>';
-            echo 'DKIM signature is valid, but it\'s from <strong>' . htmlspecialchars($dkim['domain']) . '</strong>, not your domain <strong>' . htmlspecialchars($domain) . '</strong>. ';
-            echo 'This means you\'re sending through a third-party service (like Gmail) without proper domain authentication setup.';
-            echo '</div>';
-        } else {
-            echo '<div class="mt-2">' . getDKIMExplanation($dkim['result']) . '</div>';
-        }
-    } else {
-        echo '<span class="badge bg-danger mb-2">NOT FOUND</span><br>';
-        echo '<div class="alert alert-warning mt-2 p-2">';
-        echo '<strong>⚠️ Missing DKIM Signature</strong><br>';
-        echo 'Your email from <strong>' . htmlspecialchars($domain) . '</strong> was not digitally signed, reducing trust and deliverability.';
-        echo '</div>';
-    }
-    
-    echo '</div>';
-    echo '<div class="col-md-6">';
-    echo '<div class="bg-light p-3 rounded">';
-    echo '<h6 class="text-primary">What DKIM Should Show:</h6>';
-    echo '<ul class="mb-2" style="font-size: 0.9em;">';
-    echo '<li><strong>PASS:</strong> Signature valid, email unmodified</li>';
-    echo '<li><strong>FAIL:</strong> Signature invalid or email modified</li>';
-    echo '<li><strong>NEUTRAL:</strong> No signature found</li>';
-    echo '<li><strong>TEMPERROR:</strong> Temporary DNS issue</li>';
-    echo '<li><strong>PERMERROR:</strong> Permanent DNS/config issue</li>';
-    echo '</ul>';
-    echo '<strong>Expected:</strong> <code>dkim=pass</code><br>';
-    echo '<strong>Fix:</strong> Configure DKIM signing on your mail server and publish public key in <strong>' . htmlspecialchars($domain) . '</strong> DNS';
-    echo '</div>';
-    echo '</div>';
-    echo '</div>';
-    
-    // DMARC Results
-    $dmarc = $results['dmarc'];
-    echo '<div class="row mb-4">';
-    echo '<div class="col-md-6">';
-    echo '<h6>DMARC (Domain-based Message Authentication)</h6>';
-    
-    if ($dmarc['status'] === 'found') {
-        $badge_class = getDMARCBadgeClass($dmarc['result']);
-        echo '<span class="badge ' . $badge_class . ' mb-2">' . strtoupper($dmarc['result']) . '</span><br>';
-        if ($dmarc['details']) {
-            echo '<small class="text-muted">' . htmlspecialchars($dmarc['details']) . '</small><br>';
-        }
-        echo '<div class="mt-2">' . getDMARCExplanation($dmarc['result']) . '</div>';
-    } else {
-        echo '<span class="badge bg-danger mb-2">NOT FOUND</span><br>';
-        echo '<div class="alert alert-warning mt-2 p-2">';
-        echo '<strong>⚠️ Missing DMARC Policy</strong><br>';
-        echo 'No DMARC policy found for <strong>' . htmlspecialchars($domain) . '</strong>. Email receivers cannot determine how to handle authentication failures.';
-        echo '</div>';
-    }
-    
-    echo '</div>';
-    echo '<div class="col-md-6">';
-    echo '<div class="bg-light p-3 rounded">';
-    echo '<h6 class="text-primary">What DMARC Should Show:</h6>';
-    echo '<ul class="mb-2" style="font-size: 0.9em;">';
-    echo '<li><strong>PASS:</strong> SPF or DKIM passed with alignment</li>';
-    echo '<li><strong>FAIL:</strong> Both SPF and DKIM failed alignment</li>';
-    echo '<li><strong>TEMPERROR:</strong> Temporary DNS issue</li>';
-    echo '<li><strong>PERMERROR:</strong> Invalid DMARC record</li>';
-    echo '</ul>';
-    echo '<strong>Expected:</strong> <code>dmarc=pass</code><br>';
-    echo '<strong>Fix:</strong> Add DMARC record to <code>_dmarc.' . htmlspecialchars($domain) . '</code>:<br>';
-    echo '<code style="font-size: 0.8em;">v=DMARC1; p=none; rua=mailto:dmarc@' . htmlspecialchars($domain) . '</code>';
-    echo '</div>';
-    echo '</div>';
-    echo '</div>';
-    
-    // Domain Alignment Analysis
-    $alignment_issues = [];
-    if ($dkim['status'] === 'found' && $dkim['domain'] && strtolower($dkim['domain']) !== strtolower($domain)) {
-        $alignment_issues[] = 'DKIM signed by ' . $dkim['domain'] . ' instead of ' . $domain;
-    }
-    if ($spf['status'] === 'found' && $spf['domain'] && strtolower($spf['domain']) !== strtolower($domain)) {
-        $alignment_issues[] = 'SPF checked for ' . $spf['domain'] . ' instead of ' . $domain;
-    }
-    
-    if (!empty($alignment_issues)) {
-        echo '<div class="alert alert-danger">';
-        echo '<h6 class="alert-heading">🚨 Critical Domain Alignment Issues Detected</h6>';
-        echo '<p><strong>Your email authentication reveals a security problem:</strong></p>';
-        echo '<ul>';
-        foreach ($alignment_issues as $issue) {
-            echo '<li>' . htmlspecialchars($issue) . '</li>';
-        }
-        echo '</ul>';
-        echo '<p class="mb-0"><strong>What this means:</strong> You\'re sending emails claiming to be from <strong>' . htmlspecialchars($domain) . '</strong> but using a third-party service (like Gmail) for actual delivery. Recipients can detect this mismatch, which may cause your emails to be marked as suspicious or spam.</p>';
-        echo '</div>';
-    }
-    
-    // Overall Summary
-    echo '<div class="alert alert-info">';
-    echo '<h6 class="alert-heading">📋 Summary & Next Steps for ' . htmlspecialchars($domain) . '</h6>';
-    $passed = 0;
-    $aligned_passed = 0;
-    $total = 3;
-    
-    if ($spf['status'] === 'found' && strtolower($spf['result']) === 'pass') {
-        $passed++;
-        if (!$spf['domain'] || strtolower($spf['domain']) === strtolower($domain)) {
-            $aligned_passed++;
-        }
-    }
-    if ($dkim['status'] === 'found' && strtolower($dkim['result']) === 'pass') {
-        $passed++;
-        if (!$dkim['domain'] || strtolower($dkim['domain']) === strtolower($domain)) {
-            $aligned_passed++;
-        }
-    }
-    if ($dmarc['status'] === 'found' && strtolower($dmarc['result']) === 'pass') {
-        $passed++;
-        $aligned_passed++; // DMARC passing means alignment is OK
-    }
-    
-    echo '<p><strong>Authentication Score:</strong> ' . $passed . '/' . $total . ' protocols passing for <strong>' . htmlspecialchars($domain) . '</strong></p>';
-    echo '<p><strong>Domain Alignment Score:</strong> ' . $aligned_passed . '/' . $passed . ' passing protocols properly aligned</p>';
-    
-    if ($passed === 3) {
-        echo '<p class="text-success mb-0"><strong>✅ Excellent!</strong> All email authentication protocols for <strong>' . htmlspecialchars($domain) . '</strong> are working correctly.</p>';
-    } elseif ($passed >= 1) {
-        echo '<p class="text-warning mb-2"><strong>⚠️ Partially Protected:</strong> <strong>' . htmlspecialchars($domain) . '</strong> has some authentication working, but improvements needed.</p>';
-        echo '<p class="mb-0"><strong>Priority for ' . htmlspecialchars($domain) . ':</strong> ';
-        if ($spf['status'] !== 'found' || strtolower($spf['result']) !== 'pass') echo 'Fix SPF DNS record first (easiest), ';
-        if ($dmarc['status'] !== 'found' || strtolower($dmarc['result']) !== 'pass') echo 'then add DMARC DNS policy, ';
-        if ($dkim['status'] !== 'found' || strtolower($dkim['result']) !== 'pass') echo 'finally configure DKIM signing on mail server';
-        echo '</p>';
-    } else {
-        echo '<p class="text-danger mb-0"><strong>❌ Vulnerable:</strong> No email authentication found for <strong>' . htmlspecialchars($domain) . '</strong>. Emails from this domain may be rejected or marked as spam.</p>';
-    }
-    
-    // Add specific DNS guidance
-    echo '<hr>';
-    echo '<h6 class="text-primary">🔧 Specific DNS Records Needed for ' . htmlspecialchars($domain) . ':</h6>';
-    echo '<div class="row">';
-    
-    if ($spf['status'] !== 'found' || strtolower($spf['result']) !== 'pass') {
-        echo '<div class="col-md-4 mb-2">';
-        echo '<strong>SPF Record:</strong><br>';
-        echo '<code style="font-size: 0.8em;">v=spf1 ip4:YOUR_SERVER_IP ~all</code><br>';
-        echo '<small class="text-muted">Add as TXT record for ' . htmlspecialchars($domain) . '</small>';
-        echo '</div>';
-    }
-    
-    if ($dmarc['status'] !== 'found' || strtolower($dmarc['result']) !== 'pass') {
-        echo '<div class="col-md-4 mb-2">';
-        echo '<strong>DMARC Record:</strong><br>';
-        echo '<code style="font-size: 0.8em;">v=DMARC1; p=none; rua=mailto:dmarc@' . htmlspecialchars($domain) . '</code><br>';
-        echo '<small class="text-muted">Add as TXT record for _dmarc.' . htmlspecialchars($domain) . '</small>';
-        echo '</div>';
-    }
-    
-    if ($dkim['status'] !== 'found' || strtolower($dkim['result']) !== 'pass') {
-        echo '<div class="col-md-4 mb-2">';
-        echo '<strong>DKIM Setup:</strong><br>';
-        echo '<small>1. Configure mail server to sign emails<br>';
-        echo '2. Publish public key as TXT record:<br>';
-        echo '<code style="font-size: 0.75em;">selector._domainkey.' . htmlspecialchars($domain) . '</code></small>';
-        echo '</div>';
-    }
-    
-    echo '</div>';
-    echo '</div>';
-    
+if ($result['mode'] === 'external') {
+    echo '<div class="card"><div class="card-body">';
+    echo '<p>Now open that message in the recipient\'s mailbox and use <strong>"Show original"</strong> (Gmail) or '
+        . '<strong>"View source / message headers"</strong> (others). You want to see, in the <code>Authentication-Results</code> line:</p>';
+    echo '<ul><li><code>spf=pass</code></li><li><code>dkim=pass</code> (signed by your sending domain)</li><li><code>dmarc=pass</code></li></ul>';
+    echo '<p class="mb-0 text-muted">If it never arrives, check the Mailbox <a href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a> and your spam folder.</p>';
     echo '</div></div>';
-    
-    // Show raw headers for debugging
-    echo '<div class="card mt-3">';
-    echo '<div class="card-header">';
-    echo '<h6 class="mb-0">🔍 Raw Authentication Headers</h6>';
-    echo '<small class="text-muted">Look for "Authentication-Results" lines in the headers below</small>';
-    echo '</div>';
-    echo '<div class="card-body">';
-    
-    // Extract and highlight authentication-related headers
-    $auth_headers = extractAuthHeaders($header);
-    if ($auth_headers) {
-        echo '<div class="alert alert-secondary p-2 mb-3">';
-        echo '<strong>Found Authentication Headers:</strong><br>';
-        echo '<pre style="font-size: 0.9em; margin: 0;">' . htmlspecialchars($auth_headers) . '</pre>';
-        echo '</div>';
-    }
-    
-    echo '<details>';
-    echo '<summary class="btn btn-sm btn-outline-secondary">Show All Headers</summary>';
-    echo '<pre style="font-size: 11px; max-height: 300px; overflow-y: auto; margin-top: 10px;">' . htmlspecialchars($header) . '</pre>';
-    echo '</details>';
-    echo '</div></div>';
+    echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Run another</a>';
+    $page->admin_footer();
+    exit;
 }
 
-function getSPFBadgeClass($result) {
-    switch (strtolower($result)) {
-        case 'pass': return 'bg-success';
-        case 'fail': return 'bg-danger';
-        case 'softfail': case 'neutral': return 'bg-warning';
-        default: return 'bg-secondary';
-    }
-}
+// ---- loopback: poll the inbound store for arrival ----
+echo '<div id="est-wait" class="alert alert-primary d-flex align-items-center">'
+    . '<div class="spinner-border spinner-border-sm me-3" role="status"><span class="visually-hidden">Waiting…</span></div>'
+    . '<div>Waiting for the message to come back through inbound delivery (Mailgun → DNS → Postfix → store). This usually takes a few seconds to a minute…</div></div>';
+echo '<div id="est-result"></div>';
+echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Run another</a>';
+?>
+<script>
+(function () {
+    var token = <?php echo json_encode($result['token']); ?>;
+    var wait = document.getElementById('est-wait');
+    var out  = document.getElementById('est-result');
+    var tries = 0, max = 24; // ~24 x 4s ≈ 96s
 
-function getDKIMBadgeClass($result) {
-    switch (strtolower($result)) {
-        case 'pass': return 'bg-success';
-        case 'fail': return 'bg-danger';
-        case 'neutral': case 'temperror': return 'bg-warning';
-        case 'permerror': return 'bg-danger';
-        default: return 'bg-secondary';
+    function badge(val, ok) {
+        var cls = ok ? 'bg-success' : (val ? 'bg-warning text-dark' : 'bg-secondary');
+        return '<span class="badge ' + cls + '">' + (val ? String(val).toUpperCase() : '—') + '</span>';
     }
-}
+    function esc(s){ var d=document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }
 
-function getDMARCBadgeClass($result) {
-    switch (strtolower($result)) {
-        case 'pass': return 'bg-success';
-        case 'fail': return 'bg-danger';
-        case 'temperror': return 'bg-warning';
-        case 'permerror': return 'bg-danger';
-        default: return 'bg-secondary';
+    function render(d) {
+        wait.style.display = 'none';
+        var a = d.auth || {};
+        var html = '<div class="card"><div class="card-header bg-success text-white">✓ Round-trip complete — message received and stored</div><div class="card-body">';
+        html += '<p><strong>From:</strong> ' + esc(d.sender) + '<br><strong>Subject:</strong> ' + esc(d.subject) + '<br><strong>Received:</strong> ' + esc(d.received) + '</p>';
+        var dk = d.dkim || {};
+        var dkimCell = dk.signed
+            ? '<span class="badge bg-success">present</span> <span class="text-muted">signed by ' + esc(dk.domain || '?') + (dk.selector ? ' (s=' + esc(dk.selector) + ')' : '') + '</span>'
+            : '<span class="badge bg-secondary">no signature</span>';
+        html += '<table class="table table-sm" style="max-width:560px"><tbody>';
+        html += '<tr><td>DKIM-Signature</td><td>' + dkimCell + '</td></tr>';
+        html += '<tr><td>SPF verdict (from headers)</td><td>' + badge(a.spf, a.spf === 'pass') + '</td></tr>';
+        html += '<tr><td>DKIM verdict (from headers)</td><td>' + badge(a.dkim, a.dkim === 'pass') + '</td></tr>';
+        html += '<tr><td>DMARC verdict (from headers)</td><td>' + badge(a.dmarc, a.dmarc === 'pass') + '</td></tr>';
+        html += '</tbody></table>';
+        html += '<p class="text-muted small">This shows a DKIM signature is present and which domain signed it. '
+              + 'A trustworthy <em>pass/fail verdict</em> isn\'t available on this self-hosted inbound path (no verifying milter, so the header rows read "—"). '
+              + 'For the authoritative SPF/DKIM/DMARC result, use <strong>External</strong> mode and check the message\'s "Show original".</p>';
+        html += '<a class="btn btn-sm btn-outline-primary" href="' + d.reader_url + '">Open the stored message</a>';
+        html += '</div></div>';
+        out.innerHTML = html;
     }
-}
 
-function getSPFExplanation($result) {
-    switch (strtolower($result)) {
-        case 'pass':
-            return '<div class="alert alert-success p-2">✅ Your server is authorized to send email for this domain.</div>';
-        case 'fail':
-            return '<div class="alert alert-danger p-2">❌ Your server is NOT authorized. Recipients may reject your emails.</div>';
-        case 'softfail':
-            return '<div class="alert alert-warning p-2">⚠️ Your server is probably not authorized. Emails may be marked suspicious.</div>';
-        case 'neutral':
-            return '<div class="alert alert-info p-2">ℹ️ SPF record exists but doesn\'t specify a policy for your server.</div>';
-        default:
-            return '<div class="alert alert-secondary p-2">Unknown SPF result: ' . htmlspecialchars($result) . '</div>';
-    }
-}
-
-function getDKIMExplanation($result) {
-    switch (strtolower($result)) {
-        case 'pass':
-            return '<div class="alert alert-success p-2">✅ Email signature is valid and email content is unmodified.</div>';
-        case 'fail':
-            return '<div class="alert alert-danger p-2">❌ Email signature is invalid or email content was modified in transit.</div>';
-        case 'neutral':
-            return '<div class="alert alert-info p-2">ℹ️ No DKIM signature found on this email.</div>';
-        case 'temperror':
-            return '<div class="alert alert-warning p-2">⚠️ Temporary DNS error prevented DKIM verification.</div>';
-        case 'permerror':
-            return '<div class="alert alert-danger p-2">❌ Permanent DKIM configuration error detected.</div>';
-        default:
-            return '<div class="alert alert-secondary p-2">Unknown DKIM result: ' . htmlspecialchars($result) . '</div>';
-    }
-}
-
-function getDMARCExplanation($result) {
-    switch (strtolower($result)) {
-        case 'pass':
-            return '<div class="alert alert-success p-2">✅ Email passed DMARC alignment checks (SPF or DKIM aligned with From domain).</div>';
-        case 'fail':
-            return '<div class="alert alert-danger p-2">❌ Email failed DMARC alignment. Action depends on domain policy (none/quarantine/reject).</div>';
-        case 'temperror':
-            return '<div class="alert alert-warning p-2">⚠️ Temporary DNS error prevented DMARC policy lookup.</div>';
-        case 'permerror':
-            return '<div class="alert alert-danger p-2">❌ DMARC record is malformed or invalid.</div>';
-        default:
-            return '<div class="alert alert-secondary p-2">Unknown DMARC result: ' . htmlspecialchars($result) . '</div>';
-    }
-}
-
-function extractAuthHeaders($header) {
-    $lines = explode("\n", $header);
-    $auth_lines = [];
-    
-    foreach ($lines as $line) {
-        if (stripos($line, 'Authentication-Results:') !== false) {
-            $auth_lines[] = trim($line);
-            // Get continuation lines
-            $i = array_search($line, $lines);
-            for ($j = $i + 1; $j < count($lines); $j++) {
-                if (preg_match('/^\s+/', $lines[$j]) && !empty(trim($lines[$j]))) {
-                    $auth_lines[] = trim($lines[$j]);
-                } else {
-                    break;
+    function poll() {
+        fetch('/utils/email_send_test?check=' + encodeURIComponent(token), { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d && d.found) { render(d); return; }
+                if (++tries >= max) {
+                    wait.className = 'alert alert-warning';
+                    wait.innerHTML = 'Not received within ~90 seconds. The send succeeded, so this points at the inbound path — check the inbound '
+                        + '<a href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a> and the '
+                        + '<a href="/plugins/inbound_email/admin/admin_inbound_email_reader">Mailbox reader</a>. '
+                        + '<button class="btn btn-sm btn-outline-secondary ms-2" onclick="location.reload()">Retry wait</button>';
+                    return;
                 }
-            }
-        }
+                setTimeout(poll, 4000);
+            })
+            .catch(function (e) { wait.className = 'alert alert-danger'; wait.textContent = 'Poll error: ' + e; });
     }
-    
-    return empty($auth_lines) ? null : implode("\n", $auth_lines);
-}
+    poll();
+})();
+</script>
+<?php
+$page->admin_footer();
+?>
