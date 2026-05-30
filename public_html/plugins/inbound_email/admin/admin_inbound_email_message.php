@@ -7,11 +7,12 @@
  * attacker-controlled. A "view raw" toggle shows the original MIME, and
  * an .eml download is available.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/logic/admin_inbound_email_message_logic.php'));
 
 $page_vars = process_logic(admin_inbound_email_message_logic(array_merge($_GET, $_POST, $params ?? [])));
@@ -26,21 +27,14 @@ $page->admin_header(
 		'menu-id' => 'incoming',
 		'breadcrumbs' => array(
 			'Inbound Email' => '/plugins/inbound_email/admin/admin_inbound_email',
-			'Mailbox' => '/plugins/inbound_email/admin/admin_inbound_email_mailbox',
+			'Mailbox' => '/plugins/inbound_email/admin/admin_inbound_email_reader',
 			'Message #' . intval($message->key) => '',
 		),
 		'session' => $session,
 	)
 );
 
-// Tab navigation
-echo '<ul class="nav nav-tabs mb-3">';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_setup">Setup</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
-echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email_mailbox">Mailbox</a></li>';
-echo '</ul>';
+echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Mailbox');
 
 $received_local = LibraryFunctions::convert_time(
 	$message->get('iem_received_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A T'

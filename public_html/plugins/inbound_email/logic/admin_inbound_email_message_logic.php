@@ -5,7 +5,7 @@
  * Handles soft-delete and .eml download actions; loads the message for
  * display. Soft-deleted messages are not accessible.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -23,12 +23,12 @@ function admin_inbound_email_message_logic(array $input): LogicResult {
 
 	$id = intval($input['iem_inbound_email_message_id'] ?? 0);
 	if ($id <= 0) {
-		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_mailbox');
+		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_reader');
 	}
 
 	$message = new InboundEmailMessage($id, TRUE);
 	if (!$message->key || $message->get('iem_delete_time')) {
-		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_mailbox');
+		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_reader');
 	}
 
 	if (isset($input['action']) && $input['action'] === 'delete') {
@@ -40,7 +40,7 @@ function admin_inbound_email_message_logic(array $input): LogicResult {
 			DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
-		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_mailbox');
+		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_reader');
 	}
 
 	if (isset($input['action']) && $input['action'] === 'download_eml') {

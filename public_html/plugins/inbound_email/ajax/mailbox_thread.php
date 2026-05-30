@@ -1,0 +1,36 @@
+<?php
+/**
+ * Mailbox Reader AJAX — messages in a thread.
+ *
+ * GET. Params: thread_key (required), alias_id (optional). Returns every
+ * in-scope message in the thread, chronological, each WITH its plain/HTML body
+ * for client-side sandboxed rendering. Empty array if the thread is outside
+ * scope. Staff-only.
+ *
+ * @version 1.0
+ */
+require_once(__DIR__ . '/../../../includes/PathHelper.php');
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/MailboxService.php'));
+
+header('Content-Type: application/json');
+
+$session = SessionControl::get_instance();
+if ($session->get_permission() < 5) {
+	http_response_code(403);
+	echo json_encode(array('error' => 'forbidden'));
+	exit();
+}
+
+$viewer = MailboxViewer::fromSession($session);
+$service = new MailboxService($viewer);
+
+$thread_key = isset($_GET['thread_key']) ? (string)$_GET['thread_key'] : '';
+if ($thread_key === '') {
+	echo json_encode(array('messages' => array()));
+	exit();
+}
+
+$alias_id = (isset($_GET['alias_id']) && $_GET['alias_id'] !== '')
+	? intval($_GET['alias_id']) : null;
+
+echo json_encode(array('messages' => $service->getThread($alias_id, $thread_key)));

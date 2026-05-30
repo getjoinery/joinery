@@ -8,7 +8,7 @@ The email system consists of three focused classes that provide clear separation
 - **EmailTemplate**: Template processing (conditionals, variables)
 - **EmailSender**: All sending logic with service selection and fallback
 
-**Inbound email** is handled by the Inbound Email plugin — see [Inbound Email Plugin](/plugins/inbound_email/docs/overview.md) for setup, admin usage, and server configuration. Its guided **Setup** tab verifies MX, SPF, DKIM, and forward-confirmed reverse DNS (PTR) for each inbound domain, using `DnsResolver` (including `DnsResolver::getPtr()` for reverse lookups).
+**Inbound email** is handled by the Inbound Email plugin — see [Inbound Email Plugin](/plugins/inbound_email/docs/overview.md) for setup, admin usage, and server configuration. Its guided **Setup** tab verifies MX, SPF, DKIM, and forward-confirmed reverse DNS (PTR) for each inbound domain, using `DnsResolver` (including `DnsResolver::getPtr()` for reverse lookups). Locally-stored mail is read through a Gmail-style **Mailbox Reader** with a **grant-based mailbox model** — each address is its own mailbox, shareable among several staff users, with read/star state shared per mailbox; see [Mailbox Reader](/plugins/inbound_email/docs/overview.md#mailbox-reader).
 
 ## Architecture
 

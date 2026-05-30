@@ -10,7 +10,13 @@
  * The unique_with constraint on (iem_message_id_header, iem_recipient)
  * is the dedup mechanism — see InboundEmailRouter::storeMessage().
  *
- * @version 1.0
+ * Threading + state columns (iem_thread_key, iem_is_read, iem_is_starred,
+ * iem_read_time) power the Gmail-style Mailbox Reader. Because each inbound
+ * message becomes one row per (message, recipient) — one row per mailbox —
+ * read/star state is simply a property of the row, shared among everyone with
+ * access to that mailbox (team-inbox semantics). See MailboxService.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -38,6 +44,10 @@ class InboundEmailMessage extends SystemBase {
 		'iem_body_html'           => array('type'=>'text'),
 		'iem_raw_message'         => array('type'=>'text'),
 		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient')),
+		'iem_thread_key'          => array('type'=>'varchar(255)'), // indexed via migration iem_001 (no declarative non-unique index support)
+		'iem_is_read'             => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'iem_is_starred'          => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'iem_read_time'           => array('type'=>'timestamp(6)'),
 		'iem_dkim_result'         => array('type'=>'varchar(10)'),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		'iem_received_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -84,7 +94,55 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 			$filters['iem_iea_inbound_email_alias_id'] = [$this->options['alias_id'], PDO::PARAM_INT];
 		}
 
+		// IN-list of alias ids — the Mailbox Reader's scope (the set of mailboxes
+		// the viewer may see) is fed in here. An empty list matches nothing.
+		if (isset($this->options['alias_ids'])) {
+			$ids = array();
+			foreach ((array)$this->options['alias_ids'] as $id) {
+				$ids[] = intval($id);
+			}
+			$filters['iem_iea_inbound_email_alias_id'] = count($ids)
+				? 'IN (' . implode(',', $ids) . ')'
+				: 'IN (NULL)';
+		}
+
+		// IN-list of domain ids.
+		if (isset($this->options['domain_ids'])) {
+			$ids = array();
+			foreach ((array)$this->options['domain_ids'] as $id) {
+				$ids[] = intval($id);
+			}
+			$filters['iem_ied_inbound_email_domain_id'] = count($ids)
+				? 'IN (' . implode(',', $ids) . ')'
+				: 'IN (NULL)';
+		}
+
 		$dblink = DbConnector::get_instance()->get_db_link();
+
+		if (isset($this->options['thread_key'])) {
+			$filters['iem_thread_key'] = [$this->options['thread_key'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['subject']) && $this->options['subject'] !== '') {
+			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['subject']) . '%';
+			$filters['iem_subject'] = 'ILIKE ' . $dblink->quote($term);
+		}
+
+		// Body search spans both decoded bodies; OR-grouped so it does not widen
+		// any other clause. Uses the split-parenthesis option-key convention.
+		if (isset($this->options['body']) && $this->options['body'] !== '') {
+			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['body']) . '%';
+			$q = $dblink->quote($term);
+			$filters['(iem_body_plain'] = 'ILIKE ' . $q . ' OR iem_body_html ILIKE ' . $q . ')';
+		}
+
+		if (isset($this->options['is_read'])) {
+			$filters['iem_is_read'] = $this->options['is_read'] ? '= true' : '= false';
+		}
+
+		if (isset($this->options['is_starred'])) {
+			$filters['iem_is_starred'] = $this->options['is_starred'] ? '= true' : '= false';
+		}
 
 		if (isset($this->options['recipient']) && $this->options['recipient'] !== '') {
 			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['recipient']) . '%';

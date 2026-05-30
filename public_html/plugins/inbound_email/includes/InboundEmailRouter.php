@@ -6,7 +6,7 @@
  * and either forwards via SmtpMailer or stores locally (or both, depending
  * on the alias / catch-all delivery mode). Handles SRS bounce processing.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -228,6 +228,11 @@ class InboundEmailRouter {
 		$subject_raw = $parsed['subject'] ?? '';
 		$subject = $this->decodeMimeHeader($subject_raw);
 
+		// Conversation grouping for the Mailbox Reader. Computed in-memory from
+		// the already-parsed In-Reply-To / References headers — the raw headers
+		// themselves are not persisted (recoverable from iem_raw_message).
+		$thread_key = $this->computeThreadKey($parsed, $message_id_header);
+
 		$row = [
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
@@ -238,6 +243,7 @@ class InboundEmailRouter {
 			'iem_body_html'   => $bodies['html'],
 			'iem_raw_message' => $raw_email,
 			'iem_message_id_header' => $message_id_header,
+			'iem_thread_key'  => $thread_key,
 			'iem_dkim_result' => $dkim_result ?: 'none',
 			'iem_size_bytes'  => strlen($raw_email),
 			'iem_received_time' => gmdate('Y-m-d H:i:s'),
@@ -259,6 +265,55 @@ class InboundEmailRouter {
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * Compute the conversation root key for threading, from already-parsed
+	 * headers. Precedence:
+	 *   1. References present → the FIRST Message-ID token (the thread root).
+	 *   2. Else In-Reply-To present → that Message-ID.
+	 *   3. Else the message's own Message-ID (a singleton thread).
+	 *   4. No Message-ID at all → null (reader treats null as a singleton).
+	 *
+	 * Out-of-order arrivals still converge because References normally carries
+	 * the root id. Result is truncated to 255 to fit iem_thread_key.
+	 *
+	 * @param array       $parsed             Parsed email (with ['headers'])
+	 * @param string|null $message_id_header  This message's own Message-ID (already trimmed)
+	 * @return string|null
+	 */
+	public function computeThreadKey(array $parsed, ?string $message_id_header): ?string {
+		$headers = $parsed['headers'] ?? array();
+
+		$references = $headers['references'] ?? '';
+		if (is_array($references)) { $references = $references[0] ?? ''; }
+		$references = trim((string)$references);
+		if ($references !== '') {
+			if (preg_match('/<[^>]+>/', $references, $m)) {
+				return substr($m[0], 0, 255);
+			}
+			// References with no angle-bracketed token — fall back to first whitespace token.
+			$first = preg_split('/\s+/', $references)[0] ?? '';
+			if ($first !== '') {
+				return substr($first, 0, 255);
+			}
+		}
+
+		$in_reply_to = $headers['in-reply-to'] ?? '';
+		if (is_array($in_reply_to)) { $in_reply_to = $in_reply_to[0] ?? ''; }
+		$in_reply_to = trim((string)$in_reply_to);
+		if ($in_reply_to !== '') {
+			if (preg_match('/<[^>]+>/', $in_reply_to, $m)) {
+				return substr($m[0], 0, 255);
+			}
+			return substr($in_reply_to, 0, 255);
+		}
+
+		if ($message_id_header !== null && $message_id_header !== '') {
+			return substr($message_id_header, 0, 255);
+		}
+
+		return null;
 	}
 
 	/**

@@ -12,6 +12,7 @@
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailSetupCheck.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/logic/admin_inbound_email_setup_logic.php'));
 
@@ -30,14 +31,7 @@ $page->admin_header(
 	)
 );
 
-// Tab navigation
-echo '<ul class="nav nav-tabs mb-3">';
-echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email_setup">Setup</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_mailbox">Mailbox</a></li>';
-echo '</ul>';
+echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Setup');
 
 // The per-check "Details & how to fix" disclosure reads as a link, not a field.
 echo '<style>'

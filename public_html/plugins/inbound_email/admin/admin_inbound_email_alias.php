@@ -2,11 +2,12 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/logic/admin_inbound_email_alias_logic.php'));
 
 $page_vars = process_logic(admin_inbound_email_alias_logic(array_merge($_GET, $_POST, $params ?? [])));
@@ -26,14 +27,7 @@ $page->admin_header(
 	)
 );
 
-// Tab navigation
-echo '<ul class="nav nav-tabs mb-3">';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_setup">Setup</a></li>';
-echo '<li class="nav-item"><a class="nav-link active" href="/plugins/inbound_email/admin/admin_inbound_email">Forwarding Aliases</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_domains">Domains</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_logs">Logs</a></li>';
-echo '<li class="nav-item"><a class="nav-link" href="/plugins/inbound_email/admin/admin_inbound_email_mailbox">Mailbox</a></li>';
-echo '</ul>';
+echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Forwarding Aliases');
 
 if (isset($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
@@ -97,6 +91,20 @@ $formwriter->textinput('iea_description', 'Notes', [
 ]);
 
 $formwriter->checkboxinput('iea_is_enabled', 'Enabled', []);
+
+// Mailbox access grants. Read/star state on a shared mailbox is shared among
+// everyone listed here (team-inbox semantics). Empty = nobody is granted; a
+// permission-10 superadmin still sees every mailbox without a grant.
+if (!empty($user_options)) {
+	$formwriter->checkboxList('users_with_access', 'Users with access', [
+		'options' => $user_options,
+		'checked' => $granted_user_ids ?? [],
+		'helptext' => 'Staff who can read this mailbox in the Mailbox reader. Read and star '
+			. 'state is shared among everyone granted access. Superadmins always see every mailbox.',
+	]);
+} else {
+	echo '<div class="alert alert-info">No staff users are available to grant mailbox access to yet.</div>';
+}
 
 $formwriter->submitbutton('btn_submit', 'Save Alias');
 
