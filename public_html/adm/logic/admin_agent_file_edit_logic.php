@@ -19,7 +19,11 @@ function admin_agent_file_edit_logic(array $input): LogicResult {
 		$agent_file = new AgentFile(NULL);
 	}
 
-	if ($input) {
+	// Only run the save handler on an actual form POST — otherwise merely opening
+	// the editor with ?agf_agent_file_id=N (the list page's own Edit link) would
+	// fall through to save() with empty fields and throw "Required field agf_name
+	// must be set". See LibraryFunctions::isFormSubmission().
+	if (LibraryFunctions::isFormSubmission()) {
 		if (isset($input['btn_delete']) && $agent_file->key) {
 			$agent_file->soft_delete();
 			return LogicResult::redirect('/admin/admin_agent_files');

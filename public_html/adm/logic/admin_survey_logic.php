@@ -17,7 +17,7 @@ function admin_survey_logic(array $input): LogicResult {
     $session->set_return();
 
     // Handle POST actions
-    if ($input) {
+    if (LibraryFunctions::isFormSubmission()) {
         if (isset($input['action'])) {
             switch ($input['action']) {
                 case 'addquestion':
@@ -52,7 +52,8 @@ function admin_survey_logic(array $input): LogicResult {
         }
     }
 
-    // Handle GET actions
+    // Handle GET actions.
+    // Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
     if (isset($input['action'])) {
         $svy_survey_id = $input['svy_survey_id'] ?? 0;
         $survey = new Survey($svy_survey_id, TRUE);
@@ -63,7 +64,9 @@ function admin_survey_logic(array $input): LogicResult {
                     'current_user_id' => $session->get_user_id(),
                     'current_user_permission' => $session->get_permission()
                 ]);
-                $survey->soft_delete();
+                SystemBase::$allow_get_mutation = true;
+                try { $survey->soft_delete(); }
+                finally { SystemBase::$allow_get_mutation = false; }
                 return LogicResult::redirect('/admin/admin_surveys');
                 break;
 
@@ -72,7 +75,9 @@ function admin_survey_logic(array $input): LogicResult {
                     'current_user_id' => $session->get_user_id(),
                     'current_user_permission' => $session->get_permission()
                 ]);
-                $survey->undelete();
+                SystemBase::$allow_get_mutation = true;
+                try { $survey->undelete(); }
+                finally { SystemBase::$allow_get_mutation = false; }
                 return LogicResult::redirect('/admin/admin_surveys');
                 break;
         }

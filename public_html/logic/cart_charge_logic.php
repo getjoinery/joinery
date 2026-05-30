@@ -61,6 +61,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
+	// cart_charge is the payment-gateway return handler — Stripe/PayPal redirect the
+	// buyer back here via GET — as well as the checkout POST target. Both legitimately
+	// persist the order, so opt in to the GET-is-read-only tripwire for the handler.
+	SystemBase::$allow_get_mutation = true;
   try {
 
 	if(!$settings->get_setting('products_active')){
@@ -911,6 +915,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	error_log("Checkout error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
 	$support_email = $settings->get_setting('defaultemail');
 	return _checkout_error("Something went wrong processing your order. Please try again" . ($support_email ? " or contact us at $support_email" : "") . ".");
+  } finally {
+	SystemBase::$allow_get_mutation = false;
   }
 }
 

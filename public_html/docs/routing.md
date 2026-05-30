@@ -180,6 +180,22 @@ Redirects to login if not authenticated, shows 403 if insufficient permission.
   - Right: `<a href="/admin/admin_users?id=1">`
 - Query parameters (`?key=value`) pass through routing unchanged and are available in `$_GET`.
 
+## The `__route` parameter
+
+The Apache rewrite sends every request through the front controller as
+`serve.php?__route=<path>`, so `$_GET['__route']` is set on every request. It is
+**routing metadata, not page input** — the route value is passed to dispatch as
+`$request_path`. `RouteHelper::processRoutes()` therefore **unsets**
+`__route` from `$_GET` / `$_POST` / `$_REQUEST` at dispatch entry, so page logic
+never sees it.
+
+This matters because logic functions receive `array_merge($_GET, $_POST)`: if
+`__route` leaked through, `$input` would be non-empty on every request and
+`if($input)`-style submission guards would misfire (the bug fixed in
+`specs/implemented/admin_logic_get_submission_guard_fix.md`). Don't reintroduce a
+read of `$_GET['__route']` in page code — use `$request_path` (or
+`$_SERVER['REQUEST_URI']`) instead.
+
 ## Static Page Cache
 
 Anonymous GET requests are served from a static HTML cache stored in `cache/static_pages/`.

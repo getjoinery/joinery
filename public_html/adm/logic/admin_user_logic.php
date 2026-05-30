@@ -57,20 +57,25 @@ function admin_user_logic(array $input): LogicResult {
 	// Process actions
 	$action = $input['action'] ?? $input['action'] ?? null;
 
-	// Handle GET actions
+	// Handle GET actions.
+	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
 	if(isset($input['action']) && $input['action'] == 'delete'){
 		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$user->soft_delete();
+		SystemBase::$allow_get_mutation = true;
+		try { $user->soft_delete(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 		return LogicResult::redirect('/admin/admin_users');
 	}
 	else if(isset($input['action']) && $input['action'] == 'undelete'){
 		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$user->undelete();
+		SystemBase::$allow_get_mutation = true;
+		try { $user->undelete(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 		return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 	}
 
 	// Handle POST actions
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		if($input['action'] == 'add_to_group'){
 			//ADD THE USER TO A GROUP

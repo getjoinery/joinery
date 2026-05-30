@@ -17,6 +17,12 @@
 		$session->check_permission(10);
 	}
 
+	// Intentional GET-triggered maintenance (runs on admin page view): reconciles
+	// each order's subscriptions with Stripe. Opt in to the GET-is-read-only
+	// tripwire (SystemBase) for the duration; CLI runs are exempt anyway.
+	SystemBase::$allow_get_mutation = true;
+	try {
+
 	$stripe_helper = new StripeHelper();
 
 	$orders = new MultiOrder(array('user_id' => $user->key));
@@ -27,6 +33,10 @@
 		if($stripe_helper->is_initialized()){
 			$result = $stripe_helper->update_all_subscriptions_in_order($order);
 		}
+	}
+
+	} finally {
+		SystemBase::$allow_get_mutation = false;
 	}
 
 ?>

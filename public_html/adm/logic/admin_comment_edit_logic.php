@@ -17,7 +17,7 @@ function admin_comment_edit_logic(array $input): LogicResult {
 		$comment = new Comment(NULL);
 	}
 
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		$editable_fields = array('cmt_body', 'cmt_author_name', 'cmt_is_approved', 'cmt_pst_post_id');
 

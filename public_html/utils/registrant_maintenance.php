@@ -17,6 +17,12 @@
 		$session->check_permission(10);
 	}
 
+	// Intentional GET-triggered maintenance (runs on admin page view): writes an
+	// EventLog audit row and reconciles subscriptions. Opt in to the GET-is-read-only
+	// tripwire (SystemBase) for the duration; CLI runs are exempt anyway.
+	SystemBase::$allow_get_mutation = true;
+	try {
+
 	$stripe_helper = new StripeHelper();
 
 	$event_log = new EventLog(NULL);
@@ -60,5 +66,9 @@
 	$event_log->set('evl_was_success', 1);
 	$event_log->set('evl_note', '');
 	$event_log->save();
+
+	} finally {
+		SystemBase::$allow_get_mutation = false;
+	}
 
 ?>

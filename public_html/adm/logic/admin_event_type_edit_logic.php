@@ -15,7 +15,7 @@ function admin_event_type_edit_logic(array $input): LogicResult {
 		$event_type = new EventType(NULL);
 	}
 
-	if ($input) {
+	if (LibraryFunctions::isFormSubmission()) {
 		// Submitting a product edit
 
 		$editable_fields = array('ety_name');

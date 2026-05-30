@@ -303,6 +303,15 @@ if (isset($post_vars['edit_primary_key_value'])) {
 
 See [FormWriter — Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value).
 
+> **Guard the save on the HTTP method, not on `if($input)`.** Logic functions that
+> take a single `$input` (`array_merge($_GET, $_POST)`) must gate the save handler
+> with `LibraryFunctions::isFormSubmission()` — `$input` is never empty on a GET
+> (the edit link carries the record id), so `if($input)` runs the save on
+> page-open and can null out the record. `SystemBase` enforces this at the write
+> boundary; intentional GET-action links (e.g. `?action=delete`) must opt in via
+> `SystemBase::$allow_get_mutation`. See
+> [Logic Architecture — Detecting form submission](logic_architecture.md#detecting-form-submission--use-isformsubmission-never-ifinput).
+
 ```php
 // View — wrap in begin_box / end_box so the form gets the standard card chrome
 $page->begin_box(array('title' => 'Edit User'));

@@ -20,33 +20,41 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$user = new User($session->get_user_id(), TRUE);	
 
-	if (!empty($input)) {
+	// Photo management actions — may be triggered via GET links; these are
+	// intentional mutations, so opt in to the GET-is-read-only tripwire.
+	if (isset($input['action']) && $input['action'] == 'set_primary_photo') {
+		$user = new User($session->get_user_id(), TRUE);
+		SystemBase::$allow_get_mutation = true;
+		try { $user->set_primary_photo((int)$input['photo_id']); }
+		finally { SystemBase::$allow_get_mutation = false; }
 
-		// Photo management actions
-		if (isset($input['action']) && $input['action'] == 'set_primary_photo') {
-			$user = new User($session->get_user_id(), TRUE);
-			$user->set_primary_photo((int)$input['photo_id']);
+		$msgtxt = 'Your profile picture has been updated.';
+		$message = new DisplayMessage($msgtxt, 'Photo updated', '/\/profile\/account_edit.*/',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/account_edit');
+	}
 
-			$msgtxt = 'Your profile picture has been updated.';
-			$message = new DisplayMessage($msgtxt, 'Photo updated', '/\/profile\/account_edit.*/',
-				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
-			$session->save_message($message);
-			return LogicResult::redirect('/profile/account_edit');
-		}
+	if (isset($input['action']) && $input['action'] == 'clear_primary_photo') {
+		$user = new User($session->get_user_id(), TRUE);
+		SystemBase::$allow_get_mutation = true;
+		try { $user->clear_primary_photo(); }
+		finally { SystemBase::$allow_get_mutation = false; }
 
-		if (isset($input['action']) && $input['action'] == 'clear_primary_photo') {
-			$user = new User($session->get_user_id(), TRUE);
-			$user->clear_primary_photo();
+		$msgtxt = 'Your profile picture has been removed.';
+		$message = new DisplayMessage($msgtxt, 'Photo removed', '/\/profile\/account_edit.*/',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/account_edit');
+	}
 
-			$msgtxt = 'Your profile picture has been removed.';
-			$message = new DisplayMessage($msgtxt, 'Photo removed', '/\/profile\/account_edit.*/',
-				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
-			$session->save_message($message);
-			return LogicResult::redirect('/profile/account_edit');
-		}
+	// Only run the account-save handler on an actual form POST (the account form is
+	// POST). Guarding on `if(!empty($input))` ran the save on any GET carrying a
+	// param, blanking fields set from undefined $input keys. See isFormSubmission().
+	if (LibraryFunctions::isFormSubmission()) {
 
 		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
-		if($session->get_user_id()){ 
+		if($session->get_user_id()){
 			$user = new User($session->get_user_id(), TRUE);
 			$user->set('usr_first_name', preg_replace("/[^a-zA-Z'-]/", "", $input['usr_first_name']));
 			$user->set('usr_last_name', preg_replace("/[^a-zA-Z'-]/", "", $input['usr_last_name']));

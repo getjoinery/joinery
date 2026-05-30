@@ -28,7 +28,7 @@ function admin_survey_edit_logic(array $input): LogicResult {
     }
 
     // Process POST
-    if ($input) {
+    if (LibraryFunctions::isFormSubmission()) {
         try {
             $editable_fields = array('svy_name');
 

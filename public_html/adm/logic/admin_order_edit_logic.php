@@ -21,7 +21,7 @@ function admin_order_edit_logic(array $input): LogicResult {
 	}
 
 	// Process POST actions
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		$order->set('ord_usr_user_id', $input['ord_usr_user_id']);
 

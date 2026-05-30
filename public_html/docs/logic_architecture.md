@@ -230,6 +230,59 @@ function admin_item_edit_logic($get_vars, $post_vars) {
 
 **See [FormWriter Documentation - Edit Forms](formwriter.md#edit-forms-with-edit_primary_key_value)** for complete details on why this pattern is required.
 
+### Detecting form submission — use `isFormSubmission()`, never `if($input)`
+
+Logic functions in the current convention receive a single `$input`
+(`array_merge($_GET, $_POST)`). **`$input` is never empty on a GET** — an edit
+link carries the record id, so `if ($input) { … ->save(); }` runs the save
+handler on mere page-open, producing redirect loops (handler redirects to self)
+or **null-overwrite corruption** (fields set from undefined `$input` keys, then
+saved). Guard every save/mutate/redirect handler on the HTTP method instead:
+
+```php
+function admin_item_edit_logic(array $input): LogicResult {
+    // load-or-create from $input — runs on both GET and POST
+    $item = isset($input['edit_primary_key_value'])
+        ? new Item($input['edit_primary_key_value'], TRUE)
+        : new Item(NULL);
+
+    if (LibraryFunctions::isFormSubmission()) {   // true only on a real POST
+        foreach ($editable_fields as $f) $item->set($f, $input[$f]);
+        $item->save();
+        return LogicResult::redirect('/admin/admin_item?itm_item_id=' . $item->key);
+    }
+
+    return LogicResult::render(['item' => $item]);   // GET → draw the form
+}
+```
+
+`LibraryFunctions::isFormSubmission()` returns true only when
+`$_SERVER['REQUEST_METHOD'] === 'POST'`. The meaning of "submitted" lives in one
+place; never re-derive it from `if($input)` / `if(!empty($input))`.
+
+#### GET-is-read-only invariant (enforced at the write boundary)
+
+A GET request must never persist data. `SystemBase`'s write methods —
+`save()`, `soft_delete()`, `permanent_delete()` — assert this at the single
+chokepoint every mutation passes through: a GET-request write is logged
+(`[GET_MUTATION]`), and once the rollout flips the dev gate on it also throws in
+dev (the `debug` setting). This catches the whole bug class — including plugin,
+dynamic, and non-`if($input)` code a text lint can't see.
+
+**Intentional GET-action links** legitimately mutate on GET — a `?action=delete`
+admin link, a payment-gateway return URL, a page-view maintenance task. Opt each
+one in, and **always reset the flag in a `finally`**:
+
+```php
+SystemBase::$allow_get_mutation = true;
+try { $item->soft_delete(); }
+finally { SystemBase::$allow_get_mutation = false; }
+return LogicResult::redirect('/admin/admin_items');
+```
+
+CLI / cron / scheduled-task contexts (no `REQUEST_METHOD`) are exempt
+automatically. See also [Admin Pages](admin_pages.md) and [Routing](routing.md#the-__route-parameter).
+
 ### Error Handling Pattern
 
 When calling code that might throw exceptions (e.g., Stripe, external APIs), catch them and return `LogicResult::error()`:

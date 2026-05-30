@@ -27,7 +27,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 		$event = new Event($input['edit_primary_key_value'], TRUE);
 	} elseif (isset($input['evt_event_id'])) {
 		$event = new Event($input['evt_event_id'], TRUE);
-	} elseif ($is_virtual_edit && !$input) {
+	} elseif ($is_virtual_edit && !LibraryFunctions::isFormSubmission()) {
 		// GET request for editing a virtual instance: pre-populate from parent
 		$parent = new Event($parent_event_id, TRUE);
 		$parent->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
@@ -78,7 +78,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 	}
 
 	// Process POST actions
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 
 		// If editing a virtual instance, materialize it first
 		if ($is_virtual_edit && !$input['edit_primary_key_value']) {

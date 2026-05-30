@@ -23,18 +23,14 @@ function admin_address_edit_logic(array $input): LogicResult {
 		$user_id = $address->get('usa_usr_user_id');
 	} else {
 		// Creating new address - get user_id from POST (hidden field) or GET (initial load)
-		if($input){
-			$user_id = $input['usr_user_id'] ?? NULL;
-		} else {
-			$user_id = $input['usr_user_id'] ?? NULL;
-		}
+		$user_id = $input['usr_user_id'] ?? NULL;
 	}
 
 	if(!$user_id){
 		return LogicResult::error('User ID is required');
 	}
 
-	if($input){
+	if(LibraryFunctions::isFormSubmission()){
 		// Add-only logic - set user_id and defaults when creating new address
 		if (!$address->key) {
 			$address->set('usa_usr_user_id', $user_id);

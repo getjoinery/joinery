@@ -21,7 +21,7 @@ function admin_product_group_edit_logic(array $input): LogicResult {
 
 	// Process POST actions
 	// CRITICAL: Check for POST submission
-	if ($input) {
+	if (LibraryFunctions::isFormSubmission()) {
 		$editable_fields = array('prg_max_items', 'prg_error', 'prg_name', 'prg_description', 'prg_subtitle', 'prg_type');
 
 		foreach($editable_fields as $field) {
