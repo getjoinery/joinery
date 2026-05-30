@@ -15,6 +15,11 @@ that write `$input[$field]` with no `isset` guard null out the record on GET).
 This spec defines the fix, the full file inventory, and a guard against
 recurrence.
 
+This is a targeted correctness fix for one repeated mistake — not a refactor of
+the page→logic calling convention. The handler shape stays as-is; only the
+broken submission test changes, in one shared place, plus a one-time strip of the
+`__route` footgun that made it misfire.
+
 ## How it breaks
 
 1. Apache rewrites every request to `serve.php?__route=<path>` (vhost
@@ -96,7 +101,10 @@ public static function isFormSubmission(): bool {
 }
 ```
 
-…and write handlers as `if (LibraryFunctions::isFormSubmission()) { … }`.
+…and write handlers as `if (LibraryFunctions::isFormSubmission()) { … }`. The
+*meaning* of "submitted" then lives in exactly one place; each file just calls
+it. The line is still per-file, but it is correct and named — the fragility of
+`if($input)` was that it was silently wrong, not that it appeared in each file.
 
 **This is not a blind sed.** Each file must be eyeballed because the handler
 shape varies:
@@ -134,6 +142,69 @@ First confirm nothing downstream reads `$_GET['__route']`/`$_REQUEST['__route']`
 after dispatch (grep; `RouteHelper` already works off the passed-in value and its
 cache copy). This removes the silent footgun and makes `if($input)` behave on
 no-parameter pages — defense-in-depth behind the real per-file fix.
+
+### Layer 3 (recurrence guard, one place): enforce GET-is-read-only at the write boundary
+
+Layers 1–2 correct the known cases. Layer 3 makes the *class* of bug impossible to
+reintroduce silently — not by linting `*_logic.php` text, but by enforcing the
+actual invariant ("a GET request must not persist data") at the single chokepoint
+every mutation passes through: `SystemBase`'s write methods. This catches anything
+Layer 1 misses or any future code reintroduces — including plugin code, dynamic
+calls, and non-`if($input)` forms a text lint can't see — and turns the dangerous
+property of this bug (silent corruption that goes unnoticed until a page is
+exercised) into a loud, located failure on first hit.
+
+Add a static opt-out and an assertion to `includes/SystemBase.php`, and call it at
+the top of `save()` (~line 1045), `soft_delete()` (~line 724), and
+`permanent_delete()` (~line 865):
+
+```php
+/** Set true only around an intentional GET-action mutation (e.g. a delete link). */
+public static $allow_get_mutation = false;
+
+private static function assert_not_get_mutation(string $op): void {
+    // Exempt CLI / cron / scheduled tasks (no HTTP method) and explicit opt-outs.
+    if (PHP_SAPI === 'cli' || !isset($_SERVER['REQUEST_METHOD']))  return;
+    if (self::$allow_get_mutation)                                 return;
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET')                      return;
+
+    $msg = "GET-request mutation ({$op} on " . static::class . ') at '
+         . ($_SERVER['REQUEST_URI'] ?? '?') . ' — a GET must not persist data. '
+         . 'Guard the save with LibraryFunctions::isFormSubmission(), or, for an '
+         . 'intentional GET action, set SystemBase::$allow_get_mutation = true.';
+    error_log($msg . "\n" . (new Exception())->getTraceAsString());
+
+    // Loud in dev (the `debug` setting), log-only in prod so a slip is observable
+    // without fataling a user-facing page.
+    if (Globalvars::get_instance()->get_setting('debug')) {
+        throw new SystemBaseException($msg);
+    }
+}
+```
+
+…with `self::assert_not_get_mutation('save')` (etc.) as the first statement in each
+write method.
+
+**Intentional GET mutations must opt in.** The existing delete/toggle **GET-action
+links** (e.g. `admin_question_logic`'s `action=delete` branch) legitimately mutate
+on GET. Each such branch wraps its write:
+
+```php
+SystemBase::$allow_get_mutation = true;
+try { $question->soft_delete(); }
+finally { SystemBase::$allow_get_mutation = false; }
+return LogicResult::redirect('/admin/admin_questions');
+```
+
+This opt-in is not overhead — satisfying the tripwire forces every intentional
+GET mutation to be **explicitly marked**, which inventories exactly the GET-action
+surface the separate CSRF-hardening effort will need. The work the tripwire
+requires *is* that documentation.
+
+Tradeoffs (accepted): you must find and opt-in every intentional GET mutation or
+it false-positives — that discovery is ≈ the mixed-page audit Layer 1 needs
+anyway; CLI/cron contexts are exempted (no `REQUEST_METHOD`); prod logs rather
+than throws.
 
 ## Inventory — 26 affected `adm/logic` files
 
@@ -173,16 +244,66 @@ final idiom):
 - `admin_agent_file_edit_logic.php` — gated on submit-button presence (predates
   this spec; re-align to `isFormSubmission()` for consistency).
 
-Run a final `grep -rlE 'if ?\( ?\$input ?\)' adm/logic plugins/*/logic` after the
-sweep — it should return nothing.
+**Progress / done marker.** A file is unmigrated exactly while it still contains
+the `if($input){` guard. Track with (requires the trailing `{`, so it matches the
+guard but not the explanatory comments the fix adds — the loose form without `{`
+false-flags fixed files whose comments mention `if($input)`):
+
+```bash
+grep -rlnE 'if[[:space:]]*\([[:space:]]*\$input[[:space:]]*\)[[:space:]]*\{' adm/logic plugins/*/logic
+```
+
+Baseline at spec time: **24 files** (the inventory below minus the two
+`admin_settings*` files already patched). Each drops off as its guard becomes
+`if (LibraryFunctions::isFormSubmission()) {`. A final run after the sweep should
+return nothing.
+
+## Non-admin GET-mutation surface (Layer-3 opt-in audit)
+
+The Layer-3 tripwire is global, so it also surfaces GET mutations outside `adm/`.
+220 files call a write method; 138 are non-admin, but that number collapses fast —
+most can't trip the wire:
+
+| Bucket | Files | Tripwire impact |
+|---|---|---|
+| CLI / cron / `tasks` / `migrations` / `tests` | ~22 | **Auto-exempt** — no `REQUEST_METHOD`; never fires. Zero work. |
+| `data/` model internals (`$this->save()` inside methods) | ~39 | Not decision sites — fire in the caller's context, no own opt-in. |
+| Web entrypoints that mutate (core `logic`/`ajax`/`api` ≈ 25; plugin `logic`/`ajax`/`views` ≈ 22; plugin `admin` ≈ 13) | ~60 | Only those that mutate **on GET** trip it; POST handlers (forms, webhooks, most ajax) stay silent and need nothing. |
+
+The realistic opt-in surface is single-to-low-double digits, not 138. A heuristic
+sweep ("a GET/`action` param drives a mutation") surfaces **9 concrete core
+candidates** — the same endpoints the `FormWriterV2Base` CSRF TODO already names
+(conversations, reactions, notifications, entity_photos, checkout):
+
+```
+logic/billing_logic.php          ajax/notifications_ajax.php
+logic/account_edit_logic.php     ajax/entity_photos_ajax.php
+logic/change_tier_logic.php      ajax/conversations_ajax.php
+logic/cart_charge_logic.php      ajax/checkout_ajax.php
+api/apiv1.php
+```
+
+…plus an unaudited subset of the ~22 plugin-web files. Each confirmed GET mutation
+gets either corrected (guard with `isFormSubmission()`) or, if intentional, opted
+in with `$allow_get_mutation` — exactly as for the admin GET-action links.
+
+**The exact list is not statically knowable** — whether a given call site is
+reached by GET or POST is a runtime fact — which is why the rollout ships the
+tripwire **log-only everywhere first** and lets the logs produce the definitive
+list (see Rollout).
 
 ## Prevent recurrence
 
-- **Lint rule.** Extend `maintenance_scripts/dev_tools/validate_php_file.php` to
-  flag `if ($input)` / `if($input)` used as a submission guard in `*_logic.php`
-  files, with the message "use `LibraryFunctions::isFormSubmission()` — `$input`
-  is non-empty on GET (carries `__route`)." This turns the class of bug into a
-  caught error on the validation step every change already runs.
+- **Primary: the Layer-3 write-boundary tripwire** (above). This is the real
+  recurrence guard — a runtime invariant enforced in one place that catches the
+  entire bug class (including plugin/dynamic/non-`if($input)` code), not a
+  pattern-match on one filename glob. Throws in dev, logs in prod.
+- **Optional, cheap secondary: lint rule.** Extend
+  `maintenance_scripts/dev_tools/validate_php_file.php` to flag `if ($input)` /
+  `if($input)` used as a submission guard in `*_logic.php` files, message: "use
+  `LibraryFunctions::isFormSubmission()` — `$input` is non-empty on GET (carries
+  `__route`)." Catches the specific idiom at edit-time, before the page is even
+  run. Nice-to-have on top of the tripwire, not load-bearing.
 - **Convention doc.** Document the rule (below) so the next refactor doesn't
   reintroduce it.
 
@@ -198,8 +319,13 @@ sweep — it should return nothing.
   locks the fix in.
 - **Root test:** after the `serve.php` change, assert `$_GET['__route']` is unset
   by the time a view runs, and that routing still resolves.
-- `php -l` + `validate_php_file.php` on every changed file; the new lint rule
-  must pass clean.
+- **Tripwire (Layer 3):** with `$_SERVER['REQUEST_METHOD']='GET'` and the `debug`
+  setting on, assert `save()`/`soft_delete()`/`permanent_delete()` throw
+  `SystemBaseException`; with `$allow_get_mutation = true` they do not; under
+  `PHP_SAPI==='cli'` / unset `REQUEST_METHOD` they do not; on POST they do not.
+  Confirm prod (`debug` off) logs without throwing.
+- `php -l` + `validate_php_file.php` on every changed file; the lint rule (if
+  added) must pass clean.
 
 ## Documentation
 
@@ -210,22 +336,37 @@ sweep — it should return nothing.
   pages guide (`docs/admin_pages.md`).
 - Note the `serve.php` `__route` invariant in `docs/routing.md` (the param is
   stripped from request superglobals after dispatch).
+- Document the **GET-is-read-only invariant** and the `SystemBase::$allow_get_mutation`
+  opt-out (with the `try/finally` reset pattern) wherever model writes are covered
+  — e.g. `docs/logic_architecture.md` next to the submission rule, and a one-liner
+  in the deletion-system / model docs — so intentional GET actions know how to opt
+  in and nobody mistakes the tripwire for a bug.
 
 ## Versioning
 
-- Bump `@version` on `serve.php`, `LibraryFunctions.php`, the validator, and each
-  modified logic file.
+- Bump `@version` on `serve.php`, `LibraryFunctions.php`, `includes/SystemBase.php`,
+  the validator (if the lint rule is added), and each modified logic file.
 - No schema or settings changes; no migration.
 
 ## Rollout / ordering
 
 1. Land Layer 2 (`serve.php` `__route` strip) + the `isFormSubmission()` helper
    first — immediately stops the Tier-1 loops and removes the footgun.
-2. Fix the **Tier-2 (data-corruption)** files next, highest priority
+2. Land the **Layer-3 tripwire in log-only mode EVERYWHERE first** — no throw,
+   not even in dev (temporarily skip the `debug` throw branch). It silently logs
+   every GET mutation across admin *and* non-admin, producing the definitive
+   worklist (broken handlers + intentional GET-action links) without breaking any
+   page mid-migration.
+3. Fix the **Tier-2 (data-corruption)** files next, highest priority
    (`admin_contact_type_edit` and any other no-`isset` setters found during the
    sweep).
-3. Sweep the remaining edit/save and mixed files.
-4. Add the lint rule last so the now-clean tree passes, preventing reintroduction.
+4. Sweep the remaining admin edit/save and mixed files, then the non-admin
+   surface the logs revealed (see *Non-admin GET-mutation surface*); opt-in each
+   intentional GET-action mutation (`$allow_get_mutation`) as it is flagged.
+5. **Flip dev to throw** only once the log-only burndown is clean (no unaccounted
+   GET-mutation log lines) — restoring the `debug`-gated `throw` in
+   `assert_not_get_mutation()`. Prod stays log-only permanently.
+6. (Optional) add the lint rule once the tree is clean so it passes immediately.
 
 ## Non-goals
 
@@ -233,8 +374,11 @@ sweep — it should return nothing.
   are a real CSRF-hardening concern but a separate effort; this spec only stops
   *form-save* handlers from firing on GET and preserves existing explicit
   GET-action branches.
-- **Re-architecting the page→logic calling convention** (e.g., passing a typed
-  request object instead of `array_merge($_GET,$_POST)`). The targeted fix +
-  helper + lint is sufficient; a broader convention change is optional future
-  work.
+- **Re-architecting the page→logic calling convention** (e.g., a render/submit
+  dispatcher, a typed request object, or a declarative resource layer). The
+  targeted fix + helper + lint is sufficient; this is one wrong boolean test, not
+  a framework gap. A broader convention change is explicitly out of scope.
+- **De-duplicating edit-page boilerplate** (the repeated load-model / set-fields
+  ritual). Real, but orthogonal to this correctness fix; handle separately if
+  ever.
 - **Reverting 5b7f2251.** It made other intended fixes; this is a fix-forward.
