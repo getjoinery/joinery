@@ -129,19 +129,38 @@ and submit it (still saves), and run `php -l` + `validate_php_file.php`.
 
 ### Layer 2 (hardening, one place): stop `__route` leaking into page input
 
-In `serve.php`, immediately after the route is extracted for dispatch, unset it
-from the request superglobals so it never reaches page logic:
+Strip `__route` in the routing component that already owns it — **not** in
+`serve.php` (keep the front controller free of this logic). `RouteHelper::processRoutes($routes, $request_path)`
+already receives the route value as `$request_path` and already removes `__route`
+from its cache-key copy (`RouteHelper.php:975`), so it has no further need of the
+superglobal. Unset it once at the **top of `processRoutes()`**, before the
+cache/debug/dispatch logic:
 
 ```php
-$__route = $_REQUEST['__route'] ?? '';
-unset($_GET['__route'], $_POST['__route'], $_REQUEST['__route']);
-RouteHelper::processRoutes($routes, $__route);
+public static function processRoutes($routes, $request_path) {
+    // __route is routing metadata injected by the Apache rewrite; it must not
+    // reach page logic ($input). The route value is already in $request_path.
+    unset($_GET['__route'], $_POST['__route'], $_REQUEST['__route']);
+    …
+}
 ```
 
-First confirm nothing downstream reads `$_GET['__route']`/`$_REQUEST['__route']`
-after dispatch (grep; `RouteHelper` already works off the passed-in value and its
-cache copy). This removes the silent footgun and makes `if($input)` behave on
-no-parameter pages — defense-in-depth behind the real per-file fix.
+`serve.php:443` still passes `$_REQUEST['__route'] ?? ''` in (read *before* the
+strip runs, so unaffected). The existing cache-key strip at `:975` becomes a
+harmless no-op (the key is already gone) — leave it as defensive, or drop the now-
+redundant `unset($cache_params['__route'])`.
+
+**Downstream-read audit (done — safe to strip).** A full grep for
+`$_(GET|POST|REQUEST)['__route']` reads found only one genuine post-dispatch
+consumer: `theme/tailwind/views/404.php` reads `$_REQUEST['__route']` as the
+*middle* of a fallback chain (`$debug_info['requested_path'] ?? $_REQUEST['__route']
+?? $_SERVER['REQUEST_URI'] ?? 'unknown'`) — stripping it degrades to `REQUEST_URI`,
+an equivalent source (cosmetic, 404 debug display). `includes/PublicPageBase.php`
+already lists `__route` among params it strips for canonical URLs (our global
+strip makes that a no-op); `RouteHelper` works off the passed value + a cache-key
+copy; `utils/route_debug.php` writes its own value under CLI. Nothing breaks. This
+removes the silent footgun and makes `if($input)` behave on no-parameter pages —
+defense-in-depth behind the real per-file fix.
 
 ### Layer 3 (recurrence guard, one place): enforce GET-is-read-only at the write boundary
 
@@ -317,7 +336,7 @@ list (see Rollout).
   `$_SERVER['REQUEST_METHOD']='GET'` and asserts the result is a `render` (not a
   `redirect`) and that no `save()` occurred (spy/fixture record unchanged). This
   locks the fix in.
-- **Root test:** after the `serve.php` change, assert `$_GET['__route']` is unset
+- **Root test:** after the `RouteHelper` change, assert `$_GET['__route']` is unset
   by the time a view runs, and that routing still resolves.
 - **Tripwire (Layer 3):** with `$_SERVER['REQUEST_METHOD']='GET'` and the `debug`
   setting on, assert `save()`/`soft_delete()`/`permanent_delete()` throw
@@ -334,8 +353,9 @@ list (see Rollout).
   use `LibraryFunctions::isFormSubmission()`; why (`$input` always carries
   `__route`, and edit pages carry the record id). Cross-reference from the admin
   pages guide (`docs/admin_pages.md`).
-- Note the `serve.php` `__route` invariant in `docs/routing.md` (the param is
-  stripped from request superglobals after dispatch).
+- Note the `__route` invariant in `docs/routing.md` — `RouteHelper::processRoutes`
+  strips it from the request superglobals at dispatch entry, so page logic never
+  sees it (the route value lives in `$request_path`).
 - Document the **GET-is-read-only invariant** and the `SystemBase::$allow_get_mutation`
   opt-out (with the `try/finally` reset pattern) wherever model writes are covered
   — e.g. `docs/logic_architecture.md` next to the submission rule, and a one-liner
@@ -344,14 +364,16 @@ list (see Rollout).
 
 ## Versioning
 
-- Bump `@version` on `serve.php`, `LibraryFunctions.php`, `includes/SystemBase.php`,
-  the validator (if the lint rule is added), and each modified logic file.
+- Bump `@version` on `includes/RouteHelper.php`, `LibraryFunctions.php`,
+  `includes/SystemBase.php`, the validator (if the lint rule is added), and each
+  modified logic file.
 - No schema or settings changes; no migration.
 
 ## Rollout / ordering
 
-1. Land Layer 2 (`serve.php` `__route` strip) + the `isFormSubmission()` helper
-   first — immediately stops the Tier-1 loops and removes the footgun.
+1. Land Layer 2 (`RouteHelper::processRoutes` `__route` strip) + the
+   `isFormSubmission()` helper first — immediately stops the Tier-1 loops and
+   removes the footgun.
 2. Land the **Layer-3 tripwire in log-only mode EVERYWHERE first** — no throw,
    not even in dev (temporarily skip the `debug` throw branch). It silently logs
    every GET mutation across admin *and* non-admin, producing the definitive
