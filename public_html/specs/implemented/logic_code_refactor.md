@@ -1,5 +1,22 @@
 # Logic Layer Refactor
 
+> **⚠️ Correction — submission-detection guidance below is superseded.**
+> See [`admin_logic_get_submission_guard_fix.md`](admin_logic_get_submission_guard_fix.md).
+>
+> This spec settled on `if (!empty($_POST))` (and, for mixed files, field-presence
+> checks like `isset($input['action'])`) as the action-vs-load gate, and explicitly
+> avoided any `$_SERVER` / `REQUEST_METHOD` reference. That idiom proved fragile: a
+> later refactor (commit `5b7f2251`) reintroduced the always-truthy `if($input)`
+> gate across the **admin** logic files, causing redirect loops on the settings
+> pages and silent null-overwrite corruption on edit pages opened with a GET.
+>
+> **Canonical rule now:** guard every save/mutate/redirect handler with
+> `LibraryFunctions::isFormSubmission()` (i.e. `$_SERVER['REQUEST_METHOD'] === 'POST'`),
+> never `if($input)` / `if(!empty($input))`; `__route` is stripped from the request
+> superglobals in `RouteHelper::processRoutes()`; and `SystemBase` enforces a
+> GET-is-read-only invariant at the write boundary. Treat the `if (!empty($_POST))`
+> / no-`$_SERVER` convention in this document as historical.
+
 ## Problem
 
 The architecture is 80% of the way to "free" API and AI integration, but the action layer is incomplete. Models declare their own shape via `$field_specifications` — so the REST API, auto-discovery, FormWriter, and the database updater all work from one declaration. Logic files have the right encapsulation (business rules, validation, side effects all bundled) and the right output (`LogicResult`), but the input side has no equivalent declaration.
@@ -581,6 +598,8 @@ password_set_logic.php         change_password_required_logic.php
 **Fix:** all 12 gates rewritten as `if (!empty($_POST))`. To keep API entry points working (apiv1.php parses JSON request bodies into a separate `$post_params` and PHP doesn't auto-populate `$_POST` for `application/json`), `apiv1.php` now copies `$post_params` into `$_POST` before invoking the logic function — same gate works for browser POST and JSON API submissions. (`api/apiv1.php` around line 543.)
 
 This is the post-Step-5 convention for action-vs-load gates in mixed logic files: `if (!empty($_POST))`, mirroring `cart_logic`, `post_logic`, `lists_logic`, and `event_waiting_list_logic`. No `$_SERVER` references.
+
+> **Superseded:** this `if (!empty($_POST))` / no-`$_SERVER` convention is replaced by `LibraryFunctions::isFormSubmission()` (`$_SERVER['REQUEST_METHOD'] === 'POST'`), which also handles JSON API POSTs without the `apiv1.php` `$_POST` copy described above. See [`admin_logic_get_submission_guard_fix.md`](admin_logic_get_submission_guard_fix.md).
 
 **3. Test-file fixes folded in.**
 
