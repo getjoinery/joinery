@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.8
+ * @version 1.9
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -31,6 +31,10 @@ class InboundEmailSetupCheck {
 	const FAIL = 'fail';
 	const WARN = 'warn';
 	const UNKNOWN = 'unknown';
+	// INFO is a neutral status: "we legitimately can't tell yet" — rendered
+	// without the pass/warn/fail traffic-light alarm. Introduced for the
+	// inbound-verification capability check (configured but not yet confirmed).
+	const INFO = 'info';
 
 	// severity values
 	const REQUIRED = 'required';
@@ -92,6 +96,10 @@ class InboundEmailSetupCheck {
 
 		foreach ($this->checkPlugin() as $r) { $results[] = $r; }
 
+		// Inbound-verification capability: provider-agnostic, so it runs for
+		// every provider (not delegated to the provider's host layer).
+		$results[] = $this->checkInboundVerification();
+
 		if ($address) {
 			foreach ($this->checkAddress($address) as $r) { $results[] = $r; }
 		}
@@ -132,8 +140,11 @@ class InboundEmailSetupCheck {
 
 	/** Roll a result list up into a one-line summary: counts per status (required only for fail). */
 	public static function summarize(array $results) {
-		$counts = array(self::PASS => 0, self::FAIL => 0, self::WARN => 0, self::UNKNOWN => 0);
-		foreach ($results as $r) { $counts[$r['status']]++; }
+		$counts = array(self::PASS => 0, self::FAIL => 0, self::WARN => 0, self::UNKNOWN => 0, self::INFO => 0);
+		foreach ($results as $r) {
+			if (!isset($counts[$r['status']])) { $counts[$r['status']] = 0; }
+			$counts[$r['status']]++;
+		}
 		return $counts;
 	}
 
@@ -201,6 +212,122 @@ class InboundEmailSetupCheck {
 		}
 
 		return $out;
+	}
+
+	// ===================================================================
+	// Inbound-verification capability (host layer)
+	// ===================================================================
+
+	/**
+	 * Is inbound mail actually being authentication-verified?
+	 *
+	 * This is the visible warning an operator sees whenever inbound SPF/DKIM/
+	 * DMARC are recorded as 'unverified' — so a missing or broken verifier
+	 * surfaces as an explained warning, not a silent gap. It stays useful after
+	 * the milters are first provisioned: if they break again (package upgrade,
+	 * socket drift), this check catches it.
+	 *
+	 * Two dimensions decide the status:
+	 *   (a) does the SELECTED inbound provider have a verification path we
+	 *       support; and
+	 *   (b) for a supported provider, is verification actually happening.
+	 * Package/config presence alone is not sufficient for (b) — a milter can be
+	 * wired but unreachable — so the authoritative signal is BEHAVIORAL: have we
+	 * seen any iem_auth_source = 'milter' mail recently? That probe is a DB query,
+	 * always available to the web user even when /etc host config is not readable.
+	 */
+	private function checkInboundVerification() {
+		$label = 'Inbound authentication verified';
+		$provider = strtolower(trim((string)$this->settings->get_setting('inbound_email_provider'))) ?: 'postfix';
+		$fix = $this->installerFix();
+
+		// (a) Provider-support probe. Only Postfix has a verification path today;
+		// Mailgun is deferred (specs/inbound_mailgun_verification.md), and any
+		// other inbound provider is unsupported here.
+		if ($provider !== 'postfix') {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::WARN,
+				'Inbound authentication isn\'t being verified for the selected mail provider (' . $provider . '); '
+				. 'messages are recorded as "unverified".',
+				$provider === 'mailgun'
+					? 'Mailgun inbound verdict reading is deferred (see specs/inbound_mailgun_verification.md). '
+					  . 'Until it lands, Mailgun-relayed mail is stored without SPF/DKIM/DMARC verdicts.'
+					: 'This provider has no inbound authentication-verification path in the plugin.',
+				null);
+		}
+
+		// (b) Behavioral probe — the source of truth. Any milter-stamped mail in
+		// the recent window proves verification is live.
+		$milterSeen = false;
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$milterSeen = (bool)$db->query(
+				"SELECT 1 FROM iem_inbound_email_messages
+				 WHERE iem_auth_source = 'milter'
+				 AND iem_received_time > NOW() - INTERVAL '30 days' LIMIT 1"
+			)->fetchColumn();
+		} catch (\Throwable $e) {
+			// Table absent on a brand-new install, etc. — treat as "none seen".
+			$milterSeen = false;
+		}
+
+		if ($milterSeen) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::PASS,
+				'Inbound mail is being authentication-verified — recent messages carry milter-stamped '
+				. 'SPF/DKIM/DMARC results.', '', null, true);
+		}
+
+		// No milter mail seen — enrich the reason from the host config if we can
+		// read it. Unreadable host config is NOT a failure (the web user may lack
+		// access to /etc); fall back to a neutral "can't confirm".
+		$confReadable = is_readable('/etc/opendkim.conf');
+		if (!$confReadable) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::INFO,
+				'Can\'t confirm inbound verification from here yet.',
+				'No recently-received mail carries a milter verdict, and this server\'s mail config '
+				. 'isn\'t readable by the web user — so we can\'t tell whether verification is wired. '
+				. 'Send a test message and re-check, or run the installer on the host.',
+				$fix, true);
+		}
+
+		// Config readable — assess drift. Any of these unmet means verification is broken.
+		$issues = array();
+
+		exec('which opendmarc 2>/dev/null', $o1, $e1);
+		if ($e1 !== 0) { $issues[] = 'opendmarc is not installed'; }
+		else {
+			exec('pgrep -x opendmarc 2>/dev/null', $o2, $e2);
+			if ($e2 !== 0) { $issues[] = 'opendmarc is not running'; }
+		}
+
+		$milters = array();
+		exec('postconf -h smtpd_milters 2>/dev/null', $milters);
+		$miltersLine = trim(implode(' ', $milters));
+		if (strpos($miltersLine, '8891') === false) { $issues[] = 'opendkim milter (port 8891) not in smtpd_milters'; }
+		if (strpos($miltersLine, '8893') === false) { $issues[] = 'opendmarc milter (port 8893) not in smtpd_milters'; }
+
+		// opendkim must actually be reachable on the port Postfix dials — this is
+		// the exact wired-but-unreachable drift we found.
+		$sock = @stream_socket_client('tcp://127.0.0.1:8891', $en, $es, 1);
+		if ($sock) { @fclose($sock); } else { $issues[] = 'nothing is listening on opendkim milter port 8891'; }
+
+		$conf = (string)@file_get_contents('/etc/opendkim.conf');
+		if (!preg_match('/^\s*Mode\s+\S*v/mi', $conf)) { $issues[] = 'opendkim Mode does not include verify (v)'; }
+		if (!preg_match('/^\s*AuthservID\s+\S+/mi', $conf)) { $issues[] = 'opendkim AuthservID is not set'; }
+
+		if (!empty($issues)) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::WARN,
+				'Inbound mail is not being authentication-verified — SPF/DKIM/DMARC are recorded as "unverified".',
+				'Detected: ' . implode('; ', $issues) . '. Run the installer, then send a test message to confirm '
+				. 'an Authentication-Results header appears.',
+				$fix, true);
+		}
+
+		// Config looks correct but no milter mail has arrived yet to prove it.
+		return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::INFO,
+			'Verification is configured; no recently-received mail yet to confirm it.',
+			'The opendkim/opendmarc milters look correctly wired, but no message in the last 30 days carries '
+			. 'a milter verdict. Send a test message and re-check to confirm end-to-end.',
+			null, true);
 	}
 
 	// ===================================================================

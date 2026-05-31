@@ -2,11 +2,19 @@
 /**
  * InboundEmailRouter - Core inbound email routing logic.
  *
- * Parses raw email, looks up alias, verifies DKIM, checks rate limits,
- * and either forwards via SmtpMailer or stores locally (or both, depending
- * on the alias / catch-all delivery mode). Handles SRS bounce processing.
+ * Parses raw email, looks up alias, reads authentication results, checks rate
+ * limits, and either forwards via SmtpMailer or stores locally (or both,
+ * depending on the alias / catch-all delivery mode). Handles SRS bounce
+ * processing.
  *
- * @version 1.6
+ * Authentication (SPF/DKIM/DMARC) verdicts are NOT computed here. They are read
+ * from the message's Authentication-Results header (stamped by the verifying
+ * MTA milters) via AuthenticationResults — the app trusts only a line carrying
+ * our own authserv-id, and records 'unverified' when none is present. SPF/DMARC
+ * are structurally impossible to compute at this layer anyway (the connecting
+ * client IP never reaches the pipe). See specs/inbound_dkim_verification_fix.md.
+ *
+ * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -14,6 +22,7 @@ require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_emai
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_log_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/AuthenticationResults.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/SRSRewriter.php'));
 
 class InboundEmailRouter {
@@ -86,11 +95,10 @@ class InboundEmailRouter {
 			}
 		}
 
-		// 4. DKIM verification (informational — we record the result either way)
-		$dkim_result = $this->verifyDKIM($raw_email, $parsed);
-		if ($dkim_result === 'fail') {
-			error_log('InboundEmailRouter: DKIM verification failed for ' . $envelope_recipient . ' from ' . ($parsed['from_email'] ?? 'unknown'));
-		}
+		// 4. Authentication results (informational — we record them either way).
+		// Read SPF/DKIM/DMARC from the Authentication-Results header the MTA
+		// stamped; never compute them here. No verdict line => 'unverified'.
+		$auth = $this->readAuthResults($raw_email);
 
 		$mode = $alias->get('iea_delivery_mode') ?: InboundEmailAlias::MODE_FORWARD;
 		$forwards = ($mode === InboundEmailAlias::MODE_FORWARD || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
@@ -99,7 +107,7 @@ class InboundEmailRouter {
 		// Pure-store mode skips forwarding-side gates (rate limit, From-header check)
 		// because they only apply to relay attempts.
 		if (!$forwards) {
-			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $dkim_result);
+			return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth);
 		}
 
 		// 5. Rate limiting (gates the forward path only)
@@ -143,7 +151,7 @@ class InboundEmailRouter {
 		// already happened and retrying would double-forward.
 		if ($stores) {
 			try {
-				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $dkim_result);
+				$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth);
 			} catch (\Throwable $e) {
 				error_log('InboundEmailRouter: store after forward failed: ' . $e->getMessage());
 				$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store after forward failed: ' . $e->getMessage(), $domain->key);
@@ -161,9 +169,9 @@ class InboundEmailRouter {
 	 * failure so Postfix retries. The dedup mechanism is the UNIQUE
 	 * constraint on (iem_message_id_header, iem_recipient).
 	 */
-	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $dkim_result = null) {
-		if ($dkim_result === null) {
-			$dkim_result = $this->verifyDKIM($raw_email, $parsed);
+	private function handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, $alias, $auth = null) {
+		if ($auth === null) {
+			$auth = $this->readAuthResults($raw_email);
 		}
 
 		// Volume cap (per-domain stores within forwarding window)
@@ -178,7 +186,7 @@ class InboundEmailRouter {
 		}
 
 		try {
-			$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $dkim_result);
+			$saved = $this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth);
 			$this->logTransaction(
 				$parsed,
 				$alias,
@@ -209,8 +217,15 @@ class InboundEmailRouter {
 	 * Always stores the ORIGINAL raw_email (never the header-rewritten copy
 	 * forwardEmail() builds for relay), so forward_and_store preserves the
 	 * faithful message.
+	 *
+	 * $auth is the verdict array from readAuthResults()
+	 * (['dkim','spf','dmarc','source']); when null it is read here so a direct
+	 * caller still records honest verdicts.
 	 */
-	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $dkim_result = null) {
+	public function storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth = null) {
+		if ($auth === null) {
+			$auth = $this->readAuthResults($raw_email);
+		}
 		$bodies = $this->extractBodies($raw_email, $parsed);
 
 		$message_id_header = isset($parsed['headers']['message-id'])
@@ -244,7 +259,10 @@ class InboundEmailRouter {
 			'iem_raw_message' => $raw_email,
 			'iem_message_id_header' => $message_id_header,
 			'iem_thread_key'  => $thread_key,
-			'iem_dkim_result' => $dkim_result ?: 'none',
+			'iem_dkim_result'  => $auth['dkim'],
+			'iem_spf_result'   => $auth['spf'],
+			'iem_dmarc_result' => $auth['dmarc'],
+			'iem_auth_source'  => $auth['source'],
 			'iem_size_bytes'  => strlen($raw_email),
 			'iem_received_time' => gmdate('Y-m-d H:i:s'),
 		];
@@ -648,189 +666,33 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Verify inbound DKIM signature.
+	 * Read SPF/DKIM/DMARC verdicts from the message's Authentication-Results
+	 * header. The app does NOT compute these — the verifying MTA milters
+	 * (opendkim verify mode + opendmarc) stamp them at SMTP time, and we trust
+	 * only a line carrying our own authserv-id (== the configured mail
+	 * hostname). When no such line is present the message is recorded as
+	 * 'unverified' (never a hand-rolled 'fail'); when our milter stamped a line
+	 * but didn't assert a given method, that method reads 'none'.
 	 *
-	 * @param string $raw_email Raw email content
-	 * @param array $parsed Parsed email data
-	 * @return string 'pass', 'fail', or 'none'
+	 * @return array{dkim:string,spf:string,dmarc:string,source:string}
 	 */
-	public function verifyDKIM($raw_email, $parsed) {
-		$dkim_header = $parsed['headers']['dkim-signature'] ?? null;
-		if (!$dkim_header) {
-			return 'none'; // No DKIM signature present
+	private function readAuthResults($raw_email) {
+		$authserv_id = strtolower(trim((string)$this->settings->get_setting('inbound_email_mail_hostname')));
+		$ar = AuthenticationResults::fromMessage($raw_email, $authserv_id);
+		if ($ar) {
+			return array(
+				'dkim'   => $ar->dkim()  ?: 'none',
+				'spf'    => $ar->spf()   ?: 'none',
+				'dmarc'  => $ar->dmarc() ?: 'none',
+				'source' => 'milter',
+			);
 		}
-
-		// If multiple DKIM signatures, use the first
-		if (is_array($dkim_header)) {
-			$dkim_header = $dkim_header[0];
-		}
-
-		try {
-			// Parse DKIM-Signature fields
-			$dkim_fields = $this->parseDKIMSignature($dkim_header);
-			if (!$dkim_fields) {
-				return 'none';
-			}
-
-			$domain = $dkim_fields['d'] ?? '';
-			$selector = $dkim_fields['s'] ?? '';
-			$algorithm = $dkim_fields['a'] ?? 'rsa-sha256';
-			$body_hash_expected = $dkim_fields['bh'] ?? '';
-			$signature_b64 = $dkim_fields['b'] ?? '';
-			$signed_headers_list = $dkim_fields['h'] ?? '';
-			$canonicalization = $dkim_fields['c'] ?? 'relaxed/relaxed';
-
-			if (!$domain || !$selector || !$body_hash_expected || !$signature_b64) {
-				return 'none';
-			}
-
-			// Only support rsa-sha256 (vast majority of DKIM)
-			if ($algorithm !== 'rsa-sha256') {
-				return 'none'; // Unsupported algorithm — fail open
-			}
-
-			// DNS lookup for public key
-			$dns_name = $selector . '._domainkey.' . $domain;
-			try {
-				$dns_txt = DnsResolver::getTxt($dns_name);
-			} catch (DnsLookupException $e) {
-				return 'none'; // DNS error — fail open
-			}
-			if (empty($dns_txt)) {
-				return 'none';
-			}
-
-			$public_key_data = '';
-			foreach ($dns_txt as $txt) {
-				if (strpos($txt, 'p=') !== false) {
-					$public_key_data = $txt;
-					break;
-				}
-			}
-
-			if (!$public_key_data) {
-				return 'none';
-			}
-
-			// Extract public key
-			if (preg_match('/p=([A-Za-z0-9+\/=]+)/', $public_key_data, $m)) {
-				$pub_key_b64 = $m[1];
-			} else {
-				return 'none';
-			}
-
-			$pub_key_pem = "-----BEGIN PUBLIC KEY-----\n" . wordwrap($pub_key_b64, 64, "\n", true) . "\n-----END PUBLIC KEY-----";
-			$pub_key = openssl_pkey_get_public($pub_key_pem);
-			if (!$pub_key) {
-				return 'none'; // Invalid key — fail open
-			}
-
-			// Verify body hash
-			$canon_parts = explode('/', $canonicalization);
-			$body_canon = $canon_parts[1] ?? 'simple';
-
-			$normalized = str_replace("\r\n", "\n", $raw_email);
-			$body_start = strpos($normalized, "\n\n");
-			$body_content = ($body_start !== false) ? substr($normalized, $body_start + 2) : '';
-
-			if ($body_canon === 'relaxed') {
-				$body_content = $this->canonicalizeBodyRelaxed($body_content);
-			} else {
-				$body_content = $this->canonicalizeBodySimple($body_content);
-			}
-
-			$computed_bh = base64_encode(hash('sha256', $body_content, true));
-			if ($computed_bh !== $body_hash_expected) {
-				return 'fail'; // Body was modified
-			}
-
-			// Verify header signature
-			$header_canon = $canon_parts[0] ?? 'relaxed';
-			$signed_headers = array_map('trim', explode(':', strtolower($signed_headers_list)));
-
-			$header_data = '';
-			foreach ($signed_headers as $hname) {
-				$hvalue = $parsed['headers'][$hname] ?? '';
-				if (is_array($hvalue)) {
-					$hvalue = $hvalue[0];
-				}
-				if ($header_canon === 'relaxed') {
-					$header_data .= strtolower(trim($hname)) . ':' . preg_replace('/\s+/', ' ', trim($hvalue)) . "\r\n";
-				} else {
-					$header_data .= $hname . ': ' . $hvalue . "\r\n";
-				}
-			}
-
-			// Add DKIM-Signature header without the b= value
-			$dkim_for_verify = preg_replace('/b=[A-Za-z0-9+\/=\s]+/', 'b=', $dkim_header);
-			if ($header_canon === 'relaxed') {
-				$header_data .= 'dkim-signature:' . preg_replace('/\s+/', ' ', trim($dkim_for_verify));
-			} else {
-				$header_data .= 'DKIM-Signature: ' . $dkim_for_verify;
-			}
-
-			$signature = base64_decode(preg_replace('/\s+/', '', $signature_b64));
-			$verify_result = openssl_verify($header_data, $signature, $pub_key, OPENSSL_ALGO_SHA256);
-
-			if ($verify_result === 1) {
-				return 'pass';
-			} elseif ($verify_result === 0) {
-				return 'fail';
-			} else {
-				return 'none'; // OpenSSL error — fail open
-			}
-
-		} catch (Exception $e) {
-			error_log('InboundEmailRouter DKIM error: ' . $e->getMessage());
-			return 'none'; // Error — fail open
-		}
-	}
-
-	/**
-	 * Parse DKIM-Signature header into key-value pairs.
-	 */
-	private function parseDKIMSignature($header) {
-		$fields = array();
-		// Remove line continuations
-		$header = preg_replace('/\s+/', ' ', $header);
-		$parts = explode(';', $header);
-		foreach ($parts as $part) {
-			$part = trim($part);
-			$eq = strpos($part, '=');
-			if ($eq !== false) {
-				$key = trim(substr($part, 0, $eq));
-				$value = trim(substr($part, $eq + 1));
-				$fields[$key] = $value;
-			}
-		}
-		return $fields;
-	}
-
-	/**
-	 * Relaxed body canonicalization per RFC 6376.
-	 */
-	private function canonicalizeBodyRelaxed($body) {
-		$lines = explode("\n", $body);
-		$result = array();
-		foreach ($lines as $line) {
-			$line = rtrim($line);
-			$line = preg_replace('/[ \t]+/', ' ', $line);
-			$result[] = $line;
-		}
-		$body = implode("\r\n", $result);
-		// Remove trailing empty lines
-		$body = rtrim($body, "\r\n") . "\r\n";
-		return $body;
-	}
-
-	/**
-	 * Simple body canonicalization per RFC 6376.
-	 */
-	private function canonicalizeBodySimple($body) {
-		$body = str_replace("\n", "\r\n", $body);
-		// Remove trailing empty lines, ensure single trailing CRLF
-		$body = rtrim($body, "\r\n") . "\r\n";
-		return $body;
+		return array(
+			'dkim'   => 'unverified',
+			'spf'    => 'unverified',
+			'dmarc'  => 'unverified',
+			'source' => 'none',
+		);
 	}
 
 	/**

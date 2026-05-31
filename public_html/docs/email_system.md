@@ -551,11 +551,23 @@ Use EmailMessage + EmailSender for all email development. Direct EmailTemplate u
 
 ## Email Authentication Checks (DnsAuthChecker)
 
-`includes/DnsAuthChecker.php` is the one place to check a domain's SPF, DKIM,
-and DMARC records. Use it — do not hand-roll `dns_get_record()` TXT parsing.
-`adm/admin_settings_email.php` and the `utils/email_setup_check.php` deep-dive
-tool both build on it, and the `inbound_email` plugin's domain status badges
-do too.
+`includes/DnsAuthChecker.php` is the one place to check whether a domain
+**publishes** SPF, DKIM, and DMARC records. Use it — do not hand-roll
+`dns_get_record()` TXT parsing. `adm/admin_settings_email.php` and the
+`utils/email_setup_check.php` deep-dive tool both build on it, and the
+`inbound_email` plugin's domain status badges do too.
+
+> **Record presence ≠ message verification.** `DnsAuthChecker` is a DNS
+> *record* check — it inspects domains **we control** for a sane outbound/setup
+> config. It is **not** verification of an inbound message's connecting IP
+> against a record, and must never be repurposed for inbound verdicts. The app
+> **no longer computes inbound SPF/DKIM/DMARC at all** (it once hand-rolled a
+> DKIM verifier that false-failed legitimate mail — removed). Per-inbound-message
+> verdicts come from the message's `Authentication-Results` header, stamped by
+> the verifying MTA (opendkim-verify + opendmarc) and read by the inbound_email
+> plugin's `AuthenticationResults`/`InboundEmailRouter` — never from
+> `DnsAuthChecker`. See `plugins/inbound_email/docs/overview.md` →
+> *Inbound authentication*.
 
 ```php
 require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));

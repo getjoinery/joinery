@@ -7,7 +7,7 @@
  * first unfinished step is expanded ("Do this next"), and the rest collapse to
  * a one-line summary.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -129,6 +129,7 @@ $status_badge = function ($status) {
 		case InboundEmailSetupCheck::PASS:    return '<span class="badge bg-success">PASS</span>';
 		case InboundEmailSetupCheck::FAIL:    return '<span class="badge bg-danger">FAIL</span>';
 		case InboundEmailSetupCheck::WARN:    return '<span class="badge bg-warning text-dark">WARN</span>';
+		case InboundEmailSetupCheck::INFO:    return '<span class="badge bg-info text-dark">INFO</span>';
 		default:                              return '<span class="badge bg-secondary">UNKNOWN</span>';
 	}
 };
@@ -171,7 +172,8 @@ $render_fix = function ($fix) use ($address) {
 $render_check = function ($c) use ($status_badge, $render_fix) {
 	$border = $c['status'] === InboundEmailSetupCheck::FAIL ? 'border-danger'
 		: ($c['status'] === InboundEmailSetupCheck::WARN ? 'border-warning'
-		: ($c['status'] === InboundEmailSetupCheck::PASS ? 'border-success' : 'border-secondary'));
+		: ($c['status'] === InboundEmailSetupCheck::PASS ? 'border-success'
+		: ($c['status'] === InboundEmailSetupCheck::INFO ? 'border-info' : 'border-secondary')));
 	echo '<div class="card mb-2 ' . $border . '"><div class="card-body py-2">';
 	echo '<div>' . $status_badge($c['status']) . ' <strong>' . htmlspecialchars($c['label']) . '</strong>';
 	if ($c['severity'] === InboundEmailSetupCheck::RECOMMENDED) {

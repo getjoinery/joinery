@@ -2,7 +2,16 @@
 #
 # install_email.sh - host installer + base configurator for Inbound Email.
 #
-# Version: 2.6 - The joinery pipe transport is now asserted with `postconf -Me`
+# Version: 2.7 - Inbound authentication verification. opendkim already runs in
+#                Mode sv; this adds the opendmarc milter and an AuthservID on
+#                both milters (sourced from inbound_email_mail_hostname, the
+#                value the app's AuthenticationResults parser trusts), then wires
+#                BOTH milters into smtpd_milters in order (opendkim then
+#                opendmarc) so received mail is stamped with an
+#                Authentication-Results header the app reads for SPF/DKIM/DMARC.
+#                The opendkim.conf rewrite is re-keyed on a managed marker so an
+#                already-wired host still picks up the new AuthservID line.
+#                2.6 - The joinery pipe transport is now asserted with `postconf -Me`
 #                every run instead of an append-once guard. The old guard only
 #                checked the php binary, so a stale handler PATH (e.g. after a
 #                plugin rename) survived re-runs and bounced every inbound
@@ -51,9 +60,20 @@
 #                 as - SELECT on the inbound-domains table only, never the
 #                 application's superuser. Its password lives only in the map
 #                 file; re-running this script rotates it.
-#   - opendkim  : inet socket localhost:8891, empty key/signing tables, and the
-#                 Postfix milter (milter_default_action = accept, so a keyless
-#                 or down opendkim never blocks or defers mail).
+#   - opendkim  : inet socket localhost:8891, Mode sv (sign + VERIFY), empty
+#                 key/signing tables, and an AuthservID matching the configured
+#                 mail hostname so stamped Authentication-Results lines are
+#                 attributable to us.
+#   - opendmarc : inet socket localhost:8893, SPFSelfValidate (computes SPF from
+#                 the connecting IP it sees at the milter stage — the IP the PHP
+#                 pipe never gets), RejectFailures false (stamp only, never
+#                 block; enforcement is out of scope).
+#   - main.cf   : smtpd_milters = inet:localhost:8891, inet:localhost:8893
+#                 (opendkim first so opendmarc can consume its DKIM result),
+#                 milter_default_action = accept (a down/keyless milter must
+#                 never block or defer mail). Received mail is thereby stamped
+#                 with an Authentication-Results header the app reads for its
+#                 SPF/DKIM/DMARC verdicts (it never computes them itself).
 #   - Opens port 25 if ufw is active.
 #
 # What it does NOT do (genuinely per-deployment - handled elsewhere):
@@ -129,7 +149,7 @@ fi
 echo "PHP CLI: ${PHP_BIN}"
 
 # --- 1. install packages -----------------------------------------------------
-PACKAGES=(postfix postfix-pgsql opendkim opendkim-tools)
+PACKAGES=(postfix postfix-pgsql opendkim opendkim-tools opendmarc)
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "${pkg}" >/dev/null 2>&1; then
@@ -315,9 +335,23 @@ fi
 postconf -e "virtual_mailbox_domains = ${VMD_MAP}"
 echo "main.cf: virtual_mailbox_domains = ${VMD_MAP}"
 
-# --- 5. opendkim: static config + Postfix milter -----------------------------
-# opendkim runs keyless until per-domain keys are added. The static parts are
-# deployment-independent and installed once here.
+# --- 5. opendkim + opendmarc: verify-mode config + Postfix milters -----------
+# opendkim signs outbound AND verifies inbound (Mode sv); opendmarc adds SPF +
+# DMARC verdicts. Both stamp an Authentication-Results header the app reads.
+# The static parts are deployment-independent and installed once here.
+
+# AuthservID must equal inbound_email_mail_hostname — the value the app's
+# AuthenticationResults parser trusts. If they disagree the stamped AR lines are
+# ignored and every message reads "unverified". Read it from the DB (the Setup
+# tab writes it); fall back to myhostname with a loud warning.
+AUTHSERV_ID="$("${DB_PSQL[@]}" -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'inbound_email_mail_hostname'" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+if [[ -z "${AUTHSERV_ID}" ]]; then
+    AUTHSERV_ID="$(postconf -h myhostname 2>/dev/null | tr -d '[:space:]' || true)"
+    echo "opendkim/opendmarc: inbound_email_mail_hostname is unset — using myhostname '${AUTHSERV_ID}' as AuthservID." >&2
+    echo "                    Set the mail hostname on the Inbound Email Setup tab to match, or verdicts are ignored." >&2
+fi
+echo "opendkim/opendmarc: AuthservID = ${AUTHSERV_ID}"
+
 mkdir -p /run/opendkim
 chown opendkim:opendkim /run/opendkim 2>/dev/null || true
 
@@ -336,14 +370,21 @@ if [[ ! -f /etc/opendkim/trusted.hosts ]]; then
     echo "opendkim: created /etc/opendkim/trusted.hosts"
 fi
 
-# opendkim.conf: write our managed config only if the inet socket marker is
-# absent, so operator edits on an already-configured host are left alone.
-if ! grep -q 'inet:8891@localhost' /etc/opendkim.conf 2>/dev/null; then
+# opendkim.conf: write our managed config only if our managed marker is absent.
+# Keying on the marker (not the socket) means an already-wired host running the
+# OLD managed conf — which lacked AuthservID — is upgraded in place, while an
+# operator who kept our marker and edited around it is left alone. The live box
+# was found running Debian-stock opendkim.conf (no Mode/AuthservID/tables),
+# which this rewrite corrects, restoring both inbound verify and outbound sign.
+OPENDKIM_MARKER='joinery-managed opendkim.conf'
+if ! grep -qF "${OPENDKIM_MARKER}" /etc/opendkim.conf 2>/dev/null; then
     [[ -f /etc/opendkim.conf && ! -f /etc/opendkim.conf.pre-joinery ]] && \
         cp /etc/opendkim.conf /etc/opendkim.conf.pre-joinery
-    cat > /etc/opendkim.conf <<'OPENDKIMCONF'
-# Managed by inbound_email/provisioning/install_email.sh — DKIM for
-# outbound forwarding. Per-domain keys are added to the tables below by hand.
+    cat > /etc/opendkim.conf <<OPENDKIMCONF
+# ${OPENDKIM_MARKER} — managed by inbound_email/provisioning/install_email.sh.
+# Mode sv = sign outbound + VERIFY inbound. Per-domain keys live in the tables
+# below (added by provision_dkim.sh). AuthservID attributes the stamped
+# Authentication-Results line to us so the app trusts only our own verdicts.
 Syslog                  yes
 SyslogSuccess           yes
 UMask                   007
@@ -353,14 +394,15 @@ Socket                  inet:8891@localhost
 PidFile                 /run/opendkim/opendkim.pid
 OversignHeaders         From
 UserID                  opendkim
+AuthservID              ${AUTHSERV_ID}
 KeyTable                /etc/opendkim/key.table
 SigningTable            refile:/etc/opendkim/signing.table
 ExternalIgnoreList      /etc/opendkim/trusted.hosts
 InternalHosts           /etc/opendkim/trusted.hosts
 OPENDKIMCONF
-    echo "opendkim: wrote /etc/opendkim.conf (inet socket localhost:8891)"
+    echo "opendkim: wrote /etc/opendkim.conf (inet socket localhost:8891, Mode sv, AuthservID ${AUTHSERV_ID})"
 else
-    echo "opendkim: /etc/opendkim.conf already wired to the inet socket - leaving it."
+    echo "opendkim: /etc/opendkim.conf already managed by us - leaving it."
 fi
 
 # Debian's opendkim systemd integration can override the socket from
@@ -373,12 +415,54 @@ if [[ -f /etc/default/opendkim ]]; then
     fi
 fi
 
-# Postfix milter wiring. milter_default_action = accept guarantees a keyless or
-# down opendkim never blocks or defers mail.
+# opendmarc.conf: SPFSelfValidate makes opendmarc compute SPF itself from the
+# envelope + connecting IP it sees at the milter stage (the IP the PHP pipe
+# never receives), so no separate policyd-spf milter is needed. RejectFailures
+# false / SoftwareHeader true = stamp results only, never reject (enforcement is
+# out of scope; a DMARC failure still delivers and is recorded as a verdict).
+mkdir -p /run/opendmarc
+chown opendmarc:opendmarc /run/opendmarc 2>/dev/null || true
+
+OPENDMARC_MARKER='joinery-managed opendmarc.conf'
+if ! grep -qF "${OPENDMARC_MARKER}" /etc/opendmarc.conf 2>/dev/null; then
+    [[ -f /etc/opendmarc.conf && ! -f /etc/opendmarc.conf.pre-joinery ]] && \
+        cp /etc/opendmarc.conf /etc/opendmarc.conf.pre-joinery
+    cat > /etc/opendmarc.conf <<OPENDMARCCONF
+# ${OPENDMARC_MARKER} — managed by inbound_email/provisioning/install_email.sh.
+# Stamps SPF + DMARC into Authentication-Results; never rejects (stamp-only).
+AuthservID              ${AUTHSERV_ID}
+Socket                  inet:8893@localhost
+PidFile                 /run/opendmarc/opendmarc.pid
+UserID                  opendmarc
+UMask                   0002
+Syslog                  true
+SoftwareHeader          true
+SPFSelfValidate         true
+RejectFailures          false
+OPENDMARCCONF
+    echo "opendmarc: wrote /etc/opendmarc.conf (inet socket localhost:8893, AuthservID ${AUTHSERV_ID})"
+else
+    echo "opendmarc: /etc/opendmarc.conf already managed by us - leaving it."
+fi
+
+# Keep /etc/default/opendmarc SOCKET in step with the conf (mirrors opendkim).
+if [[ -f /etc/default/opendmarc ]]; then
+    if grep -qE '^[[:space:]]*SOCKET=' /etc/default/opendmarc; then
+        sed -i 's#^[[:space:]]*SOCKET=.*#SOCKET="inet:8893@localhost"#' /etc/default/opendmarc
+    else
+        echo 'SOCKET="inet:8893@localhost"' >> /etc/default/opendmarc
+    fi
+fi
+
+# Postfix milter wiring. Order matters: opendkim FIRST so opendmarc can consume
+# its DKIM result (plus opendmarc's own SPF) to reach a DMARC verdict.
+# milter_default_action = accept guarantees a down/keyless milter never blocks
+# or defers mail. non_smtpd_milters keeps only opendkim (it signs locally
+# submitted outbound; opendmarc applies to inbound, not local submission).
 postconf -e "milter_default_action = accept"
-postconf -e "smtpd_milters = inet:localhost:8891"
+postconf -e "smtpd_milters = inet:localhost:8891, inet:localhost:8893"
 postconf -e "non_smtpd_milters = inet:localhost:8891"
-echo "main.cf: opendkim milter wired (inet:localhost:8891, default action accept)"
+echo "main.cf: milters wired (opendkim:8891 then opendmarc:8893; default action accept)"
 
 systemctl enable opendkim >/dev/null 2>&1 || true
 if command -v systemctl >/dev/null 2>&1 && systemctl restart opendkim 2>/dev/null; then
@@ -387,6 +471,15 @@ elif command -v service >/dev/null 2>&1 && service opendkim restart >/dev/null 2
     echo "opendkim: restarted (service)."
 else
     echo "WARNING: could not restart opendkim automatically - restart it manually." >&2
+fi
+
+systemctl enable opendmarc >/dev/null 2>&1 || true
+if command -v systemctl >/dev/null 2>&1 && systemctl restart opendmarc 2>/dev/null; then
+    echo "opendmarc: restarted (systemd)."
+elif command -v service >/dev/null 2>&1 && service opendmarc restart >/dev/null 2>&1; then
+    echo "opendmarc: restarted (service)."
+else
+    echo "WARNING: could not restart opendmarc automatically - restart it manually." >&2
 fi
 
 # --- 6. firewall -------------------------------------------------------------
@@ -429,3 +522,9 @@ echo "  - Publish DNS per domain: MX -> this server, plus SPF and DKIM TXT recor
 echo "  - For outbound DKIM signing, generate a per-domain key with:"
 echo "    sudo bash plugins/inbound_email/provisioning/provision_dkim.sh <domain>"
 echo "    then publish the DKIM TXT record it prints. See the Setup tab."
+echo "  - Inbound authentication: opendkim (verify) + opendmarc now stamp an"
+echo "    Authentication-Results header the app reads for SPF/DKIM/DMARC."
+echo "    CONFIRM IT WORKS: send a test message and check the stored copy carries"
+echo "    'Authentication-Results: ${AUTHSERV_ID}; dkim=... spf=... dmarc=...'."
+echo "    Config edits alone don't prove it — the Setup tab's 'Inbound"
+echo "    authentication verified' check goes PASS once milter-stamped mail arrives."
