@@ -10,16 +10,16 @@ inbound email subsystem — the receiving counterpart to outbound sending
 Postfix receives inbound mail, pipes it to a PHP handler, which looks up the
 alias and forwards via SMTP.
 
-**Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound DKIM verification, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
+**Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound authentication results (SPF/DKIM/DMARC) read from the verifying MTA / provider, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
 
 ## Installation
 
 ### Prerequisites
 
-Postfix (with the `postfix-pgsql` map driver) and opendkim are installed and
-configured by `provisioning/install_email.sh` — run it once per deployment
-(see Server Setup below). It assumes one Joinery site per host; that host may
-be a Docker container or bare metal.
+Postfix (with the `postfix-pgsql` map driver), opendkim and opendmarc are
+installed and configured by `provisioning/install_email.sh` — run it once per
+deployment (see Server Setup below). It assumes one Joinery site per host; that
+host may be a Docker container or bare metal.
 
 > **Setup status on the Plugins page.** Once activated, this plugin declares three provisioners, so the admin Plugins page (`/admin/admin_plugins`) reports whether its runtime dependencies are working: a missing inbound mail server shows **Needs setup** with the `provisioning/install_email.sh` fix command; a down or misconfigured outbound relay shows **Needs setup** with the reason; and missing MX/SPF DNS records on any enabled inbound domain show **Needs setup** listing the affected domains. See the "Declaring Host Provisioners" section of `docs/plugin_developer_guide.md`.
 
@@ -37,7 +37,8 @@ recommended way to configure the plugin. Enter the email address you want to
 receive mail at; the tab then:
 
 - autodetects the host state — Postfix, the pipe transport, the domain map,
-  opendkim, port 25;
+  opendkim, port 25, and whether inbound mail is actually being
+  authentication-verified (opendkim-verify + opendmarc);
 - verifies this server's mail identity — `myhostname`, the mail host's A
   record, and forward-confirmed reverse DNS (PTR);
 - verifies every per-domain DNS record (MX, SPF, DKIM, DMARC) for
@@ -72,20 +73,80 @@ the Setup tab to verify and publish the domain's DNS records.
 ## Server Setup
 
 On apt-based systems, run `provisioning/install_email.sh` as root, once per
-deployment. It installs Postfix, `postfix-pgsql`, and opendkim and applies the
-**fixed** base configuration, idempotently:
+deployment. It installs Postfix, `postfix-pgsql`, opendkim and opendmarc and
+applies the **fixed** base configuration, idempotently:
 
 - the `joinery` pipe transport in `master.cf`;
 - `virtual_transport = joinery`, `inet_interfaces = all`, a safe
   `mydestination`, and RBL `smtpd_recipient_restrictions`;
 - `virtual_mailbox_domains` wired to a PostgreSQL map (see below) so Postfix
   reads the live inbound-domain list straight from the database;
-- opendkim static config — inet socket on `localhost:8891`, empty key/signing
-  tables — and the Postfix milter (`milter_default_action = accept`, so a
-  keyless or down opendkim never blocks mail).
+- opendkim config — inet socket on `localhost:8891`, `Mode sv` (sign **and
+  verify**), empty key/signing tables, and an `AuthservID` matching the
+  configured mail hostname;
+- opendmarc config — inet socket on `localhost:8893`, `SPFSelfValidate true`,
+  `RejectFailures false` (stamp-only, never reject);
+- both Postfix milters, in order: `smtpd_milters = inet:localhost:8891,
+  inet:localhost:8893` (opendkim first so opendmarc can consume its DKIM
+  result), with `milter_default_action = accept` so a down/keyless milter never
+  blocks mail. Received mail is thereby stamped with an `Authentication-Results`
+  header the app reads for SPF/DKIM/DMARC (see **Inbound authentication** below).
 
 The only genuinely per-deployment work left is DNS, and per-domain DKIM keys.
 Adding or removing an inbound domain needs **no host action** — see below.
+
+### Inbound authentication (SPF / DKIM / DMARC)
+
+**The app never computes these verdicts itself.** SPF and DMARC are *structurally
+impossible* to compute at the PHP layer: SPF is a function of the connecting
+client IP evaluated against the sender domain's record, and the inbound Postfix
+pipe (`utils/inbound_email_handler.php`) only ever receives the raw MIME on
+stdin plus the envelope recipient — the connecting IP is known only to `smtpd`,
+before the pipe. So the verdicts come from the **MTA**, which has the IP at SMTP
+time:
+
+1. The verifying milters — `opendkim` in verify mode and `opendmarc`
+   (`SPFSelfValidate`) — evaluate SPF/DKIM/DMARC on receipt and stamp an
+   `Authentication-Results` header with our `AuthservID`.
+2. `AuthenticationResults` (in `includes/`) parses that header, and
+   `InboundEmailRouter` records the verdicts into `iem_spf_result` /
+   `iem_dkim_result` / `iem_dmarc_result`, with `iem_auth_source = 'milter'`.
+
+**Trust model.** A message can carry attacker-supplied `Authentication-Results`
+lines from upstream hops, so the parser honors **only** a line whose authserv-id
+equals our mail host (the milters' `AuthservID`, == `inbound_email_mail_hostname`
+— they must match or verdicts are ignored). Lines stamped by anyone else are
+discarded.
+
+**The `unverified` state is normal, not a failure.** When no trusted
+`Authentication-Results` header is present — no verifying milter installed, or
+mail that arrived some other way — the verdicts read **`unverified`** and
+`iem_auth_source = 'none'`. A hand-rolled `fail` is **never** emitted; an honest
+`unverified` is safer than a confident-but-wrong verdict. Sources today are
+`milter` and `none`; **`mailgun`** is reserved for the deferred webhook path
+(`specs/inbound_mailgun_verification.md`) — until that lands, mail relayed via
+the Mailgun webhook records `unverified`.
+
+The message detail page and the Mailbox reader show the sourced verdicts, or an
+explicit "unverified — no verifying milter installed", never a bare red `fail`.
+
+#### Verification-capability warning (Setup tab)
+
+The Setup tab runs an **Inbound authentication verified** check
+(`host.inbound_verification` in `InboundEmailSetupCheck`) so a missing or broken
+verifier surfaces as an explained warning rather than a silent `unverified`:
+
+- **WARN** — the selected provider isn't one we verify (e.g. Mailgun, pending
+  its spec), **or** the provider is Postfix but verification is broken (milter
+  unreachable, opendmarc missing, config drift). Fix: run `install_email.sh`,
+  then send a test message to confirm an `Authentication-Results` header appears.
+- **INFO** (neutral) — Postfix and the config look correct, but no
+  milter-stamped mail has arrived **yet** to confirm it (e.g. a fresh install),
+  or the host config isn't readable by the web user. We legitimately can't tell
+  yet — not an alarm.
+- **PASS** — recent mail carries `iem_auth_source = 'milter'` verdicts. The
+  behavioral signal (milter mail actually seen) is authoritative, because a
+  milter can be wired-but-unreachable; the config probe only enriches the reason.
 
 ### The inbound-domain list is live, never "installed"
 
@@ -128,6 +189,11 @@ virtual_mailbox_domains = pgsql:/etc/postfix/joinery-domains.cf
 inet_interfaces = all
 mydestination = localhost, localhost.localdomain
 
+# opendkim (verify) then opendmarc — order matters; accept on milter failure.
+milter_default_action = accept
+smtpd_milters = inet:localhost:8891, inet:localhost:8893
+non_smtpd_milters = inet:localhost:8891
+
 smtpd_recipient_restrictions =
     permit_mynetworks, reject_unauth_destination,
     reject_rbl_client zen.spamhaus.org,
@@ -136,6 +202,11 @@ smtpd_recipient_restrictions =
     reject_rhsbl_helo dbl.spamhaus.org,
     reject_rhsbl_sender dbl.spamhaus.org, permit
 ```
+
+opendkim must run `Mode sv` with an `AuthservID` equal to your mail hostname
+(== `inbound_email_mail_hostname`), and opendmarc with `SPFSelfValidate true`
+and `RejectFailures false`. See `provisioning/install_email.sh` for the exact
+managed config both daemons use.
 
 `/etc/postfix/joinery-domains.cf` (the pgsql map). `install_email.sh` creates
 the dedicated role and writes this file automatically; on a non-apt system,
@@ -165,13 +236,23 @@ joinery   unix  -  n  n  -  5  pipe
 (Use the PHP CLI path for your system — `install_email.sh` resolves it
 automatically; the official `php` Docker images ship it at `/usr/local/bin/php`.)
 
-### opendkim (DKIM signing)
+### opendkim (DKIM signing + inbound verify)
 
 `install_email.sh` installs opendkim's **static** config (the inet socket,
-empty `key.table` / `signing.table` / `trusted.hosts`, and the Postfix milter).
-opendkim then runs from first install — keyless, signing nothing — and
-`milter_default_action = accept` guarantees a keyless or down opendkim never
-blocks or defers mail.
+`Mode sv`, `AuthservID`, empty `key.table` / `signing.table` / `trusted.hosts`,
+and the Postfix milter). `Mode sv` means it **signs** outbound *and* **verifies**
+inbound (stamping the DKIM result into `Authentication-Results` — see **Inbound
+authentication** above, where opendmarc adds SPF/DMARC). opendkim runs from
+first install — keyless for *signing* until a per-domain key is added, but
+*verifying* inbound DKIM immediately — and `milter_default_action = accept`
+guarantees a keyless or down opendkim never blocks or defers mail.
+
+> The opendkim.conf the installer writes is keyed on a managed marker, so a host
+> already wired on an older version (which lacked `AuthservID`) is upgraded in
+> place on the next run. The live dev box was once found running **Debian-stock**
+> opendkim.conf with Postfix dialing a dead `inet:8891` socket — the milter was a
+> silent no-op in both directions; re-running the installer realigns the socket
+> and restores both verify and signing.
 
 Generating a key is a **per-domain** step (a key file on disk plus a DNS record
 cannot be a database lookup). `provisioning/provision_dkim.sh` does the whole

@@ -8,15 +8,18 @@
  * the default test is a credential-free LOOPBACK:
  *
  *   send via the configured provider  →  to a local inbound address  →
- *   the message is received + stored (and DKIM-verified) by InboundEmailRouter →
+ *   the message is received + stored by InboundEmailRouter (which records the
+ *   SPF/DKIM/DMARC verdicts the verifying MTA stamped) →
  *   this page polls iem_inbound_email_messages and shows the result.
  *
  * That single action exercises outbound (provider), inbound (receive/store),
- * and the platform's own DKIM verdict — with no external mailbox, no IMAP, no
- * app password. A second mode sends to any external address for a manual
- * deliverability spot-check (open the message and use "Show original").
+ * and the stored authentication verdicts — with no external mailbox, no IMAP, no
+ * app password. The verdicts shown are the ones the router stored from the
+ * message's Authentication-Results header (read by AuthenticationResults, never
+ * recomputed here); without a verifying milter they read "unverified". A second
+ * mode sends to any external address for a manual deliverability spot-check.
  *
- * @version 2.0
+ * @version 2.1
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -109,17 +112,6 @@ function est_dkim_info($raw) {
     return $info;
 }
 
-/** Extract spf/dkim/dmarc result tokens from a raw message's Authentication-Results header. */
-function est_parse_auth($raw) {
-    $out = ['spf' => null, 'dkim' => null, 'dmarc' => null];
-    foreach (['spf', 'dkim', 'dmarc'] as $k) {
-        if (preg_match('/Authentication-Results:.*?\b' . $k . '=([a-z]+)/is', (string)$raw, $m)) {
-            $out[$k] = strtolower($m[1]);
-        }
-    }
-    return $out;
-}
-
 // ------------------------------------------------ JSON poll endpoint (?check=)
 
 if (isset($_GET['check']) && $_GET['check'] !== '') {
@@ -130,7 +122,7 @@ if (isset($_GET['check']) && $_GET['check'] !== '') {
     $like = '%' . $token . '%';
     $stmt = $db->prepare(
         "SELECT iem_inbound_email_message_id, iem_sender, iem_subject, iem_received_time,
-                iem_dkim_result, iem_raw_message
+                iem_dkim_result, iem_spf_result, iem_dmarc_result, iem_auth_source, iem_raw_message
          FROM iem_inbound_email_messages
          WHERE iem_recipient ILIKE ? OR iem_subject ILIKE ?
          ORDER BY iem_received_time DESC LIMIT 1"
@@ -140,6 +132,11 @@ if (isset($_GET['check']) && $_GET['check'] !== '') {
 
     if (!$row) { echo json_encode(['found' => false]); exit; }
 
+    // The SPF/DKIM/DMARC verdicts are the ones the router already stored —
+    // read from the message's Authentication-Results header by
+    // AuthenticationResults at receive time, never recomputed here. auth_source
+    // tells the client whether a verifying milter stamped them ('milter') or
+    // the message is honestly 'unverified' (source 'none').
     echo json_encode([
         'found'       => true,
         'id'          => (int)$row['iem_inbound_email_message_id'],
@@ -147,7 +144,12 @@ if (isset($_GET['check']) && $_GET['check'] !== '') {
         'subject'     => $row['iem_subject'],
         'received'    => $row['iem_received_time'],
         'dkim'        => est_dkim_info($row['iem_raw_message']),
-        'auth'        => est_parse_auth($row['iem_raw_message']),
+        'auth'        => [
+            'spf'    => $row['iem_spf_result'],
+            'dkim'   => $row['iem_dkim_result'],
+            'dmarc'  => $row['iem_dmarc_result'],
+            'source' => $row['iem_auth_source'] ?: 'none',
+        ],
         'reader_url'  => '/plugins/inbound_email/admin/admin_inbound_email_message?iem_inbound_email_message_id=' . (int)$row['iem_inbound_email_message_id'],
     ]);
     exit;
@@ -325,6 +327,7 @@ echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Ru
     function render(d) {
         wait.style.display = 'none';
         var a = d.auth || {};
+        var verified = (a.source === 'milter' || a.source === 'mailgun');
         var html = '<div class="card"><div class="card-header bg-success text-white">✓ Round-trip complete — message received and stored</div><div class="card-body">';
         html += '<p><strong>From:</strong> ' + esc(d.sender) + '<br><strong>Subject:</strong> ' + esc(d.subject) + '<br><strong>Received:</strong> ' + esc(d.received) + '</p>';
         var dk = d.dkim || {};
@@ -333,13 +336,22 @@ echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Ru
             : '<span class="badge bg-secondary">no signature</span>';
         html += '<table class="table table-sm" style="max-width:560px"><tbody>';
         html += '<tr><td>DKIM-Signature</td><td>' + dkimCell + '</td></tr>';
-        html += '<tr><td>SPF verdict (from headers)</td><td>' + badge(a.spf, a.spf === 'pass') + '</td></tr>';
-        html += '<tr><td>DKIM verdict (from headers)</td><td>' + badge(a.dkim, a.dkim === 'pass') + '</td></tr>';
-        html += '<tr><td>DMARC verdict (from headers)</td><td>' + badge(a.dmarc, a.dmarc === 'pass') + '</td></tr>';
+        if (verified) {
+            html += '<tr><td>SPF verdict</td><td>' + badge(a.spf, a.spf === 'pass') + '</td></tr>';
+            html += '<tr><td>DKIM verdict</td><td>' + badge(a.dkim, a.dkim === 'pass') + '</td></tr>';
+            html += '<tr><td>DMARC verdict</td><td>' + badge(a.dmarc, a.dmarc === 'pass') + '</td></tr>';
+        }
         html += '</tbody></table>';
-        html += '<p class="text-muted small">This shows a DKIM signature is present and which domain signed it. '
-              + 'A trustworthy <em>pass/fail verdict</em> isn\'t available on this self-hosted inbound path (no verifying milter, so the header rows read "—"). '
-              + 'For the authoritative SPF/DKIM/DMARC result, use <strong>External</strong> mode and check the message\'s "Show original".</p>';
+        if (verified) {
+            html += '<p class="text-muted small">These SPF/DKIM/DMARC verdicts were read from the message\'s '
+                  + '<code>Authentication-Results</code> header, stamped by the verifying mail server (source: '
+                  + esc(a.source) + '). The app never computes them itself.</p>';
+        } else {
+            html += '<p class="text-muted small">This shows a DKIM signature is present and which domain signed it. '
+                  + 'SPF/DKIM/DMARC <em>verdicts</em> read <strong>unverified</strong> because no verifying milter stamped an '
+                  + '<code>Authentication-Results</code> header on receipt — install/repair the opendkim-verify + opendmarc '
+                  + 'milters (Inbound Email &rarr; Setup), or use <strong>External</strong> mode and check the message\'s "Show original".</p>';
+        }
         html += '<a class="btn btn-sm btn-outline-primary" href="' + d.reader_url + '">Open the stored message</a>';
         html += '</div></div>';
         out.innerHTML = html;

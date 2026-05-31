@@ -16,7 +16,15 @@
  * read/star state is simply a property of the row, shared among everyone with
  * access to that mailbox (team-inbox semantics). See MailboxService.
  *
- * @version 1.1
+ * Authentication verdicts (iem_dkim_result / iem_spf_result / iem_dmarc_result)
+ * are NOT computed by the app — they are read from the message's
+ * Authentication-Results header (stamped by the verifying MTA milters) via
+ * AuthenticationResults. iem_auth_source records where the verdict came from
+ * ('milter' / 'none'; 'mailgun' reserved for the deferred webhook path). When
+ * no trusted verdict is present the columns read 'unverified', never a
+ * hand-rolled 'fail'. See InboundEmailRouter and AuthenticationResults.
+ *
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -48,7 +56,10 @@ class InboundEmailMessage extends SystemBase {
 		'iem_is_read'             => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
 		'iem_is_starred'          => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
 		'iem_read_time'           => array('type'=>'timestamp(6)'),
-		'iem_dkim_result'         => array('type'=>'varchar(10)'),
+		'iem_dkim_result'         => array('type'=>'varchar(16)'),
+		'iem_spf_result'          => array('type'=>'varchar(16)', 'default'=>'unverified'),
+		'iem_dmarc_result'        => array('type'=>'varchar(16)', 'default'=>'unverified'),
+		'iem_auth_source'         => array('type'=>'varchar(20)', 'default'=>'none'),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		'iem_received_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iem_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),

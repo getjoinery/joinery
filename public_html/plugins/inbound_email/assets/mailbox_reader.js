@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 1.0
+ * No framework. @version 1.1
  *
  * Visibility is enforced server-side (MailboxViewer/MailboxService); this client
  * only renders what the endpoints return and never decides access.
@@ -252,6 +252,18 @@
 		return b;
 	}
 
+	// SPF/DKIM/DMARC verdicts are READ from the message's Authentication-Results
+	// header (auth_source 'milter'/'mailgun'), never computed. Without a
+	// verifying milter the message is honestly "unverified".
+	function authText(m) {
+		if (m.auth_source === 'milter' || m.auth_source === 'mailgun') {
+			return 'SPF ' + (m.spf_result || 'none')
+				+ ' · DKIM ' + (m.dkim_result || 'none')
+				+ ' · DMARC ' + (m.dmarc_result || 'none');
+		}
+		return 'Authentication: unverified (no verifying milter)';
+	}
+
 	function messageBlock(m, expanded) {
 		var wrap = el('div', 'mbx-message' + (expanded ? '' : ' mbx-collapsed'));
 
@@ -259,6 +271,7 @@
 		var left = el('div');
 		left.appendChild(el('div', 'mbx-message-from', m.sender || '(unknown)'));
 		left.appendChild(el('div', 'mbx-message-meta', 'to ' + (m.recipient || '')));
+		left.appendChild(el('div', 'mbx-message-meta', authText(m)));
 		head.appendChild(left);
 		head.appendChild(el('span', 'mbx-message-time', fmtTime(m.received_time)));
 		head.addEventListener('click', function () { wrap.classList.toggle('mbx-collapsed'); });

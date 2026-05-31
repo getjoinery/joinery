@@ -7,7 +7,7 @@
  * attacker-controlled. A "view raw" toggle shows the original MIME, and
  * an .eml download is available.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -51,7 +51,31 @@ echo '<dt class="col-sm-2">Received</dt><dd class="col-sm-10">' . htmlspecialcha
 echo '<dt class="col-sm-2">Domain</dt><dd class="col-sm-10">' . htmlspecialchars($domain_name ?: '-') . '</dd>';
 echo '<dt class="col-sm-2">Alias</dt><dd class="col-sm-10">' . htmlspecialchars($alias_name ?: '(catch-all)') . '</dd>';
 echo '<dt class="col-sm-2">Message-ID</dt><dd class="col-sm-10">' . htmlspecialchars($message->get('iem_message_id_header') ?: '(none)') . '</dd>';
-echo '<dt class="col-sm-2">DKIM</dt><dd class="col-sm-10">' . htmlspecialchars($message->get('iem_dkim_result') ?: 'none') . '</dd>';
+
+// Authentication: SPF/DKIM/DMARC are READ from the verifying MTA's
+// Authentication-Results header (iem_auth_source = 'milter'), never computed
+// here. With no verifying milter the message is honestly "unverified" — we
+// never render a bare red fail the app can't stand behind.
+$auth_source = $message->get('iem_auth_source') ?: 'none';
+$auth_verified = ($auth_source === 'milter' || $auth_source === 'mailgun');
+echo '<dt class="col-sm-2">Authentication</dt><dd class="col-sm-10">';
+if ($auth_verified) {
+	$verdict_cols = array('SPF' => 'iem_spf_result', 'DKIM' => 'iem_dkim_result', 'DMARC' => 'iem_dmarc_result');
+	foreach ($verdict_cols as $lbl => $col) {
+		$v = strtolower((string)$message->get($col));
+		if ($v === '') { $v = 'none'; }
+		$cls = ($v === 'pass') ? 'bg-success'
+			: (in_array($v, array('fail', 'softfail', 'permerror', 'temperror'), true) ? 'bg-danger' : 'bg-secondary');
+		echo '<span class="badge ' . $cls . ' me-1">' . htmlspecialchars($lbl . ': ' . $v) . '</span>';
+	}
+	$src_text = ($auth_source === 'milter') ? 'verified by this mail server' : 'verified by ' . $auth_source;
+	echo ' <span class="text-muted small">(' . htmlspecialchars($src_text) . ')</span>';
+} else {
+	echo '<span class="badge bg-secondary">unverified</span> '
+		. '<span class="text-muted small">no verifying milter installed — SPF/DKIM/DMARC were not checked on receipt</span>';
+}
+echo '</dd>';
+
 echo '<dt class="col-sm-2">Size</dt><dd class="col-sm-10">' . intval($message->get('iem_size_bytes')) . ' bytes</dd>';
 echo '</dl>';
 echo '</div></div>';
