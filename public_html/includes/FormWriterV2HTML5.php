@@ -743,6 +743,9 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         if ($data['onclick']) {
             $html .= ' onclick="' . htmlspecialchars($data['onclick']) . '"';
         }
+        if (!empty($data['formnovalidate'])) {
+            $html .= ' formnovalidate';
+        }
 
         $html .= '>';
         $html .= htmlspecialchars($data['label']);

@@ -833,6 +833,18 @@ $rules['phone']['pattern']['value'] = '"/^[\\d\-\(\)\s]+$/"';  // Digits, dash, 
 - **Check:** Is joinery-validate.js loaded?
 - **Check:** Are rules defined correctly (required vs optional)?
 
+### Delete / secondary button blocked by validation
+
+**Problem:** On a form with required fields, a Delete or Cancel button won't submit (the
+validator flags the empty required fields instead of running the action).
+- **Cause:** The client validator runs on every submit button by default.
+- **Solution:** Mark that button to bypass client validation:
+  `$formwriter->submitbutton('btn_delete', 'Delete', ['formnovalidate' => true]);`
+- **Note:** This skips only the *client* check — server-side validation still applies, so
+  the server action behind the button must not assume a valid model. See the "Multi-Action
+  Forms" section in [FormWriter](formwriter.md) for the full pattern (and how the clicked
+  button's name is preserved through submission).
+
 ### Server-side validation not catching errors
 
 **Problem:** Invalid data saved to database

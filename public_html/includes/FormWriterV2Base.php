@@ -3223,6 +3223,10 @@ document.addEventListener("DOMContentLoaded", function() {
             'class' => $options['class'] ?? '',
             'disabled' => !empty($options['disabled']),
             'onclick' => $options['onclick'] ?? '',
+            // Emits the HTML formnovalidate attribute so this button bypasses
+            // client-side validation (Delete/Cancel actions). 'skip_validation'
+            // is accepted as a friendlier alias.
+            'formnovalidate' => !empty($options['formnovalidate']) || !empty($options['skip_validation']),
         ];
     }
 
