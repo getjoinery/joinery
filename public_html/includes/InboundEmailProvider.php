@@ -11,7 +11,7 @@
  * Inbound providers live in includes/email_providers/ alongside outbound
  * providers, so the same physical class can satisfy both roles.
  *
- * @version 1.0
+ * @version 1.1
  */
 interface InboundEmailProvider {
     /**
@@ -73,7 +73,29 @@ interface InboundEmailProvider {
      * returns them. Returning null signals rejection (signature failure,
      * malformed input).
      *
-     * @return array{raw_mime: string, recipient: string}|null
+     * A provider that performed its own SPF/DKIM/DMARC verification upstream
+     * (and delivered the message over an authenticated path — see each
+     * provider's handleInbound) MAY include an optional 'auth' key carrying
+     * those verdicts. The router prefers it over the message's
+     * Authentication-Results header (see InboundEmailRouter::readAuthResults).
+     * Verdict tokens are normalized to the same lowercase set
+     * AuthenticationResults produces: pass | fail | softfail | neutral | none
+     * | temperror | permerror. A method the provider did not assert is null
+     * (recorded 'none'). A provider that does no verification omits 'auth'
+     * entirely (the message is then recorded 'unverified').
+     *
+     * @return array{
+     *   raw_mime: string,
+     *   recipient: string,
+     *   auth?: array{
+     *     spf: ?string,
+     *     dkim: ?string,
+     *     dmarc: ?string,
+     *     spf_domain?: string,
+     *     dkim_domain?: string,
+     *     source: string
+     *   }
+     * }|null
      */
     public function handleInbound(array $post, string $raw_body): ?array;
 }

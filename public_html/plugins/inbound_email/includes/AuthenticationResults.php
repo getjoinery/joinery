@@ -22,9 +22,11 @@
  * entries (oversigning, multiple signatures) resolve to the strongest result
  * (a pass wins over a fail).
  *
- * (A Mailgun X-Mailgun-* / Received-SPF fallback for the webhook path is a
- * separate, deferred change — see specs/inbound_mailgun_verification.md. This
- * class stays single-purpose: the standard Authentication-Results header only.)
+ * This class is single-purpose: the standard Authentication-Results header
+ * only. Webhook providers (Mailgun/SendGrid/SES) report their own SPF/DKIM/DMARC
+ * verdicts, which they map in their handleInbound() and the router prefers over
+ * this header — see InboundEmailRouter::readAuthResults() and
+ * specs/inbound_mailgun_verification.md.
  *
  * @version 1.0
  */
