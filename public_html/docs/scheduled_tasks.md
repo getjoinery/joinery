@@ -161,7 +161,7 @@ Navigate to **Admin > System > Scheduled Tasks**. The task appears under "Availa
 | `sct_schedule_time` | time | Time of day in site timezone (daily/weekly only) |
 | `sct_task_config` | jsonb | Task-specific configuration |
 | `sct_last_run_time` | timestamp | When task last ran |
-| `sct_last_run_status` | varchar(50) | success/error/skipped |
+| `sct_last_run_status` | varchar(50) | success/error/skipped/orphaned |
 | `sct_last_run_message` | varchar(500) | Human-readable result detail |
 | `sct_create_time` | timestamp | Row creation time |
 | `sct_delete_time` | timestamp | Soft delete time |
@@ -204,6 +204,29 @@ Returns `sct_task_config` as an associative array.
 - Loads active, non-deleted tasks
 - Runs due tasks and updates their status
 - Outputs timestamped results to stdout (logged by cron)
+
+### Orphaned tasks (code file removed)
+
+Deploys ship and remove code; they never touch the `sct_scheduled_tasks`
+table. So when a task is **removed or consolidated** in a release, its
+activation row is intentionally left behind (orphan-by-design) — a deploy
+will not silently delete an operator's configured schedule and config
+based on a file no longer being present (which could also be a partial
+deploy, a rename, or an unsynced plugin).
+
+When the runner hits such a row, `resolve_task_file()` returns null and it
+records a distinct **`orphaned`** status with a "remove this task in admin,
+or restore the file" message. An orphan **still counts toward the run's
+error tally**, so the cron-health summary stays honest — it is a real
+"this needs attention" condition, just a remove-or-restore cleanup item
+rather than a task that ran and failed.
+
+The admin Active Tasks list flags orphans with an **Orphaned** badge,
+detected live (by resolving the file on page load) so it reflects the
+current deploy rather than the last stored status. Cleanup is a manual,
+per-site operator action: **Deactivate** the task (soft-deletes the row).
+Consolidation therefore has two operator steps on each site — activate the
+new task, and remove the obsolete ones.
 
 ### Per-task advisory locking
 

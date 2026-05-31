@@ -8,7 +8,7 @@
  * Crontab (one line per site):
  * STAR/15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
  *
- * @version 1.2
+ * @version 1.3
  */
 
 // Reject non-CLI access
@@ -92,10 +92,18 @@ foreach ($tasks as $task) {
 		// Resolve the task class file
 		$task_file = $task->resolve_task_file();
 		if (!$task_file) {
-			echo "[$timestamp]   ERROR: Could not resolve class file for $task_class\n";
+			// The task's code file is gone — almost always because the
+			// task was removed or consolidated in a deploy while its
+			// activation row was left behind (orphan-by-design; deploys
+			// never delete operator-configured task rows). This is an
+			// operator-cleanup item, not a task that ran and failed, so it
+			// gets a distinct 'orphaned' status with a clear "remove or
+			// restore" message. It still counts toward the error tally so
+			// the cron-health summary stays honest.
+			echo "[$timestamp]   ORPHANED: No class file for $task_class — remove the task in admin or restore the file\n";
 			$task->set('sct_last_run_time', 'now()');
-			$task->set('sct_last_run_status', 'error');
-			$task->set('sct_last_run_message', 'Could not resolve class file');
+			$task->set('sct_last_run_status', 'orphaned');
+			$task->set('sct_last_run_message', 'Task code file is missing — remove this task in admin, or restore the file');
 			$task->save();
 			$tasks_errored++;
 			continue;
