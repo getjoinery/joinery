@@ -78,7 +78,7 @@ if ($result === null) {
 
 try {
 	$router = new InboundEmailRouter();
-	$exit_code = $router->processEmail($result['raw_mime'], $result['recipient']);
+	$exit_code = $router->processEmail($result['raw_mime'], $result['recipient'], $result['auth'] ?? null);
 } catch (\Throwable $e) {
 	error_log('inbound_email_webhook: router error: ' . $e->getMessage());
 	http_response_code(503);

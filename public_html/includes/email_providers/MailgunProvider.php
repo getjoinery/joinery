@@ -365,10 +365,107 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider {
             return null;
         }
 
-        return [
+        $out = [
             'raw_mime' => (string)$raw_mime,
             'recipient' => (string)$recipient,
         ];
+
+        $auth = self::extractAuth((string)$raw_mime, $post);
+        if ($auth !== null) {
+            $out['auth'] = $auth;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Build the verdict array from Mailgun's X-Mailgun-* headers (present in the
+     * stored MIME). The signature was already verified by the caller, so these
+     * headers are trusted. Returns null only when neither verdict header is
+     * present (then the router falls back to 'unverified' — never a fabricated
+     * pass).
+     *
+     * Mailgun reports no DMARC verdict, so dmarc is always null (recorded 'none').
+     */
+    private static function extractAuth(string $raw_mime, array $post): ?array {
+        $spf_raw  = self::extractMimeHeader($raw_mime, 'X-Mailgun-Spf');
+        $dkim_raw = self::extractMimeHeader($raw_mime, 'X-Mailgun-Dkim-Check-Result');
+
+        if ($spf_raw === null && $dkim_raw === null) {
+            return null;
+        }
+
+        $spf_map = [
+            'pass'     => 'pass',
+            'neutral'  => 'neutral',
+            'fail'     => 'fail',
+            'softfail' => 'softfail',
+            'none'     => 'none',
+        ];
+        $dkim_map = [
+            'pass' => 'pass',
+            'fail' => 'fail',
+        ];
+
+        $spf  = ($spf_raw  !== null) ? ($spf_map[strtolower(trim($spf_raw))]   ?? null) : null;
+        $dkim = ($dkim_raw !== null) ? ($dkim_map[strtolower(trim($dkim_raw))] ?? null) : null;
+
+        $auth = [
+            'spf'    => $spf,
+            'dkim'   => $dkim,
+            'dmarc'  => null,
+            'source' => 'mailgun',
+        ];
+
+        // Best-effort signing domains (omitted when not readily available).
+        $sender = (string)($post['sender'] ?? '');
+        if ($sender !== '' && strpos($sender, '@') !== false) {
+            $auth['spf_domain'] = strtolower(trim(substr(strrchr($sender, '@'), 1)));
+        }
+        $dkim_sig = self::extractMimeHeader($raw_mime, 'DKIM-Signature');
+        if ($dkim_sig !== null && preg_match('/\bd=\s*([^;\s]+)/i', $dkim_sig, $m)) {
+            $auth['dkim_domain'] = strtolower(rtrim(trim($m[1]), '.'));
+        }
+
+        return $auth;
+    }
+
+    /**
+     * Read the first occurrence of a header from raw MIME, unfolding RFC 5322
+     * continuation lines. Case-insensitive; returns null when absent. Scans only
+     * the header block (up to the first blank line).
+     */
+    private static function extractMimeHeader(string $raw_mime, string $name): ?string {
+        $normalized = str_replace("\r\n", "\n", $raw_mime);
+        $split = strpos($normalized, "\n\n");
+        $block = ($split !== false) ? substr($normalized, 0, $split) : $normalized;
+
+        $name = strtolower($name);
+        $value = null;
+        $collecting = false;
+
+        foreach (explode("\n", $block) as $line) {
+            if ($line !== '' && ($line[0] === ' ' || $line[0] === "\t")) {
+                if ($collecting) {
+                    $value .= ' ' . trim($line);
+                }
+                continue;
+            }
+            if ($collecting) {
+                // We already captured our header and hit the next one — done.
+                break;
+            }
+            $colon = strpos($line, ':');
+            if ($colon === false) {
+                continue;
+            }
+            if (strtolower(trim(substr($line, 0, $colon))) === $name) {
+                $value = trim(substr($line, $colon + 1));
+                $collecting = true;
+            }
+        }
+
+        return $value;
     }
 
     private static function makeResult($id, $scope, $layer, $label, $severity, $status, $summary, $detail = '', $fix = null, $recheckable = true): array {

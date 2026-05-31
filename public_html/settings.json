@@ -127,7 +127,6 @@
     { "name": "mailgun_api_key", "default": "" },
     { "name": "mailgun_domain", "default": "" },
     { "name": "mailgun_eu_api_link", "default": "" },
-    { "name": "mailgun_webhook_signing_key", "default": "" },
     { "name": "paypal_api_key", "default": "" },
     { "name": "paypal_api_key_test", "default": "" },
     { "name": "paypal_api_secret", "default": "" },

@@ -102,30 +102,52 @@ impossible* to compute at the PHP layer: SPF is a function of the connecting
 client IP evaluated against the sender domain's record, and the inbound Postfix
 pipe (`utils/inbound_email_handler.php`) only ever receives the raw MIME on
 stdin plus the envelope recipient — the connecting IP is known only to `smtpd`,
-before the pipe. So the verdicts come from the **MTA**, which has the IP at SMTP
-time:
+before the pipe. So the verdicts come from whoever ran the inbound MTA, in one
+of two trusted forms, resolved by `InboundEmailRouter::readAuthResults()` in
+precedence order:
 
-1. The verifying milters — `opendkim` in verify mode and `opendmarc`
+1. **Webhook provider verdicts.** A provider that received and verified the
+   message upstream (Mailgun, SendGrid, SES) returns its SPF/DKIM/DMARC results
+   from `handleInbound()` as an `auth` array. The webhook dispatcher threads
+   that into `processEmail()`, and the router records it with
+   `iem_auth_source =` the provider key (`mailgun` / `sendgrid` / `ses`).
+2. **Authentication-Results header.** For the self-hosted Postfix path, the
+   verifying milters — `opendkim` in verify mode and `opendmarc`
    (`SPFSelfValidate`) — evaluate SPF/DKIM/DMARC on receipt and stamp an
-   `Authentication-Results` header with our `AuthservID`.
-2. `AuthenticationResults` (in `includes/`) parses that header, and
-   `InboundEmailRouter` records the verdicts into `iem_spf_result` /
-   `iem_dkim_result` / `iem_dmarc_result`, with `iem_auth_source = 'milter'`.
+   `Authentication-Results` header with our `AuthservID`. `AuthenticationResults`
+   (in `includes/`) parses that header and the router records
+   `iem_auth_source = 'milter'`.
 
-**Trust model.** A message can carry attacker-supplied `Authentication-Results`
-lines from upstream hops, so the parser honors **only** a line whose authserv-id
-equals our mail host (the milters' `AuthservID`, == `inbound_email_mail_hostname`
-— they must match or verdicts are ignored). Lines stamped by anyone else are
-discarded.
+Either way the verdicts land in `iem_spf_result` / `iem_dkim_result` /
+`iem_dmarc_result`. Each provider normalizes its native field values to the same
+token set the header parser produces: `pass | fail | softfail | neutral | none |
+temperror | permerror`. A method a source does not assert reads `none`. Only SES
+reports a real DMARC verdict; Mailgun and SendGrid report SPF and DKIM only, so
+their `dmarc` reads `none`.
 
-**The `unverified` state is normal, not a failure.** When no trusted
-`Authentication-Results` header is present — no verifying milter installed, or
-mail that arrived some other way — the verdicts read **`unverified`** and
-`iem_auth_source = 'none'`. A hand-rolled `fail` is **never** emitted; an honest
-`unverified` is safer than a confident-but-wrong verdict. Sources today are
-`milter` and `none`; **`mailgun`** is reserved for the deferred webhook path
-(`specs/inbound_mailgun_verification.md`) — until that lands, mail relayed via
-the Mailgun webhook records `unverified`.
+**Trust model.** Provider verdicts are trusted only because they ride that
+provider's authenticated delivery path: Mailgun's HMAC-signed POST (verified in
+`MailgunProvider::handleInbound()`), SES's SNS message signature (verified
+against AWS's signing certificate, pinned to an `sns.<region>.amazonaws.com`
+host), and a shared secret on the Destination URL for SendGrid Inbound Parse
+(which does not sign its requests — a blank `sendgrid_inbound_secret` rejects
+everything). A forged `X-Mailgun-Spf`, `SPF`, or `receipt` blob on mail that did
+**not** arrive through the matching provider is never honored: the `auth` key
+only exists when that provider object handled the request. For the header path,
+a message can carry attacker-supplied `Authentication-Results` lines from
+upstream hops, so the parser honors **only** a line whose authserv-id equals our
+mail host (the milters' `AuthservID`, == `inbound_email_mail_hostname` — they
+must match or verdicts are ignored). Lines stamped by anyone else are discarded.
+
+**The `unverified` state is normal, not a failure.** When neither a provider
+verdict nor a trusted `Authentication-Results` header is present — no verifying
+milter installed, or mail that arrived some other way — the verdicts read
+**`unverified`** and `iem_auth_source = 'none'`. A hand-rolled `fail` is
+**never** emitted; an honest `unverified` is safer than a confident-but-wrong
+verdict. Misreading a provider field is fail-safe the same way: an unrecognized
+value falls through to `none` (or, when no verdict field is present at all,
+`unverified`) — never a synthesized `pass`. The valid `iem_auth_source` values
+are `milter`, `mailgun`, `sendgrid`, `ses`, and `none`.
 
 The message detail page and the Mailbox reader show the sourced verdicts, or an
 explicit "unverified — no verifying milter installed", never a bare red `fail`.
@@ -136,17 +158,20 @@ The Setup tab runs an **Inbound authentication verified** check
 (`host.inbound_verification` in `InboundEmailSetupCheck`) so a missing or broken
 verifier surfaces as an explained warning rather than a silent `unverified`:
 
-- **WARN** — the selected provider isn't one we verify (e.g. Mailgun, pending
-  its spec), **or** the provider is Postfix but verification is broken (milter
-  unreachable, opendmarc missing, config drift). Fix: run `install_email.sh`,
-  then send a test message to confirm an `Authentication-Results` header appears.
-- **INFO** (neutral) — Postfix and the config look correct, but no
-  milter-stamped mail has arrived **yet** to confirm it (e.g. a fresh install),
-  or the host config isn't readable by the web user. We legitimately can't tell
-  yet — not an alarm.
-- **PASS** — recent mail carries `iem_auth_source = 'milter'` verdicts. The
-  behavioral signal (milter mail actually seen) is authoritative, because a
-  milter can be wired-but-unreachable; the config probe only enriches the reason.
+- **WARN** — the selected provider has no inbound verification path at all,
+  **or** the provider is Postfix but verification is broken (milter unreachable,
+  opendmarc missing, config drift). Fix: run `install_email.sh`, then send a test
+  message to confirm an `Authentication-Results` header appears.
+- **INFO** (neutral) — the provider verifies, but no verdict-carrying mail has
+  arrived **yet** to confirm it. For Postfix this also covers a host whose config
+  isn't readable by the web user; for a webhook provider (Mailgun/SendGrid/SES)
+  it simply means no message stamped with that provider's `iem_auth_source` has
+  been received yet. We legitimately can't tell yet — not an alarm.
+- **PASS** — recent mail carries this provider's verdicts (`iem_auth_source` =
+  `milter` for Postfix, or `mailgun` / `sendgrid` / `ses` for a webhook
+  provider). The behavioral signal (verdict-carrying mail actually seen) is
+  authoritative, because a milter can be wired-but-unreachable; for Postfix the
+  config probe only enriches the reason.
 
 ### The inbound-domain list is live, never "installed"
 

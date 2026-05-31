@@ -241,17 +241,19 @@ class InboundEmailSetupCheck {
 		$provider = strtolower(trim((string)$this->settings->get_setting('inbound_email_provider'))) ?: 'postfix';
 		$fix = $this->installerFix();
 
-		// (a) Provider-support probe. Only Postfix has a verification path today;
-		// Mailgun is deferred (specs/inbound_mailgun_verification.md), and any
-		// other inbound provider is unsupported here.
+		// (a) Provider-support probe. Postfix verifies via milters; the webhook
+		// providers (Mailgun/SendGrid/SES) read verdicts from their own upstream
+		// verification — see specs/inbound_mailgun_verification.md. Anything else
+		// has no inbound verification path.
 		if ($provider !== 'postfix') {
+			$webhook_verifiers = array('mailgun', 'sendgrid', 'ses');
+			if (in_array($provider, $webhook_verifiers, true)) {
+				return $this->checkWebhookInboundVerification($provider, $label);
+			}
 			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::WARN,
 				'Inbound authentication isn\'t being verified for the selected mail provider (' . $provider . '); '
 				. 'messages are recorded as "unverified".',
-				$provider === 'mailgun'
-					? 'Mailgun inbound verdict reading is deferred (see specs/inbound_mailgun_verification.md). '
-					  . 'Until it lands, Mailgun-relayed mail is stored without SPF/DKIM/DMARC verdicts.'
-					: 'This provider has no inbound authentication-verification path in the plugin.',
+				'This provider has no inbound authentication-verification path in the plugin.',
 				null);
 		}
 
@@ -327,6 +329,45 @@ class InboundEmailSetupCheck {
 			'Verification is configured; no recently-received mail yet to confirm it.',
 			'The opendkim/opendmarc milters look correctly wired, but no message in the last 30 days carries '
 			. 'a milter verdict. Send a test message and re-check to confirm end-to-end.',
+			null, true);
+	}
+
+	/**
+	 * Inbound-verification status for a webhook provider that reads upstream
+	 * verdicts (Mailgun/SendGrid/SES). These providers verify SPF/DKIM/DMARC on
+	 * their own infrastructure and hand the verdicts in over their authenticated
+	 * delivery path, so there is no host milter to inspect. The authoritative
+	 * signal is the same behavioral one used for Postfix: has any message stamped
+	 * with this provider's iem_auth_source arrived recently?
+	 */
+	private function checkWebhookInboundVerification($provider, $label) {
+		$names = array('mailgun' => 'Mailgun', 'sendgrid' => 'SendGrid', 'ses' => 'Amazon SES');
+		$name = $names[$provider] ?? ucfirst($provider);
+
+		$seen = false;
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$stmt = $db->prepare(
+				"SELECT 1 FROM iem_inbound_email_messages
+				 WHERE iem_auth_source = ?
+				 AND iem_received_time > NOW() - INTERVAL '30 days' LIMIT 1"
+			);
+			$stmt->execute(array($provider));
+			$seen = (bool)$stmt->fetchColumn();
+		} catch (\Throwable $e) {
+			$seen = false;
+		}
+
+		if ($seen) {
+			return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::PASS,
+				'Inbound mail is being authentication-verified — recent messages carry SPF/DKIM/DMARC '
+				. 'verdicts from ' . $name . '.', '', null, true);
+		}
+
+		return $this->r('host.inbound_verification', '', 'host', $label, self::REQUIRED, self::INFO,
+			$name . ' supplies SPF/DKIM/DMARC verdicts on each inbound message; none received yet to confirm it.',
+			'When ' . $name . ' delivers a message through the inbound webhook, its verdicts are recorded '
+			. '(iem_auth_source = "' . $provider . '"). Send a test message and re-check to confirm end-to-end.',
 			null, true);
 	}
 

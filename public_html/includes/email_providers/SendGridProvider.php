@@ -7,8 +7,9 @@
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
+require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
-class SendGridProvider implements EmailServiceProvider {
+class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
 
     public static function getKey(): string {
         return 'sendgrid';
@@ -281,5 +282,198 @@ class SendGridProvider implements EmailServiceProvider {
             $sg->setDataResidency('eu');
         }
         return $sg;
+    }
+
+    // ── InboundEmailProvider ────────────────────────────────────────────
+
+    public static function getInboundSettingsFields(): array {
+        return [
+            [
+                'key' => 'sendgrid_inbound_secret',
+                'label' => 'Inbound Parse Shared Secret',
+                'type' => 'password',
+                'helptext' => 'SendGrid Inbound Parse does not sign its POSTs. Set a secret here and '
+                    . 'append it to the Destination URL as ?secret=… so only SendGrid can deliver mail. '
+                    . 'Required — inbound is rejected when this is blank.',
+            ],
+        ];
+    }
+
+    public static function isWebhook(): bool {
+        return true;
+    }
+
+    public static function getSetupChecks(?string $domain = null): array {
+        $settings = Globalvars::get_instance();
+        $results = [];
+
+        $secret = (string)$settings->get_setting('sendgrid_inbound_secret');
+        if ($secret !== '') {
+            $results[] = self::makeResult('sendgrid.inbound_secret_set', '', 'plugin', 'SendGrid Inbound Parse secret', 'required', 'pass',
+                'A shared secret is configured — inbound POSTs are gated.');
+        } else {
+            $results[] = self::makeResult('sendgrid.inbound_secret_set', '', 'plugin', 'SendGrid Inbound Parse secret', 'required', 'fail',
+                'No shared secret is configured — inbound Parse webhooks will be rejected.',
+                'SendGrid Inbound Parse does not HMAC-sign its requests, so a secret is the only thing '
+                . 'authenticating the POST.',
+                ['text' => 'Set a secret in the inbound provider settings and append it to the SendGrid '
+                    . 'Destination URL as ?secret=…']);
+        }
+
+        if ($domain) {
+            $records = self::getDnsRecords($domain);
+            foreach ($records as $rec) {
+                $results[] = self::makeResult(
+                    'sendgrid.dns.' . strtolower($rec['type']),
+                    $domain,
+                    'domain',
+                    'SendGrid ' . $rec['type'] . ' record',
+                    'recommended',
+                    'unknown',
+                    'Publish: ' . $rec['name'] . ' ' . $rec['type'] . ' ' . $rec['value'],
+                    $rec['note'] ?? '',
+                    ['text' => 'Publish this record at your DNS provider.',
+                     'dns_record' => ['type' => $rec['type'], 'name' => $rec['name'], 'value' => $rec['value']]]
+                );
+            }
+        }
+
+        return $results;
+    }
+
+    public static function getDnsRecords(string $domain): array {
+        return [
+            ['type' => 'MX', 'name' => $domain, 'value' => '10 mx.sendgrid.net',
+             'note' => 'Routes inbound mail for ' . $domain . ' to SendGrid Inbound Parse. '
+                . 'Add the matching host in SendGrid Settings → Inbound Parse.'],
+        ];
+    }
+
+    /**
+     * Handle a SendGrid Inbound Parse POST.
+     *
+     * Inbound Parse does NOT sign its requests, so authentication rests entirely
+     * on a shared secret carried in the Destination URL (?secret=…). The secret
+     * is required: a blank setting rejects everything.
+     *
+     * Verdicts arrive as top-level form fields (never in a MIME header): the
+     * SPF field is already a lowercase token; the dkim field is a string like
+     * "{@example.com : pass}". DMARC is not provided (recorded 'none').
+     *
+     * The raw MIME is the 'email' field (enable "POST the raw, full MIME
+     * message" in the Inbound Parse settings). The recipient comes from the
+     * 'envelope' JSON, falling back to the 'to' field.
+     */
+    public function handleInbound(array $post, string $raw_body): ?array {
+        $settings = Globalvars::get_instance();
+        $secret = (string)$settings->get_setting('sendgrid_inbound_secret');
+        $provided = isset($_GET['secret']) ? (string)$_GET['secret'] : '';
+
+        if ($secret === '' || !hash_equals($secret, $provided)) {
+            error_log('[SendGridProvider] inbound rejected — missing or invalid shared secret');
+            return null;
+        }
+
+        $raw_mime = (string)($post['email'] ?? '');
+        $recipient = self::extractRecipient($post);
+
+        if ($raw_mime === '' || $recipient === '') {
+            error_log('[SendGridProvider] inbound rejected — missing email body or recipient');
+            return null;
+        }
+
+        $out = [
+            'raw_mime' => $raw_mime,
+            'recipient' => $recipient,
+        ];
+
+        $auth = self::extractAuth($post);
+        if ($auth !== null) {
+            $out['auth'] = $auth;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Recipient from the envelope JSON ({"to":["a@b.com"],"from":"…"}),
+     * falling back to the first address in the 'to' form field.
+     */
+    private static function extractRecipient(array $post): string {
+        $envelope = $post['envelope'] ?? '';
+        if ($envelope !== '') {
+            $decoded = json_decode((string)$envelope, true);
+            if (is_array($decoded) && !empty($decoded['to'][0])) {
+                return strtolower(trim((string)$decoded['to'][0]));
+            }
+        }
+
+        $to = (string)($post['to'] ?? '');
+        if ($to !== '' && preg_match('/<([^>]+)>/', $to, $m)) {
+            return strtolower(trim($m[1]));
+        }
+        if ($to !== '' && strpos($to, '@') !== false) {
+            // Bare or comma-separated list — take the first address.
+            $first = trim(explode(',', $to)[0]);
+            return strtolower($first);
+        }
+        return '';
+    }
+
+    /**
+     * Map the SPF / dkim form fields to the normalized verdict array. Returns
+     * null when neither field is present (router falls back to 'unverified').
+     */
+    private static function extractAuth(array $post): ?array {
+        $has_spf  = array_key_exists('SPF', $post);
+        $has_dkim = array_key_exists('dkim', $post);
+        if (!$has_spf && !$has_dkim) {
+            return null;
+        }
+
+        $valid = ['pass', 'fail', 'softfail', 'neutral', 'none', 'temperror', 'permerror'];
+
+        $spf = null;
+        if ($has_spf) {
+            $token = strtolower(trim((string)$post['SPF']));
+            $spf = in_array($token, $valid, true) ? $token : null;
+        }
+
+        $dkim = null;
+        $dkim_domain = null;
+        if ($has_dkim) {
+            // e.g. "{@example.com : pass}" — may carry multiple pairs; a pass wins.
+            if (preg_match_all('/@([^\s:{}]+)\s*:\s*([A-Za-z]+)/', (string)$post['dkim'], $mm, PREG_SET_ORDER)) {
+                foreach ($mm as $pair) {
+                    $result = strtolower($pair[2]);
+                    if (!in_array($result, $valid, true)) {
+                        continue;
+                    }
+                    if ($dkim === null || $result === 'pass') {
+                        $dkim = $result;
+                        $dkim_domain = strtolower(rtrim($pair[1], '.'));
+                    }
+                }
+            }
+        }
+
+        $auth = [
+            'spf'    => $spf,
+            'dkim'   => $dkim,
+            'dmarc'  => null,
+            'source' => 'sendgrid',
+        ];
+        if ($dkim_domain !== null) {
+            $auth['dkim_domain'] = $dkim_domain;
+        }
+        return $auth;
+    }
+
+    private static function makeResult($id, $scope, $layer, $label, $severity, $status, $summary, $detail = '', $fix = null, $recheckable = true): array {
+        return [
+            'id' => $id, 'scope' => $scope, 'layer' => $layer, 'label' => $label,
+            'severity' => $severity, 'status' => $status, 'summary' => $summary,
+            'detail' => $detail, 'fix' => $fix, 'recheckable' => $recheckable,
+        ];
     }
 }

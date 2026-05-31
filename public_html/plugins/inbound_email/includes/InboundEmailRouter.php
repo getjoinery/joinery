@@ -7,14 +7,19 @@
  * depending on the alias / catch-all delivery mode). Handles SRS bounce
  * processing.
  *
- * Authentication (SPF/DKIM/DMARC) verdicts are NOT computed here. They are read
- * from the message's Authentication-Results header (stamped by the verifying
- * MTA milters) via AuthenticationResults — the app trusts only a line carrying
- * our own authserv-id, and records 'unverified' when none is present. SPF/DMARC
- * are structurally impossible to compute at this layer anyway (the connecting
- * client IP never reaches the pipe). See specs/inbound_dkim_verification_fix.md.
+ * Authentication (SPF/DKIM/DMARC) verdicts are NOT computed here. They come
+ * from one of two trusted sources, in precedence order (see readAuthResults):
+ *   1. A webhook provider that verified the message upstream and delivered it
+ *      over its authenticated path passes the verdicts in as $provider_auth.
+ *   2. Otherwise they are read from the message's Authentication-Results header
+ *      (stamped by the verifying MTA milters) via AuthenticationResults — the
+ *      app trusts only a line carrying our own authserv-id.
+ * When neither is present the message is recorded 'unverified'. SPF/DMARC are
+ * structurally impossible to compute at this layer anyway (the connecting
+ * client IP never reaches the pipe). See specs/inbound_dkim_verification_fix.md
+ * and specs/inbound_mailgun_verification.md.
  *
- * @version 1.7
+ * @version 1.8
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -36,11 +41,15 @@ class InboundEmailRouter {
 	/**
 	 * Process a raw email from stdin.
 	 *
-	 * @param string $raw_email         Raw email content from Postfix
+	 * @param string $raw_email          Raw email content from Postfix
 	 * @param string $envelope_recipient Envelope recipient from Postfix ${recipient}
+	 * @param array|null $provider_auth  Optional upstream verdicts from a webhook
+	 *                                   provider (the 'auth' key its handleInbound
+	 *                                   returned). Preferred over the message's
+	 *                                   Authentication-Results header when present.
 	 * @return int Exit code (0=success, 67=unknown user, 75=temp failure)
 	 */
-	public function processEmail($raw_email, $envelope_recipient) {
+	public function processEmail($raw_email, $envelope_recipient, $provider_auth = null) {
 		$envelope_recipient = strtolower(trim($envelope_recipient));
 		$parsed = $this->parseEmail($raw_email);
 
@@ -69,6 +78,11 @@ class InboundEmailRouter {
 			return 0;
 		}
 
+		// Authentication results (informational — we record them either way).
+		// Prefer verdicts the webhook provider supplied; otherwise read the
+		// message's Authentication-Results header. No verdict => 'unverified'.
+		$auth = $this->readAuthResults($raw_email, $provider_auth);
+
 		// Look up alias
 		$alias = $this->lookupAlias($local_part, $domain);
 		if (!$alias) {
@@ -77,7 +91,7 @@ class InboundEmailRouter {
 
 			if ($catch_all_mode === InboundEmailDomain::CATCHALL_STORE) {
 				// Store every unmatched recipient — supersedes ied_reject_unmatched.
-				return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, null);
+				return $this->handleStoreOnly($parsed, $raw_email, $envelope_recipient, $domain, null, $auth);
 			}
 
 			$catch_all = $domain->get('ied_catch_all_address');
@@ -95,11 +109,7 @@ class InboundEmailRouter {
 			}
 		}
 
-		// 4. Authentication results (informational — we record them either way).
-		// Read SPF/DKIM/DMARC from the Authentication-Results header the MTA
-		// stamped; never compute them here. No verdict line => 'unverified'.
-		$auth = $this->readAuthResults($raw_email);
-
+		// 4. Delivery mode (auth verdicts were resolved above as $auth).
 		$mode = $alias->get('iea_delivery_mode') ?: InboundEmailAlias::MODE_FORWARD;
 		$forwards = ($mode === InboundEmailAlias::MODE_FORWARD || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
 		$stores = ($mode === InboundEmailAlias::MODE_STORE || $mode === InboundEmailAlias::MODE_FORWARD_AND_STORE);
@@ -666,17 +676,39 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Read SPF/DKIM/DMARC verdicts from the message's Authentication-Results
-	 * header. The app does NOT compute these — the verifying MTA milters
-	 * (opendkim verify mode + opendmarc) stamp them at SMTP time, and we trust
-	 * only a line carrying our own authserv-id (== the configured mail
-	 * hostname). When no such line is present the message is recorded as
-	 * 'unverified' (never a hand-rolled 'fail'); when our milter stamped a line
-	 * but didn't assert a given method, that method reads 'none'.
+	 * Resolve SPF/DKIM/DMARC verdicts for a message, in precedence order:
 	 *
+	 *   1. $provider_auth — verdicts a webhook provider verified upstream and
+	 *      handed in (it owns the authenticated POST/SNS payload, so these are
+	 *      trusted; see each provider's handleInbound and the spec's Security
+	 *      section). iem_auth_source becomes the provider key (mailgun/sendgrid/ses).
+	 *   2. The message's Authentication-Results header, stamped by our verifying
+	 *      MTA milters (opendkim verify mode + opendmarc) and trusted only on a
+	 *      line carrying our own authserv-id (== the configured mail hostname).
+	 *      iem_auth_source = 'milter'.
+	 *   3. Neither present → 'unverified' (never a hand-rolled 'fail').
+	 *
+	 * In tiers 1 and 2, a method the source did not assert reads 'none'.
+	 *
+	 * The app NEVER computes these verdicts itself.
+	 *
+	 * @param string     $raw_email
+	 * @param array|null $provider_auth  Optional upstream verdicts: keys
+	 *                                   spf/dkim/dmarc (each ?string) + source.
 	 * @return array{dkim:string,spf:string,dmarc:string,source:string}
 	 */
-	private function readAuthResults($raw_email) {
+	private function readAuthResults($raw_email, $provider_auth = null) {
+		// 1. Provider-supplied verdicts (only honored with a non-empty source).
+		if (is_array($provider_auth) && !empty($provider_auth['source'])) {
+			return array(
+				'dkim'   => ($provider_auth['dkim']  ?? null) ?: 'none',
+				'spf'    => ($provider_auth['spf']   ?? null) ?: 'none',
+				'dmarc'  => ($provider_auth['dmarc'] ?? null) ?: 'none',
+				'source' => (string)$provider_auth['source'],
+			);
+		}
+
+		// 2. Standard Authentication-Results (Postfix milter path).
 		$authserv_id = strtolower(trim((string)$this->settings->get_setting('inbound_email_mail_hostname')));
 		$ar = AuthenticationResults::fromMessage($raw_email, $authserv_id);
 		if ($ar) {
@@ -687,6 +719,8 @@ class InboundEmailRouter {
 				'source' => 'milter',
 			);
 		}
+
+		// 3. Nothing trusted.
 		return array(
 			'dkim'   => 'unverified',
 			'spf'    => 'unverified',
