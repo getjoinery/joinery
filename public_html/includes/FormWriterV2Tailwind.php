@@ -551,6 +551,9 @@ class FormWriterV2Tailwind extends FormWriterV2Base {
         if ($data['onclick']) {
             $html .= ' onclick="' . htmlspecialchars($data['onclick']) . '"';
         }
+        if (!empty($data['formnovalidate'])) {
+            $html .= ' formnovalidate';
+        }
 
         $html .= '>';
         $html .= htmlspecialchars($data['label']);

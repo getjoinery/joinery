@@ -1038,6 +1038,29 @@ User Input → JavaScript Validation → Form Submission
          Model->save() → Database
 ```
 
+### Multi-Action Forms (multiple submit buttons)
+
+A form may carry more than one submit button (e.g. **Save**, **Save & Write to disk**, **Delete**). Two behaviors make these work the same whether or not the form has validation rules:
+
+**The clicked button's name/value reaches the server.** The validator submits programmatically after validating, and the name of whichever button was clicked is preserved and posted exactly as native HTML submission would. Branch on it server-side as usual:
+
+```php
+$formwriter->submitbutton('btn_save', 'Save');
+$formwriter->submitbutton('btn_save_and_write', 'Save & Write to disk');
+
+// Server side:
+if (isset($input['btn_save_and_write'])) { /* write to disk */ }
+elseif (isset($input['btn_save']))       { /* plain save */ }
+```
+
+**A button can bypass client-side validation** with the `formnovalidate` option (alias `skip_validation`). Use it for Delete/Cancel actions that must fire even when required fields are empty — matching native HTML's per-button `formnovalidate`:
+
+```php
+$formwriter->submitbutton('btn_delete', 'Delete', ['formnovalidate' => true]);
+```
+
+Without this, every submit button triggers full form validation, so a Delete on a form with empty required fields would be blocked client-side. Server-side validation still applies — `formnovalidate` only skips the client check, so the server logic for that action must not assume the model is valid.
+
 ### Automatic Validation
 
 FormWriter automatically generates validation rules from model `field_specifications`:

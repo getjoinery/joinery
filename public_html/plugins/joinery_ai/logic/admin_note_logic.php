@@ -17,7 +17,10 @@ function admin_joinery_ai_note_logic(array $input): LogicResult {
         $note->set('rcn_owner_user_id', $session->get_user_id());
     }
 
-    if ($input && isset($input['btn_submit'])) {
+    // Gate on the POST method, not a specific button name: the Delete button
+    // posts only btn_delete (not btn_submit), so an isset($input['btn_submit'])
+    // gate would skip deletes. See specs/formwriter_submitter_preservation.md.
+    if (LibraryFunctions::isFormSubmission()) {
         if (isset($input['btn_delete']) && $note->key) {
             $note->soft_delete();
             return LogicResult::redirect('/admin/joinery_ai/notes');

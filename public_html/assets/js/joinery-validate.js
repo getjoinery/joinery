@@ -1,9 +1,9 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.0.8
+ * @version 1.0.10
  */
-console.log('%c=== JOINERY VALIDATION v1.0.8 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.0.10 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -58,6 +58,24 @@ console.log('%c=== JOINERY VALIDATION v1.0.8 ===', 'color: blue; font-weight: bo
                     console.log('%c=== FORM SUBMIT ATTEMPT ===', 'color: red; font-weight: bold');
                 }
 
+                // Capture which submit button triggered this submission. We
+                // validate, then submit programmatically via form.submit() —
+                // which, unlike native submission, does NOT include the
+                // submitter button's name/value. On forms with more than one
+                // submit button (e.g. Save vs Save & Write to disk vs Delete)
+                // the server would otherwise never learn which was clicked.
+                // Captured here (before any await) and reattached below.
+                const submitter = e.submitter;
+
+                // A submit button may opt out of validation via the
+                // formnovalidate attribute (e.g. Delete / Cancel actions that
+                // must fire even when required fields are empty). Native HTML
+                // honors this per-button; mirror that here so multi-action forms
+                // behave the same whether or not the validator is attached.
+                // FormWriter exposes it as the submitbutton() 'formnovalidate'
+                // (alias 'skip_validation') option.
+                const skipValidation = !!(submitter && submitter.formNoValidate);
+
                 // Prevent double-validation during async validation
                 if (this.isValidating) {
                     if (this.debug) console.log('Validation already in progress, ignoring');
@@ -69,12 +87,32 @@ console.log('%c=== JOINERY VALIDATION v1.0.8 ===', 'color: blue; font-weight: bo
                 e.preventDefault();
                 e.stopPropagation();
 
-                // Mark as validating
-                this.isValidating = true;
-                const isValid = await this.validateForm();
-                this.isValidating = false;
+                let isValid;
+                if (skipValidation) {
+                    if (this.debug) console.log('→ Submitter sets formnovalidate; skipping validation');
+                    isValid = true;
+                } else {
+                    // Mark as validating
+                    this.isValidating = true;
+                    isValid = await this.validateForm();
+                    this.isValidating = false;
+                }
 
                 if (isValid) {
+                    // Reattach the clicked submit button's name/value so the
+                    // programmatic submit below carries it (form.submit() drops
+                    // the submitter that native submission would have sent).
+                    if (submitter && submitter.name) {
+                        let preserved = this.form.querySelector('input[type="hidden"][data-joinery-submitter]');
+                        if (!preserved) {
+                            preserved = document.createElement('input');
+                            preserved.type = 'hidden';
+                            preserved.setAttribute('data-joinery-submitter', '1');
+                            this.form.appendChild(preserved);
+                        }
+                        preserved.name = submitter.name;
+                        preserved.value = submitter.value || '';
+                    }
                     if (this.submitHandler) {
                         if (this.debug) console.log('→ Calling custom submitHandler');
                         this.submitHandler(this.form);

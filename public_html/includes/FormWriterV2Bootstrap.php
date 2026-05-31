@@ -766,6 +766,9 @@ class FormWriterV2Bootstrap extends FormWriterV2Base {
         if (!empty($data['onclick'])) {
             $html .= ' onclick="' . htmlspecialchars($data['onclick']) . '"';
         }
+        if (!empty($data['formnovalidate'])) {
+            $html .= ' formnovalidate';
+        }
 
         $html .= '>';
         $html .= htmlspecialchars($data['label']);

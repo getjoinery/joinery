@@ -101,8 +101,9 @@ $formwriter->submitbutton('btn_submit', 'Save');
 if ($spm->key) {
 	echo ' ';
 	$formwriter->submitbutton('btn_delete', 'Soft-delete', array(
-		'class'   => 'btn btn-danger',
-		'onclick' => "return confirm('Soft-delete this SEO row?');",
+		'class'          => 'btn btn-danger',
+		'onclick'        => "return confirm('Soft-delete this SEO row?');",
+		'formnovalidate' => true,
 	));
 }
 

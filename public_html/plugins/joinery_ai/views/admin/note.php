@@ -62,8 +62,11 @@ $formwriter->textinput('rcn_tags_text', 'Tags (comma-separated)', [
 $formwriter->submitbutton('btn_submit', $is_new ? 'Create' : 'Save');
 
 if (!$is_new) {
-    echo '<button type="submit" name="btn_delete" value="1" class="btn btn-outline-danger ms-2" '
-       . 'onclick="return confirm(\'Soft-delete this note?\');">Delete</button>';
+    $formwriter->submitbutton('btn_delete', 'Delete', [
+        'class'          => 'btn btn-outline-danger ms-2',
+        'onclick'        => "return confirm('Soft-delete this note?');",
+        'formnovalidate' => true,
+    ]);
 }
 
 echo $formwriter->end_form();

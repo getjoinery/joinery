@@ -74,8 +74,9 @@ $formwriter->submitbutton('btn_save_and_write', 'Save & Write to disk');
 if ($agent_file->key) {
 	echo ' ';
 	$formwriter->submitbutton('btn_delete', 'Delete', array(
-		'class'   => 'btn btn-danger',
-		'onclick' => "return confirm('Soft-delete this row and remove its on-disk target files?');",
+		'class'          => 'btn btn-danger',
+		'onclick'        => "return confirm('Soft-delete this row and remove its on-disk target files?');",
+		'formnovalidate' => true,
 	));
 }
 
