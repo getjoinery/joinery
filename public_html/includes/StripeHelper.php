@@ -846,28 +846,43 @@ class StripeHelper {
 	public function update_subscription_in_order_item($order_item){
 		if($order_item->get('odi_is_subscription')){
 			//CHECK SUBSCRIPTION STATUS
-			try{		
-				$stripe_subscription = $this->get_subscription($order_item->get('odi_stripe_subscription_id'));	
-				if($stripe_subscription['canceled_at']){
-					$canceled_at = gmdate("c", $stripe_subscription['canceled_at']);
-					
-					//IF SUBSCRIPTION ENDED, REMOVE 
-					$order_item->set('odi_subscription_cancelled_time', $canceled_at);
-				}
-				$order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $stripe_subscription['current_period_end']));
-
-				//if($stripe_subscription['status'] == 'canceled' || $stripe_subscription['status'] == 'incomplete_expired'){
-				$order_item->set('odi_subscription_status', $stripe_subscription['status']);
-				$order_item->save();
-				
+			try{
+				$stripe_subscription = $this->get_subscription($order_item->get('odi_stripe_subscription_id'));
+				$this->apply_subscription_to_order_item($order_item, $stripe_subscription);
 				return $stripe_subscription;
 			}
 			catch(Exception $e){
 				//FAIL SILENTLY
 				return false;
 			}
-		}	
+		}
 
+	}
+
+	/**
+	 * Apply an already-fetched Stripe subscription object to an order item's
+	 * local subscription fields and save. Performs NO Stripe API call, so a
+	 * subscription fetched in bulk (e.g. via get_subscriptions()) can be applied
+	 * without an extra per-item round-trip. The field-write behavior is identical
+	 * to update_subscription_in_order_item()'s original inline logic — this only
+	 * separates the local write from the fetch.
+	 *
+	 * @param OrderItem $order_item        The order item row to update.
+	 * @param mixed     $stripe_subscription  A \Stripe\Subscription (array-accessible).
+	 * @return void
+	 */
+	public function apply_subscription_to_order_item($order_item, $stripe_subscription){
+		if($stripe_subscription['canceled_at']){
+			$canceled_at = gmdate("c", $stripe_subscription['canceled_at']);
+
+			//IF SUBSCRIPTION ENDED, REMOVE
+			$order_item->set('odi_subscription_cancelled_time', $canceled_at);
+		}
+		$order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $stripe_subscription['current_period_end']));
+
+		//if($stripe_subscription['status'] == 'canceled' || $stripe_subscription['status'] == 'incomplete_expired'){
+		$order_item->set('odi_subscription_status', $stripe_subscription['status']);
+		$order_item->save();
 	}
 
 	public function change_subscription($subscription_id, $item_id_to_update, $new_stripe_price){

@@ -51,8 +51,6 @@ function admin_user_logic(array $input): LogicResult {
 
 	// Get user
 	$user = new User($input['usr_user_id'], TRUE);
-	include(PathHelper::getAbsolutePath('/utils/registrant_maintenance.php'));
-	include(PathHelper::getAbsolutePath('/utils/order_maintenance.php'));
 
 	// Process actions
 	$action = $input['action'] ?? $input['action'] ?? null;

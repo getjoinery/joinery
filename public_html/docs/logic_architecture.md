@@ -270,8 +270,8 @@ dev (the `debug` setting). This catches the whole bug class — including plugin
 dynamic, and non-`if($input)` code a text lint can't see.
 
 **Intentional GET-action links** legitimately mutate on GET — a `?action=delete`
-admin link, a payment-gateway return URL, a page-view maintenance task. Opt each
-one in, and **always reset the flag in a `finally`**:
+admin link or a payment-gateway return URL. Opt each one in, and **always reset
+the flag in a `finally`**:
 
 ```php
 SystemBase::$allow_get_mutation = true;
@@ -279,6 +279,13 @@ try { $item->soft_delete(); }
 finally { SystemBase::$allow_get_mutation = false; }
 return LogicResult::redirect('/admin/admin_items');
 ```
+
+**Maintenance and reconciliation never belong in page logic.** Work that mutates
+state as a side effect of *displaying* a page — subscription reconciliation,
+audit-log writes, external-API sweeps — must run on the cron runner as a
+[scheduled task](scheduled_tasks.md), never via `include()` into a logic file.
+A page render is read-only; opting it into `$allow_get_mutation` to silence the
+tripwire is a marker of misplaced work, not a fix.
 
 CLI / cron / scheduled-task contexts (no `REQUEST_METHOD`) are exempt
 automatically. See also [Admin Pages](admin_pages.md) and [Routing](routing.md#the-__route-parameter).
