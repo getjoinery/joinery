@@ -279,4 +279,22 @@ Plugin-owned tasks follow the plugin lifecycle:
 | `tasks/WeeklyEventsDigest.json` | Example email digest config |
 | `tasks/PurgeOldErrors.php` | Example cleanup task |
 | `tasks/PurgeOldErrors.json` | Example cleanup config |
+| `tasks/SyncPaypalSubscriptions.php` | PayPal subscription backstop |
+| `tasks/ReconcileStripeSubscriptions.php` | Stripe subscription backstop (bulk-list) |
 | `migrations/migration_scheduled_tasks_init.php` | Setup migration |
+
+### Subscription reconciliation tasks
+
+`SyncPaypalSubscriptions` and `ReconcileStripeSubscriptions` are sibling backstops
+to their respective webhooks: webhooks are the authoritative real-time path for
+subscription state, and these daily tasks catch anything a webhook missed
+(cancellations, period rollovers, status changes).
+
+`ReconcileStripeSubscriptions` loads the global working set
+(`MultiOrderItem(['is_active_subscription' => true])`), then **pages Stripe's
+subscription list endpoint** (`get_subscriptions(['status' => 'all', 'limit' =>
+100])`, up to 100 per call, stopping once every wanted id is found) and applies
+each via `StripeHelper::apply_subscription_to_order_item()` — one bulk fetch
+rather than a per-item round-trip. It writes a single `EventLog` summary row per
+run and implements `ScheduledTaskDryRunnable` for a no-write preview of pending
+changes.

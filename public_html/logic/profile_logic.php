@@ -2,7 +2,11 @@
 /**
  * Profile dashboard logic — loads summary data for the member dashboard.
  *
- * @version 2.0
+ * Subscription reconciliation runs on the cron runner
+ * (tasks/ReconcileStripeSubscriptions), never inline here — a page render is
+ * read-only.
+ *
+ * @version 2.1
  */
 
 function profile_logic(array $input): LogicResult{
@@ -42,7 +46,6 @@ function profile_logic(array $input): LogicResult{
 
 	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
-	include(PathHelper::getAbsolutePath('utils/registrant_maintenance.php'));
 
 	$now_utc = gmdate('Y-m-d H:i:s');
 

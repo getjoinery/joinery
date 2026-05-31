@@ -1,0 +1,7 @@
+{
+    "name": "Reconcile Stripe Subscriptions",
+    "description": "Periodic backstop that reconciles every active Stripe subscription order item against Stripe. Stripe webhooks are the authoritative real-time path for subscription state; this task catches anything a webhook missed (cancellations, period rollovers, status changes). It fetches subscriptions from Stripe in bulk pages (up to 100 per API call) rather than one request per item, then applies each to its order item. Writes a single EventLog summary row per run. Previously this work ran inline on admin/profile page views (per-user, one Stripe call per item, one audit row per page view); it now runs globally on the cron runner.",
+    "default_frequency": "daily",
+    "default_time": "06:30:00",
+    "config_fields": {}
+}
