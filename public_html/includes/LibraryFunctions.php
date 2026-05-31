@@ -394,9 +394,12 @@ class LibraryFunctions {
 		if (preg_match('/^[A-Z0-9._%+\\-\\#!$%&\'*\/=?^_`{}|~]+@[A-Z0-9.-]+\.[A-Z]{2,10}$/i', $email) === 0) {
 			return false;
 		}
-		// DNS MX-with-A-fallback check (fail-open) — shared with the email
-		// validation rule in SystemBase via DnsResolver::domainAcceptsMail().
+		// DNS MX-with-A-fallback check (fail-open) — skip when email_validation_mx_check is off.
 		$domain = substr($email, strrpos($email, '@') + 1);
+		$settings = Globalvars::get_instance();
+		if ((string)$settings->get_setting('email_validation_mx_check') === '0') {
+			return true;
+		}
 		return DnsResolver::domainAcceptsMail($domain);
 	}
 

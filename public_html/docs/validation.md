@@ -660,6 +660,30 @@ fallback). The DNS half is shared with `LibraryFunctions::IsValidEmail()` via
 below. A transient DNS failure never rejects an address; only a domain that
 definitively has neither MX nor A is failed.
 
+#### MX Check Toggle (`email_validation_mx_check`)
+
+The DNS step is controlled by the `email_validation_mx_check` site setting
+(Email Settings tab in admin):
+
+- **`"1"` (default)** — syntax + MX check. Current behavior; no change for
+  existing deployments.
+- **`"0"`** — syntax only. The DNS round-trip is skipped entirely. Use this
+  for bulk imports, internal/test domains (e.g. `example.test`), split-horizon
+  DNS environments, or any context where latency matters more than deliverability
+  gating.
+
+Both validation paths honor the toggle: `SystemBase::validateField()` (model
+saves) and `LibraryFunctions::IsValidEmail()` (standalone callers). Any future
+call site that calls `DnsResolver::domainAcceptsMail()` directly must add the
+same inline check so the toggle is always honored:
+
+```php
+$settings = Globalvars::get_instance();
+if ((string)$settings->get_setting('email_validation_mx_check') !== '0') {
+    // DnsResolver::domainAcceptsMail($domain) call here
+}
+```
+
 ```php
 'email' => array(
     'type' => 'varchar(255)',
