@@ -152,6 +152,7 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 	// Determine which active tasks support dry run
 	require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 	$dry_run_supported = array();
+	$orphaned_tasks = array();
 	foreach ($active_tasks as $task) {
 		$task_class = $task->get('sct_task_class');
 		$task_file = $task->resolve_task_file();
@@ -163,6 +164,12 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 					$dry_run_supported[$task->key] = true;
 				}
 			}
+		} else {
+			// Code file is gone — the activation row is an orphan (task
+			// removed/consolidated in a deploy). Flag it live so the row
+			// reads as "remove or restore" rather than relying on the
+			// stored status, which is stale until the next cron tick.
+			$orphaned_tasks[$task->key] = true;
 		}
 	}
 
@@ -188,6 +195,7 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 		'site_timezone' => $site_timezone,
 		'display_messages' => $display_messages,
 		'dry_run_supported' => $dry_run_supported,
+		'orphaned_tasks' => $orphaned_tasks,
 		'dry_run_preview_html' => $dry_run_preview_html,
 	));
 }

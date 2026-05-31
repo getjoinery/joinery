@@ -200,8 +200,17 @@ if (empty($active_tasks)) {
 		// Status badge
 		$status = $task->get('sct_last_run_status');
 		$run_message = $task->get('sct_last_run_message');
+		// Orphaned = the task's code file is missing on disk. Detected live
+		// (file resolution in the logic) so it reflects the current deploy,
+		// not the stale stored status; also honored if the cron runner has
+		// already recorded an 'orphaned' status. It is a remove-or-restore
+		// cleanup item, not a run failure, so it gets its own badge.
+		$is_orphaned = !empty($orphaned_tasks[$task->key]) || $status === 'orphaned';
 		$status_display = '';
-		if ($status === 'success') {
+		if ($is_orphaned) {
+			$status_display = '<span class="badge bg-danger" style="background-color: #dc3545; color: #fff; padding: 3px 8px; border-radius: 3px;">Orphaned</span>';
+			$status_display .= '<br><small class="text-muted">Code file is missing — remove this task, or restore the file</small>';
+		} elseif ($status === 'success') {
 			$status_display = '<span class="badge bg-success" style="background-color: #28a745; color: #fff; padding: 3px 8px; border-radius: 3px;">Success</span>';
 		} elseif ($status === 'error') {
 			$status_display = '<span class="badge bg-danger" style="background-color: #dc3545; color: #fff; padding: 3px 8px; border-radius: 3px;">Error</span>';
@@ -210,7 +219,7 @@ if (empty($active_tasks)) {
 		} else {
 			$status_display = '<span style="color: #999;">—</span>';
 		}
-		if ($run_message) {
+		if (!$is_orphaned && $run_message) {
 			$status_display .= '<br><small class="text-muted">' . htmlspecialchars($run_message) . '</small>';
 		}
 
