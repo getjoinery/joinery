@@ -1,4 +1,4 @@
-# Move per-user subscription maintenance off page-view into scheduled tasks
+# Move per-user subscription maintenance off page-view into a scheduled task
 
 ## Overview
 
@@ -6,9 +6,10 @@
 **Stripe subscription reconciliation and write an `EventLog` audit row** — real,
 mutating maintenance work — but they run **synchronously, inline, on a GET page
 render**. They are `include()`d into request logic, not driven by the cron
-runner. This spec moves that work to the scheduled-task system where it belongs
-and removes the inline includes (and the GET-mutation opt-ins that were added as
-a stopgap).
+runner. This spec moves that work to the scheduled-task system where it belongs,
+**consolidates the two files into a single global task with the most
+Stripe-call-efficient reconciliation path**, and removes the inline includes (and
+the GET-mutation opt-ins that were added as a stopgap).
 
 This is a follow-up to `admin_logic_get_submission_guard_fix.md`. That fix added
 `SystemBase::$allow_get_mutation` opt-ins around these two files so the new
@@ -50,111 +51,213 @@ Consequences:
    `admin_user_logic` (admins), but `profile_logic` serves the **non-admin**
    profile page — a permission-0 user hitting that `include` trips the level-10
    check, which redirects to login. Either the profile page is silently broken
-   for normal users or this path never really executes for them. **Verify and
-   resolve this during implementation** — it is direct evidence the work was
-   written as an admin/CLI job and wired into page loads by mistake.
+   for normal users or this path never really executes for them. Resolved by
+   removing the include (see step 5).
+
+## Key facts established during analysis
+
+These drive the consolidation and are confirmed against the code:
+
+- **Both files funnel through one method.**
+  `update_all_subscriptions_in_order($order)` (StripeHelper.php:838) simply loops
+  the order's items calling `update_subscription_in_order_item($order_item)`
+  (StripeHelper.php:846). `registrant_maintenance` calls the same per-item method
+  directly. **The subscription order item is the atomic reconciliation unit**;
+  everything else is just two different ways of reaching the same set.
+- **The order-walk is a superset of the registrant-walk.** Every subscription
+  order item belongs to an order, so iterating subscription order items globally
+  covers everything both files reached. The registrant file's only unique output
+  is the `EventLog` row (which this spec collapses to one-per-run anyway).
+- **A global filter already exists.**
+  `MultiOrderItem(['is_active_subscription' => true])` resolves to
+  `odi_is_subscription = TRUE AND odi_subscription_cancelled_time IS NULL AND
+  odi_status = OrderItem::STATUS_PAID` (order_items_class.php:396-398). That is
+  exactly the minimal set worth reconciling — paid, not-yet-cancelled
+  subscriptions — with no order/registrant walk and no scanning of
+  non-subscription rows.
+- **A bulk-list wrapper already exists.** `StripeHelper::get_subscriptions($params)`
+  (StripeHelper.php:818) wraps `$this->stripe->subscriptions->all($params)`.
+  Stripe's list endpoint returns up to 100 subscriptions per page.
+- **`update_subscription_in_order_item()` has four other callers** that must keep
+  working unchanged: `adm/admin_user.php:333`, `adm/logic/admin_order_logic.php:72`,
+  and `data/order_items_class.php:203` & `:287`.
 
 ## Goal
 
-Run subscription reconciliation as a **scheduled task** on the cron runner, the
-same way `SyncPaypalSubscriptions` already syncs PayPal subscriptions. Remove the
-two inline `include()`s and the `$allow_get_mutation` opt-ins. Page logic returns
-to read-only.
+Run subscription reconciliation as a **single global scheduled task** on the cron
+runner, the same way `SyncPaypalSubscriptions` already syncs PayPal
+subscriptions. The task reconciles **all** active Stripe subscriptions in the
+fewest Stripe API calls. Remove the two inline `include()`s and the
+`$allow_get_mutation` opt-ins; delete the two util files. Page logic returns to
+read-only.
 
-The existing `tasks/SyncPaypalSubscriptions.{json,php}` is the reference pattern
-and the conceptual sibling (it is the PayPal half of the same job).
+`tasks/SyncPaypalSubscriptions.{json,php}` is the reference pattern and the
+conceptual sibling (it is the PayPal half of the same job).
 
 ## Approach
 
-### 1. New scheduled task: reconcile Stripe subscriptions globally
+### 1. Refactor StripeHelper to separate the API fetch from the local write
+
+`update_subscription_in_order_item()` currently does two things in one method: a
+Stripe `retrieve()` **and** the local field writes (`odi_subscription_status`,
+`odi_subscription_period_end`, `odi_subscription_cancelled_time`, then `save()`).
+To allow bulk reconciliation, split the local-write half into its own method that
+takes a **pre-fetched** Stripe subscription object and performs no API call:
+
+```php
+// New: no Stripe API call — applies an already-fetched subscription to the row.
+public function apply_subscription_to_order_item($order_item, $stripe_subscription) {
+    // (the writes currently at StripeHelper.php:851-861: canceled_at,
+    //  period_end, status, save())
+}
+
+// Refactored: retrieve + apply. Existing four callers keep their exact behavior.
+public function update_subscription_in_order_item($order_item) {
+    if ($order_item->get('odi_is_subscription')) {
+        try {
+            $stripe_subscription = $this->get_subscription($order_item->get('odi_stripe_subscription_id'));
+            $this->apply_subscription_to_order_item($order_item, $stripe_subscription);
+            return $stripe_subscription;
+        } catch (Exception $e) {
+            return false; // unchanged fail-silent behavior
+        }
+    }
+}
+```
+
+This is the **only** change to reconciliation logic, and it preserves the exact
+field-write behavior — the per-record writes are not rewritten, only made
+callable with a subscription that was fetched in bulk.
+
+### 2. New scheduled task: `ReconcileStripeSubscriptions` (global, bulk-list)
 
 Create `tasks/ReconcileStripeSubscriptions.json` + `.php` following
-`docs/scheduled_tasks.md` and the `SyncPaypalSubscriptions` shape. Instead of
-"reconcile this one `$user`," it iterates the relevant set **globally**:
+`docs/scheduled_tasks.md` and the `SyncPaypalSubscriptions` shape. It implements
+`ScheduledTaskInterface` **and** `ScheduledTaskDryRunnable`.
 
-- Load active Stripe subscription order items (the same set the per-user code
-  reaches, but across all users — e.g. `MultiOrderItem` with the
-  `is_active_subscription` / Stripe-subscription filters already used elsewhere).
-- For each, call the **same** `StripeHelper` methods
-  (`update_subscription_in_order_item()` / `update_all_subscriptions_in_order()`).
-  Do **not** rewrite the reconciliation logic — only change *what drives it*.
-- Skip when `StripeHelper::is_initialized()` is false (mirrors current guards).
-- Write **one** `EventLog` summary row per run (count processed / errors), not one
-  per record.
-- Support dry-run (`docs/scheduled_tasks.md#3-optional-add-dry-run-support`).
+`run(array $config)`:
 
-Decide cadence during implementation (PayPal sync's interval is a reasonable
-starting point). Note: Stripe webhooks are the authoritative real-time path for
-subscription state; this task is the periodic backstop, so it does not need to be
-frequent.
+1. Skip cleanly when `StripeHelper::is_initialized()` is false
+   (`status => 'skipped'`), mirroring the current guards. On a non-Stripe dev
+   this is a no-op.
+2. Load the local working set:
+   `new MultiOrderItem(['is_active_subscription' => true])`. If empty, return
+   `status => 'skipped'`.
+3. **Bulk-fetch from Stripe in pages**, not one retrieve per item. Page through
+   `get_subscriptions(['status' => 'all', 'limit' => 100, ...])` using Stripe's
+   pagination (`starting_after` cursor), building a map keyed by Stripe
+   subscription id. `status => 'all'` is required so newly-canceled subscriptions
+   are visible (the default list omits canceled). Because this platform creates
+   every subscription on the account, the account's subscription set ≈ the local
+   set, so paging is strictly cheaper than N individual retrieves
+   (~N/100 calls vs N).
+4. For each local order item, look up its `odi_stripe_subscription_id` in the
+   map and call `apply_subscription_to_order_item($order_item, $sub)`. Count
+   processed / changed / missing (id present locally but absent from the Stripe
+   list → log + error counter).
+5. Write **one** `EventLog` summary row per run
+   (`evl_event = 'stripe_subscription_reconciliation'`,
+   `evl_usr_user_id = User::USER_SYSTEM`, success flag, `evl_note` = the counts),
+   not one row per record.
+6. Return `array('status' => …, 'message' => "Reconciled N, changed C, errors E")`.
 
-### 2. Remove the inline includes
+`dryRun(array $config)`: do steps 1-3 and the map lookups, but **skip
+`apply_…`/`save()` and the EventLog write**. Return a message and optional `html`
+preview of what *would* change (e.g. items whose status/period_end differ from
+Stripe).
+
+**Cadence.** `default_frequency: daily` (match `SyncPaypalSubscriptions`). Stripe
+webhooks are the authoritative real-time path; this task is the periodic backstop
+and does not need to be frequent. Document this in the `.json` description the way
+the PayPal task's description does.
+
+### 3. Remove the inline includes
 
 - `adm/logic/admin_user_logic.php:54-55` — delete both `include()`s.
 - `logic/profile_logic.php:45` — delete the `registrant_maintenance` include.
 
-After removal, neither page mutates on render. Confirm the admin user page and
-the profile page still load and show the same data (subscription state will be as
-of the last task run rather than live — see Decisions).
+After removal, neither page mutates on render. Subscription state shown is as of
+the last task run (see Decisions).
 
-### 3. Retire the opt-ins and the util files
+### 4. Retire the opt-ins and delete the util files
 
-- Fold the per-user bodies into the task (or have the task call shared helpers),
-  then **delete** `utils/registrant_maintenance.php` and
-  `utils/order_maintenance.php`, or reduce them to thin functions the task calls.
-- Either way, the `SystemBase::$allow_get_mutation = true; … finally …` wrappers
-  added by the guard-fix spec go away — there is no longer a GET mutation to opt
-  in. Re-grep `allow_get_mutation = true` afterward to confirm only the genuinely
-  intentional GET-action sites remain (admin delete/toggle links, `cart_charge`
-  payment return, `account_edit` photo actions).
+- The per-user reconciliation now lives in the task (driven off the global filter
+  and `apply_subscription_to_order_item`), so **delete**
+  `utils/registrant_maintenance.php` and `utils/order_maintenance.php`.
+- Their `SystemBase::$allow_get_mutation = true; … finally …` wrappers, and the
+  ones in `adm/logic/admin_user_logic.php` that guarded the includes, go away —
+  there is no longer a GET mutation to opt in. Re-grep `allow_get_mutation = true`
+  afterward to confirm only the genuinely intentional GET-action sites remain
+  (admin delete/toggle links, `cart_charge` payment return, `account_edit` photo
+  actions, the survey/question/product-edit admin logic).
 
-### 4. Resolve the profile permission conflict
+### 5. Resolve the profile permission conflict
 
-Confirm what `profile_logic`'s include was doing for non-admin users today
-(likely redirecting them via the level-10 check). Once the include is gone the
-conflict disappears; verify a permission-0 user can load `/profile` cleanly.
+Once `profile_logic`'s include is gone, the level-10 `check_permission` it pulled
+in disappears with it. Verify a permission-0 user can load `/profile` cleanly.
 
-## Decisions / open questions
+## Decisions (previously open questions, now resolved)
 
+- **Consolidate to one task, driven off subscription order items.** Do **not**
+  port the order-walk and registrant-walk separately. The single global filter
+  `MultiOrderItem(['is_active_subscription' => true])` is the minimal complete
+  set; the order/registrant iteration was incidental to the per-user framing.
+- **Most-efficient Stripe calls: bulk list, not per-item retrieve.** Page
+  `subscriptions->all(status=all, 100/page)` and reconcile locally. This
+  **intentionally overrides** the original non-goal of "don't touch StripeHelper
+  reconciliation logic" — the only logic change is extracting
+  `apply_subscription_to_order_item()` so a bulk-fetched subscription can be
+  applied; per-record write behavior is unchanged.
 - **On-view freshness.** Moving to cron means a user/admin sees subscription
-  state as of the last task run, not live. If an admin genuinely needs
-  reconcile-now, add an **explicit POST action** ("Refresh subscription status"
-  button) on the admin user page that runs the same reconciliation for that one
-  user — a deliberate POST mutation, not a GET side-effect. Decide whether this
-  is needed or whether webhook-driven state + periodic cron is sufficient.
-- **Scope of the global sweep.** Confirm the exact filter set so the task covers
-  every record the per-user code reached (active subscriptions across all users)
-  without scanning the whole orders table each run.
+  state as of the last task run, not live. Webhook-driven state + the daily
+  backstop is considered sufficient; a manual "Refresh subscription status"
+  POST action on the admin user page is **not** included in this spec. (If later
+  desired, it would be a deliberate POST that calls
+  `update_subscription_in_order_item()` for that one user's items — a POST
+  mutation, never a GET side-effect.)
 
 ## Non-goals
 
-- **Changing the `StripeHelper` reconciliation logic itself.** This spec only
-  changes *what triggers* it (cron vs page-view), not how a subscription is
-  reconciled.
+- **Rewriting per-record reconciliation field logic.** The status/period_end/
+  canceled_at writes are preserved verbatim; only their call site moves and the
+  fetch is batched.
 - **The PayPal sync.** `SyncPaypalSubscriptions` already exists; this is the
   Stripe counterpart, not a rework of PayPal.
+- **A manual reconcile-now button.** Explicitly deferred (see Decisions).
 
 ## Testing
 
-- Task runs under CLI (`is_initialized()` false on a non-Stripe dev → no-ops
-  cleanly; with Stripe configured → reconciles and writes one `EventLog`).
-- Dry-run reports intended changes without writing.
-- Admin user page and `/profile` load with **no** `[GET_MUTATION]` log line and no
-  Stripe call on render.
+- Task runs under CLI: `is_initialized()` false on a non-Stripe dev →
+  `status => skipped`, no-ops cleanly; with Stripe configured → reconciles via
+  paged list and writes **one** `EventLog` row.
+- **Call-count check:** with K active subscription order items, confirm the run
+  makes ~ceil(K/100) Stripe list calls, not K retrieves.
+- Dry-run reports intended changes (and optional HTML preview) without writing
+  any order item or EventLog row.
+- The four existing callers of `update_subscription_in_order_item()` still behave
+  identically (admin user page, admin order page, `OrderItem` cancel/refresh
+  paths).
+- Admin user page and `/profile` load with **no** `[GET_MUTATION]` log line and
+  no Stripe call on render.
 - A permission-0 user can load `/profile`.
-- `grep -rn 'allow_get_mutation = true'` shows the maintenance files gone from the
-  list.
+- `grep -rn 'allow_get_mutation = true'` shows both maintenance files gone from
+  the list, and the `admin_user_logic` guards removed.
 
 ## Documentation
 
-- Add the new task to `docs/scheduled_tasks.md` examples (alongside
-  `SyncPaypalSubscriptions`).
+- Add `ReconcileStripeSubscriptions` to `docs/scheduled_tasks.md` examples
+  (alongside `SyncPaypalSubscriptions`), noting the bulk-list pattern and that it
+  is the periodic backstop to Stripe webhooks.
 - Note in `docs/logic_architecture.md` (near the GET-is-read-only invariant) that
   maintenance/reconciliation must run on the cron runner, never via `include()`
   into page logic — a page render is read-only.
+- If StripeHelper's subscription methods are documented anywhere, add
+  `apply_subscription_to_order_item()` and note that
+  `update_subscription_in_order_item()` is now retrieve-then-apply.
 
 ## Versioning
 
 - New `tasks/ReconcileStripeSubscriptions.{json,php}`.
-- Bump `@version` on `admin_user_logic.php`, `profile_logic.php`, and any
-  `StripeHelper`/util files touched. No schema or settings changes.
+- Bump `@version` on `includes/StripeHelper.php`, `adm/logic/admin_user_logic.php`,
+  and `logic/profile_logic.php`. Delete `utils/registrant_maintenance.php` and
+  `utils/order_maintenance.php`. No schema or settings changes.

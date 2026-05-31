@@ -1151,16 +1151,16 @@ abstract class SystemBase {
 									$is_valid = false;
 									$error_message = $custom_messages['email'] ?? "Field '$field_name' must be a valid email address.";
 								}
-								// Step 2: DNS MX record check (fail-open) — the
-								// MX-with-A-fallback lookup is shared with
-								// IsValidEmail() via domainAcceptsMail().
+								// Step 2: DNS MX record check (fail-open) — skip when email_validation_mx_check is off.
 								else {
-									require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
-									$domain = substr($field_value, strrpos($field_value, '@') + 1);
-									if (!DnsResolver::domainAcceptsMail($domain)) {
-										// Lookup succeeded, definitively no MX or A records
-										$is_valid = false;
-										$error_message = $custom_messages['email_mx'] ?? "The email domain '$domain' does not appear to accept email.";
+									$_mx_settings = Globalvars::get_instance();
+									if ((string)$_mx_settings->get_setting('email_validation_mx_check') !== '0') {
+										require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
+										$domain = substr($field_value, strrpos($field_value, '@') + 1);
+										if (!DnsResolver::domainAcceptsMail($domain)) {
+											$is_valid = false;
+											$error_message = $custom_messages['email_mx'] ?? "The email domain '$domain' does not appear to accept email.";
+										}
 									}
 								}
 							}

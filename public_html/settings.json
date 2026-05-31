@@ -41,6 +41,7 @@
     { "name": "email_debug_mode", "default": "0" },
     { "name": "email_dry_run", "default": "0" },
     { "name": "email_test_mode", "default": "0" },
+    { "name": "email_validation_mx_check", "default": "1" },
     { "name": "force_https", "default": "0" },
     { "name": "social_settings_active", "default": "0" },
     { "name": "tier_gate_hide_from_listings", "default": "0" },

@@ -535,7 +535,13 @@
 		'options' => $optionvals,
 		'value' => $settings->get_setting('emails_active'),
 		'empty_option' => false
-	]);	
+	]);
+	$formwriter->dropinput('email_validation_mx_check', 'Verify email domains accept mail (MX lookup)', [
+		'options' => $optionvals,
+		'value' => $settings->get_setting('email_validation_mx_check'),
+		'empty_option' => false,
+		'help' => 'On (default): reject addresses whose domain has no mail server. Off: accept any syntactically valid address without a DNS lookup — faster for bulk imports, and allows internal/unroutable domains.'
+	]);
 
 	$templates = new MultiMailingList(
 		array('deleted' => false),
