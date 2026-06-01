@@ -16,7 +16,7 @@
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
  * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
  *
- * @version 1.9
+ * @version 1.10
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -638,16 +638,22 @@ class InboundEmailSetupCheck {
 				'SRS is on and a signing secret is set.');
 		}
 
-		// Outbound relay reachability.
+		// Outbound relay reachability — verifies the resolved relay (the active
+		// provider's credential when provider-relay is active, else the SMTP
+		// relay), so a healthy provider API key reads PASS even with empty smtp_*.
 		try {
 			require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailHealth.php'));
 			InboundEmailHealth::checkForwardingRelay();
+			$relay = (new InboundEmailRouter())->describeRelay();
+			$summary = ($relay['mode'] === 'provider')
+				? 'Forwarding relays through ' . $relay['label'] . ', reusing its credential.'
+				: 'The outbound SMTP relay is reachable.';
 			$out[] = $this->r('plugin.relay', '', 'plugin', 'Outbound forwarding relay', self::REQUIRED, self::PASS,
-				'The outbound SMTP relay is reachable.');
+				$summary);
 		} catch (\Throwable $e) {
 			$out[] = $this->r('plugin.relay', '', 'plugin', 'Outbound forwarding relay', self::REQUIRED, self::FAIL,
-				'The outbound SMTP relay could not be reached.', $e->getMessage(),
-				array('text' => 'Check the SMTP relay settings on the Settings page.'));
+				'The outbound forwarding relay could not be verified.', $e->getMessage(),
+				array('text' => 'Check the active email provider credential, or the forwarding SMTP relay settings, on the Settings page.'));
 		}
 
 		return $out;

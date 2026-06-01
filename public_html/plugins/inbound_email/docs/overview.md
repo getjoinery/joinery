@@ -8,7 +8,8 @@ inbound email subsystem — the receiving counterpart to outbound sending
 (e.g., `info@example.com`) that forward incoming email to real addresses.
 
 Postfix receives inbound mail, pipes it to a PHP handler, which looks up the
-alias and forwards via SMTP.
+alias and relays it through the selected outbound provider (see
+[Forwarding relay](#forwarding-relay)).
 
 **Features:** multiple domains, multiple destinations per alias, catch-all addresses, SRS for SPF compatibility, inbound authentication results (SPF/DKIM/DMARC) read from the verifying MTA / provider, outbound DKIM signing (opendkim), per-alias and per-domain rate limiting, RBL spam filtering, inbound email logs with admin viewer, live DNS validation.
 
@@ -343,7 +344,7 @@ yours to maintain; RBL checks would happen on the host relay only.
 | `inbound_email_forwarding_rate_limit_per_domain` | `200` | Per-domain limit per window |
 | `inbound_email_forwarding_rate_limit_window` | `3600` | Rate limit window (seconds) |
 | `inbound_email_log_retention_days` | `30` | Log cleanup threshold |
-| `inbound_email_forwarding_smtp_host` | (empty) | Optional dedicated SMTP for forwarding (falls back to main) |
+| `inbound_email_forwarding_smtp_host` | (empty) | Dedicated SMTP relay for forwarding. **When set, it forces the SMTP relay path** (overriding provider relay); falls back to base `smtp_*` for any field left blank. See [Forwarding relay](#forwarding-relay). |
 | `inbound_email_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
 | `inbound_email_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
 | `inbound_email_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
@@ -372,6 +373,59 @@ yours to maintain; RBL checks would happen on the host relay only.
 - **Subject:** Preserved from the original email
 
 This approach is required because SMTP services (Mailgun, SendGrid, etc.) require the From address to be on a verified domain. Sending with an arbitrary external From would be silently dropped.
+
+## Forwarding relay
+
+Forwarding relays the message through the **selected outbound provider**
+(`email_service`, the same provider ordinary outbound mail uses) when that
+provider can relay raw MIME with a chosen envelope sender — reusing the one
+credential the operator already maintains. There is no separate forwarding
+SMTP password to configure or let go stale.
+
+The router resolves one of two paths once, in `resolveRelayProvider()`:
+
+1. **Provider relay** — the active provider implements the optional
+   `RawMessageRelay` capability **and** no `inbound_email_forwarding_smtp_host`
+   override is set. The original message bytes are relayed faithfully through
+   the provider's API (Mailgun `messages.mime`, SES `sendEmail` with
+   `Content.Raw`) or native SMTP, reusing the provider credential. Providers
+   that implement it: **Mailgun, SMTP, SES**.
+2. **SMTP fallback** — every other provider (Postmark, SendGrid, Brevo,
+   Mailjet, Resend), or whenever `inbound_email_forwarding_smtp_host` is set.
+   Relays over raw SMTP using the forwarding-specific
+   `inbound_email_forwarding_smtp_*` settings, falling back to base `smtp_*`.
+   This is also the path for operators who deliberately point forwarding at a
+   dedicated relay.
+
+When the provider relay is the primary path, any destination it fails is
+**retried over the SMTP relay** — the same primary→fallback the outbound
+`EmailSender` uses. Only the failed destinations are retried, so a partial
+provider success never double-sends. The retry is skipped when it could not
+help: when no base `smtp_host` is configured, or when the active provider *is*
+the SMTP relay (same transport). A failure that survives both paths is logged
+`STATUS_ERROR` as before.
+
+All forward paths — alias forward, `forward_and_store`, and the domain
+catch-all forward — go through this resolver, so the catch-all forward
+preserves attachments and MIME structure exactly like the alias forward.
+
+The **SRS bounce notification** (`handleSRSBounce`) is not a relay — it is a
+freshly generated delivery-failure message, sent through the normal provider
+send path (`EmailSender`), which also reuses the provider credential.
+
+**SRS, per path.** On the **SMTP fallback** path the SRS-rewritten envelope
+sender is honored as `MAIL FROM` (we are the MTA and own the return-path), so
+SPF aligns at the destination and bounces route back through us for SRS
+decoding. On the **provider relay** path, providers that own bounce handling
+(Mailgun, SES) align their own SPF/DKIM with their sending domain and manage
+bounces, so the SRS envelope is best-effort there and SRS bounce-decoding does
+not apply — the From-header rewrite to the verified address is what carries
+deliverability either way.
+
+The **Outbound forwarding relay** check on the Setup tab verifies the
+*resolved* relay: when provider relay is active it confirms the provider's own
+credential is configured (so a healthy API key reads PASS even with empty
+`smtp_*`); on the SMTP fallback path it connects to the SMTP relay and closes.
 
 ## Testing
 

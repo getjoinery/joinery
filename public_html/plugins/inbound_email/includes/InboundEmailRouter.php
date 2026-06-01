@@ -3,9 +3,17 @@
  * InboundEmailRouter - Core inbound email routing logic.
  *
  * Parses raw email, looks up alias, reads authentication results, checks rate
- * limits, and either forwards via SmtpMailer or stores locally (or both,
- * depending on the alias / catch-all delivery mode). Handles SRS bounce
- * processing.
+ * limits, and either forwards or stores locally (or both, depending on the
+ * alias / catch-all delivery mode). Handles SRS bounce processing.
+ *
+ * Forwarding relays through the selected outbound provider when that provider
+ * implements RawMessageRelay (Mailgun, SMTP, SES) — reusing its credential, no
+ * separate SMTP password. It uses a raw-SMTP relay (the forwarding-specific
+ * inbound_email_forwarding_smtp_* settings, else base smtp_*) for providers
+ * without raw-MIME relay, or whenever an explicit forwarding-SMTP host override
+ * is set. The path is chosen in resolveRelayProvider(). When the provider relay
+ * is primary, destinations it fails are retried over the SMTP relay
+ * (primary→fallback, like outbound EmailSender) — see relay().
  *
  * Authentication (SPF/DKIM/DMARC) verdicts are NOT computed here. They come
  * from one of two trusted sources, in precedence order (see readAuthResults):
@@ -19,10 +27,11 @@
  * client IP never reaches the pipe). See specs/inbound_dkim_verification_fix.md
  * and specs/inbound_mailgun_verification.md.
  *
- * @version 1.8
+ * @version 1.10
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
+require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_log_class.php'));
@@ -456,11 +465,29 @@ class InboundEmailRouter {
 	 * @return array ['destination' => bool success]
 	 */
 	public function forwardEmail($raw_email, $parsed, $alias, $domain, $destinations) {
-		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
-
-		$results = array();
 		$forwarding_domain = $domain->get('ied_domain');
 		$alias_address = $alias->get('iea_alias') . '@' . $forwarding_domain;
+
+		list($raw_mime, $envelope_sender) = $this->buildForwardMessage($raw_email, $parsed, $domain, $alias_address);
+
+		return $this->relay($raw_mime, $envelope_sender, $destinations);
+	}
+
+	/**
+	 * Build the forwarded message and its envelope sender, shared by the alias
+	 * forward and the catch-all forward. Rewrites the From header to the site's
+	 * verified address (deliverability), preserves the original sender in
+	 * Reply-To, stamps the X-Forwarded-* headers, and SRS-rewrites the envelope
+	 * sender when SRS is enabled. The original message bytes are otherwise kept
+	 * intact, so attachments and MIME structure survive the relay.
+	 *
+	 * @param string $original_to_address  The address mail arrived for (alias
+	 *                                      address, or the envelope recipient for
+	 *                                      catch-all), recorded in X-Original-To.
+	 * @return array{0:string,1:string}    [raw_mime (CRLF), envelope_sender]
+	 */
+	private function buildForwardMessage($raw_email, $parsed, $domain, $original_to_address) {
+		$forwarding_domain = $domain->get('ied_domain');
 
 		// SRS rewrite envelope sender
 		$envelope_sender = $parsed['from_email'];
@@ -469,10 +496,6 @@ class InboundEmailRouter {
 			$envelope_sender = $srs->rewrite($parsed['from_email'], $forwarding_domain);
 		}
 
-		// Modify the raw email for forwarding:
-		// - Replace From header with verified sender (for deliverability)
-		// - Add Reply-To with original sender
-		// - Add forwarding headers
 		$default_from = $this->settings->get_setting('defaultemail');
 		$original_sender_name = $this->extractName($parsed['from']);
 		$from_display = $this->forwardedFromDisplay($original_sender_name);
@@ -489,7 +512,7 @@ class InboundEmailRouter {
 			$body_block = substr($normalized, $split_pos + 2);
 		}
 
-		// Replace From header
+		// Replace From header with verified sender (for deliverability)
 		$header_block = preg_replace('/^From:.*$/mi', 'From: ' . $from_display . ' <' . $default_from . '>', $header_block);
 
 		// Remove existing Reply-To if present, then add ours
@@ -497,16 +520,81 @@ class InboundEmailRouter {
 
 		// Add forwarding headers and Reply-To
 		$extra_headers = "Reply-To: " . $parsed['from_email'] . "\n";
-		$extra_headers .= "X-Original-To: " . $alias_address . "\n";
-		$extra_headers .= "X-Forwarded-For: " . $alias_address . "\n";
+		$extra_headers .= "X-Original-To: " . $original_to_address . "\n";
+		$extra_headers .= "X-Forwarded-For: " . $original_to_address . "\n";
 		$extra_headers .= "X-Forwarded-By: Joinery Inbound Email";
 
 		$header_block = trim($header_block) . "\n" . $extra_headers;
 
-		// Reassemble with \r\n for SMTP
+		// Reassemble with \r\n for SMTP / raw-MIME relay
 		$modified_header = str_replace("\n", "\r\n", $header_block);
 		$modified_body = str_replace("\n", "\r\n", $body_block);
 
+		return array($modified_header . "\r\n\r\n" . $modified_body, $envelope_sender);
+	}
+
+	/**
+	 * Relay a fully-formed raw message to the given destinations.
+	 *
+	 * When a provider raw-MIME relay is resolved it is the primary path; any
+	 * destinations it fails are retried over the SMTP relay — mirroring the
+	 * outbound primary→fallback in EmailSender. Only the failed destinations are
+	 * retried, so a partial provider success never causes a double-send. The
+	 * SMTP retry is skipped when it could not help: when no SMTP relay host is
+	 * configured, or when the provider IS the SMTP relay (same transport).
+	 *
+	 * When no provider relay is resolved, SMTP is the primary (and only) path.
+	 *
+	 * Returns ['destination' => bool] per recipient.
+	 */
+	private function relay($raw_mime, $envelope_sender, array $destinations) {
+		$provider = $this->resolveRelayProvider();
+		if (!($provider instanceof RawMessageRelay)) {
+			return $this->relayViaSmtp($raw_mime, $envelope_sender, $destinations);
+		}
+
+		// Primary: provider raw-MIME relay.
+		$results = $provider->relayRawMessage($raw_mime, $envelope_sender, $destinations);
+
+		// Fallback: retry only the destinations the provider failed, over SMTP.
+		$failed = array_keys(array_filter($results, function ($ok) { return $ok === false; }));
+		if ($failed && $this->smtpFallbackAvailable($provider)) {
+			error_log('InboundEmailRouter: provider relay failed for ' . implode(', ', $failed)
+				. ' — retrying over SMTP fallback');
+			foreach ($this->relayViaSmtp($raw_mime, $envelope_sender, $failed) as $dest => $ok) {
+				$results[$dest] = $ok; // SMTP outcome supersedes the provider failure
+			}
+		}
+
+		return $results;
+	}
+
+	/**
+	 * Whether retrying over the SMTP relay can meaningfully differ from the
+	 * given provider relay. False when the provider IS the SMTP relay (same
+	 * transport, nothing to gain) or when no base SMTP host is configured (the
+	 * retry could only fail again). Note the forwarding-specific SMTP override
+	 * is never set on the provider path — it would have forced the SMTP path in
+	 * resolveRelayProvider() — so the base smtp_host is what the retry uses.
+	 */
+	private function smtpFallbackAvailable($provider) {
+		$class = get_class($provider);
+		if ($class::getKey() === 'smtp') {
+			return false;
+		}
+		return (bool)$this->settings->get_setting('smtp_host');
+	}
+
+	/**
+	 * Raw-SMTP fallback relay — the path for providers without RawMessageRelay
+	 * and for operators who deliberately point forwarding at a dedicated relay
+	 * (inbound_email_forwarding_smtp_*, else base smtp_*, via createMailer()).
+	 * Each destination is its own SMTP transaction. Returns ['destination'=>bool].
+	 */
+	private function relayViaSmtp($raw_mime, $envelope_sender, array $destinations) {
+		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
+
+		$results = array();
 		foreach ($destinations as $destination) {
 			try {
 				$mailer = $this->createMailer();
@@ -528,7 +616,7 @@ class InboundEmailRouter {
 				if (!$smtp->recipient($destination)) {
 					throw new Exception('SMTP RCPT TO failed');
 				}
-				if (!$smtp->data($modified_header . "\r\n\r\n" . $modified_body)) {
+				if (!$smtp->data($raw_mime)) {
 					throw new Exception('SMTP DATA failed');
 				}
 
@@ -546,50 +634,75 @@ class InboundEmailRouter {
 	}
 
 	/**
+	 * Resolve the relay provider for forwarding — the single decision point.
+	 *
+	 * Returns a RawMessageRelay provider instance when the active outbound
+	 * provider (email_service, the same resolution EmailSender uses) implements
+	 * RawMessageRelay AND no explicit inbound_email_forwarding_smtp_host
+	 * override is set. Otherwise returns null, meaning the SMTP fallback path
+	 * (relayViaSmtp/createMailer) should be used.
+	 *
+	 * Public so the provisioning check (InboundEmailHealth::checkForwardingRelay)
+	 * verifies the exact relay the router will use.
+	 *
+	 * @return RawMessageRelay|null
+	 */
+	public function resolveRelayProvider() {
+		// An explicit forwarding-SMTP host override always forces the SMTP path,
+		// so an operator pointing forwarding at a dedicated relay keeps it.
+		if ($this->settings->get_setting('inbound_email_forwarding_smtp_host')) {
+			return null;
+		}
+
+		$service = $this->settings->get_setting('email_service') ?: 'mailgun';
+		$providers = EmailSender::getDiscoveredProviders();
+		$class = $providers[$service] ?? null;
+		if ($class && in_array('RawMessageRelay', class_implements($class))) {
+			return new $class();
+		}
+
+		return null;
+	}
+
+	/**
+	 * Describe the resolved forwarding relay for status display (Setup tab).
+	 * Returns ['mode' => 'provider'|'smtp', 'label' => string].
+	 */
+	public function describeRelay() {
+		$provider = $this->resolveRelayProvider();
+		if ($provider instanceof RawMessageRelay) {
+			$class = get_class($provider);
+			return array('mode' => 'provider', 'label' => $class::getLabel());
+		}
+		return array('mode' => 'smtp', 'label' => 'SMTP relay');
+	}
+
+	/**
 	 * Forward to a catch-all address.
+	 *
+	 * Relays the original message bytes through the resolved relay (same path as
+	 * the alias forward), so attachments and MIME structure are preserved — the
+	 * earlier rebuild-from-parsed-parts approach was lossy.
 	 */
 	private function forwardToCatchAll($parsed, $raw_email, $envelope_recipient, $domain, $catch_all_address) {
-		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
+		list($raw_mime, $envelope_sender) = $this->buildForwardMessage($raw_email, $parsed, $domain, $envelope_recipient);
 
-		$forwarding_domain = $domain->get('ied_domain');
-
-		$envelope_sender = $parsed['from_email'];
-		if ($this->settings->get_setting('inbound_email_srs_enabled')) {
-			$srs = new SRSRewriter();
-			$envelope_sender = $srs->rewrite($parsed['from_email'], $forwarding_domain);
-		}
-
-		// Use site's verified from address; original sender in Reply-To
-		$default_from = $this->settings->get_setting('defaultemail');
-		$original_sender_name = $this->extractName($parsed['from']);
-		$from_display = $this->forwardedFromDisplay($original_sender_name);
-
-		try {
-			$mailer = $this->createMailer();
-			$mailer->addAddress($catch_all_address);
-			$mailer->Sender = $envelope_sender;
-			$mailer->setFrom($default_from, $from_display);
-			$mailer->addReplyTo($parsed['from_email'], $original_sender_name);
-			$mailer->Subject = $parsed['subject'];
-			$mailer->Body = $parsed['body'];
-
-			$content_type = $parsed['headers']['content-type'] ?? '';
-			if (stripos($content_type, 'text/html') !== false) {
-				$mailer->isHTML(true);
-			}
-
-			$success = $mailer->send();
-			$status = $success ? InboundEmailLog::STATUS_FORWARDED : InboundEmailLog::STATUS_ERROR;
-			$this->logTransaction($parsed, null, $status, $envelope_recipient, $catch_all_address, $success ? null : 'Catch-all delivery failed', $domain->key);
-		} catch (Exception $e) {
-			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_ERROR, $envelope_recipient, $catch_all_address, $e->getMessage(), $domain->key);
-		}
+		$results = $this->relay($raw_mime, $envelope_sender, array($catch_all_address));
+		$success = !in_array(false, $results, true);
+		$status = $success ? InboundEmailLog::STATUS_FORWARDED : InboundEmailLog::STATUS_ERROR;
+		$this->logTransaction($parsed, null, $status, $envelope_recipient, $catch_all_address, $success ? null : 'Catch-all delivery failed', $domain->key);
 
 		return 0;
 	}
 
 	/**
-	 * Handle an SRS bounce — decode and forward to original sender.
+	 * Handle an SRS bounce — decode and notify the original sender.
+	 *
+	 * Unlike the forward paths, this is NOT a raw-MIME relay: it generates a
+	 * fresh delivery-failure notification with our own From, so it is a normal
+	 * transactional send. It goes through EmailSender (the same provider
+	 * abstraction outbound mail uses), reusing the provider credential — no
+	 * dependence on a separate SMTP password.
 	 */
 	private function handleSRSBounce($parsed, $raw_email, $envelope_recipient) {
 		$srs = new SRSRewriter();
@@ -605,20 +718,13 @@ class InboundEmailRouter {
 		}
 
 		try {
-			require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
-			$mailer = $this->createMailer();
-			$mailer->addAddress($original_sender);
+			$message = new EmailMessage();
+			$message->to($original_sender)
+				->subject('Delivery failure: ' . ($parsed['subject'] ?: '(no subject)'))
+				->text("Your email could not be delivered.\n\n" . ($parsed['body'] ?: ''));
 
-			$settings = Globalvars::get_instance();
-			$default_from = $settings->get_setting('defaultemail');
-			$default_name = $settings->get_setting('defaultemailname');
-			$mailer->setFrom($default_from, $default_name);
-
-			$mailer->Subject = 'Delivery failure: ' . ($parsed['subject'] ?: '(no subject)');
-			$mailer->Body = "Your email could not be delivered.\n\n" . ($parsed['body'] ?: '');
-			$mailer->isHTML(false);
-
-			$mailer->send();
+			$sender = new EmailSender();
+			$sender->send($message);
 			$this->logTransaction($parsed, null, InboundEmailLog::STATUS_BOUNCE_FORWARDED, $envelope_recipient, $original_sender);
 		} catch (Exception $e) {
 			error_log('InboundEmailRouter: Failed to forward bounce to ' . $original_sender . ': ' . $e->getMessage());
@@ -631,9 +737,13 @@ class InboundEmailRouter {
 	/**
 	 * Create a SmtpMailer instance with forwarding-specific settings (or fallback to main).
 	 *
-	 * This is the single outbound-relay acquisition routine: it is called both
-	 * by the router itself and by InboundEmailHealth::checkForwardingRelay(),
-	 * so the provisioning check exercises the exact relay the feature uses.
+	 * This is the SMTP-fallback relay acquisition routine: it is used by
+	 * relayViaSmtp() (the fallback path for providers without RawMessageRelay,
+	 * and when a forwarding-SMTP host override is set) and by
+	 * InboundEmailHealth::checkForwardingRelay() when that fallback is the
+	 * resolved relay — so the provisioning check exercises the exact relay the
+	 * feature would use. When a provider raw-MIME relay is active instead, the
+	 * health check verifies the provider credential rather than this mailer.
 	 */
 	public function createMailer() {
 		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));

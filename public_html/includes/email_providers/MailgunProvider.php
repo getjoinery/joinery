@@ -4,6 +4,11 @@
  *
  * Implements EmailServiceProvider using the Mailgun PHP SDK (v3.x).
  * Supports batch sending in groups of 500 using Mailgun recipient-variables.
+ * Also implements RawMessageRelay (messages.mime) so inbound forwarding can
+ * relay raw MIME through the same mailgun_api_key, with no separate SMTP
+ * credential.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -11,7 +16,7 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
 use Mailgun\Mailgun;
 
-class MailgunProvider implements EmailServiceProvider, InboundEmailProvider {
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, RawMessageRelay {
 
     public static function getKey(): string {
         return 'mailgun';
@@ -250,6 +255,52 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider {
             'success' => empty($failed_recipients),
             'failed_recipients' => $failed_recipients,
         ];
+    }
+
+    // ── RawMessageRelay ─────────────────────────────────────────────────
+
+    /**
+     * Relay raw MIME via Mailgun's MIME endpoint (SDK sendMime), reusing the
+     * same mailgun_api_key the send() path uses. Mailgun owns bounce handling
+     * and its own SPF/DKIM align with the sending domain, so the SRS envelope
+     * sender is best-effort here — the From-header rewrite the router already
+     * performed is what carries deliverability. See specs and email_system.md.
+     *
+     * sendMime delivers to all recipients in one call, so the result is
+     * all-or-nothing: every destination maps to the same success/failure,
+     * matching the per-destination shape forwardEmail() expects.
+     */
+    public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
+        $settings = Globalvars::get_instance();
+
+        if ($settings->get_setting('mailgun_eu_api_link')) {
+            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
+        } else {
+            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
+        }
+
+        $domain = $settings->get_setting('mailgun_domain');
+
+        // Best-effort envelope sender: Mailgun honors o:sender on the MIME
+        // endpoint where it can; it otherwise owns the return-path.
+        $params = [];
+        if ($envelope_sender !== '') {
+            $params['sender'] = $envelope_sender;
+        }
+
+        $ok = true;
+        try {
+            $mg->messages()->sendMime($domain, $destinations, $raw_mime, $params);
+        } catch (\Exception $e) {
+            error_log('[MailgunProvider] relayRawMessage failed: ' . $e->getMessage());
+            $ok = false;
+        }
+
+        $results = [];
+        foreach ($destinations as $destination) {
+            $results[$destination] = $ok;
+        }
+        return $results;
     }
 
     // ── InboundEmailProvider ────────────────────────────────────────────

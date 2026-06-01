@@ -590,6 +590,7 @@ The email system uses a provider abstraction so that new email services can be a
 
 - **`EmailServiceProvider`** — interface in `includes/EmailServiceProvider.php` that all outbound providers implement
 - **`InboundEmailProvider`** — sibling interface in `includes/InboundEmailProvider.php` for inbound transports (Postfix, Mailgun webhook, etc.). A single provider class may implement both interfaces; the Inbound Email plugin discovers inbound providers via `InboundProviderRegistry`. See [Inbound Email Plugin](../plugins/inbound_email/docs/overview.md#inbound-providers) for the inbound side.
+- **`RawMessageRelay`** — optional capability interface, declared alongside `EmailServiceProvider` in `includes/EmailServiceProvider.php`. A provider opts in to relay raw MIME with a chosen envelope sender; used by inbound-email forwarding. See [Raw-MIME relay](#raw-mime-relay-optional-capability) below.
 - **Provider classes** — live in `includes/email_providers/` (e.g., `MailgunProvider.php`, `SmtpProvider.php`, `SendGridProvider.php`)
 - **Auto-discovery** — `EmailSender` scans `includes/email_providers/` for classes implementing `EmailServiceProvider`; `InboundProviderRegistry` walks the same directory for classes implementing `InboundEmailProvider`. No manual registration needed in either case.
 
@@ -634,3 +635,43 @@ The provider automatically appears in the admin email settings dropdown and its 
 | `send(EmailMessage)` | Send a single message; return success/failure |
 | `sendBatch(EmailMessage, array)` | Send to multiple recipients; returns `['success' => bool, 'failed_recipients' => []]`. Providers can optimize (e.g., Mailgun batch API) |
 | `validateApiConnection()` | (Optional) Live API check for admin validation panel |
+
+### Raw-MIME relay (optional capability)
+
+`RawMessageRelay` is an opt-in capability interface declared next to
+`EmailServiceProvider` in `includes/EmailServiceProvider.php` (no separate
+file — it is in scope wherever providers are resolved). A provider implements
+it **in addition to** `EmailServiceProvider` when it can relay an
+already-formed RFC 5322 message byte-for-byte to chosen envelope recipients
+with an explicit envelope sender (Return-Path / `MAIL FROM`):
+
+```php
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, RawMessageRelay {
+    // ...
+    public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
+        // relay $raw_mime as-is to $destinations; returns ['dest@x' => bool]
+    }
+}
+```
+
+**What it is for.** The normal `send()` path rebuilds a message from
+`from`/`to`/`subject`/`html|text` and exposes no envelope-sender field, so it
+cannot relay original MIME faithfully or set a custom Return-Path. Inbound-email
+forwarding needs both, so it uses `RawMessageRelay` when the active outbound
+provider implements it, reusing that provider's existing credential.
+
+**Which providers implement it.**
+
+| Provider | Raw-MIME path | Envelope sender |
+|---|---|---|
+| `mailgun` | `messages.mime` (SDK `sendMime`) | Mailgun owns bounces; best-effort sender |
+| `smtp` | Native raw SMTP | Full `MAIL FROM` control |
+| `ses` | SESv2 `sendEmail` with `Content.Raw.Data` | SES owns bounces; verified MAIL FROM domain |
+
+The structured-only providers (`postmark`, `sendgrid`, `brevo`, `mailjet`,
+`resend`) deliberately **do not** implement it — they expose no faithful
+raw-MIME relay. A provider without the capability is detected via
+`instanceof RawMessageRelay` and the caller falls back to an SMTP relay, so
+forwarding never regresses. See
+[Inbound Email — Forwarding relay](../plugins/inbound_email/docs/overview.md#forwarding-relay)
+for how the inbound plugin resolves the relay path and handles SRS per path.

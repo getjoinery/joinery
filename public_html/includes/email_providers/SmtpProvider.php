@@ -4,11 +4,15 @@
  *
  * Implements EmailServiceProvider using PHPMailer via the SmtpMailer wrapper class.
  * Batch sending loops over individual sends (no native SMTP batch API).
+ * Also implements RawMessageRelay: SMTP is natively a raw-MIME relay with full
+ * envelope (MAIL FROM) control, so inbound forwarding can relay through it.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
 
-class SmtpProvider implements EmailServiceProvider {
+class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
 
     public static function getKey(): string {
         return 'smtp';
@@ -246,5 +250,57 @@ class SmtpProvider implements EmailServiceProvider {
             'success' => empty($failed_recipients),
             'failed_recipients' => $failed_recipients,
         ];
+    }
+
+    // ── RawMessageRelay ─────────────────────────────────────────────────
+
+    /**
+     * Relay raw MIME over SMTP with an explicit envelope sender. SMTP is the
+     * one path with true MAIL FROM control, so the SRS-rewritten envelope is
+     * honored as-is. Each destination is a separate SMTP transaction so a
+     * single failed recipient does not fail the others — matching the
+     * per-destination result shape forwardEmail() expects.
+     *
+     * Uses the base smtp_* settings (via SmtpMailer), the same credential the
+     * outbound SMTP send() path uses. The router's forwarding-specific
+     * inbound_email_forwarding_smtp_* override is handled separately by its
+     * own SMTP fallback path (createMailer()), which this method does not touch.
+     */
+    public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
+        $results = [];
+
+        foreach ($destinations as $destination) {
+            try {
+                $mailer = new SmtpMailer();
+                $mailer->Sender = $envelope_sender;
+                $mailer->addAddress($destination);
+
+                if (!$mailer->smtpConnect()) {
+                    throw new \Exception('SMTP connect failed: ' . $mailer->ErrorInfo);
+                }
+
+                $smtp = $mailer->getSMTPInstance();
+
+                if (!$smtp->mail($envelope_sender)) {
+                    throw new \Exception('SMTP MAIL FROM failed');
+                }
+                if (!$smtp->recipient($destination)) {
+                    throw new \Exception('SMTP RCPT TO failed');
+                }
+                if (!$smtp->data($raw_mime)) {
+                    throw new \Exception('SMTP DATA failed');
+                }
+
+                $smtp->quit();
+                $smtp->close();
+
+                $results[$destination] = true;
+            } catch (\Exception $e) {
+                error_log('[SmtpProvider] relayRawMessage failed to ' . $destination . ': ' . $e->getMessage());
+                $results[$destination] = false;
+            }
+        }
+
+        return $results;
     }
 }

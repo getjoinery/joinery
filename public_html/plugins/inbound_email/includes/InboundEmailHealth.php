@@ -12,7 +12,7 @@
  * The inbound_mail_server and domain DNS checks are provider-aware:
  * they consult InboundProviderRegistry::active() and dispatch accordingly.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/ProvisioningCheckFailed.php'));
@@ -52,16 +52,36 @@ class InboundEmailHealth {
     const RELAY_TIMEOUT = 5;
 
     /**
-     * Verify the outbound SMTP relay used to forward mail can be reached and
-     * authenticated. This calls InboundEmailRouter::createMailer() — the same
-     * routine the router itself uses to acquire its relay — then connects
-     * and immediately closes. It sends nothing: it verifies acquisition, not
-     * delivery.
+     * Verify the relay used to forward mail. The router resolves one of two
+     * paths (resolveRelayProvider):
      *
-     * @throws ProvisioningCheckFailed if the relay cannot be acquired.
+     *   - Provider raw-MIME relay (Mailgun/SMTP/SES) — verify the provider's
+     *     own configuration is complete. A healthy provider credential passes
+     *     even when the legacy smtp_* settings are empty.
+     *   - SMTP fallback — acquire the relay via createMailer(), connect, and
+     *     immediately close. It sends nothing: it verifies acquisition, not
+     *     delivery.
+     *
+     * @throws ProvisioningCheckFailed if the resolved relay cannot be verified.
      */
     public static function checkForwardingRelay() {
         $router = new InboundEmailRouter();
+
+        // Provider raw-MIME relay active: verify the provider credential.
+        $relay = $router->resolveRelayProvider();
+        if ($relay !== null) {
+            $class = get_class($relay);
+            $validation = $class::validateConfiguration();
+            if (empty($validation['valid'])) {
+                throw new ProvisioningCheckFailed(
+                    'Forwarding relays through ' . $class::getLabel()
+                    . ', but its configuration is incomplete: '
+                    . implode('; ', $validation['errors'] ?? array()));
+            }
+            return;
+        }
+
+        // SMTP fallback relay.
         $mailer = $router->createMailer();
 
         // Bound the connection so a dead relay cannot hang the check — the
