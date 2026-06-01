@@ -433,7 +433,7 @@
 					$formwriter->dropinput($field_key, $field_label, [
 						'options' => $field['options'] ?? [],
 						'value' => $settings->get_setting($field_key),
-						'empty_option' => false,
+						'empty_option' => $field['empty_option'] ?? false,
 					]);
 				} else {
 					$formwriter->textinput($field_key, $field_label, [
