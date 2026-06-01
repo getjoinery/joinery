@@ -65,7 +65,9 @@ it by re-entering an SMTP password that will rot again.
 
 ### A small, optional capability interface
 
-Add `includes/RawMessageRelay.php`:
+Add the `RawMessageRelay` interface to the **existing**
+`includes/EmailServiceProvider.php`, alongside the interface it complements (no
+new file):
 
 ```php
 interface RawMessageRelay {
@@ -85,6 +87,16 @@ interface RawMessageRelay {
 This is **separate** from `EmailServiceProvider` (opt-in), so a provider that
 cannot relay raw MIME simply doesn't implement it and there is no interface-wide
 breakage. Forwarding detects support with `instanceof RawMessageRelay`.
+
+**Why co-locate rather than add a file.** `RawMessageRelay` is an *outbound*
+capability — how forwarded mail leaves the building, reusing the outbound
+provider's credential — so it belongs with `EmailServiceProvider`. That file is
+already `require`d before any provider class is parsed (by `EmailSender` and
+`InboundProviderRegistry`), and providers/the router resolve through that same
+path, so the interface is in scope with **zero new `require_once` lines**. This
+mirrors the existing opt-in pattern of `InboundEmailProvider` (a provider adds
+the capability to its `implements` list); we just don't spend a third interface
+file on it.
 
 ### Forwarding picks the path once
 
@@ -118,7 +130,7 @@ The nine outbound providers, and whether each gets `RawMessageRelay` now:
 |---|---|---|
 | `MailgunProvider` | Yes — `messages.mime` (SDK `sendMime`) | **Implement** (the live deployment; the whole point) |
 | `SmtpProvider` | Native — it *is* raw SMTP with envelope control | **Implement** (thin wrapper over what `forwardEmail` does today) |
-| `SesProvider` | Yes — `SendRawEmail` with envelope sender | **Implement** if the SES path is exercised; else defer with a noted TODO |
+| `SesProvider` | Yes — SESv2 `sendEmail` with `Content.Raw.Data` (the provider is built on `SesV2Client`, not the v1 `SendRawEmail` API) | **Implement** if the SES path is exercised; else defer with a noted TODO |
 | `PostmarkProvider` | Limited — no arbitrary-envelope raw MIME | **Do not implement** → SMTP fallback |
 | `SendGridProvider` | Limited / no faithful raw-MIME relay | **Do not implement** → SMTP fallback |
 | `BrevoProvider` | No | **Do not implement** → SMTP fallback |
@@ -155,15 +167,15 @@ accident of which relay fired.
 ### To create
 | File | Purpose |
 |------|---------|
-| `includes/RawMessageRelay.php` | the opt-in capability interface |
 | `tests/integration/inbound_forwarding_relay_test.php` | resolver picks provider-relay vs SMTP fallback correctly; a `RawMessageRelay` provider is used when active; a non-supporting provider falls back |
 
 ### To modify
 | File | Change |
 |------|--------|
+| `includes/EmailServiceProvider.php` | add the opt-in `RawMessageRelay` interface alongside `EmailServiceProvider` (no new file); `@version` |
 | `includes/email_providers/MailgunProvider.php` | implement `RawMessageRelay::relayRawMessage()` via the SDK MIME endpoint, reusing `mailgun_api_key`; `@version` |
 | `includes/email_providers/SmtpProvider.php` | implement `RawMessageRelay` as a thin wrapper over the raw-SMTP relay logic currently inlined in `forwardEmail()` |
-| `includes/email_providers/SesProvider.php` | implement `RawMessageRelay` via `SendRawEmail` (or defer with a TODO if the SES path is unexercised) |
+| `includes/email_providers/SesProvider.php` | implement `RawMessageRelay` via SESv2 `sendEmail` with `Content.Raw.Data` (the provider uses `SesV2Client`), or defer with a TODO if the SES path is unexercised |
 | `plugins/inbound_email/includes/InboundEmailRouter.php` | add the relay resolver; route `forwardEmail()`, `forwardToCatchAll()`, and (per decision) `handleSRSBounce()` through it; keep `createMailer()` SMTP path as the documented fallback; `@version` |
 | `plugins/inbound_email/includes/InboundEmailSetupCheck.php` | the "Outbound forwarding relay" plugin check should verify the **resolved** relay (provider credential when provider-relay is active), not assume SMTP — so a healthy API key reads PASS even with empty `smtp_*` |
 | `plugins/inbound_email/plugin.json` | minor version bump |

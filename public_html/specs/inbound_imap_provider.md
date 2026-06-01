@@ -19,8 +19,16 @@ Two auth realities drive the scope:
 - **Yahoo / iCloud / Fastmail / generic IMAP** work with **basic auth + an app
   password** — covered by the base provider with per-host connection presets.
 - **Gmail / Google Workspace** and **Microsoft 365 / Outlook.com** have
-  **disabled or deprecated basic auth** and require **OAuth2 (XOAUTH2)**. Those
-  are the two add-ons this spec builds.
+  **disabled or deprecated basic auth** and require **OAuth2 (XOAUTH2)**.
+
+The OAuth2 part is **not built here.** The authorization-code flow (consent,
+`code`→token exchange, refresh, signed callback) and the Google/Microsoft
+provider definitions are a platform abstraction defined in
+**[OAuth2 Core](oauth2_core.md)** — IMAP is its **first consumer**. This spec
+builds the IMAP transport and plugs into that core: it requests the mail scope,
+stores the returned tokens on the IMAP account, and uses them for XOAUTH2. The
+`SecretBox` helper for encrypting credentials at rest also comes from the OAuth2
+core spec and is reused here for IMAP passwords.
 
 ## Motivation / the gap
 
@@ -57,15 +65,16 @@ Three decisions define it:
 
 3. **Auth is a pluggable strategy.** The connection (host/port/encryption/folder)
    is generic; the *authentication* is either a stored password/app-password or
-   an OAuth2 bearer token. Gmail and Microsoft are OAuth strategies; everyone
-   else is password.
+   an OAuth2 bearer token obtained from the [OAuth2 Core](oauth2_core.md). Gmail
+   and Microsoft use the OAuth strategy; everyone else uses a password.
 
 ```
   Scheduled task: PollImapAccounts (every few minutes)
         │  for each enabled account whose interval elapsed
         ▼
   ImapIngestor(account)
-   ├─ auth: PasswordImapAuth | OAuth2ImapAuth(GoogleOAuth | MicrosoftOAuth)
+   ├─ auth: PasswordImapAuth | OAuth2ImapAuth
+   │        └─ OAuth2ImapAuth asks OAuth2Client::ensureFresh(provider, token) → bearer
    ├─ connect (php-imap / library), select folder, UID search > last_seen_uid
    ├─ fetch raw messages
    ├─ InboundEmailRouter::storeMessage(...)  → iem_ (dedup via UNIQUE)
@@ -144,16 +153,16 @@ exposes `getPassword()`/`setPassword()` / token accessors that
 encrypt/decrypt; raw `*_enc` is never read directly by callers and never
 logged or echoed.
 
-### 2. OAuth app config (settings, per provider)
+### 2. OAuth app config — owned by the OAuth2 Core
 
 Google and Microsoft each need an OAuth **application** (client id/secret +
-redirect URI), shared across all accounts of that kind. Declared as plugin
-settings (`plugin.json`), secrets handled as secrets:
-- `inbound_imap_google_client_id`, `inbound_imap_google_client_secret`
-- `inbound_imap_microsoft_client_id`, `inbound_imap_microsoft_client_secret`,
-  `inbound_imap_microsoft_tenant` (default `common`)
-
-(No per-account OAuth app — one app per provider, many accounts consent into it.)
+redirect URI), shared across *all* OAuth consumers — not just IMAP. These live in
+the [OAuth2 Core](oauth2_core.md) as the core settings `oauth_google_client_id`/
+`oauth_google_client_secret`, `oauth_microsoft_client_id`/`_secret`/`_tenant`,
+entered once at `/admin/admin_oauth_providers`. **This spec declares no OAuth app
+settings** — it reuses whatever the OAuth core has configured. One app per
+provider, many accounts (and other consumers) consent into it; one shared
+redirect URI (`/oauth/callback`).
 
 ### Mailbox mapping nuance
 
@@ -200,9 +209,14 @@ handling).
 `ImapAuthStrategy` interface: `applyTo($imapConnection)` / returns the
 credential the IMAP connection needs.
 
-- `PasswordImapAuth` — basic `LOGIN` with username + stored app/basic password.
-- `OAuth2ImapAuth` — `AUTHENTICATE XOAUTH2` with a valid bearer access token,
-  obtained from the provider's OAuth strategy (refreshing if needed).
+- `PasswordImapAuth` — basic `LOGIN` with username + stored app/basic password
+  (decrypted via the core `SecretBox`).
+- `OAuth2ImapAuth` — `AUTHENTICATE XOAUTH2` with a valid bearer access token. It
+  does **not** implement OAuth: it reads the account's stored `OAuth2Token`, calls
+  `OAuth2Client::ensureFresh($provider, $token)` from the [OAuth2 Core](oauth2_core.md)
+  (which refreshes and hands back a valid access token), persists the token if it
+  changed, and formats the XOAUTH2 SASL string. The XOAUTH2 *formatting* and IMAP
+  *use* are the only OAuth-adjacent code this plugin owns.
 
 ### Provider matrix (what each major host needs)
 
@@ -219,26 +233,34 @@ So the only **code** add-ons are **Google** and **Microsoft** (OAuth2). Yahoo,
 iCloud, and Fastmail are connection **presets** on the generic provider plus an
 "use an app password" hint — no new classes.
 
-### OAuth handling (Google + Microsoft)
+### OAuth handling — consume the OAuth2 Core
 
-Each OAuth provider class (`GoogleOAuthProvider`, `MicrosoftOAuthProvider`)
-encapsulates: authorization endpoint, token endpoint, scopes, and
-`getConsentUrl(state)` / `exchangeCode(code)` / `refresh(refreshToken)`.
+This plugin owns **no** authorization-endpoint, token-exchange, refresh, or
+callback code. The provider definitions (`GoogleOAuthProvider`,
+`MicrosoftOAuthProvider`), the grant engine (`OAuth2Client`), the signed callback,
+and `SecretBox` all live in the [OAuth2 Core](oauth2_core.md). IMAP plugs in as a
+**consumer**:
 
-- **Scopes:** Google `https://mail.google.com/`; Microsoft
-  `https://outlook.office365.com/IMAP.AccessAsUser.All offline_access`
-  (`offline_access` is required to get a refresh token).
+- **Consumer registration** — `InboundImapOAuthConsumer implements OAuth2Consumer`
+  (in the plugin) with `getPurpose() === 'inbound_imap'`. Its
+  `onTokenGranted(OAuth2Token $token, array $payload)` loads the
+  `InboundImapAccount` from `$payload['account_id']`, stores the encrypted
+  access+refresh tokens and expiry on the account, and returns the IMAP-accounts
+  admin URL.
+- **Scopes (requested at initiation):** Google `https://mail.google.com/`;
+  Microsoft `https://outlook.office365.com/IMAP.AccessAsUser.All offline_access`
+  (`offline_access` required for a refresh token).
 - **Consent flow:** admin adds an account with provider=gmail/microsoft → clicks
-  **"Connect"** → redirect to the provider's consent screen → provider
-  redirects back to a **callback route** (new: `/admin/inbound_imap_oauth_callback`,
-  permission 10) → exchange `code` for access+refresh tokens → store (encrypted)
-  on the account. A signed/`state` value carries the account id and CSRF-protects
-  the callback.
-- **Refresh:** the poller refreshes the access token using the refresh token when
-  expired; refresh failures surface as the account's `last_status` and an admin
-  alert, not a crash.
-- **Redirect URI** must be registered in the Google Cloud / Azure app and match
-  exactly. Documented in setup.
+  **"Connect"** → the page calls
+  `OAuth2Client::beginConsent($providerKey, $scopes, 'inbound_imap', ['account_id' => $id], $returnUrl)`
+  and redirects to the returned consent URL. The provider returns to the **core**
+  `/oauth/callback`, which validates state, exchanges the code, and dispatches to
+  `InboundImapOAuthConsumer`. No plugin callback route.
+- **Refresh:** handled by `OAuth2Client::ensureFresh` inside `OAuth2ImapAuth` on
+  each poll; refresh failure raises `OAuth2Exception`, which the ingestor records
+  as the account's `last_status` and skips — never crashes the run.
+- **Redirect URI** is the single shared `/oauth/callback` registered once per
+  provider in the OAuth core setup — IMAP adds nothing to the cloud app.
 
 ## Config UI / admin
 
@@ -265,32 +287,30 @@ Reuse the per-provider check pattern (`getSetupChecks`-style) for an account:
 
 ## Dependencies (build decision)
 
-Two libraries are involved; both have a "use what's installed" option:
-
 - **IMAP access:** `php-imap` extension is installed and handles basic auth
   cleanly. Its XOAUTH2 support is workable but fiddly. **Recommended:** evaluate
   the maintained userland library **`webklex/php-imap`** (folders, UID, and
   OAuth bearer auth in one API) vs. the raw extension; lean toward the library
   for the OAuth paths, keep the extension as a fallback.
-- **OAuth2 consent/refresh:** **Recommended** `league/oauth2-client` +
-  `league/oauth2-google` + a Microsoft Azure provider package (e.g.
-  `thenetworg/oauth2-azure`). Guzzle is already vendored, so a direct
-  Guzzle implementation of the `authorization_code` + `refresh_token` grants is a
-  viable lower-dependency fallback.
+- **OAuth2 consent/refresh:** **not a dependency of this spec** — it is provided
+  by the [OAuth2 Core](oauth2_core.md), whose default is a direct Guzzle
+  implementation (Guzzle is already vendored) with no new package.
 
-Pin choices when building; declare via Composer (`composerAutoLoad` is already
-wired). Note any new `require` in `composer.json`.
+Pin the IMAP-library choice when building; declare via Composer
+(`composerAutoLoad` is already wired). Note any new `require` in `composer.json`.
 
 ## Security
 
-- **Secrets at rest:** IMAP passwords, OAuth client secrets, and refresh tokens
-  are long-lived credentials to a user's *entire* mailbox. Store **encrypted**
-  (use the platform's encryption helper if one exists; otherwise this spec adds a
-  small libsodium/`openssl` wrapper keyed from a config secret). Never store
-  plaintext, never log, never echo (per the secret-handling rule) — accessors
-  decrypt on use only.
-- **OAuth callback:** `state` is signed and single-use (CSRF + binds to the
-  account); callback is permission-10.
+- **Secrets at rest:** IMAP passwords and OAuth refresh tokens are long-lived
+  credentials to a user's *entire* mailbox. Store **encrypted** via the core
+  `SecretBox` helper (defined in the [OAuth2 Core](oauth2_core.md)) — never
+  plaintext, never log, never echo (per the secret-handling rule); accessors
+  decrypt on use only. (OAuth *client* secrets are owned and encrypted by the
+  OAuth core, not stored here.)
+- **OAuth callback:** the signed, single-use, session-bound `state` and the
+  callback live in the OAuth core; `state` carries `{account_id}` and CSRF-binds
+  the flow to the initiating admin session. The IMAP account page that starts the
+  flow is permission-10.
 - **Scope minimization:** request only mail-read scope; document that the token
   grants full mailbox read.
 - **Least exposure:** redact tokens/passwords in `last_status` and any debug
@@ -309,13 +329,11 @@ wired). Note any new `require` in `composer.json`.
 | `plugins/inbound_email/includes/imap_providers/GenericImapProvider.php` | base (password) + Yahoo/iCloud/Fastmail presets |
 | `plugins/inbound_email/includes/imap_providers/GmailImapProvider.php` | Google preset + OAuth |
 | `plugins/inbound_email/includes/imap_providers/MicrosoftImapProvider.php` | Microsoft preset + OAuth |
-| `plugins/inbound_email/includes/imap_auth/PasswordImapAuth.php`, `OAuth2ImapAuth.php` | auth strategies |
-| `plugins/inbound_email/includes/oauth/GoogleOAuthProvider.php`, `MicrosoftOAuthProvider.php` | consent/exchange/refresh |
-| `plugins/inbound_email/includes/SecretBox.php` (or reuse a core helper) | encrypt/decrypt secrets at rest |
+| `plugins/inbound_email/includes/imap_auth/PasswordImapAuth.php`, `OAuth2ImapAuth.php` | auth strategies (OAuth2ImapAuth = XOAUTH2 formatting + `OAuth2Client::ensureFresh`) |
+| `plugins/inbound_email/includes/oauth_consumers/InboundImapOAuthConsumer.php` | `OAuth2Consumer` (purpose `inbound_imap`): store granted tokens on the account |
 | `plugins/inbound_email/tasks/PollImapAccounts.json` + `.php` | the poller scheduled task |
 | `plugins/inbound_email/admin/admin_inbound_email_imap.php` (+ logic) | accounts list / add / poll-now / connect |
-| `plugins/inbound_email/admin/admin_inbound_email_imap_edit.php` (+ logic) | account editor |
-| `plugins/inbound_email/admin/admin_inbound_email_imap_oauth_callback.php` (+ logic) | OAuth redirect callback |
+| `plugins/inbound_email/admin/admin_inbound_email_imap_edit.php` (+ logic) | account editor (Connect button → `OAuth2Client::beginConsent`) |
 | `plugins/inbound_email/tests/inbound_imap_account_test.php` | model + encryption + UID cursor |
 | `plugins/inbound_email/tests/imap_poller_test.php` | poll → store → dedup → cursor advance (mock IMAP) |
 
@@ -325,9 +343,9 @@ wired). Note any new `require` in `composer.json`.
 | `plugins/inbound_email/includes/InboundProviderRegistry.php` | discover polling providers (separate list) |
 | `plugins/inbound_email/includes/admin_tabs.php` | add "IMAP Accounts" tab |
 | `plugins/inbound_email/includes/InboundEmailRouter.php` | expose a store-only entry the ingestor reuses (if `storeMessage` needs a non-Postfix caller path); bump `@version` |
-| `plugins/inbound_email/plugin.json` | register the poller task, the OAuth settings, the IMAP-source domain flag; serve `/admin/...imap*` and the callback route; bump `version` |
+| `plugins/inbound_email/plugin.json` | register the poller task and the IMAP-source domain flag; serve `/admin/...imap*`; bump `version`. **No OAuth settings or callback route** (owned by the OAuth core). Declares a dependency on the OAuth core. |
 | `plugins/inbound_email/data/inbound_email_domain_class.php` | optional `ied_is_imap_source` flag so Setup skips MX for IMAP-sourced mailboxes |
-| `serve.php` | only if the OAuth callback needs a non-plugin route (plugin admin routes auto-discover, so likely **no** change) |
+| `serve.php` | **no change** — IMAP admin routes auto-discover; the OAuth `/oauth/callback` route is added by the OAuth core spec |
 
 ### Schema
 Applied by **Sync with Filesystem** / `update_database` from the data classes —
@@ -343,9 +361,12 @@ the plugin migrations file).
 - **Ingestor (mock IMAP)** — given fixture raw messages, stores them under the
   bound alias, dedups re-fetch, records status; a connection error is captured
   per-account without throwing.
-- **OAuth** — token refresh exchanges a refresh token for a new access token
-  (mock token endpoint); expired-and-unrefreshable surfaces as status, not crash;
-  `state` validation rejects a tampered/replayed callback.
+- **OAuth consumer seam** — `InboundImapOAuthConsumer::onTokenGranted` stores the
+  granted tokens (encrypted) on the right account and returns the accounts URL; an
+  expired-and-unrefreshable token (mock `OAuth2Client::ensureFresh` throwing
+  `OAuth2Exception`) surfaces as the account's `last_status`, not a crash. (The
+  grant/refresh/`state` mechanics themselves are covered by the
+  [OAuth2 Core](oauth2_core.md) tests, not duplicated here.)
 - **Provider presets** — picking Gmail/Microsoft/Yahoo/iCloud/Fastmail yields the
   correct host/port/encryption and auth method.
 - **Reader integration** — an IMAP-ingested message appears in the Mailbox Reader
@@ -363,9 +384,10 @@ end-to-end (real Gmail/Microsoft consent) is a manual checklist in the docs.
   matrix (who needs OAuth vs app password), the poller cadence, the
   bring-your-own-mailbox story (SMTP out + IMAP in), and that the reader/grants
   are reused unchanged.
-- New **`plugins/inbound_email/docs/imap_oauth_setup.md`**: step-by-step Google
-  Cloud and Azure app registration (scopes, redirect URI), where to paste the
-  client id/secret, and the consent flow.
+- OAuth app registration (Google Cloud / Azure, scopes, the shared redirect URI,
+  where to paste client id/secret) is documented **once** in the OAuth core's
+  `docs/oauth2.md` — the IMAP overview links to it rather than duplicating it, and
+  adds only the IMAP-specific scopes and the per-account "Connect" step.
 - `docs/scheduled_tasks.md`: list the `PollImapAccounts` task and its cadence
   model (task floor vs per-account interval).
 - `docs/email_system.md`: note IMAP as an inbound transport alongside
