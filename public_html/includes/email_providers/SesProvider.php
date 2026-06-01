@@ -4,6 +4,10 @@
  *
  * Implements EmailServiceProvider using aws/aws-sdk-php's SESv2 client.
  * Batch sending is per-recipient since SES has no native non-templated bulk API.
+ * Also implements RawMessageRelay via SESv2 sendEmail with Content.Raw so
+ * inbound forwarding can relay raw MIME through the same AWS credential.
+ *
+ * @version 1.2
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -12,7 +16,7 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 use Aws\SesV2\SesV2Client;
 use Aws\Exception\AwsException;
 
-class SesProvider implements EmailServiceProvider, InboundEmailProvider {
+class SesProvider implements EmailServiceProvider, InboundEmailProvider, RawMessageRelay {
 
     public static function getKey(): string {
         return 'ses';
@@ -90,6 +94,22 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider {
             'valid' => empty($errors),
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * Whether the admin has actually entered SES credentials.
+     *
+     * Distinct from validateConfiguration(): SES treats blank static keys as
+     * valid because it can fall back to IAM role / instance credentials at send
+     * time. But "region set, keys blank" is indistinguishable from "nothing
+     * configured", so the admin validation panel must not fire a live API call
+     * in that state. Credentials count as present only when both static keys
+     * are supplied.
+     */
+    public static function hasCredentials(): bool {
+        $settings = Globalvars::get_instance();
+        return !empty($settings->get_setting('ses_access_key_id'))
+            && !empty($settings->get_setting('ses_secret_access_key'));
     }
 
     /**
@@ -324,6 +344,62 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider {
         }
 
         return new SesV2Client($config);
+    }
+
+    // ── RawMessageRelay ─────────────────────────────────────────────────
+
+    /**
+     * Relay raw MIME via SESv2 sendEmail with Content.Raw.Data, reusing the
+     * same AWS credential the send() path uses. FromEmailAddress is omitted so
+     * SES uses the From header already in the raw message (the router rewrote
+     * it to the verified address). SES owns bounce handling and uses its own
+     * verified MAIL FROM domain, so the SRS envelope sender is not honored on
+     * this path — that is the documented per-path behavior. Each destination
+     * is sent separately for a per-destination result, matching forwardEmail().
+     */
+    public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
+        $settings = Globalvars::get_instance();
+        $results = [];
+
+        try {
+            $client = self::buildClient(
+                $settings->get_setting('ses_region') ?: 'us-east-1',
+                $settings->get_setting('ses_access_key_id'),
+                $settings->get_setting('ses_secret_access_key')
+            );
+        } catch (\Exception $e) {
+            error_log('[SesProvider] relayRawMessage client setup failed: ' . $e->getMessage());
+            foreach ($destinations as $destination) {
+                $results[$destination] = false;
+            }
+            return $results;
+        }
+
+        $config_set = $settings->get_setting('ses_configuration_set');
+
+        foreach ($destinations as $destination) {
+            $params = [
+                'Content' => ['Raw' => ['Data' => $raw_mime]],
+                'Destination' => ['ToAddresses' => [$destination]],
+            ];
+            if (!empty($config_set)) {
+                $params['ConfigurationSetName'] = $config_set;
+            }
+
+            try {
+                $client->sendEmail($params);
+                $results[$destination] = true;
+            } catch (AwsException $e) {
+                error_log('[SesProvider] relayRawMessage failed to ' . $destination . ': '
+                    . ($e->getAwsErrorMessage() ?: $e->getMessage()));
+                $results[$destination] = false;
+            } catch (\Exception $e) {
+                error_log('[SesProvider] relayRawMessage failed to ' . $destination . ': ' . $e->getMessage());
+                $results[$destination] = false;
+            }
+        }
+
+        return $results;
     }
 
     // ── InboundEmailProvider ────────────────────────────────────────────

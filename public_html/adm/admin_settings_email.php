@@ -454,7 +454,14 @@
 				echo '<h5>' . htmlspecialchars($provider_label) . ' Connection Status</h5>';
 				echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 
-				if ($run_validation && !$provider_class::validateConfiguration()['valid']) {
+				// "Credentials present" defaults to a passing config check, but a
+				// provider may override via hasCredentials() when valid config does
+				// not imply entered credentials (e.g. SES IAM-role fallback).
+				$provider_has_credentials = method_exists($provider_class, 'hasCredentials')
+					? $provider_class::hasCredentials()
+					: $provider_class::validateConfiguration()['valid'];
+
+				if ($run_validation && !$provider_has_credentials) {
 					echo '<div style="text-align: center; padding: 40px;">';
 					echo '<p style="color: #666;">Credentials not configured &mdash; validation skipped</p>';
 					echo '</div>';

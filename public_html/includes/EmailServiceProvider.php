@@ -7,6 +7,10 @@
  *
  * To add a new provider, create a single file in includes/email_providers/
  * implementing this interface. No other files need modification.
+ *
+ * This file also declares the optional RawMessageRelay capability (below).
+ *
+ * @version 1.1
  */
 interface EmailServiceProvider {
     /**
@@ -53,4 +57,41 @@ interface EmailServiceProvider {
      * unsent recipients are passed to the fallback provider, avoiding double-sends.
      */
     public function sendBatch(EmailMessage $message, array $recipients): array;
+}
+
+/**
+ * RawMessageRelay - optional, opt-in capability for outbound providers.
+ *
+ * An EmailServiceProvider MAY also implement this interface when it can relay
+ * an already-formed RFC 5322 message byte-for-byte to chosen envelope
+ * recipients with an explicit envelope sender (Return-Path / MAIL FROM). This
+ * is what inbound-email forwarding needs (faithful MIME + a chosen envelope)
+ * and what the normal send() path cannot express.
+ *
+ * It is declared here, alongside EmailServiceProvider, rather than in its own
+ * file: this file is already loaded wherever outbound providers are resolved
+ * (EmailSender, InboundProviderRegistry), so the interface is in scope with no
+ * extra includes. A provider opts in simply by adding it to its `implements`
+ * list — mirroring how InboundEmailProvider is opted into. Forwarding detects
+ * support with `instanceof RawMessageRelay`; a provider that does not implement
+ * it falls back to the SMTP relay, so forwarding never regresses.
+ *
+ * Providers that implement it: Mailgun (messages.mime), SMTP (native raw SMTP),
+ * SES (SESv2 sendEmail with Content.Raw). The remaining providers expose only
+ * structured-message APIs and deliberately do not.
+ *
+ * @version 1.0
+ */
+interface RawMessageRelay {
+    /**
+     * Relay an already-formed RFC 5322 message to one or more envelope
+     * recipients, with an explicit envelope sender (Return-Path / MAIL FROM).
+     * Returns ['dest@x' => bool] per recipient, mirroring forwardEmail().
+     *
+     * @param string $raw_mime         The full message to relay, as-is.
+     * @param string $envelope_sender  MAIL FROM (already SRS-rewritten if applicable).
+     * @param string[] $destinations   Envelope recipients (RCPT TO).
+     * @return array<string,bool>      Per-destination success keyed by address.
+     */
+    public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array;
 }
