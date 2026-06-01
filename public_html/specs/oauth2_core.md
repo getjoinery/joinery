@@ -7,7 +7,7 @@ valid access token for a third-party account, plus a small **catalog of concrete
 providers** (Google, Microsoft to start). It implements the OAuth2
 **authorization-code grant with refresh** once, correctly, in core
 (`includes/oauth/`) — consent-URL building, `code`→token exchange, token refresh,
-signed single-use `state` (CSRF), and a **single generic callback** that
+session-stored single-use `state` (CSRF), and a **single generic callback** that
 dispatches the resulting token back to whichever feature initiated the flow.
 
 This is deliberately **provider- and consumer-agnostic**. The grant mechanics and
@@ -64,14 +64,14 @@ changes.
   Feature page (e.g. IMAP account edit)
       │  OAuth2Client::beginConsent(provider, scopes, purpose, payload, returnUrl)
       ▼
-  OAuth2State::issue(...) ── persists single-use nonce, binds to session
-      │  → signed `state` param + provider consent URL
+  OAuth2State::issue(...) ── stores flow in $_SESSION under a single-use nonce
+      │  → opaque `state` nonce + provider consent URL
       ▼
   [ browser → provider consent screen ]
       │  provider redirects to /oauth/callback?code=…&state=…
       ▼
   Generic callback (serve.php route /oauth/callback)
-      ├─ OAuth2State::validate(state)      (signature · expiry · single-use · session)
+      ├─ OAuth2State::validate(state)      (expiry · single-use · session-intrinsic)
       ├─ provider = OAuth2ProviderRegistry::get(state.provider)
       ├─ token    = OAuth2Client::exchangeCode(provider, code, redirectUri)
       ├─ consumer = OAuth2ConsumerRegistry::get(state.purpose)
@@ -143,23 +143,30 @@ library is used.
   persists). On refresh failure, throws `OAuth2Exception` (consumer records
   status; never crashes a batch job).
 
-### `OAuth2State` — signed, single-use, session-bound
-The CSRF and dispatch carrier. The opaque `state` query param is
-`base64url(payload_json) . '.' . hmac_sha256(payload_json, key)` where the key is
-`oauth_state_secret` (see Settings). Payload: `nonce`, `provider`, `purpose`,
-`payload` (consumer's opaque data, e.g. `{account_id: N}`), `session_id`,
-`expires` (issue + 10 min).
-- `issue(...)` signs the payload **and** persists the nonce (table below) so it
-  can be consumed exactly once.
-- `validate($state)`: verify HMAC (constant-time `hash_equals`), not expired,
-  nonce exists-and-unconsumed, `session_id` equals the current session. Any
-  failure → reject (no token exchange). On success, atomically mark the nonce
-  consumed and return the decoded payload.
+### `OAuth2State` — session-stored, single-use
+The CSRF and dispatch carrier, built on the **same mechanism as the existing CSRF
+tokens** (`FormWriterV2Base`): a single-use, expiring entry held server-side in
+`$_SESSION`. The opaque `state` query param is just an unguessable random nonce
+(`LibraryFunctions::str_rand(64)`); all flow data lives in the session entry it
+keys — never in the browser. No HMAC and no signing are needed, because the value
+never carries data the client could tamper with: the session itself is the trust
+anchor.
 
-Session binding means an admin-initiated flow can only be completed in the same
-browser session that started it — so the callback itself needs **no permission
-gate**; the originating page's permission check (e.g. the IMAP admin page at
-permission 10) governs who can ever start a flow, and a public consumer (future
+Session entry (`$_SESSION['oauth_flows'][$nonce]`): `provider`, `purpose`,
+`payload` (consumer's opaque data, e.g. `{account_id: N}`), `returnUrl`, `scopes`,
+`expires` (issue + 10 min).
+- `issue(...)` generates the nonce, writes the entry, and prunes any expired
+  entries (mirroring `cleanExpiredCSRFTokens`). Returns the nonce as the `state`
+  param.
+- `validate($state)`: look up `$_SESSION['oauth_flows'][$state]`; reject if absent
+  or expired (no token exchange). On success, **unset the entry** (single-use) and
+  return the decoded flow.
+
+Session binding is **intrinsic** — the entry exists only in the session that issued
+it, so a callback arriving in any other session simply finds no match. There is no
+`session_id` to compare and no DB row at all. Consequently the callback needs **no
+permission gate**; the originating page's permission check (e.g. the IMAP admin page
+at permission 10) governs who can ever start a flow, and a public consumer (future
 social login) works through the identical mechanism without special-casing.
 
 ### `OAuth2Consumer` (interface) + `OAuth2ConsumerRegistry`
@@ -197,24 +204,11 @@ IMAP passwords in the IMAP spec). **Never logs or echoes plaintext.**
 > (`base64_encode(random_bytes(32))`) for existing sites. If the key is absent,
 > `SecretBox` throws on construction — fail closed, never store plaintext.
 
-### State store — `data/oauth_state_class.php` (new)
-`OauthState` (`SystemBase`) + Multi, prefix `oas`, table `oas_oauth_states`.
-Minimal single-use/replay record (the signed payload carries the data; this table
-enforces *consumed-once* + expiry):
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `oas_oauth_state_id` | int8 serial PK | |
-| `oas_nonce` | varchar(64) | unique; the random nonce in the signed payload |
-| `oas_purpose` | varchar(40) | for debugging/audit |
-| `oas_session_id` | varchar(128) | session the flow was issued in |
-| `oas_consumed_time` | timestamp(6) | null until consumed (single-use) |
-| `oas_expires_time` | timestamp(6) | issue + 10 min |
-| `oas_create_time` | timestamp(6) | |
-
-`getMultiResults()` filters: `nonce`, `unconsumed`, `expired`. Expired/consumed
-rows are pruned by an existing cleanup task or a tiny step in a maintenance task
-(see Scheduled tasks).
+### State store — none (server-side session)
+There is **no state table and no state data class.** Issued flows live in
+`$_SESSION['oauth_flows']`, are consumed (unset) on validate, and expired entries
+are pruned on the next `issue()` — exactly how the CSRF-token store self-cleans.
+Nothing to migrate, no rows to sweep.
 
 ## Settings (core — `settings.json`)
 
@@ -229,12 +223,10 @@ their owner; the owner here is the cross-cutting OAuth core."
 | `oauth_microsoft_client_id` | `""` | |
 | `oauth_microsoft_client_secret` | `""` | `SecretBox` |
 | `oauth_microsoft_tenant` | `common` | `common`/`organizations`/`consumers`/a tenant id |
-| `oauth_state_secret` | `""` | HMAC key for `state`; auto-generated on first admin save if blank |
 
 > Secret-at-rest nuance: `stg_settings` stores strings. The client *secret* values
 > are written through `SecretBox` before persisting and decrypted in
-> `getClientSecret()`. `oauth_state_secret` is an HMAC key, not user-facing — seed
-> it with random bytes the first time the admin saves provider config if empty.
+> `getClientSecret()`.
 
 ## Admin UI — `adm/admin_oauth_providers.php` (+ logic)
 
@@ -260,9 +252,10 @@ shows a neutral error and logs server-side (no token/secret in the message).
 - **Secrets at rest:** client secrets and all refresh tokens go through
   `SecretBox`; refresh tokens grant long-lived access and are never logged,
   echoed, or returned to the browser.
-- **CSRF / replay:** `state` is HMAC-signed, single-use (DB nonce), session-bound,
-  and 10-minute-expiring. A tampered, replayed, foreign-session, or expired state
-  is rejected before any token exchange.
+- **CSRF / replay:** `state` is an unguessable random nonce that exists only in the
+  initiating browser's server-side session; it's single-use (consumed on validate)
+  and 10-minute-expiring. A forged, replayed, foreign-session, or expired state has
+  no matching session entry and is rejected before any token exchange.
 - **Open-redirect safety:** the consumer-supplied `returnUrl` is validated to be a
   same-site path (leading `/`, no scheme/host) before redirecting.
 - **Scope minimization:** consumers request only the scope they need; the admin
@@ -281,37 +274,36 @@ shows a neutral error and logs server-side (no token/secret in the message).
 | `includes/oauth/providers/MicrosoftOAuthProvider.php` | Microsoft endpoints + tenant |
 | `includes/oauth/OAuth2Token.php` | token value object |
 | `includes/oauth/OAuth2Client.php` | grant engine (beginConsent/exchange/refresh/ensureFresh) |
-| `includes/oauth/OAuth2State.php` | signed single-use session-bound state |
+| `includes/oauth/OAuth2State.php` | session-stored single-use state (CSRF + dispatch) |
 | `includes/oauth/OAuth2Consumer.php` | consumer interface |
 | `includes/oauth/OAuth2ConsumerRegistry.php` | discover consumers (core + plugin paths) |
 | `includes/oauth/OAuth2Exception.php` | typed failure for grant/refresh errors |
 | `includes/SecretBox.php` | encrypt/decrypt secrets at rest (general core helper) |
-| `data/oauth_state_class.php` | `OauthState` + Multi (single-use nonce store) |
 | `adm/admin_oauth_providers.php` (+ `logic/admin_oauth_providers_logic.php`) | provider app-credential admin |
 | `views/oauth_callback.php` (+ logic) | generic callback handler |
 | `tests/integration/oauth/oauth2_client_test.php` | exchange + refresh against a mock token endpoint |
-| `tests/integration/oauth/oauth2_state_test.php` | signature/expiry/replay/session-binding/return-url rejection |
-| `tests/models/oauth_state_test.php` | model CRUD + filters |
+| `tests/integration/oauth/oauth2_state_test.php` | expiry/replay/cross-session/return-url rejection |
 | `tests/integration/oauth/secret_box_test.php` | encrypt/decrypt round-trip, tamper detection, missing-key fail-closed |
+| `tests/integration/oauth/fixtures/TestEchoConsumer.php` | stub `OAuth2Consumer` (`purpose: test_echo`) that records the token and returns a fixed same-site URL |
+| `tests/integration/oauth/fixtures/TestOAuthProvider.php` | stub `OAuth2Provider` (`key: test`) pointing at the mock OAuth2 server |
 
 ### To modify
 | File | Change |
 |------|--------|
-| `settings.json` | add the six `oauth_*` settings |
+| `settings.json` | add the five `oauth_*` settings |
 | `serve.php` | add `/oauth/callback` route (no permission gate) |
 | `config/Globalvars_site.php` (+ installer / `_site_init.sh`) | add `secret_box_key`; generate on install |
 | `admin_menus.json` | add "OAuth Providers" item under Settings |
 
 ### Schema
-`oas_oauth_states` is created by `update_database` from the data class — no
-migration. `oauth_state_secret` / `secret_box_key` are config/settings, not
-schema.
+**No schema changes.** OAuth state lives in `$_SESSION`, not a table. `secret_box_key`
+(config) and the `oauth_*` settings are config/settings, not schema.
 
 ## Scheduled tasks
 
-Pruning expired/consumed `oas_oauth_states` is a one-line delete; fold it into an
-existing maintenance task (e.g. the request-log/retention sweep) rather than a new
-task — note it in `docs/scheduled_tasks.md`.
+None. Expired state entries are pruned in-process on the next `OAuth2State::issue()`
+(the same self-cleaning approach as the CSRF-token store), so there is no DB table to
+sweep and no scheduled task to add.
 
 ## Testing
 
@@ -319,8 +311,8 @@ task — note it in `docs/scheduled_tasks.md`.
   `refresh` updates the access token and preserves a prior refresh token when the
   response omits one; `ensureFresh` refreshes only within the skew window; a
   non-2xx token response raises `OAuth2Exception`.
-- **State:** valid round-trips; rejects tampered HMAC, expired, replayed
-  (consumed), foreign-session, and a `returnUrl` with a scheme/host.
+- **State:** valid round-trip; rejects expired, replayed (consumed), a nonce that
+  isn't in the current session, and a `returnUrl` with a scheme/host.
 - **SecretBox:** round-trip; ciphertext ≠ plaintext and varies per call (nonce);
   tampered blob fails to decrypt; missing key throws.
 - **Provider registry:** discovers Google + Microsoft; `configured()` excludes a
@@ -333,6 +325,45 @@ Run `php -l` + `validate_php_file.php` on every created/modified PHP file. Live
 end-to-end (real Google/Microsoft consent) is a manual checklist in
 `docs/oauth2.md`.
 
+### Standalone testability (no feature integration required)
+
+This core is exercised end-to-end with **no IMAP, social login, or other consumer
+present** — the consumer registry is the seam that makes it self-testing. Two
+fixtures, both living under `tests/integration/oauth/fixtures/`, stand in for a
+real feature and a real cloud app:
+
+- **Test consumer** — an `OAuth2Consumer` with `getPurpose() === 'test_echo'` whose
+  `onTokenGranted()` records the granted token to a test sink (temp file or a
+  scratch row) and returns a fixed same-site URL. Because the callback dispatches
+  purely on `state.purpose`, this drives the full callback path without any product
+  code. The fixture is loaded only by the test bootstrap, never registered in a
+  live consumer directory.
+- **Test provider** — an `OAuth2Provider` (`getKey() === 'test'`) whose endpoints
+  point at the mock server below and whose credentials come from test settings.
+
+**Layer 1 — no network.** All grant mechanics run against Guzzle's `MockHandler`
+(canned token-endpoint responses), so `exchangeCode`/`refresh`/`ensureFresh`,
+`OAuth2State`, `SecretBox`, and the provider registry are covered with zero live
+HTTP. The callback test forges/validates `state` and dispatches to the test
+consumer with a mocked exchange.
+
+**Layer 2 — real consent loop, no Google/Azure.** Point the test provider at a
+self-hosted mock OAuth2 server to exercise the genuine
+`beginConsent → redirect → code → exchangeCode → consumer → redirect` path:
+- **`navikt/mock-oauth2-server`** (single container) is preferred — it
+  **auto-approves consent** and issues real tokens against the test client id +
+  the `/oauth/callback` redirect URI, so the loop completes with no human
+  interaction. The Playwright MCP drives the single consent navigation; the
+  callback then runs the real code exchange and the test consumer records the
+  token. (Keycloak/Dex/Hydra work too if a real consent screen is wanted.)
+- Google's OAuth Playground is **not** usable here — it cannot redirect to
+  `/oauth/callback`, so it does not test this code path.
+
+The only behavior these fixtures cannot reproduce is provider-specific
+refresh-token policy (Google's `access_type=offline`+`prompt=consent`, Microsoft's
+tenant endpoints + `offline_access`) — that stays the manual `docs/oauth2.md`
+checklist above. Everything else is automated and consumer-free.
+
 ## Documentation
 
 - New **`docs/oauth2.md`**: the abstraction (provider catalog, client, state,
@@ -343,7 +374,6 @@ end-to-end (real Google/Microsoft consent) is a manual checklist in
   credentials).
 - `docs/settings.md`: the `oauth_*` settings and that client secrets are stored
   encrypted.
-- `docs/scheduled_tasks.md`: the state-pruning step.
 
 ## Versioning
 
