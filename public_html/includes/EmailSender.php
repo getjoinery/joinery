@@ -301,6 +301,19 @@ class EmailSender {
             return false;
         }
 
+        // Pre-flight: don't attempt a doomed network call when the selected
+        // provider has no credentials configured. Surface a friendly, actionable
+        // reason so a misconfiguration is obvious in the logs instead of looking
+        // like a transient send failure.
+        $config = $provider::validateConfiguration();
+        if (empty($config['valid'])) {
+            $reason = !empty($config['errors']) ? implode('; ', $config['errors']) : 'missing required settings';
+            $friendly = "Email service '$service' is selected but not configured: $reason. Skipping — configure it at /admin/admin_settings_email or select a different service.";
+            error_log("[EmailSender] $friendly");
+            $this->logEmailDebug($friendly, $service);
+            return false;
+        }
+
         try {
             $result = $provider->send($message);
             if ($result) {

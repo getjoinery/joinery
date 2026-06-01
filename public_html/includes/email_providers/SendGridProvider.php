@@ -36,6 +36,7 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider {
                 'key' => 'sendgrid_region',
                 'label' => 'Region',
                 'type' => 'dropdown',
+                'empty_option' => 'Select a region…',
                 'options' => [
                     'global' => 'Global (api.sendgrid.com)',
                     'eu' => 'EU (api.eu.sendgrid.com)',

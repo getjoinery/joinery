@@ -44,6 +44,7 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, RawMess
                 'key' => 'ses_region',
                 'label' => 'AWS Region',
                 'type' => 'dropdown',
+                'empty_option' => 'Select a region…',
                 'options' => [
                     'us-east-1' => 'us-east-1 (N. Virginia)',
                     'us-east-2' => 'us-east-2 (Ohio)',
