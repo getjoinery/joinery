@@ -222,6 +222,8 @@
 				: null;
 			if (!$provider_instance) {
 				echo '<div style="color: #666; text-align: center; padding: 40px 10px;">No mailing list provider selected</div>';
+			} elseif (!$provider_instance::validateConfiguration()['valid']) {
+				echo '<div style="color: #666; text-align: center; padding: 40px 10px;">Credentials not configured &mdash; validation skipped</div>';
 			} else {
 				$result = $provider_instance->validateApiConnection();
 				if (!empty($result['success'])) {
@@ -452,7 +454,11 @@
 				echo '<h5>' . htmlspecialchars($provider_label) . ' Connection Status</h5>';
 				echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 
-				if ($run_validation) {
+				if ($run_validation && !$provider_class::validateConfiguration()['valid']) {
+					echo '<div style="text-align: center; padding: 40px;">';
+					echo '<p style="color: #666;">Credentials not configured &mdash; validation skipped</p>';
+					echo '</div>';
+				} elseif ($run_validation) {
 					$api_result = $provider_class::validateApiConnection();
 
 					if ($api_result['success']) {
