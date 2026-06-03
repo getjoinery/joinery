@@ -422,6 +422,27 @@ $json = $settings->get_setting('myplugin_config');
 $config = json_decode($json, true);
 ```
 
+## OAuth Provider Settings
+
+OAuth app credentials are core settings (shared across every consumer — inbound
+IMAP, social login, outbound send) and are entered at **Admin → System → OAuth
+Providers**:
+
+| Setting | Notes |
+|---------|-------|
+| `oauth_google_client_id` | |
+| `oauth_google_client_secret` | stored **encrypted** via `SecretBox` |
+| `oauth_microsoft_client_id` | |
+| `oauth_microsoft_client_secret` | stored **encrypted** via `SecretBox` |
+| `oauth_microsoft_tenant` | `common` / `organizations` / `consumers` / a tenant id |
+
+Client *secret* values are written through `SecretBox` before being persisted to
+`stg_settings` and decrypted on read by the provider's `getClientSecret()`, so a
+secret is never stored or displayed in plaintext. [`SecretBox`](secret_box.md) is
+keyed from `secret_box_key` in `config/Globalvars_site.php` and is a
+general-purpose secrets-at-rest helper. See [OAuth2 Core](oauth2.md) for the OAuth
+abstraction and [SecretBox](secret_box.md) for the encryption helper itself.
+
 ## Security Considerations
 
 1. **Permission Control:** Only admins (permission level 8+) can access settings

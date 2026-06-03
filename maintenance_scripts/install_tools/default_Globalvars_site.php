@@ -1,5 +1,5 @@
 <?php
-//Version 1.06
+//Version 1.07
 //SITE: {{SITE_NAME}}
 
 // ============================================================
@@ -32,6 +32,12 @@ $this->settings['dbpassword'] = '';  //DATABASE PASSWORD
 $this->settings['dbusername_test'] = 'postgres';  //DATABASE USERNAME
 $this->settings['dbname_test'] = 'test_{{SITE_NAME}}';  //DATABASE NAME
 $this->settings['dbpassword_test'] = '';  //DATABASE PASSWORD
+
+// Secret-at-rest key for SecretBox (32 random bytes, base64). Generated per
+// environment by the installer. SecretBox encrypts/decrypts stored credentials
+// (OAuth client secrets and refresh tokens, etc.); changing or losing this key
+// makes every value encrypted with it undecryptable.
+$this->settings['secret_box_key'] = '{{SECRET_BOX_KEY}}';
 
 
 ?>

@@ -1,0 +1,170 @@
+# OAuth2 Core
+
+A platform-level OAuth2 client that any feature can use to obtain and keep a
+valid access token for a third-party account, plus a catalog of concrete
+providers. It implements the OAuth2 **authorization-code grant with refresh**
+once, in core (`includes/oauth/`): consent-URL building, code→token exchange,
+token refresh, single-use session `state`, and one generic callback that
+dispatches the resulting token back to whichever feature started the flow.
+
+The grant mechanics and provider endpoints are general. *What scope you request*
+and *what you do with the token* belong to the consuming feature. A new feature
+that needs OAuth is a new **consumer**; a new identity provider is a new
+**provider**. Nothing else changes.
+
+## The pieces
+
+| Class | Role |
+|-------|------|
+| `OAuth2Client` | The grant engine (on Guzzle): `beginConsent`, `exchangeCode`, `refresh`, `ensureFresh`. Provider- and feature-agnostic. |
+| `OAuth2Provider` (interface) | A provider's static identity: endpoints + which settings hold its credentials. Implementations live in `includes/oauth/providers/`. |
+| `OAuth2ProviderRegistry` | Discovers providers by interface. `get($key)`, `all()`, `configured()`. |
+| `OAuth2Token` | Immutable token value object: access/refresh tokens, absolute UTC expiry, scope. `isExpired()`, `withRefreshedAccess()`. |
+| `OAuth2State` | Session-stored, single-use CSRF + dispatch carrier. The `state` param is an opaque random nonce; all flow data lives server-side in `$_SESSION['oauth_flows']`. |
+| `OAuth2Consumer` (interface) | How a feature receives its token: a purpose key + `onTokenGranted()`. Discovered across core `includes/oauth/consumers/` and active-plugin `includes/oauth_consumers/`. |
+| `OAuth2ConsumerRegistry` | Discovers consumers by interface. |
+| [`SecretBox`](secret_box.md) | Authenticated encryption (`includes/SecretBox.php`) for secrets at rest — client secrets and refresh tokens. General-purpose, not OAuth-specific. |
+
+## The flow
+
+```
+Feature page
+  └─ $client->beginConsent($providerKey, $scopes, $purpose, $payload, $returnUrl)
+       → stores the flow in $_SESSION under a single-use nonce, returns the consent URL
+  browser → provider consent screen → Allow / Deny
+       Allow → /oauth_callback?code=…&state=…
+       Deny  → /oauth_callback?error=access_denied&state=…   (no code)
+  /oauth_callback (views/oauth_callback.php + logic — resolved by auto-discovery, no route)
+       1. OAuth2State::validate(state)         — expiry · single-use · session-intrinsic
+       2. error / no code → redirect to flow.returnUrl?oauth=cancelled   (no token exchange)
+       3. else exchangeCode → consumer->onTokenGranted(token, payload) → redirect to success URL
+```
+
+The callback knows nothing about any feature; it dispatches purely on the
+validated flow's `purpose`.
+
+### `beginConsent` arguments
+
+- `$providerKey` — `'google'` | `'microsoft'` | …
+- `$scopes` — array of scopes to request (space-joined into the authorize URL).
+- `$purpose` — the consumer key that will receive the token (e.g. `'inbound_imap'`).
+- `$payload` — opaque data the consumer needs to store the token against (e.g.
+  `['account_id' => 7]`). Round-trips through the session, never the browser.
+- `$returnUrl` — the **cancel/error** destination (a same-site path). The
+  **success** destination is the consumer's job (`onTokenGranted` return value).
+
+## The single shared redirect URI
+
+Every provider and consumer uses one redirect URI:
+`LibraryFunctions::get_absolute_url('/oauth_callback')` (the same helper Stripe
+and PayPal use). The `/oauth_callback` path resolves to `views/oauth_callback.php`
+by view auto-discovery — there is no serve.php route. It resolves the origin from
+the **`webDir` setting** + protocol,
+not raw `HTTP_HOST`, so it is stable and identical across requests. You register
+**one** redirect URI per provider per environment, forever — adding a consumer
+never touches the cloud app registration.
+
+`webDir` must be set correctly per environment; dev and prod each register their
+own redirect URI in their own cloud app.
+
+## Add a provider
+
+One class in `includes/oauth/providers/` implementing `OAuth2Provider`, plus two
+settings for its credentials. Endpoints are constants; credentials read from
+settings via the registry. See `GoogleOAuthProvider` / `MicrosoftOAuthProvider`
+for the shape. `getClientSecret()` reads its setting through `SecretBox` so the
+stored value is encrypted at rest.
+
+## Add a consumer
+
+```php
+class MyConsumer implements OAuth2Consumer {
+    public static function getPurpose(): string { return 'my_feature'; }
+    public function onTokenGranted(OAuth2Token $token, array $payload): string {
+        // persist $token (encrypt the refresh token with SecretBox) against $payload
+        // return the same-site success URL to send the user to
+        return '/my-feature/connected';
+    }
+}
+```
+
+Drop it in core `includes/oauth/consumers/` or, for a plugin, the plugin's
+`includes/oauth_consumers/`. Then start a flow from your page:
+
+```php
+$client = new OAuth2Client();
+$url = $client->beginConsent('google', ['https://mail.google.com/'],
+    'my_feature', ['account_id' => $id], '/my-feature/edit?id=' . $id);
+LibraryFunctions::Redirect($url);
+```
+
+Keep a token fresh before use:
+
+```php
+$token = $client->ensureFresh(OAuth2ProviderRegistry::get('google'), $token);
+// persist $token if it changed
+```
+
+## Settings
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `oauth_google_client_id` | `""` | |
+| `oauth_google_client_secret` | `""` | stored via SecretBox |
+| `oauth_microsoft_client_id` | `""` | |
+| `oauth_microsoft_client_secret` | `""` | stored via SecretBox |
+| `oauth_microsoft_tenant` | `common` | `common` / `organizations` / `consumers` / a tenant id |
+
+Enter them at **Admin → System → OAuth Providers** (permission 10). The page
+shows the exact redirect URI to paste into each cloud console and never displays
+a stored secret back.
+
+### `secret_box_key`
+
+Client secrets and refresh tokens are encrypted at rest with
+[`SecretBox`](secret_box.md), which is keyed from `secret_box_key` in
+`config/Globalvars_site.php` (generated per environment by the installer). If the
+key is absent, `SecretBox` fails closed and OAuth credentials cannot be stored.
+See the [SecretBox doc](secret_box.md) for the key format, generating one for an
+existing site, and the full API — it's a general-purpose helper, not OAuth-specific.
+
+## Register the cloud apps
+
+### Google Cloud
+
+1. **APIs & Services → Credentials → Create credentials → OAuth client ID.**
+2. Application type **Web application**.
+3. Under **Authorized redirect URIs**, paste the exact value from the OAuth
+   Providers admin page (`https://<your-host>/oauth_callback`).
+4. Copy the **Client ID** and **Client secret** into the admin page.
+5. Consent screen: add the scopes your consumer requests. For IMAP/SMTP use
+   `https://mail.google.com/`; for sign-in use `openid email profile`.
+
+Google returns a refresh token reliably only when the authorize request includes
+`access_type=offline` and `prompt=consent` — `GoogleOAuthProvider` adds both.
+
+### Microsoft (Azure AD)
+
+1. **Azure portal → App registrations → New registration.**
+2. Supported account types: choose to match your `oauth_microsoft_tenant`
+   (`common` for any Microsoft account, a tenant id for a single org).
+3. **Redirect URI** → platform **Web** → paste the value from the admin page.
+4. **Certificates & secrets → New client secret**; copy the value into the admin
+   page (Azure shows it once).
+5. **API permissions**: add the scopes your consumer requests. Include
+   `offline_access` so Microsoft issues a refresh token.
+
+## Scope minimization
+
+Consumers request only the scope they need. State plainly what each scope grants
+when documenting a new consumer.
+
+## Out of scope
+
+- **Token use** — formatting XOAUTH2, calling Gmail/Graph, establishing identity:
+  the consumer's responsibility. The core hands back a valid `OAuth2Token`.
+- **PKCE / public clients** — all current consumers are confidential server-side
+  clients. PKCE can be added to `OAuth2Client` later without changing the
+  provider/consumer seams.
+- **Auto-provisioning cloud apps** — the admin registers the app once and pastes
+  credentials; the platform never creates cloud apps.

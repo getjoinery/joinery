@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
-# VERSION: 2.1 - Record deployment_environment in Globalvars_site.php from $DOCKER_MODE
+# VERSION: 2.2 - Generate secret_box_key for SecretBox (secrets at rest) on install
 #
 # Called by install.sh and Dockerfile CMD
 # Do not call directly - use install.sh site instead
@@ -156,6 +156,10 @@ create_config_file() {
     # Record the deployment environment — single source of truth (spec deployment_environment_flag)
     if [ "$DOCKER_MODE" = true ]; then DEPLOY_ENV=docker; else DEPLOY_ENV=baremetal; fi
     sed -i "s/{{DEPLOYMENT_ENVIRONMENT}}/${DEPLOY_ENV}/g" "$SITE_ROOT/config/Globalvars_site.php"
+    # Generate a per-environment SecretBox key (32 random bytes, base64) for secrets at rest
+    SECRET_BOX_KEY=$(openssl rand -base64 32)
+    ESCAPED_SECRET_BOX_KEY=$(sed_escape "$SECRET_BOX_KEY")
+    sed -i "s/{{SECRET_BOX_KEY}}/${ESCAPED_SECRET_BOX_KEY}/g" "$SITE_ROOT/config/Globalvars_site.php"
     # Also handle the legacy pattern with empty password
     sed -i "s/\$this->settings\['dbpassword'\] = '';/\$this->settings['dbpassword'] = '${ESCAPED_PASSWORD}';/g" "$SITE_ROOT/config/Globalvars_site.php"
     # Restrict config file — contains database credentials

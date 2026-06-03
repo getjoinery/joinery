@@ -13,7 +13,7 @@ dispatches the resulting token back to whichever feature initiated the flow.
 This is deliberately **provider- and consumer-agnostic**. The grant mechanics and
 the provider endpoint definitions are general; *what scope you request* and *what
 you do with the token* belong to the consuming feature. The first consumer is the
-[Inbound IMAP provider](inbound_imap_provider.md); social login and OAuth-based
+[Inbound IMAP provider](../inbound_imap_provider.md); social login and OAuth-based
 outbound SMTP are anticipated consumers (see "Integration inventory").
 
 It replaces the one-off pattern of `includes/AcuitySchedulingOAuth.php` (endpoints
@@ -31,7 +31,7 @@ engine and provider catalog live in **core**; each feature plugs in as a
 
 A second decisive reason: **the redirect URI must be pre-registered** in the
 Google Cloud / Azure app and match exactly. A single core callback
-(`/oauth/callback`) means you register **one** redirect URI per provider per
+(`/oauth_callback`) means you register **one** redirect URI per provider per
 environment, forever — adding a new consumer never requires touching the cloud
 app registration.
 
@@ -42,7 +42,7 @@ settled up front rather than grown per feature:
 
 | Consumer | Provider(s) | Scope(s) | Token use | Status |
 |----------|-------------|----------|-----------|--------|
-| **Inbound IMAP poll** | Google, Microsoft | `https://mail.google.com/` · `IMAP.AccessAsUser.All offline_access` | XOAUTH2 IMAP login | this round ([spec](inbound_imap_provider.md)) |
+| **Inbound IMAP poll** | Google, Microsoft | `https://mail.google.com/` · `IMAP.AccessAsUser.All offline_access` | XOAUTH2 IMAP login | this round ([spec](../inbound_imap_provider.md)) |
 | Social login ("Sign in with…") | Google, Microsoft | `openid email profile` | identity | anticipated |
 | Outbound SMTP (XOAUTH2 send) | Google, Microsoft | mail send scope | XOAUTH2 SMTP | anticipated |
 | Gmail API / Graph transports | Google, Microsoft | API scopes | REST calls | future |
@@ -68,10 +68,10 @@ changes.
       │  → opaque `state` nonce + provider consent URL
       ▼
   [ browser → provider consent screen → Allow / Deny ]
-      │  Allow → /oauth/callback?code=…&state=…
-      │  Deny  → /oauth/callback?error=access_denied&state=…   (no code)
+      │  Allow → /oauth_callback?code=…&state=…
+      │  Deny  → /oauth_callback?error=access_denied&state=…   (no code)
       ▼
-  Generic callback (serve.php route /oauth/callback)
+  Generic callback (views/oauth_callback.php, auto-discovered at /oauth_callback)
       ├─ OAuth2State::validate(state)      (expiry · single-use · session-intrinsic)
       │       (any error path below still consumes the state)
       ├─ if `error`/no `code` (user denied or provider error):
@@ -176,7 +176,7 @@ at permission 10) governs who can ever start a flow, and a public consumer (futu
 social login) works through the identical mechanism without special-casing.
 
 > **Requirement — session cookie must stay `SameSite=Lax` (not `Strict`).** The
-> provider redirect back to `/oauth/callback` is a cross-site top-level GET
+> provider redirect back to `/oauth_callback` is a cross-site top-level GET
 > navigation. `Lax` (the current `SessionControl` default) sends the session cookie
 > on exactly that; `Strict` would withhold it, the callback would start a fresh
 > session, find no `oauth_flows` entry, and **every** flow would fail. Session-backed
@@ -255,7 +255,7 @@ credentials once per provider:
 - Links out to `docs/oauth2.md` setup steps.
 
 **Redirect URI derivation.** The callback's `redirect_uri` is
-`LibraryFunctions::get_absolute_url('/oauth/callback')` — the same helper Stripe and
+`LibraryFunctions::get_absolute_url('/oauth_callback')` — the same helper Stripe and
 PayPal use for their return URLs. It resolves the origin from the **`webDir`
 setting** (the canonical configured host) + `protocol_mode`, *not* raw `HTTP_HOST`,
 so the value is stable and identical across requests. The admin page's read-only
@@ -265,12 +265,13 @@ sends (providers reject any mismatch). `exchangeCode`'s `$redirectUri` argument 
 this same value. **Implication:** `webDir` must be set correctly per environment
 (dev vs prod each register their own redirect URI in their own cloud app).
 
-## Routing — `serve.php`
+## Routing — none (view auto-discovery)
 
-One route: `/oauth/callback` → the generic callback handler
-(`views/oauth_callback.php` + logic — a view, not `ajax/`, since it's a top-level
-browser navigation that must render a neutral error page on failure). **No
-`min_permission`** (state session-binding governs auth). Handler order:
+**No `serve.php` route.** The path `/oauth_callback` resolves to
+`views/oauth_callback.php` by view auto-discovery (a view, not `ajax/`, since it's
+a top-level browser navigation that must render a neutral error page on failure).
+Auto-discovered views carry **no `min_permission`** gate — exactly right here,
+since state session-binding governs auth. Handler order:
 1. `OAuth2State::validate(state)` first — always. A forged/expired/foreign-session
    state has no flow to trust (no `returnUrl`, no `purpose`), so it renders a
    neutral error page and logs server-side — never redirects anywhere it was told.
@@ -328,7 +329,6 @@ No token or secret ever appears in an error message or the URL.
 | File | Change |
 |------|--------|
 | `settings.json` | add the five `oauth_*` settings |
-| `serve.php` | add `/oauth/callback` route (no permission gate) |
 | `config/Globalvars_site.php` (+ installer / `_site_init.sh`) | add `secret_box_key`; generate on install |
 | `admin_menus.json` | add "OAuth Providers" item under Settings |
 | `composer.json` | declare `guzzlehttp/guzzle: ^7.4` (currently only transitive via `aws/aws-sdk-php`) as a direct dependency |
@@ -393,12 +393,12 @@ self-hosted mock OAuth2 server to exercise the genuine
 `beginConsent → redirect → code → exchangeCode → consumer → redirect` path:
 - **`navikt/mock-oauth2-server`** (single container) is preferred — it
   **auto-approves consent** and issues real tokens against the test client id +
-  the `/oauth/callback` redirect URI, so the loop completes with no human
+  the `/oauth_callback` redirect URI, so the loop completes with no human
   interaction. The Playwright MCP drives the single consent navigation; the
   callback then runs the real code exchange and the test consumer records the
   token. (Keycloak/Dex/Hydra work too if a real consent screen is wanted.)
 - Google's OAuth Playground is **not** usable here — it cannot redirect to
-  `/oauth/callback`, so it does not test this code path.
+  `/oauth_callback`, so it does not test this code path.
 
 The only behavior these fixtures cannot reproduce is provider-specific
 refresh-token policy (Google's `access_type=offline`+`prompt=consent`, Microsoft's

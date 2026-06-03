@@ -355,6 +355,14 @@
             "parent": "system"
         },
         {
+            "slug": "system-oauth-providers",
+            "title": "OAuth Providers",
+            "url": "admin_oauth_providers",
+            "order": 4,
+            "permission": 10,
+            "parent": "system"
+        },
+        {
             "slug": "subscription-tiers",
             "title": "Subscription Tiers",
             "url": "admin_subscription_tiers",
