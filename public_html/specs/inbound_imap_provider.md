@@ -48,7 +48,7 @@ among several hosts — not a "Gmail integration."
 
 ## Core model
 
-Three decisions define it:
+Four decisions define it:
 
 1. **IMAP accounts are additive, not a system transport switch.** The existing
    `inbound_email_provider` setting selects the *one* system transport
@@ -68,6 +68,16 @@ Three decisions define it:
    is generic; the *authentication* is either a stored password/app-password or
    an OAuth2 bearer token obtained from the [OAuth2 Core](implemented/oauth2_core.md). Gmail
    and Microsoft use the OAuth strategy; everyone else uses a password.
+
+4. **IMAP-sourced messages are reference-backed, not copied whole.** Pushed mail
+   (Postfix/Mailgun) *must* store the full raw because the source keeps no copy —
+   it is delivered once and gone. An IMAP mailbox is the opposite: a **durable
+   remote store** that stays put. So the poller stores only what the reader shows
+   — headers + the `text/plain`/`text/html` bodies — plus a **locator** back to the
+   message, and leaves `iem_raw_message` empty. The full raw (with attachments) is
+   fetched **on demand** for the *Download .eml* action. Attachment bytes never
+   land on platform disk or in the database, so a 50 GB Gmail costs the platform
+   kilobytes per message. See **Message storage** below.
 
 ```
   Scheduled task: PollImapAccounts (every few minutes)
@@ -165,6 +175,47 @@ settings** — it reuses whatever the OAuth core has configured. One app per
 provider, many accounts (and other consumers) consent into it; one shared
 redirect URI (`/oauth_callback`).
 
+### 3. Inbound message — reference-backed storage (modify `inbound_email_message_class.php`)
+
+**How attachments are stored today (no change to push transports).** The store has
+one row per message in `iem_inbound_email_messages` with three content columns:
+`iem_body_plain`, `iem_body_html`, and `iem_raw_message` (the **complete RFC822
+message** as a `text` column). At ingest, `InboundEmailRouter::extractBodies()` (a
+hand-rolled MIME walker, no library) pulls the text parts into the two body
+columns; **attachments are not extracted or stored separately** — they remain
+inside `iem_raw_message`. There is no attachments table and no per-attachment
+endpoint. The reader renders the body; the only attachment affordance is *Download
+.eml*, which streams `iem_raw_message` whole as `message/rfc822`. So the unit of
+"give me the attachments" is the **entire message**, and IMAP follows that same
+model — there is no per-part download to build.
+
+**IMAP-sourced messages are stored without the raw.** The poller writes the body
+columns and headers as usual but leaves `iem_raw_message` **empty**, and records a
+locator so the full message can be re-fetched on demand. Add these nullable columns
+(populated only for IMAP-sourced rows; their presence marks a message
+reference-backed):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `iem_iia_inbound_imap_account_id` | int8 | source account; non-null ⇒ reference-backed, raw fetched on demand |
+| `iem_imap_uid` | int8 | message UID within the folder |
+| `iem_imap_uidvalidity` | int8 | folder UIDVALIDITY the UID is valid under |
+| `iem_imap_folder` | varchar(255) | folder the UID lives in |
+
+`iem_message_id_header` (already stored) is the fallback locator when a UID goes
+stale. Dedup is unchanged — `UNIQUE (iem_message_id_header, iem_recipient)` still
+applies, so re-fetching a message stores nothing new.
+
+**Download .eml becomes transport-aware** (one branch in
+`admin_inbound_email_message_logic.php`): if `iem_raw_message` is present
+(Postfix/Mailgun) stream it as today; if empty and `iem_iia_inbound_imap_account_id`
+is set, connect via the account's auth, `FETCH` the full RFC822 by UID (fall back
+to a `Message-ID` search if UIDVALIDITY changed or the message moved), stream it
+**without persisting**; if it can't be located (deleted/moved/account disabled),
+return an honest "no longer available in the source mailbox" rather than an error.
+This is the one place the reader subsystem gains IMAP-aware code — display itself is
+untouched.
+
 ### Mailbox mapping nuance
 
 An alias requires `iea_ied_inbound_email_domain_id`. An IMAP-sourced mailbox
@@ -181,23 +232,41 @@ A scheduled task (mirrors `PurgeOldMailboxMessages`): `.json` (name, description
 `default_frequency`, `config_fields` for a global on/off + max-per-run) + a
 `.php` implementing `ScheduledTaskInterface::run($config)`.
 
+**First connect — start from now.** When an account's cursor is unset (just
+created / just authorized), seed `last_seen_uid` to the folder's **current high
+UID** (and store its `uidvalidity`) so the first poll ingests only mail arriving
+*after* hookup — never the mailbox's back-catalogue. This is what makes mailbox
+size a non-issue: a 50 GB archive and an empty mailbox behave identically once
+connected. A bounded historical backfill (last N days) is an explicit opt-in, off
+by default.
+
 Per run:
 1. Load enabled accounts that are **due** (`last_poll_time + interval ≤ now`).
    (Self-throttle per account so the task can run frequently without hammering
    every mailbox — the task frequency is the *floor*, the account interval is the
-   *actual* cadence.)
+   *actual* cadence.) Guard against overlap: an account already mid-poll (or a
+   still-running prior task instance) must not be polled again concurrently —
+   take a per-account claim (e.g. stamp `last_poll_time` on pickup) so two runs
+   can't race on `last_seen_uid`.
 2. For each account:
    a. Resolve `authStrategy`. If OAuth and the access token is expired/near
       expiry → **refresh** via the provider's token endpoint (store the new
       token). If refresh fails → record status, skip (don't crash the run).
    b. Connect (host/port/encryption), select folder. Compare server
-      **UIDVALIDITY** to stored; if changed, reset `last_seen_uid` to 0 (folder
-      was reset) and log it.
+      **UIDVALIDITY** to stored; if it changed (folder was recreated), **re-seed
+      `last_seen_uid` to the current high UID — not 0** — so a reset doesn't
+      trigger a full back-catalogue ingest, and log it.
    c. `UID SEARCH` for messages with UID > `last_seen_uid` (cap to max-per-run).
-   d. For each: fetch the **raw RFC822** message, hand it to the store path
-      (`InboundEmailRouter::storeMessage` / a store-only entry) with the
-      account's bound alias + recipient. Dedup is the existing UNIQUE constraint,
-      so re-fetching a message is harmless.
+   d. For each: read `RFC822.SIZE` + `BODYSTRUCTURE`, then **fetch only the text
+      parts** (`text/plain`/`text/html`) — *not* attachment parts, *not* the whole
+      raw. Hand the decoded bodies + headers + size to the store path
+      (`InboundEmailRouter::storeMessage` / a store-only entry) with the account's
+      bound alias + recipient, writing the **locator** columns and leaving
+      `iem_raw_message` empty (see *Reference-backed storage*). Attachment bytes
+      stay on the server. Dedup is the existing UNIQUE constraint, so re-fetching
+      is harmless. A pathological oversized text body is still bounded by
+      max-per-run + the size read; record and skip a message whose `RFC822.SIZE`
+      exceeds the configured per-message ceiling.
    e. Advance `last_seen_uid`; set `last_poll_time`, `last_status`.
 3. Return a summary (accounts polled, messages stored, errors).
 
@@ -326,7 +395,7 @@ Pin the IMAP-library choice when building; declare via Composer
 |------|---------|
 | `plugins/inbound_email/data/inbound_imap_account_class.php` | `InboundImapAccount` + Multi; encrypted secret accessors |
 | `plugins/inbound_email/includes/InboundEmailPollingProvider.php` | the polled-transport interface |
-| `plugins/inbound_email/includes/ImapIngestor.php` | connect/fetch/store one account |
+| `plugins/inbound_email/includes/ImapIngestor.php` | connect/fetch/store one account — fetches text parts + structure (reference-backed), never attachments or the whole raw |
 | `plugins/inbound_email/includes/imap_providers/GenericImapProvider.php` | base (password) + Yahoo/iCloud/Fastmail presets |
 | `plugins/inbound_email/includes/imap_providers/GmailImapProvider.php` | Google preset + OAuth |
 | `plugins/inbound_email/includes/imap_providers/MicrosoftImapProvider.php` | Microsoft preset + OAuth |
@@ -343,7 +412,9 @@ Pin the IMAP-library choice when building; declare via Composer
 |------|--------|
 | `plugins/inbound_email/includes/InboundProviderRegistry.php` | discover polling providers (separate list) |
 | `plugins/inbound_email/includes/admin_tabs.php` | add "IMAP Accounts" tab |
-| `plugins/inbound_email/includes/InboundEmailRouter.php` | expose a store-only entry the ingestor reuses (if `storeMessage` needs a non-Postfix caller path); bump `@version` |
+| `plugins/inbound_email/includes/InboundEmailRouter.php` | expose a store-only entry the ingestor reuses that accepts pre-extracted bodies + locator and writes a row with an empty `iem_raw_message` (the ingestor already has the bodies; no raw to parse); bump `@version` |
+| `plugins/inbound_email/data/inbound_email_message_class.php` | add the nullable IMAP locator columns (`iem_iia_inbound_imap_account_id`, `iem_imap_uid`, `iem_imap_uidvalidity`, `iem_imap_folder`); bump `@version` |
+| `plugins/inbound_email/logic/admin_inbound_email_message_logic.php` | make *Download .eml* transport-aware: stored raw → stream as today; empty + IMAP locator → connect, `FETCH` full RFC822 by UID (fall back to `Message-ID`), stream without persisting; unfetchable → "no longer available in source mailbox"; bump `@version` |
 | `plugins/inbound_email/plugin.json` | register the poller task and the IMAP-source domain flag; serve `/admin/...imap*`; bump `version`. **No OAuth settings or callback route** (owned by the OAuth core). Declares a dependency on the OAuth core. |
 | `plugins/inbound_email/data/inbound_email_domain_class.php` | optional `ied_is_imap_source` flag so Setup skips MX for IMAP-sourced mailboxes |
 | `serve.php` | **no change** — IMAP admin routes auto-discover; the OAuth core's `/oauth_callback` view auto-discovers too (no route) |
@@ -357,10 +428,21 @@ the plugin migrations file).
 
 - **Account model** — CRUD; encrypted secret round-trips (set/get password +
   tokens, `*_enc` never plaintext); `due`/`enabled` filters.
-- **UID cursor** — fetch advances `last_seen_uid`; a UIDVALIDITY change resets to
-  0; re-poll stores nothing new (dedup).
-- **Ingestor (mock IMAP)** — given fixture raw messages, stores them under the
-  bound alias, dedups re-fetch, records status; a connection error is captured
+- **Initial cursor (start from now)** — first connect seeds `last_seen_uid` to the
+  folder's current high UID; the back-catalogue is **not** ingested; a UIDVALIDITY
+  change re-seeds to the new high UID (not 0), so a folder reset doesn't trigger a
+  full backfill.
+- **UID cursor** — fetch advances `last_seen_uid`; re-poll stores nothing new
+  (dedup); an account already mid-poll isn't picked up concurrently.
+- **Reference-backed storage** — ingest writes `iem_body_plain`/`iem_body_html` +
+  locator columns and leaves `iem_raw_message` empty; attachment parts are never
+  fetched; a message over the per-message size ceiling is recorded and skipped.
+- **On-demand .eml** — *Download .eml* for an IMAP-sourced message fetches the full
+  raw from (mock) IMAP by UID; a changed UIDVALIDITY falls back to a `Message-ID`
+  search; an unlocatable message yields the graceful "no longer available" path,
+  not an error. A Postfix/Mailgun message still streams its stored raw.
+- **Ingestor (mock IMAP)** — given fixture messages, stores them under the bound
+  alias, dedups re-fetch, records status; a connection error is captured
   per-account without throwing.
 - **OAuth consumer seam** — `InboundImapOAuthConsumer::onTokenGranted` stores the
   granted tokens (encrypted) on the right account and returns the accounts URL; an
@@ -412,6 +494,13 @@ end-to-end (real Gmail/Microsoft consent) is a manual checklist in the docs.
   hosts uniformly; native APIs are a future per-provider optimization.
 - **POP3.** IMAP only (UID-based incremental sync; POP3's download-and-delete
   model is a poor fit).
+- **Per-attachment extraction / listing / download.** The platform stores and
+  serves whole messages (`iem_raw_message` + *Download .eml*), with no attachments
+  table or per-part endpoint; IMAP follows that same model and fetches the whole
+  raw on demand. Indexing attachments individually is a cross-cutting change to the
+  *entire* inbound store (all transports), not part of this spec.
+- **Historical backfill by default.** First connect starts from now; an optional
+  bounded backfill (last N days) is a future add-on, not the default.
 - **Auto-provisioning OAuth apps.** Admin registers the Google/Azure app once and
   pastes credentials; the platform does not create cloud apps.
 - **A dedicated Gmail *sending* provider** — explicitly rejected; redundant with
