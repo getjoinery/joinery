@@ -573,7 +573,7 @@ $formwriter->repeater('features', 'Features List', [
 - `value` - Array of existing data rows (each row is an associative array)
 - `fields` - Array of subfield definitions with `name`, `label`, and `type`
 - `add_label` - Button text for adding rows (default: '+ Add Item')
-- `helptext` - Help text displayed below the label
+- `helptext` - Help text displayed below the label (plain text; HTML is escaped — see [Labels, Help Text, and Option Values Are Always HTML-Escaped](#labels-help-text-and-option-values-are-always-html-escaped))
 
 **Subfield Types:**
 Any FormWriter field type can be used: `textinput`, `textarea`, `dropinput`, `checkboxinput`, etc.
@@ -1270,9 +1270,9 @@ try {
    - Keep event handlers simple
    - Use form-level scripts for complex interactions
 
-### Labels and Option Values Are Always HTML-Escaped
+### Labels, Help Text, and Option Values Are Always HTML-Escaped
 
-FormWriter passes every label and every select/radio option value through `htmlspecialchars()`. HTML tags inside labels — `<strong>`, `<em>`, `<code>`, `<span>`, etc. — will render as literal escaped text, not as markup. Use plain text only in labels and option arrays.
+FormWriter passes every label, every `helptext`, and every select/radio option value through `htmlspecialchars()`. HTML tags inside any of these — `<strong>`, `<em>`, `<code>`, `<span>`, `<a>`, etc. — render as literal escaped text, not as markup. This is intentional and safe-by-default: any caller may interpolate dynamic or user-supplied data into these strings, and escaping prevents that from becoming an injection vector. Use **plain text only** in labels, help text, and option arrays.
 
 ```php
 // ✅ CORRECT — plain text
@@ -1289,7 +1289,19 @@ $formwriter->radioinput('install_mode', 'Install Type', [
         'fresh' => '<strong>Fresh install</strong> — empty site',
     ]
 ]);
+
+// ❌ WRONG — helptext shows the literal "<span ...>set</span>" tags as text
+$formwriter->passwordinput('client_secret', 'Client Secret', [
+    'helptext' => '<span style="color:green;">set</span>',
+]);
+
+// ✅ CORRECT — plain text help
+$formwriter->passwordinput('client_secret', 'Client Secret', [
+    'helptext' => 'Currently set — leave blank to keep',
+]);
 ```
+
+There is no HTML opt-in for these fields. If a field genuinely needs rich help (a link, emphasis), render that markup yourself in the view outside the FormWriter call — do not try to smuggle it through `helptext`.
 
 ### Section Dividers Within a Form
 
