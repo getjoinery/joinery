@@ -18,10 +18,13 @@ the raw lives. The full message (with attachments) is read back from the file st
 on demand for the *Download .eml* action. No behavior changes for the user — the
 reader and download work exactly as before; only the bytes move.
 
-This is a **prerequisite refactor** for the IMAP inbound provider
-([inbound_imap_provider.md](inbound_imap_provider.md)), which already stores no raw
-at all (it is reference-backed to the remote mailbox). Both transports converge on a
-single principle and a single read accessor.
+This is **independent of, and not a prerequisite for**, the IMAP inbound provider
+([inbound_imap_provider.md](inbound_imap_provider.md)) — IMAP is reference-backed
+(it stores no raw and fetches on demand), so it neither contributes to the DB-bloat
+problem nor needs this refactor, and it ships first with its own *Download .eml*
+branch. This refactor is about the **push** transports' DB bloat; when it lands it
+also absorbs IMAP's existing download branch into the shared accessor as a cleanup.
+Sequencing is free either way.
 
 ## The principle
 
@@ -56,8 +59,10 @@ Driver meanings:
 - **`local`** — the raw is a file under the private store, located by
   `iem_raw_storage_key`. **The default for all new push-transport messages.**
 - **`remote`** — there is no platform copy; the raw is fetched on demand from the
-  source (IMAP locator columns from the IMAP spec). Set by the IMAP ingestor, not
-  this spec; listed here so the accessor covers it.
+  source (IMAP locator columns from the IMAP spec). The IMAP provider ships before
+  this refactor with its own download branch keyed off the locator columns; when this
+  refactor lands it reclassifies those rows as `remote` and routes them through the
+  shared accessor. Listed here so the accessor covers them.
 - **`cloud`** *(future)* — a file relocated to a **private** object-storage bucket
   by a cold-offload sync task (see *Forward compatibility*). Not built here.
 

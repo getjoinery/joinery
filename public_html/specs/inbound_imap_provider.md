@@ -12,8 +12,10 @@ service. The target user is low-volume: someone who already has a mailbox and
 wants the platform to read it.
 
 Fetched messages land in the same store the rest of inbound email uses
-(`iem_inbound_email_messages`) and show up in the **Mailbox Reader** with no
-changes to the reader — it already reads `iem_`.
+(`iem_inbound_email_messages`) and show up in the **Mailbox Reader** like any other
+mailbox — it already reads `iem_`. The reader gains one shared, transport-agnostic
+addition: a per-message **attachment list** with clickable download (§4), which all
+inbound mail can use.
 
 Two auth realities drive the scope:
 - **Yahoo / iCloud / Fastmail / generic IMAP** work with **basic auth + an app
@@ -58,8 +60,9 @@ Four decisions define it:
 
 2. **An IMAP account maps to a mailbox (alias).** Each account binds to an
    inbound **alias** — the mailbox it populates. Fetched messages are stored with
-   that alias's id, so they appear as a normal mailbox in the reader, honor the
-   grant model, and need no reader changes. **No MX/DNS is required** for an
+   that alias's id, so they appear as a normal mailbox in the reader and honor the
+   grant model (the new attachment list inherits that same grant). **No MX/DNS is
+   required** for an
    IMAP-sourced alias — the mail is already in the remote mailbox; that is the
    whole point. (The alias still belongs to a domain record for identity, but
    that domain needs no MX. See "Mailbox mapping" for the one schema nuance.)
@@ -73,11 +76,12 @@ Four decisions define it:
    (Postfix/Mailgun) *must* store the full raw because the source keeps no copy —
    it is delivered once and gone. An IMAP mailbox is the opposite: a **durable
    remote store** that stays put. So the poller stores only what the reader shows
-   — headers + the `text/plain`/`text/html` bodies — plus a **locator** back to the
-   message, and leaves `iem_raw_message` empty. The full raw (with attachments) is
-   fetched **on demand** for the *Download .eml* action. Attachment bytes never
-   land on platform disk or in the database, so a 50 GB Gmail costs the platform
-   kilobytes per message. See **Message storage** below.
+   — headers + the `text/plain`/`text/html` bodies + an **attachment manifest** (the
+   list of parts) — plus a **locator** back to the message, and leaves
+   `iem_raw_message` empty. Individual attachments are fetched **on demand** when the
+   user clicks one.
+   Attachment bytes never land on platform disk or in the database, so a 50 GB Gmail
+   costs the platform kilobytes per message. See §3–§4 under **Data model**.
 
 ```
   Scheduled task: PollImapAccounts (every few minutes)
@@ -92,7 +96,7 @@ Four decisions define it:
    └─ advance last_seen_uid / uidvalidity, record status
         │
         ▼
-  iem_inbound_email_messages  → Mailbox Reader (unchanged)
+  iem_inbound_email_messages (+ ima_ attachment manifest)  → Mailbox Reader (+ attachment list)
 ```
 
 ## The polled-transport extension
@@ -175,29 +179,26 @@ settings** — it reuses whatever the OAuth core has configured. One app per
 provider, many accounts (and other consumers) consent into it; one shared
 redirect URI (`/oauth_callback`).
 
-### 3. Inbound message — reference-backed storage (modify `inbound_email_message_class.php`)
+### 3. Inbound message — reference-backed (modify `inbound_email_message_class.php`)
 
-**How attachments are stored today (no change to push transports).** The store has
-one row per message in `iem_inbound_email_messages` with three content columns:
-`iem_body_plain`, `iem_body_html`, and `iem_raw_message` (the **complete RFC822
-message** as a `text` column). At ingest, `InboundEmailRouter::extractBodies()` (a
-hand-rolled MIME walker, no library) pulls the text parts into the two body
-columns; **attachments are not extracted or stored separately** — they remain
-inside `iem_raw_message`. There is no attachments table and no per-attachment
-endpoint. The reader renders the body; the only attachment affordance is *Download
-.eml*, which streams `iem_raw_message` whole as `message/rfc822`. So the unit of
-"give me the attachments" is the **entire message**, and IMAP follows that same
-model — there is no per-part download to build.
+The store has one row per message in `iem_inbound_email_messages` with three content
+columns: `iem_body_plain`, `iem_body_html`, and `iem_raw_message` (the complete RFC822
+message as a `text` column). Today attachments are never broken out — they sit inside
+the raw, and the reader's only attachment affordance is a whole-message *.eml* download
+(open it in a mail client to dig the files out). **This spec replaces that with
+clickable per-attachment download** (§4) so a user clicks a PDF and gets the PDF. IMAP
+mail gets it now; the machinery is built so Postfix/Mailgun mail adopts it later
+unchanged.
 
 **IMAP-sourced messages are stored without the raw.** The poller writes the body
 columns and headers as usual but leaves `iem_raw_message` **empty**, and records a
-locator so the full message can be re-fetched on demand. Add these nullable columns
-(populated only for IMAP-sourced rows; their presence marks a message
-reference-backed):
+locator so individual parts can be re-fetched on demand. Add these nullable columns
+(populated only for IMAP-sourced rows; a non-null `iem_iia_inbound_imap_account_id`
+marks a message reference-backed):
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `iem_iia_inbound_imap_account_id` | int8 | source account; non-null ⇒ reference-backed, raw fetched on demand |
+| `iem_iia_inbound_imap_account_id` | int8 | source account; non-null ⇒ reference-backed, parts fetched on demand |
 | `iem_imap_uid` | int8 | message UID within the folder |
 | `iem_imap_uidvalidity` | int8 | folder UIDVALIDITY the UID is valid under |
 | `iem_imap_folder` | varchar(255) | folder the UID lives in |
@@ -206,15 +207,73 @@ reference-backed):
 stale. Dedup is unchanged — `UNIQUE (iem_message_id_header, iem_recipient)` still
 applies, so re-fetching a message stores nothing new.
 
-**Download .eml becomes transport-aware** (one branch in
-`admin_inbound_email_message_logic.php`): if `iem_raw_message` is present
-(Postfix/Mailgun) stream it as today; if empty and `iem_iia_inbound_imap_account_id`
-is set, connect via the account's auth, `FETCH` the full RFC822 by UID (fall back
-to a `Message-ID` search if UIDVALIDITY changed or the message moved), stream it
-**without persisting**; if it can't be located (deleted/moved/account disabled),
-return an honest "no longer available in the source mailbox" rather than an error.
-This is the one place the reader subsystem gains IMAP-aware code — display itself is
-untouched.
+**No raw/.eml in the UI, any transport.** The user-facing surface is the body plus the
+clickable attachment list (§4) — nothing else. The platform's existing *.eml* download
+link and raw-source `<pre>` view are **removed** for every message, IMAP and
+Postfix/Mailgun alike; nobody uses them and per-attachment download covers the real
+need. (Push transports still *store* the raw bytes for now — what becomes of that is
+the storage refactor's concern; this change only retires the user-facing button and
+view, not the column.)
+
+### 4. Attachment manifest + per-attachment download (new)
+
+So a user can **click a PDF and get the PDF**, store an attachment **manifest** per
+message and serve each part on demand. No attachment bytes are ever stored on the
+platform — only the metadata needed to list the parts and fetch one.
+
+New child table `data/inbound_message_attachment_class.php`
+(`InboundMessageAttachment` + Multi). Prefix `ima`, table
+`ima_inbound_message_attachments`:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `ima_inbound_message_attachment_id` | int8 serial PK | |
+| `ima_iem_inbound_email_message_id` | int8 | parent message; FK cascade |
+| `ima_filename` | varchar(500) | display/download name (sanitized on stream) |
+| `ima_content_type` | varchar(255) | e.g. `application/pdf` |
+| `ima_size_bytes` | int8 | for the listing |
+| `ima_mime_part` | varchar(40) | MIME section the bytes live in (e.g. `2`, `2.1`) |
+| `ima_encoding` | varchar(40) | transfer-encoding to decode on fetch (`base64`/`quoted-printable`/…) |
+| `ima_content_id` | varchar(255) | `cid:` for inline parts, else null |
+| `ima_is_inline` | bool | inline (cid) vs. a real attachment |
+| `ima_create_time` | timestamp(6) | |
+
+The manifest is **transport-agnostic**: it describes *which* parts exist and *where*
+in the MIME tree, not how to read them. Turning a part into bytes is a per-message
+detail (retrieval, below). Postfix/Mailgun adopt per-attachment download later by
+simply populating this same table (from a MIME parser over their stored raw) and
+reusing the same endpoint + reader UI — no new schema, no UI change.
+
+**At ingest (IMAP).** The poller already reads `BODYSTRUCTURE` to locate the text
+parts; that same structure enumerates every attachment part (filename, content-type,
+size, section number, encoding, content-id). Write one `ima_` row per non-text part —
+metadata only, kilobytes. No part bytes are fetched at poll time.
+
+**Per-attachment download endpoint** (new admin logic + auto-discovered view, e.g.
+`admin/admin_inbound_email_attachment`). Given an attachment id: load the row + its
+message, enforce the **same permission + mailbox-grant check the reader uses** (an
+attachment is exactly as private as its message), then retrieve the part and stream it
+with `Content-Type: <ima_content_type>` and `Content-Disposition: attachment;
+filename="<sanitized ima_filename>"`. Retrieval dispatches on the message's source:
+
+- **IMAP-backed** (`iem_iia_inbound_imap_account_id` set): connect via the account's
+  auth, `FETCH BODY[<ima_mime_part>]` (Message-ID fallback if UIDVALIDITY changed),
+  decode per `ima_encoding`, stream. Pass-through — the part never lands on disk.
+- **Stored-raw** (push, *future*): parse the stored raw to `ima_mime_part`, decode,
+  stream. Not built here; the endpoint carries the seam.
+
+If the part can't be retrieved (message deleted/moved/account disabled), return an
+honest "no longer available in the source mailbox," not an error.
+
+**Reader UI.** The message view lists attachments from the manifest (filename, size,
+type); each is a link to the download endpoint. Inline parts (`ima_is_inline`) are
+excluded — they belong to the HTML body. How the body renders is unchanged.
+
+**Size — no cap.** A per-attachment fetch pulls exactly one part on click; its size is
+bounded by the provider's send-time message maximum (Gmail ~25 MB, Microsoft ≤ ~150
+MB), and the endpoint is permission-10-admin only — no unbounded or abusable vector. A
+low limit would defeat the point (getting your attachment). Stream the part to the
+response rather than buffering extra copies; let PHP `memory_limit` be the backstop.
 
 ### Mailbox mapping nuance
 
@@ -262,11 +321,19 @@ Per run:
       raw. Hand the decoded bodies + headers + size to the store path
       (`InboundEmailRouter::storeMessage` / a store-only entry) with the account's
       bound alias + recipient, writing the **locator** columns and leaving
-      `iem_raw_message` empty (see *Reference-backed storage*). Attachment bytes
-      stay on the server. Dedup is the existing UNIQUE constraint, so re-fetching
-      is harmless. A pathological oversized text body is still bounded by
-      max-per-run + the size read; record and skip a message whose `RFC822.SIZE`
-      exceeds the configured per-message ceiling.
+      `iem_raw_message` empty (see *Reference-backed*). From the same `BODYSTRUCTURE`,
+      write one `ima_` **attachment-manifest** row per non-text part (filename, type,
+      size, section number, encoding) — metadata only; no attachment bytes fetched
+      (see §4). Attachment bytes stay on the server until clicked. Dedup is the
+      existing UNIQUE constraint, so re-fetching is harmless (re-write the manifest
+      idempotently or skip when the row already exists). Record `RFC822.SIZE` into `iem_size_bytes` for display, but **do
+      not** gate ingest on it — a 25 MB message with a one-line body must still be
+      ingested (its attachments are never fetched). The only ingest guard is on the
+      **text-body** size actually pulled: if the combined `text/plain`+`text/html`
+      parts exceed a (generous) configured ceiling, store a truncated body marked as
+      such rather than skipping the message — the message still appears in the reader,
+      and the full body part can be fetched on demand the same way an attachment is
+      (it is just another MIME part). The ceiling is generous enough that this is rare.
    e. Advance `last_seen_uid`; set `last_poll_time`, `last_status`.
 3. Return a summary (accounts polled, messages stored, errors).
 
@@ -365,6 +432,10 @@ Reuse the per-provider check pattern (`getSetupChecks`-style) for an account:
 - **OAuth2 consent/refresh:** **not a dependency of this spec** — it is provided
   by the [OAuth2 Core](implemented/oauth2_core.md), whose default is a direct Guzzle
   implementation (Guzzle is already vendored) with no new package.
+- **Raw-message storage refactor:** **not a dependency.** IMAP is reference-backed
+  (it stores no raw; it fetches parts on demand), so it neither needs nor blocks on the
+  push-transport storage refactor ([inbound_raw_message_storage.md](inbound_raw_message_storage.md)).
+  The two are independent.
 
 Pin the IMAP-library choice when building; declare via Composer
 (`composerAutoLoad` is already wired). Note any new `require` in `composer.json`.
@@ -387,6 +458,13 @@ Pin the IMAP-library choice when building; declare via Composer
   output; the "Test connection" result must not leak the credential.
 - Apply the untrusted-input markers to IMAP-ingested bodies exactly as the
   webhook/pipe paths do (stored mail is attacker-controlled).
+- **Attachment download:** the per-attachment endpoint enforces the **same
+  mailbox-grant + permission check as the reader** — an attachment is exactly as
+  private as its message. Sanitize `ima_filename` in the `Content-Disposition` header
+  (strip CR/LF and path separators) to prevent header injection, and serve with
+  `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` so
+  attacker-controlled attachment bytes are downloaded, never rendered inline in the
+  admin origin. Stream pass-through; never persist the part.
 
 ## Files
 
@@ -395,7 +473,9 @@ Pin the IMAP-library choice when building; declare via Composer
 |------|---------|
 | `plugins/inbound_email/data/inbound_imap_account_class.php` | `InboundImapAccount` + Multi; encrypted secret accessors |
 | `plugins/inbound_email/includes/InboundEmailPollingProvider.php` | the polled-transport interface |
-| `plugins/inbound_email/includes/ImapIngestor.php` | connect/fetch/store one account — fetches text parts + structure (reference-backed), never attachments or the whole raw |
+| `plugins/inbound_email/includes/ImapIngestor.php` | connect/fetch/store one account — fetches text parts + `BODYSTRUCTURE` (reference-backed), writes the attachment manifest, never fetches attachment bytes at poll time; also implements the on-demand single-part `FETCH BODY[...]` the attachment endpoint calls |
+| `plugins/inbound_email/data/inbound_message_attachment_class.php` | `InboundMessageAttachment` + Multi — the per-message attachment manifest (transport-agnostic) |
+| `plugins/inbound_email/admin/admin_inbound_email_attachment.php` (+ logic) | per-attachment download endpoint: grant-checked, dispatches retrieval by message source, streams the part with its content-type + filename |
 | `plugins/inbound_email/includes/imap_providers/GenericImapProvider.php` | base (password) + Yahoo/iCloud/Fastmail presets |
 | `plugins/inbound_email/includes/imap_providers/GmailImapProvider.php` | Google preset + OAuth |
 | `plugins/inbound_email/includes/imap_providers/MicrosoftImapProvider.php` | Microsoft preset + OAuth |
@@ -406,6 +486,7 @@ Pin the IMAP-library choice when building; declare via Composer
 | `plugins/inbound_email/admin/admin_inbound_email_imap_edit.php` (+ logic) | account editor (Connect button → `OAuth2Client::beginConsent`) |
 | `plugins/inbound_email/tests/inbound_imap_account_test.php` | model + encryption + UID cursor |
 | `plugins/inbound_email/tests/imap_poller_test.php` | poll → store → dedup → cursor advance (mock IMAP) |
+| `plugins/inbound_email/tests/inbound_attachment_test.php` | manifest written from `BODYSTRUCTURE`; per-attachment fetch returns the right part decoded; inline parts excluded from the list; missing part → graceful |
 
 ### To modify
 | File | Change |
@@ -414,7 +495,8 @@ Pin the IMAP-library choice when building; declare via Composer
 | `plugins/inbound_email/includes/admin_tabs.php` | add "IMAP Accounts" tab |
 | `plugins/inbound_email/includes/InboundEmailRouter.php` | expose a store-only entry the ingestor reuses that accepts pre-extracted bodies + locator and writes a row with an empty `iem_raw_message` (the ingestor already has the bodies; no raw to parse); bump `@version` |
 | `plugins/inbound_email/data/inbound_email_message_class.php` | add the nullable IMAP locator columns (`iem_iia_inbound_imap_account_id`, `iem_imap_uid`, `iem_imap_uidvalidity`, `iem_imap_folder`); bump `@version` |
-| `plugins/inbound_email/logic/admin_inbound_email_message_logic.php` | make *Download .eml* transport-aware: stored raw → stream as today; empty + IMAP locator → connect, `FETCH` full RFC822 by UID (fall back to `Message-ID`), stream without persisting; unfetchable → "no longer available in source mailbox"; bump `@version` |
+| `plugins/inbound_email/logic/admin_inbound_email_message_logic.php` | **remove the `download_eml` action** (no user-facing raw/.eml download, any transport); bump `@version` |
+| `plugins/inbound_email/admin/admin_inbound_email_message.php` (+ the message view) | list attachments from the manifest (filename, size, type), each linking to the download endpoint; inline parts excluded; **remove the *.eml* download link and the raw `<pre>` view** (all transports); bump `@version` |
 | `plugins/inbound_email/plugin.json` | register the poller task and the IMAP-source domain flag; serve `/admin/...imap*`; bump `version`. **No OAuth settings or callback route** (owned by the OAuth core). Declares a dependency on the OAuth core. |
 | `plugins/inbound_email/data/inbound_email_domain_class.php` | optional `ied_is_imap_source` flag so Setup skips MX for IMAP-sourced mailboxes |
 | `serve.php` | **no change** — IMAP admin routes auto-discover; the OAuth core's `/oauth_callback` view auto-discovers too (no route) |
@@ -436,11 +518,9 @@ the plugin migrations file).
   (dedup); an account already mid-poll isn't picked up concurrently.
 - **Reference-backed storage** — ingest writes `iem_body_plain`/`iem_body_html` +
   locator columns and leaves `iem_raw_message` empty; attachment parts are never
-  fetched; a message over the per-message size ceiling is recorded and skipped.
-- **On-demand .eml** — *Download .eml* for an IMAP-sourced message fetches the full
-  raw from (mock) IMAP by UID; a changed UIDVALIDITY falls back to a `Message-ID`
-  search; an unlocatable message yields the graceful "no longer available" path,
-  not an error. A Postfix/Mailgun message still streams its stored raw.
+  fetched; a large attachment with a tiny body is still ingested (not skipped on
+  `RFC822.SIZE`); a body over the text-body ceiling is truncated-and-marked, not
+  dropped.
 - **Ingestor (mock IMAP)** — given fixture messages, stores them under the bound
   alias, dedups re-fetch, records status; a connection error is captured
   per-account without throwing.
@@ -454,6 +534,13 @@ the plugin migrations file).
   correct host/port/encryption and auth method.
 - **Reader integration** — an IMAP-ingested message appears in the Mailbox Reader
   under its bound mailbox and honors grant scope (reuses the reader tests).
+- **Per-attachment download** — the manifest is written from a fixture
+  `BODYSTRUCTURE` (filename/type/size/part/encoding); clicking an attachment fetches
+  exactly that part (mock `FETCH BODY[...]`), decodes per `ima_encoding`, and streams
+  with the right `Content-Type` + filename; inline (`cid:`) parts are excluded from
+  the list; a part that can't be fetched yields the graceful "no longer available"
+  result; the endpoint enforces the same mailbox-grant check as the reader (a user
+  without grant is refused).
 - **Poller task** — `run()` polls only due/enabled accounts, respects
   max-per-run, returns a summary; one failing account doesn't stop the rest.
 
@@ -466,7 +553,9 @@ end-to-end (real Gmail/Microsoft consent) is a manual checklist in the docs.
   `plugins/inbound_email/docs/overview.md`: the account model, the per-host
   matrix (who needs OAuth vs app password), the poller cadence, the
   bring-your-own-mailbox story (SMTP out + IMAP in), and that the reader/grants
-  are reused unchanged.
+  are reused — plus the new clickable **attachment list** (manifest + on-demand
+  per-attachment download), noting attachment bytes are never stored and that
+  Postfix/Mailgun mail adopts the same list later.
 - OAuth app registration (Google Cloud / Azure, scopes, the shared redirect URI,
   where to paste client id/secret) is documented **once** in the OAuth core's
   `docs/oauth2.md` — the IMAP overview links to it rather than duplicating it, and
@@ -494,11 +583,15 @@ end-to-end (real Gmail/Microsoft consent) is a manual checklist in the docs.
   hosts uniformly; native APIs are a future per-provider optimization.
 - **POP3.** IMAP only (UID-based incremental sync; POP3's download-and-delete
   model is a poor fit).
-- **Per-attachment extraction / listing / download.** The platform stores and
-  serves whole messages (`iem_raw_message` + *Download .eml*), with no attachments
-  table or per-part endpoint; IMAP follows that same model and fetches the whole
-  raw on demand. Indexing attachments individually is a cross-cutting change to the
-  *entire* inbound store (all transports), not part of this spec.
+- **Per-attachment download for Postfix/Mailgun mail.** Per-attachment download is
+  built here for IMAP (§4), on a transport-agnostic manifest + endpoint + reader list.
+  Bringing the *already-received* Postfix/Mailgun mail into it — which needs a real
+  MIME parser to enumerate/extract parts from their stored raw — is a later, additive
+  step: it populates the same `ima_` table and reuses the same endpoint and UI, no new
+  schema and no UI change. Not built in this spec.
+- **Attachment search / indexing / virus scanning.** The manifest lists parts for
+  display and download; full-text search of attachment contents and AV scanning are
+  separate future concerns.
 - **Historical backfill by default.** First connect starts from now; an optional
   bounded backfill (last N days) is a future add-on, not the default.
 - **Auto-provisioning OAuth apps.** Admin registers the Google/Azure app once and
