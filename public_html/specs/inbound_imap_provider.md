@@ -88,8 +88,8 @@ Four decisions define it:
         │  for each enabled account whose interval elapsed
         ▼
   ImapIngestor(account)
-   ├─ auth: PasswordImapAuth | OAuth2ImapAuth
-   │        └─ OAuth2ImapAuth asks OAuth2Client::ensureFresh(provider, token) → bearer
+   ├─ auth branch on iia_auth_method: password LOGIN | XOAUTH2
+   │        └─ oauth2 → OAuth2Client::ensureFresh(provider, token) → bearer
    ├─ connect (php-imap / library), select folder, UID search > last_seen_uid
    ├─ fetch raw messages
    ├─ InboundEmailRouter::storeMessage(...)  → iem_ (dedup via UNIQUE)
@@ -99,35 +99,33 @@ Four decisions define it:
   iem_inbound_email_messages (+ ima_ attachment manifest)  → Mailbox Reader (+ attachment list)
 ```
 
-## The polled-transport extension
+## The polled transport — a preset catalog, not a class hierarchy
 
-Keep `InboundEmailProvider` (push) untouched. Add a sibling interface so the
-polling subsystem is discoverable through the same registry:
+Keep `InboundEmailProvider` (push) untouched: Postfix and Mailgun earn their
+classes because parsing a piped delivery and parsing a webhook are genuinely
+different code. The pull side is the opposite — connecting, selecting a folder, and
+fetching over IMAP is **identical** for every host. The only things that vary by
+host are three values: the connection preset, the auth method, and (for OAuth) which
+OAuth provider key. That is **data, not behavior**, so there is no polling-provider
+interface and no per-host class hierarchy. One **preset catalog** describes every
+supported host:
 
 ```php
-interface InboundEmailPollingProvider {
-    public static function getKey(): string;            // 'imap_generic','imap_gmail','imap_microsoft'
-    public static function getLabel(): string;          // 'Generic IMAP','Gmail / Google Workspace',...
-    public static function getConnectionPreset(): array; // host/port/encryption defaults ([] for generic)
-    public static function getAuthMethod(): string;     // 'password' | 'oauth2'
-    public static function getAccountSettingsFields(): array; // config fields for an account of this kind
-    public static function authStrategy(InboundImapAccount $acct): ImapAuthStrategy; // password or oauth2
-    public static function testConnection(InboundImapAccount $acct): array; // [ok,bool; message]
-}
+// a const map on InboundImapAccount, read by the editor (fill host/port) and ingestor
+'imap_gmail'     => ['label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'google'],
+'imap_microsoft' => ['label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft'],
+'imap_yahoo'     => ['label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password'],
+'imap_icloud'    => ['label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password'],
+'imap_fastmail'  => ['label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password'],
+'imap_generic'   => ['label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password'],
 ```
 
-`InboundProviderRegistry` is extended to discover polling providers too (same
-discovery mechanism, separate list). Push providers (Postfix/Mailgun) are
-unaffected.
-
-Concrete providers:
-- `GenericImapProvider` — `password` auth, no preset (user supplies host).
-- `GmailImapProvider` — preset `imap.gmail.com:993/ssl`, `oauth2` (Google).
-- `MicrosoftImapProvider` — preset `outlook.office365.com:993/ssl`, `oauth2`
-  (Microsoft).
-- Yahoo / iCloud / Fastmail need **no new class** — they are `GenericImapProvider`
-  with a connection **preset** (host/port) and an "app password" hint. Ship these
-  presets as data so the UI pre-fills the host when the user picks them.
+The account editor reads this catalog to populate the provider dropdown and pre-fill
+host/port/encryption when one is picked; `imap_generic` leaves the host blank for the
+user to supply. **Gmail and Microsoft are not special** — they are simply the rows
+whose `auth` is `oauth2`. Adding a host later (or letting a generic host use OAuth) is
+a **one-line edit here** — the whole integration-point inventory in one place, not a
+new class per host. Push providers (Postfix/Mailgun) are unaffected.
 
 ## Data model
 
@@ -308,9 +306,9 @@ Per run:
    take a per-account claim (e.g. stamp `last_poll_time` on pickup) so two runs
    can't race on `last_seen_uid`.
 2. For each account:
-   a. Resolve `authStrategy`. If OAuth and the access token is expired/near
-      expiry → **refresh** via the provider's token endpoint (store the new
-      token). If refresh fails → record status, skip (don't crash the run).
+   a. Authenticate per `iia_auth_method`. If `oauth2` and the access token is
+      expired/near expiry → **refresh** via `OAuth2Client::ensureFresh` (store the
+      new token). If refresh fails → record status, skip (don't crash the run).
    b. Connect (host/port/encryption), select folder. Compare server
       **UIDVALIDITY** to stored; if it changed (folder was recreated), **re-seed
       `last_seen_uid` to the current high UID — not 0** — so a reset doesn't
@@ -341,19 +339,22 @@ Failures are **per-account and non-fatal** — one unreachable mailbox or expire
 token must not stop the others (same posture as the router's per-recipient
 handling).
 
-## Auth strategy
+## Authenticating the connection
 
-`ImapAuthStrategy` interface: `applyTo($imapConnection)` / returns the
-credential the IMAP connection needs.
+Two auth modes, selected by the account's `iia_auth_method` (which the preset
+catalog sets) — a single **branch in `ImapIngestor`**, not a strategy class
+hierarchy. The set is closed: `LOGIN` and `XOAUTH2` are the only IMAP auth that
+matters, so a two-element interface would be pure ceremony.
 
-- `PasswordImapAuth` — basic `LOGIN` with username + stored app/basic password
-  (decrypted via the core `SecretBox`).
-- `OAuth2ImapAuth` — `AUTHENTICATE XOAUTH2` with a valid bearer access token. It
-  does **not** implement OAuth: it reads the account's stored `OAuth2Token`, calls
+- **`password`** — basic `LOGIN` with the username + stored app/basic password,
+  decrypted via the core [`SecretBox`](secret_box.md) on use.
+- **`oauth2`** — `AUTHENTICATE XOAUTH2` with a valid bearer token. The ingestor
+  reads the account's stored `OAuth2Token`, calls
   `OAuth2Client::ensureFresh($provider, $token)` from the [OAuth2 Core](implemented/oauth2_core.md)
   (which refreshes and hands back a valid access token), persists the token if it
-  changed, and formats the XOAUTH2 SASL string. The XOAUTH2 *formatting* and IMAP
-  *use* are the only OAuth-adjacent code this plugin owns.
+  changed, and formats the XOAUTH2 SASL string. That formatting plus the IMAP use
+  are the only OAuth-adjacent code this plugin owns — it implements no grant,
+  refresh, or callback logic itself.
 
 ### Provider matrix (what each major host needs)
 
@@ -393,9 +394,9 @@ single-use callback, and `SecretBox` all live in the
   and redirects to the returned consent URL. The provider returns to the **core**
   `/oauth_callback`, which validates state, exchanges the code, and dispatches to
   `InboundImapOAuthConsumer`. No plugin callback route.
-- **Refresh:** handled by `OAuth2Client::ensureFresh` inside `OAuth2ImapAuth` on
-  each poll; refresh failure raises `OAuth2Exception`, which the ingestor records
-  as the account's `last_status` and skips — never crashes the run.
+- **Refresh:** handled by `OAuth2Client::ensureFresh` in the ingestor's `oauth2`
+  auth branch on each poll; refresh failure raises `OAuth2Exception`, which the
+  ingestor records as the account's `last_status` and skips — never crashes the run.
 - **Redirect URI** is the single shared `/oauth_callback` registered once per
   provider in the OAuth core setup — IMAP adds nothing to the cloud app.
 
@@ -471,15 +472,10 @@ Pin the IMAP-library choice when building; declare via Composer
 ### To create
 | File | Purpose |
 |------|---------|
-| `plugins/inbound_email/data/inbound_imap_account_class.php` | `InboundImapAccount` + Multi; encrypted secret accessors |
-| `plugins/inbound_email/includes/InboundEmailPollingProvider.php` | the polled-transport interface |
-| `plugins/inbound_email/includes/ImapIngestor.php` | connect/fetch/store one account — fetches text parts + `BODYSTRUCTURE` (reference-backed), writes the attachment manifest, never fetches attachment bytes at poll time; also implements the on-demand single-part `FETCH BODY[...]` the attachment endpoint calls |
+| `plugins/inbound_email/data/inbound_imap_account_class.php` | `InboundImapAccount` + Multi; encrypted secret accessors; **the preset catalog** (const map of host/port/encryption/auth/oauth_provider per provider_key) the editor and ingestor read |
+| `plugins/inbound_email/includes/ImapIngestor.php` | connect/auth/fetch/store one account — **branches on `iia_auth_method`** (password `LOGIN` vs `XOAUTH2` via `OAuth2Client::ensureFresh`); fetches text parts + `BODYSTRUCTURE` (reference-backed), writes the attachment manifest, never fetches attachment bytes at poll time; also implements the on-demand single-part `FETCH BODY[...]` the attachment endpoint calls, and the `testConnection()` the Setup checks use |
 | `plugins/inbound_email/data/inbound_message_attachment_class.php` | `InboundMessageAttachment` + Multi — the per-message attachment manifest (transport-agnostic) |
 | `plugins/inbound_email/admin/admin_inbound_email_attachment.php` (+ logic) | per-attachment download endpoint: grant-checked, dispatches retrieval by message source, streams the part with its content-type + filename |
-| `plugins/inbound_email/includes/imap_providers/GenericImapProvider.php` | base (password) + Yahoo/iCloud/Fastmail presets |
-| `plugins/inbound_email/includes/imap_providers/GmailImapProvider.php` | Google preset + OAuth |
-| `plugins/inbound_email/includes/imap_providers/MicrosoftImapProvider.php` | Microsoft preset + OAuth |
-| `plugins/inbound_email/includes/imap_auth/PasswordImapAuth.php`, `OAuth2ImapAuth.php` | auth strategies (OAuth2ImapAuth = XOAUTH2 formatting + `OAuth2Client::ensureFresh`) |
 | `plugins/inbound_email/includes/oauth_consumers/InboundImapOAuthConsumer.php` | `OAuth2Consumer` (purpose `inbound_imap`): store granted tokens on the account |
 | `plugins/inbound_email/tasks/PollImapAccounts.json` + `.php` | the poller scheduled task |
 | `plugins/inbound_email/admin/admin_inbound_email_imap.php` (+ logic) | accounts list / add / poll-now / connect |
@@ -491,7 +487,6 @@ Pin the IMAP-library choice when building; declare via Composer
 ### To modify
 | File | Change |
 |------|--------|
-| `plugins/inbound_email/includes/InboundProviderRegistry.php` | discover polling providers (separate list) |
 | `plugins/inbound_email/includes/admin_tabs.php` | add "IMAP Accounts" tab |
 | `plugins/inbound_email/includes/InboundEmailRouter.php` | expose a store-only entry the ingestor reuses that accepts pre-extracted bodies + locator and writes a row with an empty `iem_raw_message` (the ingestor already has the bodies; no raw to parse); bump `@version` |
 | `plugins/inbound_email/data/inbound_email_message_class.php` | add the nullable IMAP locator columns (`iem_iia_inbound_imap_account_id`, `iem_imap_uid`, `iem_imap_uidvalidity`, `iem_imap_folder`); bump `@version` |

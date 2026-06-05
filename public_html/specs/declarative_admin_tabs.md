@@ -183,7 +183,10 @@ Run `php -l` and `validate_php_file.php` on every modified PHP file.
    children of `inbound_email` in `plugin.json`, replace
    `AdminPage::tab_menu(inbound_email_admin_tabs(), …)` with
    `AdminPage::tab_menu_for('inbound_email')`, and delete the
-   `inbound_email_admin_tabs()` helper.
+   `inbound_email_admin_tabs()` helper — the whole file
+   `plugins/inbound_email/includes/admin_tabs.php` (it holds nothing else),
+   along with the `require_once(...'admin_tabs.php')` line in each of its seven
+   consumer pages.
 2. **Core settings pages** — optionally migrate `admin_settings*`'s array literal
    to a declared `settings` group, gaining permission-aware tabs.
 3. Other features migrate opportunistically; nothing is forced.
