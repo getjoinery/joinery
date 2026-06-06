@@ -18,7 +18,8 @@
         "wildbit/postmark-php": "^4.0",
         "getbrevo/brevo-php": "^2.0",
         "resend/resend-php": "^0.10",
-        "mailjet/mailjet-apiv3-php": "^1.5"
+        "mailjet/mailjet-apiv3-php": "^1.5",
+        "bytestream/horde-imap-client": "^2.34"
     },
     "config": {
         "allow-plugins": {

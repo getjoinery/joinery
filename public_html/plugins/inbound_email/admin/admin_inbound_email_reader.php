@@ -2,16 +2,17 @@
 /**
  * Inbound Email - Mailbox Reader (Gmail-style).
  *
- * Replaces the old flat Mailbox table. Left rail = mailbox switcher (the
- * addresses this viewer has been granted, each independently badged; "All mail"
- * for superadmins) + filters + search. Center = conversation list. Right =
- * reading pane, with HTML bodies rendered in a sandboxed iframe.
+ * Two-pane Gmail layout: a left sidebar (mailbox switcher — the addresses this
+ * viewer has been granted, each independently badged; "All mail" for
+ * superadmins — plus filters + search) and a single main pane that shows EITHER
+ * the conversation list OR an opened conversation full-width (with a back
+ * arrow), never both side-by-side. HTML bodies render in a sandboxed iframe.
  *
  * All data and mutations go through the scoped AJAX endpoints
  * (/ajax/mailbox_*). Vanilla JS only. The single-message detail page is kept
  * for raw MIME / .eml download / deep links.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -33,10 +34,15 @@ $page->admin_header(
 	)
 );
 
-echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Mailbox');
+echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Mailboxes');
 
-// Reader styles.
-echo '<link rel="stylesheet" href="/plugins/inbound_email/assets/mailbox_reader.css">';
+// Reader assets — cache-busted by file mtime so CDN/browser caches never serve
+// a stale stylesheet or script after an edit.
+$asset_ver = function ($rel) {
+	$path = PathHelper::getIncludePath('plugins/inbound_email/assets/' . $rel);
+	return '/plugins/inbound_email/assets/' . $rel . '?v=' . (is_file($path) ? filemtime($path) : '1');
+};
+echo '<link rel="stylesheet" href="' . htmlspecialchars($asset_ver('mailbox_reader.css')) . '">';
 
 // Config + seed data for the vanilla-JS reader.
 $config = array(
@@ -67,23 +73,24 @@ echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JS
 		</div>
 	</aside>
 
-	<section class="mbx-list-pane">
-		<div class="mbx-list-header">
-			<span id="mbx-list-title" class="mbx-list-title">All mail</span>
-			<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>
+	<section class="mbx-main">
+		<div class="mbx-list-view" id="mbx-list-view">
+			<div class="mbx-list-header">
+				<span id="mbx-list-title" class="mbx-list-title">All mail</span>
+				<button type="button" id="mbx-refresh" class="mbx-iconbtn" title="Refresh">&#8635;</button>
+			</div>
+			<ul id="mbx-threads" class="mbx-threads"></ul>
+			<div class="mbx-list-footer">
+				<button type="button" id="mbx-more" class="mbx-more" hidden>Load more</button>
+			</div>
 		</div>
-		<ul id="mbx-threads" class="mbx-threads"></ul>
-		<div class="mbx-list-footer">
-			<button type="button" id="mbx-more" class="mbx-more" hidden>Load more</button>
-		</div>
-	</section>
 
-	<section class="mbx-read-pane" id="mbx-read-pane">
-		<div class="mbx-empty" id="mbx-read-empty">Select a conversation to read.</div>
-		<div class="mbx-thread" id="mbx-thread" hidden></div>
+		<div class="mbx-read-view" id="mbx-read-pane">
+			<div class="mbx-thread" id="mbx-thread"></div>
+		</div>
 	</section>
 </div>
-<script src="/plugins/inbound_email/assets/mailbox_reader.js"></script>
+<script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
 <?php
 $page->admin_footer();
 ?>

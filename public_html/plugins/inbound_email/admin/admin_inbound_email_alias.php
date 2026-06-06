@@ -27,7 +27,7 @@ $page->admin_header(
 	)
 );
 
-echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Forwarding Aliases');
+echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Accounts');
 
 if (isset($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';

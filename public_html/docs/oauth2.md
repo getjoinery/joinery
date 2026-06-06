@@ -105,6 +105,19 @@ $token = $client->ensureFresh(OAuth2ProviderRegistry::get('google'), $token);
 // persist $token if it changed
 ```
 
+### First consumer: Inbound IMAP
+
+The Inbound Email plugin's IMAP transport is the first consumer (purpose
+`inbound_imap`, in `plugins/inbound_email/includes/oauth_consumers/`). It requests
+the mail-read scope per provider — Google `https://mail.google.com/`, Microsoft
+`https://outlook.office365.com/IMAP.AccessAsUser.All offline_access` — stores the
+granted tokens (encrypted) on the IMAP account, and uses `ensureFresh()` on each
+poll to keep the XOAUTH2 bearer valid. See
+[Receiving by IMAP poll](/plugins/inbound_email/docs/overview.md#receiving-by-imap-poll).
+The cloud-app registration (Google Cloud / Azure, the shared redirect URI, pasting
+client id/secret) is documented here once; the IMAP overview links to it and adds
+only the IMAP-specific scopes and the per-account "Connect" step.
+
 ## Settings
 
 | Setting | Default | Notes |

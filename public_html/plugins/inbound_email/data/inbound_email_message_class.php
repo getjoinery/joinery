@@ -24,7 +24,14 @@
  * no trusted verdict is present the columns read 'unverified', never a
  * hand-rolled 'fail'. See InboundEmailRouter and AuthenticationResults.
  *
- * @version 1.2
+ * IMAP-sourced messages are reference-backed: the poller stores headers + body
+ * columns but leaves iem_raw_message empty and records a locator
+ * (iem_iia_inbound_imap_account_id + iem_imap_uid/uidvalidity/folder) so
+ * individual MIME parts can be re-fetched on demand. A non-null
+ * iem_iia_inbound_imap_account_id marks a row reference-backed. See ImapIngestor
+ * and specs/inbound_imap_provider.md.
+ *
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -39,6 +46,7 @@ class InboundEmailMessage extends SystemBase {
 	protected static $foreign_key_actions = [
 		'iem_ied_inbound_email_domain_id' => ['action' => 'cascade'],
 		'iem_iea_inbound_email_alias_id'  => ['action' => 'null'],
+		'iem_iia_inbound_imap_account_id' => ['action' => 'null'],
 	];
 
 	public static $field_specifications = array(
@@ -61,6 +69,13 @@ class InboundEmailMessage extends SystemBase {
 		'iem_dmarc_result'        => array('type'=>'varchar(16)', 'default'=>'unverified'),
 		'iem_auth_source'         => array('type'=>'varchar(20)', 'default'=>'none'),
 		'iem_size_bytes'          => array('type'=>'int4'),
+		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
+		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
+		// and tells the attachment endpoint to fetch parts on demand from IMAP).
+		'iem_iia_inbound_imap_account_id' => array('type'=>'int8'),
+		'iem_imap_uid'            => array('type'=>'int8'),
+		'iem_imap_uidvalidity'    => array('type'=>'int8'),
+		'iem_imap_folder'         => array('type'=>'varchar(255)'),
 		'iem_received_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iem_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iem_delete_time'         => array('type'=>'timestamp(6)'),

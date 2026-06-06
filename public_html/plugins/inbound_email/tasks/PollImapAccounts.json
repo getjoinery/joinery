@@ -1,0 +1,10 @@
+{
+    "name": "Fetch inbound IMAP mail",
+    "description": "Connects to each enabled, due IMAP account and ingests new mail into its bound mailbox. Runs every cron pass (every_run) as a floor; each account's own poll interval is the actual cadence. Failures are per-account and non-fatal.",
+    "default_frequency": "every_run",
+    "default_time": "",
+    "config_fields": {
+        "polling_enabled": {"type": "boolean", "label": "Enable IMAP polling", "required": false},
+        "max_per_account": {"type": "number", "label": "Max messages per account per run (default 50)", "required": false}
+    }
+}

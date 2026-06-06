@@ -1,6 +1,7 @@
 /*
- * Mailbox Reader styles — bespoke three-pane (rail / list / reading) layout.
- * Vanilla CSS, no framework. @version 1.0
+ * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
+ * pane that swaps between the conversation list and an opened conversation.
+ * Vanilla CSS, no framework. @version 2.0
  */
 
 .mbx-reader {
@@ -82,14 +83,30 @@
 	font-size: 13px;
 }
 
-/* ---- Center list ---- */
-.mbx-list-pane {
-	flex: 0 0 360px;
-	border-right: 1px solid #e4e7eb;
+/* ---- Main pane (swaps between list view and reading view) ---- */
+.mbx-main {
+	flex: 1;
+	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	min-width: 0;
+	overflow: hidden;
 }
+.mbx-list-view {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+.mbx-read-view {
+	display: none;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+}
+/* When reading, the list is replaced by the conversation (Gmail-style). */
+.mbx-reader.reading .mbx-list-view { display: none; }
+.mbx-reader.reading .mbx-read-view { display: flex; flex-direction: column; }
+
 .mbx-list-header {
 	display: flex;
 	align-items: center;
@@ -146,10 +163,16 @@
 	padding: 6px 14px; cursor: pointer; font-size: 13px;
 }
 
-/* ---- Reading pane ---- */
-.mbx-read-pane { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; }
-.mbx-empty { margin: auto; color: #9097a1; font-size: 14px; }
-.mbx-thread { padding: 16px 20px; }
+/* ---- Reading view ---- */
+.mbx-thread { padding: 16px 20px; max-width: 900px; }
+.mbx-thread-back {
+	display: inline-flex; align-items: center; gap: 6px;
+	border: none; background: none; cursor: pointer;
+	color: #374151; font-size: 13px; padding: 4px 6px; border-radius: 4px;
+	margin-bottom: 10px;
+}
+.mbx-thread-back:hover { background: #eef1f4; color: #111827; }
+.mbx-thread-back .mbx-back-arrow { font-size: 17px; line-height: 1; }
 .mbx-thread-header { margin-bottom: 14px; }
 .mbx-thread-header h1 { font-size: 18px; margin: 0 0 6px; color: #111827; }
 .mbx-thread-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
@@ -196,11 +219,10 @@
 
 .mbx-loading { color: #9097a1; font-size: 13px; padding: 14px; }
 
-/* ---- Responsive: collapse to a single column ---- */
-@media (max-width: 900px) {
-	.mbx-reader { flex-direction: column; height: auto; }
+/* ---- Responsive: rail moves above the main pane on narrow screens ---- */
+@media (max-width: 760px) {
+	.mbx-reader { flex-direction: column; height: auto; min-height: 70vh; }
 	.mbx-rail { flex-basis: auto; border-right: none; border-bottom: 1px solid #e4e7eb; }
-	.mbx-list-pane { flex-basis: auto; max-height: 50vh; border-right: none; border-bottom: 1px solid #e4e7eb; }
-	.mbx-reader.reading .mbx-list-pane,
+	/* While reading on a small screen, hide the rail so the message gets full width. */
 	.mbx-reader.reading .mbx-rail { display: none; }
 }

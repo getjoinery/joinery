@@ -1,0 +1,307 @@
+<?php
+/**
+ * InboundImapAccount - A polled IMAP mailbox the platform reads inbound mail from.
+ *
+ * IMAP is the "pull" inbound transport: instead of mail being pushed in (Postfix
+ * MX->pipe, Mailgun webhook), the platform connects to an existing mailbox on a
+ * schedule (PollImapAccounts) and ingests new messages. Each account binds to an
+ * inbound alias (the mailbox it populates), so fetched mail appears in the
+ * Mailbox Reader like any other stored mail and honors the same grant model.
+ *
+ * Accounts are additive and independent: any number can run alongside whatever
+ * the system's single push transport (inbound_email_provider) is. Adding one
+ * never changes that transport.
+ *
+ * Per-host connection details are DATA, not behavior — the PRESETS catalog below
+ * is the single inventory of every supported host (host/port/encryption/auth and,
+ * for OAuth hosts, the OAuth provider key). Gmail and Microsoft are not special:
+ * they are simply the rows whose auth is 'oauth2'. Adding a host is a one-line
+ * edit here. The editor reads PRESETS to fill the form; ImapIngestor reads the
+ * account's own stored connection columns (the preset only seeds them).
+ *
+ * Secrets (IMAP password, OAuth access/refresh tokens) are encrypted at rest with
+ * the core SecretBox helper. The *_enc columns are never read directly by callers
+ * and never logged or echoed — use the get/set accessors, which encrypt/decrypt on
+ * use only.
+ *
+ * @version 1.0
+ */
+
+require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
+
+class InboundImapAccountException extends SystemBaseException {}
+
+class InboundImapAccount extends SystemBase {
+	public static $prefix = 'iia';
+	public static $tablename = 'iia_inbound_imap_accounts';
+	public static $pkey_column = 'iia_inbound_imap_account_id';
+
+	// Auth methods
+	const AUTH_PASSWORD = 'password';
+	const AUTH_OAUTH2   = 'oauth2';
+
+	// Encryption modes (maps onto the IMAP connection's secure transport)
+	const ENC_SSL = 'ssl';
+	const ENC_TLS = 'tls';
+	const ENC_NONE = 'none';
+
+	/**
+	 * The preset catalog: every supported host as pure data. The account editor
+	 * reads this to populate the provider dropdown and pre-fill host/port/
+	 * encryption when a provider is picked; imap_generic leaves the host blank for
+	 * the user to supply. 'oauth_provider' is the OAuth2ProviderRegistry key for
+	 * oauth2 hosts (null for password hosts). Add a host by adding a row here.
+	 *
+	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string}>
+	 */
+	const PRESETS = array(
+		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'google'),
+		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft'),
+		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
+		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
+		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
+		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
+	);
+
+	/**
+	 * The canonical email-address domain for the fixed-domain providers, so an
+	 * IMAP-source domain (e.g. gmail.com) and its provider preset stay in sync.
+	 * Generic/Workspace hosts have no fixed domain and are absent here.
+	 *
+	 * @var array<string,string>
+	 */
+	const PROVIDER_EMAIL_DOMAINS = array(
+		'imap_gmail'     => 'gmail.com',
+		'imap_microsoft' => 'outlook.com',
+		'imap_yahoo'     => 'yahoo.com',
+		'imap_icloud'    => 'icloud.com',
+		'imap_fastmail'  => 'fastmail.com',
+	);
+
+	/** Provider preset key for an email-address domain, or null if not a fixed-domain provider. */
+	public static function providerForEmailDomain(?string $domain): ?string {
+		$domain = strtolower(trim((string)$domain));
+		$map = array_flip(self::PROVIDER_EMAIL_DOMAINS);
+		return $map[$domain] ?? null;
+	}
+
+	protected static $foreign_key_actions = array(
+		'iia_iea_inbound_email_alias_id' => array('action' => 'cascade'),
+	);
+
+	public static $field_specifications = array(
+		'iia_inbound_imap_account_id'   => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+		'iia_label'                     => array('type'=>'varchar(255)'),
+		'iia_provider_key'              => array('type'=>'varchar(40)', 'default'=>'imap_generic', 'is_nullable'=>false),
+		'iia_iea_inbound_email_alias_id'=> array('type'=>'int4'),
+		'iia_imap_host'                 => array('type'=>'varchar(255)'),
+		'iia_imap_port'                 => array('type'=>'int4', 'default'=>'993'),
+		'iia_imap_encryption'           => array('type'=>'varchar(10)', 'default'=>'ssl'),
+		'iia_imap_folder'               => array('type'=>'varchar(255)', 'default'=>'INBOX'),
+		'iia_username'                  => array('type'=>'varchar(255)'),
+		'iia_auth_method'               => array('type'=>'varchar(10)', 'default'=>'password', 'is_nullable'=>false),
+		'iia_password_enc'              => array('type'=>'text'),
+		'iia_oauth_access_token_enc'    => array('type'=>'text'),
+		'iia_oauth_refresh_token_enc'   => array('type'=>'text'),
+		'iia_oauth_token_expires'       => array('type'=>'timestamp(6)'),
+		'iia_poll_interval_seconds'     => array('type'=>'int4', 'default'=>'300'),
+		'iia_uidvalidity'               => array('type'=>'int8'),
+		'iia_last_seen_uid'             => array('type'=>'int8'),
+		'iia_is_enabled'                => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
+		'iia_last_poll_time'            => array('type'=>'timestamp(6)'),
+		'iia_last_status'               => array('type'=>'varchar(500)'),
+		'iia_needs_reauth'              => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'iia_import_history'            => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'iia_create_time'               => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		'iia_update_time'               => array('type'=>'timestamp(6)'),
+		'iia_delete_time'               => array('type'=>'timestamp(6)'),
+	);
+
+	function authenticate_write($data) {
+		if ($data['current_user_permission'] < 5) {
+			throw new SystemAuthenticationError(
+				'Current user does not have permission to edit this entry in ' . static::$tablename);
+		}
+	}
+
+	function prepare() {
+		// Provider must be a known preset.
+		$provider = $this->get('iia_provider_key') ?: 'imap_generic';
+		if (!isset(self::PRESETS[$provider])) {
+			throw new InboundImapAccountException('Unknown IMAP provider: ' . htmlspecialchars($provider));
+		}
+		$this->set('iia_provider_key', $provider);
+
+		// Auth method is derived from the preset — the catalog is authoritative.
+		$this->set('iia_auth_method', self::PRESETS[$provider]['auth']);
+
+		$enc = $this->get('iia_imap_encryption') ?: self::ENC_SSL;
+		if (!in_array($enc, array(self::ENC_SSL, self::ENC_TLS, self::ENC_NONE), true)) {
+			throw new InboundImapAccountException('Invalid encryption: ' . htmlspecialchars($enc));
+		}
+		$this->set('iia_imap_encryption', $enc);
+
+		if (!$this->get('iia_imap_folder')) {
+			$this->set('iia_imap_folder', 'INBOX');
+		}
+		if (!intval($this->get('iia_imap_port'))) {
+			$this->set('iia_imap_port', 993);
+		}
+		if (!intval($this->get('iia_poll_interval_seconds'))) {
+			$this->set('iia_poll_interval_seconds', 300);
+		}
+
+		$this->set('iia_update_time', gmdate('Y-m-d H:i:s'));
+	}
+
+	// --- Preset helpers -----------------------------------------------------
+
+	/** The preset row for this account's provider_key (or the generic row). */
+	function getPreset(): array {
+		$key = $this->get('iia_provider_key') ?: 'imap_generic';
+		return self::PRESETS[$key] ?? self::PRESETS['imap_generic'];
+	}
+
+	function isOAuth(): bool {
+		return $this->get('iia_auth_method') === self::AUTH_OAUTH2;
+	}
+
+	/** OAuth2ProviderRegistry key for this account (e.g. 'google'), or null. */
+	function getOAuthProviderKey(): ?string {
+		return $this->getPreset()['oauth_provider'] ?? null;
+	}
+
+	// --- Encrypted secret accessors ----------------------------------------
+	// Plaintext is encrypted on set and decrypted on get; the *_enc columns are
+	// never exposed. Empty input clears the column.
+
+	function setPassword(?string $plaintext): void {
+		if ($plaintext === null || $plaintext === '') {
+			$this->set('iia_password_enc', null);
+			return;
+		}
+		$this->set('iia_password_enc', (new SecretBox())->encrypt($plaintext));
+	}
+
+	function getPassword(): ?string {
+		$blob = $this->get('iia_password_enc');
+		if (!$blob) {
+			return null;
+		}
+		return (new SecretBox())->decrypt($blob);
+	}
+
+	function hasPassword(): bool {
+		return (bool)$this->get('iia_password_enc');
+	}
+
+	/**
+	 * Persist a granted OAuth token set on this account (access + refresh +
+	 * expiry), encrypting the tokens at rest. A refresh response often omits the
+	 * refresh token — OAuth2Token::withRefreshedAccess already preserves the prior
+	 * one, so the token handed here always carries the refresh token to store.
+	 */
+	function setOAuthToken(OAuth2Token $token): void {
+		$box = new SecretBox();
+		$this->set('iia_oauth_access_token_enc', $box->encrypt($token->getAccessToken()));
+		$refresh = $token->getRefreshToken();
+		if ($refresh !== null && $refresh !== '') {
+			$this->set('iia_oauth_refresh_token_enc', $box->encrypt($refresh));
+		}
+		$this->set('iia_oauth_token_expires', $token->getExpiresAt());
+		// A freshly granted/refreshed token clears any prior re-auth flag.
+		$this->set('iia_needs_reauth', false);
+	}
+
+	/** True when the stored token is known-broken (refresh/auth failed) and the
+	 *  account must be reconnected. Distinct from "never connected" (no token). */
+	function needsReauth(): bool {
+		return $this->isOAuth() && $this->hasOAuthToken() && (bool)$this->get('iia_needs_reauth');
+	}
+
+	/** Flag this OAuth account as needing reconnection and persist it. */
+	function markNeedsReauth(): void {
+		$this->set('iia_needs_reauth', true);
+		$this->save();
+	}
+
+	/**
+	 * Reconstruct the stored OAuth2Token, or null if no token is on record.
+	 * The scope/token_type are not persisted (not needed for XOAUTH2 use); the
+	 * access token, refresh token, and expiry are what drive ensureFresh().
+	 */
+	function getOAuthToken(): ?OAuth2Token {
+		$accessBlob = $this->get('iia_oauth_access_token_enc');
+		if (!$accessBlob) {
+			return null;
+		}
+		$box = new SecretBox();
+		$refreshBlob = $this->get('iia_oauth_refresh_token_enc');
+		return new OAuth2Token(
+			$box->decrypt($accessBlob),
+			$refreshBlob ? $box->decrypt($refreshBlob) : null,
+			$this->get('iia_oauth_token_expires') ?: null
+		);
+	}
+
+	function hasOAuthToken(): bool {
+		return (bool)$this->get('iia_oauth_access_token_enc');
+	}
+
+	/** Is this account credentialed enough to attempt a poll? */
+	function isConnectable(): bool {
+		if ($this->isOAuth()) {
+			return $this->hasOAuthToken();
+		}
+		return $this->hasPassword() && (bool)$this->get('iia_imap_host');
+	}
+
+	/**
+	 * Record the outcome of a poll/connection attempt. Status is truncated and
+	 * stored verbatim — callers MUST pass an already credential-free string
+	 * (never an IMAP password or token).
+	 */
+	function recordStatus(string $status): void {
+		$this->set('iia_last_poll_time', gmdate('Y-m-d H:i:s'));
+		$this->set('iia_last_status', substr($status, 0, 500));
+		$this->save();
+	}
+}
+
+class MultiInboundImapAccount extends SystemMultiBase {
+	protected static $model_class = 'InboundImapAccount';
+
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = array();
+
+		if (isset($this->options['enabled'])) {
+			$filters['iia_is_enabled'] = $this->options['enabled'] ? '= true' : '= false';
+		}
+
+		if (isset($this->options['provider_key'])) {
+			$filters['iia_provider_key'] = array($this->options['provider_key'], PDO::PARAM_STR);
+		}
+
+		if (isset($this->options['alias_id'])) {
+			$filters['iia_iea_inbound_email_alias_id'] = array($this->options['alias_id'], PDO::PARAM_INT);
+		}
+
+		// "due": accounts whose poll interval has elapsed since the last poll.
+		// A never-polled account (last_poll_time IS NULL) is always due. Uses the
+		// split-parenthesis OR convention so the NULL case groups with the
+		// interval test without widening any other clause.
+		if (!empty($this->options['due'])) {
+			$filters['(iia_last_poll_time'] =
+				"IS NULL OR iia_last_poll_time + (iia_poll_interval_seconds * INTERVAL '1 second') <= now())";
+		}
+
+		if (isset($this->options['deleted'])) {
+			$filters['iia_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
+		}
+
+		return $this->_get_resultsv2('iia_inbound_imap_accounts', $filters, $this->order_by, $only_count, $debug);
+	}
+}
+?>

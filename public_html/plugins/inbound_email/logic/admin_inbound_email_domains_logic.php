@@ -6,26 +6,50 @@ function admin_inbound_email_domains_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
-	$redirect_url = '/plugins/inbound_email/admin/admin_inbound_email_domains';
+	// The domain editor is reached from the Accounts tree; saves and the bare
+	// (non-editing) view both land back on Accounts.
+	$accounts_url = '/plugins/inbound_email/admin/admin_inbound_email_accounts';
+
+	// Known IMAP-source provider domains (shared with the IMAP editor). Selecting
+	// one of these "Type" options implies the domain (the local part is the
+	// mailbox), flags it IMAP-source, and skips the catch-all/MX flow. "custom" is
+	// a hosted domain; "imap_generic" is an IMAP source whose domain the operator
+	// types (e.g. a Workspace domain).
+	$imap_type_domains = InboundImapAccount::PROVIDER_EMAIL_DOMAINS;
 
 	// Handle form submission (add/edit domain)
-	if ($input && isset($input['ied_domain'])) {
+	if ($input && isset($input['domain_type'])) {
 		if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
 			$domain = new InboundEmailDomain($input['edit_primary_key_value'], TRUE);
 		} else {
 			$domain = new InboundEmailDomain(NULL);
 		}
 
-		$domain->set('ied_domain', $input['ied_domain']);
+		$type = $input['domain_type'];
+		$is_imap = ($type !== 'custom');
+		$domain_name = isset($imap_type_domains[$type])
+			? $imap_type_domains[$type]
+			: trim((string)($input['ied_domain'] ?? ''));
+
+		$domain->set('ied_domain', $domain_name);
 		$domain->set('ied_is_enabled', isset($input['ied_is_enabled']) ? true : false);
-		$domain->set('ied_catch_all_mode', $input['ied_catch_all_mode'] ?? 'forward');
-		$domain->set('ied_catch_all_address', $input['ied_catch_all_address'] ?? '');
-		$domain->set('ied_reject_unmatched', isset($input['ied_reject_unmatched']) ? true : false);
+		$domain->set('ied_is_imap_source', $is_imap);
+		if ($is_imap) {
+			// IMAP-source domains route per mailbox — no catch-all.
+			$domain->set('ied_catch_all_mode', 'forward');
+			$domain->set('ied_catch_all_address', '');
+			$domain->set('ied_reject_unmatched', false);
+		} else {
+			$domain->set('ied_catch_all_mode', $input['ied_catch_all_mode'] ?? 'forward');
+			$domain->set('ied_catch_all_address', $input['ied_catch_all_address'] ?? '');
+			$domain->set('ied_reject_unmatched', isset($input['ied_reject_unmatched']) ? true : false);
+		}
 
 		try {
 			$domain->prepare();
@@ -38,11 +62,12 @@ function admin_inbound_email_domains_logic(array $input): LogicResult {
 				DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
-			return LogicResult::redirect($redirect_url);
+			return LogicResult::redirect($accounts_url);
 		} catch (InboundEmailDomainException $e) {
 			return LogicResult::render(array(
 				'error' => $e->getMessage(),
 				'edit_domain' => $domain,
+				'domain_type' => $type,
 				'session' => $session,
 				'settings' => $settings,
 			));
@@ -115,18 +140,31 @@ function admin_inbound_email_domains_logic(array $input): LogicResult {
 				));
 			}
 
-			return LogicResult::redirect($redirect_url);
+			return LogicResult::redirect($accounts_url);
 		}
 	}
 
-	// Load domain for editing
+	// Load domain for editing, and derive the "Type" the editor's dropdown shows.
 	$edit_domain = null;
+	$domain_type = 'custom';
 	if (isset($input['ied_inbound_email_domain_id'])) {
 		$edit_domain = new InboundEmailDomain($input['ied_inbound_email_domain_id'], TRUE);
+		if ($edit_domain->get('ied_is_imap_source')) {
+			$reverse = array_flip($imap_type_domains);
+			$domain_type = $reverse[strtolower((string)$edit_domain->get('ied_domain'))] ?? 'imap_generic';
+		}
+	}
+
+	// The standalone domain list is retired — the Accounts tree is the list. Only
+	// the add/edit form is served here; any bare visit bounces to Accounts.
+	$is_add = (($input['action'] ?? '') === 'add');
+	if (!$edit_domain && !$is_add) {
+		return LogicResult::redirect($accounts_url);
 	}
 
 	return LogicResult::render(array(
 		'edit_domain' => $edit_domain,
+		'domain_type' => $domain_type,
 		'session' => $session,
 		'settings' => $settings,
 	));

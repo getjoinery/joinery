@@ -57,18 +57,33 @@ Set the **mail server hostname** on the Setup tab once: the FQDN of this server
 (`inbound_email_mail_hostname`), used as the MX target, HELO name, and PTR
 name. Everything else is autodetected.
 
+### The Accounts tree
+
+**Emails > Incoming > Accounts** is the single place to see and manage routing:
+every domain, the mailboxes (aliases) nested under it, how each mailbox routes
+(stored / forwarded / both), and any IMAP feed pulling mail into it. A domain is
+either MX-hosted (mail pushed in) or an **IMAP source** (mail pulled in per
+mailbox — e.g. `gmail.com`, no MX needed); both nest identically. The tree is the
+overview and entry point; **+ Domain**, **+ Mailbox**, and every **Edit** open the
+per-object editor with context pre-filled. Under an **IMAP-source** domain the
+mailbox *is* its feed: **+ Mailbox** and **Edit** open one combined editor that
+manages the mailbox name, its access grants, and the IMAP feed together (creating
+the feed if the mailbox doesn't have one yet) — there is no separate feed object
+to add. Hosted (MX) domains keep a distinct **+ IMAP feed** per mailbox.
+
 ### Adding a Domain
 
 The Setup tab registers a domain for you as part of the guided flow. To manage
-domains directly: go to **Emails > Incoming > Domains**, add the domain and
-save — Postfix picks it up immediately (the inbound domain list is read live
-from the database; no host command, no per-domain Postfix config). Then use
-the Setup tab to verify and publish the domain's DNS records.
+domains directly: on the **Accounts** tab click **+ Add Domain**, enter the name
+and save — Postfix picks it up immediately (the inbound domain list is read live
+from the database; no host command, no per-domain Postfix config). Then use the
+Setup tab to verify and publish the domain's DNS records. Tick **IMAP source** on
+a domain whose mail arrives by IMAP poll rather than MX.
 
-### Adding an Alias
+### Adding an Alias (mailbox)
 
-1. Go to **Emails > Incoming > Forwarding Aliases** tab
-2. Click "New Alias", select domain, enter alias name and destinations
+1. On the **Accounts** tab, click **+ Mailbox** on the domain you want
+2. Enter the alias name, delivery mode, and destinations (for forwarding)
 3. Save
 
 ## Server Setup
@@ -465,11 +480,11 @@ Each domain also has a **catch-all mode** (`ied_catch_all_mode`):
 
 ## Local Mailbox
 
-The **Mailbox** tab (`Emails > Incoming > Mailbox`) lists locally-stored
-inbound messages with filters for recipient, sender, and domain. Each row
-links to a detail view that shows the parsed plain-text body, a sandboxed
-iframe rendering of the HTML body (no scripts, no top-nav), and the original
-raw MIME with a `.eml` download.
+The **Mailboxes** tab (`Emails > Incoming > Mailboxes`) is the default landing
+tab — a Gmail-style reader over locally-stored inbound messages. Each message
+shows the parsed plain-text body, a sandboxed iframe rendering of the HTML body
+(no scripts, no top-nav), and a per-attachment download; the single-message
+detail page keeps the original raw MIME with a `.eml` download.
 
 Stored bodies are fully attacker-controlled — admins should never paste a
 captured token into a non-admin page or feed an untrusted body to an AI
@@ -507,12 +522,14 @@ constraints).
 
 ## Mailbox Reader
 
-The **Mailbox** tab is a Gmail-style reader over the stored messages —
-conversation list, reading pane, threading, read/unread, star, and search —
-replacing the old flat table. It is `admin_inbound_email_reader.php`, a vanilla-JS
-client (`assets/mailbox_reader.js` + `.css`) talking to four scoped AJAX
-endpoints. The single-message detail page is kept for raw MIME / `.eml` download
-and deep links.
+The **Mailboxes** tab is a two-pane Gmail-style reader over the stored messages:
+a left rail (mailbox switcher + filters + search) and a single main pane that
+shows either the conversation list or an opened conversation full-width (a back
+arrow or Esc returns to the list). It supports threading, read/unread, star, and
+search. It is `admin_inbound_email_reader.php`, a vanilla-JS client
+(`assets/mailbox_reader.js` + `.css`, cache-busted by file mtime) talking to four
+scoped AJAX endpoints. The single-message detail page is kept for raw MIME /
+`.eml` download and deep links.
 
 ### Mailbox-per-address model
 
@@ -642,3 +659,137 @@ Adding a new HTTP-based provider is one new file in
 returns `['raw_mime' => ..., 'recipient' => ...]`. No router changes, no
 Setup-tab changes, no new endpoints — the generic dispatcher handles
 routing via `?provider=<key>`.
+
+## Receiving by IMAP poll
+
+Besides the push transports above (Postfix MX→pipe, Mailgun webhook), the platform
+can receive mail by **polling an existing mailbox** over IMAP — Gmail, Microsoft
+365, Yahoo, iCloud, Fastmail, or any IMAP host. Paired with the generic **SMTP**
+outbound provider, this gives a complete **bring-your-own-mailbox** path (SMTP out
++ IMAP in, same account) with no self-hosted MX and no webhook service. It targets
+the low-volume user who already has a mailbox and wants the platform to read it.
+
+IMAP feeds are managed from the **Accounts** tree, attached to the mailbox they
+fill. They are **additive**: any number run alongside whatever the system's single
+push transport is, and adding one never changes that transport. Each feed binds to
+an inbound **alias** (the mailbox it populates), so fetched mail lands in
+`iem_inbound_email_messages` and appears in the **Mailbox Reader** like any other
+stored mail, honoring the same grant model. **No MX/DNS is needed** for an
+IMAP-sourced mailbox — the mail is already in the remote mailbox.
+
+A polled mailbox is modeled as a normal `alias@domain`: the address you poll
+*is* the mailbox. So a Gmail you read becomes the domain **`gmail.com`** with the
+`ied_is_imap_source` flag set (Setup skips MX/DNS for it) and `me@gmail.com` as a
+mailbox under it, fed by an IMAP feed. Multiple polled Gmail accounts sit as
+sibling mailboxes under the one `gmail.com` domain.
+
+### Per-host matrix — who needs OAuth vs. an app password
+
+| Provider | IMAP host | Auth |
+|----------|-----------|------|
+| Gmail / Google Workspace | `imap.gmail.com:993` | **OAuth2** (App Passwords retired) |
+| Microsoft 365 / Outlook.com | `outlook.office365.com:993` | **OAuth2** (basic auth disabled) |
+| Yahoo / AOL | `imap.mail.yahoo.com:993` | app password |
+| iCloud | `imap.mail.me.com:993` | app-specific password |
+| Fastmail | `imap.fastmail.com:993` | app password |
+| Generic IMAP | user-supplied | password |
+
+Connection details are **data, not code**: the `InboundImapAccount::PRESETS`
+catalog is the single inventory of every supported host (host/port/encryption/auth
+and, for OAuth hosts, the OAuth provider key). Gmail and Microsoft are not special
+— they are simply the rows whose auth is `oauth2`. Adding a host is a one-line edit
+there. Authentication is a single branch in `ImapIngestor`: `password` LOGIN vs.
+`XOAUTH2` with a bearer token. The IMAP library (`horde/imap_client`) is wrapped
+entirely behind `ImapIngestor`.
+
+### OAuth accounts (Gmail / Microsoft)
+
+OAuth accounts use the platform's [OAuth2 Core](/docs/oauth2.md) — the IMAP
+transport is its first consumer (purpose `inbound_imap`). Register the Google/Azure
+app **once** and paste its client id/secret on `/admin/admin_oauth_providers`; that
+is documented in the [OAuth2 Core guide](/docs/oauth2.md) and not repeated here.
+Then: on an IMAP-source domain, **+ Mailbox** → enter the address as the username →
+save → click **Connect** on the mailbox row in the Accounts tree (on a hosted
+domain it is **+ IMAP feed** on the mailbox instead). That begins a consent flow through the shared
+`/oauth_callback`; on return, `InboundImapOAuthConsumer` stores the granted tokens
+(encrypted) on the account. The poller keeps the access token fresh via
+`OAuth2Client::ensureFresh`. IMAP-specific scopes requested at consent:
+
+- **Google:** `https://mail.google.com/`
+- **Microsoft:** `https://outlook.office365.com/IMAP.AccessAsUser.All offline_access`
+  (`offline_access` is required for a refresh token).
+
+The token grants full mailbox **read** access; secrets (IMAP passwords and OAuth
+refresh tokens) are stored encrypted at rest with [`SecretBox`](/docs/secret_box.md)
+and never logged or echoed.
+
+### The poll cadence
+
+The **PollImapAccounts** scheduled task is the heartbeat. It runs every cron pass
+(`every_run`) as a **floor**; each account's own `iia_poll_interval_seconds`
+(default 300) is the **actual cadence** — the task self-throttles per account, and
+claims each account with an atomic stamp so two runs can't race the same cursor.
+**First connect** behaviour is a per-mailbox choice set at creation
+(`iia_import_history`):
+- **Future only** (default) — the cursor seeds to the folder's current high UID,
+  so a 50 GB archive and an empty mailbox behave identically; only mail arriving
+  after hookup is ingested.
+- **Full history** — the cursor starts at 0 and the mailbox is backfilled
+  oldest-first.
+
+Either way each fetch walks **one bounded UID window** (`(cursor+1):(cursor+max_per_account)`,
+a numeric `UID FETCH` range — never `SEARCH`, which Gmail's ESEARCH rejects), so a
+full-history backfill of a large mailbox imports in batches across successive
+fetches rather than one enormous fetch. A UIDVALIDITY change re-seeds per the same
+choice. Failures are per-account and non-fatal: one unreachable mailbox or expired
+token never stops the rest, and the reason is recorded in the account's last status
+(`iia_needs_reauth` is set when a token refresh/auth fails, surfacing a Reconnect).
+
+### Reference-backed storage + the attachment list
+
+IMAP-sourced messages are **reference-backed**, not copied whole. Unlike a pushed
+delivery (which is gone after one delivery, so the full raw must be kept), an IMAP
+mailbox is a durable remote store. So the poller stores only what the reader shows
+— headers + the `text/plain`/`text/html` bodies + an attachment **manifest** — plus
+a locator (account + UID + UIDVALIDITY + folder) back to the message, and leaves
+`iem_raw_message` empty. A 50 GB Gmail costs the platform kilobytes per message.
+
+Every message view now shows a clickable **attachment list** (filename, size,
+type), built from the `ima_inbound_message_attachments` manifest. **Attachment
+bytes are never stored on the platform** — clicking one fetches exactly that MIME
+part on demand (`FETCH BODY[<section>]`, Message-ID fallback if UIDVALIDITY
+changed), decodes it, and streams it pass-through with `Content-Disposition:
+attachment` + `X-Content-Type-Options: nosniff`. The download enforces the **same
+mailbox-grant check as the reader** — an attachment is exactly as private as its
+message. Inline (`cid:`) parts belong to the HTML body and are excluded from the
+list. If a part can't be retrieved (message deleted/moved/account disabled), the
+endpoint says so honestly. The manifest + endpoint + reader list are
+**transport-agnostic**: Postfix/Mailgun mail can adopt the same clickable
+attachments later by populating the same table from a MIME parser over their stored
+raw — no new schema, no UI change. (The whole-message *.eml* download and raw-source
+view have been retired for every transport.)
+
+### Setting up a Gmail account (end to end)
+
+The live connect/fetch path is wrapped behind Horde; unit tests cover the platform
+side (model + encryption, reference-backed store + dedup, manifest + grant parity,
+poller summary). To connect a real Gmail account:
+
+1. **Google Cloud Console (one-time).** Create/select a project → **OAuth consent
+   screen** (External; app name + support email; add scope `https://mail.google.com/`;
+   keep status Testing and add the target Gmail as a **Test user**) → **Credentials →
+   Create OAuth client ID → Web application**, and under Authorized redirect URIs paste
+   the exact value shown on `/admin/admin_oauth_providers` (`https://<host>/oauth_callback`).
+   Copy the Client ID + secret. (No need to "enable the Gmail API" — IMAP uses
+   `imap.gmail.com` with XOAUTH2; the scope authorizes it.)
+2. **Platform credentials.** Paste the Client ID + secret on `/admin/admin_oauth_providers`.
+3. **Gmail prep.** In Gmail: Settings → Forwarding and POP/IMAP → **Enable IMAP** → Save.
+4. **Accounts tree.** **+ Add Domain** → Type **IMAP — Gmail** (domain `gmail.com` is
+   implied; no MX needed) → save. Then **+ Mailbox** on the `gmail.com` row, enter the
+   full address as the username (this creates the mailbox and its feed together) → save
+   → **Connect** and grant consent as the test user.
+5. **Verify.** Click **Test**, then **Fetch now**. The first fetch seeds the cursor to
+   "now" and ingests nothing — send a **new** email to the Gmail afterward, **Fetch now**
+   again, and confirm it appears under the mailbox in the **Mailboxes** reader; open it
+   and download an attachment. For hands-off fetching, activate the **Fetch inbound IMAP
+   mail** scheduled task.

@@ -32,7 +32,7 @@ $page->admin_header(
 	)
 );
 
-echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Forwarding Aliases');
+echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Accounts');
 
 // Display session messages
 $display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
