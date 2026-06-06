@@ -42,7 +42,8 @@ notifies you; you connect and poll on a schedule. So IMAP is a *third transport
 shape* the current model doesn't express. Everything needed to add it already
 exists: a scheduled-task system, the store path
 (`InboundEmailRouter::storeMessage`) with dedup via `UNIQUE
-(iem_message_id_header, iem_recipient)`, and the `php-imap` extension.
+(iem_message_id_header, iem_recipient)`, and a pure-PHP IMAP client
+(`horde/imap_client`) for the connect/fetch.
 
 This is also a platform-level abstraction, not a product feature: a generic IMAP
 ingestor with pluggable auth, where Gmail and Microsoft are two OAuth strategies
@@ -90,7 +91,7 @@ Four decisions define it:
   ImapIngestor(account)
    ├─ auth branch on iia_auth_method: password LOGIN | XOAUTH2
    │        └─ oauth2 → OAuth2Client::ensureFresh(provider, token) → bearer
-   ├─ connect (php-imap / library), select folder, UID search > last_seen_uid
+   ├─ connect (Horde_Imap_Client), select folder, UID search > last_seen_uid
    ├─ fetch raw messages
    ├─ InboundEmailRouter::storeMessage(...)  → iem_ (dedup via UNIQUE)
    └─ advance last_seen_uid / uidvalidity, record status
@@ -425,11 +426,21 @@ Reuse the per-provider check pattern (`getSetupChecks`-style) for an account:
 
 ## Dependencies (build decision)
 
-- **IMAP access:** `php-imap` extension is installed and handles basic auth
-  cleanly. Its XOAUTH2 support is workable but fiddly. **Recommended:** evaluate
-  the maintained userland library **`webklex/php-imap`** (folders, UID, and
-  OAuth bearer auth in one API) vs. the raw extension; lean toward the library
-  for the OAuth paths, keep the extension as a fallback.
+- **IMAP access:** pinned to **`horde/imap_client`** (installed as the maintained,
+  composer-clean fork **`bytestream/horde-imap-client`**). It is a pure-PHP IMAP
+  client — no reliance on the `php-imap` C extension — with **native XOAUTH2** and
+  first-class `BODYSTRUCTURE` enumeration + single-part `FETCH`, which is exactly
+  what the reference-backed design needs (list parts cheaply, fetch one part on
+  demand). It pulls ~16 self-contained `bytestream/horde-*` packages and **no
+  framework substrate** (no Laravel/Carbon). It is wrapped entirely behind
+  `ImapIngestor`, so the library choice is contained to that one class.
+  - *Rejected alternatives, for the record:* the raw `php-imap` C extension
+    (XOAUTH2 unreliable on the installed `libc-client 2007f` build — would defeat
+    the Gmail/Microsoft headline); `webklex/php-imap` (capable, but drags the
+    Laravel `illuminate/*` + Carbon substrate, ~20 packages); `ddeboer/imap`
+    (tiny, but wraps the same c-client extension and inherits its XOAUTH2 gap);
+    `laminas/laminas-mail` (light, but its IMAP layer leans on whole-message fetch
+    and undercuts the reference-backed, kilobytes-per-message goal).
 - **OAuth2 consent/refresh:** **not a dependency of this spec** — it is provided
   by the [OAuth2 Core](implemented/oauth2_core.md), whose default is a direct Guzzle
   implementation (Guzzle is already vendored) with no new package.
@@ -438,8 +449,9 @@ Reuse the per-provider check pattern (`getSetupChecks`-style) for an account:
   push-transport storage refactor ([inbound_raw_message_storage.md](inbound_raw_message_storage.md)).
   The two are independent.
 
-Pin the IMAP-library choice when building; declare via Composer
-(`composerAutoLoad` is already wired). Note any new `require` in `composer.json`.
+Declare via Composer (`composerAutoLoad` is already wired):
+`composer require bytestream/horde-imap-client`. Note the new `require` in
+`composer.json`.
 
 ## Security
 
@@ -593,3 +605,74 @@ end-to-end (real Gmail/Microsoft consent) is a manual checklist in the docs.
   pastes credentials; the platform does not create cloud apps.
 - **A dedicated Gmail *sending* provider** — explicitly rejected; redundant with
   generic SMTP and breaks domain alignment (see prior analysis).
+
+## Implementation notes — as built (deviations from spec)
+
+The transport, OAuth flow, reference-backed storage, and attachment manifest
+landed as specified. These points differ from or extend the spec above:
+
+### Admin IA: one "Accounts" tree, not an "IMAP Accounts" tab
+The spec described a standalone **IMAP Accounts** tab (list + add/edit + "Poll
+now"). Instead the inbound-email admin was consolidated into four tabs —
+**Mailboxes** (the reader, now the default landing tab), **Accounts**, **Logs**,
+**Setup** — and the separate Domains / Forwarding Aliases / IMAP Accounts list
+pages were retired (they redirect to Accounts). The **Accounts** page
+(`admin_inbound_email_accounts.php`) is a single domain → mailbox → feed tree;
+the old per-object editors remain and are reached contextually from it.
+
+### Gmail-is-a-domain model
+A polled mailbox is modeled as a normal `alias@domain`: `me@gmail.com` is alias
+`me` under domain `gmail.com`, with `ied_is_imap_source` set (no MX/DNS). The
+domain editor leads with a **Type** dropdown (`Custom` / `IMAP — Gmail` /
+`Microsoft` / `Yahoo` / `iCloud` / `Fastmail` / `Other host`); known providers
+imply the domain via `InboundImapAccount::PROVIDER_EMAIL_DOMAINS` (a new shared
+map). Under an IMAP-source domain, **+ Mailbox** and **Edit** open one *combined*
+editor that creates/edits the mailbox (alias name + access grants) **and** its
+feed together — creating the feed if missing — so there is no separate "+ IMAP
+feed" step there. Hosted (MX) domains keep the distinct alias + "+ IMAP feed".
+
+### First-connect import is a per-mailbox choice (changeable anytime)
+The spec seeds the cursor to "now" and treats historical backfill as a future
+opt-in. As built, the feed editor has an **Existing mail** choice — **Import only
+future emails** (default, = seed-to-now) or **Import full email history** —
+editable at any time. Switching to full history resets the cursor and backfills
+**oldest-first in bounded UID windows** (`max_per_account` per fetch), so a large
+mailbox imports incrementally across polls. Stored as new column
+`iia_import_history`. (A date-bounded "last N days" backfill is *not* offered —
+it needs IMAP `SEARCH SINCE`, which Gmail's ESEARCH rejects; see below.)
+
+### No UID SEARCH — Gmail rejects ESEARCH
+The spec's poll step uses `UID SEARCH > last_seen_uid`. Gmail advertises the
+`ESEARCH` capability but returns `BAD Could not parse command` for the
+`UID SEARCH RETURN (...)` form Horde emits. So search was removed entirely: the
+poller does a numeric `UID FETCH (cursor+1):(cursor+max)` window and derives the
+new UIDs from the result keys. This also bounds each fetch (enabling the windowed
+backfill above) and is server-agnostic.
+
+### XOAUTH2 needs a non-empty `password` param
+This Horde version rejects an empty `password` *before* selecting an auth
+mechanism, so XOAUTH2 alone fails with "No password provided." `ImapIngestor`
+sets `password` to the bearer token in addition to `xoauth2_token`; XOAUTH2 is
+still the mechanism used.
+
+### Connection health: `needs_reauth` + Connect/Reconnect/none
+Rather than always offering "Reconnect", the UI shows **Connect** only when never
+connected, **Reconnect** only when the stored token is known-broken, and nothing
+when healthy. A new column `iia_needs_reauth` is set when a token refresh/auth
+fails (e.g. Google's 7-day Testing refresh-token expiry) and cleared whenever a
+token is (re)stored.
+
+### Auto-fetch health warning
+The Accounts page shows an amber **⚠ Auto-fetch** warning badge on a feed when the
+`PollImapAccounts` scheduled task is not scheduled, paused, config-disabled, or
+running less often than hourly — linking to the Scheduled Tasks page.
+
+### Naming
+The user-facing "Poll now" / "Poll interval" / task name were renamed to
+**Fetch now** / **Fetch interval** / **Fetch inbound IMAP mail**. Internal
+identifiers (`poll_now` action, `iia_poll_interval_seconds`, the `PollImapAccounts`
+task class) are unchanged.
+
+### Schema additions beyond the spec
+`iia_needs_reauth` (bool) and `iia_import_history` (bool) on
+`iia_inbound_imap_accounts`, in addition to the columns listed in §Schema.

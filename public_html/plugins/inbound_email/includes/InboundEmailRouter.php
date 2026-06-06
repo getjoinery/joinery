@@ -27,7 +27,13 @@
  * client IP never reaches the pipe). See specs/inbound_dkim_verification_fix.md
  * and specs/inbound_mailgun_verification.md.
  *
- * @version 1.10
+ * The IMAP poller (ImapIngestor) is reference-backed and never parses a raw: it
+ * already holds the decoded bodies + headers, so it calls storeExtracted() to
+ * write a row with an empty iem_raw_message plus the IMAP locator columns. Dedup
+ * (UNIQUE on iem_message_id_header, iem_recipient) is shared with the push path,
+ * so re-fetching a message stores nothing new. See specs/inbound_imap_provider.md.
+ *
+ * @version 1.11
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -302,6 +308,105 @@ class InboundEmailRouter {
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * Store a reference-backed message from pre-extracted parts (the IMAP path).
+	 *
+	 * Unlike storeMessage(), there is no raw to parse: the IMAP ingestor already
+	 * holds the decoded text bodies and the headers, so it hands them in directly.
+	 * iem_raw_message is left empty and the IMAP locator columns
+	 * (account id / uid / uidvalidity / folder) are written so individual MIME
+	 * parts can be re-fetched on demand. iem_size_bytes records the message's
+	 * RFC822.SIZE (for display), NOT the body length.
+	 *
+	 * $msg keys (all optional unless noted):
+	 *   sender, subject, body_plain, body_html, message_id_header (string|null),
+	 *   headers (assoc array for thread-key computation; or pass thread_key
+	 *   directly), size_bytes, received_time (UTC 'Y-m-d H:i:s'),
+	 *   imap_account_id (required), imap_uid, imap_uidvalidity, imap_folder.
+	 *
+	 * $auth is a verdict array (['dkim','spf','dmarc','source']); IMAP-sourced mail
+	 * has no trusted local verdict, so the ingestor passes 'unverified'/'none'.
+	 *
+	 * Returns ['message' => InboundEmailMessage|null, 'dedup' => bool], matching
+	 * storeMessage() — a unique violation (SQLSTATE 23505) is a successful dedup.
+	 */
+	public function storeExtracted(array $msg, $alias, $domain, $envelope_recipient, array $auth): array {
+		$message_id_header = $msg['message_id_header'] ?? null;
+		if ($message_id_header !== null) {
+			$message_id_header = trim((string)$message_id_header);
+			$message_id_header = ($message_id_header === '') ? null : substr($message_id_header, 0, 255);
+		}
+
+		$thread_key = $msg['thread_key'] ?? null;
+		if ($thread_key === null) {
+			$thread_key = $this->computeThreadKey(
+				array('headers' => $msg['headers'] ?? array()),
+				$message_id_header
+			);
+		}
+
+		$row = array(
+			'iem_ied_inbound_email_domain_id' => $domain->key,
+			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
+			'iem_sender'      => substr((string)($msg['sender'] ?? ''), 0, 500),
+			'iem_recipient'   => substr((string)$envelope_recipient, 0, 500),
+			'iem_subject'     => substr((string)($msg['subject'] ?? ''), 0, 1000),
+			'iem_body_plain'  => $msg['body_plain'] ?? '',
+			'iem_body_html'   => $msg['body_html'] ?? '',
+			'iem_raw_message' => '', // reference-backed: parts fetched on demand
+			'iem_message_id_header' => $message_id_header,
+			'iem_thread_key'  => $thread_key,
+			'iem_dkim_result'  => $auth['dkim'] ?? 'unverified',
+			'iem_spf_result'   => $auth['spf'] ?? 'unverified',
+			'iem_dmarc_result' => $auth['dmarc'] ?? 'unverified',
+			'iem_auth_source'  => $auth['source'] ?? 'none',
+			'iem_size_bytes'  => intval($msg['size_bytes'] ?? 0),
+			'iem_iia_inbound_imap_account_id' => intval($msg['imap_account_id'] ?? 0) ?: null,
+			'iem_imap_uid'         => isset($msg['imap_uid']) ? intval($msg['imap_uid']) : null,
+			'iem_imap_uidvalidity' => isset($msg['imap_uidvalidity']) ? intval($msg['imap_uidvalidity']) : null,
+			'iem_imap_folder'      => $msg['imap_folder'] ?? null,
+			'iem_received_time' => $msg['received_time'] ?? gmdate('Y-m-d H:i:s'),
+		);
+
+		try {
+			$saved = InboundEmailMessage::CreateEntry($row);
+			return array('message' => $saved, 'dedup' => false);
+		} catch (\Throwable $e) {
+			// Dedup can surface two ways: SystemBase::save() pre-validates the
+			// unique_with (iem_message_id_header, iem_recipient) and throws a
+			// DisplayableUserException, OR a concurrent insert trips the DB UNIQUE
+			// (SQLSTATE 23505). Either way, if the duplicate row genuinely exists
+			// it is a successful dedup; otherwise the error is real — rethrow.
+			if ($this->duplicateMessageExists($message_id_header, $row['iem_recipient']) || $this->isUniqueViolation($e)) {
+				return array('message' => null, 'dedup' => true);
+			}
+			throw $e;
+		}
+	}
+
+	/** True if a row with this (message-id, recipient) already exists. */
+	private function duplicateMessageExists(?string $message_id_header, string $recipient): bool {
+		if ($message_id_header === null || $message_id_header === '') {
+			return false;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT 1 FROM iem_inbound_email_messages
+			 WHERE iem_message_id_header = ? AND iem_recipient = ? LIMIT 1"
+		);
+		$stmt->execute(array($message_id_header, $recipient));
+		return (bool)$stmt->fetchColumn();
+	}
+
+	/** True if the throwable is (or wraps) a SQLSTATE 23505 unique violation. */
+	private function isUniqueViolation(\Throwable $e): bool {
+		if ($e instanceof PDOException && $e->getCode() === '23505') {
+			return true;
+		}
+		$prev = $e->getPrevious();
+		return $prev instanceof PDOException && $prev->getCode() === '23505';
 	}
 
 	/**

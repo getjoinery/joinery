@@ -2,7 +2,12 @@
 /**
  * InboundEmailDomain - Tracks domains that accept inbound mail.
  *
- * @version 1.3
+ * ied_is_imap_source marks a domain whose mail arrives by IMAP poll (an
+ * InboundImapAccount populates one of its aliases) rather than by MX delivery.
+ * The Setup tab skips MX/DNS checks for such a domain — the mail is already in
+ * the remote mailbox, so no MX is required.
+ *
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -25,6 +30,7 @@ class InboundEmailDomain extends SystemBase {
 		'ied_catch_all_mode'    => array('type'=>'varchar(20)', 'default'=>'forward', 'is_nullable'=>false),
 		'ied_catch_all_address' => array('type'=>'varchar(500)'),
 		'ied_reject_unmatched'  => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
+		'ied_is_imap_source'    => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
 		'ied_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ied_update_time'       => array('type'=>'timestamp(6)'),
 		'ied_delete_time'       => array('type'=>'timestamp(6)'),

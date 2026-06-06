@@ -1,11 +1,12 @@
 <?php
 /**
- * Inbound Email - Domain Management
+ * Inbound Email - Domain editor
  *
- * Domain CRUD only. DNS and host verification live on the Setup tab
+ * The add/edit domain form, reached from the Accounts tree (which is the domain
+ * list). DNS and host verification live on the Setup tab
  * (admin_inbound_email_setup), driven by InboundEmailSetupCheck.
  *
- * @version 2.0
+ * @version 2.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -29,7 +30,7 @@ $page->admin_header(
 	)
 );
 
-echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Domains');
+echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Accounts');
 
 // Display session messages
 $display_messages = $session->get_messages('/plugins\/inbound_email\/admin\//');
@@ -51,6 +52,11 @@ if ($show_form) {
 	$form_domain = $edit_domain ?: new InboundEmailDomain(NULL);
 	$form_title = $edit_domain ? 'Edit Domain' : 'Add Domain';
 
+	// A new domain defaults to enabled (the common case).
+	if (!$form_domain->key) {
+		$form_domain->set('ied_is_enabled', true);
+	}
+
 	$page->begin_box(array('title' => $form_title));
 
 	$formwriter = $page->getFormWriter('domain_form', [
@@ -60,9 +66,35 @@ if ($show_form) {
 
 	echo $formwriter->begin_form();
 
+	// IMAP-source presets hide the domain-name field (the domain is implied); the
+	// catch-all block only applies to a hosted (Custom) domain.
+	$imap_hide = ['ied_domain', 'ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched'];
+	$type_visibility = [
+		'custom'         => ['show' => ['ied_domain', 'ied_catch_all_mode'], 'hide' => []],
+		'imap_gmail'     => ['show' => [], 'hide' => $imap_hide],
+		'imap_microsoft' => ['show' => [], 'hide' => $imap_hide],
+		'imap_yahoo'     => ['show' => [], 'hide' => $imap_hide],
+		'imap_icloud'    => ['show' => [], 'hide' => $imap_hide],
+		'imap_fastmail'  => ['show' => [], 'hide' => $imap_hide],
+		'imap_generic'   => ['show' => ['ied_domain'], 'hide' => ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched']],
+	];
+
+	$formwriter->dropinput('domain_type', 'Type', [
+		'options' => [
+			'custom'         => 'Custom domain (hosted — mail arrives by MX)',
+			'imap_gmail'     => 'IMAP — Gmail',
+			'imap_microsoft' => 'IMAP — Microsoft 365 / Outlook',
+			'imap_yahoo'     => 'IMAP — Yahoo',
+			'imap_icloud'    => 'IMAP — iCloud',
+			'imap_fastmail'  => 'IMAP — Fastmail',
+			'imap_generic'   => 'IMAP — Other host',
+		],
+		'value' => $domain_type,
+		'visibility_rules' => $type_visibility,
+	]);
+
 	$formwriter->textinput('ied_domain', 'Domain Name', [
-		'validation' => ['required' => true],
-		'help_text' => 'e.g., example.com',
+		'placeholder' => 'example.com',
 	]);
 
 	$formwriter->checkboxinput('ied_is_enabled', 'Enabled', []);
@@ -72,20 +104,15 @@ if ($show_form) {
 			'forward' => 'Forward to an address',
 			'store'   => 'Store locally (every unmatched recipient)',
 		],
-		'helptext' => 'Store mode supersedes "reject unmatched" — every unmatched recipient is captured.',
 		'visibility_rules' => [
 			'forward' => ['show' => ['ied_catch_all_address', 'ied_reject_unmatched'], 'hide' => []],
 			'store'   => ['show' => [], 'hide' => ['ied_catch_all_address', 'ied_reject_unmatched']],
 		],
 	]);
 
-	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', [
-		'help_text' => 'Used only in Forward mode: receive all unmatched mail for this domain at this address.',
-	]);
+	$formwriter->textinput('ied_catch_all_address', 'Catch-All Address', []);
 
-	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', [
-		'help_text' => 'Reject mail to non-existent aliases (Forward mode only, when no catch-all address is set). If unchecked, unmatched mail is silently discarded.',
-	]);
+	$formwriter->checkboxinput('ied_reject_unmatched', 'Reject Unmatched', []);
 
 	$formwriter->submitbutton('btn_submit', $edit_domain ? 'Update Domain' : 'Add Domain');
 
@@ -94,78 +121,9 @@ if ($show_form) {
 	$page->end_box();
 } // end show_form
 
-// --- Domain List ---
-require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
-
-// Show deleted domains to superadmins
-$show_deleted = ($session->get_permission() >= 10);
-$domain_filters = $show_deleted ? [] : ['deleted' => false];
-$domains = new MultiInboundEmailDomain($domain_filters, array('ied_delete_time' => 'ASC', 'ied_domain' => 'ASC'));
-$domains->load();
-
-$headers = array('Domain', 'Status', 'Catch-All', 'Aliases', 'Actions');
-$altlinks = array('Add Domain' => '/plugins/inbound_email/admin/admin_inbound_email_domains?action=add');
-$table_options = array('title' => 'Inbound Domains', 'altlinks' => $altlinks);
-$page->tableheader($headers, $table_options);
-
-foreach ($domains as $d) {
-	$domain_name = $d->get('ied_domain');
-	$is_deleted = !empty($d->get('ied_delete_time'));
-	$alias_count = $is_deleted ? 0 : $d->get_alias_count();
-
-	// Status column — combines enabled + deleted
-	if ($is_deleted) {
-		$status_display = '<span class="badge bg-dark">Deleted</span>';
-	} else if ($d->get('ied_is_enabled')) {
-		$status_display = '<span class="badge bg-success">Enabled</span>';
-	} else {
-		$status_display = '<span class="badge bg-secondary">Disabled</span>';
-	}
-
-	// Build row
-	$rowvalues = [];
-	$rowvalues[] = htmlspecialchars($domain_name);
-	$rowvalues[] = $status_display;
-	$catch_all_mode = $d->get('ied_catch_all_mode') ?: 'forward';
-	if ($catch_all_mode === 'store') {
-		$catch_all_display = '<span class="badge bg-info text-dark">Store locally</span>';
-	} elseif ($d->get('ied_catch_all_address')) {
-		$catch_all_display = htmlspecialchars($d->get('ied_catch_all_address'));
-	} else {
-		$catch_all_display = '-';
-	}
-	$rowvalues[] = $catch_all_display;
-	$rowvalues[] = $is_deleted ? '-' : $alias_count;
-
-	// Action buttons
-	$actions = '';
-	if ($is_deleted) {
-		$actions .= PublicPageBase::action_button('Restore', '/plugins/inbound_email/admin/admin_inbound_email_domains', [
-			'hidden' => ['action' => 'undelete', 'ied_inbound_email_domain_id' => $d->key],
-			'confirm' => 'Restore this domain and its aliases?',
-			'class' => 'btn btn-sm btn-outline-success',
-		]);
-		if ($session->get_permission() >= 10) {
-			$actions .= ' ' . PublicPageBase::action_button('Permanent Delete', '/plugins/inbound_email/admin/admin_inbound_email_domains', [
-				'hidden' => ['action' => 'permanent_delete', 'ied_inbound_email_domain_id' => $d->key],
-				'confirm' => 'PERMANENTLY delete this domain and all its aliases? This cannot be undone.',
-				'class' => 'btn btn-sm btn-outline-danger',
-			]);
-		}
-	} else {
-		$actions .= '<a href="/plugins/inbound_email/admin/admin_inbound_email_domains?ied_inbound_email_domain_id=' . $d->key . '" class="btn btn-sm btn-outline-primary">Edit</a> ';
-		$actions .= PublicPageBase::action_button('Delete', '/plugins/inbound_email/admin/admin_inbound_email_domains', [
-			'hidden' => ['action' => 'delete', 'ied_inbound_email_domain_id' => $d->key],
-			'confirm' => 'Delete this domain and all its aliases?',
-			'class' => 'btn btn-sm btn-outline-danger',
-		]);
-	}
-	$rowvalues[] = $actions;
-
-	$page->disprow($rowvalues);
-}
-
-$page->endtable();
+// The active-domain list lives in the Accounts tree; this page is now purely the
+// add/edit form (a bare visit is redirected to Accounts by the logic). Soft-
+// deleted domain restore is handled from the Accounts tree (superadmin).
 
 $page->admin_footer();
 ?>

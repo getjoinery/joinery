@@ -1,9 +1,12 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 1.1
+ * No framework. @version 2.0
  *
- * Visibility is enforced server-side (MailboxViewer/MailboxService); this client
- * only renders what the endpoints return and never decides access.
+ * Two-pane layout: the main pane swaps between the conversation list and an
+ * opened conversation (toggled by the `reading` class on #mbx-reader); a back
+ * arrow returns to the list. Visibility is enforced server-side
+ * (MailboxViewer/MailboxService); this client only renders what the endpoints
+ * return and never decides access.
  */
 (function () {
 	'use strict';
@@ -192,11 +195,9 @@
 		});
 		if (rowEl) rowEl.classList.add('active');
 		$('#mbx-reader').classList.add('reading');
+		$('#mbx-read-pane').scrollTop = 0;
 
 		var pane = $('#mbx-thread');
-		var empty = $('#mbx-read-empty');
-		empty.hidden = true;
-		pane.hidden = false;
 		pane.innerHTML = '<div class="mbx-loading">Loading…</div>';
 
 		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(t.thread_key)
@@ -220,6 +221,14 @@
 		pane.innerHTML = '';
 
 		var header = el('div', 'mbx-thread-header');
+
+		var back = el('button', 'mbx-thread-back', null);
+		back.type = 'button';
+		back.appendChild(el('span', 'mbx-back-arrow', '←'));
+		back.appendChild(el('span', null, 'Back to list'));
+		back.addEventListener('click', closeThread);
+		header.appendChild(back);
+
 		header.appendChild(el('h1', null, t.subject || '(no subject)'));
 
 		var actions = el('div', 'mbx-thread-actions');
@@ -309,10 +318,11 @@
 
 	function closeThread() {
 		state.threadKey = null;
-		$('#mbx-thread').hidden = true;
 		$('#mbx-thread').innerHTML = '';
-		$('#mbx-read-empty').hidden = false;
 		$('#mbx-reader').classList.remove('reading');
+		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
+			n.classList.remove('active');
+		});
 	}
 
 	// ---- wiring ----
@@ -339,6 +349,11 @@
 
 		$('#mbx-refresh').addEventListener('click', function () { refreshMailboxes(); loadThreads(true); });
 		$('#mbx-more').addEventListener('click', function () { state.page += 1; loadThreads(false); });
+
+		// Esc returns from an open conversation to the list (Gmail-style).
+		document.addEventListener('keydown', function (e) {
+			if (e.key === 'Escape' && state.threadKey != null) { closeThread(); }
+		});
 
 		// Seed switcher, then pick a default mailbox.
 		var seed = CFG.initialMailboxes || { mailboxes: [], all_access: false };

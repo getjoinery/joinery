@@ -75,7 +75,7 @@ function admin_inbound_email_alias_logic(array $input): LogicResult {
 				DisplayMessage::MESSAGE_ANNOUNCEMENT,
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
-			return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email');
+			return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_accounts');
 		} catch (InboundEmailAliasException $e) {
 			return LogicResult::render(array(
 				'alias' => $alias,
@@ -97,6 +97,11 @@ function admin_inbound_email_alias_logic(array $input): LogicResult {
 	// not have to remember to tick the box.
 	if (!$alias->key) {
 		$alias->set('iea_is_enabled', true);
+		// Pre-select the domain when "+ Mailbox" was clicked under a domain in the
+		// Accounts tree (?domain_id=N).
+		if (!empty($input['domain_id'])) {
+			$alias->set('iea_ied_inbound_email_domain_id', intval($input['domain_id']));
+		}
 	}
 
 	// Pre-select users who currently hold a grant for this mailbox.

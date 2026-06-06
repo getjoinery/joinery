@@ -1,7 +1,7 @@
 {
     "name": "Inbound Email",
     "description": "Self-hosted inbound email: forwarding, local mailboxes, DKIM/SRS",
-    "version": "1.12.0",
+    "version": "1.14.0",
     "author": "Joinery",
     "receives_upgrades": true,
     "included_in_publish": true,
@@ -13,7 +13,7 @@
         {
             "slug": "incoming",
             "title": "Incoming",
-            "url": "/plugins/inbound_email/admin/admin_inbound_email_setup",
+            "url": "/plugins/inbound_email/admin/admin_inbound_email_reader",
             "parent": "emails",
             "permission": 5,
             "order": 10

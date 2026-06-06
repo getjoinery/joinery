@@ -23,7 +23,7 @@ function admin_inbound_email_logic(array $input): LogicResult {
 			DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
-		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email');
+		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_accounts');
 	}
 
 	// Handle enable/disable toggle
@@ -31,17 +31,11 @@ function admin_inbound_email_logic(array $input): LogicResult {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
 		$alias->set('iea_is_enabled', $alias->get('iea_is_enabled') ? false : true);
 		$alias->save();
-		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email');
+		return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_accounts');
 	}
 
-	// Load domains for filter dropdown
-	$domains = new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC'));
-	$domains->load();
-
-	return LogicResult::render(array(
-		'session' => $session,
-		'settings' => $settings,
-		'domains' => $domains,
-	));
+	// The standalone alias list is retired — mailboxes live in the Accounts tree.
+	// This page is now only an action handler; any bare visit bounces to Accounts.
+	return LogicResult::redirect('/plugins/inbound_email/admin/admin_inbound_email_accounts');
 }
 ?>

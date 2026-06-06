@@ -8,7 +8,7 @@
  * exact string to paste into the Google/Azure console — derived from the same
  * helper exchangeCode() uses, so it matches byte-for-byte.
  *
- * @version 1.0
+ * @version 1.1
  */
 
     require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -37,13 +37,9 @@
 
     $page->begin_box(array('title' => 'OAuth Providers'));
 
-    // Helper: render a "set / not set" affordance for a stored secret.
-    $secret_affordance = function ($setting_name) use ($settings) {
-        $stored = (string)$settings->get_setting($setting_name, false, true);
-        return $stored !== ''
-            ? '•••• set — leave blank to keep'
-            : 'Not set';
-    };
+    // Is a stored secret present? (Drives the masked "saved" affordance below.)
+    $google_secret_set    = (string)$settings->get_setting('oauth_google_client_secret', false, true) !== '';
+    $microsoft_secret_set = (string)$settings->get_setting('oauth_microsoft_client_secret', false, true) !== '';
 
     $configured = OAuth2ProviderRegistry::configured();
     $google_ok    = isset($configured['google']);
@@ -69,6 +65,33 @@ stored encrypted and are never displayed back. See
     $formwriter = $page->getFormWriter('form1');
     $formwriter->begin_form();
 
+    // Render a client-secret field. When a secret is already stored we show a
+    // masked "saved" note with an Edit link and keep the real password input
+    // hidden until the admin opts to replace it. A blank submit keeps the stored
+    // value (see the logic), so hiding the field is purely cosmetic.
+    $secret_field = function ($input_name, $label, $is_set) use ($formwriter) {
+        if (!$is_set) {
+            $formwriter->passwordinput($input_name, $label, [
+                'autocomplete' => 'new-password',
+                'helptext'     => 'Not set',
+            ]);
+            return;
+        }
+        echo '<div id="' . htmlspecialchars($input_name) . '_note" class="form-group">';
+        echo '<label>' . htmlspecialchars($label) . '</label>';
+        echo '<div style="display:flex;align-items:center;gap:.75rem;">';
+        echo '<span style="color:#2e7d32;">•••••••• saved</span>';
+        echo '<button type="button" class="oauth-secret-edit" data-target="' . htmlspecialchars($input_name) . '"'
+           . ' style="background:none;border:none;color:#1565c0;cursor:pointer;padding:0;text-decoration:underline;">Edit</button>';
+        echo '</div></div>';
+        echo '<div id="' . htmlspecialchars($input_name) . '_wrap" style="display:none;">';
+        $formwriter->passwordinput($input_name, $label, [
+            'autocomplete' => 'new-password',
+            'helptext'     => 'Enter a new secret to replace the stored one. Leave blank to keep the current one.',
+        ]);
+        echo '</div>';
+    };
+
     // ----- Google -----
     echo '<h3>Google ' . ($google_ok
         ? '<span style="font-size:.7em;color:#2e7d32;">(configured)</span>'
@@ -77,10 +100,7 @@ stored encrypted and are never displayed back. See
     $formwriter->textinput('oauth_google_client_id', 'Google Client ID', [
         'value' => $settings->get_setting('oauth_google_client_id', false, true),
     ]);
-    $formwriter->passwordinput('oauth_google_client_secret_input', 'Google Client Secret', [
-        'autocomplete' => 'new-password',
-        'helptext'     => $secret_affordance('oauth_google_client_secret'),
-    ]);
+    $secret_field('oauth_google_client_secret_input', 'Google Client Secret', $google_secret_set);
 
     echo '<hr>';
 
@@ -92,10 +112,7 @@ stored encrypted and are never displayed back. See
     $formwriter->textinput('oauth_microsoft_client_id', 'Microsoft Client ID', [
         'value' => $settings->get_setting('oauth_microsoft_client_id', false, true),
     ]);
-    $formwriter->passwordinput('oauth_microsoft_client_secret_input', 'Microsoft Client Secret', [
-        'autocomplete' => 'new-password',
-        'helptext'     => $secret_affordance('oauth_microsoft_client_secret'),
-    ]);
+    $secret_field('oauth_microsoft_client_secret_input', 'Microsoft Client Secret', $microsoft_secret_set);
     $formwriter->textinput('oauth_microsoft_tenant', 'Microsoft Tenant', [
         'value'    => $settings->get_setting('oauth_microsoft_tenant', false, true) ?: 'common',
         'helptext' => 'common | organizations | consumers | a specific tenant id',
@@ -103,7 +120,22 @@ stored encrypted and are never displayed back. See
 
     $formwriter->submitbutton('submit_button', 'Save');
     $formwriter->end_form();
+?>
 
+<script>
+// Reveal a hidden client-secret input when its "Edit" link is clicked.
+document.querySelectorAll('.oauth-secret-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var target = btn.getAttribute('data-target');
+        var note = document.getElementById(target + '_note');
+        var wrap = document.getElementById(target + '_wrap');
+        if (note) { note.style.display = 'none'; }
+        if (wrap) { wrap.style.display = ''; }
+    });
+});
+</script>
+
+<?php
     $page->end_box();
     $page->admin_footer();
 ?>
