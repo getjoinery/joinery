@@ -1,13 +1,14 @@
 <?php
 /**
- * Inbound Email - Guided Setup & Verification
+ * Inbound Email - Setup & Verification (mailbox-first)
  *
- * Presents InboundEmailSetupCheck's results as an ordered, focused wizard:
- * the engine's layers are grouped into five dependency-ordered steps, only the
- * first unfinished step is expanded ("Do this next"), and the rest collapse to
- * a one-line summary.
+ * Pick a registered mailbox; the page checks its setup, grouped into Receiving
+ * (always) and Forwarding (only when the mailbox forwards). Server-wide
+ * diagnostics — the inbound provider, this server's mail hostname/IP, and the
+ * full Postfix/relay health run — live behind the Advanced disclosure so they
+ * don't clutter the per-mailbox view.
  *
- * @version 1.6
+ * @version 2.0
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -20,16 +21,14 @@ $page_vars = process_logic(admin_inbound_email_setup_logic(array_merge($_GET, $_
 extract($page_vars);
 
 $page = new AdminPage();
-$page->admin_header(
-	array(
-		'menu-id' => 'incoming',
-		'breadcrumbs' => array(
-			'Inbound Email' => '/plugins/inbound_email/admin/admin_inbound_email',
-			'Setup' => '',
-		),
-		'session' => $session,
-	)
-);
+$page->admin_header(array(
+	'menu-id' => 'incoming',
+	'breadcrumbs' => array(
+		'Inbound Email' => '/plugins/inbound_email/admin/admin_inbound_email_accounts',
+		'Setup' => '',
+	),
+	'session' => $session,
+));
 
 echo AdminPage::tab_menu(inbound_email_admin_tabs(), 'Setup');
 
@@ -48,82 +47,7 @@ if (!empty($display_messages)) {
 	$session->clear_clearable_messages();
 }
 
-// --- Step 1: Inbound provider picker ---
-$page->begin_box(array('title' => 'Inbound provider'));
-echo '<p class="mb-2">Choose how this site receives inbound mail. Switching is a single setting change — '
-	. 'the same domain, alias and store machinery runs underneath.</p>';
-echo '<form method="post" class="d-inline-block">';
-echo '<input type="hidden" name="action" value="set_provider">';
-echo '<div class="d-flex gap-2 align-items-center">';
-echo '<select name="provider" class="form-select form-select-sm">';
-foreach ($provider_options as $key => $label) {
-	$sel = ($key === $active_provider_key) ? ' selected' : '';
-	echo '<option value="' . htmlspecialchars($key) . '"' . $sel . '>' . htmlspecialchars($label) . '</option>';
-}
-echo '</select>';
-echo '<button type="submit" class="btn btn-sm btn-primary">Use this provider</button>';
-echo '</div>';
-echo '</form>';
-if ($active_provider_is_webhook && $webhook_url !== '') {
-	echo '<p class="mt-3 mb-0"><strong>Webhook URL.</strong> Configure your provider to POST inbound mail to:<br>';
-	echo '<code style="word-break:break-all">' . htmlspecialchars($webhook_url) . '</code></p>';
-}
-$page->end_box();
-
-// --- Step 2: address + mail-server identity ---
-$page->begin_box(array('title' => 'What are you setting up?'));
-
-$formwriter = $page->getFormWriter('setup_form');
-echo $formwriter->begin_form();
-
-$formwriter->textinput('address', 'Email address you are setting up', [
-	'value'       => $address,
-	'placeholder' => 'info@example.com',
-	'help_text'   => 'The checks below are scoped to this address and its domain. Leave blank to check every registered domain.',
-]);
-
-$formwriter->textinput('mail_hostname', 'Mail server hostname', [
-	'value'       => $mail_hostname,
-	'placeholder' => 'mail.example.com',
-	'help_text'   => 'The fully-qualified name of THIS mail server — the target of your MX records, its HELO name, and its reverse-DNS name. One per server, separate from the mail domains it serves.',
-]);
-
-if ($public_ip_private) {
-	$formwriter->addError('public_ip',
-		'Auto-detection found ' . $public_ip . ', a private address. Enter this server\'s public IP here.');
-}
-$formwriter->textinput('public_ip', 'Mail server public IP', [
-	'value'       => $configured_public_ip,
-	'placeholder' => $public_ip !== '' ? 'auto-detected: ' . $public_ip : 'auto-detected',
-	'help_text'   => 'Leave blank to auto-detect. Set this only if the server is behind NAT and auto-detection finds a private address.',
-]);
-
-$formwriter->submitbutton('btn_save', 'Save & Run Checks');
-echo $formwriter->end_form();
-
-$page->end_box();
-
-// --- Provider-supplied DNS records for the focused domain ---
-if (!empty($dns_records) && $focus_domain !== '') {
-	$page->begin_box(array('title' => 'DNS records to publish for ' . htmlspecialchars($focus_domain)));
-	echo '<p class="mb-2">Copy these into your DNS provider for <code>' . htmlspecialchars($focus_domain) . '</code>:</p>';
-	echo '<table class="table table-sm table-bordered" style="max-width:900px">';
-	echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Note</th></tr></thead><tbody>';
-	foreach ($dns_records as $rec) {
-		echo '<tr>';
-		echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
-		echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-		echo '<td><input type="text" class="form-control form-control-sm" readonly '
-			. 'style="cursor:pointer;background:#fff" value="' . htmlspecialchars($rec['value'])
-			. '" onclick="this.select()"></td>';
-		echo '<td class="text-muted small">' . htmlspecialchars($rec['note'] ?? '') . '</td>';
-		echo '</tr>';
-	}
-	echo '</tbody></table>';
-	$page->end_box();
-}
-
-// --- Shared check-row renderers ---
+// --- Shared check-row renderers (used by scoped sections and Advanced) ---
 $status_badge = function ($status) {
 	switch ($status) {
 		case InboundEmailSetupCheck::PASS:    return '<span class="badge bg-success">PASS</span>';
@@ -193,118 +117,159 @@ $render_check = function ($c) use ($status_badge, $render_fix) {
 	echo '</div></div>';
 };
 
-// --- Step model: group the engine's layers into ordered setup steps ---
-$steps = array(
-	array('key' => 'host',     'title' => 'Mail server software',       'layers' => array('host')),
-	array('key' => 'mailhost', 'title' => "This server's mail identity", 'layers' => array('mailhost')),
-	array('key' => 'domain',   'title' => 'DNS for your domain',         'layers' => array('domain')),
-	array('key' => 'plugin',   'title' => 'Plugin configuration',        'layers' => array('plugin')),
-	array('key' => 'delivery', 'title' => 'Delivery target & test',      'layers' => array('address', 'e2e')),
-);
-
-foreach ($steps as &$step) {
-	$rows = array_values(array_filter($results, function ($r) use ($step) {
-		return in_array($r['layer'], $step['layers'], true);
-	}));
-	$req_fail = 0; $req_unknown = 0; $recommend_open = 0; $pass = 0;
-	foreach ($rows as $r) {
-		if ($r['status'] === InboundEmailSetupCheck::PASS) { $pass++; }
-		if ($r['severity'] === InboundEmailSetupCheck::REQUIRED) {
-			if ($r['status'] === InboundEmailSetupCheck::FAIL)    { $req_fail++; }
-			if ($r['status'] === InboundEmailSetupCheck::UNKNOWN) { $req_unknown++; }
-		} elseif ($r['status'] !== InboundEmailSetupCheck::PASS) {
-			$recommend_open++;
-		}
-	}
-	$step['rows']           = $rows;
-	$step['needs_address']  = empty($rows);
-	$step['done']           = (!empty($rows) && $req_fail === 0 && $req_unknown === 0);
-	$step['req_open']       = $req_fail + $req_unknown;
-	$step['recommend_open'] = $recommend_open;
-	$step['pass']           = $pass;
-	$step['total']          = count($rows);
-}
-unset($step);
-
-// The active step is the first one that is not done.
-$active = null;
-foreach ($steps as $i => $step) {
-	if (!$step['done']) { $active = $i; break; }
-}
-
-$recheck_url = '/plugins/inbound_email/admin/admin_inbound_email_setup'
-	. ($address !== '' ? '?address=' . urlencode($address) : '');
-
-// --- Progress strip ---
-echo '<div class="card mb-3"><div class="card-body py-2">';
-echo '<div class="d-flex flex-wrap" style="gap:1.5rem">';
-foreach ($steps as $i => $step) {
-	if ($step['done']) {
-		$marker = '<span class="badge bg-success">&#10003;</span>';
-		$cls = 'text-success';
-	} elseif ($i === $active) {
-		$marker = '<span class="badge bg-primary">' . ($i + 1) . '</span>';
-		$cls = 'fw-bold';
-	} else {
-		$marker = '<span class="badge bg-light text-dark border">' . ($i + 1) . '</span>';
-		$cls = 'text-muted';
-	}
-	echo '<span class="' . $cls . '">' . $marker . ' ' . htmlspecialchars($step['title']) . '</span>';
-}
-echo '</div>';
-echo '<div class="d-flex justify-content-between align-items-center mt-2">';
-if ($active === null) {
-	echo '<span class="text-success"><strong>All five steps complete</strong> — inbound email is fully set up.</span>';
+// =====================================================================
+// Mailbox picker
+// =====================================================================
+$page->begin_box(array('title' => 'Mailbox'));
+if (empty($mailbox_options)) {
+	echo '<div class="alert alert-info mb-0">No mailboxes yet. Add one on the '
+		. '<a href="/plugins/inbound_email/admin/admin_inbound_email_accounts">Accounts</a> tab, then come back to verify it.</div>';
 } else {
-	echo '<span>Step ' . ($active + 1) . ' of ' . count($steps) . ': <strong>'
-		. htmlspecialchars($steps[$active]['title']) . '</strong> &mdash; see the highlighted panel below.</span>';
+	$mbform = $page->getFormWriter('mbform', array('method' => 'GET', 'action' => $base));
+	echo $mbform->begin_form();
+	$mbform->dropinput('alias_id', 'Mailbox to check', array(
+		'options' => $mailbox_options,
+		'value'   => $selected_alias_id,
+	));
+	$mbform->submitbutton('btn_view', 'Check this mailbox');
+	echo $mbform->end_form();
 }
-echo '<a href="' . htmlspecialchars($recheck_url) . '" class="btn btn-sm btn-outline-secondary">Re-check</a>';
-echo '</div>';
-echo '</div></div>';
+$page->end_box();
 
-// --- Step panels ---
-foreach ($steps as $i => $step) {
-	$is_active = ($i === $active);
+// =====================================================================
+// Scoped results for the chosen mailbox
+// =====================================================================
+if ($selected) {
+	$arrival_label = $arrival === 'imap' ? 'pulled by IMAP'
+		: ($arrival === 'webhook' ? 'received via webhook provider' : 'received by this mail server');
 
-	if ($step['done']) {
-		$head_class = 'bg-success text-white';
-		$state_text = 'all required checks pass'
-			. ($step['recommend_open'] > 0 ? ' · ' . $step['recommend_open'] . ' optional improvement(s)' : '');
-	} elseif ($is_active) {
-		$head_class = 'bg-primary text-white';
-		$state_text = $step['needs_address']
-			? 'enter the email address above to run this step'
-			: $step['req_open'] . ' required item(s) to address'
-				. ($step['recommend_open'] > 0 ? ' · ' . $step['recommend_open'] . ' optional' : '');
+	$recheck_url = $base . '?alias_id=' . (int)$selected_alias_id;
+	echo '<p><a href="' . htmlspecialchars($recheck_url) . '" class="btn btn-sm btn-outline-secondary">Re-check</a></p>';
+
+	$page->begin_box(array('title' => 'Receiving — ' . $address));
+	echo '<p class="text-muted small mb-3">Mail for this address is ' . htmlspecialchars($arrival_label) . '.</p>';
+	if (empty($receiving_rows)) {
+		echo '<p class="text-muted mb-0">No receiving checks apply to this mailbox.</p>';
 	} else {
-		$head_class = 'bg-light text-muted';
-		$state_text = $step['needs_address'] ? 'waiting on the email address above' : 'not started';
+		foreach ($receiving_rows as $r) { $render_check($r); }
 	}
+	$page->end_box();
 
-	echo '<details class="card mb-2"' . ($is_active ? ' open' : '') . '>';
-	echo '<summary class="card-header ' . $head_class . '" style="cursor:pointer">';
-	echo '<strong>Step ' . ($i + 1) . ' &middot; ' . htmlspecialchars($step['title']) . '</strong>';
-	echo ' &mdash; ' . htmlspecialchars($state_text);
-	if ($is_active) { echo ' <span class="badge bg-white text-primary ms-1">Do this next</span>'; }
-	echo '</summary>';
-	echo '<div class="card-body">';
-
-	if ($step['needs_address']) {
-		echo '<p class="mb-0 text-muted">This step checks the domain of the address you are setting up. '
-			. 'Enter that address in the form above and press "Save &amp; Run Checks".</p>';
-	} elseif ($step['key'] === 'domain') {
-		$by_scope = array();
-		foreach ($step['rows'] as $r) { $by_scope[$r['scope']][] = $r; }
-		foreach ($by_scope as $scope => $scope_rows) {
-			echo '<h6 class="text-muted">' . htmlspecialchars($scope) . '</h6>';
-			foreach ($scope_rows as $r) { $render_check($r); }
+	if ($forwards) {
+		$page->begin_box(array('title' => 'Forwarding'));
+		echo '<p class="text-muted small mb-3">This mailbox forwards mail back out, so outbound delivery must work too.</p>';
+		if (empty($forwarding_rows)) {
+			echo '<p class="text-muted mb-0">No forwarding checks available.</p>';
+		} else {
+			foreach ($forwarding_rows as $r) { $render_check($r); }
 		}
-	} else {
-		foreach ($step['rows'] as $r) { $render_check($r); }
+		$page->end_box();
+	}
+}
+
+// =====================================================================
+// Advanced — server-wide setup & diagnostics
+// =====================================================================
+$adv_base = $base . ($selected_alias_id ? '?alias_id=' . (int)$selected_alias_id : '');
+if (!$advanced) {
+	$sep = $selected_alias_id ? '&' : '?';
+	echo '<p class="mt-3"><a href="' . htmlspecialchars($adv_base . $sep . 'advanced=1') . '">Advanced server setup &amp; diagnostics &rarr;</a></p>';
+} else {
+	echo '<hr class="my-4">';
+	echo '<h4 class="mb-1">Advanced server setup</h4>';
+	echo '<p class="text-muted small mb-3">Server-wide settings and the full inbound health run — shared by every hosted mailbox. '
+		. '<a href="' . htmlspecialchars($adv_base) . '">Hide advanced</a></p>';
+
+	// --- Inbound provider ---
+	$page->begin_box(array('title' => 'Inbound provider'));
+	echo '<p class="mb-2">How this site receives inbound mail. Switching is a single setting change — '
+		. 'the same domain, alias and store machinery runs underneath.</p>';
+	$pform = $page->getFormWriter('provider_form', array('action' => $adv_base));
+	echo $pform->begin_form();
+	$pform->hiddeninput('action', '', array('value' => 'set_provider'));
+	$pform->dropinput('provider', 'Provider', array(
+		'options' => $provider_options,
+		'value'   => $active_provider_key,
+	));
+	$pform->submitbutton('btn_provider', 'Use this provider');
+	echo $pform->end_form();
+	if ($active_provider_is_webhook && $webhook_url !== '') {
+		echo '<p class="mt-3 mb-0"><strong>Webhook URL.</strong> Configure your provider to POST inbound mail to:<br>';
+		echo '<code style="word-break:break-all">' . htmlspecialchars($webhook_url) . '</code></p>';
+	}
+	$page->end_box();
+
+	// --- Server mail identity ---
+	$page->begin_box(array('title' => "This server's mail identity"));
+	$formwriter = $page->getFormWriter('setup_form', array('action' => $adv_base));
+	echo $formwriter->begin_form();
+	$formwriter->textinput('mail_hostname', 'Mail server hostname', array(
+		'value'       => $mail_hostname,
+		'placeholder' => 'mail.example.com',
+		'help_text'   => 'The fully-qualified name of THIS mail server — the target of your MX records, its HELO name, and its reverse-DNS name.',
+	));
+	if ($public_ip_private) {
+		$formwriter->addError('public_ip',
+			'Auto-detection found ' . $public_ip . ', a private address. Enter this server\'s public IP here.');
+	}
+	$formwriter->textinput('public_ip', 'Mail server public IP', array(
+		'value'       => $configured_public_ip,
+		'placeholder' => $public_ip !== '' ? 'auto-detected: ' . $public_ip : 'auto-detected',
+		'help_text'   => 'Leave blank to auto-detect. Set this only if the server is behind NAT and auto-detection finds a private address.',
+	));
+	$formwriter->submitbutton('btn_save', 'Save & Run Checks');
+	echo $formwriter->end_form();
+	$page->end_box();
+
+	// --- Provider-supplied DNS records for the focused domain ---
+	if (!empty($dns_records) && $focus_domain !== '') {
+		$page->begin_box(array('title' => 'DNS records to publish for ' . $focus_domain));
+		echo '<p class="mb-2">Copy these into your DNS provider for <code>' . htmlspecialchars($focus_domain) . '</code>:</p>';
+		echo '<table class="table table-sm table-bordered" style="max-width:900px">';
+		echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Note</th></tr></thead><tbody>';
+		foreach ($dns_records as $rec) {
+			echo '<tr>';
+			echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
+			echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
+			echo '<td><input type="text" class="form-control form-control-sm" readonly '
+				. 'style="cursor:pointer;background:#fff" value="' . htmlspecialchars($rec['value'])
+				. '" onclick="this.select()"></td>';
+			echo '<td class="text-muted small">' . htmlspecialchars($rec['note'] ?? '') . '</td>';
+			echo '</tr>';
+		}
+		echo '</tbody></table>';
+		$page->end_box();
 	}
 
-	echo '</div></details>';
+	// --- Full server-wide diagnostic ---
+	$page->begin_box(array('title' => 'Full inbound health run'
+		. ($focus_domain !== '' ? ' (' . $focus_domain . ')' : '')));
+	if (empty($results)) {
+		echo '<p class="text-muted mb-0">No checks returned.</p>';
+	} else {
+		$by_layer = array();
+		foreach ($results as $r) { $by_layer[$r['layer']][] = $r; }
+		$layer_titles = array(
+			'host'     => 'Mail server software',
+			'mailhost' => "This server's mail identity",
+			'domain'   => 'Domain DNS',
+			'plugin'   => 'Plugin configuration',
+			'address'  => 'Delivery target',
+			'e2e'      => 'End-to-end',
+		);
+		foreach ($layer_titles as $layer => $title) {
+			if (empty($by_layer[$layer])) { continue; }
+			echo '<h6 class="text-muted mt-3">' . htmlspecialchars($title) . '</h6>';
+			foreach ($by_layer[$layer] as $r) { $render_check($r); }
+		}
+		// Any layers not in the title map (defensive).
+		foreach ($by_layer as $layer => $rows) {
+			if (isset($layer_titles[$layer])) { continue; }
+			echo '<h6 class="text-muted mt-3">' . htmlspecialchars($layer) . '</h6>';
+			foreach ($rows as $r) { $render_check($r); }
+		}
+	}
+	$page->end_box();
 }
 
 $page->admin_footer();
