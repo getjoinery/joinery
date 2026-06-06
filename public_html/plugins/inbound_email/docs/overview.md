@@ -31,31 +31,37 @@ host may be a Docker container or bare metal.
 3. **Incoming** appears under **Emails** in the admin sidebar — it opens on the
    **Setup** tab
 
-### Guided Setup (recommended)
+### Setup & verification (mailbox-first)
 
-The **Setup** tab (`Emails > Incoming > Setup`) is a guided checklist and the
-recommended way to configure the plugin. Enter the email address you want to
-receive mail at; the tab then:
+The **Setup** tab (`Emails > Incoming > Setup`) verifies one mailbox at a time.
+Pick a registered mailbox (from the Accounts tab) in the dropdown; the checks
+scope to that mailbox and split into two groups:
 
-- autodetects the host state — Postfix, the pipe transport, the domain map,
-  opendkim, port 25, and whether inbound mail is actually being
-  authentication-verified (opendkim-verify + opendmarc);
-- verifies this server's mail identity — `myhostname`, the mail host's A
-  record, and forward-confirmed reverse DNS (PTR);
-- verifies every per-domain DNS record (MX, SPF, DKIM, DMARC) for
-  *correctness*, not just presence — e.g. that the MX target actually resolves
-  to this server;
-- shows copy-ready DNS records and exact fix commands for anything failing;
-- offers one-click actions to enable the plugin and register the domain;
-- runs an end-to-end test — send a real message to the address and watch it
-  land in the logs.
+- **Receiving** (always): the mailbox's domain DNS verified for *correctness*,
+  not just presence (MX target actually resolves to this server, SPF authorizes
+  the IP, DMARC published), that the domain is registered, that inbound mail is
+  being authentication-verified (opendkim-verify + opendmarc), that the alias
+  resolves, and an **end-to-end** proof — send a real message and watch it land
+  in the logs. For an **IMAP-source** mailbox there is no MX/host stack, so this
+  group instead reports the feed's connection state and last fetch.
+- **Forwarding** (only when the mailbox forwards): the outbound relay, SRS, and
+  DKIM signing — the checks that matter when mail is forwarded back out.
 
-It cannot create DNS records or set reverse DNS for you (those live with your
-registrar / VPS provider) — it detects, instructs, and verifies.
+Copy-ready DNS records and exact fix commands appear inline on any failing
+check, along with one-click actions to enable the plugin or register a domain.
+The tab cannot create DNS records or set reverse DNS for you (those live with
+your registrar / VPS provider) — it detects, instructs, and verifies.
 
-Set the **mail server hostname** on the Setup tab once: the FQDN of this server
-(`inbound_email_mail_hostname`), used as the MX target, HELO name, and PTR
-name. Everything else is autodetected.
+#### Advanced server setup
+
+Settings and diagnostics that are server-wide rather than per-mailbox live
+behind the **Advanced server setup** disclosure: the inbound **provider** picker
+(`inbound_email_provider`), this server's **mail identity** — the FQDN
+(`inbound_email_mail_hostname`, used as the MX target, HELO name, and PTR name)
+and public IP — the provider's DNS records to publish, and the **full inbound
+health run** (every layer: Postfix/pipe transport/domain map/opendkim/port 25,
+mail identity, domain DNS, plugin config, and end-to-end). Set the mail hostname
+here once; everything else is autodetected.
 
 ### The Accounts tree
 
@@ -73,8 +79,9 @@ to add. Hosted (MX) domains keep a distinct **+ IMAP feed** per mailbox.
 
 ### Adding a Domain
 
-The Setup tab registers a domain for you as part of the guided flow. To manage
-domains directly: on the **Accounts** tab click **+ Add Domain**, enter the name
+The Setup tab can register a domain for you (a one-click action on the
+"Domain registered" check). To manage domains directly: on the **Accounts** tab
+click **+ Add Domain**, enter the name
 and save — Postfix picks it up immediately (the inbound domain list is read live
 from the database; no host command, no per-domain Postfix config). Then use the
 Setup tab to verify and publish the domain's DNS records. Tick **IMAP source** on

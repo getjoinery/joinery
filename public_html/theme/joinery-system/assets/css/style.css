@@ -526,6 +526,16 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .card:not(:has(> .card-header)):not(:has(> .card-body)):not(:has(> .card-footer)) {
     padding: 1.25rem;
 }
+/* Mixed page card: mostly boxed (begin_box → .card-body) but with a few loose
+   elements rendered between/after the boxes — headings, action buttons, links,
+   alerts. With no padding on the card, those sit flush against its edges (and
+   the theme zeroes <p> margins, so the last one touches the bottom border).
+   Give them margin on all sides so they line up with the boxed content and keep
+   clear of the top/bottom edges. The tab nav and structural sections are
+   excluded so they keep spanning full width. */
+.card:has(> .card-body) > :not(.card-header):not(.card-body):not(.card-footer):not(.nav-tabs):not(style):not(script) {
+    margin: 1.25rem;
+}
 .card-footer {
     padding: 0.875rem 1.25rem;
     border-top: 1px solid var(--border-light);
