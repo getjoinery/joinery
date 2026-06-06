@@ -1349,11 +1349,24 @@ abstract class SystemBase {
 							$dbhelper->bind_value(":$column_name", FALSE, PDO::PARAM_BOOL);
 						}
 					}
-					else if($column_val==TRUE){
-						$dbhelper->bind_value(":$column_name", TRUE, PDO::PARAM_BOOL);
-					}
-					else if($column_val==FALSE){
-						$dbhelper->bind_value(":$column_name", FALSE, PDO::PARAM_BOOL);
+					else {
+						// Normalize before binding. A bare truthiness test (the historical
+						// bug) treated the non-empty string 'false' as TRUE, so any boolean
+						// left to a string 'false' default was stored as true. Handle every
+						// representation explicitly: native bools pass through; recognized
+						// truthy strings (including the Postgres 't') map to true; everything
+						// else (incl. 'false'/'f'/'0'/'no'/'off'/'') maps to false. The
+						// explicit list is used over filter_var() because filter_var does not
+						// recognize 't'/'f' and would silently flip 't' to false if the PDO
+						// driver/config ever returned Postgres-style boolean strings.
+						if (is_bool($column_val)) {
+							$bool_val = $column_val;
+						} else if (is_string($column_val)) {
+							$bool_val = in_array(strtolower(trim($column_val)), ['t', 'true', '1', 'yes', 'on'], true);
+						} else {
+							$bool_val = (bool)$column_val;
+						}
+						$dbhelper->bind_value(":$column_name", $bool_val, PDO::PARAM_BOOL);
 					}
 				}
 				else if($column_meta[$column_name]['data_type'] == 'json' || $column_meta[$column_name]['data_type'] == 'jsonb'){

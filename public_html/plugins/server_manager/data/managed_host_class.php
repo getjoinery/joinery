@@ -23,7 +23,7 @@ class ManagedHost extends SystemBase {
 		'mgh_ssh_key_path'         => array('type'=>'varchar(500)'),
 		'mgh_ssh_port'             => array('type'=>'int4', 'default'=>'22'),
 		'mgh_max_sites'            => array('type'=>'int4', 'default'=>'50'),
-		'mgh_provisioning_enabled' => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'mgh_provisioning_enabled' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgh_notes'                => array('type'=>'text'),
 		'mgh_create_time'          => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mgh_update_time'          => array('type'=>'timestamp(6)'),

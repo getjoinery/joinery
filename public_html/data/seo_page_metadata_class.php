@@ -24,7 +24,7 @@ class SeoPageMetadata extends SystemBase {
 		'spm_og_description'       => array('type'=>'text', 'is_nullable'=>true),
 		'spm_preview_image_url'    => array('type'=>'varchar(500)', 'is_nullable'=>true),
 		'spm_og_type'              => array('type'=>'varchar(50)', 'is_nullable'=>true),
-		'spm_noindex'              => array('type'=>'bool', 'default'=>'false'),
+		'spm_noindex'              => array('type'=>'bool', 'default'=>false),
 		'spm_create_time'          => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'spm_modify_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'spm_delete_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),

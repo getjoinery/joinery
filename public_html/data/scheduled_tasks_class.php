@@ -21,7 +21,7 @@ class ScheduledTask extends SystemBase {
 		'sct_scheduled_task_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'sct_name'                 => array('type'=>'varchar(255)', 'is_nullable'=>false),
 		'sct_task_class'           => array('type'=>'varchar(255)', 'is_nullable'=>false),
-		'sct_is_active'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'true'),
+		'sct_is_active'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>true),
 		'sct_frequency'            => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>"'daily'"),
 		'sct_schedule_day_of_week' => array('type'=>'int4', 'is_nullable'=>true),
 		'sct_schedule_time'        => array('type'=>'time', 'is_nullable'=>false, 'default'=>"'09:00:00'"),

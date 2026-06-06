@@ -22,7 +22,7 @@ class RequestLog extends SystemBase {
 		'rql_action'         => array('type'=>'varchar(100)'),
 		'rql_ip_address'     => array('type'=>'varchar(45)', 'is_nullable'=>false),
 		'rql_usr_user_id'    => array('type'=>'int4'),
-		'rql_was_success'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'true'),
+		'rql_was_success'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>true),
 		'rql_status_code'    => array('type'=>'int2'),
 		'rql_error_type'     => array('type'=>'varchar(50)'),
 		'rql_note'           => array('type'=>'varchar(255)'),
