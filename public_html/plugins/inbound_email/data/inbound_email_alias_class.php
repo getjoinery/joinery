@@ -31,7 +31,7 @@ class InboundEmailAlias extends SystemBase {
 		'iea_destinations'       => array('type'=>'text'),
 		'iea_delivery_mode'      => array('type'=>'varchar(20)', 'default'=>'forward', 'is_nullable'=>false),
 		'iea_description'        => array('type'=>'varchar(500)'),
-		'iea_is_enabled'         => array('type'=>'bool', 'default'=>'true', 'is_nullable'=>false),
+		'iea_is_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'iea_forward_count'      => array('type'=>'int4', 'default'=>'0'),
 		'iea_last_forward_time'  => array('type'=>'timestamp(6)'),
 		'iea_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),

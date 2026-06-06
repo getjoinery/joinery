@@ -61,8 +61,8 @@ class InboundEmailMessage extends SystemBase {
 		'iem_raw_message'         => array('type'=>'text'),
 		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient')),
 		'iem_thread_key'          => array('type'=>'varchar(255)'), // indexed via migration iem_001 (no declarative non-unique index support)
-		'iem_is_read'             => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
-		'iem_is_starred'          => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'iem_is_read'             => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'iem_is_starred'          => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iem_read_time'           => array('type'=>'timestamp(6)'),
 		'iem_dkim_result'         => array('type'=>'varchar(16)'),
 		'iem_spf_result'          => array('type'=>'varchar(16)', 'default'=>'unverified'),

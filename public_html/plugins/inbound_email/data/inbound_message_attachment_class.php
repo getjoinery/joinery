@@ -40,7 +40,7 @@ class InboundMessageAttachment extends SystemBase {
 		'ima_mime_part'     => array('type'=>'varchar(40)'),
 		'ima_encoding'      => array('type'=>'varchar(40)'),
 		'ima_content_id'    => array('type'=>'varchar(255)'),
-		'ima_is_inline'     => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
+		'ima_is_inline'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'ima_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
