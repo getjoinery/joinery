@@ -517,6 +517,15 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .card-header h5, .card-header h6 { margin-bottom: 0; }
 .card-body { padding: 1.25rem; }
 .card-body.p-0 { padding: 0; }
+/* Loose page content: a page that renders its own markup directly inside the
+   page card (BeginPage) — instead of through begin_box or a table box — leaves
+   the bare .card with no padding, so content sits flush against the edge. Pad
+   that card so any page gets standard spacing for free. Cards that supply their
+   own .card-header / .card-body / .card-footer manage their own padding and are
+   left untouched, so existing boxed pages are unaffected. */
+.card:not(:has(> .card-header)):not(:has(> .card-body)):not(:has(> .card-footer)) {
+    padding: 1.25rem;
+}
 .card-footer {
     padding: 0.875rem 1.25rem;
     border-top: 1px solid var(--border-light);
