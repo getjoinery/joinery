@@ -19,6 +19,7 @@
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapSyncer.php'));
 
 class PollImapAccounts implements ScheduledTaskInterface {
 
@@ -65,7 +66,20 @@ class PollImapAccounts implements ScheduledTaskInterface {
 			$polled++;
 			$ingestor = new ImapIngestor($account);
 			try {
-				$result = $ingestor->poll($maxPerAccount);
+				if ($account->syncEnabled()) {
+					// Two-way / read-only sync: run the whole cycle on one connection
+					// (specs/two_way_imap_sync.md §7) — Pull → Ingest → Push.
+					$syncer = new ImapSyncer($account, $ingestor);
+					$syncer->prepare();                 // capabilities + folder discovery
+					$syncer->pull();                    // flags + VANISHED (pull|both)
+					$result = $ingestor->poll($maxPerAccount); // ingest, seeding imf_ membership
+					if ($account->isTwoWay()) {
+						$syncer->push($maxPerAccount);  // STORE / COPY / MOVE / EXPUNGE
+					}
+					$syncer->reconcileDeletes();        // remote Trash arrivals → soft-delete
+				} else {
+					$result = $ingestor->poll($maxPerAccount);
+				}
 				$stored += intval($result['stored'] ?? 0);
 				$messages[] = $this->describe($account) . ': ' . ($result['status'] ?? 'ok');
 			} catch (Throwable $e) {

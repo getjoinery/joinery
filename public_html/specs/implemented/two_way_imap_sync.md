@@ -1,6 +1,6 @@
 # Spec: Two-Way IMAP Sync
 
-**Status:** Proposed (awaiting implementation)
+**Status:** Implemented — kept live and refined as built (see §14 As-built refinements)
 **Scope:** `inbound_email` plugin — IMAP-source feeds only
 **Related docs:** `plugins/inbound_email/docs/overview.md` (Setup, IMAP feeds, reference-backed storage)
 **Related specs:** `outbound_reply_forward.md`, `connected_account_email.md` (Sent / APPEND-on-send)
@@ -89,9 +89,12 @@ as the unconfigured default:
 | **Read-only** | `pull` | source → Joinery | No | Joinery *follows* the source: read/star/move/delete in the native client → reflected in Joinery. Joinery never writes back. |
 | **Two-way** | `both` | bidirectional | Yes | Full reconciliation (§7): act in either place → reflected in the other. |
 
-**Read-only and Two-way both require QRESYNC** (§6) — the read-only mirror must observe folder
-removals/moves (`VANISHED`), not only flags. A server without QRESYNC can only be **Off**; the setup
-dropdown omits the sync options with a short note.
+**Read-only and Two-way require CONDSTORE** (§6) — incremental flag/membership pull via
+`CHANGEDSINCE`. Detecting messages that *left* a folder uses QRESYNC `VANISHED` when the server has
+it, else a UID-set diff fallback (§7.4), so CONDSTORE alone is sufficient. A server without CONDSTORE
+can only be **Off**; the setup dropdown omits the sync options with a short note. (Originally specced
+as "QRESYNC required"; corrected during implementation — Gmail advertises CONDSTORE but not QRESYNC,
+so a QRESYNC gate would have excluded Gmail entirely. See §14.)
 
 `iia_sync_deletes` (bool, default `false`) gates the deletion dimension independently of mode: when
 off, local soft-deletes never touch the source and remote deletions are not pulled. `iia_show_compose`
@@ -116,8 +119,12 @@ otherwise inert).
 - `iia_sync_mode` `varchar(10)` default `'off'` not null — `off|pull|both`.
 - `iia_sync_deletes` `bool` default `false` not null — gate delete propagation.
 - `iia_show_compose` `bool` default `false` not null — surface reader compose + Sent handling (§9).
-- `iia_supports_qresync` `bool` default `false` not null — cached capability (§6). QRESYNC implies
-  CONDSTORE and adds `VANISHED`; it is required for any sync, so it is the single capability gate.
+- `iia_supports_condstore` `bool` default `false` not null — cached capability (§6); the **sync gate**
+  (incremental flag/membership pull via `CHANGEDSINCE`). Required for any sync.
+- `iia_supports_qresync` `bool` default `false` not null — cached capability (§6); the **fast
+  removal-detection path** (`VANISHED`). QRESYNC implies CONDSTORE; when absent (e.g. Gmail) removals
+  are found by a UID-set diff (§7.4). (Originally the single gate; split into these two during
+  implementation — see §14.)
 - `iia_folders_exclusive` `bool` default `true` not null — **membership cardinality**. True (the
   default) for ordinary IMAP, where a message lives in exactly one folder; false for hosts whose
   model lets a message sit in several folders at once (Gmail, which advertises `X-GM-EXT-1`, where
@@ -147,6 +154,11 @@ has three rows. Carries the **shadow**.
 - `imf_present_local` `bool` default `true` not null — is the message in this folder per Joinery now.
 - `imf_present_base` `bool` default `true` not null — **the shadow:** was it in this folder at the
   last successful sync. A membership element is **dirty** iff `imf_present_local ≠ imf_present_base`.
+- `imf_imap_uid` `int8` nullable, `imf_imap_uidvalidity` `int8` nullable — the message's UID in
+  **this** folder, recorded at ingest. QRESYNC `VANISHED` (and the CONDSTORE-only UID-diff) return
+  only UIDs for messages that no longer exist and so can't be re-fetched; this column is how a
+  vanished UID is correlated back to its membership row to clear it incrementally (§7.4). (Added
+  during implementation — see §14.)
 - Unique on (`imf_iem_...`, `imf_iif_...`). A row with both bits false is deleted, not kept.
 
 **`iem_inbound_email_message` (message):**
@@ -179,11 +191,14 @@ step can act on it; soft-delete and membership are two representations of one fa
 Behavior is data-driven from a capability surface on the provider/preset layer, not hard-coded per
 host. Detected from the server `CAPABILITY` response and cached on the feed:
 
-- **QRESYNC** (RFC 7162) → `iia_supports_qresync`. QRESYNC implies CONDSTORE (incremental
-  flag/membership pull via `CHANGEDSINCE iif_last_sync_modseq`) and adds `VANISHED` for detecting
-  messages that left a folder (move or delete). It is the single gate: **any sync requires it**;
-  without it the feed can only be Off. (Horde exposes the pieces: `Fetch_Query::modseq()`, the
-  `changedsince`/`unchangedsince` store options, and `sync()`/fetch `VANISHED`.)
+- **CONDSTORE** (RFC 7162) → `iia_supports_condstore`. Incremental flag/membership pull via
+  `CHANGEDSINCE iif_last_sync_modseq`. This is the **sync gate**: any sync requires it; without it the
+  feed can only be Off.
+- **QRESYNC** (RFC 7162) → `iia_supports_qresync`. Adds `VANISHED` for detecting messages that left a
+  folder. The **fast** removal path; when absent (Gmail has CONDSTORE but not QRESYNC) removals are
+  found by a per-folder UID-set diff instead (§7.4). QRESYNC implies CONDSTORE, so detection sets
+  `condstore = qresync || CONDSTORE`. (Horde exposes the pieces: `Fetch_Query::modseq()`, the
+  `changedsince` store option, fetch `VANISHED`, and a plain UID fetch for the diff.)
 - **Cardinality** (`X-GM-EXT-1`) → `iia_folders_exclusive`. A host advertising `X-GM-EXT-1` (Gmail)
   is **non-exclusive** (`false`): a message can be in several folders at once. Everything else is
   exclusive. This flag drives only the push strategy (§6.1), not how membership is observed.
@@ -333,10 +348,12 @@ value-equal no-op. No per-element MODSEQ column.
 
 ### 7.4 Vanish handling & locator maintenance
 
-A `VANISHED` UID in folder F means the message left F. Under the per-folder presence model this is,
-first and simply, **a remote-remove of membership F** (§7.2) — there is no move *classification* to
-perform; a move is just a remove of F plus an add of G, reconciled as two independent elements. Two
-concerns remain:
+A UID that left folder F is **a remote-remove of membership F** (§7.2) — there is no move
+*classification* to perform; a move is just a remove of F plus an add of G, reconciled as two
+independent elements. **How the departed UIDs are found depends on capability:** on a QRESYNC feed,
+`VANISHED` since the modseq cursor; on a CONDSTORE-only feed (Gmail), a **UID-set diff** — fetch F's
+current UIDs and treat any stored membership UID (`imf_imap_uid`) no longer present as departed. Both
+feed the same removal logic. Two concerns remain:
 
 - **Locator re-point (all feeds).** If the `iem_` locator (`iem_imap_folder`/`iem_imap_uid`/
   `iem_imap_uidvalidity`) pointed at F, the body/attachment bytes must stay fetchable. Look up the
@@ -381,12 +398,17 @@ re-seed (correlating by `iem_message_id_header`) before sync resumes for that fo
 - **Folder selection.** From `LIST`, the operator picks which folders are tracked (`iif_is_tracked`);
   special-use folders pre-selected. The `\All` view (Gmail `[Gmail]/All Mail`) is tracked as a
   coverage source, not a togglable membership folder (§6.1).
-- **Reader folder navigation.** The reader gains a folder dimension alongside the alias scope, driven
-  by `imf_` membership; INBOX-only feeds simply show one folder (the Product-A subset, §1.1). A
-  message in several folders appears under each without being double-counted in thread aggregation
-  (the `MailboxService` thread queries join `imf_` and de-duplicate). An **"All Mail" entry** shows
-  the folder-unfiltered alias view, so coverage-only messages (no `imf_` membership) are reachable
-  there.
+- **Reader folder navigation.** The reader gains a folder dimension alongside the alias scope. The
+  left rail lists the mailbox's tracked folders **indented under the selected mailbox**, rendered from
+  the discovered `iif_` folders (so the structure is visible as soon as folders are discovered,
+  independent of sync mode — they fill with mail as sync populates `imf_` membership; see §14). The
+  mailbox root is the folder-unfiltered **"All Mail"** view, so coverage-only messages (no `imf_`
+  membership) are reachable there; a message in several folders appears under each without being
+  double-counted in thread aggregation (the `MailboxService` thread queries filter by `imf_` and each
+  message row is unique). INBOX-only feeds simply show one folder (the Product-A subset, §1.1). The
+  open-thread toolbar also carries a **Move ▾ / Labels ▾** control that edits the thread's membership
+  (`set_membership` → `MailboxService::setMembership`), which two-way push then reconciles to the
+  source — see §14.
 - **Setup → Receiving (IMAP mailbox).** Synthetic rows report sync mode and per-folder last-sync
   time/status (reuses `_setup_imap_receiving_rows`).
 
@@ -482,6 +504,64 @@ Update `plugins/inbound_email/docs/overview.md` to describe sync as the current 
 rule — no "previously one-way" narration): a "Sync" subsection covering the per-feed Off/Read-only/
 Two-way modes, the flag↔state and membership↔folder mappings, the per-folder-presence observation
 model, the `\All` coverage view (All-Mail ingestion without membership), the shadow-based
-reconciliation, deletion and Sent handling, the pull/ingest/push cycle, and the QRESYNC requirement.
+reconciliation, deletion and Sent handling, the pull/ingest/push cycle, and the CONDSTORE requirement.
 Note that no OAuth re-consent is required and that Gmail is reconciled by the same folder model as
 every other host.
+
+## 14. As-Built Refinements
+
+Deviations from the original proposal, made while implementing and verified against a live Gmail feed.
+This section is the authoritative record of *why* the as-built design differs from the prose above.
+
+1. **Sync gate is CONDSTORE, not QRESYNC.** The proposal made QRESYNC the single gate. A live
+   capability check showed **Gmail advertises CONDSTORE but not QRESYNC** — so a QRESYNC gate would
+   have locked Gmail (the primary target) to Off, contradicting §1. Fixed by gating on CONDSTORE
+   (incremental flags) and treating QRESYNC as an optional *fast path* for removal detection.
+   `iia_supports_condstore` was added alongside `iia_supports_qresync`; `detectCapabilities()` sets
+   `condstore = qresync || CONDSTORE`. A migration backfills `condstore` from a prior `qresync` flag.
+
+2. **Removal detection has a CONDSTORE-only fallback (§7.4).** When QRESYNC is present, `VANISHED`
+   since the modseq cursor. When absent, a per-folder **UID-set diff**: fetch the folder's current
+   UIDs and treat any stored membership UID no longer present as departed. Same downstream logic.
+
+3. **`imf_` carries the per-folder UID (`imf_imap_uid` / `imf_imap_uidvalidity`).** Required by both
+   removal paths: a vanished/absent UID belongs to a message that can no longer be fetched, so the
+   UID→membership-row correlation must have been recorded at ingest. The original `imf_` shape (just
+   the shadow bits) could not support incremental removal.
+
+4. **Folder rail is shown whenever folders are discovered, independent of sync mode.** `§8` originally
+   implied folders surface only for syncing feeds. `MailboxService::foldersForAlias()` now returns the
+   feed's tracked (non-`\All`) folders whenever they exist, so the structure is visible before sync is
+   switched on. Folder *contents* still depend on `imf_` membership, which only populates once sync
+   runs — so an Off feed shows the folders but they read empty until sync is enabled.
+
+5. **Hot-path indexes via migration.** The declarative schema builder makes no non-unique indexes, so
+   a migration adds: `imf_(folder_id, imap_uid)` (removal correlation), `imf_(message_id)`, and
+   `iem_(account_id, imap_folder, imap_uid)` (the flag-pull locator lookup).
+
+6. **Pull fetches use a numeric UID range, never `1:*`.** Found against live Gmail: a `1:*` UID fetch
+   can return zero rows (the same `*`-form caveat the ingest path already avoids). The flag-pull and
+   the UID-diff removal fetch both compute `1:<UIDNEXT-1>` from `STATUS`. Without this, flag pull was
+   silently inert and the UID-diff saw an empty folder and wrongly cleared every membership. An empty
+   folder (`UIDNEXT-1 < 1`) is treated as "unknown" and skips removal detection rather than clearing.
+
+7. **Reader move/labels control (membership mutation from the UI).** §8 originally scoped the reader
+   to *navigating* folders. A **Move ▾** (exclusive feeds) / **Labels ▾** (non-exclusive, e.g. Gmail)
+   control was added to the open-thread toolbar so a user can change a thread's membership from
+   Joinery: `MailboxService::setMembership()` sets `imf_present_local` (keeping the shadow base, so the
+   element goes dirty) and the `set_membership` AJAX action drives it; two-way push then issues the
+   COPY/MOVE/EXPUNGE to the source. `listMailboxes` now also returns `folders_exclusive` per mailbox so
+   the reader picks the single-pick Move vs. multi-toggle Labels affordance, and the thread fetch
+   returns the thread's current folder ids to pre-check it. Verified end-to-end against live Gmail.
+
+8. **Create a label/folder locally → created on the source during sync.** The Move/Labels control has
+   a "New label… / New folder…" field. `MailboxService::createFolder()` makes a tracked `iif_` row
+   flagged `iif_pending_remote_create` and files the thread into it; the `ImapClient` seam gained
+   `createMailbox`, and `ImapSyncer::push()` runs `createPendingFolders()` first — issuing the IMAP
+   `CREATE` (idempotent: an already-existing folder is adopted), clearing the flag, then the membership
+   `COPY` lands. Pull and ingest skip pending folders until they exist on the server. Verified
+   end-to-end against live Gmail (create "Receipts" in the reader → folder + message appear on Gmail).
+
+9. **The implemented spec stays live.** Per the docs/spec workflow this file was first moved to
+   `specs/implemented/`, then moved back to `specs/` so it continues to track refinements as the
+   feature is exercised. Treat this §14 as the diff against the proposal body above.

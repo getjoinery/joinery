@@ -32,4 +32,8 @@ if ($thread_key === '') {
 
 $alias_id = MailboxService::parseAliasParam($_GET['alias_id'] ?? null);
 
-echo json_encode(array('messages' => $service->getThread($alias_id, $thread_key)));
+echo json_encode(array(
+	'messages' => $service->getThread($alias_id, $thread_key),
+	// Folder ids this thread currently belongs to — pre-checks the move/labels control.
+	'folders'  => $service->threadFolderIds($alias_id, $thread_key),
+));

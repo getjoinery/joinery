@@ -21,6 +21,8 @@
 		page: 1,
 		hasMore: false,
 		threadKey: null,
+		folderId: null,       // null = folder-unfiltered (the mailbox's "All Mail")
+		mailboxLabel: '',     // the active mailbox label, for composing folder titles
 		mailboxes: [],
 		messages: []      // messages of the currently-open thread
 	};
@@ -56,6 +58,9 @@
 		if (payload.aliasId != null) body.set('alias_id', String(payload.aliasId));
 		if (payload.threadKey != null) body.set('thread_key', payload.threadKey);
 		if (payload.ids) payload.ids.forEach(function (id) { body.append('ids[]', String(id)); });
+		if (payload.folderId != null) body.set('folder_id', String(payload.folderId));
+		if (payload.present != null) body.set('present', payload.present ? '1' : '0');
+		if (payload.name != null) body.set('name', String(payload.name));
 		return fetch(CFG.actionUrl, {
 			method: 'POST',
 			credentials: 'same-origin',
@@ -75,21 +80,23 @@
 		list.innerHTML = '';
 
 		state.mailboxes.forEach(function (m) {
-			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.any_starred));
+			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.any_starred, m.folders));
 		});
 		if (state.allAccess && data.unmatched && data.unmatched.total > 0) {
-			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, false);
+			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, false, []);
 			li.title = 'Unrouted mail that matched no mailbox';
 			list.appendChild(li);
 		}
 
-		// Highlight current selection.
+		// Highlight current selection + render the active mailbox's folder rail.
 		highlightMailbox();
+		renderFolderRail();
 	}
 
-	function mailboxItem(label, aliasId, unread, anyStarred) {
+	function mailboxItem(label, aliasId, unread, anyStarred, folders) {
 		var li = el('li', 'mbx-mailbox');
 		li.dataset.alias = (aliasId == null ? '' : String(aliasId));
+		li._folders = folders || [];
 		var addr = el('span', 'mbx-mailbox-addr', label);
 		li.appendChild(addr);
 		if (anyStarred) li.appendChild(el('span', 'mbx-star-dot', '★'));
@@ -97,6 +104,62 @@
 		li.appendChild(badge);
 		li.addEventListener('click', function () { selectMailbox(aliasId, label); });
 		return li;
+	}
+
+	// ---- folder rail (membership-driven, under the active mailbox) ----
+	function activeMailboxLi() {
+		var cur = (state.aliasId == null ? '' : String(state.aliasId));
+		var hit = null;
+		Array.prototype.forEach.call(document.querySelectorAll('.mbx-mailbox'), function (li) {
+			if (li.dataset.alias === cur) hit = li;
+		});
+		return hit;
+	}
+
+	function renderFolderRail() {
+		// Remove any prior rail, then render folders for the active mailbox (if it
+		// has tracked folders). The mailbox root remains the folder-unfiltered
+		// "All Mail" view; folders narrow it.
+		var prior = $('#mbx-folder-rail');
+		if (prior) prior.parentNode.removeChild(prior);
+
+		var li = activeMailboxLi();
+		var folders = li && li._folders ? li._folders : [];
+		if (!li || !folders.length) return;
+
+		var ul = el('ul', 'mbx-folders');
+		ul.id = 'mbx-folder-rail';
+		ul.appendChild(folderItem(null, 'All Mail'));
+		folders.forEach(function (f) { ul.appendChild(folderItem(f.id, f.name)); });
+		li.parentNode.insertBefore(ul, li.nextSibling);
+		highlightFolder();
+	}
+
+	function folderItem(folderId, name) {
+		var li = el('li', 'mbx-folder');
+		li.dataset.folder = (folderId == null ? '' : String(folderId));
+		li.appendChild(el('span', 'mbx-folder-name', name));
+		li.addEventListener('click', function (e) {
+			e.stopPropagation();
+			selectFolder(folderId, name);
+		});
+		return li;
+	}
+
+	function highlightFolder() {
+		var cur = (state.folderId == null ? '' : String(state.folderId));
+		Array.prototype.forEach.call(document.querySelectorAll('.mbx-folder'), function (li) {
+			li.classList.toggle('active', li.dataset.folder === cur);
+		});
+	}
+
+	function selectFolder(folderId, name) {
+		closeThread();                    // leave any open conversation → show the list
+		state.folderId = folderId;
+		$('#mbx-list-title').textContent = (state.mailboxLabel || 'All mail')
+			+ (folderId == null ? '' : ' / ' + name);
+		highlightFolder();
+		loadThreads(true);
 	}
 
 	function highlightMailbox() {
@@ -108,9 +171,13 @@
 	}
 
 	function selectMailbox(aliasId, label) {
+		closeThread();                    // leave any open conversation → show the list
 		state.aliasId = aliasId;
-		$('#mbx-list-title').textContent = label || 'All mail';
+		state.folderId = null;            // reset to the folder-unfiltered view
+		state.mailboxLabel = label || 'All mail';
+		$('#mbx-list-title').textContent = state.mailboxLabel;
 		highlightMailbox();
+		renderFolderRail();
 		loadThreads(true);
 	}
 
@@ -125,6 +192,7 @@
 		if (state.filter === 'unread') p.set('unread_only', '1');
 		if (state.filter === 'starred') p.set('starred_only', '1');
 		if (state.search) { p.set('subject', state.search); p.set('sender', state.search); p.set('body', state.search); }
+		if (state.folderId != null) p.set('folder_id', String(state.folderId));
 		p.set('page', String(state.page));
 		return CFG.listUrl + '?' + p.toString();
 	}
@@ -196,7 +264,7 @@
 		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(t.thread_key)
 			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '');
 		apiGet(url).then(function (data) {
-			renderThread(t, data.messages || []);
+			renderThread(t, data.messages || [], data.folders || []);
 			// Opening marks the whole thread read (shared per mailbox).
 			if (t.unread_count > 0) {
 				apiAction({ action: 'mark_read', threadKey: t.thread_key, aliasId: state.aliasId })
@@ -209,8 +277,17 @@
 		});
 	}
 
-	function renderThread(t, messages) {
+	// The tracked folders + cardinality for a mailbox (by alias id), from the
+	// switcher data. Returns { folders:[{id,name,role}], exclusive:bool }.
+	function mailboxFolders(aliasId) {
+		var hit = state.mailboxes.filter(function (m) { return String(m.alias_id) === String(aliasId); })[0];
+		if (!hit) return { folders: [], exclusive: true };
+		return { folders: hit.folders || [], exclusive: !!hit.folders_exclusive };
+	}
+
+	function renderThread(t, messages, threadFolders) {
 		state.messages = messages || [];
+		state.threadFolders = threadFolders || [];
 		var pane = $('#mbx-thread');
 		parkCompose();        // move the compose box out before clearing the pane
 		pane.innerHTML = '';
@@ -241,6 +318,13 @@
 			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
 				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
 		}));
+		// Move (exclusive feed) / Labels (non-exclusive) — drives membership sync.
+		var threadAlias = null;
+		for (var mi = 0; mi < messages.length; mi++) {
+			if (messages[mi].alias_id != null) { threadAlias = messages[mi].alias_id; break; }
+		}
+		var folderCtl = threadAlias != null ? buildFolderControl(t, threadAlias) : null;
+		if (folderCtl) actions.appendChild(folderCtl);
 		header.appendChild(actions);
 		pane.appendChild(header);
 
@@ -278,6 +362,91 @@
 		b.type = 'button';
 		b.addEventListener('click', onClick);
 		return b;
+	}
+
+	/**
+	 * Build the Move/Labels control for the open thread. Exclusive feeds get a
+	 * single-pick "Move ▾" (choosing a folder relocates the thread); non-exclusive
+	 * feeds (Gmail) get "Labels ▾" with a checkbox per folder (toggling adds/removes
+	 * the label). Each change calls set_membership; two-way sync pushes it upstream.
+	 * Returns null when the mailbox has no tracked folders.
+	 */
+	function buildFolderControl(t, aliasId) {
+		var info = mailboxFolders(aliasId);
+		if (!info.folders.length) return null;
+
+		var wrap = el('div', 'mbx-folder-ctl');
+		var btn = el('button', 'mbx-action', info.exclusive ? 'Move ▾' : 'Labels ▾');
+		btn.type = 'button';
+		var panel = el('div', 'mbx-folder-panel');
+		panel.hidden = true;
+
+		var current = {};
+		(state.threadFolders || []).forEach(function (id) { current[String(id)] = true; });
+
+		info.folders.forEach(function (f) {
+			if (info.exclusive) {
+				var item = el('div', 'mbx-folder-opt' + (current[String(f.id)] ? ' current' : ''), f.name);
+				item.addEventListener('click', function () {
+					apiAction({ action: 'set_membership', threadKey: t.thread_key, aliasId: state.aliasId,
+						folderId: f.id, present: true })
+						.then(function () { panel.hidden = true; closeThread(); refreshMailboxes(); loadThreads(true); });
+				});
+				panel.appendChild(item);
+			} else {
+				var lab = el('label', 'mbx-folder-opt');
+				var cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.checked = !!current[String(f.id)];
+				cb.addEventListener('change', function () {
+					apiAction({ action: 'set_membership', threadKey: t.thread_key, aliasId: state.aliasId,
+						folderId: f.id, present: cb.checked })
+						.then(function () {
+							current[String(f.id)] = cb.checked;
+							refreshMailboxes();
+							if (state.folderId != null) { loadThreads(true); } // a filtered view may change
+						});
+				});
+				lab.appendChild(cb);
+				lab.appendChild(el('span', null, ' ' + f.name));
+				panel.appendChild(lab);
+			}
+		});
+
+		// "New label / New folder" — create locally; the sync push creates it on the
+		// source (CREATE) and files the thread into it.
+		var newRow = el('div', 'mbx-folder-newrow');
+		var input = document.createElement('input');
+		input.type = 'text';
+		input.placeholder = info.exclusive ? 'New folder…' : 'New label…';
+		input.className = 'mbx-folder-newinput';
+		var addBtn = el('button', 'mbx-folder-newbtn', '+');
+		addBtn.type = 'button';
+		var submit = function () {
+			var name = input.value.trim();
+			if (name === '') { input.focus(); return; }
+			addBtn.disabled = true;
+			apiAction({ action: 'create_folder', threadKey: t.thread_key, aliasId: aliasId, name: name })
+				.then(function (resp) {
+					addBtn.disabled = false;
+					if (!resp || !resp.folder) { alert('Could not create the label.'); return; }
+					input.value = '';
+					panel.hidden = true;
+					// Refresh the switcher (new folder in the rail) and re-open the thread
+					// so the control rebuilds with the new label checked.
+					refreshMailboxes().then(function () { openThread(t); });
+				});
+		};
+		addBtn.addEventListener('click', submit);
+		input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+		newRow.appendChild(input);
+		newRow.appendChild(addBtn);
+		panel.appendChild(newRow);
+
+		btn.addEventListener('click', function () { panel.hidden = !panel.hidden; });
+		wrap.appendChild(btn);
+		wrap.appendChild(panel);
+		return wrap;
 	}
 
 	// SPF/DKIM/DMARC verdicts are READ from the message's Authentication-Results

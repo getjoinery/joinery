@@ -30,9 +30,12 @@
 
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_folder_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_folder_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_message_attachment_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
+require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapClient.php'));
 require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
@@ -47,11 +50,18 @@ class ImapIngestor {
 
 	/** @var InboundImapAccount */
 	private $account;
-	/** @var Horde_Imap_Client_Socket|null */
+	/** @var ImapClient|null */
 	private $client = null;
 
-	public function __construct(InboundImapAccount $account) {
+	/**
+	 * @param InboundImapAccount $account
+	 * @param ImapClient|null $client Inject a fake client for testing (the §6.2
+	 *        seam); when null the real Horde-backed client is built lazily on first
+	 *        use and shared with a sibling ImapSyncer via getClient().
+	 */
+	public function __construct(InboundImapAccount $account, ?ImapClient $client = null) {
 		$this->account = $account;
+		$this->client = $client;
 	}
 
 	// ── Connection / auth ──────────────────────────────────────────────────
@@ -61,7 +71,7 @@ class ImapIngestor {
 	 * auth method. Throws ImapIngestorException with a credential-free message on
 	 * any failure (refresh, connect, or login).
 	 */
-	private function client(): Horde_Imap_Client_Socket {
+	private function client(): ImapClient {
 		if ($this->client !== null) {
 			return $this->client;
 		}
@@ -94,8 +104,8 @@ class ImapIngestor {
 		}
 
 		try {
-			$client = new Horde_Imap_Client_Socket($params);
-			$client->login();
+			$socket = new Horde_Imap_Client_Socket($params);
+			$socket->login();
 		} catch (Horde_Imap_Client_Exception $e) {
 			// An OAuth account whose token the server rejects needs reconnection.
 			if ($this->account->isOAuth() && $e->getCode() === Horde_Imap_Client_Exception::LOGIN_AUTHENTICATIONFAILED) {
@@ -107,8 +117,17 @@ class ImapIngestor {
 			throw new ImapIngestorException('IMAP connection failed: ' . $e->getMessage());
 		}
 
-		$this->client = $client;
-		return $client;
+		$this->client = new HordeImapClient($socket);
+		return $this->client;
+	}
+
+	/**
+	 * The shared, logged-in client — forces the connection if not yet open. A
+	 * sibling ImapSyncer calls this so Pull → Ingest → Push run on one connection
+	 * (specs/two_way_imap_sync.md §6.2).
+	 */
+	public function getClient(): ImapClient {
+		return $this->client();
 	}
 
 	/**
@@ -154,6 +173,89 @@ class ImapIngestor {
 		}
 	}
 
+	// ── Capability detection & folder discovery (sync) ─────────────────────
+
+	/**
+	 * Detect and cache the sync-relevant capabilities on the feed: CONDSTORE (the
+	 * sync gate — incremental flag/membership pull; QRESYNC implies it), QRESYNC
+	 * (the fast removal-detection path, VANISHED), and X-GM-EXT-1 (Gmail →
+	 * non-exclusive folders). Gmail advertises CONDSTORE but not QRESYNC, so the two
+	 * are tracked separately. Saves only when a value changed; safe on every connect
+	 * (so the editor can offer sync once CONDSTORE is known).
+	 */
+	public function detectCapabilities(): void {
+		$client = $this->client();
+		$qresync = $client->queryCapability('QRESYNC');
+		$condstore = $qresync || $client->queryCapability('CONDSTORE');
+		$exclusive = !$client->queryCapability('X-GM-EXT-1');
+
+		$changed = false;
+		if ((bool)$this->account->get('iia_supports_condstore') !== $condstore) {
+			$this->account->set('iia_supports_condstore', $condstore);
+			$changed = true;
+		}
+		if ((bool)$this->account->get('iia_supports_qresync') !== $qresync) {
+			$this->account->set('iia_supports_qresync', $qresync);
+			$changed = true;
+		}
+		if ((bool)$this->account->get('iia_folders_exclusive') !== $exclusive) {
+			$this->account->set('iia_folders_exclusive', $exclusive);
+			$changed = true;
+		}
+		if ($changed) {
+			$this->account->save();
+		}
+	}
+
+	/**
+	 * Discover the server's folders via LIST (SPECIAL-USE) and upsert an iif_ row
+	 * per folder, mapping special-use roles. Special-use folders (Sent/Trash/etc.)
+	 * and the coverage \All view are pre-tracked; ordinary folders are created
+	 * untracked so the operator opts them in (§8). Returns the discovered folders.
+	 *
+	 * Idempotent: re-running preserves the operator's per-folder tracking choices
+	 * (InboundImapFolder::upsert never flips iif_is_tracked on an existing row).
+	 *
+	 * @return InboundImapFolder[]
+	 */
+	public function discoverFolders(): array {
+		$client = $this->client();
+		$accountId = intval($this->account->key);
+
+		$list = array();
+		try {
+			$list = $client->listMailboxes('*', Horde_Imap_Client::MBOX_ALL, array(
+				'attributes'  => true,
+				'special_use' => true,
+				'delimiter'   => true,
+			));
+		} catch (Throwable $e) {
+			error_log('ImapIngestor::discoverFolders failed for account ' . $accountId . ': ' . $e->getMessage());
+			return array();
+		}
+
+		$folders = array();
+		foreach ($list as $name => $info) {
+			$mailbox = is_array($info) && isset($info['mailbox']) ? (string)$info['mailbox'] : (string)$name;
+			if ($mailbox === '') { continue; }
+			$attributes = (is_array($info) && isset($info['attributes'])) ? (array)$info['attributes'] : array();
+			// Skip \Noselect containers (e.g. the bare "[Gmail]" parent) — they hold no mail.
+			$lowerAttrs = array_map(function($a){ return strtolower(ltrim((string)$a, '\\')); }, $attributes);
+			if (in_array('noselect', $lowerAttrs, true) || in_array('nonexistent', $lowerAttrs, true)) {
+				continue;
+			}
+			$role = InboundImapFolder::roleFor($attributes, $mailbox);
+			// Pre-track INBOX, the coverage \All view, and the behaviorally
+			// significant special-use folders; leave plain folders for the operator.
+			$preTrack = in_array($role, array(
+				InboundImapFolder::ROLE_INBOX, InboundImapFolder::ROLE_ALL,
+				InboundImapFolder::ROLE_SENT, InboundImapFolder::ROLE_TRASH,
+			), true);
+			$folders[] = InboundImapFolder::upsert($accountId, $mailbox, $role, $preTrack);
+		}
+		return $folders;
+	}
+
 	// ── Setup-check connectivity test ──────────────────────────────────────
 
 	/**
@@ -166,6 +268,9 @@ class ImapIngestor {
 			$folder = $this->account->get('iia_imap_folder') ?: 'INBOX';
 			$status = $client->status($folder, Horde_Imap_Client::STATUS_MESSAGES);
 			$count = intval($status['messages'] ?? 0);
+			// Cache sync capabilities now so the editor can offer Read-only / Two-way
+			// right after a successful Test (specs/two_way_imap_sync.md §6).
+			try { $this->detectCapabilities(); } catch (Throwable $e) { /* non-fatal */ }
 			return array('ok' => true, 'message' => 'Connected. Folder "' . $folder . '" has ' . $count . ' message(s).');
 		} catch (ImapIngestorException $e) {
 			return array('ok' => false, 'message' => $e->getMessage());
@@ -179,8 +284,11 @@ class ImapIngestor {
 	// ── Polling / ingest ───────────────────────────────────────────────────
 
 	/**
-	 * Poll this account once: seed the cursor on first connect / UIDVALIDITY
-	 * change, then ingest up to $maxPerRun new messages (UID > last_seen_uid).
+	 * Ingest new mail for this account once. The cursor and ingest are per-folder
+	 * (iif_ rows), so the same path serves a sync-off feed (the single configured
+	 * folder) and a sync-on feed (every tracked folder, seeding membership). Does
+	 * NOT close the connection — the caller (the poller, or a sibling ImapSyncer's
+	 * Pull → Ingest → Push cycle) owns the lifecycle (§6.2).
 	 *
 	 * Returns ['stored'=>int, 'dedup'=>int, 'seen'=>int, 'status'=>string].
 	 * Throws ImapIngestorException on connect/auth failure (the poller records it).
@@ -190,57 +298,140 @@ class ImapIngestor {
 		$domain = new InboundEmailDomain($alias->get('iea_ied_inbound_email_domain_id'), TRUE);
 		$recipient = strtolower($alias->get_full_address());
 
+		$this->client(); // force connect
+		$this->detectCapabilities();
+
+		if ($this->account->syncEnabled()) {
+			return $this->ingestTrackedFolders($maxPerRun, $alias, $domain, $recipient);
+		}
+
+		// Off feed: the single configured folder only, no membership rows — behavior
+		// is identical to the pre-sync single-folder ingest, just cursored in iif_.
+		$folder = $this->ensureFolderCursor($this->account->get('iia_imap_folder') ?: 'INBOX',
+			InboundImapFolder::ROLE_INBOX);
+		$res = $this->ingestFolder($folder, $maxPerRun, false, $alias, $domain, $recipient);
+		$this->account->recordStatus($res['status']);
+		return $res;
+	}
+
+	/**
+	 * Ingest across every tracked folder of a sync-enabled feed. Membership
+	 * (`imf_`) rows are seeded on tracked, non-coverage folders; a coverage folder
+	 * (`\All`) ingests for storage + flag pull but contributes no membership (§6.1,
+	 * §7.3). One folder's failure never aborts the rest.
+	 */
+	private function ingestTrackedFolders(int $maxPerRun, $alias, $domain, $recipient): array {
+		$tracked = new MultiInboundImapFolder(array(
+			'account_id'     => intval($this->account->key),
+			'tracked'        => true,
+			'pending_create' => false, // not on the server yet — created by push, ingested next cycle
+		), array('iif_inbound_imap_folder_id' => 'ASC'));
+		$tracked->load();
+
+		$folders = array();
+		foreach ($tracked as $row) {
+			$folders[] = new InboundImapFolder($row->key, TRUE);
+		}
+		// A freshly-enabled feed whose folders haven't been discovered yet still
+		// ingests its configured folder so it is never dark before discoverFolders.
+		if (!count($folders)) {
+			$folders[] = $this->ensureFolderCursor($this->account->get('iia_imap_folder') ?: 'INBOX',
+				InboundImapFolder::ROLE_INBOX);
+		}
+
+		$totalStored = 0; $totalDedup = 0; $totalSeen = 0; $parts = array();
+		foreach ($folders as $folder) {
+			try {
+				$res = $this->ingestFolder($folder, $maxPerRun, $folder->isMembership(), $alias, $domain, $recipient);
+				$totalStored += $res['stored']; $totalDedup += $res['dedup']; $totalSeen += $res['seen'];
+				$parts[] = $res['status'];
+			} catch (Throwable $e) {
+				error_log('ImapIngestor: ingest failed for folder ' . $folder->get('iif_name')
+					. ' (account ' . $this->account->key . '): ' . $e->getMessage());
+				$parts[] = $folder->get('iif_name') . ': ERROR';
+			}
+		}
+
+		$statusMsg = 'Ingested ' . count($folders) . ' folder(s): ' . $totalStored . ' stored, '
+			. $totalDedup . ' duplicate. ' . implode(' | ', $parts);
+		$this->account->recordStatus($statusMsg);
+		return array('stored' => $totalStored, 'dedup' => $totalDedup, 'seen' => $totalSeen, 'status' => $statusMsg);
+	}
+
+	/**
+	 * Upsert the iif_ row for $name, migrating the legacy account-level cursor into
+	 * the configured folder's row on first sync-era poll so an existing feed keeps
+	 * its position (the iia_ cursor is never read again afterward).
+	 */
+	private function ensureFolderCursor(string $name, ?string $role = null): InboundImapFolder {
+		$folder = InboundImapFolder::upsert(intval($this->account->key), $name, $role, true);
+
+		$configured = $this->account->get('iia_imap_folder') ?: 'INBOX';
+		if ($folder->get('iif_uidvalidity') === null
+				&& $folder->get('iif_last_seen_uid') === null
+				&& strcasecmp($name, $configured) === 0
+				&& $this->account->get('iia_uidvalidity') !== null) {
+			$folder->set('iif_uidvalidity', intval($this->account->get('iia_uidvalidity')));
+			$folder->set('iif_last_seen_uid', intval($this->account->get('iia_last_seen_uid')));
+			$folder->prepare();
+			$folder->save();
+		}
+		return $folder;
+	}
+
+	/**
+	 * Ingest one folder using its iif_ cursor: seed on first connect / UIDVALIDITY
+	 * change, then ingest up to $maxPerRun new messages (UID > iif_last_seen_uid).
+	 * When $recordMembership, each ingested/deduped message gets an `imf_` row for
+	 * this folder (local = base = true).
+	 */
+	private function ingestFolder(InboundImapFolder $folder, int $maxPerRun, bool $recordMembership,
+			$alias, $domain, $recipient): array {
 		$client = $this->client();
-		$folder = $this->account->get('iia_imap_folder') ?: 'INBOX';
+		$folderName = (string)$folder->get('iif_name');
 
 		$status = $client->status(
-			$folder,
+			$folderName,
 			Horde_Imap_Client::STATUS_UIDVALIDITY | Horde_Imap_Client::STATUS_UIDNEXT
 		);
 		$serverUidValidity = intval($status['uidvalidity'] ?? 0);
 		$uidNext = intval($status['uidnext'] ?? 0);
 		$highUid = $uidNext > 0 ? $uidNext - 1 : 0;
 
-		$storedUidValidity = $this->account->get('iia_uidvalidity');
-		$lastSeenUid = intval($this->account->get('iia_last_seen_uid'));
+		$storedUidValidity = $folder->get('iif_uidvalidity');
+		$lastSeenUid = intval($folder->get('iif_last_seen_uid'));
 
-		// First connect, or the folder was recreated (UIDVALIDITY changed).
-		// "Future only" (default): seed the cursor to the CURRENT high UID so we
-		// ingest only mail arriving after hookup, never the back-catalogue.
-		// "Full history": start the cursor at 0 and fall through to backfill the
-		// whole mailbox in bounded batches over successive fetches.
+		// First connect, or the folder was recreated (UIDVALIDITY changed, §7.6):
+		// clear the sync modseq cursor and re-seed. "Future only" (default) seeds to
+		// the current high UID; "Full history" starts at 0 and backfills in batches.
 		if ($storedUidValidity === null || intval($storedUidValidity) !== $serverUidValidity) {
-			$this->account->set('iia_uidvalidity', $serverUidValidity);
+			$folder->set('iif_uidvalidity', $serverUidValidity);
+			$folder->set('iif_last_sync_modseq', null);
 			if ($this->account->get('iia_import_history')) {
-				$this->account->set('iia_last_seen_uid', 0);
+				$folder->set('iif_last_seen_uid', 0);
 				$lastSeenUid = 0;
 				// fall through to the windowed fetch below
 			} else {
-				$this->account->set('iia_last_seen_uid', $highUid);
-				$reason = ($storedUidValidity === null) ? 'first connect' : 'UIDVALIDITY changed';
-				$this->account->recordStatus('Seeded cursor to UID ' . $highUid . ' (' . $reason . '); 0 ingested.');
-				$this->close();
+				$folder->set('iif_last_seen_uid', $highUid);
+				$folder->prepare();
+				$folder->save();
 				return array('stored' => 0, 'dedup' => 0, 'seen' => 0,
-					'status' => 'Seeded cursor (' . $reason . ')');
+					'status' => $folderName . ': seeded cursor');
 			}
 		}
 
 		// Nothing above the cursor → done.
 		if ($lastSeenUid >= $highUid) {
-			$this->account->set('iia_last_seen_uid', max($lastSeenUid, $highUid));
-			$this->account->recordStatus('No new messages.');
-			$this->close();
-			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'status' => 'No new messages');
+			$folder->set('iif_last_seen_uid', max($lastSeenUid, $highUid));
+			$folder->prepare();
+			$folder->save();
+			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'status' => $folderName . ': no new');
 		}
 
-		// Walk forward one bounded UID window per run (oldest-first). This caps
-		// each fetch — so a full-history backfill of a large mailbox imports in
-		// batches across successive polls rather than one enormous fetch — and
-		// unifies the incremental case (the window is just small). No SEARCH:
-		// Gmail rejects the ESEARCH form Horde emits; a numeric UID FETCH range
-		// avoids it entirely.
+		// Walk forward one bounded UID window per run (oldest-first). A numeric UID
+		// FETCH range (not SEARCH) avoids the ESEARCH form Gmail rejects.
 		$windowEnd = min($highUid, $lastSeenUid + max(1, $maxPerRun));
-		$metaFetch = $this->fetchWindow($client, $folder, $lastSeenUid + 1, $windowEnd);
+		$metaFetch = $this->fetchWindow($client, $folderName, $lastSeenUid + 1, $windowEnd);
 		$uids = array();
 		foreach ($metaFetch->ids() as $uid) {
 			$uid = intval($uid);
@@ -250,9 +441,6 @@ class ImapIngestor {
 
 		$router = new InboundEmailRouter();
 
-		// Claim the whole window up front; back off below the first message that
-		// fails so a transient failure retries next poll, while empty gaps in the
-		// window are still skipped (the cursor advances past them).
 		$stored = 0; $dedup = 0; $seen = 0; $maxUid = $windowEnd;
 		foreach ($uids as $uid) {
 			$seen++;
@@ -260,23 +448,22 @@ class ImapIngestor {
 			if ($data === null) { $maxUid = min($maxUid, $uid - 1); continue; }
 
 			try {
-				$result = $this->ingestOne($client, $folder, $uid, $data, $router, $alias, $domain, $recipient, $serverUidValidity);
+				$result = $this->ingestOne($client, $folder, $uid, $data, $router,
+					$alias, $domain, $recipient, $serverUidValidity, $recordMembership);
 				if ($result['dedup']) { $dedup++; } else { $stored++; }
 			} catch (Throwable $e) {
-				error_log('ImapIngestor: failed to ingest UID ' . $uid . ' for account '
-					. $this->account->key . ': ' . $e->getMessage());
-				// Skip this message but keep going; do NOT advance the cursor past it
-				// so a transient failure retries next poll.
+				error_log('ImapIngestor: failed to ingest UID ' . $uid . ' in ' . $folderName
+					. ' for account ' . $this->account->key . ': ' . $e->getMessage());
 				$maxUid = min($maxUid, $uid - 1);
 			}
 		}
 
-		$this->account->set('iia_last_seen_uid', max($lastSeenUid, $maxUid));
-		$statusMsg = 'Fetched: ' . $stored . ' stored, ' . $dedup . ' duplicate, ' . $seen . ' seen.';
-		$this->account->recordStatus($statusMsg);
-		$this->close();
+		$folder->set('iif_last_seen_uid', max($lastSeenUid, $maxUid));
+		$folder->prepare();
+		$folder->save();
 
-		return array('stored' => $stored, 'dedup' => $dedup, 'seen' => $seen, 'status' => $statusMsg);
+		return array('stored' => $stored, 'dedup' => $dedup, 'seen' => $seen,
+			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup');
 	}
 
 	/**
@@ -287,7 +474,7 @@ class ImapIngestor {
 	 * entirely. A numeric (non-`*`) range also avoids the "N:* always matches the
 	 * highest message" caveat. Missing UIDs in the range simply aren't returned.
 	 */
-	private function fetchWindow(Horde_Imap_Client_Socket $client, string $folder, int $startUid, int $endUid) {
+	private function fetchWindow(ImapClient $client, string $folder, int $startUid, int $endUid) {
 		$query = new Horde_Imap_Client_Fetch_Query();
 		$query->structure();
 		$query->envelope();
@@ -301,10 +488,15 @@ class ImapIngestor {
 	/**
 	 * Extract + store one message and its attachment manifest. Returns
 	 * ['dedup'=>bool]. Idempotent: dedup (UNIQUE message-id+recipient) means the
-	 * row already exists, so the manifest is not rewritten.
+	 * row already exists, so the manifest is not rewritten. When $recordMembership,
+	 * an `imf_` membership row for ($folder) is attached (local = base = true) on
+	 * both the new-row and dedup paths — the dedup path is where a message already
+	 * stored from another folder gains its second-folder membership (§7.3).
 	 */
-	private function ingestOne($client, $folder, $uid, $data, InboundEmailRouter $router,
-			$alias, $domain, $recipient, $serverUidValidity): array {
+	private function ingestOne($client, InboundImapFolder $folder, $uid, $data, InboundEmailRouter $router,
+			$alias, $domain, $recipient, $serverUidValidity, bool $recordMembership = false): array {
+
+		$folderName = (string)$folder->get('iif_name');
 
 		$structure = $data->getStructure();
 		$envelope = $data->getEnvelope();
@@ -326,8 +518,8 @@ class ImapIngestor {
 		}
 
 		// Fetch only the chosen text parts (decoded), never the attachments.
-		$plain = $bodyPlainId !== null ? $this->fetchTextPart($client, $folder, $uid, $structure, $bodyPlainId) : '';
-		$html  = $bodyHtmlId  !== null ? $this->fetchTextPart($client, $folder, $uid, $structure, $bodyHtmlId)  : '';
+		$plain = $bodyPlainId !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyPlainId) : '';
+		$html  = $bodyHtmlId  !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyHtmlId)  : '';
 
 		// Generous ceiling: truncate-and-mark rather than skip.
 		if (strlen($plain) + strlen($html) > self::TEXT_BODY_CEILING) {
@@ -355,18 +547,147 @@ class ImapIngestor {
 			'imap_account_id' => intval($this->account->key),
 			'imap_uid' => intval($uid),
 			'imap_uidvalidity' => intval($serverUidValidity),
-			'imap_folder' => $folder,
+			'imap_folder' => $folderName,
 		);
+
+		// §9 Sent dedup: a message in the Sent folder may be one Joinery already
+		// stored as a local outbound row (or a provider-filed copy of it). Its
+		// recipient differs from the alias, so the (Message-ID, recipient) unique
+		// key won't fire — dedup by Message-ID alone against the alias's rows. On a
+		// hit, adopt the locator (so attachments stay fetchable) and attach Sent
+		// membership; no new row.
+		if ((string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT) {
+			$existingId = $this->aliasMessageIdByMessageId($alias, (string)$envelope->message_id);
+			if ($existingId > 0) {
+				$this->adoptLocatorIfMissing($existingId, intval($uid), intval($serverUidValidity), $folderName);
+				if ($recordMembership) {
+					InboundMessageFolder::setPresence($existingId, intval($folder->key), true, true,
+						intval($uid), intval($serverUidValidity));
+				}
+				return array('dedup' => true, 'message_id' => $existingId);
+			}
+		}
 
 		$auth = array('dkim' => 'unverified', 'spf' => 'unverified', 'dmarc' => 'unverified', 'source' => 'none');
 		$result = $router->storeExtracted($msg, $alias, $domain, $recipient, $auth);
 
-		// Write the manifest only for a freshly-stored row (dedup ⇒ already has one).
+		// Resolve the stored message id: the freshly-saved row, or — on a dedup hit
+		// (already stored from another folder) — the existing row by the same
+		// (Message-ID, recipient) dedup key.
+		$messageId = 0;
 		if (!$result['dedup'] && $result['message'] !== null) {
-			$this->writeManifest($result['message']->key, $attachParts);
+			$messageId = intval($result['message']->key);
+			// Write the manifest only for a freshly-stored row (dedup ⇒ already has one).
+			$this->writeManifest($messageId, $attachParts);
+			// A brand-new Sent-folder message is mail the user sent — mark it outbound
+			// so the reader renders it as a sent message (native-client or Gmail
+			// no-local-row path, §9).
+			if ((string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT) {
+				$this->markDirectionOutbound($messageId);
+			}
+		} elseif ($result['dedup']) {
+			$messageId = $this->existingMessageId((string)$envelope->message_id, $recipient);
 		}
 
-		return array('dedup' => (bool)$result['dedup']);
+		// Attach this folder's membership (local = base = true). On the dedup path
+		// this is where a message stored from another folder gains a second
+		// membership; the new-row path seeds the first.
+		if ($recordMembership && $messageId > 0) {
+			InboundMessageFolder::setPresence($messageId, intval($folder->key), true, true,
+				intval($uid), intval($serverUidValidity));
+		}
+
+		return array('dedup' => (bool)$result['dedup'], 'message_id' => $messageId);
+	}
+
+	/** The id of an already-stored row by its (Message-ID, recipient) dedup key, or 0. */
+	private function existingMessageId(string $messageIdHeader, string $recipient): int {
+		$messageIdHeader = trim($messageIdHeader);
+		if ($messageIdHeader === '') {
+			return 0;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+			 WHERE iem_message_id_header = ? AND iem_recipient = ? LIMIT 1');
+		$stmt->execute(array(substr($messageIdHeader, 0, 255), $recipient));
+		$id = $stmt->fetchColumn();
+		return $id ? intval($id) : 0;
+	}
+
+	/** §9: any row in this alias's mailbox with the given Message-ID (any direction/recipient), or 0. */
+	private function aliasMessageIdByMessageId(InboundEmailAlias $alias, string $messageIdHeader): int {
+		$messageIdHeader = trim($messageIdHeader);
+		if ($messageIdHeader === '' || !$alias->key) {
+			return 0;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+			 WHERE iem_iea_inbound_email_alias_id = ? AND iem_message_id_header = ?
+			   AND iem_delete_time IS NULL LIMIT 1');
+		$stmt->execute(array(intval($alias->key), substr($messageIdHeader, 0, 255)));
+		$id = $stmt->fetchColumn();
+		return $id ? intval($id) : 0;
+	}
+
+	/** Adopt the IMAP locator on a row that has none (e.g. a local outbound row), so its parts become fetchable. */
+	private function adoptLocatorIfMissing(int $messageId, int $uid, int $uidvalidity, string $folderName): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'UPDATE iem_inbound_email_messages
+			 SET iem_iia_inbound_imap_account_id = ?, iem_imap_uid = ?, iem_imap_uidvalidity = ?, iem_imap_folder = ?
+			 WHERE iem_inbound_email_message_id = ? AND iem_iia_inbound_imap_account_id IS NULL');
+		$stmt->execute(array(intval($this->account->key), $uid, $uidvalidity, $folderName, $messageId));
+	}
+
+	/** Mark a row as outbound (a Sent-folder message the user sent). */
+	private function markDirectionOutbound(int $messageId): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"UPDATE iem_inbound_email_messages SET iem_direction = 'outbound'
+			 WHERE iem_inbound_email_message_id = ?");
+		$stmt->execute(array($messageId));
+	}
+
+	/**
+	 * APPEND a sent copy (raw RFC822 MIME) into the source Sent folder with \Seen,
+	 * for feeds whose SMTP does not auto-file (filesSent=false, §9). The connection
+	 * lifecycle is the caller's. Returns ['ok'=>bool, 'message'=>string].
+	 */
+	public function appendToSent(string $rawMime): array {
+		try {
+			$client = $this->client();
+			$sent = $this->resolveSentFolderName();
+			if ($sent === null) {
+				return array('ok' => false, 'message' => 'No Sent folder could be resolved on the source mailbox.');
+			}
+			$client->append($sent, array(array('data' => $rawMime, 'flags' => array('\\Seen'))));
+			return array('ok' => true, 'message' => 'Filed a copy in ' . $sent . '.');
+		} catch (ImapIngestorException $e) {
+			return array('ok' => false, 'message' => $e->getMessage());
+		} catch (Throwable $e) {
+			error_log('ImapIngestor::appendToSent failed for account ' . $this->account->key . ': ' . $e->getMessage());
+			return array('ok' => false, 'message' => 'Could not file the sent copy in the source Sent folder.');
+		}
+	}
+
+	/** The Sent folder's name (iif_ role=sent), discovering folders once if needed, else null. */
+	private function resolveSentFolderName(): ?string {
+		$rows = new MultiInboundImapFolder(array(
+			'account_id' => intval($this->account->key),
+			'role'       => InboundImapFolder::ROLE_SENT,
+		));
+		$rows->load();
+		if (!count($rows)) {
+			$this->discoverFolders();
+			$rows = new MultiInboundImapFolder(array(
+				'account_id' => intval($this->account->key),
+				'role'       => InboundImapFolder::ROLE_SENT,
+			));
+			$rows->load();
+		}
+		return count($rows) ? (string)$rows->get(0)->get('iif_name') : null;
 	}
 
 	/** Persist one ima_ row per non-text part (metadata only, no bytes). */
@@ -547,7 +868,14 @@ class ImapIngestor {
 		$current = null;
 		foreach (explode("\n", $normalized) as $line) {
 			if (preg_match('/^\s+/', $line) && $current !== null) {
-				$headers[$current] .= ' ' . trim($line);
+				// Folded continuation: append to the current value, or to the last
+				// occurrence when the header repeated (value is an array).
+				if (is_array($headers[$current])) {
+					$last = count($headers[$current]) - 1;
+					$headers[$current][$last] .= ' ' . trim($line);
+				} else {
+					$headers[$current] .= ' ' . trim($line);
+				}
 			} elseif (preg_match('/^([^:]+):\s*(.*)$/', $line, $m)) {
 				$current = strtolower(trim($m[1]));
 				if (isset($headers[$current])) {

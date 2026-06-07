@@ -132,6 +132,35 @@ $formwriter->numberinput('iia_poll_interval_seconds', 'Fetch interval (seconds)'
 
 $formwriter->checkboxinput('iia_is_enabled', 'Enabled', array());
 
+// Sync (specs/two_way_imap_sync.md §8). Read-only / Two-way appear only on a
+// CONDSTORE feed; the deletes + compose gates reveal via visibility_rules when sync
+// is on. Guided controls only — no explainer prose.
+$formwriter->dropinput('iia_sync_mode', 'Sync', array(
+	'options' => $sync_options,
+	'value' => $account->get('iia_sync_mode') ?: 'off',
+	'visibility_rules' => $sync_visibility,
+	'helptext' => $sync_supported
+		? 'Off: one-time import. Read-only: Joinery follows the source. Two-way: changes sync both ways.'
+		: 'This server does not advertise CONDSTORE, so only one-time import is available. Run Test to re-check.',
+));
+$formwriter->checkboxinput('iia_sync_deletes', 'Also sync deletions', array(
+	'helptext' => 'Deleting here moves the source message to Trash; a deletion in the source removes it here.',
+));
+$formwriter->checkboxinput('iia_show_compose', 'Enable compose / Sent sync', array(
+	'helptext' => 'Show reply/forward in the reader and file sent copies into the source Sent folder.',
+));
+
+// Tracked folders (membership). The \All coverage view is tracked silently and is
+// not in this list. Appears once folders are discovered (after a Test or poll).
+if (!empty($folder_options)) {
+	$formwriter->hiddeninput('_folders_present', '', array('value' => '1'));
+	$formwriter->checkboxList('tracked_folders', 'Tracked folders', array(
+		'options' => $folder_options,
+		'checked' => $tracked_folder_ids,
+		'helptext' => 'Folders synced when sync is on. Special-use folders (Inbox, Sent, Trash) are pre-selected.',
+	));
+}
+
 // Combined mode folds the mailbox's access grants into this one editor.
 if ($combined && !empty($user_options)) {
 	$formwriter->checkboxList('users_with_access', 'Users with access', array(

@@ -318,6 +318,23 @@ function _setup_imap_receiving_rows(?InboundImapAccount $imap): array {
 			'Enable it from the Accounts tab to resume pulling mail.', $accounts_link);
 	}
 
+	// Sync mode (specs/two_way_imap_sync.md §8): report Off / Read-only / Two-way
+	// and the CONDSTORE requirement so the operator sees why sync may be unavailable.
+	$modeLabels = array(
+		InboundImapAccount::SYNC_OFF  => 'Off (one-time import)',
+		InboundImapAccount::SYNC_PULL => 'Read-only (follow the source)',
+		InboundImapAccount::SYNC_BOTH => 'Two-way (full sync)',
+	);
+	$mode = $imap->syncMode();
+	if ($mode === InboundImapAccount::SYNC_OFF) {
+		$summary = $imap->supportsCondstore()
+			? 'Sync is off; this feed does a one-time import only.'
+			: 'Sync is off. This server does not advertise CONDSTORE, so only one-time import is available.';
+		$out[] = $row(InboundEmailSetupCheck::INFO, 'Sync', $summary);
+	} else {
+		$out[] = $row(InboundEmailSetupCheck::PASS, 'Sync', $modeLabels[$mode]);
+	}
+
 	$last = trim((string)$imap->get('iia_last_status'));
 	if ($last !== '') {
 		$out[] = $row(InboundEmailSetupCheck::INFO, 'Last fetch', $last);

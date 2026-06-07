@@ -2,7 +2,8 @@
 /**
  * Mailbox Reader AJAX — state mutations.
  *
- * POST, CSRF-protected. action ∈ {mark_read, mark_unread, star, unstar, delete}.
+ * POST, CSRF-protected. action ∈ {mark_read, mark_unread, star, unstar, delete,
+ * set_membership, create_folder}.
  * Targets are either ids[] (message ids) OR a thread_key (expanded server-side
  * via messageIdsInThread, optionally narrowed by alias_id). Every mutation
  * re-checks scope in SQL, so a crafted id/thread for an un-granted mailbox
@@ -76,6 +77,26 @@ switch ($action) {
 	case 'delete':
 		$count = $service->softDelete($ids);
 		break;
+	case 'set_membership':
+		// Move / labels: add or remove a folder membership for the thread's messages.
+		// Two-way sync then pushes it to the source (COPY / MOVE / EXPUNGE).
+		$folder_id = intval($_POST['folder_id'] ?? 0);
+		$present = !empty($_POST['present']) && $_POST['present'] !== '0';
+		$count = $service->setMembership($ids, $folder_id, $present);
+		break;
+	case 'create_folder':
+		// Create a label/folder locally and apply it to the thread. The folder is
+		// created on the source during the next sync push (its pending flag), then
+		// the membership COPYs into it. Returns the new folder so the UI updates.
+		$folder = $service->createFolder(intval($alias_id ?? 0), (string)($_POST['name'] ?? ''));
+		if ($folder === null) {
+			http_response_code(400);
+			echo json_encode(array('error' => 'create_failed'));
+			exit();
+		}
+		$count = $service->setMembership($ids, intval($folder['id']), true);
+		echo json_encode(array('folder' => $folder, 'count' => $count));
+		exit();
 	default:
 		http_response_code(400);
 		echo json_encode(array('error' => 'unknown_action'));
