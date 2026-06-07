@@ -25,8 +25,9 @@ back-and-forth conversation.
 
 ## 2. Non-Goals
 
-- **Not a full webmail client.** No folder management, no scheduled send, no signatures/templates
-  in v1 (the platform's email-template system is separate).
+- **Not a full webmail client.** This spec adds no folder management, scheduled send, or
+  signatures/templates in v1 (the platform's email-template system is separate). Folder/label
+  navigation and Sent ingestion are owned by `two_way_imap_sync.md`, not built here.
 - **No compose-from-scratch.** v1 is reply / reply-all / forward *from an existing thread*; a blank
   "New message" composer is later.
 - **No transport/provider design here.** Identity and transport are defined in the Outbound Email
@@ -93,18 +94,18 @@ conversation, not just inbound halves.
   outbound rows carry distinct Message-IDs.)
 - **Reader rendering:** `mailbox_thread.php` returns `direction`; the JS styles outbound messages
   distinctly (labeled "Sent" / aligned) so a thread reads as a dialog.
-- **The local outbound row is the source of truth for sent mail** — the reader renders the
-  conversation from these rows, not from any pulled-back copy. No Message-ID coordination with the
-  provider is required.
-- **No pulled-back duplicate in the normal case.** Ingestion polls one folder, default `INBOX`
-  (`iia_imap_folder ?: 'INBOX'`); Gmail/M365 file sent mail in `[Gmail]/Sent` / All Mail, *not*
-  `INBOX`, so a sent copy is never re-ingested and there is nothing to dedup. v1 deliberately scopes
-  ingestion to a non-sent folder so this holds.
-- **Edge case — a feed deliberately polling a sent-bearing folder** (All Mail): on ingest, before
-  creating an inbound row, skip messages whose `iem_message_id_header` already matches an outbound row
-  for the same account. This is **best-effort, not a correctness guarantee** — Gmail rewrites the
-  `Message-ID` server-side on send, so the stored value may not match the re-ingested copy. Robust
-  structural own-send detection is out of scope for v1; document the limitation.
+- **The local outbound row is created immediately on send** and is the reader's record from that
+  moment — the conversation renders from it without waiting for a poll.
+- **Reconciliation with the ingested Sent copy.** When two-way sync (`two_way_imap_sync.md`) tracks the
+  Sent folder, the same message is later observed there — filed by the provider (Gmail/M365 auto-save)
+  or `APPEND`-ed by Joinery on a non-auto-filing provider. Ingestion **does not create a second row:**
+  it matches the sent copy to the existing outbound row by `iem_gm_msgid` (Gmail, server-stable) or
+  `iem_message_id_header` (elsewhere), backfills the IMAP locator, and adds an `imf_` membership in the
+  Sent folder so the outbound row becomes reference-backed and shows under Sent in folder navigation.
+- **Dedup is reliable, not best-effort.** `iem_gm_msgid` is server-assigned and stable, so the case
+  that was previously unsolvable — Gmail rewriting `Message-ID` server-side on send — now reconciles
+  cleanly. The APPEND path is reliable by construction (Joinery sets the Message-ID it later matches).
+  The own-send identity is the `(account, gm_msgid|message_id)` match; no separate heuristic is needed.
 
 ## 7. Forward Specifics
 
@@ -160,12 +161,23 @@ All via `$field_specifications` + `update_database`.
 
 ## 11. Relationship to Two-Way Sync
 
-Complementary, with one overlap: for IMAP-source mailboxes, sending through the feed's own SMTP makes
-the provider file the Sent copy in Sent/All Mail automatically — so no IMAP `APPEND` is needed to keep
-the source's Sent folder correct. Note this filed copy does **not** flow back into the reader: v1
-ingests `INBOX` only, so the Sent copy is not re-ingested and the local outbound row (§6) remains the
-reader's record. For hosted mailboxes there is no source mailbox to file into. The specs share the
-OAuth-token reuse and `iia_needs_reauth` health model and can ship independently.
+Two-way sync (`two_way_imap_sync.md`) tracks the **Sent folder**, so a Joinery-composed message lands
+in the source's Sent and flows back into the reader. The two specs interlock as follows:
+
+- **Getting the copy into Sent.** For an IMAP-source mailbox the reader sends through the feed's own
+  SMTP (`resolveOutboundTransport`, §9). Gmail/M365 SMTP auto-file the Sent copy, so nothing more is
+  needed. On a provider that does **not** auto-file (self-hosted Postfix+Dovecot; `PRESETS`
+  `smtp_files_sent = false`), the sync layer `APPEND`s the sent copy to Sent — gated so the copy is
+  filed **exactly once** (never both auto-filed and APPEND-ed). For hosted mailboxes there is no source
+  mailbox to file into; the local outbound row stands alone.
+- **No duplicate on the way back.** When sync ingests the Sent folder, it reconciles the copy to the
+  outbound row created at send (§6) by `iem_gm_msgid` / `iem_message_id_header` rather than creating a
+  new row.
+- **Shared health.** Both specs reuse the OAuth-token grant and the `iia_needs_reauth` model.
+
+The specs can still ship independently: until Sent is tracked, the local outbound row is the sole
+record and nothing is ingested back; once it is, reconciliation activates with no change to this spec's
+send path.
 
 ## 12. Testing
 
@@ -173,9 +185,10 @@ OAuth-token reuse and `iia_needs_reauth` health model and can ship independently
   subject normalization.
 - Outbound storage: row stored with `iem_direction='outbound'`, grouped by thread_key; reader renders
   it as the sent half of the dialog from the local row.
-- INBOX-only ingestion: a sent copy filed in `[Gmail]/Sent` is not re-ingested (no duplicate). For a
-  feed polling a sent-bearing folder, the best-effort own-send skip suppresses a matching Message-ID
-  (and is documented as best-effort).
+- Sent reconciliation: a sent copy observed in the Sent folder (provider-filed or APPEND-ed)
+  reconciles to the outbound row by `iem_gm_msgid` / `iem_message_id_header` — one row, not two — and
+  gains an `imf_` Sent membership. Gmail's server-side `Message-ID` rewrite still reconciles via
+  `iem_gm_msgid`.
 - Scope: a user without a grant to the mailbox cannot send as it.
 - Forward: reference-backed original attachments fetched and attached.
 - Failure: send error → not marked sent; OAuth expiry → needs_reauth.
@@ -186,8 +199,9 @@ OAuth-token reuse and `iia_needs_reauth` health model and can ship independently
 
 1. Reply / Reply-All for **hosted** mailboxes (platform provider, our DKIM).
 2. Outbound storage + reader dialog rendering (`iem_direction`).
-3. IMAP-source send (depends on the Outbound Email spec's per-mailbox transport). No dedup work in the
-   normal INBOX-only case; best-effort own-send skip only if a sent-bearing folder is polled.
+3. IMAP-source send (depends on the Outbound Email spec's per-mailbox transport). Sent-copy
+   reconciliation (§6) activates when `two_way_imap_sync.md` tracks the Sent folder; until then the
+   local outbound row stands alone.
 4. Forward (inline original + reference-backed attachment re-attach).
 5. Compose attachments (uploads).
 

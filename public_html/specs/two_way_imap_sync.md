@@ -3,298 +3,362 @@
 **Status:** Proposed (awaiting implementation)
 **Scope:** `inbound_email` plugin — IMAP-source feeds only
 **Related docs:** `plugins/inbound_email/docs/overview.md` (Setup, IMAP feeds, reference-backed storage)
+**Related specs:** `outbound_reply_forward.md`, `connected_account_email.md` (Sent / APPEND-on-send)
 
 ---
 
 ## 1. Problem & Goal
 
 The IMAP integration is **one-way (read-only pull)** today. `ImapIngestor` only calls
-`login`, `status`, `search`, `fetch` (all with `BODY.PEEK`), and `logout`; it never
-issues `STORE`, `EXPUNGE`, `APPEND`, or `COPY`. Message state — read/unread, starred,
-deleted — lives entirely in Joinery's `iem_` rows (`iem_is_read`, `iem_is_starred`,
-`iem_delete_time`) via `MailboxService`, and never propagates to the source mailbox.
-Likewise, a change made in the source mailbox (e.g. reading or deleting a message in
-Gmail) is never reflected back into Joinery.
+`login`, `status`, `search`, `fetch` (all with `BODY.PEEK`), and `logout`; it never issues
+`STORE`, `EXPUNGE`, `APPEND`, `COPY`, or `MOVE`. Message state — read/unread, starred, deleted,
+and which folder/label a message carries — lives entirely in Joinery's `iem_` rows and never
+propagates to the source mailbox, nor does a change made in the source mailbox return to Joinery.
 
-**Goal:** let an operator opt a feed into keeping the source mailbox and the Joinery
-reader in agreement for a defined set of state dimensions, in one or both directions,
-without changing behavior for feeds that don't opt in.
+**Goal:** keep the source mailbox and the Joinery reader in agreement across every state a
+mailbox row can carry — read/star flags, **folder/label membership**, and deletion — in one or
+both directions, for feeds that opt in, without changing behavior for feeds that don't.
 
-This is a **platform-level** capability of the IMAP provider, expressed in standard IMAP
-flags — not a Gmail-specific feature. Gmail is one instance.
+This is a **platform-level** capability of the IMAP provider, expressed in standard IMAP flags,
+folders, and (where available) labels — not a Gmail-specific feature. Gmail is one instance.
+
+### 1.1 Product framing — A is a runtime subset of B
+
+Two product shapes exist for the reader: **"Joinery reads your mail"** (a clean INBOX reader —
+flags, maybe deletes, no folder navigation, no compose) and **"Joinery is your mail client"**
+(full webmail — folders, Sent, compose). These are **not two builds.** The mail-client shape is
+the superset; the reader shape is that same system *configured down* — `iia_sync_mode` plus a
+"show compose" flag plus a folder set of `{INBOX}`. There is one codebase and one data model; the
+operator's choice of how much of it to use is configuration, never an architectural fork. This
+spec designs the superset.
 
 ## 2. Non-Goals
 
-- **No new OAuth scope / re-consent.** The granted scopes (`https://mail.google.com/`,
-  Microsoft `IMAP.AccessAsUser.All offline_access`) already permit IMAP writes; password
-  feeds (Yahoo/iCloud/Fastmail/generic) likewise have full access. Sync is purely
-  additive on the existing connection.
-- **Single folder, no folder/label sync.** Sync operates only on the feed's one configured folder
-  (`iia_imap_folder`, default `INBOX`) — the same folder ingestion polls. v1 syncs *flags* (and
-  optionally deletion) within that folder, not Gmail labels, IMAP folder moves, multiple folders, or
-  arbitrary categorization. See the multi-folder note below.
-- **No applicability to non-IMAP inbound.** Webhook (Mailgun/SendGrid/SES) and Postfix
-  domains have no upstream mailbox to sync with; this feature is inert for them.
-- **No real-time push.** Sync rides the existing poll cadence (`PollImapAccounts`); IMAP
-  IDLE / push notifications are out of scope.
+- **No new OAuth scope / re-consent.** The granted scopes (`https://mail.google.com/`, Microsoft
+  `IMAP.AccessAsUser.All offline_access`) already permit IMAP reads *and writes* — `STORE`,
+  `COPY`/`MOVE`, `APPEND`, `EXPUNGE`. Password feeds (Yahoo/iCloud/Fastmail/generic) have full
+  access likewise. Sync is purely additive on the existing connection.
+- **No applicability to non-IMAP inbound.** Webhook (Mailgun/SendGrid/SES) and Postfix domains
+  have no upstream mailbox to sync with; this feature is inert for them.
+- **No real-time push.** Sync rides the existing poll cadence (`PollImapAccounts`); IMAP IDLE /
+  push notifications are out of scope.
+- **Compose UI and send transport are specced elsewhere.** This spec owns *ingesting* the Sent
+  folder and *APPEND*-ing a sent copy back to the source; the reader compose UI is
+  `outbound_reply_forward.md` and the send identity/transport is `connected_account_email.md`.
+  This spec consumes `resolveOutboundTransport(mailbox)` and does not re-decide it (§9).
 
-**Future — multiple folders (own spec, not small).** The single-folder model is baked into the data
-layer, so multi-folder is a sizeable follow-on, not an add-on here. It would involve: (1) a per-folder
-sub-entity (`iif_inbound_imap_folder`) since UIDVALIDITY and MODSEQ are per-folder — the
-`iia_uidvalidity` / `iia_last_sync_modseq` / `iia_last_sync_time` state moves there; (2) a folder
-dimension on `iem_` rows (UIDs are unique only within `(folder, UIDVALIDITY)`), included in the dedup
-constraint; (3) **cross-folder Message-ID dedup** — Gmail folders are labels, so the same message
-appears in INBOX *and* All Mail *and* each label as distinct UIDs; (4) folder discovery (`LIST`) +
-selection UI with provider special-folder names in `PRESETS`; (5) ingestor/syncer iterating folders
-per feed with per-folder cursors and shared per-run caps; (6) a reader folder-navigation dimension
-(which also revives the spec 2 sent-copy concern once Sent is ingested). Deliberately deferred.
+## 3. State Dimensions
 
-## 3. State Dimensions (decide once, up front)
+Every state a mailbox row can carry, and its IMAP counterpart:
 
-Every state dimension a mailbox row can carry, and its IMAP counterpart:
+| Joinery state            | IMAP counterpart                              | Conflict shape | In v1 |
+|--------------------------|-----------------------------------------------|----------------|-------|
+| `iem_is_read`            | `\Seen` system flag                           | scalar boolean | Synced |
+| `iem_is_starred`         | `\Flagged` system flag (= Gmail star)         | scalar boolean | Synced |
+| folder/label membership  | label set (`X-GM-LABELS`) or folder location  | **set / scalar** (§7) | Synced |
+| deletion                 | move to Trash (`\Deleted` only when no Trash) | destructive    | Synced |
+| sent copy (compose)      | `APPEND` to Sent                              | one-way out    | Synced (§9) |
 
-| Joinery state            | IMAP counterpart                          | Sync risk | Default in v1 |
-|--------------------------|-------------------------------------------|-----------|---------------|
-| `iem_is_read`            | `\Seen` system flag                       | Safe (reversible) | Synced |
-| `iem_is_starred`         | `\Flagged` system flag (= Gmail star)     | Safe (reversible) | Synced |
-| `iem_delete_time` (soft) | Move to Trash, or `\Deleted` + `EXPUNGE`  | **Destructive** | **Deferred (§4.1)** |
-| (none — replies/compose) | `APPEND` to Sent, drafts                  | Out of scope | n/a |
-
-Flags are the safe core and the scope of this spec. Deletion is destructive and asymmetric
-(soft-delete here vs. permanent removal there) and is **deferred** (§4.1); when built it is a distinct
-opt-in defaulting to move-to-Trash, never raw `EXPUNGE`, unless explicitly configured.
+Flags are scalar booleans. **Membership** is the dimension that does not reduce to a boolean and
+drives the reconciliation design in §7. Deletion is destructive and asymmetric (soft-delete here
+vs. move-to-Trash there) and is gated by its own toggle, defaulting to move-to-Trash, never raw
+`EXPUNGE` unless explicitly configured.
 
 ## 4. Sync Levels & Directions
 
-Sync is configured **per feed** (`InboundImapAccount`) and is **off by default**, so existing feeds
-are unaffected. The capability is an escalating ladder; the operator picks one level per feed:
+Sync is configured **per feed** (`InboundImapAccount`) and is **off by default**, so existing
+feeds are unaffected. The operator picks one level per feed:
 
 | Level | `iia_sync_mode` | Direction | Writes to source? | Needs CONDSTORE? | What it gives |
 |---|---|---|---|---|---|
-| **0 — None** | `off` | — | No | No | Default. Mail is ingested once; the source is never touched again and local read/star/delete stay local. |
-| **1 — Read-only mirror** | `pull` | source → Joinery | No (source untouched) | Yes | Joinery *follows* the source: read/star in Gmail → shown in Joinery. Joinery actions do not propagate. |
-| **2 — Push** | `push` | Joinery → source | Yes | No | The source *follows* Joinery: act in the reader → reflected in the source. Source-side changes do not return. |
-| **3 — Two-way (INBOX)** | `both` | bidirectional | Yes | Yes | Full reconciliation on the INBOX with the local-wins conflict rule (§7). |
+| **0 — None** | `off` | — | No | No | Default. Mail is ingested once; the source is never touched again and local state stays local. |
+| **1 — Mirror** | `pull` | source → Joinery | No | Yes | Joinery *follows* the source: read/star/move/delete in the native client → reflected in Joinery. |
+| **2 — Push** | `push` | Joinery → source | Yes | No | The source *follows* Joinery: act in the reader → reflected in the source. |
+| **3 — Two-way** | `both` | bidirectional | Yes | Yes | Full reconciliation across all tracked folders, with the §7 rules. |
 
-Flags sync as a pair — read (`\Seen`) and star (`\Flagged`) move together; there is no separate
-"read but not star" switch. **Pull and Both require CONDSTORE** (§6); on a non-CONDSTORE server only
-`off` and `push` are selectable. Setting: `iia_sync_mode` ∈ `{off, push, pull, both}` (default `off`).
+`iia_sync_deletes` (bool, default `false`) gates the deletion dimension independently of mode: when
+off, local soft-deletes never touch the source and remote deletions are not pulled. `iia_show_compose`
+(bool, default `false`) surfaces the reader's reply/forward/compose affordances (the compose feature
+itself is `outbound_reply_forward.md`); when on and the feed is IMAP-backed, sent copies are
+APPEND-ed to Sent (§9).
 
-**Scope of this spec: Levels 0–3, flags only.** The destructive **deletions** dimension
-(`iia_sync_deletes`) and **Level 4 (all folders)** are deferred — see §4.1.
-
-**Directions in detail:**
-- **Push (local → remote):** a reader flag action (`markRead`, `setStarred`) propagates to the source
-  mailbox's flags on the next sync pass.
-- **Pull (remote → local):** a flag change made in the source mailbox is reflected into the `iem_` row
-  on the next poll.
-- **Both:** push and pull, with the conflict rule in §7.
-
-### 4.1 Deferred Scope & Rationale (read this before extending)
-
-Two capabilities are intentionally *out* of this spec. The reasoning is recorded here so a future
-reader doesn't assume they were forgotten or re-litigate the decision:
-
-- **Deletion sync (`iia_sync_deletes`).** Deferred — it is a step-change in cost *and* risk for
-  marginal benefit. It is destructive and asymmetric (soft-delete here vs. move-to-Trash / permanent
-  removal there); pull-side deletion needs the separate QRESYNC/`VANISHED` machinery; and on Gmail
-  "archive" (remove from INBOX) is indistinguishable from delete at the IMAP layer, so it would mark
-  archived mail as deleted. Pre-launch that is a poor trade. It is cleanly additive later — the toggle,
-  the Trash-target columns, and the delete code drop onto the finished flags path without reworking it.
-  (Its mechanics are still described in §5–§11 as reference for when it is built.)
-- **Level 4 — all folders.** Deferred — the single-folder assumption is baked into the data layer, so
-  multi-folder is a sizeable separate effort (per-folder UIDVALIDITY/MODSEQ entity, a folder dimension
-  on `iem_` rows, cross-folder Message-ID dedup for Gmail labels, folder discovery + selection UI,
-  per-folder loop cursors, and a reader folder-navigation UX). See the multi-folder note in §2.
-
-**Why the line sits exactly here (cost/benefit).** Most of the cost is standing up `ImapSyncer` at all
-(columns, `MailboxService` hooks, poll integration, UI); once that exists, two-way flags is the
-coherent payoff, because one-way leaves the other view stale — push-only would show reads done in the
-native client as unread, which is more confusing than no sync. The hard correctness design (conflict
-carve-out, loop avoidance, §7) is already done, so Levels 1–3 bank that work. Deletions and all-folders
-are where cost and risk jump disproportionately, so they are the natural deferral. Note the whole
-feature's value is **conditional on dual-client use** (the operator also using their native mail app
-on the same mailbox); if Joinery is the sole client even Level 3 adds little — which is why sync is
-off by default and low priority.
+**Pull and Both require CONDSTORE** (§6); on a non-CONDSTORE server only `off` and `push` are
+selectable. Flags and membership sync together — there is no per-dimension on/off beyond the
+deletes gate.
 
 ## 5. Data Model Changes
 
-All via `$field_specifications` + `update_database` (no migrations for schema).
+All via `$field_specifications` + `update_database` (no migrations for schema). The single-folder
+assumption in the current data layer is removed: per-folder cursor state moves out of the account
+row into a per-folder entity, and membership becomes a first-class many-to-many relation.
 
 **`iia_inbound_imap_account` (feed):**
 - `iia_sync_mode` `varchar(10)` default `'off'` not null — `off|push|pull|both`.
-- `iia_last_sync_modseq` `int8` nullable — highest CONDSTORE MODSEQ reconciled on pull.
-- `iia_supports_condstore` `bool` default `false` not null — cached capability (see §6).
+- `iia_sync_deletes` `bool` default `false` not null — gate delete propagation.
+- `iia_show_compose` `bool` default `false` not null — surface reader compose + APPEND-to-Sent.
+- `iia_supports_condstore` `bool` default `false` not null — cached capability (§6).
+- `iia_supports_qresync` `bool` default `false` not null — cached capability (§6).
+- `iia_supports_labels` `bool` default `false` not null — true for Gmail (`X-GM-EXT-1`); false for
+  exclusive-folder servers. Selects the membership *observation* path (§7).
 - `iia_last_sync_time` `timestamp(6)` nullable — observability.
 
-*Deferred (§4.1) — added with the delete path, not in the flags-only v1:*
-- `iia_sync_deletes` `bool` default `false` not null — gate delete propagation.
-- `iia_trash_folder` `varchar(255)` nullable — target for delete-push (e.g. `[Gmail]/Trash`;
-  null ⇒ provider default, see §6).
-- `iia_supports_qresync` `bool` default `false` not null — cached capability; gates remote→local
-  delete-pull via `VANISHED` (see §6).
+The per-account `iia_uidvalidity` / `iia_last_seen_uid` move to the per-folder entity below; the
+account row keeps them only as a legacy single-folder fallback during migration and is otherwise
+unused once folders are seeded.
+
+**`iif_inbound_imap_folder` (new — one row per (feed, folder/label)):** UIDVALIDITY and MODSEQ are
+per-folder, so the cursor lives here.
+- `iif_iia_inbound_imap_account_id` `int8` not null — owning feed (`cascade` delete).
+- `iif_name` `varchar(255)` not null — IMAP mailbox name / Gmail label (e.g. `INBOX`, `Receipts`,
+  `[Gmail]/Sent Mail`).
+- `iif_role` `varchar(20)` nullable — special-use role: `inbox|sent|trash|drafts|junk|archive|all|custom`
+  (from `SPECIAL-USE` / provider name mapping, §6).
+- `iif_navigable` `bool` default `true` not null — false for the Gmail All-Mail backing folder
+  (`iif_role = all`), which is an ingestion source, not a reader destination (§7).
+- `iif_uidvalidity` `int8` nullable, `iif_last_seen_uid` `int8` nullable — ingestion cursor.
+- `iif_last_sync_modseq` `int8` nullable — highest CONDSTORE MODSEQ reconciled on pull.
+- `iif_is_tracked` `bool` default `true` not null — whether sync polls this folder.
+
+**`imf_inbound_message_folder` (new — membership join, the heart of §7):** one row per
+(message, folder) the message belongs to. Many-to-many: a Gmail message in INBOX + Receipts + Work
+has three rows. Carries the **shadow**.
+- `imf_iem_inbound_email_message_id` `int8` not null (`cascade` delete).
+- `imf_iif_inbound_imap_folder_id` `int8` not null (`cascade` delete).
+- `imf_present_local` `bool` default `true` not null — is the message in this folder per Joinery now.
+- `imf_present_base` `bool` default `true` not null — **the shadow:** was it in this folder at the
+  last successful sync. A membership element is **dirty** iff `imf_present_local ≠ imf_present_base`.
+- Unique on (`imf_iem_...`, `imf_iif_...`). A row with both bits false is deleted, not kept.
 
 **`iem_inbound_email_message` (message):**
 - `iem_local_state_modified` `timestamp(6)` nullable — set by `MailboxService` whenever a
-  *reference-backed* row's read/star/delete changes locally; the "needs push" marker and
-  the conflict timestamp.
-- `iem_synced_state_time` `timestamp(6)` nullable — when push last reconciled this row;
-  a row needs push ("dirty") iff `iem_local_state_modified > iem_synced_state_time` (or the
-  latter is null). Together these two columns fully drive sync; loop avoidance is handled by
-  value comparison, so no per-row MODSEQ column is needed (§7).
+  reference-backed row's *flags or membership* change locally; a cheap "this row has some pending
+  push" index so sync need not scan all `imf_` rows each cycle. Correctness lives in the per-element
+  shadow; this is only an index.
+- `iem_synced_state_time` `timestamp(6)` nullable — when push last reconciled this row's **flags**
+  (membership dirtiness is tracked per-element in `imf_`, not by this timestamp).
+- `iem_gm_msgid` `varchar(32)` nullable — Gmail `X-GM-MSGID` (stable, account-unique). The dedup
+  key that collapses the same message seen under N labels into one row (§7). Null for non-label feeds.
+- `iem_gm_thrid` `varchar(32)` nullable — Gmail `X-GM-THRID`, an authoritative thread key when present.
 
-Existing `iem_imap_uid` / `iem_imap_uidvalidity` / `iem_iia_inbound_imap_account_id`
-already address a message on the server; reuse them. Only reference-backed rows
-(non-null `iem_iia_inbound_imap_account_id`) are ever synced.
+Existing `iem_imap_uid` / `iem_imap_uidvalidity` / `iem_imap_folder` /
+`iem_iia_inbound_imap_account_id` remain the *current-locator* for body/attachment fetch. On a move
+(classic IMAP, §7) the UID changes; the locator is re-pointed to the destination folder's new UID.
+Only reference-backed rows (non-null `iem_iia_inbound_imap_account_id`) are ever synced.
 
 ## 6. Provider Capability & Mechanics
 
-Add a capability surface to the IMAP provider/preset layer so behavior is data-driven,
-not hard-coded per host:
+Behavior is data-driven from a capability surface on the provider/preset layer, not hard-coded per
+host. Detected from the server `CAPABILITY` response and cached on the feed:
 
-- **CONDSTORE / QRESYNC** (RFC 7162): both detected from the server `CAPABILITY` response and
-  cached in `iia_supports_condstore` / `iia_supports_qresync`. CONDSTORE enables efficient flag pull
-  (fetch only flags changed since `iia_last_sync_modseq`); QRESYNC adds `VANISHED` for delete-pull.
-  Gmail and Microsoft 365 advertise both, as do Fastmail/iCloud. **Pull and Both modes require
-  CONDSTORE**; a server without it is **push-only** (the §8 control omits Pull/Both with a short note).
-  This is the guard that lets pull stay incremental with no remote-flag baseline cache.
-- **Trash target:** per-provider default for delete-push (`[Gmail]/Trash` for Gmail;
-  generic IMAP falls back to `\Deleted` + `EXPUNGE` only when `iia_sync_deletes` is on and
-  no Trash folder is resolvable). Configurable via `iia_trash_folder`.
+- **CONDSTORE / QRESYNC** (RFC 7162) → `iia_supports_condstore` / `iia_supports_qresync`. CONDSTORE
+  enables incremental flag/label pull (`CHANGEDSINCE iif_last_sync_modseq`); QRESYNC adds `VANISHED`
+  for detecting messages that left a folder (move or delete). **Pull and Both require CONDSTORE.**
+- **Labels** (`X-GM-EXT-1`) → `iia_supports_labels`. When true, membership is **observed directly**
+  via `X-GM-LABELS` and written via `STORE ±X-GM-LABELS`; ingestion reads All Mail once. When false,
+  membership is a single exclusive folder, observed by which folder a UID lives in and written via
+  `MOVE` (or `COPY`+`EXPUNGE`).
+- **Special-use folders** — `SELECT`/`LIST (SPECIAL-USE)` and provider name maps populate `iif_role`
+  (`\Sent`, `\Trash`, `\Drafts`, `\Junk`, `\Archive`, `\All`; `[Gmail]/Sent Mail`, `[Gmail]/Trash`,
+  `[Gmail]/All Mail` for Gmail). Trash is the delete target; All is the Gmail ingestion source; Sent
+  is the APPEND target (§9).
 
-**Operations introduced in a new `ImapSyncer` (sibling of `ImapIngestor`, sharing the open
-connection):**
-- Push flags: `STORE` `+FLAGS`/`-FLAGS (\Seen \Flagged)` over a UID set, batched (reuse the
-  windowed-UID pattern and a per-run cap).
-- Push delete: `COPY`/`MOVE` to the Trash folder (or `\Deleted` + `EXPUNGE` for generic
-  when explicitly configured).
-- Pull (flags): **requires CONDSTORE** — `FETCH … (FLAGS) CHANGEDSINCE <iia_last_sync_modseq>`. No
-  full-flag-diff fallback: without CONDSTORE there is no stored remote-flag baseline to diff against,
-  so pull is simply unavailable (see below). This keeps `§5` free of a remote-flag cache column.
-- Pull (deletes): **requires QRESYNC** (`iia_supports_qresync`). Plain `CHANGEDSINCE` reports
-  *modified* messages, not *vanished* ones, so deletions are read via QRESYNC's
-  `UID FETCH … (CHANGEDSINCE <iia_last_sync_modseq> VANISHED)` (or a QRESYNC `SELECT`) — the
-  returned `VANISHED (EARLIER)` UIDs map to local rows, which are soft-deleted. Runs in the §7 pull
-  step on the same modseq cursor as flag-pull, and only when `iia_sync_deletes` is on. No full-UID-scan
-  fallback: a CONDSTORE-but-not-QRESYNC feed syncs flags and can push-delete, but remote deletions are
-  not reflected locally (guard surfaced at the §8 checkbox).
+**Operations in a new `ImapSyncer` (sibling of `ImapIngestor`, sharing the open connection):**
+- Push flags: `STORE +FLAGS/-FLAGS (\Seen \Flagged)` over a UID set, batched (windowed-UID pattern,
+  per-run cap).
+- Push membership: Gmail `STORE ±X-GM-LABELS (<label>)`; classic `MOVE`/`COPY`+`EXPUNGE` to the
+  destination folder.
+- Push delete (when `iia_sync_deletes`): `MOVE` to the Trash folder; `\Deleted` + `EXPUNGE` only on a
+  generic feed with no resolvable Trash and explicit configuration.
+- Pull flags/labels: `FETCH (FLAGS` + on Gmail `X-GM-LABELS`) `CHANGEDSINCE iif_last_sync_modseq`.
+- Pull vanished (deletes / classic moves): QRESYNC `UID FETCH … (CHANGEDSINCE <modseq> VANISHED)`.
 
-## 7. Sync Cycle, Conflicts & Loop Avoidance
+## 7. Sync Cycle, Reconciliation, Conflicts & Loop Avoidance
 
-`ImapSyncer` runs inside `PollImapAccounts`, on the already-open connection, once per feed
-(skipped entirely when `iia_sync_mode = off`).
+`ImapSyncer` runs inside `PollImapAccounts`, on the already-open connection, once per feed (skipped
+when `iia_sync_mode = off`). Order per feed: **Pull → Ingest → Push.**
 
-**"Dirty" row.** A row has a pending local change iff `iem_local_state_modified >
-iem_synced_state_time` (or `iem_synced_state_time` is null). Dirty rows are what push owns — and what
-protects a local edit from being clobbered by pull.
+### 7.1 Flags — scalar, unchanged from the proven design
 
-Order per feed:
+A flag row is **dirty** iff `iem_local_state_modified > iem_synced_state_time` (or the latter is
+null). Pull applies remote flag changes to **clean** rows and **skips dirty** ones (local-wins);
+Push `STORE`s each dirty row whose local value still differs, then sets `iem_synced_state_time = now`.
+Loop avoidance is by value comparison: a pushed flag bumps MODSEQ and is re-read next cycle, but the
+row is clean and value-equal, so pull no-ops. The modseq cursor is advanced to the **pre-pull**
+`HIGHESTMODSEQ`. (This is the existing flag mechanic; membership generalizes it.)
 
-1. **Pull** (mode ∈ `pull|both`): capture the folder's current `HIGHESTMODSEQ` *first*, then
-   `FETCH (FLAGS) CHANGEDSINCE iia_last_sync_modseq` (plus `VANISHED` when QRESYNC + deletes). For each
-   changed row:
-   - **dirty → skip** — do *not* apply the remote value; the pending local edit wins and is pushed in
-     step 3 (this is the conflict resolution, below).
-   - **clean → apply** the remote flag/deletion to the local row.
+### 7.2 Membership — the shadow makes it a conflict-free set merge
 
-   Then advance `iia_last_sync_modseq` to the `HIGHESTMODSEQ` captured at the *start* of this step
-   (not after push — see loop avoidance).
-2. **Ingest** new mail (existing `ImapIngestor::poll`).
-3. **Push** (mode ∈ `push|both`): for each **dirty** row whose local value still differs from the
-   current remote value, `STORE` the change (move-to-Trash for deletes), then set
-   `iem_synced_state_time = now` (clearing dirty).
+Membership cannot be reconciled as a scalar: a message in `{INBOX, Work}` now showing `{Work}`
+locally and `{INBOX, Work}` remotely is ambiguous — *local removed INBOX* or *remote added INBOX*?
+— unless you know the set as of last agreement. That is the **shadow** (`imf_present_base`).
 
-**Conflict rule — local-wins, enforced by the step-1 dirty carve-out.** The carve-out is the crux:
-if pull overwrote a dirty row it would set local = remote, and step 3 would then see "no difference"
-and skip the push — silently making *remote* win. By skipping dirty rows in pull and pushing them in
-step 3, a local edit made since the last sync always prevails ("I changed it here, make it so").
-Remote-wins (server-authoritative) is the viable alternative but surprises a user who just acted in
-the reader; local-wins is the chosen rule.
+Decompose per folder/label into one boolean three-way merge (base `b` / local `l` / remote `r`):
 
-**Loop avoidance — value comparison is the correctness guarantee; the modseq cursor is only
-efficiency.** A flag we push bumps the server MODSEQ, so the next cycle's `CHANGEDSINCE` re-reads that
-row. That is harmless: the row is no longer dirty (step 3 cleared it) and its remote value now equals
-the local value, so pull's "clean → apply" is a value-equal no-op. The read-back self-cancels — **no
-`iem_remote_modseq` bookkeeping is needed.** The cursor is advanced to the **pre-push**
-`HIGHESTMODSEQ` deliberately: advancing past our own pushes would risk skipping a genuine remote
-change that landed concurrently during the cycle. Re-reading our own pushed rows once is the bounded
-price of never missing a real change.
+| b | l | r | meaning | action |
+|---|---|---|---------|--------|
+| 0 | 1 | 0 | local added | **push add** |
+| 0 | 0 | 1 | remote added | **apply add** (set local & base) |
+| 1 | 0 | 1 | local removed | **push remove** |
+| 1 | 1 | 0 | remote removed | **apply remove** (clear local & base → drop row) |
+| 0 | 1 | 1 / 1 | 0 | 0 | both moved same way | agree → advance base |
+| 1 | 1 | 1 / 0 | 0 | 0 | unchanged | no-op |
 
-**Worked example (both-mode), cursor = 100:**
-- A reader marks message X read (X now dirty); concurrently someone stars message Y in Gmail.
-- *Step 1:* capture `HIGHESTMODSEQ` = 105; `CHANGEDSINCE 100` returns Y (`\Flagged`, modseq 104). Y is
-  clean → apply the star locally. X is *not* in the remote-changed set (only its local state changed),
-  so pull never touches it. Advance cursor → 105.
-- *Step 3:* X is dirty and remote ≠ local → `STORE +FLAGS (\Seen)`; server assigns X modseq 106; set X
-  `iem_synced_state_time = now` (X no longer dirty).
-- *Next cycle:* capture `HIGHESTMODSEQ` = 106; `CHANGEDSINCE 105` returns X (`\Seen`, modseq 106). X is
-  clean and remote (read) == local (read) → no-op. Advance cursor → 106. Loop closed, nothing
-  re-applied.
-- *Had Y also been edited locally (dirty),* step 1 would skip it and step 3 would push the local value
-  — local-wins.
+**Per-element, membership is a boolean, and a boolean three-way merge cannot conflict** — a genuine
+conflict needs one item driven to two *different* targets, and a boolean has only one other state, so
+if both sides change it they necessarily agree. On a label provider (Gmail) where every folder is an
+independent membership bit, **membership sync is conflict-free.** The dirty carve-out (skip a dirty
+element in pull, push it in step 3) is retained purely as the mechanical guard against pull clobbering
+an unpushed local edit — not as a tiebreak.
 
-**UIDVALIDITY change:** if the folder's `UIDVALIDITY` differs from `iia_uidvalidity`, all
-UID→row mappings are stale — clear `iia_last_sync_modseq`, do not push (UIDs are
-meaningless), and let ingestion re-seed before sync resumes.
+**The one genuine conflict lives in the *exclusive-folder* (classic) case,** where "which one folder"
+is a multi-valued scalar: base `INBOX`, local → `Archive`, remote → `Receipts` (three distinct
+values). There the §7.1 **local-wins** rule is the resolution — keep the local destination, push it.
+So the label provider is the easy one; the constrained provider is where the tiebreak is needed, and
+it reuses the rule flags already established.
+
+### 7.3 Cycle, by provider observation path
+
+1. **Pull (mode ∈ `pull|both`).** Capture each tracked folder's current `HIGHESTMODSEQ` first.
+   - **Label provider (Gmail):** `FETCH (FLAGS X-GM-LABELS) CHANGEDSINCE` over **All Mail** (the one
+     pass that sees every message). For each changed message, `X-GM-LABELS` is the *authoritative full
+     set* → reconcile every membership element by §7.2 (adds = new labels; removes = any base label
+     absent from the returned set — **no `VANISHED` needed for labels**). Flags reconcile per §7.1.
+   - **Exclusive-folder provider (classic):** for each tracked folder, `FETCH (FLAGS) CHANGEDSINCE`
+     (flags) and QRESYNC `VANISHED` (UIDs that left the folder). Stage new arrivals across all tracked
+     folders keyed by `iem_message_id_header`. Then **correlate vanished-vs-arrived to classify moves**
+     (§7.4). Apply membership changes (single-element set) by §7.2 with the local-wins tiebreak.
+
+   For clean elements/flags apply remote; for dirty, skip. Then advance each folder's
+   `iif_last_sync_modseq` to the **pre-pull** `HIGHESTMODSEQ`.
+2. **Ingest** new mail (`ImapIngestor::poll`, extended to seed `imf_` rows with `local = base =`
+   observed set, and `iem_gm_msgid`/`iem_gm_thrid` on Gmail).
+3. **Push (mode ∈ `push|both`).** For each **dirty** flag row and each **dirty** `imf_` element whose
+   local value still differs from remote, issue the §6 op (`STORE`, `±X-GM-LABELS`, `MOVE`,
+   move-to-Trash). On confirmed write set the shadow to match local (`imf_present_base =
+   imf_present_local`; flags → `iem_synced_state_time = now`), clearing dirty. Drop `imf_` rows now
+   `(0,0)`.
+
+**Loop avoidance** is the shadow doing the same job at element granularity: a pushed label/move bumps
+MODSEQ and is re-read next cycle, but `imf_present_base` already equals remote, so §7.2 yields a
+value-equal no-op. No per-element MODSEQ column.
+
+### 7.4 Classic move detection (solved, not deferred)
+
+A QRESYNC `VANISHED` UID in folder F means the message left F — *moved or deleted*, indistinguishable
+from F alone. Resolution, within the same poll, after all tracked folders' pulls have staged arrivals:
+
+- Look up the local message for the vanished UID (its `iem_message_id_header` is known).
+- Search the staged new-arrival sets of the **other** tracked folders for that Message-ID.
+  - **Found in folder G** → **move F→G**: update the single-membership scalar to G; re-point the
+    `iem_` locator (`iem_imap_folder`/`iem_imap_uid`/`iem_imap_uidvalidity`) to G's new UID.
+  - **Found in Trash** (if Trash is tracked/resolvable) → **delete**: soft-delete locally (when
+    `iia_sync_deletes`).
+  - **Found nowhere we track** → moved to an untracked folder → treat as removed from all tracked
+    folders (out of the reader's view); not a delete.
+
+Because a move assigns a new UID, the destination arrival is also what re-seeds the locator — the
+existing `resolveUid` Message-ID fallback covers any cursor gap. Gmail never enters this path: labels
+are observed directly, and a Trash move is just `\Trash` appearing / `\Inbox` etc. disappearing in
+`X-GM-LABELS`.
+
+### 7.5 Deletion
+
+`iia_sync_deletes` gates both directions. **Push:** a local soft-delete `MOVE`s the source message to
+Trash (Gmail: add `\Trash`, which Gmail treats as removal from all other labels). **Pull:** a Trash
+arrival (Gmail) or a `VANISHED`-classified-as-delete (classic, §7.4) soft-deletes the local row. On
+Gmail, **archive** (`X-GM-LABELS` loses `\Inbox` but the message persists in All Mail) is cleanly
+distinct from delete (gains `\Trash`) — the membership model removes the old archive/delete ambiguity.
+
+### 7.6 UIDVALIDITY change
+
+If a folder's `UIDVALIDITY` differs from `iif_uidvalidity`, all UID→row mappings for that folder are
+stale: clear `iif_last_sync_modseq`, do not push into it (UIDs are meaningless), and let ingestion
+re-seed (correlating by Message-ID / `iem_gm_msgid`) before sync resumes for that folder.
 
 ## 8. UI
 
-- **Accounts → combined IMAP mailbox editor:** add a "Sync" control — a single dropdown
-  (`Off` / `Pull (read-only)` / `Push` / `Two-way`). Use FormWriter `dropinput` with
-  `visibility_rules` (no hand-rolled JS). On a non-CONDSTORE feed (`iia_supports_condstore`
-  false), omit the `Pull`/`Two-way` options and show a short note that two-way sync requires a
-  CONDSTORE-capable server.
-- **Deferred (§4.1):** the "Also sync deletions" checkbox is **not** shown in this spec's scope.
-  When the delete path is built, it appears when sync ≠ Off, warns that deletions move the source
-  message to Trash, and notes on a non-QRESYNC pull/both feed (`iia_supports_qresync` false) that
-  remote deletions will not be reflected locally (push-delete still works).
-- **Setup → Receiving (IMAP mailbox):** surface a synthetic row reporting sync mode and
-  last sync time/status (reuses `_setup_imap_receiving_rows`).
-- Default presentation reflects `off`; no behavior change unless the operator opts in.
+- **Accounts → combined IMAP mailbox editor.** A "Sync" dropdown (`Off` / `Pull (read-only)` /
+  `Push` / `Two-way`) via FormWriter `dropinput` with `visibility_rules` (no hand-rolled JS). On a
+  non-CONDSTORE feed (`iia_supports_condstore` false) omit `Pull`/`Two-way` with a short note. When
+  sync ≠ Off, reveal **"Also sync deletions"** (`iia_sync_deletes`) — warns deletions move the source
+  message to Trash — and **"Enable compose / Sent sync"** (`iia_show_compose`, §9). Guided controls
+  only, no explainer prose (per the self-documenting-pages rule).
+- **Folder selection.** From `LIST`, the operator picks which folders are tracked (`iif_is_tracked`);
+  special-use folders pre-selected, All Mail hidden as a non-navigable backing source on Gmail.
+- **Reader folder navigation.** The reader gains a folder/label dimension alongside the alias scope,
+  driven by `imf_` membership; INBOX-only feeds simply show one folder (the Product-A subset, §1.1).
+- **Setup → Receiving (IMAP mailbox).** Synthetic rows report sync mode, per-folder last-sync
+  time/status (reuses `_setup_imap_receiving_rows`).
 
-## 9. Failure Handling
+## 9. Sent / Compose Interop
 
-- Reuse `iia_needs_reauth` / `markNeedsReauth()` — a sync write failing on auth flags the
-  feed exactly as ingestion does; the Accounts "Reconnect" affordance already covers it.
-- Partial progress is safe: pushes are idempotent (`STORE` of an already-set flag is a
-  no-op); `iem_synced_state_time` only advances on confirmed writes, so an interrupted run
-  retries the remainder next cycle.
-- Per-run caps (mirroring `maxPerRun`) bound work and API/rate exposure; `iia_last_status`
-  records counts (pushed/pulled/conflicts).
+Two distinct mechanics, both owned here:
 
-## 10. Testing
+- **Ingesting Sent.** The Sent folder (`iif_role = sent`) is a tracked folder like any other; its
+  messages ingest and show in the reader, so mail sent from the *native* client appears in Joinery.
+- **APPEND-on-send (conditional).** When the reader's reply/forward feature
+  (`outbound_reply_forward.md`) sends as an IMAP-backed mailbox with `iia_show_compose` on, the sent
+  copy must reach the source's Sent folder so the native client sees Joinery-sent mail. *Most providers
+  file it themselves* — Gmail/M365 SMTP auto-save to Sent — so Joinery `APPEND`s **only when the send
+  transport does not** (`PRESETS` capability `smtp_files_sent = false`, e.g. self-hosted Postfix+Dovecot
+  where SMTP submission does not save Sent). APPEND-ing when the provider already filed would duplicate.
+  Transport/identity come from `resolveOutboundTransport(mailbox)` (`connected_account_email.md`), which
+  also exposes `smtp_files_sent`; this spec only performs the conditional APPEND (with `\Seen`).
+- **Dedup / reconciliation.** A Joinery-composed message is stored as a local outbound row immediately
+  (for instant reader display) *and* later observed in Sent — whether the provider filed it or Joinery
+  APPEND-ed it. Ingestion **reconciles to the existing outbound row** instead of creating a duplicate:
+  match by `iem_gm_msgid` (Gmail, server-stable) or `iem_message_id_header` (elsewhere; reliable for the
+  APPEND path since Joinery sets the Message-ID), then backfill the `iem_` IMAP locator and add an
+  `imf_` membership in the Sent folder so the outbound row becomes reference-backed and appears under
+  Sent in reader navigation. `iem_gm_msgid` closes the old gap where Gmail rewrites `Message-ID` on
+  send.
 
-Extend `plugins/inbound_email/tests/imap_poller_test.php` (or a new `imap_syncer_test.php`)
-with a mock IMAP client:
-- Push: local read/star change → `STORE +FLAGS` issued with correct UID set; no-op when
-  already in sync.
-- Pull: remote `\Seen`/`\Flagged` change since MODSEQ → local row updated (CONDSTORE path).
-  Non-CONDSTORE feed → Pull/Both unavailable; only push runs.
-- Conflict (both changed) → local-wins per §7.
-- Loop avoidance → after a push, the next pull re-reads the row but applies nothing (remote == local
-  value-equal no-op); the cursor advances without re-applying.
-- Conflict carve-out → a row dirty *and* remotely changed in the same cycle is skipped by pull and
-  pushed in step 3 (local-wins), not overwritten.
-- UIDVALIDITY change → sync suspends and re-seeds without corrupting state.
-- Delete: with `iia_sync_deletes` on → move-to-Trash (Gmail) / `\Deleted`+`EXPUNGE`
-  (generic); with it off → local soft-delete does not touch the server.
-- Delete-pull: QRESYNC `VANISHED` UIDs → matching local rows soft-deleted; a CONDSTORE-only
-  (no QRESYNC) feed → remote deletions not reflected locally, flags still sync.
+## 10. Failure Handling
 
-## 11. Delivery Order (not a timeline)
+- Reuse `iia_needs_reauth` / `markNeedsReauth()` — a sync write failing on auth flags the feed exactly
+  as ingestion does; the Accounts "Reconnect" affordance covers it.
+- Partial progress is safe: pushes are idempotent (`STORE`/`±X-GM-LABELS` of an already-set value is a
+  no-op); the shadow and `iem_synced_state_time` only advance on confirmed writes, per element, so an
+  interrupted run retries the remainder next cycle.
+- Per-run caps (mirroring `maxPerRun`) bound work and rate exposure; `iia_last_status` records counts
+  (pushed/pulled/moved/deleted/conflicts).
 
-Inventoried up front; shipped in risk order. **This spec covers steps 1–3 (Levels 0–3, flags only);
-step 4 and all-folders are deferred (§4.1).**
-1. Push flags (read/star) — non-destructive, highest value, simplest.
-2. Pull flags via CONDSTORE (CONDSTORE-capable feeds only; others stay push-only).
-3. Both-mode + conflict rule + loop guard.
-4. **Deferred (§4.1)** — Delete sync, gated behind `iia_sync_deletes`: push (move-to-Trash) on any
-   feed; pull (QRESYNC `VANISHED` → local soft-delete) on QRESYNC-capable feeds only. Built later,
-   additively, onto the finished flags path.
+## 11. Testing
 
-## 12. Docs to Update at Implementation
+Extend `plugins/inbound_email/tests/imap_poller_test.php` (or a new `imap_syncer_test.php`) with a
+mock IMAP client covering both observation paths:
+- **Flags** push/pull/conflict (local-wins) and loop avoidance, as today.
+- **Membership, label provider:** remote `X-GM-LABELS` add/remove since MODSEQ → `imf_` reconciled;
+  local label add/remove → `STORE ±X-GM-LABELS`; both-add-same-label → agree, no double op;
+  conflict-free claim — concurrent disjoint label edits both land (no clobber).
+- **Membership, classic:** local move → `MOVE` + locator re-point; remote move detected by
+  vanish-in-F/appear-in-G correlation (§7.4); move-vs-delete disambiguation via Trash; genuine scalar
+  conflict (local→A, remote→B) → local-wins.
+- **Deletion:** `iia_sync_deletes` on → move-to-Trash (push) and Trash-arrival/VANISHED → soft-delete
+  (pull); off → local soft-delete does not touch the source and remote deletions are not pulled;
+  Gmail archive (lose `\Inbox`, keep All Mail) is *not* treated as delete.
+- **Sent:** native-client Sent message ingests; Joinery-composed message APPEND-ed and then ingested
+  from Sent dedups to one row by Message-ID.
+- **UIDVALIDITY change:** sync suspends for that folder and re-seeds without corrupting `imf_`.
 
-Update `plugins/inbound_email/docs/overview.md` to describe sync as the current state
-(per the docs rule — no "previously one-way" narration): the IMAP section gains a "Sync"
-subsection covering the per-feed mode, the flag↔state mapping, deletion handling, the
-pull/ingest/push cycle, and the conflict rule. Note that no OAuth re-consent is required.
+## 12. Delivery Order (not a timeline)
+
+Inventoried up front; shipped in risk order, each step independently shippable.
+1. **Flags two-way** (read/star) — push, then CONDSTORE pull, then both + loop guard. The proven core.
+2. **Membership data layer** — `iif_` folder entity, `imf_` membership join + shadow, capability
+   detection (`iia_supports_labels/condstore/qresync`), folder discovery/selection UI.
+3. **Membership sync, label provider (Gmail)** — All-Mail pull, `X-GM-LABELS` reconcile, `STORE
+   ±X-GM-LABELS` push; conflict-free, highest value, simplest of the membership work.
+4. **Membership sync, exclusive-folder provider (classic)** — per-folder cursors, `MOVE` push,
+   vanish/appear move detection (§7.4), local-wins scalar conflict.
+5. **Deletion** (`iia_sync_deletes`) — move-to-Trash push; Trash/VANISHED pull.
+6. **Sent / compose interop** (§9) — Sent ingestion + APPEND-on-send + dedup, landing with
+   `outbound_reply_forward.md`.
+
+## 13. Docs to Update at Implementation
+
+Update `plugins/inbound_email/docs/overview.md` to describe sync as the current state (per the docs
+rule — no "previously one-way" narration): a "Sync" subsection covering the per-feed mode, the
+flag↔state and membership↔folder/label mappings, the shadow-based reconciliation, deletion and Sent
+handling, the pull/ingest/push cycle, and the conflict rules. Note that no OAuth re-consent is
+required.

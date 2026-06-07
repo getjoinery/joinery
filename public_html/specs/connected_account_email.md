@@ -61,71 +61,111 @@ an ESP (Mailgun/SES, already supported); the spec makes that transition graceful
   `iia_provider_key`) — outbound reuses these unchanged.
 - `EmailMessage` / `EmailSender` — the structured outbound entry point.
 
-## 4. Design: Extend the SMTP Path (no new sender)
+## 4. Design: Transport Injection on the One SMTP Path (no new sender)
 
-**Two needs, one mechanism.** Connected-account outbound serves two distinct needs, and only one of
-them fits the existing provider model:
+**Two needs, one pipeline.** Connected-account outbound serves two needs. Today only the first can
+flow through `EmailSender`, because a provider is selected by the global `email_service` string and
+built with `new $class()` (no arguments) — there is no slot for "send through *this* account":
 
-1. **Connected account as the *system-wide* provider** ("send all site email through my Gmail"). This
-   fits the current model exactly: `EmailSender` selects a provider by the single `email_service`
-   setting, instantiates it with no arguments, and the provider reads its config from settings. One
-   account, chosen once, site-wide. **This is what the exposure layer (c) is about.**
-2. **Send *as a specific mailbox*** (reader reply/forward — §7's `resolveOutboundTransport(mailbox)`).
-   Here the account varies *per call*, which **does not fit** the provider model: providers are picked
-   by a global string setting and built with no arguments, so there is no slot for "send this one
-   through account 7." This need is served by calling the §4(b) helper
-   (`SmtpMailer::forConnectedAccount($account)`) **directly** from `resolveOutboundTransport`,
-   bypassing `EmailSender`'s provider selection. No provider-layer design changes this.
+1. **Connected account as the *system-wide* provider** ("send all site email through my Gmail").
+   Chosen once via the active-provider setting; surfaced by the thin exposure layer (d).
+2. **Send *as a specific mailbox*** (reader reply/forward — §7's `resolveOutboundTransport(mailbox)`),
+   where the account varies *per call*.
 
-Both needs converge on the **same primitives** below — a configurable `SmtpMailer`, a
-`forConnectedAccount()` builder, and a shared `EmailMessage`→mailer mapping — so there is exactly one
-send mechanism. Two focused changes, a shared extraction, then a thin exposure layer.
+The clean way to serve both with one code path is to **separate transport from transport selection**:
+make a *configured transport* a first-class value that `EmailSender::send()` can be handed, instead of
+always re-deriving it from global settings. Then the system provider, the connected account, and the
+per-mailbox case are three ways to *obtain* a transport — all sent through the **same** `EmailSender`
+pipeline (validation, retry-queue, debug logging). **No send path bypasses `EmailSender`.**
 
-**(a) `SmtpMailer` gains an auth abstraction.** Today it hard-reads global `smtp_*` and does basic
-auth. Generalize it to be configured from a **credential source**, with two auth modes:
-- `password` — existing behavior (global settings *or* a supplied username/password).
-- `xoauth2` — **new**: authenticate with an OAuth access token, wired through PHPMailer's XOAUTH2
-  token-provider interface, the token supplied by the OAuth2 Core (`ensureFresh()`).
+**(a) An explicit `SmtpConfig` + a single `SmtpMailer` construction model.** Today `SmtpMailer`
+hard-reads global `smtp_*` in its constructor and does basic auth only. Introduce a plain
+**`SmtpConfig` value object** `{host, port, encryption, authMode, credential}` with two auth modes:
+- `password` — username/password (the existing behavior).
+- `xoauth2` — **new**: authenticate with an OAuth access token via PHPMailer's XOAUTH2 token-provider
+  interface, the token supplied by OAuth2 Core (`ensureFresh()`).
 
-So `SmtpMailer` can be built either the current way (global settings) or from an explicit config
-`{host, port, encryption, authMode, credential}`. This is the only real new primitive, and it
-benefits any OAuth SMTP use — not just connected accounts.
+`SmtpMailer` is configured *from* an `SmtpConfig` — one construction model, not two. Back-compatible:
+`SmtpConfig::fromSettings()` reproduces today's global-settings behavior, so the existing no-arg
+`new SmtpMailer()` (used by `SmtpProvider::send`, `relayRawMessage`, `validateApiConnection`) keeps
+working unchanged. Likewise `SmtpProvider` takes an **optional `SmtpConfig`** (default
+`SmtpConfig::fromSettings()`), so the *one* provider class is the SMTP transport whether configured
+globally or per-account. XOAUTH2 is the only genuinely new primitive, and it benefits any OAuth SMTP
+use — not just connected accounts.
 
-**(b) Build that config from a connected account.** A small helper —
-`SmtpMailer::forConnectedAccount(InboundImapAccount $a)` — reads host/port/encryption from the
-account's `PRESETS` row and the credential from the account (`xoauth2` with its OAuth token for
-`oauth2` providers; `password` with its stored app password otherwise). No host/port/password is
-re-typed.
+**(b) `SmtpConfig::fromConnectedAccount(InboundImapAccount $a)`.** Reads host/port/encryption from the
+account's `PRESETS` SMTP coordinates and the credential from the account (`xoauth2` for `oauth2`
+providers; `password` with its stored app password otherwise). No host/port/password is re-typed. This
+is the *only* connected-account-specific mechanic; everything downstream is shared.
 
-**(b′) Extract the `EmailMessage`→mailer mapping (the key anti-duplication move).** Today the mapping
-of an `EmailMessage` onto a PHPMailer instance (From, recipients, cc/bcc, reply-to, custom headers,
-attachments) lives **inline inside `SmtpProvider::send()`**. Lift it into a shared method —
-`SmtpMailer::applyMessage(EmailMessage $m)` (or an equivalent static helper). After this, every send
-is *build a mailer + `applyMessage` + send*:
-- `SmtpProvider::send()` — build from global settings, `applyMessage`, send.
-- `ConnectedMailboxProvider::send()` — `forConnectedAccount()`, `applyMessage`, send.
-- `resolveOutboundTransport()` (§7, Need 2) — `forConnectedAccount()`, return the configured mailer;
-  the reply/forward caller does `applyMessage` + send.
+**(b′) Extract the `EmailMessage`→PHPMailer mapping (the anti-duplication move, do it first).** The
+mapping (From, recipients, cc/bcc, reply-to, custom headers, attachments) lives **inline inside
+`SmtpProvider::send()`** today. Lift it into `SmtpMailer::applyMessage(EmailMessage $m)`. After this
+every SMTP send is *configure a mailer from `SmtpConfig` + `applyMessage` + send* — one mapping, used
+by the global path, the connected-account path, and the per-mailbox path alike.
 
-This extraction is what makes "one send mechanism" literally true and reduces the exposure layer to a
-UX choice. Do it first (§13).
+**(c) `EmailSender::send()` accepts an optional transport — the single pipeline.** Change the signature
+to `send(EmailMessage $m, $queue_on_failure = true, ?EmailServiceProvider $transport = null)`:
+- `$transport === null` (the default) — unchanged: select by the `email_service` setting, with the
+  `email_fallback_service` fallback.
+- `$transport` provided — send through it directly. **Skip the fallback** (you cannot fall back a
+  "send *as* this mailbox" to a *different* identity), but **keep** validation, the try/catch, the
+  retry-queue (`queueForRetry`), and debug logging.
 
-**(c) Thin exposure layer — *resolved: a `ConnectedMailboxProvider` class* (Option A).** Expose "send
-through a connected account" as its own auto-discovered provider:
-- A small `ConnectedMailboxProvider implements EmailServiceProvider`, `getKey() = 'connected_account'`,
-  `getLabel() = 'Connected Email Account'`. Its `send()` reads which account from a setting, builds
-  `SmtpMailer::forConnectedAccount($chosen)`, runs `applyMessage`, sends — forcing `From` to the
-  account address (per the §5 identity model). It delegates; it does not duplicate.
-- `getSettingsFields()` returns a dropdown whose options are the connected accounts — built
-  dynamically (the method runs PHP and may query `InboundImapAccount`; `SmtpProvider` already returns
-  option lists for static fields, so dynamic options are a small extension).
+This is the crux of the refactor: per-mailbox sends inherit every cross-cutting concern instead of
+re-implementing them or silently losing them. `resolveOutboundTransport(mailbox)` (§7) returns a
+configured transport, and reply/forward calls `$sender->send($msg, true, $transport)` — *through* the
+pipeline, never around it.
+
+**(d) Thin exposure layer — `ConnectedMailboxProvider` (Option A), now pure UX.** Expose "send through
+a connected account" as its own auto-discovered provider so it is a **first-class, discoverable choice**
+in the existing provider dropdown (matching the §6 onboarding):
+- `ConnectedMailboxProvider implements EmailServiceProvider`, `getKey() = 'connected_account'`,
+  `getLabel() = 'Connected Email Account'`. Its `send()` reads which account from a setting and sends
+  via a `SmtpProvider` configured with `SmtpConfig::fromConnectedAccount($chosen)`, forcing `From` to
+  the account address (§5 identity model). With (a)–(c) in place this is a few delegating lines — no
+  mechanics of its own.
+- `getSettingsFields()` returns a dropdown whose options are the connected accounts, built dynamically
+  (the method runs PHP and may query `InboundImapAccount`).
 - `validateConfiguration()` checks an account is selected and not in `iia_needs_reauth`.
 
-Chosen over bolting a "credential source" option onto `SmtpProvider` because it surfaces "Connected
-Email Account" as a **first-class, discoverable choice** in the existing provider dropdown — matching
-the §6 "Connect an email account" onboarding — whereas the alternative hides the feature behind a
-sub-option and gives `SmtpProvider` two personalities (hand-typed host vs. account picker). Once (b′)
-is done, the class is a few delegating lines, so the discoverability win is nearly free.
+Chosen over bolting a "credential source" sub-option onto `SmtpProvider` for that dropdown
+discoverability; with the mapping single-sourced in (b′) it adds no duplicate mechanics either way.
+
+**Architecture (before → after).**
+
+```
+BEFORE
+  EmailSender::send($msg)
+     │  reads email_service (global string) → new $class()      one config source: globals
+     ▼
+  EmailServiceProvider   (SmtpProvider | MailgunProvider | …)
+     │  SmtpProvider::send(): new SmtpMailer() + INLINE EmailMessage→PHPMailer mapping
+     ▼
+  SmtpMailer extends PHPMailer    ← constructor reads global smtp_* (password auth only)
+
+  per-mailbox reply/forward ──── no path through EmailSender ────✗  (would bypass it)
+
+AFTER
+  EmailSender::send($msg, $queue, ?$transport)        ┐ ONE pipeline:
+     │  $transport == null → select by email_service (+ fallback)  │ validate · retry-queue · debug log
+     │  $transport given   → use it (no fallback)      ┘
+     ▼
+  EmailServiceProvider  (the transport)
+     ├─ SmtpProvider(?SmtpConfig)         ← injected config, else SmtpConfig::fromSettings()
+     │     └─ applyMessage()  (shared EmailMessage→PHPMailer mapping)
+     ├─ ConnectedMailboxProvider          ← UX only; delegates to SmtpProvider w/ fromConnectedAccount()
+     └─ MailgunProvider | SesProvider | …
+
+  SmtpConfig {host, port, encryption, authMode, credential}
+     ├─ fromSettings()             (global smtp_*)
+     └─ fromConnectedAccount($a)   (PRESETS + iia_oauth_* / iia_password_enc; password | xoauth2)
+     ▼
+  SmtpMailer extends PHPMailer    ← ONE constructor, configured from SmtpConfig (password | XOAUTH2)
+
+  resolveOutboundTransport(mailbox) → EmailServiceProvider ─┐
+  reader reply/forward: send($msg, true, $transport) ───────┘ through the SAME pipeline
+```
 
 The connected-account provider's *only* distinct responsibilities are UX (pick a connected account)
 and forcing `From` to that account. Mechanics are single-sourced in `SmtpMailer` via (a), (b), (b′).
@@ -157,11 +197,64 @@ Per provider:
 
 **Why not provider REST APIs** (Gmail `messages.send`, Graph `sendMail`): they auto-file Sent and
 Graph dodges SMTP-AUTH-disabled tenants, but they require HTTP clients and a **second send path**,
-branching `forConnectedAccount()` by provider — against the minimal-duplication goal. Their main win
-(auto-filed Sent) is moot for the reader anyway: the ingestor polls INBOX, Sent copies land in
-`[Gmail]/Sent` and never return via poll, so `outbound_reply_forward.md` stores the sent row locally
-regardless. **Deferred:** introduce Graph `sendMail` as a Microsoft-only transport *only if* M365
-demand justifies it — isolated to that case, leaving Google/password on the one SMTP path.
+branching `SmtpConfig::fromConnectedAccount()` by provider — against the minimal-duplication goal. Their
+auto-file-Sent win is already covered without them: providers whose SMTP auto-saves Sent
+(`smtp_files_sent`, §7/§11) need nothing extra, and where SMTP does not, two-way sync `APPEND`s the
+copy (`two_way_imap_sync.md` §9) — so Sent is correct on the one SMTP path regardless. **Deferred:**
+introduce Graph `sendMail` as a Microsoft-only transport *only if* M365 demand justifies it — isolated
+to that case, leaving Google/password on the one SMTP path.
+
+### 4.2 Two Send Modes, One Plumbing (relay consolidation)
+
+The transport-injection work above cleans up the **structured-send** path (mode 1). The same
+`SmtpConfig` primitive then collapses the *raw-relay* paths, so the platform ends with exactly **two
+send modes over one set of plumbing** — the natural end state, flagged here as a distinct delivery step
+(§13) because it reaches into `InboundEmailRouter`.
+
+Today there are **four** send entry points, two of which duplicate each other:
+
+1. `EmailSender::send(EmailMessage)` — structured/composed send (mode 1 above).
+2. `provider->relayRawMessage()` — raw-MIME relay with explicit envelope sender, for inbound forwarding.
+3. `InboundEmailRouter::relayViaSmtp()` + `createMailer()` — the SMTP **fallback** for forwarding (and
+   the path when a dedicated `inbound_email_forwarding_smtp_*` relay is set). Its SMTP transaction is a
+   near-line-for-line **duplicate** of (2); the only real difference is `createMailer()` hand-patching
+   Host/Port/auth from the forwarding settings.
+4. `Activation.php`'s stray `new systemmailer()` — a direct PHPMailer send bypassing `EmailSender`.
+
+`SmtpConfig` resolves the redundancy:
+
+- **`createMailer()` → `SmtpConfig::fromForwardingSettings()`** — a third `SmtpConfig` factory
+  (`inbound_email_forwarding_smtp_*`, falling back to base `smtp_*`). The router's manual override block
+  disappears.
+- **`relayViaSmtp()` → deleted.** The forwarding SMTP fallback becomes
+  `SmtpProvider(SmtpConfig::fromForwardingSettings())->relayRawMessage(...)`. The duplicate transaction
+  collapses into the single copy in `SmtpProvider::relayRawMessage()` (which now reads its injected
+  `SmtpConfig` instead of `new SmtpMailer()` globals — §4a). `InboundEmailRouter::relay()`'s
+  primary→fallback orchestration is unchanged; only the fallback's *implementation* swaps to the
+  configured provider.
+- **`Activation.php` → `EmailSender`** (`quickSend`/`sendTemplate`), removing the stray direct mailer.
+
+End state — **two modes, shared plumbing:**
+
+```
+  STRUCTURED SEND   EmailSender::send(EmailMessage, ?transport)
+                      └ provider + applyMessage()            build MIME, stamp our identity
+  RAW RELAY         provider->relayRawMessage(raw, envelope, dests)
+                      └ preserve envelope (SRS/SPF/DKIM), forward exact bytes
+
+  both modes share:   SmtpConfig { fromSettings | fromConnectedAccount | fromForwardingSettings }
+                      one SmtpMailer  (single constructor)
+                      the discovered provider set (Smtp | Mailgun | Ses | ConnectedMailbox | …)
+```
+
+**The floor is two, not one.** Structured send builds a MIME body and lets the provider set `From` to
+the authenticated identity; raw relay ships pre-formed bytes with an explicit `MAIL FROM` so
+SPF/DKIM/SRS stay aligned to the *original* sender. Forwarding needs the envelope preserved, so the two
+modes cannot merge without losing that. Consolidation stops here deliberately.
+
+**Scope flag.** This step widens the blast radius from the email layer into `plugins/inbound_email`
+(`InboundEmailRouter::relayViaSmtp`/`createMailer`, the forwarding-relay tests) and touches
+`Activation.php`. It is cleanly separable from the connected-account feature and ships last (§13).
 
 ## 5. One Connection for Both Directions
 
@@ -209,17 +302,25 @@ any provider, both directions. Switching to Mailgun/SES later is one setting.
 
 When sending **as a specific mailbox** (a reader reply or forward), identity must be that mailbox's
 address and the transport must be authorized for it. `resolveOutboundTransport(mailbox)` returns a
-**configured `SmtpMailer` (or the platform provider)** — the same send path as §4, just configured
-per mailbox:
+**configured transport** — an `EmailServiceProvider` (`SmtpProvider` built from an `SmtpConfig`, or the
+platform provider unchanged). The caller sends it through the one pipeline:
+`$sender->send($msg, true, $transport)` (§4c) — same path as the system provider, just a different
+transport:
 
-| Mailbox type | From identity | Transport (built from) | Sent copy lands in source? |
+| Mailbox type | From identity | Transport (built from) | Sent copy in source (`smtp_files_sent`)? |
 |---|---|---|---|
-| **Hosted** (`alias@our-domain`) | the alias | the platform provider / SMTP relay (existing), our domain's DKIM + SRS | n/a |
-| **IMAP-source, OAuth** (Gmail / M365) | the feed address | `SmtpMailer::forConnectedAccount(feed)` → XOAUTH2 | **Yes** — provider auto-files Sent |
-| **IMAP-source, password** (Yahoo/iCloud/Fastmail/generic) | the feed address | `SmtpMailer::forConnectedAccount(feed)` → password | Usually yes |
+| **Hosted** (`alias@our-domain`) | the alias | the platform provider / SMTP relay (existing), our domain's DKIM + SRS | n/a — no source mailbox |
+| **IMAP-source, OAuth** (Gmail / M365) | the feed address | `SmtpProvider(SmtpConfig::fromConnectedAccount(feed))` → XOAUTH2 | **Yes** — provider auto-files |
+| **IMAP-source, password** (Yahoo/iCloud/Fastmail) | the feed address | `SmtpProvider(SmtpConfig::fromConnectedAccount(feed))` → password | Yes — provider auto-files |
+| **IMAP-source, generic** (self-hosted Postfix+Dovecot) | the feed address | `SmtpProvider(SmtpConfig::fromConnectedAccount(feed))` → password | **No** — SMTP submission does not save Sent |
 
-So the system provider (§4) and the per-mailbox transport are two entry points into the **one**
-`SmtpMailer` configuration helper — no second send implementation.
+So the system provider (§4) and the per-mailbox transport are two ways to **obtain a transport** for
+the one `EmailSender` pipeline — no second send implementation, no bypass.
+
+**Sent-copy responsibility.** `smtp_files_sent` (a `PRESETS` capability, §11) records whether a
+provider's SMTP saves the sent copy itself. When true, nothing more is needed. When false, two-way sync
+`APPEND`s the copy to the Sent folder (`two_way_imap_sync.md` §9) — filed exactly once, never both.
+`resolveOutboundTransport` surfaces this flag so the sync layer knows whether to APPEND.
 
 **Provider auth notes (data, per `PRESETS`):**
 - **Google:** `https://mail.google.com/` already authorizes SMTP send via XOAUTH2 — no re-consent.
@@ -266,11 +367,25 @@ sender intact.
 
 ## 11. Data Model / Settings, Failure Handling, Testing
 
-- **`SmtpMailer`:** add the auth abstraction (config object + `xoauth2` mode) and
-  `forConnectedAccount()`; existing global-settings construction unchanged (back-compatible).
+- **`SmtpConfig` (new value object):** `{host, port, encryption, authMode, credential}` with
+  `fromSettings()`, `fromConnectedAccount()`, and `fromForwardingSettings()` factories.
+- **`SmtpMailer`:** configured from an `SmtpConfig` (one construction model) with `password` and
+  `xoauth2` auth modes; the no-arg path defaults to `SmtpConfig::fromSettings()` (back-compatible).
+- **`SmtpProvider`:** optional `SmtpConfig` constructor arg (default `fromSettings()`) + the extracted
+  `applyMessage()`; both `send()` and `relayRawMessage()` use the injected config. Same class serves
+  global, per-account, and forwarding SMTP transport.
+- **`EmailSender::send()`:** optional `?EmailServiceProvider $transport` param — when supplied, send
+  through it (no fallback) while keeping validation, retry-queue, and debug logging.
+- **Relay consolidation (§4.2):** `InboundEmailRouter::relayViaSmtp()` deleted; `createMailer()` reduced
+  to `SmtpConfig::fromForwardingSettings()`; the forwarding SMTP fallback routes through
+  `SmtpProvider::relayRawMessage()`. `Activation.php`'s direct `systemmailer` send moves to
+  `EmailSender`.
 - **`PRESETS`:** add `smtp_host` / `smtp_port` / `smtp_encryption` per entry (Gmail
   `smtp.gmail.com:587`, M365 `smtp.office365.com:587`, Yahoo `:465`, iCloud `smtp.mail.me.com:587`,
-  Fastmail `:465`, generic = user-entered).
+  Fastmail `:465`, generic = user-entered). Add `smtp_files_sent` (bool) per entry — whether the
+  provider's SMTP auto-saves the sent copy to Sent (`true` for Gmail/M365/Yahoo/iCloud/Fastmail;
+  `false` for generic self-hosted). Consumed by two-way sync (`two_way_imap_sync.md` §9) to decide
+  whether to `APPEND` the copy.
 - **Settings:** active-provider gains the connected-account option + which account; config stores the
   chosen `InboundImapAccount` reference (credentials already on the account). No schema beyond that.
 - **Failure handling:** OAuth refresh via `ensureFresh()`; auth failure → `iia_needs_reauth` +
@@ -283,10 +398,14 @@ sender intact.
 
 ## 12. Open Decisions
 
-- **Exposure layer:** *(resolved — Option A, see §4(c))* a thin `ConnectedMailboxProvider` delegating
-  to `SmtpMailer`, chosen for first-class discoverability in the provider dropdown over a "credential
-  source" option on `SmtpProvider`. Both reuse `SmtpMailer`; the deciding factor was UX, not
-  mechanics, because the §4(b′) mapping extraction single-sources the send either way.
+- **Exposure layer:** *(resolved — Option A, see §4(d))* a thin `ConnectedMailboxProvider` delegating
+  to a `SmtpProvider` configured via `SmtpConfig::fromConnectedAccount()`, chosen for first-class
+  discoverability in the provider dropdown over a "credential source" option on `SmtpProvider`. The
+  deciding factor was UX, not mechanics, because the §4(b′) mapping extraction single-sources the send.
+- **Transport injection vs. provider bypass:** *(resolved — see §4(c))* per-mailbox sends flow through
+  `EmailSender::send()` via an optional injected transport, **not** by calling the SMTP layer directly.
+  Chosen so per-mailbox sends inherit validation, retry-queue, and debug logging; the only behavior
+  intentionally skipped for an injected transport is provider fallback (wrong for send-as-identity).
 - **OAuth transport:** *(resolved — SMTP + XOAUTH2, see §4.1)* one transport via PHPMailer's built-in
   XOAUTH2; `forConnectedAccount()` stays a pure SMTP config helper with no per-provider branch.
   Provider REST APIs (Gmail `messages.send`, Graph `sendMail`) are a **deferred, Microsoft-only
@@ -303,16 +422,29 @@ sender intact.
 
 1. **Extract `SmtpMailer::applyMessage()`** (§4 b′) from `SmtpProvider::send()` — the anti-duplication
    primitive everything else reuses; pure refactor, no behavior change (regression: existing SMTP send).
-2. **`SmtpMailer` XOAUTH2 auth mode** + config-object construction (the core primitive; back-compatible).
-3. **`SmtpMailer::forConnectedAccount()`** + `PRESETS` SMTP coordinates.
-4. **`ConnectedMailboxProvider`** (§4 c) + the "Connect an email account" onboarding (§6).
-5. **`resolveOutboundTransport`** (§7) — unblocks `outbound_reply_forward.md`.
-6. **Limit detection + migration nudge + bulk warning** (§9).
+2. **`SmtpConfig` value object + single `SmtpMailer` construction model** (`fromSettings()` back-compat)
+   **+ XOAUTH2 auth mode** (the core primitives; back-compatible).
+3. **`SmtpConfig::fromConnectedAccount()` + `PRESETS` SMTP coordinates + `SmtpProvider` optional
+   `SmtpConfig` param** (so the one provider class is the SMTP transport either way).
+4. **`EmailSender::send()` optional transport parameter** (§4 c) — the single pipeline for injected
+   transports; regression: existing global-selection + fallback unchanged.
+5. **`ConnectedMailboxProvider`** (§4 d) + the "Connect an email account" onboarding (§6).
+6. **`resolveOutboundTransport`** (§7) — returns an injected transport; unblocks `outbound_reply_forward.md`.
+7. **Limit detection + migration nudge + bulk warning** (§9).
+8. **Relay consolidation to the two-mode end state** (§4.2) — `SmtpConfig::fromForwardingSettings()`;
+   route the forwarding SMTP fallback through `SmtpProvider::relayRawMessage()`; delete
+   `InboundEmailRouter::relayViaSmtp()`; move `Activation.php` to `EmailSender`. **Wider blast radius
+   (`plugins/inbound_email` + forwarding-relay tests); separable, ships last.** Regression: inbound
+   forwarding via provider relay *and* via the SMTP fallback both still deliver.
 
 ## 14. Docs to Update at Implementation
 
-`docs/email_system.md` — document the SMTP path's XOAUTH2 auth and connected-account credential
-sourcing, the connected-account provider option, the per-mailbox transport resolver, forced `From`,
-and the limits/migration guidance. Cross-reference from `plugins/inbound_email/docs/overview.md` that
+`docs/email_system.md` — document the **two send modes** (structured send vs. raw relay) and their
+shared plumbing: the SMTP path's XOAUTH2 auth and connected-account credential sourcing, `SmtpConfig`
+and its three factories (`fromSettings`/`fromConnectedAccount`/`fromForwardingSettings`),
+`EmailSender::send()`'s optional injected transport (one pipeline, fallback skipped for injected
+transports), the connected-account provider option, the per-mailbox transport resolver, forced `From`,
+and the limits/migration guidance. Note that inbound forwarding's SMTP fallback now routes through
+`SmtpProvider::relayRawMessage()` (no separate `relayViaSmtp` path). Cross-reference from `plugins/inbound_email/docs/overview.md` that
 one account connection serves both inbound (IMAP feed) and outbound (the same `SmtpMailer`). Written
 as the current state, per the docs rule.
