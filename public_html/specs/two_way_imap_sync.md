@@ -113,8 +113,11 @@ per-folder, so the cursor lives here.
   `[Gmail]/Sent Mail`).
 - `iif_role` `varchar(20)` nullable — special-use role: `inbox|sent|trash|drafts|junk|archive|all|custom`
   (from `SPECIAL-USE` / provider name mapping, §6).
-- `iif_navigable` `bool` default `true` not null — false for the Gmail All-Mail backing folder
-  (`iif_role = all`), which is an ingestion source, not a reader destination (§7).
+- `iif_navigable` `bool` default `true` not null — reader visibility, an axis **independent of**
+  `iif_role`: whether this folder appears in reader navigation. Seeded `false` only for the Gmail
+  All-Mail backing source (an ingestion source, not a reader destination, §7); otherwise `true`. A
+  full mail-client folder-visibility preference (e.g. hide Junk, collapse a noisy folder) drives this
+  per-folder without a schema change — do not "optimize" it into a function of `iif_role`.
 - `iif_uidvalidity` `int8` nullable, `iif_last_seen_uid` `int8` nullable — ingestion cursor.
 - `iif_last_sync_modseq` `int8` nullable — highest CONDSTORE MODSEQ reconciled on pull.
 - `iif_is_tracked` `bool` default `true` not null — whether sync polls this folder.
@@ -131,14 +134,14 @@ has three rows. Carries the **shadow**.
 
 **`iem_inbound_email_message` (message):**
 - `iem_local_state_modified` `timestamp(6)` nullable — set by `MailboxService` whenever a
-  reference-backed row's *flags or membership* change locally; a cheap "this row has some pending
-  push" index so sync need not scan all `imf_` rows each cycle. Correctness lives in the per-element
-  shadow; this is only an index.
+  reference-backed row's **flags** change locally; the flag-dirtiness signal compared against
+  `iem_synced_state_time` in §7.1. Membership dirtiness is **not** tracked here — it lives entirely in
+  the per-element shadow (`imf_present_local ≠ imf_present_base`), which the push step queries directly,
+  so there is no `iem_`-level membership index to keep in sync.
 - `iem_synced_state_time` `timestamp(6)` nullable — when push last reconciled this row's **flags**
   (membership dirtiness is tracked per-element in `imf_`, not by this timestamp).
 - `iem_gm_msgid` `varchar(32)` nullable — Gmail `X-GM-MSGID` (stable, account-unique). The dedup
   key that collapses the same message seen under N labels into one row (§7). Null for non-label feeds.
-- `iem_gm_thrid` `varchar(32)` nullable — Gmail `X-GM-THRID`, an authoritative thread key when present.
 
 Existing `iem_imap_uid` / `iem_imap_uidvalidity` / `iem_imap_folder` /
 `iem_iia_inbound_imap_account_id` remain the *current-locator* for body/attachment fetch. On a move
@@ -231,7 +234,7 @@ it reuses the rule flags already established.
    For clean elements/flags apply remote; for dirty, skip. Then advance each folder's
    `iif_last_sync_modseq` to the **pre-pull** `HIGHESTMODSEQ`.
 2. **Ingest** new mail (`ImapIngestor::poll`, extended to seed `imf_` rows with `local = base =`
-   observed set, and `iem_gm_msgid`/`iem_gm_thrid` on Gmail).
+   observed set, and `iem_gm_msgid` on Gmail).
 3. **Push (mode ∈ `push|both`).** For each **dirty** flag row and each **dirty** `imf_` element whose
    local value still differs from remote, issue the §6 op (`STORE`, `±X-GM-LABELS`, `MOVE`,
    move-to-Trash). On confirmed write set the shadow to match local (`imf_present_base =
