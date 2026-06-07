@@ -51,6 +51,7 @@ $config = array(
 	'listUrl'           => '/ajax/mailbox_list',
 	'threadUrl'         => '/ajax/mailbox_thread',
 	'actionUrl'         => '/ajax/mailbox_action',
+	'sendUrl'           => '/ajax/mailbox_send',
 	'messageDetailBase' => '/plugins/inbound_email/admin/admin_inbound_email_message',
 	'initialMailboxes'  => $initial_mailboxes,
 );
@@ -73,7 +74,45 @@ echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JS
 		</div>
 	</aside>
 
-	<section class="mbx-main">
+	<section class="mbx-main"><?php
+	// Compose panel — a real FormWriter form rendered once, hidden; the reader's
+	// JS shows it and populates To/Cc/Subject + the hidden context fields per the
+	// clicked conversation, then submits it via fetch (no reload). Admin-only, so
+	// FormWriter's single-use/expiring token would only get in the way of a
+	// long-lived reader — disabled (csrf => false); the endpoint validates the
+	// reader's persistent token instead. @see specs/outbound_reply_forward.md §4
+	$compose = $page->getFormWriter('mbx_compose_form', array(
+		'action'  => '/ajax/mailbox_send',
+		'method'  => 'POST',
+		'enctype' => 'multipart/form-data',
+		'csrf'    => false,
+	));
+	?>
+		<div class="mbx-compose" id="mbx-compose" hidden>
+			<div class="mbx-compose-head">
+				<span class="mbx-compose-title" id="mbx-compose-title">Reply</span>
+				<button type="button" class="mbx-iconbtn" id="mbx-compose-close" title="Discard">&times;</button>
+			</div>
+			<div class="mbx-compose-error" id="mbx-compose-error" hidden></div>
+			<?php
+			$compose->begin_form();
+			$compose->hiddeninput('mode', '', array('value' => '', 'id' => 'mbx_mode'));
+			$compose->hiddeninput('source_id', '', array('value' => '', 'id' => 'mbx_source_id'));
+			$compose->hiddeninput('_csrf_token', '', array('value' => $csrf_token, 'id' => 'mbx_csrf'));
+			// No FormWriter validation rules: the reader submits this form by fetch,
+			// and FormWriter's client validator does a native (full-page) submit when
+			// it passes — which would break the SPA. Validation is the reader JS (To
+			// non-empty) plus full server-side validation in MailboxSender.
+			$compose->textinput('to', 'To', array('id' => 'mbx_to',
+				'helptext' => 'Separate multiple addresses with commas.'));
+			$compose->textinput('cc', 'Cc', array('id' => 'mbx_cc', 'placeholder' => 'Optional'));
+			$compose->textinput('subject', 'Subject', array('id' => 'mbx_subject'));
+			$compose->textarea('body', 'Message', array('id' => 'mbx_body', 'rows' => 10));
+			$compose->fileinput('attachments[]', 'Attachments', array('id' => 'mbx_attachments', 'multiple' => true));
+			$compose->submitbutton('mbx_send', 'Send');
+			$compose->end_form();
+			?>
+		</div>
 		<div class="mbx-list-view" id="mbx-list-view">
 			<div class="mbx-list-header">
 				<span id="mbx-list-title" class="mbx-list-title">All mail</span>

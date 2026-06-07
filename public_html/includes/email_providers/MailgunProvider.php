@@ -173,9 +173,18 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Raw
 
         if ($message->getHtmlBody()) {
             $email_to_send['html'] = $message->getHtmlBody();
+            $text = $message->getTextBody();
+            if ($text !== null && $text !== '') {
+                $email_to_send['text'] = $text;
+            }
         } else {
             $email_to_send['text'] = $message->getTextBody();
         }
+
+        // Cc / Bcc, custom headers (Message-Id / In-Reply-To / References for
+        // threaded reply-forward), reply-to, and attachments — so a relay send
+        // carries the same envelope as the SMTP path, never silently dropping them.
+        $this->applyExtras($email_to_send, $message);
 
         $recipients = $message->getRecipients();
         $sending_groups = array_chunk($recipients, 500, true);
@@ -202,6 +211,52 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Raw
         }
 
         return $all_sent;
+    }
+
+    /**
+     * Stamp Cc/Bcc, reply-to, custom headers, and attachments onto a Mailgun
+     * array-format send payload. Custom headers become Mailgun "h:" params (so
+     * Message-Id / In-Reply-To / References ride along for threaded mail);
+     * attachments map to Mailgun's attachment file specs (filePath for on-disk,
+     * fileContent for in-memory bytes from attachData()).
+     */
+    private function applyExtras(array &$payload, EmailMessage $message): void {
+        $cc = $message->getCc();
+        if (!empty($cc)) {
+            $payload['cc'] = implode(',', array_map(array($this, 'formatAddress'), $cc));
+        }
+        $bcc = $message->getBcc();
+        if (!empty($bcc)) {
+            $payload['bcc'] = implode(',', array_map(array($this, 'formatAddress'), $bcc));
+        }
+        if ($message->getReplyTo()) {
+            $payload['h:Reply-To'] = $message->getReplyTo();
+        }
+        if ($message->getMessageId()) {
+            $payload['h:Message-Id'] = $message->getMessageId();
+        }
+        foreach ($message->getHeaders() as $name => $value) {
+            $payload['h:' . $name] = $value;
+        }
+
+        $files = array();
+        foreach ($message->getAttachments() as $attachment) {
+            if (isset($attachment['data'])) {
+                $files[] = array('fileContent' => $attachment['data'], 'filename' => $attachment['name']);
+            } elseif (isset($attachment['path'])) {
+                $files[] = array('filePath' => $attachment['path'], 'filename' => $attachment['name']);
+            }
+        }
+        if (!empty($files)) {
+            $payload['attachment'] = $files;
+        }
+    }
+
+    /** Render one EmailMessage recipient ['email','name'] as "Name <email>". */
+    private function formatAddress(array $addr): string {
+        $email = $addr['email'] ?? '';
+        $name = trim((string)($addr['name'] ?? ''));
+        return $name !== '' ? ($name . ' <' . $email . '>') : $email;
     }
 
     public function sendBatch(EmailMessage $message, array $recipients): array {

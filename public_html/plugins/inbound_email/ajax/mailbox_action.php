@@ -43,8 +43,7 @@ $service = new MailboxService($viewer);
 
 $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
 
-$alias_id = (isset($_POST['alias_id']) && $_POST['alias_id'] !== '')
-	? intval($_POST['alias_id']) : null;
+$alias_id = MailboxService::parseAliasParam($_POST['alias_id'] ?? null);
 
 // Resolve target ids: explicit ids[] or a thread_key expanded server-side.
 $ids = array();

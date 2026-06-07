@@ -15,6 +15,7 @@ class EmailMessage {
     private $attachments = [];
     private $headers = [];
     private $metadata = [];
+    private $messageId;
     
     /**
      * Static constructor for common use case
@@ -146,6 +147,32 @@ class EmailMessage {
         return $this;
     }
     
+    /**
+     * Attach in-memory bytes (no file on disk required). The counterpart to
+     * attach() for content the caller already holds — re-attached fetched/parsed
+     * originals (reply/forward), generated reports, etc. Mapped to PHPMailer's
+     * addStringAttachment() in SmtpMailer and to Mailgun's fileContent.
+     */
+    public function attachData($data, $fileName, $contentType = 'application/octet-stream') {
+        $this->attachments[] = [
+            'data' => $data,
+            'name' => $fileName ?: 'attachment',
+            'type' => $contentType ?: 'application/octet-stream',
+        ];
+
+        return $this;
+    }
+
+    /**
+     * Pin the outgoing Message-ID (RFC angle-bracketed form, e.g. <id@domain>).
+     * When set, transports stamp this exact value instead of auto-generating one,
+     * so a stored copy can be reconciled to the sent message by Message-ID.
+     */
+    public function messageId($id) {
+        $this->messageId = $id;
+        return $this;
+    }
+
     public function header($name, $value) {
         $this->headers[$name] = $value;
         return $this;
@@ -231,4 +258,5 @@ class EmailMessage {
     public function getAttachments() { return $this->attachments; }
     public function getHeaders() { return $this->headers; }
     public function getMetadata() { return $this->metadata; }
+    public function getMessageId() { return $this->messageId; }
 }

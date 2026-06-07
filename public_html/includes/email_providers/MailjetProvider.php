@@ -275,6 +275,12 @@ class MailjetProvider implements EmailServiceProvider {
                     'Filename' => $a['name'] ?: basename($a['path']),
                     'Base64Content' => base64_encode(file_get_contents($a['path'])),
                 ];
+            } elseif (isset($a['data'])) {
+                $attachments[] = [
+                    'ContentType' => $a['type'] ?: 'application/octet-stream',
+                    'Filename' => $a['name'] ?: 'attachment',
+                    'Base64Content' => base64_encode($a['data']),
+                ];
             }
         }
         if (!empty($attachments)) {

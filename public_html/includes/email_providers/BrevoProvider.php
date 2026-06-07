@@ -251,6 +251,11 @@ class BrevoProvider implements EmailServiceProvider {
                     'name' => $a['name'] ?: basename($a['path']),
                     'content' => base64_encode(file_get_contents($a['path'])),
                 ];
+            } elseif (isset($a['data'])) {
+                $attachments[] = [
+                    'name' => $a['name'] ?: 'attachment',
+                    'content' => base64_encode($a['data']),
+                ];
             }
         }
         if (!empty($attachments)) {

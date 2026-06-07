@@ -116,6 +116,12 @@ class SmtpMailer extends PHPMailer {
         $this->setFrom($message->getFrom(), $message->getFromName());
         $this->Subject = $message->getSubject();
 
+        // A caller-pinned Message-ID wins over PHPMailer's auto-generated one so a
+        // later-observed copy reconciles by Message-ID (reply/forward threading).
+        if ($message->getMessageId()) {
+            $this->MessageID = $message->getMessageId();
+        }
+
         // HTML message: HTML body + plain-text alternative. Text-only message:
         // send as plain text (an empty Body under isHTML(true) is rejected by
         // PHPMailer as "Message body empty"), so plain-text mail — e.g. SMS-gateway
@@ -149,7 +155,16 @@ class SmtpMailer extends PHPMailer {
             $this->addCustomHeader($name, $value);
         }
         foreach ($message->getAttachments() as $attachment) {
-            $this->addAttachment($attachment['path'], $attachment['name']);
+            if (isset($attachment['data'])) {
+                $this->addStringAttachment(
+                    $attachment['data'],
+                    $attachment['name'],
+                    PHPMailer::ENCODING_BASE64,
+                    $attachment['type'] ?? 'application/octet-stream'
+                );
+            } else {
+                $this->addAttachment($attachment['path'], $attachment['name']);
+            }
         }
     }
 }

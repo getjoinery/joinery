@@ -44,8 +44,10 @@ $message = EmailMessage::create('user@example.com', 'Subject', 'Body content')
 - `subject($subject)` - Set subject
 - `html($content)` - Set HTML body
 - `text($content)` - Set plain text body
-- `attachment($path, $name)` - Add attachment
+- `attach($path, $name)` - Add an on-disk attachment by file path
+- `attachData($bytes, $name, $contentType)` - Add an in-memory attachment (generated/fetched content, no file needed)
 - `header($name, $value)` - Add custom header
+- `messageId($id)` - Pin the outgoing Message-ID (angle-bracketed) instead of letting the transport auto-generate one
 
 ### EmailSender Class
 
