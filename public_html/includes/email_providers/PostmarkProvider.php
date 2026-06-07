@@ -277,6 +277,12 @@ class PostmarkProvider implements EmailServiceProvider {
                     'Content' => base64_encode(file_get_contents($a['path'])),
                     'ContentType' => mime_content_type($a['path']) ?: 'application/octet-stream',
                 ];
+            } elseif (isset($a['data'])) {
+                $out[] = [
+                    'Name' => $a['name'] ?: 'attachment',
+                    'Content' => base64_encode($a['data']),
+                    'ContentType' => $a['type'] ?: 'application/octet-stream',
+                ];
             }
         }
         return $out ?: null;

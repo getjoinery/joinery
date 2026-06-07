@@ -30,7 +30,6 @@ if ($thread_key === '') {
 	exit();
 }
 
-$alias_id = (isset($_GET['alias_id']) && $_GET['alias_id'] !== '')
-	? intval($_GET['alias_id']) : null;
+$alias_id = MailboxService::parseAliasParam($_GET['alias_id'] ?? null);
 
 echo json_encode(array('messages' => $service->getThread($alias_id, $thread_key)));

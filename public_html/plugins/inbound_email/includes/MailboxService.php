@@ -34,6 +34,31 @@ class MailboxService {
 	/** Prefix marking a synthetic singleton thread key (no real thread header). */
 	const SINGLETON_PREFIX = 'm:';
 
+	/**
+	 * Sentinel alias-scope meaning "unmatched (NULL-alias) mail only" — the
+	 * superadmin-only pseudo-mailbox for mail that routed to no alias. A real
+	 * alias id is always a positive serial, so -1 can never collide.
+	 */
+	const UNMATCHED = -1;
+
+	/**
+	 * Parse an alias_id request parameter into a scope value for the read/mutation
+	 * methods: '' / absent → null (all accessible); 'unmatched' → UNMATCHED; else
+	 * the integer alias id. One parser shared by every reader endpoint.
+	 *
+	 * @param mixed $raw
+	 * @return int|null
+	 */
+	public static function parseAliasParam($raw): ?int {
+		if ($raw === null || $raw === '') {
+			return null;
+		}
+		if ($raw === 'unmatched') {
+			return self::UNMATCHED;
+		}
+		return intval($raw);
+	}
+
 	/** SQL expression for a row's grouping key (real thread key, or m:<id>). */
 	const GROUP_KEY_SQL = "COALESCE(NULLIF(iem_thread_key,''), 'm:' || iem_inbound_email_message_id)";
 
@@ -56,6 +81,13 @@ class MailboxService {
 	 * all-access) case is unconstrained so NULL-alias unmatched mail surfaces.
 	 */
 	private function readScopeSql(?int $aliasId): string {
+		// "Unmatched" — NULL-alias mail that belongs to no mailbox. Superadmin-only;
+		// everyone else gets a no-match scope even if they craft the parameter.
+		if ($aliasId === self::UNMATCHED) {
+			return $this->viewer->isAllAccess()
+				? 'iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL'
+				: '1=0';
+		}
 		if ($aliasId === null && $this->viewer->isAllAccess()) {
 			return 'iem_delete_time IS NULL';
 		}
@@ -288,7 +320,8 @@ class MailboxService {
 					iem_sender, iem_recipient, iem_subject, iem_received_time,
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source,
-					iem_size_bytes, iem_message_id_header, iem_body_plain, iem_body_html
+					iem_size_bytes, iem_message_id_header, iem_direction,
+					iem_body_plain, iem_body_html
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -313,6 +346,7 @@ class MailboxService {
 				'auth_source'       => $r['iem_auth_source'],
 				'size_bytes'        => intval($r['iem_size_bytes']),
 				'message_id_header' => $r['iem_message_id_header'],
+				'direction'         => $r['iem_direction'] ?: 'inbound',
 				'body_plain'        => $r['iem_body_plain'],
 				'body_html'         => $r['iem_body_html'],
 			);

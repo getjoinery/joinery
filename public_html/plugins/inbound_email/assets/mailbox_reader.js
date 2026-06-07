@@ -21,7 +21,8 @@
 		page: 1,
 		hasMore: false,
 		threadKey: null,
-		mailboxes: []
+		mailboxes: [],
+		messages: []      // messages of the currently-open thread
 	};
 
 	// ---- tiny DOM helpers ----
@@ -73,22 +74,13 @@
 		var list = $('#mbx-mailboxes');
 		list.innerHTML = '';
 
-		if (state.allAccess && data.all_mail) {
-			list.appendChild(mailboxItem('All mail', null, data.all_mail.unread, false));
-		}
 		state.mailboxes.forEach(function (m) {
 			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.any_starred));
 		});
 		if (state.allAccess && data.unmatched && data.unmatched.total > 0) {
-			var info = el('li', 'mbx-mailbox', null);
-			info.style.opacity = '.7';
-			info.style.cursor = 'default';
-			info.appendChild(el('span', 'mbx-mailbox-addr', 'Unmatched'));
-			var b = el('span', 'mbx-badge' + (data.unmatched.unread ? '' : ' zero'),
-				String(data.unmatched.unread));
-			info.appendChild(b);
-			info.title = 'Unrouted mail (no mailbox) — visible in All mail';
-			list.appendChild(info);
+			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, false);
+			li.title = 'Unrouted mail that matched no mailbox';
+			list.appendChild(li);
 		}
 
 		// Highlight current selection.
@@ -190,6 +182,7 @@
 	// ---- reading pane (right) ----
 	function openThread(t, rowEl) {
 		state.threadKey = t.thread_key;
+		state.openThread = t;
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
 			n.classList.remove('active');
 		});
@@ -217,7 +210,9 @@
 	}
 
 	function renderThread(t, messages) {
+		state.messages = messages || [];
 		var pane = $('#mbx-thread');
+		parkCompose();        // move the compose box out before clearing the pane
 		pane.innerHTML = '';
 
 		var header = el('div', 'mbx-thread-header');
@@ -252,6 +247,30 @@
 		messages.forEach(function (m, idx) {
 			pane.appendChild(messageBlock(m, idx === messages.length - 1));
 		});
+
+		// Gmail-style: Reply / Reply All / Forward chips at the bottom of the
+		// conversation. They act on the latest message and only show for a real
+		// mailbox (not the superadmin "Unmatched" view).
+		var latest = lastInboundOrLast(messages);
+		if (latest && latest.alias_id != null) {
+			var chips = el('div', 'mbx-reply-actions');
+			chips.appendChild(replyChip('↩ Reply', function () { openCompose('reply', t, latest); }));
+			chips.appendChild(replyChip('↩ Reply All', function () { openCompose('reply_all', t, latest); }));
+			chips.appendChild(replyChip('↪ Forward', function () { openCompose('forward', t, latest); }));
+			pane.appendChild(chips);
+		}
+
+		// Move the single (hidden) compose box to the bottom of this conversation,
+		// so it opens inline beneath the chips like Gmail.
+		var compose = document.getElementById('mbx-compose');
+		if (compose) { compose.hidden = true; pane.appendChild(compose); }
+	}
+
+	function replyChip(label, onClick) {
+		var b = el('button', 'mbx-reply-btn', label);
+		b.type = 'button';
+		b.addEventListener('click', onClick);
+		return b;
 	}
 
 	function actionBtn(label, danger, onClick) {
@@ -274,15 +293,23 @@
 	}
 
 	function messageBlock(m, expanded) {
-		var wrap = el('div', 'mbx-message' + (expanded ? '' : ' mbx-collapsed'));
+		var outbound = (m.direction === 'outbound');
+		var wrap = el('div', 'mbx-message' + (outbound ? ' mbx-outbound' : '') + (expanded ? '' : ' mbx-collapsed'));
 
 		var head = el('div', 'mbx-message-head');
 		var left = el('div');
-		left.appendChild(el('div', 'mbx-message-from', m.sender || '(unknown)'));
+		var from = el('div', 'mbx-message-from', m.sender || '(unknown)');
+		if (outbound) from.appendChild(el('span', 'mbx-sent-tag', 'Sent'));
+		left.appendChild(from);
 		left.appendChild(el('div', 'mbx-message-meta', 'to ' + (m.recipient || '')));
-		left.appendChild(el('div', 'mbx-message-meta', authText(m)));
+		if (!outbound) left.appendChild(el('div', 'mbx-message-meta', authText(m)));
 		head.appendChild(left);
-		head.appendChild(el('span', 'mbx-message-time', fmtTime(m.received_time)));
+
+		var right = el('div', 'mbx-message-right');
+		right.appendChild(el('span', 'mbx-message-time', fmtTime(m.received_time)));
+		right.appendChild(kebabMenu(m));
+		head.appendChild(right);
+
 		head.addEventListener('click', function () { wrap.classList.toggle('mbx-collapsed'); });
 		wrap.appendChild(head);
 
@@ -298,26 +325,204 @@
 		} else if (m.body_plain) {
 			body.appendChild(el('pre', null, m.body_plain));
 		} else {
-			body.appendChild(el('em', null, 'No text body. Use Raw / .eml.'));
+			body.appendChild(el('em', null, 'No text body. Use the ⋮ menu → View raw / .eml.'));
 		}
-
-		// Per-message raw / .eml deep-link to the detail page.
-		var links = el('div', 'mbx-thread-actions');
-		links.style.marginTop = '10px';
-		var base = CFG.messageDetailBase + '?iem_inbound_email_message_id=' + encodeURIComponent(m.id);
-		var raw = el('a', 'mbx-action', 'View raw / .eml');
-		raw.href = base + '&view=raw';
-		raw.target = '_blank';
-		raw.rel = 'noopener';
-		links.appendChild(raw);
-		body.appendChild(links);
 
 		wrap.appendChild(body);
 		return wrap;
 	}
 
+	// Gmail-style per-message kebab (⋮) menu — currently holds the raw / .eml
+	// deep-link, kept out of the way until asked for.
+	function kebabMenu(m) {
+		var wrap = el('div', 'mbx-kebab-wrap');
+		var btn = el('button', 'mbx-kebab', '⋮');
+		btn.type = 'button';
+		btn.title = 'More';
+		btn.setAttribute('aria-label', 'More options');
+
+		var menu = el('div', 'mbx-kebab-menu');
+		menu.hidden = true;
+		var base = CFG.messageDetailBase + '?iem_inbound_email_message_id=' + encodeURIComponent(m.id);
+		var raw = el('a', 'mbx-kebab-item', 'View raw / .eml');
+		raw.href = base + '&view=raw';
+		raw.target = '_blank';
+		raw.rel = 'noopener';
+		menu.appendChild(raw);
+
+		// Don't let kebab/menu clicks collapse the message (the head toggles it).
+		btn.addEventListener('click', function (e) {
+			e.stopPropagation();
+			var willOpen = menu.hidden;
+			closeAllKebabs();
+			menu.hidden = !willOpen;
+		});
+		menu.addEventListener('click', function (e) { e.stopPropagation(); });
+
+		wrap.appendChild(btn);
+		wrap.appendChild(menu);
+		return wrap;
+	}
+
+	function closeAllKebabs() {
+		Array.prototype.forEach.call(document.querySelectorAll('.mbx-kebab-menu'), function (mn) {
+			mn.hidden = true;
+		});
+	}
+
+	// ---- compose (reply / reply all / forward) ----
+
+	// Pull the email out of a "Name <email>" display string (or a bare address).
+	function extractEmail(s) {
+		if (!s) return '';
+		var m = /<([^>]+)>/.exec(s);
+		return (m ? m[1] : s).trim();
+	}
+
+	// Split a stored recipient string into individual addresses.
+	function splitAddrs(s) {
+		if (!s) return [];
+		return s.split(/[,;]+/).map(extractEmail).filter(Boolean);
+	}
+
+	// The current mailbox's own address (to drop from Reply-All), by alias id.
+	function addressForAlias(aliasId) {
+		if (aliasId == null) return '';
+		var hit = state.mailboxes.filter(function (m) { return String(m.alias_id) === String(aliasId); })[0];
+		return hit ? (hit.address || '') : '';
+	}
+
+	// Prefer the latest inbound message as the reply target; fall back to the last.
+	function lastInboundOrLast(messages) {
+		if (!messages || !messages.length) return null;
+		for (var i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].direction !== 'outbound') return messages[i];
+		}
+		return messages[messages.length - 1];
+	}
+
+	function ensurePrefix(subject, prefix, altRe) {
+		subject = subject || '';
+		return altRe.test(subject) ? subject : (prefix + ' ' + subject);
+	}
+
+	function openCompose(mode, t, source) {
+		var titles = { reply: 'Reply', reply_all: 'Reply All', forward: 'Forward' };
+		$('#mbx-compose-title').textContent = titles[mode] || 'Reply';
+		hideComposeError();
+
+		document.getElementById('mbx_mode').value = mode;
+		document.getElementById('mbx_source_id').value = source.id;
+
+		var own = (addressForAlias(source.alias_id) || '').toLowerCase();
+		var sender = extractEmail(source.sender);
+
+		var to = '', cc = '';
+		if (mode === 'forward') {
+			to = '';
+		} else {
+			to = sender;
+			if (mode === 'reply_all') {
+				cc = splitAddrs(source.recipient).filter(function (a) {
+					var la = a.toLowerCase();
+					return la !== own && la !== sender.toLowerCase();
+				}).join(', ');
+			}
+		}
+		document.getElementById('mbx_to').value = to;
+		document.getElementById('mbx_cc').value = cc;
+
+		var subj = t.subject || source.subject || '';
+		subj = (mode === 'forward')
+			? ensurePrefix(subj, 'Fwd:', /^\s*(fwd?|fw)\s*:/i)
+			: ensurePrefix(subj, 'Re:', /^\s*re\s*:/i);
+		document.getElementById('mbx_subject').value = subj;
+
+		document.getElementById('mbx_body').value = '';
+		var files = document.getElementById('mbx_attachments');
+		if (files) files.value = '';
+
+		var chips = document.querySelector('.mbx-reply-actions');
+		if (chips) chips.hidden = true;
+		var compose = $('#mbx-compose');
+		compose.hidden = false;
+		compose.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		document.getElementById('mbx_to').focus();
+	}
+
+	function closeCompose() {
+		$('#mbx-compose').hidden = true;
+		var chips = document.querySelector('.mbx-reply-actions');
+		if (chips) chips.hidden = false;
+	}
+
+	// The compose box is a single element moved into the open thread. Park it back
+	// on the main pane (hidden) before a thread's innerHTML is cleared, so clearing
+	// the thread never destroys it.
+	function parkCompose() {
+		var c = document.getElementById('mbx-compose');
+		if (c) { c.hidden = true; $('.mbx-main').appendChild(c); }
+	}
+
+	function showComposeError(msg) {
+		var e = $('#mbx-compose-error');
+		e.textContent = msg;
+		e.hidden = false;
+	}
+	function hideComposeError() {
+		var e = $('#mbx-compose-error');
+		e.hidden = true;
+		e.textContent = '';
+	}
+
+	function submitCompose(e) {
+		e.preventDefault();
+		var form = e.target;
+		hideComposeError();
+
+		var to = document.getElementById('mbx_to').value.trim();
+		if (!to) { showComposeError('Add at least one recipient.'); return; }
+
+		var btn = document.getElementById('mbx_send');
+		if (btn) btn.disabled = true;
+
+		fetch(CFG.sendUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'X-CSRF-Token': CFG.csrf || '' },
+			body: new FormData(form)
+		}).then(function (r) { return r.json(); }).then(function (data) {
+			if (btn) btn.disabled = false;
+			if (data && data.ok) {
+				closeCompose();
+				// Re-open the thread so the new outbound row renders in the dialog.
+				if (state.threadKey != null) {
+					reopenCurrentThread();
+				}
+				refreshMailboxes();
+			} else {
+				showComposeError((data && data.error) || 'The message could not be sent.');
+			}
+		}).catch(function () {
+			if (btn) btn.disabled = false;
+			showComposeError('A network error prevented sending.');
+		});
+	}
+
+	// Reload the open thread's messages in place (after a send).
+	function reopenCurrentThread() {
+		var url = CFG.threadUrl + '?thread_key=' + encodeURIComponent(state.threadKey)
+			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '');
+		apiGet(url).then(function (data) {
+			renderThread(state.openThread || { thread_key: state.threadKey, subject: '' }, data.messages || []);
+		});
+	}
+
 	function closeThread() {
+		closeCompose();
+		parkCompose();        // preserve the compose box before clearing the thread
 		state.threadKey = null;
+		state.messages = [];
 		$('#mbx-thread').innerHTML = '';
 		$('#mbx-reader').classList.remove('reading');
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
@@ -350,21 +555,34 @@
 		$('#mbx-refresh').addEventListener('click', function () { refreshMailboxes(); loadThreads(true); });
 		$('#mbx-more').addEventListener('click', function () { state.page += 1; loadThreads(false); });
 
-		// Esc returns from an open conversation to the list (Gmail-style).
+		// Compose: discard button + fetch-intercepted submit.
+		var closeBtn = $('#mbx-compose-close');
+		if (closeBtn) closeBtn.addEventListener('click', closeCompose);
+		var composeForm = document.getElementById('mbx_compose_form');
+		if (composeForm) composeForm.addEventListener('submit', submitCompose);
+
+		// A click anywhere else closes any open kebab (⋮) menu.
+		document.addEventListener('click', function () { closeAllKebabs(); });
+
+		// Esc closes any kebab menu, then the compose panel, then the conversation.
 		document.addEventListener('keydown', function (e) {
-			if (e.key === 'Escape' && state.threadKey != null) { closeThread(); }
+			if (e.key !== 'Escape') return;
+			var open = document.querySelector('.mbx-kebab-menu:not([hidden])');
+			if (open) { closeAllKebabs(); }
+			else if (!$('#mbx-compose').hidden) { closeCompose(); }
+			else if (state.threadKey != null) { closeThread(); }
 		});
 
 		// Seed switcher, then pick a default mailbox.
 		var seed = CFG.initialMailboxes || { mailboxes: [], all_access: false };
 		renderMailboxes(seed);
 
-		if (seed.all_access) {
-			selectMailbox(null, 'All mail');
-		} else if (seed.mailboxes && seed.mailboxes.length) {
+		if (seed.mailboxes && seed.mailboxes.length) {
 			selectMailbox(seed.mailboxes[0].alias_id, seed.mailboxes[0].address);
 		} else {
-			$('#mbx-threads').appendChild(emptyRow('No mailboxes have been shared with you.'));
+			$('#mbx-threads').appendChild(emptyRow(seed.all_access
+				? 'No mailboxes yet.'
+				: 'No mailboxes have been shared with you.'));
 		}
 	}
 

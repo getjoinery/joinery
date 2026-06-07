@@ -601,8 +601,10 @@ superadmins are all-access. **Opening the reader to non-admin members later need
 no schema change or migration** — the grant table, per-row state, and the
 viewer/scope seam are keyed on the user generically. It is purely additive code:
 relax the endpoint permission gate (currently `get_permission() < 5` in each
-`ajax/mailbox_*.php`) and add a member-area mount. `MailboxViewer::canCompose()`
-is the seam for a future compose/reply.
+`ajax/mailbox_*.php`) and add a member-area mount. Reply/Reply-All/Forward
+(below) are staff-and-superadmin, gated by the same mailbox grant that governs
+reading; `MailboxViewer::canCompose()` is the seam for exposing them to non-admin
+members.
 
 ### Endpoints
 
@@ -612,9 +614,48 @@ is the seam for a future compose/reply.
 | `/ajax/mailbox_list` | GET | thread list (`alias_id`, filters, `page`) |
 | `/ajax/mailbox_thread` | GET | messages in a `thread_key` (with bodies) |
 | `/ajax/mailbox_action` | POST | mark read/unread, star/unstar, delete — CSRF-protected, accepts `ids[]` or a `thread_key` expanded server-side |
+| `/ajax/mailbox_send` | POST (multipart) | send a reply / reply-all / forward AS the mailbox; stores the sent copy |
 
 HTML bodies stay sandboxed (`<iframe sandbox="">`, no `allow-scripts`) exactly as
 the detail page does — stored mail is fully attacker-controlled.
+
+### Reply / Forward
+
+From an open conversation, **Reply**, **Reply All**, and **Forward** compose a
+message sent **as that mailbox**, threaded into the conversation, with the sent
+copy stored so the thread reads as a back-and-forth dialog (outbound messages are
+labelled "Sent").
+
+- **Compose UI.** A single `FormWriter` form is rendered once in the reader
+  (hidden) and the reader's JS shows it, populates To/Cc/Subject and the quoted
+  context, and submits it by `fetch` so the page never reloads. The panel is
+  admin-only, so the form is rendered with `csrf => false` (FormWriter's
+  single-use, 2-hour token would break a second compose in a long-lived reader);
+  the endpoint validates the reader's persistent `mailbox_reader_csrf` token
+  instead, as the other reader actions do.
+- **Identity & transport.** `mailbox_send.php` resolves the mailbox to a
+  transport with `resolveOutboundTransport()` and sends through the one
+  `EmailSender` pipeline. An **IMAP-source** mailbox (a connected account) sends
+  through the feed's own SMTP as the feed address; a **hosted alias**
+  (`alias@our-domain`) sends through the platform's active provider as the alias,
+  with the domain's DKIM/SRS. Sending is gated by the same grant that governs
+  reading the mailbox.
+- **Threading.** Replies set `In-Reply-To`/`References` on the wire from the
+  replied-to message; the stored outbound row reuses the conversation's
+  `iem_thread_key` (a singleton original is given a real thread key on first
+  reply so the two group). A forward starts a fresh external thread (no reply
+  headers) but still files into the conversation locally.
+- **Forward attachments.** The original's attachments are re-attached: an
+  IMAP-source original loads its `ima_` manifest and fetches each part on demand
+  (`ImapIngestor::fetchPart`); a hosted original parses `iem_raw_message` with
+  `Horde_Mime`. If a reference-backed original is no longer in the source mailbox,
+  the forward fails with a clear message rather than sending an empty body.
+  User-uploaded attachments ride along in every mode.
+- **The stored copy.** Each successful send is persisted as an
+  `iem_direction = 'outbound'` row (sender = mailbox address, recipient = the
+  To/Cc list, `iem_is_read = true`) so the conversation renders from the local
+  row immediately — no poll needed. A failed send stores **no** row and surfaces
+  the error inline; the draft stays in the panel to fix and resend.
 
 ## Inbound Providers
 

@@ -265,6 +265,15 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, RawMess
      * Caller fills in 'Destination'.
      */
     private function buildSendParams(EmailMessage $message, Globalvars $settings): array {
+        // The Simple content shape cannot carry attachments or custom headers
+        // (In-Reply-To/References/Message-Id). When the message needs them, send
+        // raw MIME instead — built by the same SmtpMailer mapping every other
+        // structured send uses, so attachments (incl. attachData bytes) and
+        // threading headers ride along.
+        if (!empty($message->getAttachments()) || !empty($message->getHeaders()) || $message->getMessageId()) {
+            return $this->buildRawSendParams($message, $settings);
+        }
+
         $from = $message->getFromName()
             ? $message->getFromName() . ' <' . $message->getFrom() . '>'
             : $message->getFrom();
@@ -290,6 +299,33 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, RawMess
         if ($replyTo = $message->getReplyTo()) {
             $params['ReplyToAddresses'] = [$replyTo];
         }
+
+        $config_set = $settings->get_setting('ses_configuration_set');
+        if (!empty($config_set)) {
+            $params['ConfigurationSetName'] = $config_set;
+        }
+
+        return $params;
+    }
+
+    /**
+     * Build SES params with raw MIME (Content.Raw) for messages that carry
+     * attachments or custom headers. The MIME is assembled by SmtpMailer's
+     * EmailMessage->PHPMailer mapping — the one place that mapping lives — then
+     * handed to SES. FromEmailAddress is omitted so SES uses the MIME From header
+     * (matching relayRawMessage()); the caller still fills Destination.
+     */
+    private function buildRawSendParams(EmailMessage $message, Globalvars $settings): array {
+        require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
+
+        $mailer = new SmtpMailer();
+        $mailer->applyMessage($message);
+        $mailer->preSend();
+        $raw = $mailer->getSentMIMEMessage();
+
+        $params = [
+            'Content' => ['Raw' => ['Data' => $raw]],
+        ];
 
         $config_set = $settings->get_setting('ses_configuration_set');
         if (!empty($config_set)) {

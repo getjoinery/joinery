@@ -23,8 +23,7 @@ if ($session->get_permission() < 5) {
 $viewer = MailboxViewer::fromSession($session);
 $service = new MailboxService($viewer);
 
-$alias_id = (isset($_GET['alias_id']) && $_GET['alias_id'] !== '')
-	? intval($_GET['alias_id']) : null;
+$alias_id = MailboxService::parseAliasParam($_GET['alias_id'] ?? null);
 
 $filters = array(
 	'sender'       => isset($_GET['sender']) ? trim((string)$_GET['sender']) : '',

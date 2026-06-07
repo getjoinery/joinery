@@ -61,6 +61,7 @@ class InboundEmailMessage extends SystemBase {
 		'iem_raw_message'         => array('type'=>'text'),
 		'iem_message_id_header'   => array('type'=>'varchar(255)', 'unique_with'=>array('iem_recipient')),
 		'iem_thread_key'          => array('type'=>'varchar(255)'), // indexed via migration iem_001 (no declarative non-unique index support)
+		'iem_direction'           => array('type'=>'varchar(10)', 'default'=>'inbound', 'is_nullable'=>false), // inbound | outbound (reply/forward sent from the reader)
 		'iem_is_read'             => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iem_is_starred'          => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iem_read_time'           => array('type'=>'timestamp(6)'),
@@ -182,6 +183,10 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 
 		if (isset($this->options['message_id_header'])) {
 			$filters['iem_message_id_header'] = [$this->options['message_id_header'], PDO::PARAM_STR];
+		}
+
+		if (isset($this->options['direction'])) {
+			$filters['iem_direction'] = [$this->options['direction'], PDO::PARAM_STR];
 		}
 
 		if (isset($this->options['received_since'])) {
