@@ -66,11 +66,16 @@ multi-field form in the platform.
 The all-JS reader is no obstacle: render the compose form with FormWriter server-side once (hidden),
 and have the reader's JS **show and populate** it — setting To/Cc/Subject/quoted body and the hidden
 context fields (mode, `alias_id`, `thread_key`, replied-to id) on the clicked message. Populating an
-existing FormWriter form's fields from JS is not hand-rolling a form. The form may submit via a
-`fetch` intercept (reading FormWriter's own CSRF hidden field) so the reader keeps its no-reload feel.
-Consequences: CSRF for this endpoint is FormWriter's standard token (the reader token remains for the
-single-button actions); the collapsible **Cc** and the plain/rich **body toggle** are FormWriter
-`visibility_rules`, not hand-rolled JS.
+existing FormWriter form's fields from JS is not hand-rolling a form. The form submits via a `fetch`
+intercept so the reader keeps its no-reload feel.
+
+Consequences: **CSRF is not a concern for this admin-only (permission ≥5) endpoint** — render the
+FormWriter form with `csrf => false`. FormWriter's own token is single-use and time-boxed (it `unset`s
+the token on a valid check and expires it after 2h, `FormWriterV2Base.php:269-279`), which would break a
+second compose in a long-lived reader; disabling it avoids that trap entirely. The send endpoint reuses
+the reader's existing persistent `mailbox_reader_csrf` token (the same one the single-button actions
+validate-but-don't-consume) or omits the check. The collapsible **Cc** and the plain/rich **body
+toggle** are FormWriter `visibility_rules`, not hand-rolled JS.
 
 ## 5. Threading & Subject
 
@@ -80,6 +85,10 @@ single-button actions); the collapsible **Cc** and the plain/rich **body toggle*
 - Generate/capture the sent message's `Message-ID` for storage + dedup (§6).
 - Reuse the conversation's `iem_thread_key` so the sent row groups into the same thread.
 - Subject: add `Re:`/`Fwd:` only when not already present.
+
+The threading headers are set on the outgoing `EmailMessage` via `->header()` (`EmailMessage.php:149`) —
+wire-only. None are persisted as columns: grouping is `iem_thread_key` (copied from the replied-to row)
+and nothing reads `In-Reply-To`/`References` back from storage (see §8).
 
 ## 6. Storing the Sent Message
 
@@ -116,40 +125,62 @@ followed by the body, with the original attachments re-attached. The original-as
 attachment style is **not** v1; it can be a later option. This is a UX choice with no architectural
 weight — both styles fetch the same content below.
 
-- **Hosted messages** retain raw MIME in `iem_raw_message` → original headers/body/attachments read
-  from the stored message.
-- **IMAP-source messages** are reference-backed (no stored bytes) → fetch the original
-  parts/attachments on demand via the existing `ImapIngestor` fetch path (the reference-backed
-  caveat applies — the source must still hold the message).
+- **Attachment plumbing (shared sink).** Re-attaching fetched/parsed originals needs in-memory bytes,
+  but `EmailMessage` only attaches by file path today (`attach($filePath)`, `EmailMessage.php:136`). Add
+  `EmailMessage::attachData($bytes, $filename, $contentType)` and map it in `SmtpMailer::applyMessage`
+  via PHPMailer `addStringAttachment()`. Both forward sources below converge on this one sink — it is a
+  general capability (any feature sending generated/in-memory content benefits), not forward-specific.
+- **IMAP-source messages** are reference-backed (no stored bytes), but the attachment set is **already
+  enumerated**: the IMAP poll writes an `ima_` manifest per message (`ImapIngestor::writeManifest`) with
+  `ima_mime_part`, `ima_filename`, `ima_content_type`, `ima_encoding`, `ima_is_inline`. Forward = load
+  the `ima_` rows, `fetchPart(ima_mime_part, …)` each (the IMAP locator columns are on the `iem_` row),
+  `attachData`. **No MIME-tree walk at forward time.** The reference-backed caveat applies — the source
+  must still hold the message (§10).
+- **Hosted messages** retain raw MIME in `iem_raw_message` but have **no** manifest (it is written only
+  on the IMAP path). Forward = parse `iem_raw_message` with `Horde_Mime_Part::parseMessage` (Horde_Mime
+  is already a dependency, used in `ImapIngestor`), iterate parts, `attachData`. This parse helper is the
+  only genuinely new extraction code in the feature.
 - User-added attachments (compose uploads) are added alongside.
 
 ## 8. Data Model Changes
 
-All via `$field_specifications` + `update_database`.
+All via `$field_specifications` + `update_database`. The whole feature adds **one column**:
 
-**`iem_inbound_email_message`:**
-- `iem_direction` `varchar(10)` default `'inbound'` not null.
-- `iem_send_status` `varchar(20)` nullable — `sent|failed|queued` for outbound rows (observability +
-  retry); null for inbound.
-- (Optional) `iem_in_reply_to` / `iem_references` `text` — store threading headers for fidelity;
-  `iem_thread_key` already suffices for grouping, so these are nice-to-have.
+**`iem_inbound_email_messages`:**
+- `iem_direction` `varchar(10)` default `'inbound'` not null — `inbound|outbound`.
+
+`MailboxService::getThread()` must add `iem_direction` to its SELECT (it is not selected today) so the
+reader can style the outbound half as "Sent."
+
+Nothing else is stored:
+- `iem_in_reply_to` / `iem_references` — **not stored.** The outgoing `In-Reply-To`/`References` headers
+  are built transiently at send time (§5) and have no reader that reads them back; grouping is
+  `iem_thread_key`, which the sent row copies from the replied-to row.
+- `iem_send_status` — **not stored.** Failed sends are not persisted (§10), so every outbound row that
+  exists is sent; the column would carry a single value.
 
 (The feed-SMTP `PRESETS` coordinates needed to *send* live in the Outbound Email spec, not here.)
 
 ## 9. Endpoint & Permissions
 
 - **New `ajax/mailbox_send.php`:** params — mode (`reply|reply_all|forward`), `alias_id`, source
-  `thread_key` + replied-to message id, To/Cc, subject, body, attachment refs. Validates the
-  **FormWriter CSRF token** (§4), enforces `MailboxService` scope (sender must have a grant to the
-  mailbox; superadmins all-access), builds the `EmailMessage`, sends via
-  `resolveOutboundTransport(mailbox)`, stores the outbound row (§6), returns status.
+  `thread_key` + replied-to message id, To/Cc, subject, body, attachment refs. Enforces `MailboxService`
+  scope (sender must have a grant to the mailbox; superadmins all-access), builds the `EmailMessage`,
+  resolves `$t = resolveOutboundTransport(mailbox)`, and **applies the identity itself** —
+  `$message->from($t->fromAddress, $fromName)`. (Required: the hosted-alias path returns
+  `transport = null` to mean "use the platform's active provider," and nothing else forces From to the
+  alias; the resolver stays a pure data lookup.) Then sends `EmailSender::send($message, false,
+  $t->transport)` — `queue_on_failure = false` so success/failure is synchronous and shown inline
+  (§10) — and stores the outbound row **only on success** (§6), returns status. CSRF: admin-only (§4).
 - Sending as a mailbox is gated by the **same scope** that governs reading/mutating it — no new
   permission concept.
 
 ## 10. Failure Handling
 
-- Send failure → do **not** present the message as sent; store with `iem_send_status='failed'`
-  (or don't store) and surface the error inline for retry.
+- Send failure → do **not** present the message as sent and do **not** store a row. Surface the error
+  inline; the compose panel retains the user's draft so retry is "fix and Send again." No stored failed
+  rows and no draft/retry state machine — both are §2 non-goals. Failure observability comes from the
+  `error_log` lines in `EmailSender`/`SmtpProvider` plus the inline reader error.
 - OAuth expiry on a feed-SMTP send → reuse `iia_needs_reauth` / `markNeedsReauth()` and the Accounts
   "Reconnect" affordance (shared with inbound).
 - **Forward of a reference-backed original no longer on the source** (deleted/expunged upstream, so the
@@ -208,7 +239,8 @@ send path.
 ## 14. Open Decisions
 
 - *(resolved — see §4)* **Compose UI:** FormWriter form embedded in the reader, JS-populated and
-  fetch-submitted; CSRF via FormWriter; Cc/body toggles via `visibility_rules`.
+  fetch-submitted; no CSRF concern (admin-only) so FormWriter is rendered with `csrf => false`; Cc/body
+  toggles via `visibility_rules`.
 - *(resolved — see §7)* **Quote/forward formatting:** inline by default (blockquote reply, Gmail-style
   forward block, attachments re-attached); `message/rfc822` attachment style deferred.
 
