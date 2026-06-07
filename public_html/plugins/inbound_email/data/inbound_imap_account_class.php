@@ -24,7 +24,11 @@
  * and never logged or echoed — use the get/set accessors, which encrypt/decrypt on
  * use only.
  *
- * @version 1.0
+ * The same connected account drives outbound: the PRESETS smtp_* coordinates and
+ * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
+ * outbound helpers below report SMTP send-capability and granted-scope state.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -54,15 +58,25 @@ class InboundImapAccount extends SystemBase {
 	 * the user to supply. 'oauth_provider' is the OAuth2ProviderRegistry key for
 	 * oauth2 hosts (null for password hosts). Add a host by adding a row here.
 	 *
-	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string}>
+	 * The smtp_* coordinates make one row drive BOTH directions: the same account
+	 * that feeds inbound IMAP also sends outbound through these SMTP settings
+	 * (SmtpConfig::fromConnectedAccount). 'smtp_encryption' is 'tls' (STARTTLS,
+	 * port 587) or 'ssl' (implicit TLS, port 465). 'smtp_files_sent' records
+	 * whether the provider's SMTP auto-saves the sent copy to the Sent folder —
+	 * true for the hosted mailbox providers, false for generic self-hosted
+	 * submission (where two-way sync APPENDs the copy instead). Generic has no
+	 * fixed SMTP host: connected-account outbound is unavailable for it, and a
+	 * relay-class provider is used to send for those mailboxes.
+	 *
+	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string,smtp_host:?string,smtp_port:int,smtp_encryption:?string,smtp_files_sent:bool}>
 	 */
 	const PRESETS = array(
-		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'google'),
-		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft'),
-		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
-		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
-		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
-		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null),
+		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'google',    'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
+		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
+		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.yahoo.com','smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true),
+		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.me.com',   'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
+		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.fastmail.com',  'smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true),
+		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>null,                 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>false),
 	);
 
 	/**
@@ -106,6 +120,7 @@ class InboundImapAccount extends SystemBase {
 		'iia_oauth_access_token_enc'    => array('type'=>'text'),
 		'iia_oauth_refresh_token_enc'   => array('type'=>'text'),
 		'iia_oauth_token_expires'       => array('type'=>'timestamp(6)'),
+		'iia_oauth_scopes'              => array('type'=>'text'),
 		'iia_poll_interval_seconds'     => array('type'=>'int4', 'default'=>'300'),
 		'iia_uidvalidity'               => array('type'=>'int8'),
 		'iia_last_seen_uid'             => array('type'=>'int8'),
@@ -173,6 +188,75 @@ class InboundImapAccount extends SystemBase {
 		return $this->getPreset()['oauth_provider'] ?? null;
 	}
 
+	// --- Outbound (SMTP send) helpers --------------------------------------
+	// The same connected account that feeds inbound IMAP can authenticate the
+	// outbound SMTP sender (SmtpConfig::fromConnectedAccount). These read the
+	// preset's SMTP coordinates and the granted-scope state.
+
+	/** Whether this account has SMTP coordinates to send through (false for generic). */
+	function canSendViaSmtp(): bool {
+		return !empty($this->getPreset()['smtp_host']);
+	}
+
+	/** Whether the provider's SMTP auto-files the sent copy in Sent (PRESETS capability). */
+	function smtpFilesSent(): bool {
+		return !empty($this->getPreset()['smtp_files_sent']);
+	}
+
+	/**
+	 * The OAuth scopes an OAuth account needs in order to SEND via SMTP XOAUTH2.
+	 * Google's IMAP scope (https://mail.google.com/) already authorizes SMTP, so
+	 * no extra scope is required. Microsoft needs SMTP.Send added to the IMAP
+	 * scopes (a re-consent). Password providers need no scopes.
+	 *
+	 * @return string[] the scope strings that must all be present to send.
+	 */
+	static function requiredSendScopes(?string $oauthProviderKey): array {
+		if ($oauthProviderKey === 'microsoft') {
+			return array('https://outlook.office365.com/SMTP.Send');
+		}
+		// Google: the IMAP scope already covers SMTP send.
+		return array();
+	}
+
+	/** The scopes the stored grant was issued with (space-delimited → array). */
+	function grantedScopes(): array {
+		$raw = trim((string)$this->get('iia_oauth_scopes'));
+		if ($raw === '') {
+			return array();
+		}
+		return preg_split('/\s+/', $raw);
+	}
+
+	/**
+	 * True when this account is authorized to send outbound right now: password
+	 * accounts always are (the app password covers SMTP); OAuth accounts must
+	 * hold a token and every required send scope. Drives the proactive
+	 * "Reconnect to allow sending" prompt (§4.1) before any send is attempted.
+	 */
+	function isSendAuthorized(): bool {
+		if (!$this->canSendViaSmtp()) {
+			return false;
+		}
+		if (!$this->isOAuth()) {
+			return $this->hasPassword();
+		}
+		if (!$this->hasOAuthToken() || $this->needsReauth()) {
+			return false;
+		}
+		$required = self::requiredSendScopes($this->getOAuthProviderKey());
+		if (empty($required)) {
+			return true;
+		}
+		$granted = $this->grantedScopes();
+		foreach ($required as $scope) {
+			if (!in_array($scope, $granted, true)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	// --- Encrypted secret accessors ----------------------------------------
 	// Plaintext is encrypted on set and decrypted on get; the *_enc columns are
 	// never exposed. Empty input clears the column.
@@ -211,6 +295,14 @@ class InboundImapAccount extends SystemBase {
 			$this->set('iia_oauth_refresh_token_enc', $box->encrypt($refresh));
 		}
 		$this->set('iia_oauth_token_expires', $token->getExpiresAt());
+		// Persist granted scopes so outbound can detect whether SMTP send was
+		// authorized (e.g. Microsoft SMTP.Send) and prompt a re-consent if not.
+		// Only overwrite when the response actually carries a scope — a refresh
+		// response often omits it, and we must not erase the grant-time scopes.
+		$scope = $token->getScope();
+		if ($scope !== '') {
+			$this->set('iia_oauth_scopes', $scope);
+		}
 		// A freshly granted/refreshed token clears any prior re-auth flag.
 		$this->set('iia_needs_reauth', false);
 	}

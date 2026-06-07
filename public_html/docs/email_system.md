@@ -551,6 +551,106 @@ The email system provides:
 
 Use EmailMessage + EmailSender for all email development. Direct EmailTemplate usage is only for specialized template processing needs.
 
+## Two Send Modes & SmtpConfig
+
+Outbound mail flows in exactly **two modes over one set of plumbing**:
+
+- **Structured send** — `EmailSender::send(EmailMessage, $queue, ?$transport)` builds a MIME
+  body from `from`/`to`/`subject`/`html|text` and lets the provider stamp our identity. This is
+  the path for all transactional and composed mail.
+- **Raw relay** — `provider->relayRawMessage($raw_mime, $envelope_sender, $destinations)` ships
+  pre-formed bytes with an explicit `MAIL FROM`, preserving SPF/DKIM/SRS alignment to the original
+  sender. This is the path for inbound forwarding. See [Raw-MIME relay](#raw-mime-relay-optional-capability).
+
+Both modes share one SMTP construction model: `SmtpConfig` + a single `SmtpMailer`.
+
+### SmtpConfig
+
+`SmtpConfig` (`includes/SmtpConfig.php`) is a value object describing how to open an SMTP
+transport — `{host, port, encryption, authMode, credential}` — with two auth modes: `password`
+(username/password) and `xoauth2` (an OAuth access token via PHPMailer's XOAUTH2 token-provider
+interface). `encryption` is `'ssl'` (implicit TLS / SMTPS), `'tls'` (STARTTLS), `'none'`, or
+`null` (auto-detect from port). Three factories cover the three credential sources:
+
+| Factory | Source | Used by |
+|---|---|---|
+| `SmtpConfig::fromSettings()` | Global `smtp_*` settings | The system SMTP provider (`new SmtpProvider()`), default for `new SmtpMailer()` |
+| `SmtpConfig::fromConnectedAccount($account)` | A connected `InboundImapAccount` — PRESETS SMTP coordinates + the stored OAuth token (`xoauth2`) or app password (`password`) | The connected-account provider and per-mailbox transport |
+| `SmtpConfig::fromForwardingSettings()` | `inbound_email_forwarding_smtp_*`, falling back to base `smtp_*` | Inbound forwarding's SMTP fallback |
+
+`SmtpMailer` takes an optional `SmtpConfig` (default `fromSettings()`), so `new SmtpMailer()`
+reads global `smtp_*` with password auth unchanged. The single `EmailMessage`→PHPMailer mapping
+lives in `SmtpMailer::applyMessage(EmailMessage)`, so every structured SMTP send is "configure a
+mailer from an `SmtpConfig`, `applyMessage`, send." `SmtpProvider` takes the same optional
+`SmtpConfig`, so the one provider class is the SMTP transport whether configured globally, per
+account, or for forwarding.
+
+### XOAUTH2 (OAuth SMTP)
+
+OAuth accounts (Gmail, Microsoft 365) send via **SMTP with XOAUTH2** — no provider REST API and no
+second send path. `XOAuth2TokenProvider` (`includes/XOAuth2TokenProvider.php`) implements
+PHPMailer's `OAuthTokenProvider`, sourcing a live access token from OAuth2 Core
+(`OAuth2Client::ensureFresh()`) and persisting a refreshed token back onto the account — the same
+shared grant inbound IMAP polling uses. A refresh failure flags `iia_needs_reauth`, so one
+**Reconnect** fixes both inbound and outbound.
+
+- **Google** — the `https://mail.google.com/` IMAP scope already authorizes SMTP send; no re-consent.
+- **Microsoft** — needs `https://outlook.office365.com/SMTP.Send` alongside the IMAP scope; the
+  connect flow requests both, so connecting (or reconnecting) an account grants both directions.
+  M365 tenants may disable SMTP AUTH org-wide — a send rejected for auth surfaces an actionable
+  warning to use Mailgun/SES or have the tenant admin enable SMTP AUTH.
+- **Password providers** (Yahoo/iCloud/Fastmail) — the same app password sends; only host/port differ.
+
+### Connected account as the system provider
+
+Selecting **Connected Email Account** as the active `email_service` sends all site mail through a
+connected account (chosen via the `connected_account_id` setting). `ConnectedMailboxProvider` is
+pure UX over the SMTP path: it forces `From` to the account address (consumer/provider SMTP
+rewrites it anyway — the accepted single-identity trade-off) and delegates to a `SmtpProvider`
+configured with `SmtpConfig::fromConnectedAccount()`. It proactively refuses to send for an
+account that lacks send authorization (e.g. a Microsoft account connected before SMTP.Send was
+granted), reporting "Reconnect to allow sending."
+
+### Injected transport (one pipeline, no bypass)
+
+`EmailSender::send()` accepts an optional third argument, `?EmailServiceProvider $transport`:
+
+- `$transport === null` (default) — select the provider by the `email_service` setting, with the
+  `email_fallback_service` fallback (unchanged).
+- `$transport` provided — send through it directly. **Fallback is skipped** (you cannot fall back a
+  "send as this mailbox" to a different identity), but validation, the retry-queue, and debug
+  logging are kept.
+
+This is how "send **as** a specific mailbox" stays on the one pipeline. `resolveOutboundTransport($mailbox)`
+(`includes/OutboundTransport.php`) returns a configured transport for a mailbox — an `SmtpProvider`
+built from `SmtpConfig::fromConnectedAccount()` for an IMAP-source mailbox, or the platform's active
+provider for a hosted alias (`alias@our-domain`, which a connected account cannot send as) — plus the
+`From` identity and a `filesSent` flag (whether the provider's SMTP auto-files the Sent copy, a PRESETS
+capability; when false, two-way sync APPENDs the copy). The caller sends via
+`$sender->send($msg, true, $result->transport)`.
+
+### Limits & migration
+
+Per-provider send limits are the signal to move to an ESP. On a rate-limit/quota response the
+connected-account path records a visible status ("<provider> is rate-limiting send — consider a
+dedicated provider") and the message uses the existing retry queue. Migrating is one setting:
+connect Mailgun/SES and change the active provider — no message-path changes. Bulk volume stays an
+ESP job; sending a list through a connected account is allowed but warned against.
+
+### Forwarding through a connected account
+
+A connected account is **not** a transparent `RawMessageRelay` — its SMTP rewrites the envelope
+sender and `From`. Inbound forwarding through one is allowed (the message goes out as the connected
+address, with the original sender preserved in `Reply-To` / `X-Original-From`), but a relay-class
+provider (SMTP host / Mailgun / SES) is preferred automatically when configured, since only it
+keeps SPF/DKIM/SRS aligned to the original sender. Inbound forwarding's SMTP fallback routes through
+`SmtpProvider::relayRawMessage()` configured with `SmtpConfig::fromForwardingSettings()`, so the raw
+SMTP transaction lives in one place shared with all other SMTP relaying.
+
+> **One account, both directions.** A single connected `InboundImapAccount` serves inbound (the
+> IMAP feed) and outbound (the same `SmtpMailer`), with a shared OAuth grant and a shared
+> `iia_needs_reauth` health flag. See [Inbound Email Plugin](../plugins/inbound_email/docs/overview.md#receiving-by-imap-poll).
+
 ## Email Authentication Checks (DnsAuthChecker)
 
 `includes/DnsAuthChecker.php` is the one place to check whether a domain
@@ -608,6 +708,7 @@ The email system uses a provider abstraction so that new email services can be a
 | `brevo` | Brevo | Native (`messageVersions`, 1000/chunk) | Yes (`/v3/account`) | Single global endpoint; supports sandbox mode via `X-Sib-Sandbox` header |
 | `resend` | Resend | Native (`batch->send`, 100/chunk) | Yes (`apiKeys->list`) | Simplest config — single bearer token. Restricted/sending-only keys validate as "API Key Valid (Restricted)" |
 | `mailjet` | Mailjet | Native v3.1 Send API (50 messages/chunk, per-message status) | Yes (`/v3/REST/myprofile`) | Two-part credential (key + secret); supports sandbox mode |
+| `connected_account` | Connected Email Account | Per-recipient loop | — | Sends all site mail through a connected IMAP account's SMTP (Gmail/M365 XOAUTH2, Yahoo/iCloud/Fastmail app password). Forces `From` to that address. See [Two send modes](#two-send-modes--smtpconfig) |
 
 ### Adding a New Provider
 

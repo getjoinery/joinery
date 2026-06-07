@@ -108,15 +108,23 @@ $token = $client->ensureFresh(OAuth2ProviderRegistry::get('google'), $token);
 ### First consumer: Inbound IMAP
 
 The Inbound Email plugin's IMAP transport is the first consumer (purpose
-`inbound_imap`, in `plugins/inbound_email/includes/oauth_consumers/`). It requests
-the mail-read scope per provider — Google `https://mail.google.com/`, Microsoft
-`https://outlook.office365.com/IMAP.AccessAsUser.All offline_access` — stores the
-granted tokens (encrypted) on the IMAP account, and uses `ensureFresh()` on each
-poll to keep the XOAUTH2 bearer valid. See
-[Receiving by IMAP poll](/plugins/inbound_email/docs/overview.md#receiving-by-imap-poll).
+`inbound_imap`, in `plugins/inbound_email/includes/oauth_consumers/`). One consent
+grants **both directions** — IMAP read for the inbound feed and SMTP send for
+outbound — so the scopes requested are:
+
+- **Google:** `https://mail.google.com/` (this single scope authorizes IMAP *and*
+  SMTP send — no separate send scope).
+- **Microsoft:** `https://outlook.office365.com/IMAP.AccessAsUser.All`,
+  `https://outlook.office365.com/SMTP.Send`, and `offline_access`.
+
+The consumer stores the granted tokens (encrypted) and the granted scopes on the
+IMAP account, and `ensureFresh()` keeps the XOAUTH2 bearer valid for both the poll
+and the SMTP send. See
+[Receiving by IMAP poll](/plugins/inbound_email/docs/overview.md#receiving-by-imap-poll)
+and [Email System → Two send modes](/docs/email_system.md#two-send-modes--smtpconfig).
 The cloud-app registration (Google Cloud / Azure, the shared redirect URI, pasting
 client id/secret) is documented here once; the IMAP overview links to it and adds
-only the IMAP-specific scopes and the per-account "Connect" step.
+only the per-account "Connect" step.
 
 ## Settings
 
@@ -165,7 +173,10 @@ Google returns a refresh token reliably only when the authorize request includes
 4. **Certificates & secrets → New client secret**; copy the value into the admin
    page (Azure shows it once).
 5. **API permissions**: add the scopes your consumer requests. Include
-   `offline_access` so Microsoft issues a refresh token.
+   `offline_access` so Microsoft issues a refresh token. For inbound IMAP +
+   outbound SMTP, add `IMAP.AccessAsUser.All` and `SMTP.Send` (Office 365 Exchange
+   Online). Note M365 tenants may disable SMTP AUTH org-wide — sending then needs a
+   tenant admin to enable it, or a relay-class provider (Mailgun/SES).
 
 ## Scope minimization
 

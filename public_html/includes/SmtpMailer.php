@@ -3,53 +3,153 @@
 require_once(__DIR__ . '/PathHelper.php');
 
 require_once(PathHelper::getComposerAutoloadPath());
+require_once(PathHelper::getIncludePath('includes/SmtpConfig.php'));
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
 
+/**
+ * SmtpMailer - PHPMailer configured for SMTP from an SmtpConfig.
+ *
+ * One construction model: the constructor takes an optional SmtpConfig and
+ * defaults to SmtpConfig::fromSettings(), so the historical no-arg
+ * `new SmtpMailer()` keeps reading global smtp_* with password auth unchanged.
+ * Pass a config to authenticate as a connected account (XOAUTH2 or app password)
+ * or through the inbound-forwarding relay — the only thing that varies is the
+ * SmtpConfig.
+ *
+ * applyMessage() is the single EmailMessage→PHPMailer mapping; every structured
+ * SMTP send (global, connected-account, per-mailbox) is "new SmtpMailer($config),
+ * applyMessage($m), send()".
+ *
+ * @version 2.0
+ */
 class SmtpMailer extends PHPMailer {
     // Only encoding is truly universal
     const SMTP_ENCODING = 'quoted-printable';
-    
-    function __construct() {
-        $settings = Globalvars::get_instance();
-        
+
+    function __construct(?SmtpConfig $config = null) {
+        $config = $config ?: SmtpConfig::fromSettings();
+
         // Configure SMTP
         $this->isSMTP();
-        
-        // Get all configurable settings (no hardcoded defaults)
-        $this->Host = $settings->get_setting('smtp_host') ?: '';
-        $this->Port = intval($settings->get_setting('smtp_port') ?: 25);
-        
+
         // Set encoding (only truly universal value)
         $this->Encoding = self::SMTP_ENCODING;
-        
-        // Get domain-specific settings
-        $this->Helo = $settings->get_setting('smtp_helo') ?: '';
-        $this->Hostname = $settings->get_setting('smtp_hostname') ?: '';
-        $this->Sender = $settings->get_setting('smtp_sender') ?: '';
-        
-        // Auto-detect encryption based on port
-        switch($this->Port) {
-            case 465:
-                $this->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS; // SSL
+
+        $this->Host = $config->host ?: '';
+        $this->Port = intval($config->port ?: 25);
+
+        // Domain-specific settings (global path supplies these; the per-account
+        // and forwarding paths leave them empty, which is correct).
+        $this->Helo = $config->helo ?: '';
+        $this->Hostname = $config->hostname ?: '';
+        $this->Sender = $config->sender ?: '';
+
+        // Encryption: an explicit value wins; null means auto-detect from port
+        // (the historical SmtpMailer behavior).
+        if ($config->encryption === null) {
+            $this->SMTPSecure = self::encryptionForPort($this->Port);
+        } else {
+            $this->SMTPSecure = self::mapEncryption($config->encryption);
+        }
+
+        // Authentication
+        switch ($config->authMode) {
+            case SmtpConfig::AUTH_PASSWORD:
+                $this->SMTPAuth = true;
+                $this->Username = $config->username ?: '';
+                $this->Password = $config->password ?: '';
                 break;
+
+            case SmtpConfig::AUTH_XOAUTH2:
+                $this->SMTPAuth = true;
+                $this->AuthType = 'XOAUTH2';
+                $this->Username = $config->username ?: '';
+                if ($config->oauthProvider) {
+                    $this->setOAuth($config->oauthProvider);
+                }
+                break;
+
+            case SmtpConfig::AUTH_NONE:
+            default:
+                // Unauthenticated relay (e.g. local Postfix on port 25).
+                break;
+        }
+    }
+
+    /** Map an SmtpConfig encryption keyword to the PHPMailer SMTPSecure constant. */
+    private static function mapEncryption(string $encryption): string {
+        switch ($encryption) {
+            case 'ssl':
+                return PHPMailer::ENCRYPTION_SMTPS;   // implicit TLS / SMTPS
+            case 'tls':
+                return PHPMailer::ENCRYPTION_STARTTLS; // STARTTLS
+            case 'none':
+            default:
+                return '';
+        }
+    }
+
+    /** Historical port→encryption auto-detection used when encryption is null. */
+    private static function encryptionForPort(int $port): string {
+        switch ($port) {
+            case 465:
+                return PHPMailer::ENCRYPTION_SMTPS; // SSL
             case 587:
             case 2525:
-                $this->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // TLS
-                break;
+                return PHPMailer::ENCRYPTION_STARTTLS; // TLS
             case 25:
             default:
                 // Port 25 typically no encryption (but can support STARTTLS)
-                $this->SMTPSecure = '';
-                break;
+                return '';
         }
-        
-        // Support for authenticated SMTP
-        if ($settings->get_setting('smtp_auth')) {
-            $this->SMTPAuth = true;
-            $this->Username = $settings->get_setting('smtp_username') ?: '';
-            $this->Password = $settings->get_setting('smtp_password') ?: '';
+    }
+
+    /**
+     * The single EmailMessage→PHPMailer mapping. Stamps From, recipients, cc/bcc,
+     * reply-to, custom headers, and attachments onto this mailer. Shared by the
+     * global, connected-account, and per-mailbox SMTP send paths so the mapping
+     * lives in exactly one place.
+     */
+    function applyMessage(EmailMessage $message): void {
+        $this->setFrom($message->getFrom(), $message->getFromName());
+        $this->Subject = $message->getSubject();
+
+        // HTML message: HTML body + plain-text alternative. Text-only message:
+        // send as plain text (an empty Body under isHTML(true) is rejected by
+        // PHPMailer as "Message body empty"), so plain-text mail — e.g. SMS-gateway
+        // codes — sends correctly over the SMTP/connected-account path too.
+        $html = $message->getHtmlBody();
+        $text = $message->getTextBody();
+        if ($html !== null && $html !== '') {
+            $this->isHTML(true);
+            $this->Body = $html;
+            if ($text !== null && $text !== '') {
+                $this->AltBody = $text;
+            }
+        } else {
+            $this->isHTML(false);
+            $this->Body = (string)$text;
+        }
+
+        foreach ($message->getRecipients() as $recipient) {
+            $this->addAddress($recipient['email'], $recipient['name']);
+        }
+        foreach ($message->getCc() as $cc) {
+            $this->addCC($cc['email'], $cc['name']);
+        }
+        foreach ($message->getBcc() as $bcc) {
+            $this->addBCC($bcc['email'], $bcc['name']);
+        }
+        if ($replyTo = $message->getReplyTo()) {
+            $this->addReplyTo($replyTo);
+        }
+        foreach ($message->getHeaders() as $name => $value) {
+            $this->addCustomHeader($name, $value);
+        }
+        foreach ($message->getAttachments() as $attachment) {
+            $this->addAttachment($attachment['path'], $attachment['name']);
         }
     }
 }

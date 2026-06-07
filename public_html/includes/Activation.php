@@ -275,15 +275,13 @@ class Activation {
 		// For the phone verification only send a 6 digit code for easy of typing in!
 		$gen_code = self::getTempCode($phone->get('phn_usr_user_id'), '30 day', Activation::PHONE_VERIFY, $phn_phone_number_id, NULL, 6);
 
-		//SEND WELCOME MAIL
-		$mail = new systemmailer();
-
+		// Send the code through the same outbound pipeline as all other mail
+		// (active provider + fallback + retry queue) — no direct mailer bypass.
+		// The recipient is the carrier's email-to-SMS gateway; a plain-text body
+		// keeps it as an SMS, not an HTML email.
 		$settings = Globalvars::get_instance();
-		$mail->setFrom($settings->get_setting('defaultemail'), $settings->get_setting('defaultemailname'));
-		$mail->addAddress($phone->get('phn_phone_number') . '@' . $phone->get('phn_phone_carrier'));
-		$mail->Subject = $settings->get_setting('site_name').' Verify Code';
-		$mail->Body = "Code: $gen_code";
-		$mail->send();
+		$to = $phone->get('phn_phone_number') . '@' . $phone->get('phn_phone_carrier');
+		EmailSender::quickSend($to, $settings->get_setting('site_name') . ' Verify Code', "Code: $gen_code");
 	}
 }
 
