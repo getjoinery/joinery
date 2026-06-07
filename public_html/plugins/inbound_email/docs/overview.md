@@ -676,6 +676,14 @@ outbound provider, this gives a complete **bring-your-own-mailbox** path (SMTP o
 + IMAP in, same account) with no self-hosted MX and no webhook service. It targets
 the low-volume user who already has a mailbox and wants the platform to read it.
 
+> **One account, both directions.** The same connected account also powers
+> **outbound**: selecting the **Connected Email Account** provider sends all site
+> mail through this account's SMTP (Gmail/M365 via XOAUTH2, app-password hosts via
+> SMTP AUTH), reusing the same stored grant and `iia_needs_reauth` health flag — one
+> Reconnect fixes both inbound and outbound. The connect flow requests both the IMAP
+> read scope and the SMTP send scope, so connecting once enables both directions. See
+> [Email System → Two send modes](../../../docs/email_system.md#two-send-modes--smtpconfig).
+
 IMAP feeds are managed from the **Accounts** tree, attached to the mailbox they
 fill. They are **additive**: any number run alongside whatever the system's single
 push transport is, and adding one never changes that transport. Each feed binds to

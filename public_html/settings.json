@@ -77,6 +77,7 @@
     { "name": "cloud_storage_public_base_url", "default": "" },
     { "name": "cloud_storage_region", "default": "" },
     { "name": "cloud_storage_secret_key", "default": "" },
+    { "name": "connected_account_id", "default": "" },
     { "name": "cookie_consent_mode", "default": "auto" },
     { "name": "default_comment_status", "default": "Approved" },
     { "name": "default_email_template", "default": "default_outer_template" },

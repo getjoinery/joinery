@@ -7,12 +7,32 @@
  * Also implements RawMessageRelay: SMTP is natively a raw-MIME relay with full
  * envelope (MAIL FROM) control, so inbound forwarding can relay through it.
  *
- * @version 1.1
+ * Configured from an SmtpConfig (default: global smtp_*), so the one class is the
+ * SMTP transport whether sending globally, as a connected account, or through the
+ * forwarding relay. The EmailMessage→PHPMailer mapping lives once in
+ * SmtpMailer::applyMessage().
+ *
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
+require_once(PathHelper::getIncludePath('includes/SmtpConfig.php'));
 
 class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
+
+    /**
+     * The SMTP transport configuration. Defaults to the global smtp_* settings so
+     * `new SmtpProvider()` (the auto-discovered, no-arg construction EmailSender
+     * uses) is the system SMTP provider unchanged. Pass an SmtpConfig to make the
+     * same class send through a connected account or the forwarding relay.
+     *
+     * @var SmtpConfig
+     */
+    private $config;
+
+    public function __construct(?SmtpConfig $config = null) {
+        $this->config = $config ?: SmtpConfig::fromSettings();
+    }
 
     public static function getKey(): string {
         return 'smtp';
@@ -158,44 +178,8 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
     }
 
     public function send(EmailMessage $message): bool {
-        $mailer = new SmtpMailer();
-
-        // Set email content
-        $mailer->isHTML(true);
-        $mailer->setFrom($message->getFrom(), $message->getFromName());
-        $mailer->Subject = $message->getSubject();
-        $mailer->Body = $message->getHtmlBody();
-        $mailer->AltBody = $message->getTextBody();
-
-        // Add recipients
-        foreach ($message->getRecipients() as $recipient) {
-            $mailer->addAddress($recipient['email'], $recipient['name']);
-        }
-
-        // Add CC recipients
-        foreach ($message->getCc() as $cc) {
-            $mailer->addCC($cc['email'], $cc['name']);
-        }
-
-        // Add BCC recipients
-        foreach ($message->getBcc() as $bcc) {
-            $mailer->addBCC($bcc['email'], $bcc['name']);
-        }
-
-        // Add reply-to
-        if ($replyTo = $message->getReplyTo()) {
-            $mailer->addReplyTo($replyTo);
-        }
-
-        // Add custom headers
-        foreach ($message->getHeaders() as $name => $value) {
-            $mailer->addCustomHeader($name, $value);
-        }
-
-        // Add attachments
-        foreach ($message->getAttachments() as $attachment) {
-            $mailer->addAttachment($attachment['path'], $attachment['name']);
-        }
+        $mailer = new SmtpMailer($this->config);
+        $mailer->applyMessage($message);
 
         if (!$mailer->send()) {
             error_log("[SmtpProvider] Send failed: " . $mailer->ErrorInfo);
@@ -261,17 +245,17 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay {
      * single failed recipient does not fail the others — matching the
      * per-destination result shape forwardEmail() expects.
      *
-     * Uses the base smtp_* settings (via SmtpMailer), the same credential the
-     * outbound SMTP send() path uses. The router's forwarding-specific
-     * inbound_email_forwarding_smtp_* override is handled separately by its
-     * own SMTP fallback path (createMailer()), which this method does not touch.
+     * Uses this provider's injected SmtpConfig (default: the base smtp_* settings),
+     * so the same class relays through the global SMTP credential, the inbound
+     * forwarding relay (SmtpConfig::fromForwardingSettings()), or any other
+     * configured transport without a second SMTP transaction implementation.
      */
     public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
         $results = [];
 
         foreach ($destinations as $destination) {
             try {
-                $mailer = new SmtpMailer();
+                $mailer = new SmtpMailer($this->config);
                 $mailer->Sender = $envelope_sender;
                 $mailer->addAddress($destination);
 

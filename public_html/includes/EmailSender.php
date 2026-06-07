@@ -111,9 +111,15 @@ class EmailSender {
      * @param EmailMessage $message The email to send
      * @param bool $queue_on_failure If true, save to equ_queued_emails on total failure for later retry.
      *        Pass false when sending from the retry task to prevent infinite re-queuing.
+     * @param EmailServiceProvider|null $transport Optional pre-configured transport. When supplied
+     *        the message is sent through it directly — used for "send AS this mailbox" (the system
+     *        connected-account provider and the per-mailbox reply/forward transport). The global
+     *        email_service selection AND its fallback are skipped (you cannot fall back a
+     *        send-as-this-identity to a different identity), but validation, the retry-queue, and
+     *        debug logging are kept. This is the single pipeline — no send path bypasses it.
      * @return bool True if sent successfully
      */
-    public function send(EmailMessage $message, $queue_on_failure = true) {
+    public function send(EmailMessage $message, $queue_on_failure = true, ?EmailServiceProvider $transport = null) {
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
@@ -123,6 +129,25 @@ class EmailSender {
         $errors = $message->validate();
         if (!empty($errors)) {
             throw new Exception('Invalid email message: ' . implode(', ', $errors));
+        }
+
+        // Injected transport: send through it directly, no provider fallback.
+        if ($transport !== null) {
+            $service = method_exists($transport, 'getKey') ? $transport::getKey() : get_class($transport);
+            try {
+                $result = $transport->send($message);
+                $this->logEmailDebug(
+                    $result ? "Email sent successfully via injected transport $service"
+                            : "Email send failed via injected transport $service",
+                    $service);
+            } catch (\Exception $e) {
+                $this->logEmailDebug("Email send exception via injected transport $service: " . $e->getMessage(), $service);
+                $result = false;
+            }
+            if (!$result && $queue_on_failure) {
+                $this->queueForRetry($message);
+            }
+            return $result;
         }
 
         // Use service selection with fallback

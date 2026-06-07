@@ -86,10 +86,17 @@ function _imap_begin_consent(InboundImapAccount $account, $session, string $list
 		return _imap_msg_redirect($session, 'This account does not use OAuth.', $list_url);
 	}
 
-	// IMAP-read scope per provider (offline_access on Microsoft for a refresh token;
+	// One consent grants BOTH directions (§6 unified onboarding): IMAP read for the
+	// inbound feed AND SMTP send for outbound. Google's https://mail.google.com/
+	// already authorizes SMTP send, so no extra scope is needed. Microsoft needs
+	// SMTP.Send added alongside IMAP (offline_access yields the refresh token;
 	// Google returns one via access_type=offline + prompt=consent in the provider).
 	$scopes = ($providerKey === 'microsoft')
-		? array('https://outlook.office365.com/IMAP.AccessAsUser.All', 'offline_access')
+		? array(
+			'https://outlook.office365.com/IMAP.AccessAsUser.All',
+			'https://outlook.office365.com/SMTP.Send',
+			'offline_access',
+		)
 		: array('https://mail.google.com/');
 
 	try {

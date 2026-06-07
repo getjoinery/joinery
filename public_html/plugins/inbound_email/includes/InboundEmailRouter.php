@@ -655,7 +655,7 @@ class InboundEmailRouter {
 	private function relay($raw_mime, $envelope_sender, array $destinations) {
 		$provider = $this->resolveRelayProvider();
 		if (!($provider instanceof RawMessageRelay)) {
-			return $this->relayViaSmtp($raw_mime, $envelope_sender, $destinations);
+			return $this->relayViaSmtpFallback($raw_mime, $envelope_sender, $destinations);
 		}
 
 		// Primary: provider raw-MIME relay.
@@ -666,12 +666,27 @@ class InboundEmailRouter {
 		if ($failed && $this->smtpFallbackAvailable($provider)) {
 			error_log('InboundEmailRouter: provider relay failed for ' . implode(', ', $failed)
 				. ' — retrying over SMTP fallback');
-			foreach ($this->relayViaSmtp($raw_mime, $envelope_sender, $failed) as $dest => $ok) {
+			foreach ($this->relayViaSmtpFallback($raw_mime, $envelope_sender, $failed) as $dest => $ok) {
 				$results[$dest] = $ok; // SMTP outcome supersedes the provider failure
 			}
 		}
 
 		return $results;
+	}
+
+	/**
+	 * The SMTP forwarding fallback — raw-MIME relay through SmtpProvider configured
+	 * with the forwarding SMTP coordinates (SmtpConfig::fromForwardingSettings()).
+	 * The SMTP transaction itself lives once in SmtpProvider::relayRawMessage();
+	 * this method only supplies the configured provider, so there is no duplicate
+	 * MAIL FROM / RCPT TO / DATA copy. Returns ['destination' => bool].
+	 */
+	private function relayViaSmtpFallback($raw_mime, $envelope_sender, array $destinations) {
+		require_once(PathHelper::getIncludePath('includes/SmtpConfig.php'));
+		require_once(PathHelper::getIncludePath('includes/email_providers/SmtpProvider.php'));
+
+		$provider = new SmtpProvider(SmtpConfig::fromForwardingSettings());
+		return $provider->relayRawMessage($raw_mime, $envelope_sender, $destinations);
 	}
 
 	/**
@@ -691,61 +706,13 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Raw-SMTP fallback relay — the path for providers without RawMessageRelay
-	 * and for operators who deliberately point forwarding at a dedicated relay
-	 * (inbound_email_forwarding_smtp_*, else base smtp_*, via createMailer()).
-	 * Each destination is its own SMTP transaction. Returns ['destination'=>bool].
-	 */
-	private function relayViaSmtp($raw_mime, $envelope_sender, array $destinations) {
-		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
-
-		$results = array();
-		foreach ($destinations as $destination) {
-			try {
-				$mailer = $this->createMailer();
-
-				// Set envelope sender and recipient for the SMTP transaction
-				$mailer->Sender = $envelope_sender;
-				$mailer->addAddress($destination);
-
-				// Connect and send raw message via SMTP directly
-				if (!$mailer->smtpConnect()) {
-					throw new Exception('SMTP connect failed: ' . $mailer->ErrorInfo);
-				}
-
-				$smtp = $mailer->getSMTPInstance();
-
-				if (!$smtp->mail($envelope_sender)) {
-					throw new Exception('SMTP MAIL FROM failed');
-				}
-				if (!$smtp->recipient($destination)) {
-					throw new Exception('SMTP RCPT TO failed');
-				}
-				if (!$smtp->data($raw_mime)) {
-					throw new Exception('SMTP DATA failed');
-				}
-
-				$smtp->quit();
-				$smtp->close();
-
-				$results[$destination] = true;
-			} catch (Exception $e) {
-				error_log('InboundEmailRouter: Failed to forward to ' . $destination . ': ' . $e->getMessage());
-				$results[$destination] = false;
-			}
-		}
-
-		return $results;
-	}
-
-	/**
 	 * Resolve the relay provider for forwarding — the single decision point.
 	 *
 	 * Returns a RawMessageRelay provider instance when the active outbound
 	 * provider (email_service, the same resolution EmailSender uses) implements
 	 * RawMessageRelay AND no explicit inbound_email_forwarding_smtp_host
 	 * override is set. Otherwise returns null, meaning the SMTP fallback path
-	 * (relayViaSmtp/createMailer) should be used.
+	 * (relayViaSmtpFallback, a SmtpProvider on the forwarding SmtpConfig) is used.
 	 *
 	 * Public so the provisioning check (InboundEmailHealth::checkForwardingRelay)
 	 * verifies the exact relay the router will use.
@@ -840,54 +807,24 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Create a SmtpMailer instance with forwarding-specific settings (or fallback to main).
+	 * Create a SmtpMailer for the forwarding relay, configured from
+	 * SmtpConfig::fromForwardingSettings() (inbound_email_forwarding_smtp_*, else
+	 * base smtp_*).
 	 *
-	 * This is the SMTP-fallback relay acquisition routine: it is used by
-	 * relayViaSmtp() (the fallback path for providers without RawMessageRelay,
-	 * and when a forwarding-SMTP host override is set) and by
-	 * InboundEmailHealth::checkForwardingRelay() when that fallback is the
-	 * resolved relay — so the provisioning check exercises the exact relay the
-	 * feature would use. When a provider raw-MIME relay is active instead, the
-	 * health check verifies the provider credential rather than this mailer.
+	 * Used by InboundEmailHealth::checkForwardingRelay() to connection-test the
+	 * exact relay the SMTP fallback would use (relayViaSmtpFallback sends through a
+	 * SmtpProvider on the same SmtpConfig). When a provider raw-MIME relay is
+	 * active instead, the health check verifies the provider credential rather than
+	 * this mailer.
 	 */
 	public function createMailer() {
 		require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
+		require_once(PathHelper::getIncludePath('includes/SmtpConfig.php'));
 
-		$mailer = new SmtpMailer();
-
-		// Override with forwarding-specific SMTP settings if configured
-		$fwd_host = $this->settings->get_setting('inbound_email_forwarding_smtp_host');
-		if ($fwd_host) {
-			$mailer->Host = $fwd_host;
-		}
-		$fwd_port = $this->settings->get_setting('inbound_email_forwarding_smtp_port');
-		if ($fwd_port) {
-			$mailer->Port = intval($fwd_port);
-			// Re-detect encryption for new port
-			switch ($mailer->Port) {
-				case 465:
-					$mailer->SMTPSecure = 'ssl';
-					break;
-				case 587:
-				case 2525:
-					$mailer->SMTPSecure = 'tls';
-					break;
-				case 25:
-					$mailer->SMTPSecure = '';
-					break;
-			}
-		}
-		$fwd_user = $this->settings->get_setting('inbound_email_forwarding_smtp_username');
-		if ($fwd_user) {
-			$mailer->SMTPAuth = true;
-			$mailer->Username = $fwd_user;
-		}
-		$fwd_pass = $this->settings->get_setting('inbound_email_forwarding_smtp_password');
-		if ($fwd_pass) {
-			$mailer->Password = $fwd_pass;
-		}
-
-		return $mailer;
+		// The forwarding relay's SMTP coordinates are a third SmtpConfig source
+		// (inbound_email_forwarding_smtp_*, falling back to base smtp_*), so the
+		// manual override block is gone — one construction model builds the mailer.
+		return new SmtpMailer(SmtpConfig::fromForwardingSettings());
 	}
 
 	/**
