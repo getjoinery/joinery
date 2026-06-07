@@ -133,6 +133,25 @@ class MailboxSender {
 			throw new MailboxSenderException('The message could not be sent. Check the mailbox connection and try again.');
 		}
 
+		// §9 Sent / compose interop, only when the feed opted into compose/Sent sync.
+		// Dedup is Message-ID only: the source Sent copy (provider-filed or APPENDed)
+		// reconciles to one row on the next Sent ingest by Message-ID.
+		if ($account && $account->showCompose()) {
+			if (!$transport->filesSent) {
+				// The provider's SMTP does not file Sent (generic / self-hosted): APPEND
+				// the exact MIME ourselves, carrying the same Message-ID so the ingest
+				// dedups. Best-effort — a failed APPEND never fails the send.
+				$this->appendSentCopy($account, $email);
+			} elseif ($account->smtpRewritesMessageId()) {
+				// Gmail rewrites the Message-ID on send, so a stored row could never
+				// match the filed copy. Store no local row; the message appears on the
+				// next Sent ingest (one poll-interval latency).
+				return array('ok' => true, 'outbound_id' => 0, 'pending_sent_ingest' => true);
+			}
+			// else (files Sent, preserves Message-ID): store the local row now; the
+			// filed copy dedups by Message-ID on ingest.
+		}
+
 		$outbound_id = $this->storeOutboundRow($source, $alias, $mode, $from_address,
 			array_merge($to, $cc), $subject, $email, $message_id);
 
@@ -399,6 +418,101 @@ class MailboxSender {
 		$name = str_replace(array("\r", "\n", '"', '\\', '/'), '', $name);
 		$name = trim($name);
 		return $name !== '' ? substr($name, 0, 255) : 'attachment';
+	}
+
+	// ── Sent / compose interop (§9) ──────────────────────────────────────────
+
+	/**
+	 * APPEND the just-sent message into the source mailbox's Sent folder (§9), for
+	 * a connected feed whose SMTP does not auto-file. Best-effort: a failure is
+	 * logged but never fails the user's send (the local row still shows it, and the
+	 * copy will simply be absent from the source Sent folder).
+	 */
+	private function appendSentCopy(InboundImapAccount $account, EmailMessage $email): void {
+		require_once(PathHelper::getIncludePath('plugins/inbound_email/includes/ImapIngestor.php'));
+		try {
+			$raw = $this->buildRawMime($email);
+			if ($raw === '') {
+				return;
+			}
+			$ingestor = new ImapIngestor($account);
+			try {
+				$ingestor->appendToSent($raw);
+			} finally {
+				$ingestor->close();
+			}
+		} catch (Throwable $e) {
+			error_log('MailboxSender: APPEND-to-Sent failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Serialize an EmailMessage to raw RFC822 MIME (via Horde_Mime_Mail) for the
+	 * APPEND, carrying the same Message-ID + threading headers so the Sent ingest
+	 * dedups by Message-ID.
+	 */
+	private function buildRawMime(EmailMessage $email): string {
+		require_once(PathHelper::getComposerAutoloadPath());
+
+		$mail = new Horde_Mime_Mail();
+		$from = $email->getFromName()
+			? $email->getFromName() . ' <' . $email->getFrom() . '>'
+			: $email->getFrom();
+		$mail->addHeader('From', $from);
+		$mail->addHeader('To', $this->joinAddresses($email->getRecipients()));
+		$cc = $this->joinAddresses($email->getCc());
+		if ($cc !== '') {
+			$mail->addHeader('Cc', $cc);
+		}
+		$mail->addHeader('Subject', (string)$email->getSubject());
+		$mail->addHeader('Date', gmdate('r'));
+		if ($email->getMessageId()) {
+			$mail->addHeader('Message-ID', $email->getMessageId());
+		}
+		// Threading + any other custom headers (In-Reply-To / References).
+		foreach ((array)$email->getHeaders() as $name => $value) {
+			$mail->addHeader($name, $value);
+		}
+
+		$html = (string)$email->getHtmlBody();
+		$text = (string)$email->getTextBody();
+		if ($html !== '') {
+			$mail->setHtmlBody($html, 'UTF-8', true);
+		} elseif ($text !== '') {
+			$mail->setBody($text, 'UTF-8');
+		}
+
+		foreach ($email->getAttachments() as $a) {
+			$bytes = null;
+			if (!empty($a['data'])) {
+				$bytes = (string)$a['data'];
+			} elseif (!empty($a['path']) && is_readable($a['path'])) {
+				$bytes = (string)file_get_contents($a['path']);
+			}
+			if ($bytes === null) {
+				continue;
+			}
+			$part = new Horde_Mime_Part();
+			$part->setType($a['type'] ?? 'application/octet-stream');
+			$part->setContents($bytes);
+			$part->setName($a['name'] ?? 'attachment');
+			$part->setDisposition('attachment');
+			$mail->addMimePart($part);
+		}
+
+		$raw = $mail->getRaw(false);
+		return is_string($raw) ? $raw : '';
+	}
+
+	/** Join EmailMessage recipient arrays into a "Name <email>" comma list. */
+	private function joinAddresses(array $list): string {
+		$parts = array();
+		foreach ($list as $r) {
+			if (!empty($r['email'])) {
+				$parts[] = !empty($r['name']) ? $r['name'] . ' <' . $r['email'] . '>' : $r['email'];
+			}
+		}
+		return implode(', ', $parts);
 	}
 
 	// ── storage ────────────────────────────────────────────────────────────

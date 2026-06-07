@@ -558,7 +558,10 @@ either the alias or the user.
 The reader's **left rail** is a switcher over the addresses the viewer has been
 granted, each independently badged with its unread count. Selecting one scopes
 the whole reader to that mailbox; below the switcher are All / Unread / Starred
-filters and a debounced search box.
+filters and a debounced search box. A mailbox whose IMAP feed has discovered
+folders also lists them **indented under the selected mailbox** (an "All Mail"
+root for the folder-unfiltered view, then each tracked folder); see the Sync
+subsection for how membership drives folder contents.
 
 ### Threading and shared state
 
@@ -849,3 +852,81 @@ poller summary). To connect a real Gmail account:
    again, and confirm it appears under the mailbox in the **Mailboxes** reader; open it
    and download an attachment. For hands-off fetching, activate the **Fetch inbound IMAP
    mail** scheduled task.
+
+### Sync (read-only and two-way)
+
+Each IMAP feed has a **Sync** mode, set per feed on the mailbox editor and **off by
+default**:
+
+- **Off** — one-time import. The source is never written to and local read/star/
+  delete state stays in Joinery.
+- **Read-only** — Joinery *follows* the source: a read/star/move/delete made in the
+  native client is reflected in Joinery; Joinery never writes back.
+- **Two-way** — full reconciliation: acting in either place is reflected in the other.
+
+Read-only and Two-way require the server to advertise **CONDSTORE** (incremental
+flag/membership pull via `CHANGEDSINCE`). Detecting messages that *left* a folder
+uses **QRESYNC**'s `VANISHED` when the server also has it; on a CONDSTORE-only server
+(notably **Gmail**, which has CONDSTORE but not QRESYNC) it falls back to diffing the
+folder's current UID set against the stored membership UIDs — same result, a little
+more bandwidth. A server without CONDSTORE offers only Off. Capabilities are detected
+on connect/**Test** and cached on the feed. No OAuth re-consent is needed — the
+granted IMAP scope already permits the `STORE`/`COPY`/`MOVE`/`APPEND`/`EXPUNGE`
+writes. **Gmail is reconciled by the same folder model as every other host** — no
+Gmail IMAP extensions are used.
+
+**State mapped to IMAP.** Read ↔ `\Seen`, star ↔ `\Flagged`, folder/label membership
+↔ the set of folders the message appears in, deletion ↔ move to Trash.
+
+**Per-folder presence.** Membership is observed uniformly as *which tracked folders
+contain a message*, matched across folders by `Message-ID`. Adding a message to a
+folder is a `COPY` (a Gmail label add) on a multi-folder host or a `MOVE` on a
+classic one-folder host; removing is `STORE \Deleted` + `EXPUNGE`; deleting is a
+`MOVE` to Trash. Operators pick which folders are tracked on the mailbox editor;
+special-use folders (Inbox, Sent, Trash) are pre-selected.
+
+**Changing membership from the reader.** The open-thread toolbar has a **Move ▾**
+(exclusive feeds) / **Labels ▾** (non-exclusive feeds, e.g. Gmail) control: pick a
+folder to relocate the thread, or toggle label checkboxes. Each change sets the
+local membership (`MailboxService::setMembership`, via the `set_membership` action)
+and the next sync pushes it to the source. Membership edits require a Two-way feed
+to reach the source; on a Read-only feed they stay local.
+
+**Creating a label/folder.** The same control has a **New label… / New folder…**
+field. Creating one makes a tracked `iif_` folder flagged `iif_pending_remote_create`
+(it does not exist on the source yet) and files the thread into it. The folder is
+materialized on the source **during the sync push** — `ImapSyncer` issues the IMAP
+`CREATE`, clears the pending flag, then `COPY`s the message in; pull/ingest skip a
+pending folder until it exists. Creation is idempotent (a folder that already exists
+is adopted). Conversely, a label created on the *source* is discovered each sync as
+an untracked folder — tick it on the mailbox editor to start syncing it.
+
+**The `\All` coverage view (Gmail All Mail).** An all-mail folder is tracked as a
+**coverage source**, not a navigable folder: it ingests every message — including
+mail archived with no label — so nothing is missed, but it never carries a
+membership bit. In the reader, the **mailbox root is the folder-unfiltered “All
+Mail” view**, so coverage-only messages (no folder membership) are reachable there;
+the folders listed beneath it narrow to a single folder.
+
+**Reconciliation.** Each cycle runs **Pull → Ingest → Push** on one connection.
+Flags are a three-way merge keyed on a per-row dirty signal (a local change since
+the last push wins over an incoming remote change). Membership is reconciled through
+a per-element **shadow** (the set as of last agreement), which makes each
+(message, folder) bit a conflict-free boolean merge; on a one-folder host a
+divergent move converges to the local destination within two cycles with no explicit
+tiebreak. A pushed change is re-read next cycle as a value-equal no-op, so nothing
+loops.
+
+**Deletion** (a separate **“Also sync deletions”** toggle): a local delete moves the
+source message to Trash; a message arriving in Trash on the source soft-deletes the
+local row. Archiving on Gmail (losing the Inbox label while keeping others / All
+Mail) is distinct from deletion and is not treated as one.
+
+**Compose / Sent** (the **“Enable compose / Sent sync”** toggle, with the reader’s
+reply/forward feature): the source Sent folder is ingested like any tracked folder,
+so mail sent from the native client appears in Joinery. When a feed’s SMTP does not
+auto-file sent mail (self-hosted / generic), Joinery `APPEND`s the sent copy to the
+source Sent folder itself. Sent dedup is **by Message-ID only**: a provider that
+preserves the Message-ID reconciles the filed copy to the locally-stored sent row,
+while a provider that rewrites it on send (Gmail) stores no local row — the message
+appears on the next Sent ingest (one poll-interval later).

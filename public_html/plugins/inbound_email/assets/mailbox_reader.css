@@ -47,6 +47,19 @@
 .mbx-mailbox:hover { background: #e9eef3; }
 .mbx-mailbox.active { background: #d7e7fb; font-weight: 600; }
 .mbx-mailbox-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Folder rail — the membership-driven folders under the active mailbox. */
+.mbx-folders { list-style: none; margin: 0 0 4px 0; padding: 0; }
+.mbx-folder {
+	padding: 5px 9px 5px 22px;
+	border-radius: 5px;
+	cursor: pointer;
+	font-size: 12px;
+	color: #3b4754;
+}
+.mbx-folder:hover { background: #eef2f6; }
+.mbx-folder.active { background: #e3eefb; font-weight: 600; }
+.mbx-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mbx-badge {
 	flex: 0 0 auto;
 	min-width: 20px;
@@ -182,6 +195,32 @@
 .mbx-action:hover { background: #f1f3f5; }
 .mbx-action.danger { color: #b42318; border-color: #f1c4bf; }
 .mbx-action.danger:hover { background: #fef0ee; }
+
+/* Move / Labels control (open-thread toolbar). */
+.mbx-folder-ctl { position: relative; display: inline-block; }
+.mbx-folder-panel {
+	position: absolute; z-index: 20; top: calc(100% + 4px); left: 0;
+	min-width: 180px; max-height: 260px; overflow-y: auto;
+	background: #fff; border: 1px solid #cfd6dd; border-radius: 6px;
+	box-shadow: 0 6px 18px rgba(16,24,40,.12); padding: 4px;
+}
+.mbx-folder-opt {
+	display: flex; align-items: center; gap: 6px;
+	padding: 6px 9px; border-radius: 5px; cursor: pointer; font-size: 12px; color: #374151;
+}
+.mbx-folder-opt:hover { background: #f1f3f5; }
+.mbx-folder-opt.current { font-weight: 600; background: #e3eefb; }
+.mbx-folder-newrow { display: flex; gap: 4px; padding: 6px; border-top: 1px solid #eef0f2; margin-top: 2px; }
+.mbx-folder-newinput {
+	flex: 1 1 auto; min-width: 0; border: 1px solid #cfd6dd; border-radius: 5px;
+	padding: 5px 8px; font-size: 12px;
+}
+.mbx-folder-newbtn {
+	flex: 0 0 auto; border: 1px solid #cfd6dd; background: #fff; border-radius: 5px;
+	padding: 4px 10px; cursor: pointer; font-size: 14px; line-height: 1; color: #2563eb;
+}
+.mbx-folder-newbtn:hover { background: #f1f3f5; }
+.mbx-folder-newbtn:disabled { opacity: .5; cursor: default; }
 
 .mbx-message {
 	border: 1px solid #e4e7eb;

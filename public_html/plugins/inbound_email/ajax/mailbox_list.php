@@ -34,5 +34,6 @@ $filters = array(
 );
 
 $page = isset($_GET['page']) ? intval($_GET['page']) : 1;
+$folder_id = isset($_GET['folder_id']) && $_GET['folder_id'] !== '' ? intval($_GET['folder_id']) : null;
 
-echo json_encode($service->listThreads($alias_id, $filters, $page, 50));
+echo json_encode($service->listThreads($alias_id, $filters, $page, 50, $folder_id));

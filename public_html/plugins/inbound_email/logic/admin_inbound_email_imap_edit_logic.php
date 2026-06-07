@@ -24,6 +24,7 @@ function admin_inbound_email_imap_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_account_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_imap_folder_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_alias_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_domain_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/inbound_email/data/inbound_email_mailbox_grant_class.php'));
@@ -108,6 +109,37 @@ function admin_inbound_email_imap_edit_logic(array $input): LogicResult {
 		}
 	}
 
+	// Sync settings (specs/two_way_imap_sync.md §8). Read-only / Two-way are
+	// offered only when the server advertised CONDSTORE (cached on a prior
+	// connect/Test); otherwise only Off, with a short note in the view.
+	$sync_supported = $account->supportsCondstore();
+	$sync_options = $sync_supported
+		? array(
+			InboundImapAccount::SYNC_OFF  => 'Off',
+			InboundImapAccount::SYNC_PULL => 'Read-only (follow the source)',
+			InboundImapAccount::SYNC_BOTH => 'Two-way (full sync)',
+		)
+		: array(InboundImapAccount::SYNC_OFF => 'Off');
+	$sync_visibility = array(
+		InboundImapAccount::SYNC_OFF  => array('hide' => array('iia_sync_deletes', 'iia_show_compose')),
+		InboundImapAccount::SYNC_PULL => array('show' => array('iia_sync_deletes', 'iia_show_compose')),
+		InboundImapAccount::SYNC_BOTH => array('show' => array('iia_sync_deletes', 'iia_show_compose')),
+	);
+
+	// Discovered folders the operator can track. The \All coverage view is tracked
+	// silently (a coverage source, not a membership folder, §6.1) and excluded.
+	$folder_options = array();
+	$tracked_folder_ids = array();
+	if ($account->key) {
+		$folders = new MultiInboundImapFolder(array('account_id' => intval($account->key)), array('iif_name' => 'ASC'));
+		$folders->load();
+		foreach ($folders as $f) {
+			if ($f->get('iif_role') === InboundImapFolder::ROLE_ALL) { continue; }
+			$folder_options[intval($f->key)] = $f->get('iif_name');
+			if ($f->get('iif_is_tracked')) { $tracked_folder_ids[] = intval($f->key); }
+		}
+	}
+
 	// Save.
 	if (isset($input['iia_provider_key']) && ($input['_submitted'] ?? '') === '1') {
 		$provider = $input['iia_provider_key'];
@@ -133,6 +165,16 @@ function admin_inbound_email_imap_edit_logic(array $input): LogicResult {
 		$account->set('iia_imap_folder', trim((string)($input['iia_imap_folder'] ?? 'INBOX')) ?: 'INBOX');
 		$account->set('iia_poll_interval_seconds', intval($input['iia_poll_interval_seconds'] ?? 300) ?: 300);
 		$account->set('iia_is_enabled', isset($input['iia_is_enabled']) ? true : false);
+
+		// Sync mode + gates. prepare() downgrades the mode to Off if CONDSTORE is not
+		// (yet) cached, so a non-CONDSTORE feed can never be left half-on.
+		$wantMode = $input['iia_sync_mode'] ?? InboundImapAccount::SYNC_OFF;
+		if (!in_array($wantMode, array(InboundImapAccount::SYNC_OFF, InboundImapAccount::SYNC_PULL, InboundImapAccount::SYNC_BOTH), true)) {
+			$wantMode = InboundImapAccount::SYNC_OFF;
+		}
+		$account->set('iia_sync_mode', $wantMode);
+		$account->set('iia_sync_deletes', isset($input['iia_sync_deletes']));
+		$account->set('iia_show_compose', isset($input['iia_show_compose']));
 
 		// Bind the mailbox. Combined mode resolves it from the username under the
 		// domain (creating it / keeping it named to match); plain mode uses the
@@ -187,6 +229,25 @@ function admin_inbound_email_imap_edit_logic(array $input): LogicResult {
 				InboundEmailMailboxGrant::sync_for_alias($resolved_alias_id, $submitted);
 			}
 
+			// Folder tracking: a hidden marker tells us the selector was shown so an
+			// all-unchecked submit means "track nothing" rather than "no change". The
+			// \All coverage view is always tracked and never in the toggle list.
+			if ($account->key && ($input['_folders_present'] ?? '') === '1') {
+				$submittedFolders = array_map('intval', (array)($input['tracked_folders'] ?? array()));
+				$allFolders = new MultiInboundImapFolder(array('account_id' => intval($account->key)));
+				$allFolders->load();
+				foreach ($allFolders as $f) {
+					if ($f->get('iif_role') === InboundImapFolder::ROLE_ALL) { continue; }
+					$want = in_array(intval($f->key), $submittedFolders, true);
+					if ((bool)$f->get('iif_is_tracked') !== $want) {
+						$folder = new InboundImapFolder($f->key, TRUE);
+						$folder->set('iif_is_tracked', $want);
+						$folder->prepare();
+						$folder->save();
+					}
+				}
+			}
+
 			$is_oauth = $account->isOAuth();
 			$msg = $is_oauth && !$account->hasOAuthToken()
 				? 'Mailbox saved. Click "Connect" to authorize mailbox access.'
@@ -202,7 +263,11 @@ function admin_inbound_email_imap_edit_logic(array $input): LogicResult {
 				'alias_options' => $alias_options, 'provider_options' => $provider_options,
 				'visibility' => $visibility, 'combined' => $combined, 'domain' => $domain,
 				'bound_alias_id' => $alias_id, 'user_options' => $user_options,
-				'granted_user_ids' => $granted_user_ids, 'error' => $e->getMessage(),
+				'granted_user_ids' => $granted_user_ids,
+				'sync_supported' => $sync_supported, 'sync_options' => $sync_options,
+				'sync_visibility' => $sync_visibility, 'folder_options' => $folder_options,
+				'tracked_folder_ids' => $tracked_folder_ids,
+				'error' => $e->getMessage(),
 			));
 		}
 	}
@@ -238,6 +303,9 @@ function admin_inbound_email_imap_edit_logic(array $input): LogicResult {
 		'visibility' => $visibility, 'combined' => $combined, 'domain' => $domain,
 		'bound_alias_id' => $alias_id, 'user_options' => $user_options,
 		'granted_user_ids' => $granted_user_ids,
+		'sync_supported' => $sync_supported, 'sync_options' => $sync_options,
+		'sync_visibility' => $sync_visibility, 'folder_options' => $folder_options,
+		'tracked_folder_ids' => $tracked_folder_ids,
 	));
 }
 

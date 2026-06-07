@@ -86,4 +86,60 @@ return [
 			$dblink->exec("ALTER TABLE iem_inbound_email_messages ALTER COLUMN iem_dkim_result TYPE varchar(16)");
 		},
 	],
+
+	[
+		// Two-way IMAP sync hot paths (specs/two_way_imap_sync.md). The auto-updater
+		// does not create non-unique indexes, so add the per-cycle lookup indexes
+		// here: VANISHED correlation by (folder, uid), the folder-membership
+		// subquery by folder, and the iem_ locator lookup by (account, folder, uid).
+		'id' => 'iem_005_two_way_sync_indexes',
+		'version' => '1.11.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS imf_folder_uid_idx
+				 ON imf_inbound_message_folders (imf_iif_inbound_imap_folder_id, imf_imap_uid)"
+			);
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS imf_message_idx
+				 ON imf_inbound_message_folders (imf_iem_inbound_email_message_id)"
+			);
+			$dblink->exec(
+				"CREATE INDEX IF NOT EXISTS iem_imap_locator_idx
+				 ON iem_inbound_email_messages
+				 (iem_iia_inbound_imap_account_id, iem_imap_folder, iem_imap_uid)"
+			);
+		},
+	],
+
+	[
+		// Sync is gated on CONDSTORE (QRESYNC implies it, but Gmail has CONDSTORE
+		// without QRESYNC). Backfill the new gate from the prior QRESYNC flag so a
+		// feed already detected as QRESYNC-capable stays sync-capable without a
+		// re-poll; CONDSTORE-only feeds (Gmail) pick it up on the next connect/Test.
+		'id' => 'iia_001_backfill_condstore_from_qresync',
+		'version' => '1.11.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec(
+				"UPDATE iia_inbound_imap_accounts
+				 SET iia_supports_condstore = true
+				 WHERE iia_supports_qresync = true"
+			);
+		},
+	],
+
+	[
+		// The plugin-table sync adds bool columns without finalizing DEFAULT/NOT NULL
+		// (same gap iem_002 handles). Finalize iif_pending_remote_create so existing
+		// rows (which already exist on the source) read false, not NULL.
+		'id' => 'iif_001_pending_create_not_null',
+		'version' => '1.11.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec("UPDATE iif_inbound_imap_folders SET iif_pending_remote_create = false WHERE iif_pending_remote_create IS NULL");
+			$dblink->exec("ALTER TABLE iif_inbound_imap_folders ALTER COLUMN iif_pending_remote_create SET DEFAULT false");
+			$dblink->exec("ALTER TABLE iif_inbound_imap_folders ALTER COLUMN iif_pending_remote_create SET NOT NULL");
+		},
+	],
 ];

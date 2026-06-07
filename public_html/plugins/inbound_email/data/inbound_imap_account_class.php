@@ -46,6 +46,12 @@ class InboundImapAccount extends SystemBase {
 	const AUTH_PASSWORD = 'password';
 	const AUTH_OAUTH2   = 'oauth2';
 
+	// Sync modes (specs/two_way_imap_sync.md §4). Off by default so existing feeds
+	// are unaffected. Read-only follows the source one-way; Two-way reconciles both.
+	const SYNC_OFF  = 'off';
+	const SYNC_PULL = 'pull';   // Read-only: source → Joinery
+	const SYNC_BOTH = 'both';   // Two-way: bidirectional
+
 	// Encryption modes (maps onto the IMAP connection's secure transport)
 	const ENC_SSL = 'ssl';
 	const ENC_TLS = 'tls';
@@ -68,15 +74,20 @@ class InboundImapAccount extends SystemBase {
 	 * fixed SMTP host: connected-account outbound is unavailable for it, and a
 	 * relay-class provider is used to send for those mailboxes.
 	 *
-	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string,smtp_host:?string,smtp_port:int,smtp_encryption:?string,smtp_files_sent:bool}>
+	 * 'smtp_rewrites_message_id' records whether the provider's SMTP rewrites the
+	 * Message-ID on send (Gmail does) — true means a Joinery-composed message can
+	 * never be matched to its filed Sent copy by Message-ID, so no local outbound
+	 * row is stored and the message surfaces on the next Sent ingest (§9 dedup).
+	 *
+	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string,smtp_host:?string,smtp_port:int,smtp_encryption:?string,smtp_files_sent:bool,smtp_rewrites_message_id:bool}>
 	 */
 	const PRESETS = array(
-		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'google',    'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
-		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
-		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.yahoo.com','smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true),
-		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.me.com',   'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
-		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.fastmail.com',  'smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true),
-		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>null,                 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>false),
+		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'google',    'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>true),
+		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.yahoo.com','smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.me.com',   'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.fastmail.com',  'smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>null,                 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>false, 'smtp_rewrites_message_id'=>false),
 	);
 
 	/**
@@ -122,8 +133,22 @@ class InboundImapAccount extends SystemBase {
 		'iia_oauth_token_expires'       => array('type'=>'timestamp(6)'),
 		'iia_oauth_scopes'              => array('type'=>'text'),
 		'iia_poll_interval_seconds'     => array('type'=>'int4', 'default'=>'300'),
+		// Legacy single-folder cursor — superseded by the per-folder iif_ cursor
+		// (specs/two_way_imap_sync.md §5). Seeded into the INBOX iif_ row on first
+		// poll of an existing feed; no longer read after that.
 		'iia_uidvalidity'               => array('type'=>'int8'),
 		'iia_last_seen_uid'             => array('type'=>'int8'),
+		// Two-way sync (specs/two_way_imap_sync.md §4, §5). Off by default.
+		'iia_sync_mode'                 => array('type'=>'varchar(10)', 'default'=>'off', 'is_nullable'=>false),
+		'iia_sync_deletes'              => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'iia_show_compose'              => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// CONDSTORE is the sync gate (incremental flag/membership pull via
+		// CHANGEDSINCE); QRESYNC is the faster removal-detection path (VANISHED) when
+		// the server also advertises it. Gmail has CONDSTORE but not QRESYNC, so
+		// CONDSTORE — not QRESYNC — is what enables sync.
+		'iia_supports_condstore'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'iia_supports_qresync'          => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		'iia_folders_exclusive'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'iia_is_enabled'                => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'iia_last_poll_time'            => array('type'=>'timestamp(6)'),
 		'iia_last_status'               => array('type'=>'varchar(500)'),
@@ -168,6 +193,20 @@ class InboundImapAccount extends SystemBase {
 			$this->set('iia_poll_interval_seconds', 300);
 		}
 
+		// Sync mode: a known value, and never sync without CONDSTORE (incremental
+		// flag/membership pull). Removals are detected via QRESYNC VANISHED when the
+		// server has it, else a UID-set diff — so CONDSTORE alone (e.g. Gmail) is
+		// enough. A feed whose capability is unknown/false can only be Off until the
+		// next poll/Test detects CONDSTORE.
+		$mode = $this->get('iia_sync_mode') ?: self::SYNC_OFF;
+		if (!in_array($mode, array(self::SYNC_OFF, self::SYNC_PULL, self::SYNC_BOTH), true)) {
+			$mode = self::SYNC_OFF;
+		}
+		if ($mode !== self::SYNC_OFF && !$this->get('iia_supports_condstore')) {
+			$mode = self::SYNC_OFF;
+		}
+		$this->set('iia_sync_mode', $mode);
+
 		$this->set('iia_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
@@ -201,6 +240,54 @@ class InboundImapAccount extends SystemBase {
 	/** Whether the provider's SMTP auto-files the sent copy in Sent (PRESETS capability). */
 	function smtpFilesSent(): bool {
 		return !empty($this->getPreset()['smtp_files_sent']);
+	}
+
+	/** Whether the provider's SMTP rewrites the Message-ID on send (Gmail) — drives §9 dedup. */
+	function smtpRewritesMessageId(): bool {
+		return !empty($this->getPreset()['smtp_rewrites_message_id']);
+	}
+
+	// --- Sync helpers (specs/two_way_imap_sync.md §4) -----------------------
+
+	/** Current sync mode: off | pull | both. */
+	function syncMode(): string {
+		$mode = $this->get('iia_sync_mode') ?: self::SYNC_OFF;
+		return in_array($mode, array(self::SYNC_OFF, self::SYNC_PULL, self::SYNC_BOTH), true) ? $mode : self::SYNC_OFF;
+	}
+
+	/** Sync is on in either direction (pull or both). */
+	function syncEnabled(): bool {
+		return $this->syncMode() !== self::SYNC_OFF;
+	}
+
+	/** Two-way: Joinery writes changes back to the source. */
+	function isTwoWay(): bool {
+		return $this->syncMode() === self::SYNC_BOTH;
+	}
+
+	/** Delete propagation is gated independently of mode. */
+	function syncDeletes(): bool {
+		return (bool)$this->get('iia_sync_deletes');
+	}
+
+	/** Reader compose/Sent affordances are surfaced for this feed. */
+	function showCompose(): bool {
+		return (bool)$this->get('iia_show_compose');
+	}
+
+	/** Server advertised CONDSTORE (cached). The sync gate — required for any sync. */
+	function supportsCondstore(): bool {
+		return (bool)$this->get('iia_supports_condstore');
+	}
+
+	/** Server advertised QRESYNC (cached). The fast removal-detection path (VANISHED). */
+	function supportsQresync(): bool {
+		return (bool)$this->get('iia_supports_qresync');
+	}
+
+	/** Membership cardinality: true = a message lives in exactly one folder (classic IMAP). */
+	function foldersExclusive(): bool {
+		return (bool)$this->get('iia_folders_exclusive');
 	}
 
 	/**
