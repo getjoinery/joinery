@@ -1374,11 +1374,20 @@ class MultiEvent extends SystemMultiBase {
 		$parents = new MultiEvent($parent_options, []);
 		$parents->load();
 
+		$required_visibility = isset($options['visibility']) ? $options['visibility'] : null;
+
 		foreach ($parents as $parent) {
 			$parent_pic = $parent->get_picture_link();
 			$instances = $parent->get_instances_for_range($range_start, $range_end);
 			foreach ($instances as $instance) {
 				$is_virtual = is_object($instance) && isset($instance->is_virtual) && $instance->is_virtual;
+				// Materialized instances can have a different visibility than the parent (e.g., edited individually).
+				// Filter them to match the requested visibility so private instances don't appear in public listings.
+				if (!$is_virtual && $required_visibility !== null) {
+					if ($instance->get('evt_visibility') != $required_visibility) {
+						continue;
+					}
+				}
 				if ($is_virtual) {
 					$instance->_picture_link = $parent_pic;
 				}

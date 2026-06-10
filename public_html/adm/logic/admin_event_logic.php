@@ -52,6 +52,26 @@ function admin_event_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
 	}
 
+	if($input['action'] == 'revert_instance'){
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$instance_id = intval($input['instance_event_id']);
+		if($instance_id){
+			$instance = new Event($instance_id, TRUE);
+			$instance->soft_delete();
+		}
+		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
+	}
+
+	if($input['action'] == 'delete_instance'){
+		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$instance_id = intval($input['instance_event_id']);
+		if($instance_id){
+			$instance = new Event($instance_id, TRUE);
+			$instance->soft_delete();
+		}
+		return LogicResult::redirect('/admin/admin_event?evt_event_id='.$event->key);
+	}
+
 	if($input['action'] == 'end_series'){
 		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 		$event->end_series();

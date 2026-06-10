@@ -422,10 +422,19 @@
 							</td>
 							<td>
 								<?php if ($is_cancelled): ?>
-									—
+									<?php echo AdminPage::action_button('Delete', '/admin/admin_event', [
+										'hidden'  => ['action' => 'delete_instance', 'instance_event_id' => $mat_instance->key, 'evt_event_id' => $event->key],
+										'confirm' => 'Permanently delete this cancelled occurrence?',
+										'class'   => 'btn btn-sm btn-danger py-0 px-2',
+									]); ?>
 								<?php elseif ($is_materialized): ?>
 									<a href="/admin/admin_event?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-soft-default py-0 px-2">View</a>
 									<a href="/admin/admin_event_edit?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-soft-default py-0 px-2">Edit</a>
+									<?php echo AdminPage::action_button('Revert', '/admin/admin_event', [
+										'hidden'  => ['action' => 'revert_instance', 'instance_event_id' => $mat_instance->key, 'evt_event_id' => $event->key],
+										'confirm' => 'Revert this occurrence to the series default? Your customizations will be lost.',
+										'class'   => 'btn btn-sm btn-soft-warning py-0 px-2',
+									]); ?>
 								<?php else: ?>
 									<a href="/admin/admin_event_edit?parent_event_id=<?php echo $event->key; ?>&instance_date=<?php echo $occ_date; ?>" class="btn btn-sm btn-soft-primary py-0 px-2">Edit</a>
 									<?php echo AdminPage::action_button('Cancel', '/admin/admin_event', [
