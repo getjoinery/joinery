@@ -2,34 +2,6 @@
 
 **Purpose:** Define what's needed to build a dating site on Joinery, separated into reusable core platform features vs. dating-specific plugin features. MVP-focused.
 
-**Last Updated:** 2026-03-22
-
----
-
-## Implementation Status
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Core Platform** | | |
-| 1.1 Extended User Profiles | **DONE** | Fields added to `users_class.php` (2026-03-22) |
-| 1.2 Notification Center | **DONE** | Data model, logic, views, AJAX all implemented. Notification preferences not yet built. |
-| 1.3 User Discovery / Member Directory | Not started | Deferred to Phase 2 per plan |
-| 1.4 Reaction System | **DONE** | Separate spec: [Reaction System Spec](implemented/reaction_system_spec.md) (2026-03-22) |
-| 1.5 Block System | Not started | |
-| 1.6 Report System | Not started | |
-| 1.7 Messaging Enhancements | **DONE** | Separate spec: [Messaging Enhancements Spec](messaging_enhancements_spec.md) (2026-03-24) |
-| **Dating Plugin** | | |
-| 2.1 Dating Profile | Not started | `plugins/dating/` directory does not exist |
-| 2.2 Dating Preferences | Not started | |
-| 2.3 Match System | Not started | |
-| 2.4 Discovery Engine | Not started | |
-| 2.5 Message Gating | Not started | |
-| 2.6 Admin Verification | Not started | |
-| 2.7 Interest Tags | Not started | Groups system exists but no interest category integration |
-| **Infrastructure** | | |
-| Geolocation / PostGIS | Not started | PostGIS extension not installed; spec exists |
-| Pictures Refactor | **DONE** | `EntityPhoto` model implemented (`eph_entity_photos` table) |
-
 ---
 
 ## Design Principle: Core vs. Plugin
@@ -45,29 +17,11 @@ This separation means the core work benefits every Joinery site, and the dating 
 
 ## Part 1: Core Platform Features
 
-These are new core features that fill gaps in the platform for ANY interactive/social use case.
+**Already implemented:** Extended User Profiles (bio/DOB/gender/visibility fields on `usr_users`), Notification Center (`specs/implemented/notification_center_spec.md`), Reaction System (`specs/implemented/reaction_system_spec.md`), Messaging Enhancements (`specs/implemented/messaging_enhancements_spec.md`), Pictures Refactor (`EntityPhoto`, `eph_entity_photos`).
 
-### 1.1 Extended User Profiles -- STATUS: DONE (2026-03-22)
+What remains:
 
-**Problem:** Users currently have only name, email, photo, phone, timezone. Any community or membership platform needs richer profiles.
-
-**New fields on `usr_users`** (via `$field_specifications` in `data/users_class.php`):
-- `usr_bio` (text) - Free-form about me, 500 char limit
-- `usr_date_of_birth` (date) - Stored securely, displayed as age only in public contexts
-- `usr_gender` (varchar(30)) - Open text or constrained list (site-configurable)
-- `usr_profile_visibility` (varchar(20)) - 'public', 'members_only', 'private'
-
-These are core user attributes. The `usr_users` table already has profile-type fields (`usr_nickname`, `usr_organization_name`, `usr_pic_picture_id`, `usr_timezone`), so this extends the existing pattern.
-
-**Location & Geography:** Address data (city, state, country) and geocoded coordinates (lat/lng, PostGIS geography column) live on the existing `usa_users_addrs` table, not on `usr_users`. Users already have addresses; geocoding extends that existing data. See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for full details.
-
-**Principle:** Core features go in core tables. Plugin-specific fields (dating preferences, relationship goals, etc.) go in plugin tables. Address and geography data stays in the address table where it belongs.
-
-### 1.2 Notification Center -- STATUS: DONE
-
-See **[Notification Center Spec](notification_center_spec.md)** for full details on the in-app notification system, data models (`notifications`, `notification_preferences`), existing UI scaffolding, and delivery strategy.
-
-### 1.3 User Discovery / Member Directory -- STATUS: Not started (Phase 2)
+### 1.3 User Discovery / Member Directory
 
 **Problem:** No way to browse or search other users. Membership orgs, professional networks, and community platforms all need a member directory.
 
@@ -80,47 +34,43 @@ See **[Notification Center Spec](notification_center_spec.md)** for full details
 - Configurable: admin can enable/disable directory, choose which fields are filterable
 
 **New Settings:**
-- `member_directory_active` (bool) - Feature toggle
+- `member_directory_active` (bool) — feature toggle
 - `member_directory_requires_login` (bool, default true)
-- `member_directory_fields` (json) - Which profile fields appear as filters
+- `member_directory_fields` (json) — which profile fields appear as filters
 
 **Geolocation Support:** See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for PostGIS setup, geocoding, spatial indexing on the address table, and distance queries.
 
-### 1.4 Reaction System -- STATUS: DONE (2026-03-22, separate spec)
-
-See **[Reaction System Spec](implemented/reaction_system_spec.md)** for full details. Polymorphic `entity_type` + `entity_id` pattern (same as EntityPhoto, ChangeTracking). Works with any entity: users, events, posts, products, etc. Supports likes, favorites, bookmarks, passes. Dating plugin adds match semantics on top.
-
-### 1.5 Block System -- STATUS: Not started
+### 1.5 Block System
 
 **Problem:** Any platform where users interact needs the ability to block other users. Blocked users can't see your profile, message you, or appear in your results.
 
-**New Model: `user_blocks`**
+**New Model: `ubl_user_blocks`**
 - `ubl_user_block_id` (serial, primary key)
-- `ubl_usr_user_id` (int4, FK) - User doing the blocking
-- `ubl_blocked_usr_user_id` (int4, FK) - Blocked user
+- `ubl_usr_user_id` (int4, FK) — user doing the blocking
+- `ubl_blocked_usr_user_id` (int4, FK) — blocked user
 - `ubl_reason` (varchar 255, nullable)
 - `ubl_create_time` (timestamp)
 - Unique constraint on (user_id, blocked_user_id)
 
-**Enforcement:** Block checks are applied in:
+**Enforcement:** Block checks applied in:
 - Member directory queries
 - Message sending (reject if blocked)
 - Profile viewing (404 or "user not found")
 - Notification generation (suppress)
 
-### 1.6 Report System -- STATUS: Not started
+### 1.6 Report System
 
-**Problem:** Any platform with user-generated content or user interaction needs content/user reporting and admin moderation. This is non-negotiable for safety.
+**Problem:** Any platform with user-generated content or user interaction needs content/user reporting and admin moderation.
 
-**New Model: `user_reports`**
+**New Model: `urp_user_reports`**
 - `urp_user_report_id` (serial, primary key)
-- `urp_usr_user_id_reporter` (int4, FK) - Who reported
-- `urp_target_type` (varchar 50) - 'user', 'message', 'post', 'photo', etc.
-- `urp_target_id` (int4) - ID of reported entity
-- `urp_reason` (varchar 50) - Category: 'harassment', 'fake_profile', 'inappropriate_content', 'spam', 'other'
-- `urp_details` (text, nullable) - Free-form explanation
-- `urp_status` (varchar 20, default 'pending') - 'pending', 'reviewed', 'actioned', 'dismissed'
-- `urp_admin_notes` (text, nullable) - Admin resolution notes
+- `urp_usr_user_id_reporter` (int4, FK) — who reported
+- `urp_target_type` (varchar 50) — `user`, `message`, `post`, `photo`, etc.
+- `urp_target_id` (int4) — ID of reported entity
+- `urp_reason` (varchar 50) — `harassment`, `fake_profile`, `inappropriate_content`, `spam`, `other`
+- `urp_details` (text, nullable) — free-form explanation
+- `urp_status` (varchar 20, default `pending`) — `pending`, `reviewed`, `actioned`, `dismissed`
+- `urp_admin_notes` (text, nullable)
 - `urp_resolved_by_usr_user_id` (int4, nullable)
 - `urp_create_time` / `urp_resolved_time` (timestamps)
 
@@ -129,99 +79,83 @@ See **[Reaction System Spec](implemented/reaction_system_spec.md)** for full det
 - Action buttons: dismiss, warn user, disable user, permanent ban
 - Report statistics dashboard
 
-### 1.7 Messaging Enhancements -- STATUS: DONE (2026-03-24)
-
-See **[Messaging Enhancements Spec](implemented/messaging_enhancements_spec.md)** for full details. Conversation threading, read status, inbox UI, AJAX messaging, header unread count, and admin moderation all implemented.
-
 ---
 
 ## Part 2: Dating Plugin
 
-These features only make sense for a dating site. Built as a standard Joinery plugin at `plugins/dating/`.
+Built as a standard Joinery plugin at `plugins/dating/`. All sections below are not started.
 
-### 2.1 Dating Profile -- STATUS: Not started
+### 2.1 Dating Profile
 
-**New Model: `dating_profiles`** (plugin data model)
+**New Model: `dtp_dating_profiles`**
 - `dtp_dating_profile_id` (serial, primary key)
-- `dtp_usr_user_id` (int4, FK, unique) - One dating profile per user
-- `dtp_looking_for` (varchar 50) - 'men', 'women', 'everyone' (or site-configurable options)
-- `dtp_relationship_goal` (varchar 50) - 'casual', 'long_term', 'marriage', 'friends', 'not_sure'
-- `dtp_height_cm` (int2, nullable) - Height in centimeters (display converts to ft/in based on locale)
-- `dtp_smoking` (varchar 20, nullable) - 'never', 'sometimes', 'regularly'
-- `dtp_drinking` (varchar 20, nullable) - 'never', 'socially', 'regularly'
-- `dtp_children` (varchar 30, nullable) - 'no_children', 'have_children', 'want_children', 'dont_want', 'open_to_children'
-- `dtp_education` (varchar 30, nullable) - 'high_school', 'some_college', 'bachelors', 'masters', 'doctorate', 'trade_school'
+- `dtp_usr_user_id` (int4, FK, unique) — one dating profile per user
+- `dtp_looking_for` (varchar 50) — `men`, `women`, `everyone`
+- `dtp_relationship_goal` (varchar 50) — `casual`, `long_term`, `marriage`, `friends`, `not_sure`
+- `dtp_height_cm` (int2, nullable)
+- `dtp_smoking` (varchar 20, nullable) — `never`, `sometimes`, `regularly`
+- `dtp_drinking` (varchar 20, nullable) — `never`, `socially`, `regularly`
+- `dtp_children` (varchar 30, nullable) — `no_children`, `have_children`, `want_children`, `dont_want`, `open_to_children`
+- `dtp_education` (varchar 30, nullable) — `high_school`, `some_college`, `bachelors`, `masters`, `doctorate`, `trade_school`
 - `dtp_occupation` (varchar 100, nullable)
-- `dtp_prompts` (jsonb, nullable) - Array of {prompt_id, answer} for conversation starter prompts
-- `dtp_is_active` (bool, default true) - User can pause/unpause their dating profile
-- `dtp_last_active_time` (timestamp) - For "recently active" indicators
+- `dtp_prompts` (jsonb, nullable) — array of `{prompt_id, answer}` for conversation starter prompts
+- `dtp_is_active` (bool, default true)
+- `dtp_last_active_time` (timestamp)
 - `dtp_create_time` / `dtp_update_time` / `dtp_delete_time` (timestamps)
 
-**Profile Prompts System:**
-Instead of a free-form bio only (which is already in core `usr_users` as `usr_bio`), dating sites use guided prompts like:
-- "A perfect first date for me is..."
-- "I'm looking for someone who..."
-- "My most controversial opinion is..."
+**Profile Prompts System:** Users pick 3 prompts from a site-configured list ("A perfect first date for me is...", "I'm looking for someone who...", etc.) and write short answers. Stored as JSON in `dtp_prompts`. Admin manages available prompts.
 
-Prompts are stored in a settings/config table. Users pick 3 prompts and write answers. Stored as JSON in `dtp_prompts`. Admin can manage available prompts.
+### 2.2 Dating Preferences / Dealbreakers
 
-### 2.2 Dating Preferences / Dealbreakers -- STATUS: Not started
-
-**New Model: `dating_preferences`** (plugin data model)
+**New Model: `dpr_dating_preferences`**
 - `dpr_dating_preference_id` (serial, primary key)
 - `dpr_usr_user_id` (int4, FK, unique)
 - `dpr_age_min` (int2, default 18)
 - `dpr_age_max` (int2, default 99)
-- `dpr_distance_max_km` (int4, default 80) - ~50 miles
-- `dpr_looking_for` (varchar 50) - Redundant with profile but allows asymmetry
+- `dpr_distance_max_km` (int4, default 80) — ~50 miles
+- `dpr_looking_for` (varchar 50)
 - `dpr_height_min_cm` (int2, nullable)
 - `dpr_height_max_cm` (int2, nullable)
-- `dpr_relationship_goal` (varchar 50, nullable) - NULL = any
-- `dpr_dealbreakers` (jsonb, nullable) - Fields where mismatch = hard filter
+- `dpr_relationship_goal` (varchar 50, nullable) — NULL = any
+- `dpr_dealbreakers` (jsonb, nullable) — fields where mismatch = hard filter
 
-**Filter Logic:**
-- Age range and distance are always hard filters
-- Other preferences are soft (affect ranking) unless marked as dealbreakers in the JSON field
+**Filter Logic:** Age range and distance are always hard filters. Other preferences are soft (affect ranking) unless marked as dealbreakers in the JSON field.
 
-### 2.3 Match System -- STATUS: Not started
+### 2.3 Match System
 
-**Core reaction system** (1.4) handles the raw like/pass data. The dating plugin adds match detection.
+The core reaction system handles raw like/pass data. The dating plugin adds match detection on top.
 
-**New Model: `dating_matches`** (plugin data model)
+**New Model: `dtm_dating_matches`**
 - `dtm_dating_match_id` (serial, primary key)
-- `dtm_usr_user_id_1` (int4, FK) - Lower user ID (canonical ordering)
-- `dtm_usr_user_id_2` (int4, FK) - Higher user ID
-- `dtm_cnv_conversation_id` (int4, FK, nullable) - Auto-created conversation
+- `dtm_usr_user_id_1` (int4, FK) — lower user ID (canonical ordering)
+- `dtm_usr_user_id_2` (int4, FK) — higher user ID
+- `dtm_cnv_conversation_id` (int4, FK, nullable) — auto-created conversation
 - `dtm_matched_time` (timestamp)
-- `dtm_unmatched_time` (timestamp, nullable) - If either user unmatches
+- `dtm_unmatched_time` (timestamp, nullable)
 - `dtm_unmatched_by_usr_user_id` (int4, nullable)
 - Unique constraint on (user_id_1, user_id_2)
 
 **Match Logic:**
-1. User A likes User B (creates `rct_reactions` row with entity_type='user')
-2. System checks: does User B already have a like for User A?
-3. If yes: create `dating_matches` row, create conversation, send notifications to both
-4. If no: just store the like, optionally notify B ("Someone new likes you" for free tier, or show who for premium)
+1. User A likes User B (creates `rct_reactions` row with `entity_type='user'`)
+2. Check if User B already has a like for User A
+3. If yes: create `dtm_dating_matches` row, create conversation, notify both
+4. If no: store the like; optionally notify B ("someone new likes you" for free tier, full reveal for premium)
 
-**Unmatch:** Either user can unmatch. This soft-deletes the match, hides the conversation, and prevents future likes (or allows re-liking after a cooldown, configurable).
+**Unmatch:** Soft-deletes the match, hides the conversation, prevents future likes (or allows re-liking after a configurable cooldown).
 
-### 2.4 Discovery Engine -- STATUS: Not started
+### 2.4 Discovery Engine
 
-This is the core dating experience -- "who should I see next?"
+**Discovery Logic (`plugins/dating/logic/discover_logic.php`):**
 
-**Discovery Logic (in `plugins/dating/logic/discover_logic.php`):**
-
-**Filter Pipeline:**
+Filter pipeline:
 1. Start with all active users of preferred gender
 2. Exclude: already liked, already passed, blocked users, self
 3. Apply hard filters: age range, max distance, dealbreakers
-4. Apply soft ranking: distance (closer = higher), recently active (more recent = higher), profile completeness (more complete = higher)
+4. Apply soft ranking: distance (closer first), recently active (more recent first), profile completeness
 5. Paginate results
 
 **SQL Approach (using PostGIS):**
 ```sql
--- Core discovery query (simplified)
--- Geography lives on the address table; join through user's default address
 SELECT u.*, dp.*,
   ST_Distance(a.usa_geography, ST_SetSRID(ST_MakePoint(:my_lng, :my_lat), 4326)::geography) / 1000 AS distance_km
 FROM usr_users u
@@ -232,86 +166,66 @@ WHERE ST_DWithin(a.usa_geography, ST_SetSRID(ST_MakePoint(:my_lng, :my_lat), 432
   AND u.usr_user_id NOT IN (SELECT ubl_blocked_usr_user_id FROM ubl_user_blocks WHERE ubl_usr_user_id = :user_id)
   AND dp.dtp_is_active = true
   AND dp.dtp_looking_for IN (:my_gender, 'everyone')
-  -- age filters on u.usr_date_of_birth
 ORDER BY distance_km ASC, dp.dtp_last_active_time DESC
 LIMIT 20 OFFSET :offset;
 ```
 
-`ST_DWithin` uses the GiST spatial index on the address table to eliminate far-away users before computing exact distances. See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for full details on PostGIS setup and distance queries.
+`ST_DWithin` uses the GiST spatial index on the address table to eliminate far-away users before computing exact distances. See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)**.
 
 **Views:**
 - Card-based browse view (one profile at a time, swipe-style)
-- Grid view option (see multiple profiles at once)
+- Grid view option
 - Profile detail modal / page
 
-### 2.5 Message Gating -- STATUS: Not started
+### 2.5 Message Gating
 
-**Dating-specific messaging rule:** Only matched users can message each other.
+Only matched users can message each other when the dating plugin is active.
 
-**Implementation:** Hook into the core messaging system. When the dating plugin is active:
-- Before sending a message, check if sender and recipient have an active match
-- If no match, reject with appropriate error
-- Admin messages bypass this check
-- This is implemented as a plugin hook/filter, not a core change
+**Implementation:** Plugin hook/filter on message send. Before sending, check if sender and recipient have an active match; reject with an appropriate error if not. Admin messages bypass this check. No core code changes required.
 
-**Configurable:** Setting `dating_message_requires_match` (bool, default true). Site admin could disable this to allow open messaging.
+**Setting:** `dating_message_requires_match` (bool, default true) — admin can disable to allow open messaging.
 
-### 2.6 Admin Verification (Simple MVP) -- STATUS: Not started
+### 2.6 Admin Verification (MVP)
 
-**Why MVP:** Users on dating platforms have heightened safety concerns. A "Verified" badge dramatically increases trust and engagement. The MVP version is simple and low-effort.
-
-**MVP Approach: Manual Admin Verification**
-- Add `dtp_is_verified` (bool, default false) to dating profile
-- Add `dtp_verified_time` (timestamp)
-- Add `dtp_verified_by_usr_user_id` (int4) - Admin who verified
-- Admin can mark profiles as verified from the user admin page
+**MVP: Manual Admin Verification**
+- Add `dtp_is_verified` (bool, default false), `dtp_verified_time` (timestamp), `dtp_verified_by_usr_user_id` (int4) to the dating profile
+- Admin marks profiles verified from the user admin page
 - Verified badge displayed on profile cards and detail pages
-- Verification criteria documented for admin team (e.g., "profile has real photo, name matches, not a duplicate")
 
-**Not MVP:** AI selfie matching, government ID upload, video verification. These are post-launch enhancements.
+Post-MVP: AI selfie matching, government ID upload, video verification.
 
-### 2.7 Interest Tags -- STATUS: Not started
+### 2.7 Interest Tags
 
-**Approach:** Leverage the existing **groups system** with a new category.
-
+Uses the existing groups system with a new category:
 - Create groups with `grp_category = 'interest'`
 - Users select interests during profile setup
 - Interests displayed on profile
 - Discovery algorithm boosts profiles with shared interests
 - Admin manages available interest tags
 
-**Seeded interests:** Music, Travel, Fitness, Cooking, Reading, Gaming, Hiking, Photography, Art, Movies, Dancing, Yoga, Sports, Food, Dogs, Cats, etc.
-
-No new data model needed -- this uses existing `groups` + `group_members`.
+No new data model needed — uses existing `groups` + `group_members`.
 
 ---
 
 ## Part 3: MVP Scope
 
-### What Ships First
+### Remaining Core Work (Phase 1)
+- Block System (1.5)
+- Report System (1.6)
 
-**Core features (Phase 1):**
-1. Extended User Profiles (1.1) - bio, DOB, gender, profile visibility
-2. Like System (1.4) - like/pass on users
-3. Block System (1.5) - block users
-4. Report System (1.6) - report users with admin queue
-5. Messaging Enhancements (1.7) - conversations, read status
-6. Notification Center (1.2) - basic in-app notifications
+### Core Deferred to Phase 2
+- User Discovery as a standalone member directory (1.3) — in Phase 1, discovery is dating-plugin-only; the generalized directory comes later
 
-**Core features deferred to Phase 2:**
-- User Discovery as a standalone core feature (1.3) - in Phase 1, discovery is dating-plugin-only; generalized member directory comes later
-- Notification preferences per type (1.2 partial) - Phase 1 just sends all notifications
+### Dating Plugin (Phase 1)
+1. Dating Profile (2.1)
+2. Dating Preferences (2.2)
+3. Match System (2.3)
+4. Discovery Engine (2.4)
+5. Message Gating (2.5)
+6. Admin Verification (2.6)
+7. Interest Tags (2.7)
 
-**Dating plugin (Phase 1):**
-1. Dating Profile (2.1) - dating-specific fields, prompts
-2. Dating Preferences (2.2) - age/distance/gender filters
-3. Match System (2.3) - mutual like = match
-4. Discovery Engine (2.4) - basic filtered browse with distance sorting
-5. Message Gating (2.5) - matches only
-6. Admin Verification (2.6) - manual verified badge
-7. Interest Tags (2.7) - via groups system
-
-**Explicitly NOT in MVP:**
+### Explicitly NOT in MVP
 - Compatibility scoring / personality quizzes
 - Super likes / boost / premium discovery features
 - Activity status (online/offline indicators)
@@ -321,19 +235,19 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 - Icebreaker prompts in conversations
 - Travel/passport mode
 - Video profiles
-- Speed dating events integration (though the event system is there for it later)
+- Speed dating events integration
 
 ### MVP User Flow
 
-1. **Register** (existing) -> **Complete Profile** (new: bio, DOB, gender, address, photos)
+1. **Register** → **Complete Profile** (bio, DOB, gender, address, photos)
 2. **Set Dating Preferences** (age range, distance, looking for)
-3. **Discover** -> Browse profiles one at a time or in grid
-4. **Like or Pass** -> Like sends to match engine
-5. **Match!** -> Both liked each other -> Notification + conversation created
-6. **Message** -> Chat within the conversation
-7. **Block/Report** -> Safety controls available at any point
+3. **Discover** → browse profiles one at a time or in grid
+4. **Like or Pass** → like sends to match engine
+5. **Match** → both liked each other → notification + conversation created
+6. **Message** → chat within the conversation
+7. **Block/Report** → safety controls available at any point
 
-### MVP Subscription Tiers (using existing tier system)
+### MVP Subscription Tiers
 
 | Feature | Free | Premium |
 |---------|------|---------|
@@ -348,40 +262,21 @@ No new data model needed -- this uses existing `groups` + `group_members`.
 
 ## Part 4: Architecture
 
-### Directory Structure
+### Files to Create
 
 ```
-# Core additions (profile fields in users_class.php, geo fields in address_class.php)
+# Core additions
 data/
-  notifications_class.php          # In-app notifications
-  notification_preferences_class.php
-  reactions_class.php              # Generic reaction system (like/favorite/bookmark/pass)
   user_blocks_class.php            # Block system
   user_reports_class.php           # Report system
-  conversations_class.php          # Conversation threading
-  conversation_participants_class.php
-
-views/
-  notifications.php                # Notification list page
-  conversations.php                # Inbox / conversation list
-  conversation.php                 # Single conversation view
-
-logic/
-  notifications_logic.php
-  conversations_logic.php
 
 adm/
   admin_reports.php                # Report moderation queue
   admin_report_view.php            # Single report detail
 
-ajax/
-  notifications_ajax.php           # Mark read, get count
-  reaction_ajax.php                # Reaction toggle/status/count
-
 # Dating plugin
 plugins/dating/
   plugin.json
-  serve.php                        # Plugin routes
   data/
     dating_profiles_class.php
     dating_preferences_class.php
@@ -409,13 +304,13 @@ plugins/dating/
 ### Key Integration Points
 
 **Dating plugin hooks into core:**
-- `reactions` -> match detection fires on new reaction where entity_type='user'
-- `conversations` -> auto-created on match
-- `notifications` -> sent on match, new message, new like (if premium)
-- `user_blocks` -> enforced in discovery queries
-- `user_reports` -> available from profile view and conversation
-- `groups` (category='interest') -> displayed on profile, used in discovery ranking
-- `subscription_tiers` -> controls like limits, filter access, "see who liked you"
+- `rct_reactions` → match detection fires on new reaction where `entity_type='user'`
+- `conversations` → auto-created on match
+- `notifications` → sent on match, new message, new like (if premium)
+- `ubl_user_blocks` → enforced in discovery queries
+- `urp_user_reports` → available from profile view and conversation
+- `groups` (category=`interest`) → displayed on profile, used in discovery ranking
+- `subscription_tiers` → controls like limits, filter access, "see who liked you"
 
 **No core code changes needed for:**
 - Message gating (plugin middleware/hook)
@@ -431,18 +326,16 @@ See **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** for PostGIS se
 
 ## Part 5: Post-MVP Roadmap
 
-Ordered roughly by impact and user demand:
-
-1. **Profile View Tracking** - "Who viewed me" (premium feature, drives upgrades)
-2. **Activity Status** - Online/recently active indicators
-3. **Compatibility Scoring** - Leverage survey system for personality matching
-4. **Super Likes** - Limited per day, more for premium
-5. **Boost** - Appear at top of discovery for N hours
-6. **Photo Verification** - Selfie-matching or video verification
-7. **Events Integration** - Speed dating, mixers using existing event system
-8. **Icebreaker Prompts** - Suggested first messages based on profile
-9. **Advanced Recommendation Algorithm** - ML-based matching, collaborative filtering
-10. **Real-Time Features** - WebSocket for typing indicators, online status, instant messages
+1. **Profile View Tracking** — "who viewed me" (premium feature, drives upgrades)
+2. **Activity Status** — online/recently active indicators
+3. **Compatibility Scoring** — leverage survey system for personality matching
+4. **Super Likes** — limited per day, more for premium
+5. **Boost** — appear at top of discovery for N hours
+6. **Photo Verification** — selfie-matching or video verification
+7. **Events Integration** — speed dating, mixers using existing event system
+8. **Icebreaker Prompts** — suggested first messages based on profile
+9. **Advanced Recommendation Algorithm** — ML-based matching, collaborative filtering
+10. **Real-Time Features** — WebSocket for typing indicators, online status, instant messages
 
 ---
 
@@ -450,14 +343,15 @@ Ordered roughly by impact and user demand:
 
 1. **Gender model:** Simple 3-option (man/woman/nonbinary) or flexible (free text, multiple select)? This has significant UI and filtering implications.
 
-2. **Photo moderation:** MVP has manual admin review via reports. See **[Pictures Refactor Spec](implemented/pictures_refactor_spec.md)** open questions for `uph_is_approved` discussion.
+2. **Mobile:** Is the MVP web-only, or do we need to consider a mobile app from the start? The existing API could support a mobile client, but the discovery UX is very different on mobile vs. desktop.
 
-3. **Mobile:** Is the MVP web-only, or do we need to consider a mobile app from the start? The existing API could support a mobile client, but the discovery UX is very different on mobile vs. desktop.
-
-4. **Like notification to free users:** Show "someone liked you" (with blur) to drive upgrades, or hide completely? The blur approach is the standard monetization play.
+3. **Like notification to free users:** Show "someone liked you" (with blur) to drive upgrades, or hide completely? The blur approach is the standard monetization play.
 
 ---
 
-## Appendix: Related Specs
+## Related Specs
 
-- **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** -- PostGIS setup, geocoding, spatial indexing, legacy geo code inventory and cleanup
+- **[Geolocation & PostGIS Spec](geolocation_postgis_spec.md)** — PostGIS setup, geocoding, spatial indexing, legacy geo code inventory and cleanup
+- **[Reaction System](implemented/reaction_system_spec.md)** — polymorphic like/pass/favorite system (implemented)
+- **[Messaging Enhancements](implemented/messaging_enhancements_spec.md)** — conversation threading, inbox UI (implemented)
+- **[Notification Center](implemented/notification_center_spec.md)** — in-app notification system (implemented)
