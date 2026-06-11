@@ -25,7 +25,11 @@ function device_delete_logic(array $input): LogicResult{
 	$tier = SubscriptionTier::GetUserTier($user->key);
 	$page_vars['tier'] = $tier;
 
-	$device = new SdDevice($_REQUEST['device_id'], TRUE);
+	if(empty($input['device_id'])){
+		return LogicResult::error('device_id is required.');
+	}
+
+	$device = new SdDevice($input['device_id'], TRUE);
 	$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
 	$page_vars['device'] = $device;
 
@@ -36,6 +40,13 @@ function device_delete_logic(array $input): LogicResult{
 	}
 
 	return LogicResult::render($page_vars);
+}
+
+function device_delete_logic_api() {
+	return [
+		'requires_session' => true,
+		'description' => 'Permanently delete a DNS-filtering device (pass device_id and confirm=1)',
+	];
 }
 
 ?>

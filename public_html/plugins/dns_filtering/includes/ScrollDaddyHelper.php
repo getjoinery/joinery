@@ -1000,5 +1000,130 @@ class ScrollDaddyHelper {
 		),
 	);
 
+	/**
+	 * Hostnames the client tunnel/VPN layer enforces at the connection level:
+	 * active, block-action, hard-block rules on the device's always-on block,
+	 * de-duplicated. The DNS resolver ignores the hard-block flag.
+	 *
+	 * @param int $device_id
+	 * @return string[] lowercase hostnames
+	 */
+	public static function getHardBlockHostnames($device_id) {
+		require_once(PathHelper::getIncludePath('plugins/dns_filtering/data/scheduled_blocks_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/dns_filtering/data/scheduled_block_rules_class.php'));
+
+		$always_on = SdScheduledBlock::getOrCreateAlwaysOnBlock($device_id);
+
+		$rules = new MultiSdScheduledBlockRule(array(
+			'block_id' => $always_on->key,
+			'active' => true,
+			'action' => 0,
+			'hard_block' => true,
+		));
+		$rules->load();
+
+		$hostnames = array();
+		foreach ($rules as $rule) {
+			$hostnames[strtolower($rule->get('sbr_hostname'))] = true;
+		}
+
+		return array_keys($hostnames);
+	}
+
+	/**
+	 * JSON-clean export of a block for API responses.
+	 *
+	 * @param SdScheduledBlock $block
+	 * @param bool $include_contents true = full filters/services/rules;
+	 *                               false = summary with rule counts only
+	 * @return array
+	 */
+	public static function exportBlock($block, $include_contents = true) {
+		require_once(PathHelper::getIncludePath('plugins/dns_filtering/data/scheduled_block_rules_class.php'));
+
+		$days_json = $block->get('sdb_schedule_days');
+		$days = $days_json ? json_decode($days_json, true) : array();
+
+		$export = array(
+			'block_id' => $block->key,
+			'name' => $block->get('sdb_name'),
+			'is_always_on' => (bool)$block->get('sdb_is_always_on'),
+			'is_active' => (bool)$block->get('sdb_is_active'),
+			'active_now' => $block->key ? $block->is_active_now() : false,
+			'schedule' => array(
+				'start' => $block->get('sdb_schedule_start'),
+				'end' => $block->get('sdb_schedule_end'),
+				'days' => is_array($days) ? $days : array(),
+				'timezone' => $block->get('sdb_schedule_timezone'),
+			),
+		);
+
+		if ($include_contents) {
+			$export['filters'] = $block->key ? $block->get_filter_rules() : array();
+			$export['services'] = $block->key ? $block->get_service_rules() : array();
+
+			$export['rules'] = array();
+			if ($block->key) {
+				$domain_rules = new MultiSdScheduledBlockRule(array('block_id' => $block->key));
+				$domain_rules->load();
+				foreach ($domain_rules as $rule) {
+					$export['rules'][] = array(
+						'rule_id' => $rule->key,
+						'hostname' => $rule->get('sbr_hostname'),
+						'action' => (int)$rule->get('sbr_action'),
+						'is_active' => (bool)$rule->get('sbr_is_active'),
+						'hard_block' => (bool)$rule->get('sbr_hard_block'),
+					);
+				}
+			}
+		}
+		else {
+			$export['rule_count'] = $block->key
+				? $block->count_rules() + (new MultiSdScheduledBlockRule(array('block_id' => $block->key)))->count_all()
+				: 0;
+		}
+
+		return $export;
+	}
+
+	/**
+	 * JSON-clean export of a device for API responses. Includes the DoH/DoT
+	 * endpoints (the construction the activation page uses) and the merged
+	 * hard-block hostname list the apps sync into their tunnel layers.
+	 *
+	 * @param SdDevice $device
+	 * @param Globalvars $settings
+	 * @return array
+	 */
+	public static function exportDevice($device, $settings) {
+		$dns_host = $settings->get_setting('dns_filtering_dns_host');
+		$resolver_uid = $device->get('sdd_resolver_uid');
+
+		$doh_url = '';
+		$dot_hostname = '';
+		if ($dns_host && $resolver_uid) {
+			$doh_url = 'https://' . $dns_host . '/resolve/' . $resolver_uid;
+			$dot_hostname = $resolver_uid . '.' . $dns_host;
+		}
+
+		return array(
+			'device_id' => $device->key,
+			'name' => $device->get_readable_name(),
+			'device_name' => $device->get('sdd_device_name'),
+			'device_type' => $device->get('sdd_device_type'),
+			'timezone' => $device->get('sdd_timezone'),
+			'is_active' => (bool)$device->get('sdd_is_active'),
+			'log_queries' => (bool)$device->get('sdd_log_queries'),
+			'allow_device_edits' => (int)$device->get('sdd_allow_device_edits'),
+			'filters_editable' => (bool)$device->are_filters_editable(),
+			'create_time' => $device->get('sdd_create_time'),
+			'activate_time' => $device->get('sdd_activate_time'),
+			'resolver_uid' => $resolver_uid,
+			'doh_url' => $doh_url,
+			'dot_hostname' => $dot_hostname,
+			'hard_block_hostnames' => self::getHardBlockHostnames($device->key),
+		);
+	}
+
 }
 ?>

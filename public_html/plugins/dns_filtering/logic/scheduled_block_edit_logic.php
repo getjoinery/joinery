@@ -144,6 +144,17 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 			// New scheduled block — empty object
 			$block = new SdScheduledBlock(NULL);
 		}
+
+		// API: clean JSON payload — full block contents (filters + services +
+		// rules + schedule) instead of view-shaped objects
+		if($session->is_api_context()){
+			require_once(PathHelper::getIncludePath('plugins/dns_filtering/includes/ScrollDaddyHelper.php'));
+			return LogicResult::render(array(
+				'device_id' => $device->key,
+				'block' => ScrollDaddyHelper::exportBlock($block, true),
+			));
+		}
+
 		$page_vars['block'] = $block;
 
 		// Load existing filter/service/domain rules for display
@@ -162,6 +173,13 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 	}
 
 	return LogicResult::render($page_vars);
+}
+
+function scheduled_block_edit_logic_api() {
+	return [
+		'requires_session' => true,
+		'description' => 'Read a device block (device_id, optional block_id) or save it (action=edit) / delete it (action=delete)',
+	];
 }
 
 ?>

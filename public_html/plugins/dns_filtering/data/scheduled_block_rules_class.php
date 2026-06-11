@@ -20,6 +20,9 @@ class SdScheduledBlockRule extends SystemBase {
 	    'sbr_hostname' => array('type'=>'varchar(128)'),
 	    'sbr_is_active' => array('type'=>'int2'),
 	    'sbr_action' => array('type'=>'int2'),
+	    // Connection-level enforcement flag for client tunnel/VPN layers.
+	    // The DNS resolver ignores this column.
+	    'sbr_hard_block' => array('type'=>'int2', 'default'=>0),
 	);
 
 }
@@ -40,6 +43,10 @@ class MultiSdScheduledBlockRule extends SystemMultiBase {
 
         if (isset($this->options['action'])) {
             $filters['sbr_action'] = [$this->options['action'], PDO::PARAM_INT];
+        }
+
+        if (isset($this->options['hard_block'])) {
+            $filters['sbr_hard_block'] = $this->options['hard_block'] ? "= 1" : "= 0";
         }
 
         return $this->_get_resultsv2('sbr_scheduled_block_rules', $filters, $this->order_by, $only_count, $debug);

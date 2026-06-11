@@ -14,7 +14,9 @@ function querylog_logic(array $input): LogicResult {
 
 	$device_id = isset($input['device_id']) ? (int)$input['device_id'] : 0;
 	if (!$device_id) {
-		return LogicResult::redirect('/profile/dns_filtering/devices');
+		return $session->is_api_context()
+			? LogicResult::error('device_id is required.')
+			: LogicResult::redirect('/profile/dns_filtering/devices');
 	}
 
 	try {
@@ -24,16 +26,21 @@ function querylog_logic(array $input): LogicResult {
 			'current_user_permission' => $session->get_permission(),
 		));
 	} catch (Exception $e) {
-		return LogicResult::redirect('/profile/dns_filtering/devices');
+		return $session->is_api_context()
+			? LogicResult::error('Device not found or access denied.')
+			: LogicResult::redirect('/profile/dns_filtering/devices');
 	}
 
 	$page_vars = array(
-		'device'          => $device,
+		'device_id'       => $device->key,
 		'device_name'     => htmlspecialchars($device->get_readable_name()),
 		'lines'           => array(),
 		'lines_requested' => 100,
 		'fetch_error'     => false,
 	);
+	if (!$session->is_api_context()) {
+		$page_vars['device'] = $device;
+	}
 
 	// Clamp lines_requested to supported values
 	$allowed_lines = array(100, 250, 500);
@@ -105,6 +112,13 @@ function querylog_logic(array $input): LogicResult {
 	$page_vars['lines'] = $parsed;
 
 	return LogicResult::render($page_vars);
+}
+
+function querylog_logic_api() {
+	return [
+		'requires_session' => true,
+		'description' => 'Fetch a device\'s DNS query log (device_id, optional lines: 100/250/500)',
+	];
 }
 
 ?>
