@@ -76,6 +76,20 @@ function password_reset_1_logic_api() {
     ];
 }
 
+/**
+ * Form builder — single source for the web reset-request form and the JSON
+ * form definition (GET /api/v1/form/password_reset_1).
+ */
+function password_reset_1_logic_form($formwriter, $user = null, $input = []) {
+	$formwriter->textinput('usr_email', 'Email Address:', [
+		'type'      => 'email',
+		'required'  => true,
+		'maxlength' => 64,
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Send Reset Link');
+}
+
 function password_reset_1_logic_descriptor(): array {
 	return [
 		'description'      => 'Send a password reset email to the given address.',

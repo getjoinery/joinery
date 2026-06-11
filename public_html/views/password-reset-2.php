@@ -38,39 +38,11 @@
                 'action' => '/password-reset-2',
             ]);
             $formwriter->begin_form();
-            $formwriter->hiddeninput('act_code', '', ['value' => $page_vars['act_code']]);
-            ?>
 
-            <div class="form-group">
-                <label for="usr_password" class="form-label">New Password:</label>
-                <input type="password" name="usr_password" id="usr_password" class="form-control" autocomplete="new-password">
-            </div>
+            // Shared form definition — also serves GET /api/v1/form/password_reset_2
+            password_reset_2_logic_form($formwriter, null, array_merge($_GET, $_POST, ['act_code' => $page_vars['act_code']]));
 
-            <div class="form-group">
-                <label for="usr_password_again" class="form-label">Confirm Password:</label>
-                <input type="password" name="usr_password_again" id="usr_password_again" class="form-control" autocomplete="new-password">
-            </div>
-
-            <?php if (empty($page_vars['terms_already_accepted'])):
-                $settings_page = Globalvars::get_instance();
-                $terms_url   = trim((string)$settings_page->get_setting('terms_url'));
-                $privacy_url = trim((string)$settings_page->get_setting('privacy_url'));
-                $terms_link   = $terms_url   !== '' ? '<a href="' . htmlspecialchars($terms_url,   ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Terms of Use</a>'   : 'Terms of Use';
-                $privacy_link = $privacy_url !== '' ? '<a href="' . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Privacy Policy</a>' : 'Privacy Policy';
-            ?>
-            <div class="form-check" style="margin-top: 1rem;">
-                <input type="checkbox" name="accept_terms" id="accept_terms" class="form-check-input" required>
-                <label for="accept_terms" class="form-check-label">
-                    I agree to the <?php echo $terms_link; ?> and <?php echo $privacy_link; ?>.
-                </label>
-            </div>
-            <?php endif; ?>
-
-            <div style="margin-top: 1rem;">
-                <button type="submit" name="submit" class="btn btn-primary btn-block">Set Password</button>
-            </div>
-
-            <?php echo $formwriter->end_form(); ?>
+            $formwriter->end_form(); ?>
 
         <?php endif; ?>
 

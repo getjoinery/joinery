@@ -2,7 +2,7 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.2
+ * @version 2.3
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -129,6 +129,20 @@ $api_auth_rate_limit = (int)($settings->get_setting('api_auth_rate_limit_request
 $api_auth_rate_window = (int)($settings->get_setting('api_auth_rate_limit_window') ?: 900);
 if (!RequestLogger::check_rate_limit('api_auth', $api_auth_rate_limit, $api_auth_rate_window, false)) {
 	api_error('Too many failed authentication attempts. Please try again later.', 'RateLimitError', 429);
+}
+
+// Form definition endpoint: GET /api/v1/form/{action_name}
+// Sessionless forms (requires_session => false) are served here, before the
+// key-header requirement — a first-launch client has no credentials yet.
+// Sessioned forms fall through to authentication and are dispatched again
+// after $api_user resolves.
+$request_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$url_segments = explode('/', trim($request_path, '/'));
+// URL: /api/v1/{Entity}/{Id} → segments: ['api', 'v1', 'Entity', 'Id']
+if (strtolower($url_segments[2] ?? '') === 'form') {
+	require_once(PathHelper::getIncludePath('includes/ApiFormEndpoint.php'));
+	ApiFormEndpoint::dispatchPreAuth($url_segments);
+	// Returns only when the form requires a session.
 }
 
 // Discover all model classes available for API
@@ -258,10 +272,7 @@ if (!$api_entry->check_secret_key($secret_key)) {
 	api_error('Incorrect secret key', 'AuthenticationError', 401);
 }
 
-// Authentication passed — parse URL segments from the request path
-$request_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$url_segments = explode('/', trim($request_path, '/'));
-// URL: /api/v1/{Entity}/{Id} → segments: ['api', 'v1', 'Entity', 'Id']
+// Authentication passed — URL segments were parsed above the form dispatch
 $operation = isset($url_segments[2]) ? ucwords($url_segments[2]) : '';
 $entity_id = isset($url_segments[3]) ? $url_segments[3] : null;
 $request_method = strtolower($_SERVER['REQUEST_METHOD']);
@@ -275,6 +286,12 @@ if (strtolower($url_segments[2] ?? '') === 'management') {
 	require_once(PathHelper::getIncludePath('includes/ManagementApiRouter.php'));
 	ManagementApiRouter::dispatch($url_segments, $auth_data, $request_method);
 	// dispatch() always exits.
+}
+
+// Sessioned form definitions — sessionless ones were served pre-auth above.
+if (strtolower($url_segments[2] ?? '') === 'form') {
+	ApiFormEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user);
+	// dispatchAuthenticated() always exits.
 }
 
 if (in_array($operation, $classes)) {
@@ -469,6 +486,8 @@ if (in_array($operation, $classes)) {
 				$actions[$action_name] = [
 					'description' => $meta['description'] ?? '',
 					'requires_session' => $meta['requires_session'] ?? true,
+					// Form builder companion → GET /api/v1/form/{action} works
+					'has_form' => function_exists($basename . '_form'),
 				];
 			}
 		}

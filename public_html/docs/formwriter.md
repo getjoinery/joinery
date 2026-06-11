@@ -15,6 +15,8 @@ The FormWriter system provides a structured, consistent way to build forms in th
 7. [Validation Integration](#7-validation-integration)
 8. [Best Practices](#8-best-practices)
 9. [Advanced Features](#9-advanced-features)
+10. [Architecture: Base Class vs. Renderers](#10-architecture-base-class-vs-renderers)
+11. [JSON Output Mode (Server-Driven Forms)](#11-json-output-mode-server-driven-forms)
 
 ---
 
@@ -36,6 +38,7 @@ FormWriter is a PHP class system that generates HTML forms with:
 - **`FormWriterV2Bootstrap`** - Bootstrap 4/5 themed implementation
 - **`FormWriterV2Tailwind`** - Tailwind CSS themed implementation
 - **`FormWriterV2HTML5`** - Pure HTML5 with semantic markup (no CSS framework dependencies)
+- **`FormWriterV2JSON`** - JSON form definitions for native-app renderers (see [JSON Output Mode](#11-json-output-mode-server-driven-forms))
 - **Base class: `FormWriterV2Base`** - Abstract base with all core functionality
 
 All features including visibility rules, custom scripts, CSRF protection, and validation work with all theme implementations.
@@ -1571,3 +1574,118 @@ if ($data['autocapitalize']) {
     $html .= ' autocapitalize="' . htmlspecialchars($data['autocapitalize']) . '"';
 }
 ```
+
+---
+
+## 11. JSON Output Mode (Server-Driven Forms)
+
+**The rule: a form is defined in one function in its logic file; the view and the API both call it — views contribute only layout and web-only widgets.**
+
+Everything else in this section is mechanics that follow from that sentence. The builder function can only use what's passed in, so the acting user and request input are parameters; computed option lists must be reachable from it, so they live in helpers in the logic file; things that can't serialize (JavaScript hooks, bot defences, file inputs) can't go inside it — and `FormWriterV2JSON` throws if they do, so violations fail loudly rather than quietly. New forms follow the rule from the start; a view that still declares fields inline is brought under the rule the next time it's modified. Following it is what makes serving any form to a native app a five-minute change instead of a refactor.
+
+`FormWriterV2JSON` is the renderer that makes the rule pay: it serializes a form as a JSON-encodable **definition** — fields, labels, prefilled values, validation rules, visibility rules — instead of HTML. Native apps fetch definitions from `GET /api/v1/form/{action_name}` and render every form with one generic renderer, so a form changes once, server-side, and the web page and the apps all pick it up. (Endpoint details: [docs/api.md](api.md#form-definition-endpoint).)
+
+Because of the prepare/render split, JSON mode inherits all behavioral logic — model autofill, validation auto-detection from `$field_specifications`, value resolution, visibility rules — for free. Each `render*($data)` appends the prepared data to the definition; `getDefinition()` returns the result.
+
+### Form Builder Companions
+
+The form's one function is its **builder**, named `{action}_logic_form()` in the action's logic file (mirroring the `_api()` companion convention):
+
+```php
+// In logic/account_edit_logic.php
+function account_edit_logic_form($formwriter, $user = null, $input = []) {
+    if ($user) {
+        $formwriter->set_model($user);   // builder owns prefill
+    }
+    $formwriter->textinput('usr_first_name', 'First Name', ['maxlength' => 255]);
+    // ... fields ...
+    $formwriter->submitbutton('btn_submit', 'Submit');
+}
+```
+
+- `$formwriter` — any FormWriter implementation. The web view calls the builder with its theme FormWriter (between `begin_form()`/`end_form()`); the API calls it with `FormWriterV2JSON`.
+- `$user` — the acting user for prefill and conditional fields (null for sessionless forms like `register`).
+- `$input` — request parameters (the web view passes `array_merge($_GET, $_POST)`, the API endpoint passes `$_GET`), for forms that carry request context such as `password_reset_2`'s `act_code`.
+
+Keep web-only concerns **out of the builder** and in the web view: bot defences (`antispam_question_input()`, `honeypot_hidden_input()`, `captcha_hidden_input()`), layout markup, and links. `FormWriterV2JSON` throws if a builder uses them.
+
+The exposure rule: `GET /api/v1/form/{action}` serves the form iff both `{action}_logic_api()` and `{action}_logic_form()` exist.
+
+### Post-Construction Value Binding
+
+Builders own prefill, so `FormWriterV2Base` supports binding values after construction (all renderers, web included):
+
+```php
+$formwriter->set_values(['usr_city' => 'Austin']);  // merges over existing values
+$formwriter->set_model($user);                       // binds export_as_array()
+```
+
+Call before adding fields — fields capture their value when created. Both apply the same UTC→local timestamp conversion construction-time values receive.
+
+### Definition Schema (v1)
+
+```json
+{
+  "schema_version": 1,
+  "form": {
+    "name": "account_edit",
+    "submit_to": "/api/v1/action/account_edit",
+    "submit_label": "Submit"
+  },
+  "fields": [
+    {"type": "hidden", "name": "edit_primary_key_value", "value": "123"},
+    {"type": "text", "name": "usr_first_name", "label": "First Name",
+     "value": "Jeremy", "required": true,
+     "validation": {"required": true, "maxlength": 64}},
+    {"type": "drop", "name": "usr_timezone", "label": "Your Time Zone",
+     "value": "America/Chicago", "options": {"America/Chicago": "..."}}
+  ]
+}
+```
+
+- `schema_version` is an integer; changes within a version are additive-only. Renderers seeing a higher version than they support fall back per form ("update the app or use the website").
+- Keys whose value is empty/false are omitted — absence of a flag means false.
+- Common keys: `type`, `name`, `label`, `value`, `required`, `readonly`, `disabled`, `helptext`, `placeholder`, `validation` (rule-name object, same rules the web JS receives; the server-only `unique` rule is never serialized), `visibility_rules` (verbatim — see [Field Visibility](#6-field-visibility--custom-scripts)).
+- Purely cosmetic HTML keys (`class`, `id`, `autofocus`) are not serialized.
+- Submissions go to the normal action endpoint (`POST /api/v1/action/{action}`) as a JSON body whose keys and value shapes are identical to the web form's POST. Validation failures come back as the action API's 422 `validation_errors` map, keyed by field name.
+
+### Field Types in JSON Mode
+
+| FormWriter method | JSON `type` | Notes |
+|---|---|---|
+| `textinput` | `text` | HTML subtypes (`email`, `url`, ...) serialize as `input_type`; `prepend`, `pattern`, `min`/`max`/`step`, `minlength`/`maxlength` included |
+| `passwordinput` | `password` | `strength_meter` flag; the value is **never** serialized |
+| `numberinput` | `number` | `min`/`max`/`step` |
+| `textarea` | `textarea` | |
+| `dropinput` | `drop` | `options`, `empty_option`, `multiple`; `ajaxendpoint` serializes as `search_endpoint` |
+| `checkboxinput` | `checkbox` | `checked_value`, `is_checked` |
+| `radioinput` | `radio` | `options` |
+| `checkboxList` | `checkbox_list` | `options`, `checked`, `disabled_values`, `readonly_values`, `list_type`; submits an array under the field name |
+| `dateinput` | `date` | submits `name` => `YYYY-MM-DD` |
+| `timeinput` | `time` | submits `name` => `HH:MM` (24-hour), same as the web widget's hidden input |
+| `datetimeinput` | `datetime` | compound submit contract via `submit_parts` (below) |
+| `hiddeninput` | `hidden` | round-trips values, including the automatic `edit_primary_key_value` |
+| `submitbutton` | — | becomes form-level `submit_label`; one submit per form (a second throws) |
+
+**Datetime submit contract.** A `datetime` field lists its `submit_parts` — the same multi-part POST keys the web form produces, so `FormWriterV2Base::process_datetimeinput()` and logic files work unchanged:
+
+```json
+"submit_parts": {
+  "date":   "evt_start_dateinput",        // YYYY-MM-DD
+  "hour":   "evt_start_timeinput_hour",   // 1-12
+  "minute": "evt_start_timeinput_minute", // 0-59
+  "ampm":   "evt_start_timeinput_ampm"    // AM | PM
+}
+```
+
+Values are in the user's timezone, exactly as on the web.
+
+**Unsupported — throws at definition time.** `fileinput`, `imageinput`, `textbox` (rich text), `repeater`, `imageselector`, `colorpicker`, and anything carrying JavaScript (`custom_script`, `onchange`) throw in JSON mode, so a non-serializable builder is caught in development rather than silently degraded in production. `visibility_rules` are fine — they are declarative data and serialize verbatim.
+
+**CSRF is forced off** in JSON mode: API requests authenticate via key headers, which browsers never attach cross-origin, and the CSRF token is bound to a web session API clients do not have.
+
+### Forms Currently Exposed
+
+`register`, `account_edit`, `password_edit`, `contact_preferences`, `password_reset_1`, `password_reset_2`. Login is intentionally **not** server-driven — it is the fixed two-field bootstrap contract of the auth endpoint, rendered natively.
+
+Any other action opts in by adding its `_logic_form()` builder and updating its web view to call the same builder — no core changes needed.

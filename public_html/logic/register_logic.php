@@ -146,6 +146,65 @@ function register_logic_api() {
     ];
 }
 
+/**
+ * Form builder — single source for the web register form and the JSON form
+ * definition (GET /api/v1/form/register). Web-only bot defences (antispam,
+ * honeypot, captcha) stay in the web view, not here.
+ */
+function register_logic_form($formwriter, $user = null, $input = []) {
+	require_once(PathHelper::getIncludePath('data/address_class.php'));
+	$settings = Globalvars::get_instance();
+
+	$formwriter->textinput('usr_first_name', 'First Name:', [
+		'maxlength' => 32,
+		'required' => true,
+	]);
+	$formwriter->textinput('usr_last_name', 'Last Name:', [
+		'maxlength' => 32,
+		'required' => true,
+	]);
+
+	$nickname_display = $settings->get_setting('nickname_display_as');
+	if ($nickname_display) {
+		$formwriter->textinput('usr_nickname', htmlspecialchars($nickname_display) . ':', [
+			'maxlength' => 32,
+		]);
+	}
+
+	$formwriter->textinput('usr_email', 'Email Address:', [
+		'type' => 'email',
+		'maxlength' => 64,
+		'required' => true,
+	]);
+
+	$formwriter->passwordinput('password', 'Choose Password:', [
+		'maxlength' => 255,
+		'required' => true,
+	]);
+
+	$formwriter->dropinput('usr_timezone', 'Timezone:', [
+		'options' => Address::get_timezone_drop_array(),
+		'value' => $settings->get_setting('default_timezone'),
+	]);
+
+	$privacy_url = trim((string)$settings->get_setting('privacy_url'));
+	$privacy_label = $privacy_url !== ''
+		? "I have read and agree to the <a href='" . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . "' target='_blank' rel='noopener'>privacy policy</a>"
+		: "I have read and agree to the privacy policy";
+	$formwriter->checkboxinput('privacy', $privacy_label, [
+		'value' => 'yes',
+	]);
+	$formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
+		'value' => 'yes',
+	]);
+	$formwriter->checkboxinput('setcookie', 'Keep me logged in', [
+		'value' => 'yes',
+		'checked' => true,
+	]);
+
+	$formwriter->submitbutton('btn_submit', 'Register Now');
+}
+
 function register_logic_descriptor(): array {
 	return [
 		'description'      => 'Create a new user account.',

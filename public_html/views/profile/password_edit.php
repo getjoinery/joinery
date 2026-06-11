@@ -45,15 +45,10 @@
                     }
                 }
 
-                if ($page_vars['has_old_password']) {
-                    $formwriter->passwordinput('usr_old_password', 'Old Password');
-                }
-                $formwriter->passwordinput('usr_password', 'New Password', [
-                    'description' => 'Must be at least 5 characters.'
-                ]);
-                $formwriter->passwordinput('usr_password_again', 'Retype New Password');
-                echo '<a href="/profile/account_edit">Cancel</a> ';
-                $formwriter->submitbutton('btn_submit', 'Submit');
+                // Shared form definition — also serves GET /api/v1/form/password_edit
+                password_edit_logic_form($formwriter, $page_vars['user'], array_merge($_GET, $_POST));
+
+                echo '<a href="/profile/account_edit">Cancel</a>';
 
                 $formwriter->end_form();
                 ?>

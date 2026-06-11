@@ -15,9 +15,6 @@
         'header_only'   => true,
     ]);
 
-    $settings = Globalvars::get_instance();
-    $nickname_display = $settings->get_setting('nickname_display_as');
-
     $formwriter = $page->getFormWriter('form1', [
         'action' => '/register',
     ]);
@@ -42,95 +39,16 @@
 
         $formwriter->begin_form();
         $formwriter->hiddeninput('prevformname', 'register');
-        ?>
 
-        <div class="row g-3">
-            <div class="col-md-6">
-                <?php $formwriter->textinput('usr_first_name', 'First Name:', [
-                    'value'     => @$form_fields->usr_first_name,
-                    'maxlength' => 32,
-                ]); ?>
-            </div>
-            <div class="col-md-6">
-                <?php $formwriter->textinput('usr_last_name', 'Last Name:', [
-                    'value'     => @$form_fields->usr_last_name,
-                    'maxlength' => 32,
-                ]); ?>
-            </div>
+        // Web-only bot defences — these never appear in the shared builder
+        $formwriter->antispam_question_input();
+        $formwriter->honeypot_hidden_input();
+        $formwriter->captcha_hidden_input();
 
-            <?php if ($nickname_display): ?>
-            <div class="col-12">
-                <?php $formwriter->textinput('usr_nickname', htmlspecialchars($nickname_display) . ':', [
-                    'value'     => @$form_fields->usr_nickname,
-                    'maxlength' => 32,
-                ]); ?>
-            </div>
-            <?php endif; ?>
+        // Shared form definition — also serves GET /api/v1/form/register
+        register_logic_form($formwriter, null, array_merge($_GET, $_POST));
 
-            <div class="col-12">
-                <?php $formwriter->textinput('usr_email', 'Email Address:', [
-                    'type'      => 'email',
-                    'maxlength' => 64,
-                ]); ?>
-            </div>
-
-            <div class="col-12">
-                <?php $formwriter->passwordinput('password', 'Choose Password:', [
-                    'maxlength' => 255,
-                ]); ?>
-            </div>
-
-            <div class="col-12">
-                <?php
-                $optionvals = Address::get_timezone_drop_array();
-                $default_timezone = $settings->get_setting('default_timezone');
-                $formwriter->dropinput('usr_timezone', 'Timezone:', [
-                    'options' => $optionvals,
-                    'value'   => $default_timezone,
-                ]);
-                ?>
-            </div>
-
-            <div class="col-12">
-                <?php $formwriter->antispam_question_input(); ?>
-            </div>
-
-            <div class="col-12">
-                <?php
-                $privacy_url = trim((string)$settings->get_setting('privacy_url'));
-                $privacy_label = $privacy_url !== ''
-                    ? "I have read and agree to the <a href='" . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . "' target='_blank' rel='noopener'>privacy policy</a>"
-                    : "I have read and agree to the privacy policy";
-                $formwriter->checkboxinput('privacy', $privacy_label, [
-                    'value' => 'yes',
-                ]);
-                ?>
-            </div>
-            <div class="col-12">
-                <?php $formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
-                    'value' => 'yes',
-                ]); ?>
-            </div>
-            <div class="col-12">
-                <?php $formwriter->checkboxinput('setcookie', 'Keep me logged in', [
-                    'value'   => 'yes',
-                    'checked' => true,
-                ]); ?>
-            </div>
-
-            <div class="col-12">
-                <?php
-                $formwriter->honeypot_hidden_input();
-                $formwriter->captcha_hidden_input();
-                ?>
-            </div>
-
-            <div class="col-12">
-                <?php $formwriter->submitbutton('btn_submit', 'Register Now', ['class' => 'btn btn-primary btn-block']); ?>
-            </div>
-        </div>
-
-        <?php $formwriter->end_form(); ?>
+        $formwriter->end_form(); ?>
 
         <div class="auth-footer-text">
             Already have an account? <a href="/login<?php echo $extra; ?>">Login to your Account</a>

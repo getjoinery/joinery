@@ -338,15 +338,62 @@ Returns a list of all available actions with descriptions. Useful for API consum
     "data": {
         "register": {
             "description": "Register a new user account",
-            "requires_session": false
+            "requires_session": false,
+            "has_form": true
         },
         "event_register": {
             "description": "Register for an event",
-            "requires_session": true
+            "requires_session": true,
+            "has_form": false
         }
     }
 }
 ```
+
+`has_form` indicates whether the action exposes a server-driven form definition (below).
+
+## Form Definition Endpoint
+
+```
+GET /api/v1/form/{action_name}
+```
+
+Returns the action's form as a JSON **definition** — fields, labels, prefilled values, validation rules, visibility rules — built by the action's form builder function and rendered through `FormWriterV2JSON`. Native apps render the definition with a generic form renderer and submit through the normal action endpoint; the schema reference, builder convention, and supported field types are documented in [docs/formwriter.md](formwriter.md#11-json-output-mode-server-driven-forms).
+
+A form is served iff the action's logic file defines **both** `{action_name}_logic_api()` and `{action_name}_logic_form()` (reflected in the discovery endpoint's `has_form` flag).
+
+**Authentication mirrors the action's `requires_session` declaration:**
+
+- Sessioned forms require the standard key headers; the definition is prefilled with the acting user's data. Like other reads, write-only keys (permission 2) get 403.
+- Sessionless forms (`register`, `password_reset_1`, `password_reset_2`) are served **without** key headers — a first-launch client has no credentials yet. HTTPS enforcement and both rate limiters apply unchanged.
+
+Query parameters are passed to the builder as request context (e.g. `GET /api/v1/form/password_reset_2?act_code=...` round-trips the reset code into the form's hidden field).
+
+**Response:**
+```json
+{
+    "api_version": "1.0",
+    "success_message": "Form definition for 'account_edit'",
+    "data": {
+        "schema_version": 1,
+        "form": {
+            "name": "account_edit",
+            "submit_to": "/api/v1/action/account_edit",
+            "submit_label": "Submit"
+        },
+        "fields": [
+            {"type": "text", "name": "usr_first_name", "label": "First Name",
+             "value": "Jeremy", "maxlength": 255},
+            {"type": "drop", "name": "usr_timezone", "label": "Your Time Zone",
+             "value": "America/Chicago", "options": {"America/Chicago": "America/Chicago"}}
+        ]
+    }
+}
+```
+
+Submissions go to `POST /api/v1/action/{action_name}` with a JSON body whose keys match the web form's POST exactly; validation failures return the standard 422 response with the field-keyed `validation_errors` map.
+
+**Errors:** unknown action, action without a form builder → 404; non-GET method → 405; missing/invalid key on a sessioned form → standard authentication errors; a builder using a non-serializable construct → 500 `ActionError`.
 
 ## Management API (Read-Only)
 

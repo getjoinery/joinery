@@ -48,31 +48,12 @@
                 ]);
 
                 $formwriter = $page->getFormWriter('form1', [
-                    'model' => $page_vars['user'],
                     'action' => '/profile/account_edit'
                 ]);
                 $formwriter->begin_form();
 
-                $formwriter->textinput('usr_first_name', 'First Name', [
-                    'maxlength' => 255
-                ]);
-                $formwriter->textinput('usr_last_name', 'Last Name', [
-                    'maxlength' => 255
-                ]);
-
-                $nickname_display = $page_vars['settings']->get_setting('nickname_display_as');
-                if($nickname_display){
-                    $formwriter->textinput('usr_nickname', $nickname_display, [
-                        'maxlength' => 255
-                    ]);
-                }
-
-                $optionvals = Address::get_timezone_drop_array();
-                $formwriter->dropinput('usr_timezone', 'Your Time Zone', [
-                    'options' => $optionvals
-                ]);
-
-                $formwriter->submitbutton('btn_submit', 'Submit');
+                // Shared form definition — also serves GET /api/v1/form/account_edit
+                account_edit_logic_form($formwriter, $page_vars['user'], array_merge($_GET, $_POST));
 
                 $formwriter->end_form();
                 ?>

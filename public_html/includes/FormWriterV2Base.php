@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.6.1
+ * @version 2.7.0
+ * @changelog 2.7.0 - Added set_values()/set_model() for post-construction value binding (form builder functions)
  * @changelog 2.6.1 - prepareCheckboxData: use array_key_exists instead of isset so null 'checked' value is treated as unchecked (not missing)
  * @changelog 2.6.0 - Phase 2 cleanup: buildAjaxSelectScript shared method, visibility/custom_script in base output methods, outputTextbox uses handleOutput
  * @changelog 2.5.0 - Prepare/render split: base class concrete output*() methods call prepare*Data() + abstract render*()
@@ -93,6 +94,35 @@ abstract class FormWriterV2Base {
 
         // Initialize CSRF if needed
         $this->initializeCSRF();
+    }
+
+    /**
+     * Bind values after construction.
+     *
+     * Form builder functions own prefill, so callers (e.g. the form API
+     * endpoint) can construct the FormWriter generically and let the builder
+     * bind data. Merges over any existing values (later bindings win) and
+     * applies the same UTC-to-local conversion construction-time values get.
+     *
+     * Call before adding fields — fields capture their value when created.
+     *
+     * @param array $values Field name => value map
+     */
+    public function set_values(array $values) {
+        $this->values = array_merge($this->values, $values);
+        $this->convertDateTimeFieldsToLocalTime();
+    }
+
+    /**
+     * Bind a model's exported values after construction.
+     *
+     * @param object $model Object with an export_as_array() method
+     */
+    public function set_model($model) {
+        if (!is_object($model) || !method_exists($model, 'export_as_array')) {
+            throw new Exception('FormWriterV2: set_model() requires an object with an export_as_array() method');
+        }
+        $this->set_values($model->export_as_array());
     }
 
     /**
