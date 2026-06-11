@@ -61,6 +61,7 @@ class PublicPage extends PublicPageBase {
 	public function public_header($options=array()) {
 		$GLOBALS['page_header_loaded'] = true;
 		$settings = Globalvars::get_instance();
+		$site_name = $settings->get_setting('site_name', true, true) ?: 'Jeremy Tunnell';
 		$session = SessionControl::get_instance();
 		ob_start();
 		$options = parent::public_header_common($options);

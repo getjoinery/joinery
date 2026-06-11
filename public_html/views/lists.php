@@ -4,7 +4,7 @@
     require_once(PathHelper::getThemeFilePath('lists_logic.php', 'logic'));
 
     $page_vars = process_logic(lists_logic(array_merge($_GET, $_POST, $params ?? [])));
-    $messages            = $page_vars['messages'];
+    $messages            = $page_vars['messages'] ?? [];
     $session             = $page_vars['session'];
     $mailing_lists       = $page_vars['mailing_lists'];
     $numlists            = $page_vars['numlists'];

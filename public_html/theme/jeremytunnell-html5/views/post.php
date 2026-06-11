@@ -68,9 +68,6 @@
 	if($settings->get_setting('comments_active')){
 		if($settings->get_setting('comments_unregistered_users') || $session->get_user_id()){
 
-			if($new_comment){
-				echo '<div class="section-content"><p>Your comment has been submitted.</p></div>';
-			} else {
 ?>
 	<div class="comments-section">
 		<?php
@@ -101,7 +98,6 @@
 		?>
 	</div>
 <?php
-			}
 		}
 
 		if($settings->get_setting('show_comments')){

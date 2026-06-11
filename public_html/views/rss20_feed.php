@@ -21,7 +21,7 @@
 	<link>'.LibraryFunctions::get_absolute_url('').'</link>
 	<description/>';
 
-	foreach ($posts as $post){
+	foreach ($page_vars['posts'] as $post){
 
 		// Skip tier-gated posts in RSS feeds
 		$tier_min = $post->get('pst_tier_min_level');

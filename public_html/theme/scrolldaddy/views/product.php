@@ -84,9 +84,8 @@ Career Area
 						
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT 
 				if(!$product->is_sold_out()){
-					$formwriter = $page->getFormWriter('product_form', ['action' => $product_url, 'method' => 'POST']);
-					// Post back to the same product URL (with slug)
 					$product_url = '/product/' . $product->get('pro_link');
+					$formwriter = $page->getFormWriter('product_form', ['action' => $product_url, 'method' => 'POST']);
 					echo $formwriter->begin_form();
 					$formwriter->hiddeninput('product_id', '', ['value' => $product_id]);
 

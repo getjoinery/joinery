@@ -4,7 +4,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 $session    = SessionControl::get_instance();
-$session_id = $_GET['session_id'];
+$session_id = $_GET['session_id'] ?? null;
 $settings   = Globalvars::get_instance();
 
 $cart     = $session->get_shopping_cart();
