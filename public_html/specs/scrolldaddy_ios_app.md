@@ -258,7 +258,9 @@ Server: session-key auth and server-driven forms already in place per
 screen, the generic form renderer driving register, forgot/reset password,
 account edit, and contact preferences from server definitions, a
 subscription status screen, and Keychain key storage. JoineryKit sends the
-`client_app`/`client_version` headers on every request and renders any 426
+`client-app`/`client-version` headers on every request (hyphen form —
+underscore header names are dropped by proxy_fcgi stacks; see the client
+headers section of `docs/api.md`) and renders any 426
 `UpgradeRequired` response as a blocking upgrade screen with an App Store
 deep link (per `specs/user_session_api_keys.md`). ScrollDaddy app
 target exists but is a thin shell.

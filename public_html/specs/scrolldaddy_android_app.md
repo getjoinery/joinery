@@ -72,7 +72,7 @@ a native Compose login screen, **one generic server-driven form renderer**
 (per `specs/formwriter_json_forms.md`) driving register, forgot/reset
 password, account edit, and contact preferences from server JSON
 definitions, plus subscription status and billing entry point. Like
-JoineryKit, it sends the `client_app`/`client_version` headers on every
+JoineryKit, it sends the `client-app`/`client-version` headers on every
 request and renders any 426 `UpgradeRequired` response as a blocking upgrade
 screen with a Play Store deep link (per `specs/user_session_api_keys.md`).
 Same reuse target as JoineryKit: any app on any Joinery deployment.
