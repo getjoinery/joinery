@@ -2,7 +2,9 @@
   "_comment": "Core settings seeded on every update_database run. Plugin-owned settings live in the plugin's plugin.json. See specs/declarative_plugin_settings.md for the scope principle. Values are always strings (use '0'/'1' for booleans, '42' for numbers).",
   "settings": [
     { "name": "activation_required_login", "default": "1" },
+    { "name": "api_min_client_versions", "default": "{}", "helptext": "JSON map of client_app header value to minimum allowed client_version (semver). Clients below their minimum receive HTTP 426 UpgradeRequired on every API request. Empty map disables enforcement." },
     { "name": "api_require_https", "default": "1" },
+    { "name": "api_session_key_lifetime_days", "default": "365", "helptext": "Days until an API session key minted by /api/v1/auth/login expires (apk_expires_time). Existing keys keep the expiry they were minted with." },
     { "name": "blog_active", "default": "1" },
     { "name": "comments_active", "default": "1" },
     { "name": "comments_unregistered_users", "default": "0" },

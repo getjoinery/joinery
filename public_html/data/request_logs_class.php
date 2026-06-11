@@ -26,6 +26,7 @@ class RequestLog extends SystemBase {
 		'rql_status_code'    => array('type'=>'int2'),
 		'rql_error_type'     => array('type'=>'varchar(50)'),
 		'rql_note'           => array('type'=>'varchar(255)'),
+		'rql_api_key_type'   => array('type'=>'varchar(16)'),
 		'rql_response_ms'    => array('type'=>'int4'),
 		'rql_create_time'    => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);

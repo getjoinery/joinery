@@ -9,6 +9,7 @@ $page_vars = process_logic(admin_api_keys_logic(array_merge($_GET, $_POST)));
 
 $session = $page_vars['session'];
 $api_keys = $page_vars['api_keys'];
+$type = $page_vars['type'];
 $numrecords = $page_vars['numrecords'];
 $numperpage = $page_vars['numperpage'];
 
@@ -25,13 +26,17 @@ array(
 )
 );
 
-$headers = array("Name", "Public Key", 'Owner', "Start Time", "Expires Time", 'Status');
+$headers = array("Name", "Public Key", 'Owner', "Start Time", "Expires Time", "Last Used", 'Status');
 $altlinks = array();
 $altlinks += array('Add ApiKey'=> '/admin/admin_api_key_edit');
 $pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 $table_options = array(
 	'altlinks' => $altlinks,
 	'title' => 'ApiKeys',
+	'filteroptions' => array(
+		'Machine keys' => ApiKey::TYPE_MACHINE,
+		'App session keys' => ApiKey::TYPE_SESSION,
+	),
 );
 $page->tableheader($headers, $table_options, $pager);
 
@@ -47,6 +52,9 @@ foreach ($api_keys as $api_key){
 
 	array_push($rowvalues, LibraryFunctions::convert_time($api_key->get('apk_start_time'), "UTC", $session->get_timezone(), 'M j, Y'));
 	array_push($rowvalues, LibraryFunctions::convert_time($api_key->get('apk_expires_time'), "UTC", $session->get_timezone(), 'M j, Y'));
+	array_push($rowvalues, $api_key->get('apk_last_used_time')
+		? LibraryFunctions::convert_time($api_key->get('apk_last_used_time'), "UTC", $session->get_timezone(), 'M j, Y g:i A')
+		: 'Never');
 
 	if($api_key->get('apk_delete_time')){
 		array_push($rowvalues, '<b>Deleted</b>');

@@ -137,6 +137,50 @@
                 <?php endif; ?>
 
             </div>
+
+            <?php if (!empty($page_vars['app_sessions']) && count($page_vars['app_sessions'])): ?>
+            <div class="jy-panel" style="margin-top: var(--jy-space-4);">
+                <h2>App Sessions</h2>
+                <p>Devices signed in to your account. Revoke a session to sign that device out.</p>
+
+                <table class="jy-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Signed in</th>
+                            <th>Last used</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($page_vars['app_sessions'] as $app_session): ?>
+                        <tr>
+                            <td><?php echo htmlspecialchars($app_session->get('apk_name')); ?></td>
+                            <td><?php echo htmlspecialchars(LibraryFunctions::convert_time($app_session->get('apk_create_time'), 'UTC',
+                                SessionControl::get_instance()->get_timezone(), 'M j, Y')); ?></td>
+                            <td><?php echo $app_session->get('apk_last_used_time')
+                                ? htmlspecialchars(LibraryFunctions::convert_time($app_session->get('apk_last_used_time'), 'UTC',
+                                    SessionControl::get_instance()->get_timezone(), 'M j, Y g:i A'))
+                                : 'Never'; ?></td>
+                            <td style="text-align: right;">
+                                <form action="/profile/security" method="POST" style="display: inline;">
+                                    <input type="hidden" name="action" value="revoke_app_session">
+                                    <input type="hidden" name="apk_api_key_id" value="<?php echo (int)$app_session->key; ?>">
+                                    <button type="submit" class="btn btn-danger">Revoke</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+
+                <form action="/profile/security" method="POST" style="margin-top: var(--jy-space-2);"
+                      onsubmit="return confirm('Sign out every device signed in to your account?');">
+                    <input type="hidden" name="action" value="revoke_all_app_sessions">
+                    <button type="submit" class="btn btn-secondary">Revoke All</button>
+                </form>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </section>

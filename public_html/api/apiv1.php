@@ -2,7 +2,10 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.3
+ * @version 2.4
+ * @changelog 2.4 - User session keys: /auth/* endpoints, pre-auth dispatch of
+ *   sessionless actions, client version handshake (426 UpgradeRequired),
+ *   last-used tracking, key type stamped onto request logs
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -96,7 +99,7 @@ if ($allowed_origins && isset($_SERVER['HTTP_ORIGIN'])) {
 	if (in_array($origin, $allowed_list)) {
 		header("Access-Control-Allow-Origin: " . $origin);
 		header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE");
-		header("Access-Control-Allow-Headers: public_key, secret_key, Content-Type");
+		header("Access-Control-Allow-Headers: public_key, secret_key, public-key, secret-key, client-app, client-version, Content-Type");
 		header("Access-Control-Max-Age: 86400");
 	}
 }
@@ -131,28 +134,73 @@ if (!RequestLogger::check_rate_limit('api_auth', $api_auth_rate_limit, $api_auth
 	api_error('Too many failed authentication attempts. Please try again later.', 'RateLimitError', 429);
 }
 
+// HTTP header names are case-insensitive (RFC 7230). Clients such as Go's
+// net/http canonicalize `public_key` → `Public_key` on HTTP/1.1, where case is
+// preserved on the wire. Additionally, CGI/FastCGI transports collapse `-`
+// and `_` into one namespace (HTTP_PUBLIC_KEY) — and Apache→FPM silently
+// DROPS header names containing underscores, so clients behind such stacks
+// must send `public-key`/`secret-key`. Normalize to lowercase with
+// underscores so both spellings authenticate identically.
+$headers = array();
+foreach (getallheaders() as $header_name => $header_value) {
+	$headers[str_replace('-', '_', strtolower($header_name))] = $header_value;
+}
+
+// Client version handshake: apps send client_app + client_version on every
+// request. If the named app has a configured minimum and the request's version
+// is below it (or missing), respond 426 — the client renders this as a
+// blocking upgrade screen. Requests without client headers are unaffected.
+$min_client_versions_json = $settings->get_setting('api_min_client_versions');
+$client_app = isset($headers['client_app']) ? trim($headers['client_app']) : '';
+if ($client_app !== '' && $min_client_versions_json) {
+	$min_client_versions = json_decode($min_client_versions_json, true);
+	if (is_array($min_client_versions) && isset($min_client_versions[$client_app])) {
+		$client_version = isset($headers['client_version']) ? trim($headers['client_version']) : '';
+		if ($client_version === ''
+			|| version_compare($client_version, $min_client_versions[$client_app], '<')) {
+			api_error('A newer version of this app is required. Please update it from the app store.',
+				'UpgradeRequired', 426);
+		}
+	}
+}
+
+$request_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$url_segments = explode('/', trim($request_path, '/'));
+// URL: /api/v1/{Entity}/{Id} → segments: ['api', 'v1', 'Entity', 'Id']
+
 // Form definition endpoint: GET /api/v1/form/{action_name}
 // Sessionless forms (requires_session => false) are served here, before the
 // key-header requirement — a first-launch client has no credentials yet.
 // Sessioned forms fall through to authentication and are dispatched again
 // after $api_user resolves.
-$request_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$url_segments = explode('/', trim($request_path, '/'));
-// URL: /api/v1/{Entity}/{Id} → segments: ['api', 'v1', 'Entity', 'Id']
 if (strtolower($url_segments[2] ?? '') === 'form') {
 	require_once(PathHelper::getIncludePath('includes/ApiFormEndpoint.php'));
 	ApiFormEndpoint::dispatchPreAuth($url_segments);
 	// Returns only when the form requires a session.
 }
 
+// Auth endpoints: /api/v1/auth/*. login is the unauthenticated entry point and
+// is handled (exits) here; session/logout fall through to key authentication.
+if (strtolower($url_segments[2] ?? '') === 'auth') {
+	require_once(PathHelper::getIncludePath('includes/ApiAuthEndpoint.php'));
+	ApiAuthEndpoint::dispatchPreAuth($url_segments);
+	// Returns only for endpoints that require key authentication.
+}
+
+// Action endpoint: POST /api/v1/action/{action_name}
+// Sessionless actions (requires_session => false: register, password resets)
+// execute here, before the key-header requirement. Sessioned actions fall
+// through to authentication and are dispatched again after $api_user resolves.
+require_once(PathHelper::getIncludePath('includes/ApiActionEndpoint.php'));
+if (strtolower($url_segments[2] ?? '') === 'action') {
+	ApiActionEndpoint::dispatchPreAuth($url_segments);
+	// Returns only when the action requires a session.
+}
+
 // Discover all model classes available for API
 $classes = LibraryFunctions::discover_model_classes();
 
 $source_ip = $_SERVER['REMOTE_ADDR'];
-// HTTP header names are case-insensitive (RFC 7230). Clients such as Go's
-// net/http canonicalize `public_key` → `Public_key` on HTTP/1.1, where case is
-// preserved on the wire. Normalize to lowercase for lookup.
-$headers = array_change_key_case(getallheaders(), CASE_LOWER);
 $public_key = isset($headers['public_key']) ? $headers['public_key'] : null;
 $secret_key = isset($headers['secret_key']) ? $headers['secret_key'] : null;
 
@@ -186,6 +234,15 @@ if (!$api_entry->key) {
 }
 
 // Validate API key status
+if ($api_entry->get('apk_delete_time')) {
+	RequestLogger::log('api_auth', 'auth_failure', false, [
+		'status_code' => 401,
+		'error_type' => 'AuthenticationError',
+		'note' => 'API key has been revoked'
+	]);
+	api_error('API key has been revoked', 'AuthenticationError', 401);
+}
+
 if (!$api_entry->get('apk_is_active')) {
 	RequestLogger::log('api_auth', 'auth_failure', false, [
 		'status_code' => 401,
@@ -272,7 +329,12 @@ if (!$api_entry->check_secret_key($secret_key)) {
 	api_error('Incorrect secret key', 'AuthenticationError', 401);
 }
 
-// Authentication passed — URL segments were parsed above the form dispatch
+// Authentication passed — stamp the key type onto every subsequent log row
+// and record key usage (written at most once per hour).
+RequestLogger::set_api_key_type($api_entry->get('apk_type'));
+$api_entry->touch_last_used();
+
+// URL segments were parsed above the pre-auth dispatches
 $operation = isset($url_segments[2]) ? ucwords($url_segments[2]) : '';
 $entity_id = isset($url_segments[3]) ? $url_segments[3] : null;
 $request_method = strtolower($_SERVER['REQUEST_METHOD']);
@@ -284,13 +346,19 @@ $response = NULL;
 // Operation matches "management" (case-insensitive via ucwords above).
 if (strtolower($url_segments[2] ?? '') === 'management') {
 	require_once(PathHelper::getIncludePath('includes/ManagementApiRouter.php'));
-	ManagementApiRouter::dispatch($url_segments, $auth_data, $request_method);
+	ManagementApiRouter::dispatch($url_segments, $auth_data, $request_method, $api_entry);
 	// dispatch() always exits.
 }
 
 // Sessioned form definitions — sessionless ones were served pre-auth above.
 if (strtolower($url_segments[2] ?? '') === 'form') {
 	ApiFormEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user);
+	// dispatchAuthenticated() always exits.
+}
+
+// Key-authenticated auth endpoints (session/logout) — login exited pre-auth.
+if (strtolower($url_segments[2] ?? '') === 'auth') {
+	ApiAuthEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user);
 	// dispatchAuthenticated() always exits.
 }
 
@@ -501,114 +569,9 @@ if (in_array($operation, $classes)) {
 	);
 
 } else if (strtolower($url_segments[2] ?? '') === 'action' && isset($url_segments[3])) {
-	// Action endpoint: POST /api/v1/action/{action_name}
-	if ($request_method !== 'post') {
-		api_error('Actions must use POST method', 'ActionError', 405);
-	}
-
-	if ($api_entry->get('apk_permission') < 2) {
-		api_error('Insufficient API key permission for actions', 'AuthenticationError', 403);
-	}
-
-	$action_name = strtolower($url_segments[3]);
-
-	// Validate action name format (security: prevent path traversal)
-	if (!preg_match('/^[a-zA-Z0-9_]+$/', $action_name)) {
-		api_error('Invalid action name', 'ActionError', 400);
-	}
-
-	// Convention: action name maps to logic/{action_name}_logic.php
-	$logic_filename = $action_name . '_logic.php';
-	try {
-		$logic_filepath = PathHelper::getThemeFilePath($logic_filename, 'logic');
-	} catch (Exception $e) {
-		api_error('Unknown action: ' . $action_name, 'ActionError', 404);
-	}
-
-	if (!file_exists($logic_filepath)) {
-		api_error('Unknown action: ' . $action_name, 'ActionError', 404);
-	}
-
-	require_once($logic_filepath);
-
-	// Check for opt-in: the logic file must define {action_name}_logic_api()
-	$api_meta_function = $action_name . '_logic_api';
-	$logic_function = $action_name . '_logic';
-
-	if (!function_exists($api_meta_function)) {
-		api_error('Unknown action: ' . $action_name, 'ActionError', 404);
-	}
-
-	if (!function_exists($logic_function)) {
-		api_error('Action is misconfigured: ' . $action_name, 'ActionError', 500);
-	}
-
-	// Get metadata
-	$meta = call_user_func($api_meta_function);
-	$requires_session = $meta['requires_session'] ?? true;
-
-	// Set up session simulation if needed
-	$session = SessionControl::get_instance();
-	if ($requires_session) {
-		$session->set_api_user($api_user->key);
-	}
-
-	// Build parameters from JSON request body or form data
-	$get_params = $_GET;
-	$raw_input = file_get_contents('php://input');
-	$json_params = json_decode($raw_input, true);
-	$post_params = is_array($json_params) ? $json_params : $_POST;
-
-	// Populate $_POST from JSON body so logic files can use !empty($_POST)
-	// to detect submission consistently across browser POSTs and JSON API calls.
-	$_POST = $post_params;
-
-	// Call the logic function
-	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	try {
-		$result = call_user_func($logic_function, array_merge($get_params, $post_params));
-	} catch (Exception $e) {
-		if ($requires_session) {
-			$session->clear_api_user();
-		}
-		RequestLogger::log('api', 'action ' . $action_name, false, [
-			'user_id' => $api_user->key,
-			'status_code' => 422,
-			'error_type' => 'ActionError',
-			'note' => $e->getMessage()
-		]);
-		$result = LogicResult::error($e->getMessage());
-	}
-
-	// Clean up session simulation
-	if ($requires_session) {
-		$session->clear_api_user();
-	}
-
-	// Translate LogicResult to API response
-	$translated = api_translate_logic_result($result, $action_name);
-	$response_ms = round((microtime(true) - $api_start_time) * 1000);
-
-	if ($translated['status_code'] >= 400) {
-		RequestLogger::log('api', 'action ' . $action_name, false, [
-			'user_id' => $api_user->key,
-			'status_code' => $translated['status_code'],
-			'error_type' => $translated['response']['errortype'] ?? 'ActionError',
-			'response_ms' => $response_ms,
-			'note' => $translated['response']['error'] ?? ''
-		]);
-	} else {
-		RequestLogger::log('api', 'action ' . $action_name, true, [
-			'user_id' => $api_user->key,
-			'status_code' => $translated['status_code'],
-			'response_ms' => $response_ms
-		]);
-	}
-
-	header("Content-Type: application/json");
-	http_response_code($translated['status_code']);
-	echo json_encode($translated['response']) . PHP_EOL;
-	exit;
+	// Sessioned action endpoint — sessionless actions executed pre-auth above.
+	ApiActionEndpoint::dispatchAuthenticated($url_segments, $api_entry, $api_user);
+	// dispatchAuthenticated() always exits.
 }
 
 if ($response !== NULL) {

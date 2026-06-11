@@ -47,6 +47,13 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		'usr_pic_picture_id' => ['action' => 'null'],
 	];
 
+	// Password-change detection for API session key revocation. The hash as
+	// loaded from the database is snapshotted on every load path; save()
+	// compares against it. The suppress flag lets check_password()'s silent
+	// hash upgrades (same plaintext, new hash) skip revocation.
+	private $loaded_password_hash = NULL;
+	private $suppress_session_key_revocation = FALSE;
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
@@ -625,27 +632,35 @@ private static function UcName($string) {
 
 		// Try modern PHP password_verify first (bcrypt or Argon2id)
 		if (password_verify($password, $stored)) {
-			// Silently upgrade hash to Argon2id if needed
+			// Silently upgrade hash to Argon2id if needed. Same plaintext, new
+			// hash — not a credential change, so session keys must survive.
 			if (password_needs_rehash($stored, PASSWORD_ARGON2ID)) {
+				$this->suppress_session_key_revocation = TRUE;
 				try {
 					$this->set('usr_password', static::GeneratePassword($password));
 					$this->save();
 				} catch (Exception $e) {
 					error_log('Password rehash failed for user ' . $this->key . ': ' . $e->getMessage());
+				} finally {
+					$this->suppress_session_key_revocation = FALSE;
 				}
 			}
 			return true;
 		}
 
-		// Fall back to legacy phpass hashes and upgrade on success
+		// Fall back to legacy phpass hashes and upgrade on success. Same
+		// plaintext, new hash — not a credential change.
 		require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 		$hasher = new PasswordHash(8, TRUE);
 		if ($hasher->CheckPassword($password, $stored)) {
+			$this->suppress_session_key_revocation = TRUE;
 			try {
 				$this->set('usr_password', static::GeneratePassword($password));
 				$this->save();
 			} catch (Exception $e) {
 				error_log('Password rehash failed for user ' . $this->key . ': ' . $e->getMessage());
+			} finally {
+				$this->suppress_session_key_revocation = FALSE;
 			}
 			return true;
 		}
@@ -955,11 +970,39 @@ private static function UcName($string) {
 		}
 	}
 
+	function load() {
+		$result = parent::load();
+		$this->loaded_password_hash = ($this->data !== NULL && isset($this->data->usr_password))
+			? $this->data->usr_password : NULL;
+		return $result;
+	}
+
+	function load_from_data($data, $fields) {
+		parent::load_from_data($data, $fields);
+		$this->loaded_password_hash = $this->get('usr_password');
+	}
+
 	function save($debug=false) {
+		// A changed hash on an existing, previously loaded user is a credential
+		// change — the single choke point for every password-changing flow.
+		$password_changed = ($this->key !== NULL
+			&& $this->loaded_password_hash !== NULL
+			&& $this->get('usr_password') !== NULL
+			&& $this->get('usr_password') !== $this->loaded_password_hash);
+
 		parent::save($debug);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-		
+
+		// Revoke all active API session keys when the password changes —
+		// the lost-phone / compromised-credential path. Machine keys survive
+		// (an admin changing their password must not break integrations).
+		if ($password_changed && !$this->suppress_session_key_revocation) {
+			require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
+			ApiKey::RevokeSessionKeysForUser($this->key);
+		}
+		$this->loaded_password_hash = $this->get('usr_password');
+
 		//THIS IS A SPECIAL CALCULATED FIELD BASED ON THE USER ID
 		if($rowdata['usr_authhash'] === NULL){
 			$rowdata['usr_authhash'] = substr(hash('sha256', $this->key.'izsalt'), 0, 8);

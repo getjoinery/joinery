@@ -6,8 +6,11 @@
  * includes/management_api/. Called by apiv1.php after authentication has
  * passed — the router does NOT re-do auth.
  *
- * Authorization: the owning user's permission must be >= 10 (superadmin).
- * apk_permission is the CRUD-axis permission; it is NOT the gate used here.
+ * Authorization: the key must be a machine key (apk_type = machine) AND the
+ * owning user's permission must be >= 10 (superadmin). Session keys minted by
+ * auth/login never reach the control plane — a superadmin logging into a phone
+ * app must not mint a management credential. apk_permission is the CRUD-axis
+ * permission; it is NOT the gate used here.
  *
  * Endpoint convention:
  *   URL:  /api/v1/management/stats
@@ -24,7 +27,9 @@
  * Discovery:
  *   GET /api/v1/management  →  lists every available endpoint + metadata.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - machine-key gate: dispatch() takes the authenticated ApiKey
+ *   and 403s anything that is not a machine key (session keys are user-plane only)
  */
 
 class ManagementApiRouter {
@@ -39,8 +44,15 @@ class ManagementApiRouter {
 	 *
 	 * $auth_data must contain 'current_user_permission' (superadmin gate).
 	 * $request_method is the lowercased HTTP method from apiv1.php.
+	 * $api_entry is the authenticated ApiKey (machine-key gate).
 	 */
-	public static function dispatch($url_segments, $auth_data, $request_method) {
+	public static function dispatch($url_segments, $auth_data, $request_method, $api_entry) {
+		// Machine-key gate — fails closed: anything that is not explicitly a
+		// machine key is rejected before the endpoint is even resolved.
+		if (!$api_entry || $api_entry->get('apk_type') !== ApiKey::TYPE_MACHINE) {
+			api_error('Management API requires a machine key', 'AuthenticationError', 403);
+		}
+
 		// Superadmin gate — single authorization check for all management endpoints.
 		if (($auth_data['current_user_permission'] ?? 0) < 10) {
 			api_error('Management API requires superadmin permission', 'AuthenticationError', 403);

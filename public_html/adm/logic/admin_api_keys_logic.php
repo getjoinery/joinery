@@ -16,7 +16,14 @@ function admin_api_keys_logic(array $input): LogicResult {
 	$sort = LibraryFunctions::fetch_variable_local($input, 'sort', 'api_key_id');
 	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'DESC');
 
-	$search_criteria = array();
+	// Machine keys (integrations) by default; the filter exposes user session
+	// keys for fleet-wide visibility and revocation.
+	$type = LibraryFunctions::fetch_variable_local($input, 'filter', ApiKey::TYPE_MACHINE);
+	if (!in_array($type, array(ApiKey::TYPE_MACHINE, ApiKey::TYPE_SESSION))) {
+		$type = ApiKey::TYPE_MACHINE;
+	}
+
+	$search_criteria = array('type' => $type);
 	$api_keys = new MultiApiKey($search_criteria, array($sort=>$sdirection), $numperpage, $offset);
 	$numrecords = $api_keys->count_all();
 	$api_keys->load();
@@ -24,6 +31,7 @@ function admin_api_keys_logic(array $input): LogicResult {
 	$page_vars = array();
 	$page_vars['session'] = $session;
 	$page_vars['api_keys'] = $api_keys;
+	$page_vars['type'] = $type;
 	$page_vars['numrecords'] = $numrecords;
 	$page_vars['numperpage'] = $numperpage;
 
