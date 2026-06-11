@@ -5,19 +5,22 @@ function booking_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
-	require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
-
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
 	$session->check_permission(0);
-
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 	if(!$settings->get_setting('bookings_active')){
 		return LogicResult::error('This feature is turned off');
 	}
+
+	$bookings_class = PathHelper::getIncludePath('plugins/bookings/data/bookings_class.php');
+	if (!file_exists($bookings_class)) {
+		return LogicResult::error('Bookings plugin is not installed');
+	}
+	require_once($bookings_class);
+	require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
 
 	$booking_type_id = $input['booking_type_id'];
 	$booking_type = new BookingType($booking_type_id, TRUE);

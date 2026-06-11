@@ -15,7 +15,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$page = new PublicPage();
 	$page->public_header(array(
-		'is_valid_page' => $is_valid_page,
+		'is_valid_page' => $is_valid_page ?? true,
 	));
 
 	//echo PublicPage::BeginPage('');

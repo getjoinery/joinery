@@ -9,7 +9,7 @@
     $page_vars = process_logic(blog_logic(array_merge($_GET, $_POST)));
     $page = new PublicPage();
     $hoptions = array(
-        'is_valid_page' => $is_valid_page,
+        'is_valid_page' => $is_valid_page ?? true,
         'title' => $page_vars['title']
     );
     $page->public_header($hoptions); 

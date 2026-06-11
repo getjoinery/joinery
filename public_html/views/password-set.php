@@ -6,7 +6,7 @@
     $page_vars = process_logic(password_set_logic(array_merge($_GET, $_POST, $params ?? [])));
     $page = new PublicPage();
     $page->public_header([
-        'is_valid_page' => $is_valid_page,
+        'is_valid_page' => true,
         'title'         => 'Password Set',
     ]);
     echo PublicPage::BeginPage('Set a Password');
@@ -20,7 +20,7 @@
                 <p class="text-muted">Create a secure password for your account</p>
             </div>
 
-            <?php if ($message): ?>
+            <?php if (!empty($page_vars['message'])): ?>
                 <div class="alert alert-<?php echo $page_vars['message_type'] == 'error' ? 'danger' : ($page_vars['message_type'] == 'success' ? 'success' : 'info'); ?>" role="alert">
                     <?php if ($page_vars['message_title']): ?>
                         <h5 class="alert-heading"><?php echo $page_vars['message_title']; ?></h5>
