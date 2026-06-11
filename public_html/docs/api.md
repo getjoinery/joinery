@@ -11,28 +11,91 @@ The Joinery platform provides a REST API for programmatic access to data and ope
 
 ## Authentication
 
-All API requests require two custom headers:
+All authenticated API requests use the same two custom headers:
 
 ```
 public_key: {your_public_key}
 secret_key: {your_secret_key}
 ```
 
-### Obtaining API Keys
+There is one auth story with **two key types**, distinguished by `apk_type` in the shared `apk_api_keys` table. The request path is identical for both — only provisioning and secret hashing differ.
 
-API keys are created by an administrator via **Admin > API Keys**. Each key is associated with a user account. The key inherits that user's identity for object-level authorization checks.
+| | Machine keys (`machine`) | Session keys (`session`) |
+|---|---|---|
+| Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` |
+| Identity | The user account the admin attached | The user who logged in |
+| Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request |
+| Permission | Chosen by the admin (1–4) | Always 4; object-level authorization is the effective gate |
+| Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) |
+| Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change |
+| Management API | Allowed (with superadmin owner) | **Never** |
+
+A password change revokes **all** of the user's session keys (the lost-phone path); machine keys owned by the same user are untouched. Session keys are not IP-restricted — devices roam networks by design; the App Sessions view's device label and last-used time are the compensating visibility.
 
 ### Key Properties
 
 | Property | Description |
 |----------|-------------|
 | `public_key` | Public identifier sent in requests |
-| `secret_key` | Secret verified via bcrypt hash comparison |
+| `secret_key` | Secret, verified against a stored hash (scheme per key type, above) |
+| `type` | `machine` or `session` |
 | `is_active` | Key must be active to authenticate |
 | `start_time` | If set, key is rejected before this time (UTC) |
 | `expires_time` | If set, key is rejected after this time (UTC) |
-| `ip_restriction` | Comma-separated list of allowed IPs (optional) |
+| `last_used_time` | Updated by the auth path at most once per hour |
+| `ip_restriction` | Comma-separated list of allowed IPs (optional, machine keys) |
 | `permission` | Access level (see Permission Levels below) |
+
+## Auth Endpoints
+
+Session-key provisioning and lifecycle live under `/api/v1/auth/*`. HTTPS enforcement and both rate limiters apply to all of them.
+
+### `POST /api/v1/auth/login` — unauthenticated
+
+The one place passwords transit the API. Body (JSON or form):
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `email` | Yes | Account email |
+| `password` | Yes | Account password |
+| `device_label` | No | Stored as the key name, shown in session lists (e.g. "Jeremy's iPhone") |
+
+Success returns the key pair — **the only time the secret plaintext is ever returned** — plus expiry and the same user/tier summary `auth/session` returns:
+
+```json
+{
+    "api_version": "1.0",
+    "success_message": "Login successful",
+    "data": {
+        "public_key": "sess_…",
+        "secret_key": "…64 hex chars…",
+        "expires_time": "2027-06-11 17:00:00",
+        "user": { "user_id": 5, "display_name": "…", "email": "…",
+                  "permission": 0, "tier": { "name": "…", "tier_level": 2, "features": {} } }
+    }
+}
+```
+
+Store the two strings and send them as the standard key headers on every subsequent request. Failed logins return 401 `AuthenticationError` (identical response for unknown email, deleted user, and wrong password) and count toward the failed-auth rate limit.
+
+### `GET /api/v1/auth/session` — key-authenticated (either type)
+
+Returns the user summary: user id, name, email, permission, subscription tier, and tier feature flags. The "who am I / what may I do" call on app launch.
+
+### `POST /api/v1/auth/logout` — session-key-authenticated
+
+Revokes the presented key (soft delete) and nothing else. Machine keys get 403 here — they are revoked from the admin page, not by themselves.
+
+## Client Versioning
+
+Apps send two headers on every request:
+
+```
+client_app: scrolldaddy-ios
+client_version: 1.4.2
+```
+
+The `api_min_client_versions` setting holds a JSON map of `client_app` → minimum version (semver). If the request names an app with a configured minimum and its `client_version` compares below it (or is missing), every endpoint — including `auth/login` — responds **HTTP 426** with errortype `UpgradeRequired`; the client renders this as a blocking upgrade screen with a store link. Requests without client headers (machine integrations, curl) are wholly unaffected.
 
 ## Permission Levels
 
@@ -179,11 +242,12 @@ Common models include: `User`, `Product`, `Event`, `EventRegistrant`, `EventSess
 
 | Status | Error Type | Meaning |
 |--------|-----------|---------|
-| 400 | AuthenticationError | Missing headers, invalid key, deleted user |
+| 400 | AuthenticationError | Missing headers, invalid key, deleted user, missing login fields |
 | 400 | TransactionError | Object not found, validation failure, save error, invalid object name |
-| 401 | AuthenticationError | Wrong secret, IP restricted, inactive/expired key |
-| 403 | AuthenticationError | Insufficient permission for this operation |
+| 401 | AuthenticationError | Wrong secret, bad login credentials, IP restricted, inactive/expired/revoked key |
+| 403 | AuthenticationError | Insufficient permission; machine key on `auth/logout`; session key on `management/*` |
 | 426 | SecurityError | HTTPS required |
+| 426 | UpgradeRequired | `client_version` below the configured minimum for this `client_app` |
 | 429 | RateLimitError | Rate limit exceeded |
 
 ## Rate Limiting
@@ -256,7 +320,9 @@ secret_key: {key}
 { "field": "value", ... }
 ```
 
-Actions require API key write permission (level 2+).
+Sessioned actions require API key write permission (level 2+) and run under session simulation as the key's user.
+
+**Sessionless actions** (`requires_session => false`: `register`, `password_reset_1`, `password_reset_2`, …) are dispatched **without** key headers — a first-launch client has no credentials yet. HTTPS enforcement and both rate limiters apply unchanged, and failures log like other auth-adjacent traffic. The matching rule for fetching those actions' form definitions is in the Form Definition Endpoint section.
 
 ### Action Response Formats
 
@@ -401,11 +467,12 @@ The `/api/v1/management/*` namespace is a separate **read-only** surface used by
 
 ### Authorization
 
-Management endpoints reuse the existing `stg_api_keys` table unchanged. The gate is **user-level**, not key-level:
+Management endpoints reuse the existing `apk_api_keys` table unchanged. Two gates, both checked before the endpoint is resolved:
 
-- The API key's owning user must have `usr_permission >= 10` (superadmin).
-- `apk_permission` (1–4 CRUD gradient) is NOT the gate here — it is **orthogonal** to the management check. A superadmin's key with `apk_permission = 1` (read-only CRUD) can call management endpoints; a permission-5 admin's key cannot, regardless of `apk_permission`.
-- All other existing auth checks (active, not expired, IP restriction, bcrypt secret) apply unchanged — management dispatch only happens after `apiv1.php`'s full auth chain has passed.
+- **Machine keys only.** The key's `apk_type` must be `machine`. Session keys minted by `auth/login` get 403 here regardless of who owns them — a superadmin logging into a phone app must not hold a control-plane credential. This boundary is pinned by a dedicated test in `tests/functional/api/session_keys_test.php`; treat that test as load-bearing.
+- **Superadmin owner.** The key's owning user must have `usr_permission >= 10`.
+- `apk_permission` (1–4 CRUD gradient) is NOT a gate here — it is **orthogonal** to the management check. A superadmin's machine key with `apk_permission = 1` (read-only CRUD) can call management endpoints; a permission-5 admin's key cannot, regardless of `apk_permission`.
+- All other existing auth checks (active, not deleted, not expired, IP restriction, secret verification) apply unchanged — management dispatch only happens after `apiv1.php`'s full auth chain has passed.
 
 ### Endpoints
 
@@ -456,11 +523,12 @@ The management API is permanently read-only. Mutating operations (backups, resto
 
 | Status | Error Type | Meaning |
 |--------|-----------|---------|
-| 400 | AuthenticationError | Missing headers, invalid key, deleted user |
+| 400 | AuthenticationError | Missing headers, invalid key, deleted user, missing login fields |
 | 400 | TransactionError | Object not found, validation failure, save error, invalid object name |
-| 401 | AuthenticationError | Wrong secret, IP restricted, inactive/expired key |
-| 403 | AuthenticationError | Insufficient permission for this operation |
+| 401 | AuthenticationError | Wrong secret, bad login credentials, IP restricted, inactive/expired/revoked key |
+| 403 | AuthenticationError | Insufficient permission; machine key on `auth/logout`; session key on `management/*` |
 | 426 | SecurityError | HTTPS required |
+| 426 | UpgradeRequired | `client_version` below the configured minimum for this `client_app` |
 | 429 | RateLimitError | Rate limit exceeded |
 
 ### Action Error Types
@@ -474,6 +542,6 @@ The management API is permanently read-only. Mutating operations (backups, resto
 
 ## Request Logging
 
-All API requests are logged for audit purposes. Logs include: feature, action, IP address, user ID, success/failure, HTTP status code, and response time. Secret keys and request bodies are never logged.
+All API requests are logged for audit purposes. Logs include: feature, action, IP address, user ID, success/failure, HTTP status code, response time, and — once authentication has passed — the API key type (`rql_api_key_type`), so audit queries can separate machine from session traffic. Secret keys, passwords, and request bodies are never logged.
 
 Logs are retained for a configurable period (default: 90 days) and automatically cleaned up by a scheduled task.

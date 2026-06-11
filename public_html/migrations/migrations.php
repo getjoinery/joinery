@@ -829,3 +829,17 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// ========== Backfill apk_type = 'machine' on pre-existing API keys (v133) ==========
+	// Spec: specs/implemented/user_session_api_keys.md.
+	// Schema: apk_type was added via $field_specifications, applied by
+	// update_database before this migration. Every key that existed before the
+	// type column is an admin-provisioned machine key; session keys are only
+	// minted with an explicit type by ApiKey::CreateSessionKey(). Keeps the
+	// fail-closed machine-key gate in ManagementApiRouter working for existing
+	// integrations immediately after deploy.
+	$migration = array();
+	$migration['database_version'] = '133';
+	$migration['migration_file'] = 'api_key_type_backfill.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

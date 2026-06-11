@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function security_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
@@ -148,6 +149,30 @@ function security_logic(array $input): LogicResult{
 		return LogicResult::redirect('/profile/security');
 	}
 
+	if ($action === 'revoke_app_session') {
+		$key_id = (int)($input['apk_api_key_id'] ?? 0);
+		$api_key = $key_id ? new ApiKey($key_id, TRUE) : NULL;
+		if ($api_key && $api_key->key && $api_key->is_session()
+			&& $api_key->get('apk_usr_user_id') == $user->key
+			&& !$api_key->get('apk_delete_time')) {
+			$api_key->soft_delete();
+			$message = new DisplayMessage('The app session has been signed out.', 'Session revoked',
+				'/\/profile\/security.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT,
+				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+			$session->save_message($message);
+		}
+		return LogicResult::redirect('/profile/security');
+	}
+
+	if ($action === 'revoke_all_app_sessions') {
+		ApiKey::RevokeSessionKeysForUser($user->key);
+		$message = new DisplayMessage('All app sessions have been signed out.', 'Sessions revoked',
+			'/\/profile\/security.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
+		$session->save_message($message);
+		return LogicResult::redirect('/profile/security');
+	}
+
 	// Default render — set up display state if a setup is currently in progress
 	if (!$page_vars['totp_enabled'] && !empty($_SESSION['totp_setup_secret'])) {
 		$page_vars['setup_in_progress'] = true;
@@ -155,6 +180,14 @@ function security_logic(array $input): LogicResult{
 		$page_vars['provisioning_uri'] = _build_totp_uri($_SESSION['totp_setup_secret'], $user, $settings);
 		$page_vars['qr_uri'] = _build_qr_data_uri($page_vars['provisioning_uri']);
 	}
+
+	$app_sessions = new MultiApiKey(array(
+		'user_id' => $user->key,
+		'type' => ApiKey::TYPE_SESSION,
+		'deleted' => false,
+	), array('create_time' => 'DESC'));
+	$app_sessions->load();
+	$page_vars['app_sessions'] = $app_sessions;
 
 	$page_vars['tab_menus'] = array(
 		'Edit Account' => '/profile/account_edit',

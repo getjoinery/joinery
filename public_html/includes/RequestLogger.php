@@ -5,12 +5,24 @@
  * General-purpose: works for API calls, login attempts, registration,
  * password resets, or any site feature that needs logging or throttling.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - API key type context: set_api_key_type() stamps every subsequent log row so audit queries can separate machine from session API traffic
  * @changelog 1.1 - log(): mark the RequestLog save as an intentional GET mutation (audit/rate-limit rows persist on any request method)
  */
 require_once(PathHelper::getIncludePath('data/request_logs_class.php'));
 
 class RequestLogger {
+
+	/** @var string|null Authenticated API key type ('machine'/'session') stamped onto every log row for the rest of the request */
+	private static $api_key_type = null;
+
+	/**
+	 * Set the API key type for the current request. Called once by apiv1.php
+	 * after key authentication passes; every subsequent log() row carries it.
+	 */
+	public static function set_api_key_type($type) {
+		self::$api_key_type = $type;
+	}
 
 	/**
 	 * Log a request.
@@ -32,6 +44,7 @@ class RequestLogger {
 		if (isset($options['error_type']))  $log->set('rql_error_type', $options['error_type']);
 		if (isset($options['note']))        $log->set('rql_note', substr($options['note'], 0, 255));
 		if (isset($options['response_ms'])) $log->set('rql_response_ms', $options['response_ms']);
+		if (self::$api_key_type !== null)   $log->set('rql_api_key_type', self::$api_key_type);
 
 		// A request-log row is an intentional persist on any request method
 		// (GET reads are logged and rate-limited too).
